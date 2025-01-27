@@ -732,32 +732,51 @@ We don't allow setting the `strict-transport-security` header on either an Ingre
 #### X-Forwarded-For
 `x-forwarded-for` and related headers were considered for the deny-list (as modifying these headers using this new API could affect configuration specified using
 another [option](https://docs.openshift.com/container-platform/4.12/networking/ingress-operator.html#nw-using-ingress-forwarded_configuring-ingress))
-but have actual use-cases (which aren't covered by the existing option). They will be allowed, with notes in the API and product documentation,
-and possibly a warning on admission.
+but have actual use-cases (which aren't covered by the existing option). Therefore, they will be allowed, with the following note in the product documentation:
 
-For example: If someone creates an Ingress Controller with the following:
-```sh
-apiVersion: operator.openshift.io/v1
-kind: IngressController
-metadata:
-  name: default
-  namespace: openshift-ingress-operator
-spec:
-  httpHeaders:
-    forwardedHeaderPolicy: Replace
-```
-Or if someone add a route annotation `haproxy.router.openshift.io/set-forwarded-headers`,
-then the `set-header` stanzas will be added in `haproxy.config` using the [haproxy-config.template](https://github.com/openshift/router/blob/0cd9a58dff77127562f7851ccfa5cda79b8cef48/images/router/haproxy/conf/haproxy-config.template#L565-L580)
+Note: In the IngressController, if both the action `Set` is configured using `spec.httpHeaders.actions` and the 
+action `Replace` is configured using `spec.httpHeaders.forwardedHeaderPolicy`, then the resulting configured value
+is from `spec.httpHeaders.actions`.  
+In short, the value set by `spec.httpHeaders.actions` will override the value set by `spec.httpHeaders.forwardedHeaderPolicy`.
 
-However, if someone wants to set custom values for these then they need to use the API of this EP.
+In the case of HTTP request headers, the actions specified in `spec.httpHeaders.actions` on the Route will be executed after
+the actions specified in the IngressController's `spec.httpHeaders.actions` field.
 
-The custom values set using `spec.httpHeaders.actions` will take over the value defined in annotation `haproxy.router.openshift.io/set-forwarded-headers` or `spec.httpHeaders.forwardedHeaderPolicy`.  
+This enhancement provides a method for a user to  delete the `x-forwarded-for` header, which the Ingress Controller `spec.httpHeaders.forwardedHeaderPolicy` does not provide.
 
-Please note that the setting of forwardedHeaderPolicy happens at the plain backend section of haproxy.config i.e. per route level and not at the front-end section
-of the haproxy.config level as per the above-mentioned link.
+The `x-forwarded-for` header can be changed in three different places in the IngressControllerSpec and Route annotation: `spec.httpHeaders.actions`, `spec.httpHeaders.forwardedHeaderPolicy`, route annotation `haproxy.router.openshift.io/set-forwarded-headers`
 
-Another use case is deleting the header which forwardedHeaderPolicy does not provide but this EP does which is the reason why we will allow users to set/delete
-`x-forwarded-for` headers using this API.
+The following chart describes what values will be over-ridden when either `spec.httpHeaders.forwardedHeaderPolicy`, route annotation `haproxy.router.openshift.io/set-forwarded-headers` 
+or both are set along with `spec.httpHeaders.actions`.
+
+A=haproxy.router.openshift.io/set-forwarded-headers
+
+B=spec.httpHeaders.forwardedHeaderPolicy
+
+C=spec.httpHeaders.actions in IngressController
+
+D=spec.httpHeaders.actions in Route
+
+| Simplified combination | When this comb. is present                                                                                                                                                  | This value is used                                                                                                               |
+|------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------|
+| ABCD                   | haproxy.router.openshift.io/set-forwarded-headers, spec.httpHeaders.forwardedHeaderPolicy, spec.httpHeaders.actions in IngressController, spec.httpHeaders.actions in Route | spec.httpHeaders.actions in Route.                                                                                               |
+| ABC                    | haproxy.router.openshift.io/set-forwarded-headers, spec.httpHeaders.forwardedHeaderPolicy, spec.httpHeaders.actions in IngressController                                    | spec.httpHeaders.actions                                                                                                         |
+| ABD	                   | haproxy.router.openshift.io/set-forwarded-headers, spec.httpHeaders.forwardedHeaderPolicy, spec.httpHeaders.actions in Route                                                | spec.httpHeaders.actions                                                                                                         |
+| ACD                    | haproxy.router.openshift.io/set-forwarded-headers,spec.httpHeaders.actions in IngressController,spec.httpHeaders.actions in Route                                           | spec.httpHeaders.actions in Route.                                                                                               |
+| BCD                    | 	spec.httpHeaders.forwardedHeaderPolicy, spec.httpHeaders.actions in IngressController, spec.httpHeaders.actions in Route                                                   | spec.httpHeaders.actions in Route.                                                                                               |
+| AB                     | haproxy.router.openshift.io/set-forwarded-headers, spec.httpHeaders.forwardedHeaderPolicy                                                                                   | haproxy.router.openshift.io/set-forwarded-headers will set the policy for handling X-Forwarded-For headers.                      |
+| AC                     | haproxy.router.openshift.io/set-forwarded-headers, spec.httpHeaders.actions in IngressController                                                                            | spec.httpHeaders.actions will set X-Forwarded-For.                                                                               |
+| AD                     | haproxy.router.openshift.io/set-forwarded-headers, spec.httpHeaders.actions in Route                                                                                        | spec.httpHeaders.actions will set X-Forwarded-For                                                                                |
+| BC                     | spec.httpHeaders.forwardedHeaderPolicy, spec.httpHeaders.actions in IngressController                                                                                       | append policy: spec.httpHeaders.actions will set X-Forwarded-For and one more X-Forwarded-For header will be set with client IP. |
+|                        |                                                                                                                                                                             | replace policy: value in spec.httpHeaders.actions will be replaced by client IP.                                                 |
+|                        |                                                                                                                                                                             | never policy:  spec.httpHeaders.actions will set the X-Forwarded-For header.                                                     |
+|                        |                                                                                                                                                                             | if-none policy:spec.httpHeaders.actions will set X-Forwarded-For header.                                                         |
+| BD	                    | spec.httpHeaders.forwardedHeaderPolicy, spec.httpHeaders.actions in Route                                                                                                   | append policy: spec.httpHeaders.actions will set X-Forwarded-For and one more X-Forwarded-For header will be set with client IP. |
+|                        |                                                                                                                                                                             | replace policy: spec.httpHeaders.actions will set X-Forwaders-For header.                                                        |
+|                        |                                                                                                                                                                             | never policy: spec.httpHeaders.actions will set the X-Forwarded-For header.                                                      |
+|                        |                                                                                                                                                                             | if-none policy:spec.httpHeaders.actions will set X-Forwarded-For header.                                                         |
+| CD                      | spec.httpHeaders.actions in IngressController, spec.httpHeaders.actions in Route                                                                                            | spec.httpHeaders.actions in Route.                                                                                               |
+
 
 #### X-SSL
 Similarly to `x-forwarded-for`, there are legitimate use-cases for setting `x-ssl` and related headers, and allowing the cluster-admin or route owner to modify these headers presents no security risk.
@@ -782,15 +801,28 @@ For this reason, the `host` header is in the deny list of headers that are prohi
 
 Please note that a custom `host` header may be specified via RouteSpec. Please refer to `Open Questions` for more details.
 
-The following table summarizes which headers are allowed to be customized via the Route API or IngressController API:
+#### Cookie and Set-Cookie
+This enhancement does not allow setting or deleting `Cookie` or `Set-Cookie` headers, for the following three reasons:
 
-| Header name                 | Configurable using IngressController `spec.httpHeaders.actions` | Configurable using Route `spec.httpHeaders.actions` | Configurable using another API |
-|-----------------------------|-----------------------------------------------------------------|-----------------------------------------------------|---------------------------------|
+1. The cookies that HAProxy sets are used for session tracking, to map a client connection to a particular 
+   backend server.
+   We don't want to risk interfering with HAProxy's session affinity, nor restrict HAProxy's ownership of a cookie.
+
+2. There were no use cases mentioned for these headers in [RFE](https://issues.redhat.com/browse/RFE-464).
+
+3. A better solution for cookie headers is a new structured API feature.
+
+#### Header Configuration Options
+The following table summarizes the previously mentioned headers, and which API to use to customize them:
+
+| Header name                 | Configurable using IngressController `spec.httpHeaders.actions` | Configurable using Route `spec.httpHeaders.actions` | Configurable using another API                                                                                                               |
+|-----------------------------|-----------------------------------------------------------------|-----------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------|
 | `proxy`                     | No                                                              | No                                                  | No                                                                                                                                           |
 | `host`                      | No                                                              | Yes                                                 | No                                                                                                                                           |
 | `strict-transport-security` | No                                                              | No                                                  | `haproxy.router.openshift.io/hsts_header` Route annotation                                                                                   |
 | `x-forwarded-for`           | Yes                                                             | Yes                                                 | `haproxy.router.openshift.io/set-forwarded-headers` Route annotation or IngressController `spec.httpHeaders.forwardedHeaderPolicy` API field |
 | `x-ssl`                     | Yes                                                             | Yes                                                 | No                                                                                                                                           |        
+| `cookie` or `set-cookie`      | No                                                              | No                                                  | `haproxy.router.openshift.io/disable_cookie` or `router.openshift.io/cookie_name` Route annotation.                                          |        
 
 ### Drawbacks
 
@@ -889,7 +921,7 @@ FIELD:    forwardedHeaderPolicy <string>
   Answer: Yes, please refer to the `Risks and Mitigations` section for more details.
 
 #### Can we please make sure to only add the `cache-control: private` header if there is no `cache-control: public` header already present in the response?
-Answer:  No.  Many applications serve mixed content: static assets (images, js, css) and dynamic content (html, json). 
+Answer:  No. Many applications serve mixed content: static assets (images, js, css) and dynamic content (html, json). 
 
 They usually want to cache the static assets on the client and do not care about session stickiness for those requests.
 
@@ -973,7 +1005,7 @@ This route can be annotated with `haproxy.router.openshift.io/disable_cookies=tr
   Answer: The connection is still encrypted in public_ssl, so it is not possible to examine or modify the HTTP session there. The fe_sni and fe_no_sni frontends terminate TLS.
 
 #### Can we use conditional values for headers?
-  Answer: No.  You cannot set a conditional value.
+  Answer: No. You cannot set a conditional value.
   
   For example: If you set x-frame-options: "%[res.hdr(server)] if { req.hdr(user-agent) -m sub evil}" on an 
   HTTP x-frame-options response header, then the response value will be
@@ -1001,17 +1033,55 @@ This route can be annotated with `haproxy.router.openshift.io/disable_cookies=tr
   must not exceed the value of spec.tuningOptions.headerBufferMaxRewriteBytes on the
   IngressController.
 
-#### Why does a custom header value defined in RouteSpec override IngressControllerSpec value ?
-  Answer: It's quite common to have a global setting with an escape hatch locally to override the global setting.
-  The purpose of this EP is to define custom headers. So, there are two reasons we need such override:
-  1. A route owner shall have the choice to define what headers he wants as per his application requirements(as they might be varying) 
-  than the ones admin has set cluster-wide.
-  2. The IngressController and Route might be owned by the same person who wants to specify some global configuration
-  and then override that global configuration on a small subset of routes. 
+#### How do Route headers interact with IngressController headers of the same value?
+  Answer:  It depends on if they are response headers or request headers.
+
+In case of HTTP response headers, the actions specified in `spec.httpHeaders.actions[*].response` on the IngressController will be executed after
+the actions specified in the Route's `spec.httpHeaders.actions[*].response` field.
+
+In the case of HTTP request headers, the actions specified in `spec.httpHeaders.actions[*].request` on the Route will be executed after
+the actions specified in the IngressController's `spec.httpHeaders.actions[*].request` field.
+
+ This is because of the way HAProxy is designed to work. We cannot change the processing order; we're constrained by HAProxy's design: 
+ the frontend receives the request and dispatches it to the backend, and then the frontend gets the 
+ response from the backend.
+
+This means that for requests, [the frontend's rules are applied first, followed by the backend's,
+and conversely](https://cbonte.github.io/haproxy-dconv/2.6/configuration.html#4.2-http-request), for responses, [the backend's rules are applied first, followed by the frontend's](https://cbonte.github.io/haproxy-dconv/2.6/configuration.html#4.2-http-response).
+ The `http-response/http-request set or delete` stanzas are applied and interpreted in this way by the HAProxy.
+
+For example: A cluster admin sets a response header with the name `X-Frame-Options` and the value `DENY` 
+using the IngressController API. However, a route owner sets  the `X-Frame-Options` header with the value `SAMEORIGIN`.
+In this scenario, `haproxy.config` will look like the following where
+the response header called `X-Frame-Options` with value 'DENY' applied to the frontend configurations 
+will override the response header `X-Frame-Options` with the value `'SAMEORIGIN'` set in the backend section.
+```conf
+frontend public
+  http-response set-header X-Frame-Options 'DENY' 
+
+frontend fe_sni
+  http-response set-header X-Frame-Options 'DENY' 
+
+frontend fe_no_sni
+  http-response set-header X-Frame-Options 'DENY' 
+
+backend be_secure:openshift-monitoring:alertmanager-main
+  http-response set-header X-Frame-Options 'SAMEORIGIN'
+```
+
+The following sequence diagram represents how the headers get set in sequence and how they could get over-ridden:
+```mermaid
+sequenceDiagram
+    client->>frontend: request - IngressController <br> spec.httpHeaders.actions[].request[] applied
+    frontend->>backend: request - Route spec.httpHeaders.actions[].request applied. <br> If in presence of route annotations for the same header,<br>  spec.httpHeaders.actions[].request will be applied after it.
+    backend->>application: request <br> (application receives request headers)
+    application->>backend: response <br> (application sets response headers)
+    backend->>frontend: response - Route spec.httpHeaders.actions[].response applied. <br> If in presence of route annotations for the same header, <br> spec.httpHeaders.actions[].response will be applied after it.
+    frontend->>client: response - IngressController <br> IngressController spec.httpHeaders.actions[].response applied
+```
 
 #### Does a custom header value defined in RouteSpec override the route annotation ?
-  Answer: Yes. A value defined in RouteSpec overrides the route annotation.
-  For Example: Please refer to `X-Forwarded-For` section under `Risks and Mitigations` for more details.
+  Answer: Yes. A value defined in RouteSpec overrides the route annotation, except for response headers, where the IngressControllerSpec overrides both.
 
 #### So, we allowed there to be an additional way of specifying x-forwarded-for as well?  Are there any plans to deprecate the first way?
   Answer: We don't have any plans to deprecate the existing way of setting forwarded headers using route annotation and ingress controller.
@@ -1067,7 +1137,7 @@ N/A
  
 #### Failure Modes
 - If a user sets a header with a value which may expand to a size greater than tune.bufsize - tune.maxrewrite 
-  then haproxy will send a `400` in response. For example: Setting repeatedly a dynamic value having a fetcher `ssl_c_der` and a converter `base64` 
+  then HAProxy will send a `400` in response. For example: Setting repeatedly a dynamic value having a fetcher `ssl_c_der` and a converter `base64` 
   which exceeds the limit.
   By default, tune.maxrewrite is 8192 and tune.bufsize is 32768.
 ```html
@@ -1091,7 +1161,7 @@ Reference: https://github.com/haproxy/haproxy/issues/1309
     value was set.
 - If the API fields are not getting set via IngressController Spec or Route Spec i.e. if `oc patch` is failing to edit values of the Ingress Controller or Route CR 
   then check the openshift-apiserver logs. You can even run `oc explain route.spec.httpHeaders` or `oc explain ingresscontroller.spec.httpHeaders` to understand how to set the `httpHeaders` field.
-- Check [access logs](https://docs.openshift.com/container-platform/4.12/rest_api/operator_apis/ingresscontroller-operator-openshift-io-v1.html#spec-logging-access) of the haproxy if you want to check what HTTP Response or Request was set for the frontend and backend.
+- Check the [access logs](https://docs.openshift.com/container-platform/4.12/rest_api/operator_apis/ingresscontroller-operator-openshift-io-v1.html#spec-logging-access) of the HAProxy if you want to check what HTTP Response or Request was set for the frontend and backend.
 
 ## Implementation History
 
@@ -1122,6 +1192,33 @@ We have multiple options for quoting header values in `haproxy.config`, as [desc
   1. Replace every occurrence of `'` with `'\''`.
   2. Wrap the entire string in single-quotes.
 The HAProxy documentation refers to this as _strong quoting_.  Using strong quoting allows us to keep the quoting logic simple and `haproxy.config` more human-readable compared to the alternatives.
+
+### Proposed Alternative Solution for overriding the HTTP response headers defined in the IngressController by the Route
+By design, HAProxy's frontend receives the request and dispatches it to the backend, and then the frontend
+gets the response from the backend.
+
+So, the override behavior happens the way mentioned in the question `How do Route headers interact with IngressController headers of the same value?`
+under section `Open Questions` where HTTP request headers defined in the IngressController are overridden by headers
+defined in the Route.  HTTP response headers defined in the Ingress Controller are **not** overridden by response headers defined in the Route.
+
+We considered implementing the same behavior of override for HTTP response headers as that of HTTP request headers.
+However, to do this we would have to inject the set-header from the IngressController config into every backend and not the frontend.
+
+We rejected this because it would grow the generated haproxy.config significantly, compromising the performance of HAProxy. 
+For Example: Suppose an ingress controller called custom-header handles 100 routes.
+If it sets HTTP response `X-Frame-Options DENY` via `spec.httpHeader.actions`,
+then for each of those 100 routes the command `http-response set-header X-Frame-Options DENY` will be set, resulting in 100 additional stanzas as it will be one stanza per backend related to a route.
+
+There might be a case, where company policy requires the admin to set a response header for all connections to the IngressController.  
+For example, a cluster admin wants to set the  `X-Frame-Options` header with the value `DENY` for all routes the ingress controller is handling, overwriting
+any existing `X-Frame-Options` header that may have been set by the application or Route configuration.  This wouldn't be possible with this alternative solution.
+However, it can be done by the current proposal as described in the section `Workflow Description`.
+
+The upsides of injecting all the header configuration on the backends is that
+it would give OpenShift router full control over the ordering of header actions and present a more consistent learning environment for the admin.
+
+In addition, in the case of the `host` header, because the actions would take place after the frontend dispatches the connection to the backend, 
+we could allow the `host` header to be modified via the IngressController API (see `Risks and Mitigations` section).
 
 ## Infrastructure Needed
 
