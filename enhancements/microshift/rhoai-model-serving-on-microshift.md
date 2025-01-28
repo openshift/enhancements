@@ -69,6 +69,22 @@ Provide users with ServingRuntime definitions derived from RHOAI, so they
 are not forced to use upstream manifests.
 Decision on how to do this is pending. See open questions.
 
+### Rebase procedure in detail
+
+1. `rebase_rhoai.sh` script shall take an argument pointing to the RHOAI Operator Bundle Image.
+1. The script will:
+   1. Extract ClusterServiceVersion (CSV) of the RHOAI Operator.
+   1. Obtain RHOAI Operator image reference from the CSV.
+   1. Extract /opt/manifests from the RHOAI Operator image.
+   1. Copy contents of /opt/manifests/kserve to MicroShift repository.
+   1. Copy contents of /opt/manifests/odh-model-controller/runtimes to MicroShift repository.
+   1. Prepare top-level kustomization.yaml with MicroShift-specific tweaks.
+      1. Create kserve settings ConfigMap to configure MicroShift-specific tweaks.
+      1. Use contents of different files from RHOAI Operator's /opt/manifests
+         to get downstream-rebuilt image references and apply them over the
+         existing manifests.
+
+
 ### Workflow Description
 
 **User** is a human administrating and using MicroShift cluster/device.
