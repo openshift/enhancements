@@ -238,7 +238,31 @@ solution around this we will implement that solution.
 > aligned with existing user expectations?  Will it be a significant maintenance
 > burden?  Is it likely to be superceded by something else in the near future?
 
-_TBD_
+The key tradeoff is that we will start treating Gateway API effectively as if
+it were a core API. This means any perceived value someone might see in being
+able to manage and upgrade the Gateway API resources themselves, independently
+of the platform version, will be lost.
+
+> **Note**: This "downside" can actually be an upside for integrators, as we've
+> heard from projects which have Gateway API integrations (such as OSSM) which
+> appreciate having a consistent and known version of Gateway API on the
+> cluster which they can always rely on being there.
+
+Unfortunately this is not really an avoidable problem, as it is not tenable for
+us to simultaneously say that we support Gateway API as a primary and fully
+supported API surface for ingress traffic, and also have no control over which
+version of the APIs are present, or if they are even present at all (e.g. the
+cluster admin decides to delete them).
+
+To make this situation a bit easier we do anticipate providing some updates
+after the initial release. We want to eventually allow version _ranges_ in
+time after we resolve the "dead fields" problem (see more in the section about
+this above) which we expect to provide significantly more flexibility and take
+care of many concerns that would come from thsi change. We are also tracking and
+supporting [upstream efforts] to separate experimental APIs out into their own
+group, which will provide more flexibility when users want experimental features.
+
+[upstream efforts]:https://github.com/kubernetes-sigs/gateway-api/discussions/3497
 
 ## Open Questions [optional]
 
