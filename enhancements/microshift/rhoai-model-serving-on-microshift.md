@@ -132,7 +132,7 @@ Enhancement is MicroShift specific.
 
 ### Implementation Details/Notes/Constraints
 
-N/A
+See "Proposal"
 
 ### Risks and Mitigations
 
@@ -228,6 +228,12 @@ that website's relevant sections and also to [RHOAI's guide on adding NVIDIA Tri
 If there's no existing guide on setting specific accelerator for usage with RHDE,
 we shall work with partners to achieve that. We want to avoid directing users
 to generic upstream information without any support.
+
+### Do we need ODH Model Controller?
+
+RHOAI Operator deploys both kserve and ODH Model Controller.
+In the catalog image for Model Controller is described as:
+> The controller removes the need for users to perform manual steps when deploying their models
 
 
 ## Versioning
