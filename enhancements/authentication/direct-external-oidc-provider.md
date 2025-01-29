@@ -119,7 +119,13 @@ For more details on the `OIDCProvider` type and its fields, see [here](https://g
 
 #### Hypershift / Hosted Control Planes
 
-This enhancement proposal is not relevant to Hypershift; this has been implemented independently for Hypershift (see [OCPSTRAT-933](https://issues.redhat.com/browse/OCPSTRAT-933))
+The functionality for enabling of external OIDC support has been implemented independently for Hypershift (see [OCPSTRAT-933](https://issues.redhat.com/browse/OCPSTRAT-933))
+
+While the implementation for standalone OCP will not have any direct impacts to Hypershift, there are some kube-apiserver
+changes that will be made to ensure a holistic change when enabling external OIDC on a standalone OCP cluster that
+Hypershift should consider using to ensure a holistic change in a Hypershift cluster. More details can be found
+in the Implementation Details below, specifically the section covering the considerations in place for the
+`authorization.openshift.io/RestrictSubjectBindings` admission plugin.
 
 #### Standalone Clusters
 
@@ -130,6 +136,12 @@ This enhancement proposal applies to standalone OCP.
 **SNO:** Configuring an external OIDC provider in a Single-Node deployment of OpenShift will result in reduced resource consumption overall, due to the fact that once an external provider is configured successfully, the system will remove components and resources that are unused (e.g. the oauth-server and oauth-apiserver pods won't exist).
 
 **MicroShift:** This proposal is not relevant to MicroShift, as it does not run with multiple users.
+
+While the implementation for standalone OCP will not have any direct impacts to MicroShift, there are some kube-apiserver
+changes that will be made to ensure a holistic change when enabling external OIDC on a standalone OCP cluster that
+MicroShift should consider using to prevent unintentional behaviors when the OAuth stack is not present.
+More details can be found in the Implementation Details below, specifically the section covering the considerations
+in place for the `authorization.openshift.io/RestrictSubjectBindings` admission plugin.
 
 ### Implementation Details/Notes/Constraints
 
@@ -212,6 +224,91 @@ These changes have already been implemented, and the initial PR for them can be 
 
 In order to use `oc` with an external OIDC provider, the tool has been [extended](https://github.com/openshift/oc/pull/1640) with the necessary functionality, including command-line arguments that enable the required configuration. In particular, [`oauth2cli`](https://github.com/int128/oauth2cli) has been vendored into the `oc` codebase. One important consideration here is that depending on the OIDC provider, further functionality might be required, in which case `oc` will have to be extended to support that too.
 
+#### authorization.openshift.io/RestrictSubjectBindings admission plugin considerations
+
+OpenShift's default admission plugin `authorization.openshift.io/RestrictSubjectBindings`
+utilizes the OAuth stack, specifically the `User` and `Group` APIs, to ensure `RoleBinding`
+subjects do not violate any restrictions in the namespace they are going to be created in.
+These restrictions are specified by `RoleBindingRestriction` custom resources.
+
+Removing the OAuth stack entirely may result in the `authorization.openshift.io/RestrictSubjectBindings` admission plugin not functioning as expected.
+
+Anticipated impacts are:
+
+- Logs in the KAS reflecting that informers for OAuth APIs could not be started
+- Errors, that are not actionable from the perspective of users, occurring during validation of `RoleBinding` resources when a `RoleBindingRestriction` resource in the same namespace specifies user/group restrictions. These errors prevent the creation of `RoleBinding`s in a namespace, making it impossible to manage permissions in the namespace.
+
+These impacts may cause concern for cluster administrators that their cluster is in an unhealthy state and may not be easily correlated to taking down the OAuth stack.
+
+To ensure a holistic change in cluster behavior when removing the OAuth stack, and reduce potentially concerning behavior in the control plane components, it is proposed that changes are made to:
+
+- Remove the `rolebindingrestrictions.authorization.openshift.io` CustomResourceDefinition
+- Disable the `authorization.openshift.io/RestrictSubjectBindings` and `authorization.openshift.io/ValidateRoleBindingRestriction` admission plugins as they are reliant on the `RoleBindingRestriction` resource and/or the OAuth stack being present
+
+##### Changes to the kube-apiserver
+
+The OpenShift-specific patch to the kube-apiserver that adds this admission plugin is found here:
+https://github.com/openshift/kubernetes/blob/3c62f738ce74a624d46b4f73f25d6c15b3a80a2b/openshift-kube-apiserver/openshiftkubeapiserver/patch.go#L71
+
+In order to prevent misleading logs about informers that failed to start or errors related to creating `RoleBinding` resources, the following changes to this patch are to be made:
+
+- `Group` informer creation and configuration is moved into the `authorization.openshift.io/RestrictSubjectBindings` admission plugin initialization process
+
+##### Changes to the cluster-kube-apiserver-operator
+
+When the `Authentication` resource with name `cluster` has `.spec.type` not set to `IntegratedOAuth`, the `authorization.openshift.io/RestrictSubjectBindings` and `authorization.openshift.io/ValidateRoleBindingRestriction` admission plugins will be disabled.
+
+When transitioning from `IntegratedOAuth` to another valid value, the appropriate config observers will update the `KubeAPIServerConfig.apiServerArguments` map to:
+
+- Remove the `authorization.openshift.io/RestrictSubjectBindings` and `authorization.openshift.io/ValidateRoleBindingRestriction` admission plugins from the `--enable-admission-plugins` argument
+- Add the `authorization.openshift.io/RestrictSubjectBindings` and `authorization.openshift.io/ValidateRoleBindingRestriction` admission plugins to the `--disable-admission-plugins` argument
+
+When transitioning from another value to `IntegratedOAuth`, the appropriate config observers will update the `KubeAPIServerConfig.apiServerArguments` map to:
+
+- Remove the `authorization.openshift.io/RestrictSubjectBindings` and `authorization.openshift.io/ValidateRoleBindingRestriction` admission plugins from the `--disable-admission-plugins` argument
+- Add the `authorization.openshift.io/RestrictSubjectBindings` and `authorization.openshift.io/ValidateRoleBindingRestriction` admission plugins to the `--enable-admission-plugins` argument
+
+##### Changes to the cluster-authentication-operator
+
+To support the need to remove the `rolebindingrestrictions.authorization.openshift.io` CustomResourceDefinition when the OpenShift oauth server is not desired, the cluster-authentication-operator will be updated to manage this CRD.
+
+This will mean vendoring the generated CRD manifests as outlined in https://github.com/openshift/api/tree/master?tab=readme-ov-file#vendoring-generated-manifests-into-other-repositories and adding a new static resource controller to manage the CRD.
+
+Managing the CRD will consist of the following:
+
+- When OpenShift oauth server is desired, ensure the `RoleBindingRestriction` CRD exists and matches desired state
+- When OpenShift oauth server is not desired, but `RoleBindingRestriction` resources exist, ensure the `RoleBindingRestriction` CRD exists and matches desired state, set CAO status to `Degraded` with a message stating that `RoleBindingRestriction` resources exist and as such we can not delete the CRD
+- When OpenShift oauth server is not desired, no `RoleBindingRestriction` resources exist, remove the `RoleBindingRestriction` CRD
+
+##### Changes to openshift/api
+
+As the cluster-authentication-operator will now be responsible for the `rolebindingrestrictions.authorization.openshift.io` CRD, it should no longer be added to the openshift/api payload manifests that are included in a payload image and get managed by CVO.
+
+This will likely mean removing the associated files from the hack/update-payload-crd.sh script here: https://github.com/openshift/api/blob/dd0f68969241c0548906ec98c12bb208512cbbb4/hack/update-payload-crds.sh#L6
+
+During an upgrade from a version of OpenShift where the CRD is part of the payload, managed by CVO, to a version of OpenShift where the CRD is managed by the cluster-authentication-operator it is expected to a smooth handover. The anticipated handover flow is:
+
+- CRD is in payload of 4.X, managed by CVO
+- CRD is not in payload of 4.Y, CVO ignores CRD, managed by cluster-authentication-operator
+
+##### Considerations for HyperShift
+
+To ensure commonality in behavior between standalone OpenShift and HyperShift, HyperShift should be updated such that the `HostedControlPlane` controller will act in the same way the cluster-authentication-operator and cluster-kube-apiserver-operator will. Specifically:
+
+- Managing the `RoleBindingRestriction` CRD
+- Setting the appropriate flags on the kube-apiserver when oauth stack is not desired
+
+This enhancement proposal is scoped only to standalone OpenShift, and while the changes made as part of this EP won't break HyperShift it is recommended that HyperShift is updated in this way. 
+
+##### Considerations for MicroShift
+
+As MicroShift does not run with the OpenShift OAuth stack, it should be updated to ensure that:
+
+- The `RoleBindingRestriction` CRD is not present
+- Setting the appropriate flags on the kube-apiserver when oauth stack is not desired
+
+This enhancement proposal is scoped only to standalone OpenShift, and while the changes made as part of this EP won't break MicroShift it is recommended that MicroShift is updated in this way. 
+
 #### Authentication disruptions
 
 In case something goes wrong with the external provider, authentication might stop working. In such cases, cluster admins will still be able to access the cluster using a `kubeconfig` file with client certificates for an admin user. It is the responsibility of the cluster admins to make sure that such users exist; deleting all admin users might result in losing access to the cluster should any issues with the external provider arise.
@@ -238,10 +335,12 @@ Overall, for this feature there must be e2e tests that cover the following:
   - authenticate users with bearer tokens issued by the OIDC provider
   - ensure tokens issued by the built-in oauth stack do not work
   - ensure user mapping capabilities work as expected
+  - ensure that existence of `RoleBindingRestriction` resources results in the CAO status going Degraded
 - on a cluster that uses an external OIDC provider, test reverting configuration back to the built-in OAuth stack (good/bad configurations should be tested)
 - on a cluster that uses an external OIDC provider, test monitoring and cluster-authentication-operator status when the provider becomes unavailable
 - version skew between participating components; e.g. the cluster-authentication-operator has picked up the new configuration but the kube-apiserver-operator hasn't yet
 - cluster still accessible if OIDC provider becomes unavailable using a `kubeconfig` (break-glass scenario)
+- on a cluster that uses an external OIDC provider, test that the `rolebindingrestrictions.authorization.openshift.io` CRD does not exist
 
 Finally, in order to make sure that others can test their components in an external OIDC environment, a cluster with an external OIDC configuration must be created and made available to the CI.
 
