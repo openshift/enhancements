@@ -98,54 +98,77 @@ newer version of these CRDs).
 
 ## Proposal
 
-### Life-cycle management
+### CRD Life-cycle management
 
-OpenShift's Ingress Operator monitors for the presence of the Gateway API CRDs
-and uses [Server-Side Apply](https://kubernetes.io/docs/reference/using-api/server-side-apply/) to track ownership using the following logic:
+OpenShift's [Cluster Ingress Operator (CIO)] will manage the _entire_
+life-cycle of the Gateway API CRDs from here onward. The CIO will be packaged
+along with a [Validating Admission Policy (VAP)] to block updates from sources
+other than the CIO, and will hold the CRDs at a specific `$CRD_VERSION`. In
+effect, this means that the **Gateway API resources will now be treated like a
+core API.**
 
-- If CRDs are absent, the Ingress Operator installs the appropriate version.
-- If CRDs are present with the Ingress Operator as owner:
-  - If they are at the appropriate version, the operator does nothing.
-  - Else, the operator updates the CRDs to the appropriate version.
-- If CRDs are present with some other owner:
-  - If CRDs are at an unexpected version, the operator signals a degraded state.
-  - Else, _TODO: Do we signal degraded, or what?_
+> **Note**: the `$CRD_VERSION` selected for any OCP release version will be
+> based on a corresponding release of [OpenShift Service Mesh (OSSM)] which is
+> the implementation of Gateway API we will be using for first party Gateway
+> API support on the cluster.
 
-Note that the appropriate version for the CRDs depends on the version of
-OpenShift Service Mesh (OSSM) that the Ingress Operator has pinned in a given
-OpenShift release.  Specifically, the CRDs SHOULD be the version corresponding
-to the version of Istio in that OSSM version; they MUST be of some version that
-is compatible and that we have tested with that version of Istio.  That is, in
-order for some version of the CRDs to be allowed to be accepted, Red Hat MUST
-run the upstream conformance tests and downstream end-to-end tests with the
-specific combination of OSSM version that the operator installs and CRD version
-that is desired to be installed.
+[Cluster Ingress Operator (CIO)]:https://github.com/openshift/cluster-ingress-operator
+[Validating Admission Policy (VAP)]:https://kubernetes.io/docs/reference/access-authn-authz/validating-admission-policy/
+[OpenShift Service Mesh (OSSM)]:https://github.com/openshift-service-mesh
 
-These CRDs are necessary for the Gateway API feature to work at all.  Ideally,
-the Ingress Operator is the only agent that attempts to manage the life-cycle of
-these CRDs (that is, creating, updating, or deleting them).  However, in some
-contingencies, this is not the case:
+#### CRD Deployment
 
-- A cluster-admin can install the CRDs before upgrading to OpenShift 4.19.
-- A layered product or third-party controller could be actively managing them.
+The CIO will now check for the presence of the CRDs on the cluster, for
+which there are two scenarios:
 
-In any scenario in which some agent other than the Ingress Operator has
-installed the CRDs, the Ingress Operator cannot trivially infer the intent and
-potential active use of the existing CRDs.  Overwriting the existing versions
-represents a risk of breaking workload or violating the end-user's expectations.
-Thus the Ingress Operator will only detect and warn about these scenarios.
+1. The CRDs are not present, so we create them
+2. The CRDs are already present, so we need to take over management
 
-The Ingress Operator's warning will take the form of, at a minimum, setting the
-`Degraded` status condition's status to `True` with a descriptive message on the
-ingress clusteroperator.  
+The former is extremely straightforward and the correct version of the CRDs
+will be applied.
 
-The Cluster Version Operator has [an alerting rule](https://github.com/openshift/cluster-version-operator/blob/0b3f507632ce4705702fc725614bd22d25d6686c/install/0000_90_cluster-version-operator_02_servicemonitor.yaml#L106-L124) that reports when a
-clusteroperator has `Degraded` status `True`.  However, we might decide to
-implement a more specific alerting rule that provides more details on how to
-reconcile conflicting CRDs.
+The latter situation has more complexities. We'll refer to this process as "CRD
+Management Succession", and cover it's implications and logic below.
 
-_TBD_: Talk about how we could use Server-Side Apply for CRD updates in upgrades
-from OpenShift 4.19.0.
+#### CRD Management Succession
+
+Taking over the management of the Gateway API CRDs from a previous entity
+can be turmultuous as we will require:
+
+* no other actors managing the CRDs from here on out
+* only standard CRDs can be deployed (no experimental)
+* the CRDs to be deployed at an exact version/schema
+* OR the CRDs not to be present at all
+
+We will require this by providing a pre-upgrade check in the previous release
+that verifies these are true and sets `upgradable=false` if any of them are not.
+
+> **Note**: Upstream Gateway API unfortunately layered experimental versions of
+> CRDs on top of the same GVK as the standard ones, so unfortunately for initial
+> release users will be unable to use experimental as we can't deliver that as
+> a part of our supported API surface. It will be feasible to add a gate to
+> enable experimental later, but because of this layering this will not be a
+> great user experience and will require the cluster to become tainted. We are
+> tracking and supporting [an effort] in upstream Gateway API to separate
+> experimental into its own group, which we expect to help move towards a better
+> overall experience for users who want experimental Gateway API features going
+> forward.
+
+**We simply can not anticipate all of the negative effects** succession will
+have on existing implementations if the cluster admin forces through the upgrade
+check. As an extra precaution for users forcing upgrades precipitously, we will
+provide an admin gate to both provide an extra warning and gather consent from
+the cluster admin to take over the management of the CRDs. This will be
+accompanied by detailed documentation on what the admin should check and how to
+fufill the checks, which will also be linked from the description provided in
+the admin gate.
+
+The admin will be responsible for ensuring the safety of succession. If they
+force through the pre-upgrade check AND the admin gate, the admin gate will be
+left behind to help aid investigation of the cause of problems when the upgrade
+goes wrong.
+
+[an effort]:https://github.com/kubernetes-sigs/gateway-api/discussions/3497
 
 ### Workflow Description
 
