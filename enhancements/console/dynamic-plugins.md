@@ -485,7 +485,7 @@ https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Polic
 #### Key Features of `ConsolePluginCSP`
 
 - **Directive Types**:
-  - The supported directive types include `DefaultSrc`, `ScriptSrc`, `StyleSrc`, `ImgSrc`, `FontSrc`, `ObjectSrc` and `ConnectSrc`, each of which allows plugins to specify valid sources for loading different types of content.
+  - The supported directive types include `DefaultSrc`, `ScriptSrc`, `StyleSrc`, `ImgSrc`, `FontSrc` and `ConnectSrc`, each of which allows plugins to specify valid sources for loading different types of content.
   - Each directive type serves different purposes, e.g., `ScriptSrc` defines valid JavaScript sources, while `ImgSrc` controls where images can be loaded from.
 
 - **Values**:
