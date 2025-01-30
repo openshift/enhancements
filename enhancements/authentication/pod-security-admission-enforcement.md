@@ -82,7 +82,7 @@ To allow a safer rollout of enforcement, the following steps are proposed:
 2. **Global Config Enforce**
    Once all viable Namespaces are labeled successfully, the cluster will set the `PodSecurity` configuration for the kube-apiserver to `Restricted`, again only if there are no potentially failing workloads.
 
-The feature flag `OpenShiftPodSecurityAdmission` will serve as a break-glass option. If unexpected failures occur, the roll-out can be reverted by removing the `FeatureGate` off the default `FeatureSet`.
+The feature flag `OpenShiftPodSecurityAdmission` will serve as a break-glass option. If unexpected failures occur, the rollout can be reverted by removing the `FeatureGate` from the default `FeatureSet`.
 
 #### Examples
 
@@ -97,7 +97,7 @@ To allow users influence over this gradual transition, a new API called `PSAEnfo
 
 - Force `Restricted` enforcement, ignoring potential violations.
 - Remain in `Privileged` mode, regardless of whether violations exist or not.
-- Let the cluster evaluate the state and enforce `Restricted`, if now workloads would fail.
+- Let the cluster evaluate the state and automatically enforce `Restricted` if no workloads would fail.
 - Identify Namespaces that would fail enforcement.
 
 ### Release Timing
@@ -114,19 +114,18 @@ Here, `n` could be OCP `4.19`, assuming it is feasible to backport the API and d
 
 ### Improved Diagnostics
 
-The [ClusterFleetEvaluation](https://github.com/openshift/enhancements/blob/61581dcd985130357d6e4b0e72b87ee35394bf6e/dev-guide/cluster-fleet-evaluation.md) showed that there are cases were clusters fail.
-In some of those cases it couldn't be evaluated yet, why Namespaces in those clusters are failing.
-There is a strong assumption that it is due to the [`PodSecurityAdmissionLabelSynchronizationController`](https://github.com/openshift/cluster-policy-controller/blob/master/pkg/psalabelsyncer/podsecurity_label_sync_controller.go)(PSA label syncer) not labeling Namespaces with user-based SCCs.
-There is a need to improve the diagnostics to ensure that the root cause has been identified for those clusters that are potentially failing.
+The [ClusterFleetEvaluation](https://github.com/openshift/enhancements/blob/61581dcd985130357d6e4b0e72b87ee35394bf6e/dev-guide/cluster-fleet-evaluation.md) revealed that some clusters would fail enforcement, and it was unclear why certain Namespaces in those clusters were failing.
+The assumed root-cause is that [`PodSecurityAdmissionLabelSynchronizationController`](https://github.com/openshift/cluster-policy-controller/blob/master/pkg/psalabelsyncer/podsecurity_label_sync_controller.go) (PSA label syncer) does not label Namespaces that rely on user-based SCCs.
+In some cases, it couldn't be evaluated as all as the PSA labels have been overwritten by the user.
+To confirm this and identify all potential causes, we need improved diagnostics.
 
 #### New SCC Annotation: `security.openshift.io/ValidatedSCCSubjectType`
 
-Today, there is an annotation (`openshift.io/scc`) indicating which SCC was used to admit a workload.
-However, it isn't being distinguished **how** that SCC was granted—**via a user** or **via the Pod’s service account**.
-A new annotation would help us to understand if there is a ServiceAccount with the required SCCs or if a user created a workload out of bound.
-As the PSA label syncer doesn't watch a user's SCCs, it can't assess the labels directly.
+Currently, the annotation `openshift.io/scc` indicates which SCC admitted a workload, but it does not distinguish **how** that SCC was granted—**via a user** or **via the Pod’s service account**.
+A new annotation will help determine if a ServiceAccount with the required SCCs was used or if a user created the workload out of band.
+Since the PSA label syncer does not track user-based SCCs, it cannot fully assess labeling in those cases.
 
-Based on that argumentation, the proposal contains a new annotation:
+Based on this reasoning, the proposal introduces:
 
 ```go
 // ValidatedSCCSubjectTypeAnnotation indicates the subject type that allowed the
@@ -136,31 +135,31 @@ Based on that argumentation, the proposal contains a new annotation:
 ValidatedSCCSubjectTypeAnnotation = "security.openshift.io/ValidatedSCCSubjectType"
 ```
 
-That annotation would be set by the [`SecurityContextConstraint` admission](https://github.com/openshift/apiserver-library-go/blob/60118cff59e5d64b12e36e754de35b900e443b44/pkg/securitycontextconstraints/sccadmission/admission.go#L138) plugin.
+This annotation will be set by the [`SecurityContextConstraint` admission](https://github.com/openshift/apiserver-library-go/blob/60118cff59e5d64b12e36e754de35b900e443b44/pkg/securitycontextconstraints/sccadmission/admission.go#L138) plugin.
 
-#### Set SCC Annotation: `security.openshift.io/MinimallySufficientPodSecurityStandard`
+#### Set PSS Annotation: `security.openshift.io/MinimallySufficientPodSecurityStandard`
 
-The PSA label syncer needs to set the `security.openshift.io/MinimallySufficientPodSecurityStandard`.
-`pod-security.kubernetes/warn` and `pod-security.kubernetes/audit` can be modified by the user which leads to the fact that it is not clear what the PSA label syncer would have decided.
-This is important to evaluate how the PSA label syncer how it might decide in enforce-mode, if the `pod-security.kubernetes/enforce` label is unset, while the other labels are missing.
+The PSA label syncer must set the `security.openshift.io/MinimallySufficientPodSecurityStandard` annotation.
+Because users can modify `pod-security.kubernetes.io/warn` and `pod-security.kubernetes.io/audit`, these labels do not reliably indicate the minimal standard.
+The new annotation ensures a clear record of the minimal Pod Security Standard that would be enforced if the `pod-security.kubernetes.io/enforce` label would be set.
 
-#### Update the PodSecurityReadinessController
+#### Update the PodSecurityRead
 
-Adding both annotations enables the [`PodSecurityReadinessController`](https://github.com/openshift/cluster-kube-apiserver-operator/blob/master/pkg/operator/podsecurityreadinesscontroller/podsecurityreadinesscontroller.go) to more accurately predict potentially failing Namespaces and their root cause:
+By adding these annotations, the [`PodSecurityReadinessController`](https://github.com/openshift/cluster-kube-apiserver-operator/blob/master/pkg/operator/podsecurityreadinesscontroller/podsecurityreadinesscontroller.go) PodSecurityReadinessController can more accurately identify potentially failing Namespaces and understand their root causes:
 
-- With the `security.openshift.io/MinimallySufficientPodSecurityStandard` annotation, the [`PodSecurityReadinessController`](https://github.com/openshift/cluster-kube-apiserver-operator/blob/master/pkg/operator/podsecurityreadinesscontroller/podsecurityreadinesscontroller.go) will be able to evaluate the Namespaces that don't have a `pod-security.kubernetes.io/enforce` label, while having an audit and warn label that are overwritten by the user.
-- With the usage of `ValidatedSCCSubjectType`, it is possible to create another classification of reason for clusters with failing workloads: user-based workloads. There is a strong assumption that most of the reminding clusters with violations are based on the fact that they are running with user-based SCCs.
+- With the `security.openshift.io/MinimallySufficientPodSecurityStandard` annotation, it can evaluate Namespaces that lack the `pod-security.kubernetes.io/enforce` label yet have user-overridden warn or audit labels.
+- With ValidatedSCCSubjectType, the controller can classify issues arising from user-based SCC workloads separately. We strongly suspect that many of the remaining clusters with violations involve workloads admitted by user SCCs instead of ServiceAccounts.
 
 ### Secure Roll-out
 
-As mentioned in the proposal, the changes will be introduced by a gradual movement towards the enforcement of Pod Security Admission on the Namespace-level and then on the Global-config-level.
-Besides the change of the behavior of the `FeatureGate` for the `OpenShiftPodSecurityAdmission`, it is required to give control and insight about the process to the user.
-The introduction of a new API is necessary.
+As noted in the Proposal, we will introduce these changes gradually: first enforcing Pod Security Admission at the Namespace level, then at the global (cluster-wide) level.
+In addition to adjusting how the `OpenShiftPodSecurityAdmission` `FeatureGate` behaves, we must give administrators both visibility and control over this transition.
+Therefore, introducing a new API becomes necessary.
 
 #### New API
 
-This API will give us the flexibility to roll out the Pod Security Admission enforcement to clusters in a gradual way.
-It gives the users the ability to have control over the process and gives them the necessary feedback about the cluster's current state with regards to Pod Security violations.
+This API provides the flexibility to roll out Pod Security Admission enforcement to clusters in a gradual way.
+It gives users the ability to control the process and see feedback about the cluster’s state regarding Pod Security violations.
 
 ```go
 package v1alpha1
@@ -169,13 +168,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// PSAEnforcementMode is the enforcement mode for Pod Security Admission
-// roll-out.
+// PSAEnforcementMode is the enforcement mode for Pod Security Admission roll-out.
 type PSAEnforcementMode string
 
 const (
 	// EnforcementModePrivileged indicates that no Pod Security restrictions are
-	// being applied effectively.
+	// being effectively applied.
 	// This puts the cluster in its pre-roll-out state.
 	EnforcementModePrivileged PSAEnforcementMode = "Privileged"
 
@@ -190,13 +188,13 @@ const (
 	//     controlled switch, set EnforcementMode to "Privileged" and change to
 	//     "Conditional" back once ready.
 	//   - If the state changes from "no violations" to "any violation", and the
-	//     cluster settled on enforcing "Restricted" already, the state won't
-	//     change back, except the EnforcementMode is set to "Privileged".
+	//     cluster has already settled on "Restricted", it will not change back
+	//     unless the EnforcementMode is set to "Privileged".
 	EnforcementModeConditional PSAEnforcementMode = "Conditional"
 
 	// EnforcementModeRestricted indicates that the strictest Pod Security
-	// restrictions apply. This effectively moves the cluster into the
-	// "Restricted" state, despite violations.
+	// restrictions are applied. This effectively moves the cluster into the
+	// "Restricted" state, despite any existing violations.
 	EnforcementModeRestricted PSAEnforcementMode = "Restricted"
 )
 
@@ -234,8 +232,8 @@ type PSAEnforcementConfigSpec struct {
 type PSAEnforcementConfigStatus struct {
 	// labelMode is the actual Pod Security Admission mode being
 	// enforced by the PSA label syncer. This will differ from spec.mode if
-	// spec.mode is Conditional, then the initial decision will be based on
-	// violating Namespaces.
+	// spec.mode is "Conditional", then the presence or absence of violations
+	// decides upon the outcome.
 	// The modes are:
 	// - `Restricted`, the PSA label syncer will set the enforce label.
 	// - `Privileged`, the PSA label syncer will not set the enforce label.
@@ -244,8 +242,8 @@ type PSAEnforcementConfigStatus struct {
 
 	// configMode is the actual Pod Security Admission mode being
 	// enforced by the kube-apiserver. This will differ from spec.mode if
-	// spec.mode is Conditional, then the initial decision will be based on
-	// violating Namespaces.
+	// spec.mode is "Conditional", then the presence or absence of violations
+	// decides upon the outcome.
 	// The modes are:
 	// - `Restricted`, the PSA plugin will enforce `Restricted` by default.
 	// - `Privileged`, the PSA plugin will enforce `Privileged` by default.
@@ -254,12 +252,11 @@ type PSAEnforcementConfigStatus struct {
 
 	// violatingNamespaces is a list of namespaces that can initially block the
 	// cluster from fully enforcing a "Restricted" mode. Administrators should
-	// review each listed Namespace and fix any issues to enable strict
-	// enforcement.
+	// review each listed Namespace to fix any issues to enable strict enforcement.
 	//
-	// Violations after "Restricted" mode is being applied, have no effect. This
-	// means that a cluster can have "status.labelMode = Restricted" or
-	// "status.configMode = Restricted" and a list of violating namespaces.
+	// If a cluster is already in "Restricted" mode and new violations emerge,
+	// it remains in "Restricted" until the user explicitly switches to
+	// "spec.mode = Privileged".
 	//
 	// To revert "Restricted" mode the Administrators need to set the
 	// PSAEnfocementMode to "Privileged".
@@ -275,9 +272,8 @@ type ViolatingNamespace struct {
 	// enforced.
 	Name string `json:"name"`
 
-	// reason is an textual description explaining why the Namespace is
-	// incompatible with the requested Pod Security mode and highlights which mode
-	// is being affected.
+	// reason is a textual description explaining why the Namespace is incompatible
+	// with the requested Pod Security mode and highlights which mode is affected.
 	//
 	// Possible values are:
 	// - PSAConfig: Misconfigured OpenShift Namespace
@@ -287,20 +283,19 @@ type ViolatingNamespace struct {
 	Reason string `json:"reason,omitempty"`
 }
 ```
+The `spec` allows the user to choose the desired state:
 
-The `spec` enables the user to specify their wished state:
+- `Privileged`
+- `Conditional`
+- `Restricted`
 
-- `Privileged`,
-- `Conditional` or
-- `Restricted`.
+While `Privileged` and `Restricted` each ignore cluster feedback and strictly enforce their respective modes, `Conditional` depends on whether any Namespaces are violating.
+If `spec.mode = Conditional` and no violations are found, the `status` mode becomes `Restricted`. Otherwise, it becomes `Privileged`.
 
-While `Privileged` and `Restricted` will enforce their respective states, ignoring the feedback the cluster gives, the `Conditional` `spec.mode` will rely on the lack of violating Namespaces.
-`spec.mode = Conditional` will set the `status` mode to `Restricted`, depending on the release and if there are no violations found.
-It will set the `status` mode to to `Privileged` otherwise.
-As mentioned in the [Release Timing](#release-timing) paragraph, the `status` `Restricted` will mean in release `n` that the PSA label syncer will set the `pod-security.kubernetes.io/enforce` label.
-In the release `n+1`, the `status` `Restricted` will mean that the PodSecurity configuration for the kube-apiserver will be set to `Restricted` by default.
+As noted in the [Release Timing](#release-timing) section, when `status` is `Restricted` in release `n`, the PSA label syncer sets the `pod-security.kubernetes.io/enforce` label.
+In release `n+1`, `status` `Restricted` implies the kube-apiserver is configured to enforce `Restricted` by default.
 
-To be specific, here is a boolean table of the behavior expected in `status.effectiveMode`:
+Below is a table illustrating the expected behavior:
 
 | spec.mode   | violations found | release | status.labelMode | status.configMode |
 | ----------- | ---------------- | ------- | ---------------- | ----------------- |
@@ -317,78 +312,86 @@ To be specific, here is a boolean table of the behavior expected in `status.effe
 | Conditional | none             | n + 1   | Restricted       | Restricted        |
 | Conditional | found            | n + 1   | Privileged       | Privileged        |
 
-Once a cluster with `spec.mode = Conditional` settles on `Restricted`, it can only turn back to `Privileged` if the user sets `spec.mode = Privileged`.
-If a cluster with `spec.mode = Conditional` cluster starts with `status` `Privileged`, it might flip immediately the cluster to `status` `Restricted`, once the cluster has no violations.
-For a controlled roll-out, the user would need to set the `spec.mode = Privileged`, and time the setting of `spec.mode = Conditional` to a moment that fits best.
+Once a cluster with `spec.mode = Conditional` settles on `Restricted`, it can revert to `Privileged` only if the user explicitly sets `spec.mode = Privileged`.
+If a cluster in `spec.mode = Conditional` mode begins with `status` `Privileged`, it may immediately flip to `status` `Restricted` when no violations remain.
+To manage rollout timing, a user could set `spec.mode = Privileged` and then switch to `Conditional` back at a suitable time.
 
-The `status.violatingNamespaces` contains a list of Namespaces that could contain failing workloads.
+`status.violatingNamespaces` lists the Namespaces that would have failing workloads, if `status` `Restricted` is being enforced.
 The reason gives the user the ability to identify which Namespaces are failing and in which which type of failure it is: based on the PSA label syncer or the PSA configuration.
-To identify those workloads individually, the user would need to query the kube-apiserver to identify the reason.
-Optionally the user could use the [cluster debugging tool](https://github.com/openshift/cluster-debug-tools), which contains the capability to identify those workloads.
+To identify specific workloads, an administrator must query the kube-apiserver or optionally use the [cluster debugging tool](https://github.com/openshift/cluster-debug-tools), which can pinpoint the problematic workloads.
 
 ### Implementation Details
 
-The cluster-kube-apiserver-operator's PodSecurityReadinessController will be responsible for managing the new API.
+The `PodSecurityReadinessController` in the `cluster-kube-apiserver-operator` will manage the new API.
 
-If the `FeatureGate` gets removed, the cluster must revert to its previous state.
+If the `FeatureGate` is removed, the cluster must revert to its previous state.
 
 #### PodSecurity Configuration
 
-Currently the Config Observer for the kube-apiserver manages the state of the Global Config based on templates that change based on the feature flag.
-The Config Observer will need to watch the `status.configMode` for `Restricted` and the `FeatureGate` and base the decision upon that.
+Currently, a Config Observer in the `cluster-kube-apiserver-operator` manages the Global Config for the kube-apiserver, adjusting behavior based on the feature flag.
+It will need to watch both the `status.configMode` (for `Restricted`) and the `FeatureGate` to make its decisions.
 
 #### PSA Label Syncer
 
-The PSA label syncer will need to watch the `status.labelMode` for `Restricted` and the `FeatureGate` `OpenShiftPodSecurityAdmission`.
+The PSA label syncer will watch the `status.labelMode` and the `OpenShiftPodSecurityAdmission` feature gate.
+If `status.labelMode` is `Restricted` and `OpenShiftPodSecurityAdmission` is enabled, the syncer will set the `pod-security.kubernetes.io/enforce` label.
+Otherwise, it will refrain from setting that label and remove any enforce labels it owns.
 
-If the `status.labelMode` is set to `Restricted` and the `FeatureGate` `OpenShiftPodSecurityAdmission` is set, the PSA label syncer will set the `pod-security.kubernetes.io/enforce` label.
-If the opposite is true, `pod-security.kubernetes.io/enforce` will not be set and labels that are owned by the controller will be removed.
-
-The ability to set the `pod-security.kubernetes.io/enforce` label will happen in release `n`.
-Therefore the capability to remove the `pod-security.kubernetes.io/enforce` label must be introduced in release `n-1`.
+Because the ability to set `pod-security.kubernetes.io/enforce` will be introduced in release `n`, the ability to remove that label must exist in release `n-1`.
+Otherwise, the cluster won't be able to revert to its previous state.
 
 ## Open Questions
 
 ### Baseline Clusters
 
-The current suggestion differentiates between `restricted` and `privileged` PSS. It could be possible to have an intermediate step and set the cluster to `baseline` as well.
+The current suggestion differentiates between `restricted` and `privileged` PSS.
+It may be possible to introduce an intermediate step and set the cluster to `baseline` instead.
 
 ### Fresh Installs
 
-The System Administrator needs to pre-configure the new API's `spec.mode`, such that the cluster will be `privileged`, `restrited` or `conditional` on fresh install.
+The System Administrator needs to pre-configure the new API’s `spec.mode`, choosing whether the cluster will be `privileged`, `restricted`, or `conditional` upon a fresh install.
 
 ## Test Plan
 
-The PSA label syncer maps the SCCs by a hard-coded rule-set to an appropriate PSS.
-In addition the PSA version is set to `latest`.
-This could mean that the mapping of SCC to PSS gets outdated at some moment in time.
-In order to protect user workloads, there is a need for an e2e-test that would fail if this behavior changes.
-To be completely sure, it would be required to use the podsecurityadmission package logic directly, which would protect custom SCCs as well.
+The PSA label syncer currently maps SCCs to PSS through a hard-coded rule set, and the PSA version is set to `latest`.
+This arrangement risks becoming outdated if the mapping logic changes over time upstream.
+To protect user workloads, an end-to-end test should fail if the mapping logic no longer behaves as expected.
+Ideally, the PSA label syncer would use the `podsecurityadmission` package directly.
+Otherwise it can't be guaranteed that all possible SCCs are mapped correctly.
 
 ## Graduation Criteria
 
-- If the label syncer is able to roll out on most of the clusters without any negative feedback. The global config for PSA can be set to `restricted`.
-- If most of our users have the global config for PSA set to `restricted`, upgrade can be blocked on clusters that didn't reach that state yet.
+- If the PSA label syncer can roll out on most clusters without negative feedback, the global PSA config can be set to `restricted`.
+- If the majority of users have their global PSA config set to `restricted`, upgrades can be blocked on clusters that are still not in that state.
 
 ## Upgrade / Downgrade Strategy
 
 ### On Upgrade
 
-The upgrade strategy is mentioned above in the [Release Timing](#release-timing) section.
+See the [Release Timing](#release-timing) section for the overall upgrade strategy.
 
 ### On Downgrade
 
-The downgrade strategy is mentioned in above and in particular for the PSA label syncer in the [Implementation Details](#implementation-details), in the [PSA Label Syncer](#psa-label-syncer) section.
+See the earlier references, including the [PSA Label Syncer](#psa-label-syncer) subsection in the [Implementation Details](#implementation-details) section, for the downgrade strategy.
 
 ## New Installation
 
-As there should be no violating Namespace on a fresh install, the cluster would promote to `Restricted`, if the `spec.mode = Privileged` is not set. As described above, this wouldn't be the case at first.
-Fresh installs will start with `Conditional` as default, to nudge the users to move forward. An Admin should be then able to configure the cluster, such that it starts of with `Privileged`.
+Because a fresh install should not have any violating Namespaces, the cluster would move to `Restricted` if `spec.mode = Privileged` is not set.
+As described earlier, the default for new installs is `Conditional`, prompting users to adopt `Restricted`.
+An administrator can also configure the cluster to start in `Privileged` if desired.
 
 ## Operational Aspects
 
-- If a cluster is `spec.mode = Conditional` and it is violating at first and the violations are removed step-by-step, a sudden switch in `status.effectiveMode` can happen and result in an upgrade to `Restricted`. It could be preferred by the user to do it in a timed way.
-- If a cluster once switches into `status.effectiveMode = Restricted`, having a workload that violates shouldn't be possible anymore. In case that this somehow happens, there should be no switch back to `status.effevtiveMode = Privileged` as an alternating state could cause unnecessary rotations of the kube-apiserver.
-- If a user identified issues in their cluster fleet with the `status.effectiveMode = Restricted`, the user can pro-actively set the `spec.mode = Privileged` to stop the enforcement process.
-- If a Namespace is violating a user could determine the specific issues by querying the kube-apiserver with `kubectl label ...`
-- ClusterAdmins need to be taught to set the proper `securityContext`, if they would like to create direct workloads. It could be made easier, by modifying templates for creation of such workloads.
+- If a cluster is set to `Conditional` and has violations initially, those violations might be resolved one-by-one.
+  Once all violations are resolved, the cluster may suddenly switch to `Restricted`, which some admins may prefer to manage manually.
+- After a cluster switches to `status` `Restricted`, no violating workloads should be possible.
+  If a violating workload appears, there is no automatic fallback to `Privileged`, preventing unnecessary kube-apiserver restarts.
+- If users identify issues in a cluster that has already switched to `Restricted`, they can proactively set `spec.mode = Privileged` to halt enforcement on other clusters.
+- ClusterAdmins must ensure the proper `securityContext` is set for directly created workloads (user-based SCCs).
+  Modifying default workload templates may simplify this process.
+- To determine specific problems in a violating Namespace, admins can query the kube-apiserver:
+
+  ```bash
+  kubectl label --dry-run=server --overwrite $NAMESPACE --all \
+      pod-security.kubernetes.io/enforce=$MINIMALLY_SUFFICIENT_POD_SECURITY_STANDARD
+  ```
