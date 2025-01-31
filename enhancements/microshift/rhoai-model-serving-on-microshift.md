@@ -238,6 +238,30 @@ RHOAI Operator deploys both kserve and ODH Model Controller.
 In the catalog image for Model Controller is described as:
 > The controller removes the need for users to perform manual steps when deploying their models
 
+Summary of ODH Model Controller's functionality in regards to Raw Deployment mode for InferenceService:
+- Creates ClusterRoleBinding
+  - Role: `system:auth-delegator`, Subject: InferenceService's Service Account
+  - Seems not needed in MicroShift if we're delegating authentication to user
+- Creates OpenShift Route CR
+  - Route to expose the inference service.
+  - We might delegate Route CR creation to the user, as not always inference service might require exposing outside.
+- Creates Prometheus ServiceMonitor (it instructs in-cluster Prometheus' configuration to scrape the service)
+  - MicroShift does not ship Prometheus - not needed
+- Creates K8s Service for serving metrics
+  - Probably for ServiceMonitor - not needed
+- ConfigMap for a RHOAI Dashboard
+  - Probably to configure Dashboard to present serving metrics - not needed for MicroShift
+
+For the ServingRuntime CRs:
+- Creates RoleBindings for monitoring - not needed as MicroShift doesn't ship Prometheus.
+
+Model Controller also creates auth config (Authorino) for InferenceGraph.
+MicroShift won't ship Authorino, so no need to include it. If user decides to use it,
+they'll need to setup required elements.
+
+Model Controller also watches Secrets to collect data connection secrets into
+single Secret. Seems to be revelant to Model Mesh or using Dashboard, if that's the case
+MicroShift users can use single secret for configuring access to models.
 
 ## Versioning
 
