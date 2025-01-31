@@ -188,7 +188,8 @@ From [kserve documentation](https://kserve.github.io/website/master/modelserving
 > through environment variables in the container specification.
 
 RHOAI approach to ServingRuntimes:
-- ClusterServingRuntimes are not supported (the CRD is not created).
+- ClusterServingRuntimes are not supported (the CRD is not created and code that
+  lists CSRs is commented out).
 - Each usable ServingRuntime is wrapped in Template and resides in RHOAI's namespace.
 - When user uses RHOAI Dashboard to serve a model, they must select a runtime
   from a list (which is constructed from Templates holding ServingRuntime)
@@ -212,6 +213,9 @@ Potential solutions so far:
 - Change ServingRuntimes to ClusterServingRuntimes and include them in an RPM,
   so they're accessible from any namespace (MicroShift is intended for
   single-user operation anyway).
+  - This would also require change in `opendatahub-io/kserve` to start listing
+    ClusterServingRuntimes as it's currently commented out (compared to upstream kserve).
+    See GetSupportingRuntimes() function in [predictor_model.go](https://github.com/opendatahub-io/kserve/blob/master/pkg/apis/serving/v1beta1/predictor_model.go).
 - Don't include SRs in any of the RPM. Instead include them in the documentation
   for users to copy and include in their manifests.
   - This might be prone to getting outdated very easily as documentation is not
