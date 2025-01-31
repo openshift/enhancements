@@ -8,11 +8,12 @@ reviewers:
   - "eslutsky, MicroShift contributor"
   - "copejon, MicroShift contributor"
 approvers:
-  - "jerpeter1"
+  - "jerpeter1, MicroShift principal engineer"
+  - "moadz, Telemetry principal engineer"
 api-approvers:
   - None
 creation-date: 2025-01-27
-last-updated: 2025-01-27
+last-updated: 2025-01-31
 tracking-link:
   - https://issues.redhat.com/browse/OCPSTRAT-1071
 ---
