@@ -15,6 +15,8 @@ tracking-link:
   - https://issues.redhat.com/browse/NE-1105
   - https://issues.redhat.com/browse/NE-1107
   - https://issues.redhat.com/browse/NE-1108
+see-also:
+  - "/enhancements/ingress/gateway-api-crd-life-cycle-management.md"
 ---
 
 # Gateway API with Cluster Ingress Operator
