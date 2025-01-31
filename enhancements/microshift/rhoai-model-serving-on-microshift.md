@@ -153,6 +153,9 @@ reworked (depending on how the RHOAI's manifests will look like).
 
 ### Tweaking Kserve setting: ingress domain
 
+**Update: If we disable creating Ingress and instruct user to create Route if**
+**needed, there's no need to do following.**
+
 Kserve settings are delivered in form of a ConfigMap:
 - [Upstream example](https://github.com/red-hat-data-services/kserve/blob/master/config/configmap/inferenceservice.yaml)
 - [RHOAI's overrides](https://github.com/red-hat-data-services/kserve/blob/master/config/overlays/odh/inferenceservice-config-patch.yaml)
