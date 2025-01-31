@@ -10,7 +10,7 @@ approvers:
 api-approvers:
   - None
 creation-date: 2024-11-25
-last-updated: 2025-01-14
+last-updated: 2025-01-31
 tracking-link:
   - https://issues.redhat.com/browse/OTA-540
 ---
@@ -154,7 +154,7 @@ To ensure we do not surprise anyone with this shift, we are collecting acks from
 * [ ] kube-storage-version-migrator
 * [ ] machine-api
 * [ ] machine-approver
-* [ ] machine-config
+* [x] machine-config, [acked](https://github.com/openshift/enhancements/pull/1719#discussion_r1934857504) by @yuqi-zhang
 * [ ] marketplace
 * [ ] monitoring
 * [ ] network
