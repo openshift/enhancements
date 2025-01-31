@@ -11,7 +11,7 @@ approvers: # A single approver is preferred, the role of the approver is to rais
 api-approvers:
   - None
 creation-date: 2025-01-17
-last-updated: 2025-01-17
+last-updated: 2025-01-31
 tracking-link:
   - https://issues.redhat.com/browse/OCPSTRAT-1721
 # see-also:
@@ -52,6 +52,7 @@ edge using MicroShift.
 
 - Deploying full RHOAI on MicroShift.
 - Providing goodies such as RHOAI Dashboard. Using it will be more similar to upstream kserve.
+- Securing serving endpoint - we'll defer this action to user if needed as inference might be consumed by other Pod.
 
 ## Proposal
 
@@ -60,6 +61,8 @@ Extract kserve manifests from RHOAI Operator image and adjust them for MicroShif
   - This might require adding some extra annotations to resources so the service-ca injects the certs.
 - Drop requirement for Istio as an Ingress Controller and use OpenShift Router instead.
   - Done by changing kserve's setting configmap to use another ingress controller.
+  - RHOAI disables automatic Ingress creation by kserve and odh-model-controller takes over creation of appropriate CRs.
+    We need to decide if we want to re-enable it or instruct user to create Route CR themselves.
 - Use 'RawDeployment' mode, so that neither Service Mesh nor Serverless are required,
   to minimize to make the solution suitable for edge devices.
   - Also done in the configmap.
