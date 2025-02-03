@@ -348,6 +348,11 @@ side loaded).
 MicroShift and kserve RPMs built from the same .spec file should not introduce
 a version skew.
 
+For initial release of RHOAI kserve for MicroShift, a `fast` channel RHOAI might
+be used. Between used `fast` and next `stable`, 4.19 branch should be actively
+updated with new `fast` versions. Next releases of MicroShift should use `stable`
+RHOAI releases.
+
 ## Operational Aspects of API Extensions
 
 N/A
