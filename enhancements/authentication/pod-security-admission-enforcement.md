@@ -366,14 +366,18 @@ Otherwise, the cluster will be unable to revert to its previous state.
 
 ## Open Questions
 
+### Fresh Installs
+
+Needs to be evaluated. The System Administrator needs to pre-configure the new API’s `spec.targetMode`, choosing whether the cluster will be `privileged`, `restricted`, or `conditional` during a fresh install.
+
+### Impact on HyperShift
+
+Needs to be evaluated.
+
 ### Baseline Clusters
 
 The current suggestion differentiates between `restricted` and `privileged` PSS.
 It may be possible to introduce an intermediate step and set the cluster to `baseline` instead.
-
-### Fresh Installs
-
-The System Administrator needs to pre-configure the new API’s `spec.targetMode`, choosing whether the cluster will be `privileged`, `restricted`, or `conditional` during a fresh install.
 
 ## Test Plan
 
