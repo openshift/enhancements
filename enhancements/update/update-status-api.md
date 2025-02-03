@@ -218,19 +218,17 @@ Initially, the USC will produce status insights for `ClusterVersion`, `ClusterOp
 
 ##### Update Health Insights
 
-Update Health Insights report a state or condition in the cluster that is abnormal or negative and either affects or is affected by the update. Ideally, none would be generated in a standard healthy update. Health insights should communicate a condition that requires immediate attention by the cluster administrator and should be actionable. Links to resources helpful in the given situation should accompany health insights. Health insights can reference multiple resources involved in the situation. For example, a health insight exposing a failure to drain a node would reference the `Node`, the `Pod` that fails to be drained, and the `PodDisruptionBudget` that protects it. Individual resources can be involved in multiple insights.
+Update Health Insights report a state or condition in the cluster that is abnormal or negative and either affects or is affected by the update. Ideally, none would be generated in a standard healthy update. Health insights should communicate a condition that warrants attention by the cluster administrator and should be actionable. Links to resources helpful in the given situation should accompany health insights. Health insights can reference multiple resources involved in the situation. For example, a health insight exposing a failure to drain a node would reference the `Node`, the `Pod` that fails to be drained, and the `PodDisruptionBudget` that protects it. Individual resources can be involved in multiple insights.
 
 #### Update Status Controller
 
-The Update Status Controller (USC) is a new component in OpenShift that will be deployed directly by the CVO and is being treated as its operand. This is uncommon in OpenShift, as the CVO typically deploys only second-level operators as its operands. In this model, the USC (providing cluster functionality) would normally be an operand, and we would need to invent a new cluster operator to manage it. Because the CVO is directly involved in updates, such an additional layer does not have value.
+The Update Status Controller (USC) is a new component in OpenShift that will be deployed directly by the CVO and is being treated as its operand. This is uncommon in OpenShift (listed as a [drawback][this-drawbacks]), as the CVO typically deploys only second-level operators as its operands. In this model, the USC (providing cluster functionality) would normally be an operand, and we would need to invent a new cluster operator to manage it. Because the CVO is directly involved in updates, such an additional layer does not have value, at least for now. If managing the USC shows to be a sufficiently complex problem in practice, we can consider introducing a new operator to manage it.
 
 The Update Status Controller will run a primary controller that will maintain the `UpdateStatus` resource. The resource has no `.spec`, so the controller will ensure the resource exists and its `.status` content is up-to-date and correct. It will determine the `status` subresource content by receiving and processing insights from the other controllers in the USC.
 
 The Update Status Controller will have two additional control loops, both serving as producers of insights for the given domain. One will monitor the control plane and will watch `ClusterVersion` and `ClusterOperator` resources. The other will monitor the node pools and will watch `MachineConfigPool` and `Node` resources. Both will report their observations as status or health insights to the primary controller so it can update the `UpdateStatus` resource. These control loops will reuse the existing cluster check code implemented in the client-side `oc adm upgrade status` prototype.
 
-To avoid inflating OpenShift payload images, the USC will be delivered in the same image as the CVO, so its code will live in the `openshift/cluster-version-operator` repository. The USC will be either a separate binary or a subcommand of the CVO binary (the CVO already has subcommands).
-
-> Note: As of Jan 7, the prototyping work showed the via-CVO delivery causes issues because the CVO image and manifests inside are treated specially by code that interacts with them (like hypershift [OCPBUGS-44438](https://issues.redhat.com/browse/OCPBUGS-44438) or release payload build [OCPBUGS-30080](https://issues.redhat.com/browse/OCPBUGS-30080)). Coupling with CVO still makes sense, but delivery through a standard additional payload image would prevent us from hitting subtle issues like the one mentioned above. What is the bar for the inclusion of a new image in the payload?
+To avoid inflating OpenShift payload images for all clusters while the feature is in TechPreview, the USC will be delivered in the same image as the CVO. Its code will live in the `openshift/cluster-version-operator` repository, and the USC will be either a separate binary or a subcommand of the CVO binary (the CVO already has subcommands). Prototyping work showed that this delivery method causes issues because the CVO image and manifests inside are treated specially by the code that interacts with them (like hypershift [OCPBUGS-44438](https://issues.redhat.com/browse/OCPBUGS-44438) or release payload build [OCPBUGS-30080](https://issues.redhat.com/browse/OCPBUGS-30080)). We will consider extracting USC into a separate image before the transition to GA, depending on further experience of shipping via CVO, the decision to build a cluster operator for USC, and other tradeoffs, subject to payload inclusion [approvals][becoming-payload].
 
 #### `oc adm upgrade status`
 
@@ -316,10 +314,13 @@ N/A - the `UpdateStatus` feature gate is already Tech Preview
 * A clear plan to achieve HyperShift support is in place.
 * The `oc adm upgrade status` consumes the Status API by default and has at least feature parity with the client-based prototype.
 * Meets TRT criteria: e2e tests exist in `openshift/origin`, and a result data corpus proves the feature works and does not lower platform stability.
+* Decided whether to extract USC to a separate image or continue to ship with CVO one
 
 ### Removing a deprecated feature
 
-N/A
+The Update Status API replaces the TechPreview client-based behavior from 4.16+ in `oc adm upgrade status`. We will place the client behavior behind a separate flag or command when that happens and announce its deprecation. We will remove the code entirely when the Update Status API reaches GA.
+
+Removing client-based behavior removes some value because it was able to provide information even for clusters with no server-side Update Status API, such as ones running older versions or clusters with the Capability disabled. We may consider keeping it longer to smoothen adoption until enough of the fleet is running the OCP version with API.
 
 ## Upgrade / Downgrade Strategy
 
@@ -329,7 +330,7 @@ The USC will be updated by the CVO very early in the update process, immediately
 
 There are two sources of skew:
 
-1. The updated USC needs to monitor resources of potentially old-version CRDs managed by old-version controllers. This should be fine, as CRDs are updated early in the process.
+1. The updated USC needs to monitor resources of potentially old-version CRDs managed by old-version controllers. This should be fine, as CRDs are updated early in the process. The risks here are low because the resources involved in the update are stable, mature types, all in API tier 1, hence unlikely to change significantly to cause issues. The USC must be able to maintain `UpdateStatus` resources from 4.x-1, 4.x, and 4.x+1, but once the feature is GA, the `UpdateStatus` API will also become stable.
 1. `oc` client needs to be able to process and display `UpdateStatus` resources for OCP versions following the version skew policy. `oc adm upgrade status` of version 4.x must gracefully handle `UpdateStatus` resources from 4.x-1, 4.x and 4.x+1.
 
 ## Operational Aspects of API Extensions
@@ -392,6 +393,7 @@ N/A
 [oc-adm-upgrade-status-examples]: https://github.com/openshift/oc/tree/master/pkg/cli/admin/upgrade/status/examples
 [hcp-client]: https://docs.redhat.com/en/documentation/openshift_container_platform/4.17/html/hosted_control_planes/hosted-control-planes-overview#hcp-versioning-cli_hcp-overview
 [updates-in-hcp]: https://docs.redhat.com/en/documentation/openshift_container_platform/4.17/html/hosted_control_planes/updating-hosted-control-planes#hcp-get-upgrade-versions_hcp-updating
+[becoming-payload]: https://docs.ci.openshift.org/docs/how-tos/onboarding-a-new-component/#product-builds-and-becoming-part-of-an-openshift-release
 [this-usc]: #update-status-controller
 [this-drawbacks]: #drawbacks
 [this-api-size]: #api-size-and-footprint
