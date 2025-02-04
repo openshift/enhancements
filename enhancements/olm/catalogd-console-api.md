@@ -1,16 +1,21 @@
 ---
-title: catalogd-query-endpoint
+title: catalogd-console-api
 authors:
-  - @grokspawn
-  - @anik120
+  - "@grokspawn"
+  - "@anik120"
 reviewers: # Include a comment about what domain expertise a reviewer is expected to bring and what area of the enhancement you expect them to focus on. For example: - "@networkguru, for networking aspects, please look at IP bootstrapping aspect"
-  - TBD
+  - "@spadgett" # for OCP console
+  - "@jhadvig" # for OCP console
+  - "@TheRealJon" # for OCP console
+  - "@joelanford" # for OLM
+  - "@eggfoobar" # for SNO
+  - "@csrwng" # for Hypershift
 approvers: # A single approver is preferred, the role of the approver is to raise important questions, help ensure the enhancement receives reviews from all applicable areas/SMEs, and determine when consensus is achieved such that the EP can move forward to implementation.  Having multiple approvers makes it difficult to determine who is responsible for the actual approval.
-  - TBD
+  - "@spadgett"
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
-  - TBD
+  - None
 creation-date: 2025-01-30
-last-updated: 2025-01-30
+last-updated: 2025-02-11
 tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
   - https://issues.redhat.com/browse/OPRUN-3688
 see-also:
@@ -46,13 +51,15 @@ See ../README.md for background behind these instructions.
 Start by filling out the header with the metadata for this enhancement.
 -->
 
-# catalogd-query-api
+# catalogd-console-api
 
 ## Summary
 
 Catalogd currently supports an HTTPS endpoint to access file-based catalog (FBC) contents
-but the endpoint provides complete catalog content in a single transaction.
-We would like to introduce a new HTTPS endpoint to provide more fine-grained access to 
+but the endpoint provides complete catalog content in a single transaction.  In performance testing with 
+proof of concept OCP console work, it proves insufficiently responsive and requires user-agent-side results
+ caching of large amounts of catalog data.   
+We would like to introduce a new HTTPS endpoint to provide more fine-grained and lower-latency access to 
 catalog contents. 
 
 <!--
@@ -72,7 +79,7 @@ This section is for explicitly listing the motivation, goals and non-goals of
 this proposal. Describe why the change is important and the benefits to users.
 -->
 
-The existing `/api/v1/all` endpoint returns the entire FBC, which the clients then need 
+The existing `/api/v1/all` endpoint returns the entire FBC, which console or other clients then need 
 to process in order to retrieve relevant information. This is very inefficient for 
 accesses which can be satisfied by a much smaller record set. 
 
@@ -80,20 +87,29 @@ accesses which can be satisfied by a much smaller record set.
 redhat-operator-index:    55MB
 certified-operator-ind:   32MB
 community-operator-index: 29MB
-operatorhub.io:           21MB          <--- the benchmark 4-10s duration
+operatorhub.io:           21MB
 redhat-marketplace-index:  9MB
 -->
 
-Requiring clients to retrieve the full catalog can also result in a 4-10 second delay _per catalog_ even under optimal network conditions. 
+Requiring OCP console to make the common RH catalog contents available to users incurs a 4-10 second delay even 
+under optimal network conditions, plus large local cache coherency challenges to avoid additional retrievals to 
+fulfill further use-cases as a user makes progress towards selecting content to install.
 
 
 ### User Stories
 
-* As a catalog client, I want to be able to pose space-efficient catalog queries
+* As a console user, I would like to be able to discover available packages for installation.
+* As a console user, I would like to be able to request only catalog context relevant to a specific package.
+* As a console user, I would like to be able to discover available package updates.
+* As a console user, I would like to be able to view details for a specific channel for a package.
+* As a console user, I would like to be able to discover all bundle versions associated with a package 
+(and optionally a specific channel).
+* As a console user, I would like to be able to view details for a specific bundle version.
+
 
 ### Goals
 
-* Provide an HTTPS endpoint which fulfills targeted catalog queries with a minimum record set.
+* Provide an HTTPS catalog content discovery endpoint which fulfills targeted catalog queries with a minimum record set.
 
 <!--
 Summarize the specific goals of the proposal. How will we know that
@@ -119,7 +135,9 @@ enhancement.
 
 ## Proposal
 
-This proposal introduces an additional HTTPS endpoint to an existing catalogd API.  The existing HTTPS "all" endpoint will remain as a default option; the user will be able to enable this new capability via a feature gate.
+This proposal introduces an additional HTTPS endpoint to an existing catalogd API.  
+The existing HTTPS "all" endpoint will remain as a default option; the user will be 
+able to enable this new capability via a feature gate.
 
 <!--
 This section should explain what the proposal actually is. Enumerate
@@ -137,7 +155,12 @@ the document.
 
 ### Workflow Description
 
-To serve curated data from the FBC, a new HTTPS endpoint will be exposed by the existing service under the base URL as detailed in `API Specification`. The new endpoint will be derived from `.status.urls.base` following the pattern `/api/v1/query?[...parameters]` and will accept parameters which correspond to any of the fields of the `declcfg.Meta` catalog [atomic type](https://github.com/operator-framework/operator-registry/blob/e15668c933c03e229b6c80025fdadb040ab834e0/alpha/declcfg/declcfg.go#L111):
+To serve curated data from the FBC, a new HTTPS endpoint will be exposed by 
+the existing service under the base URL as detailed in `API Specification`. 
+The new endpoint will be derived from `.status.urls.base` following the pattern 
+`/api/v1/metas?[...parameters]` and will accept parameters which correspond to
+any of the fields of the `declcfg.Meta` catalog 
+[atomic type](https://github.com/operator-framework/operator-registry/blob/e15668c933c03e229b6c80025fdadb040ab834e0/alpha/declcfg/declcfg.go#L111):
 
 ```golang
  type Meta struct {
@@ -147,7 +170,8 @@ To serve curated data from the FBC, a new HTTPS endpoint will be exposed by the 
 }
 ```
 Query parameters will be logically ANDed and used to restrict response scope.   
-This API will be conditionally enabled by an upstream `APIV1QueryEndpoint` feature gate as part of a downstream `NewOLM{suffix}` style OCP TP feature gate, and will be disabled by default.
+This API will be conditionally enabled by an upstream `APIV1MetasEndpoint`
+feature gate as part of a downstream `NewOLM{suffix}` style feature gate.
 
 <!--
 Explain how the user will use the feature. Be detailed and explicit.
@@ -188,7 +212,8 @@ This proposal has no effect on OCP APIs.
 
 #### Hypershift / Hosted Control Planes
 
-No impacts, as Hypershift presently lacks support for catalogd.
+We project no impacts, since the catalog service endpoints and data are cluster-scoped. 
+Hypershift presently lacks support for OLMv1, but that is likely to come soon.
 
 #### Standalone Clusters
 
@@ -209,24 +234,24 @@ info:
   version: 1.0.0
   description: ""
 paths:
-  /{baseURL}/api/v1/query:
+  /{baseURL}/api/v1/metas:
     get:
       parameters:
         - name: name
           description: query by declcfg.Meta.name
           schema:
             type: string
-          in: query
+          in: metas
         - name: package
           description: query by declcfg.Meta.package
           schema:
             type: string
-          in: query
+          in: metas
         - name: schema
           description: query by declcfg.Meta.schema
           schema:
             type: string
-          in: query
+          in: metas
       responses:
         "200":
           headers:
@@ -306,16 +331,36 @@ how the code will be rewritten in the enhancement.
 
 ### Caching Considerations
 
-This proposal indends to provide RFC7234 caching compliance through support for `Last-Modified` and `If-Modified-Since` directives. Clients can use these headers to avoid re-downloading unchanged data. 
-The server will respond with 304 Not Changed if the catalog metadata is unchanged.  
+This proposal intends to provide [RFC7234, Section 2](https://www.rfc-editor.org/rfc/rfc7234#section-2) caching compliance through support for `Last-Modified` and 
+`If-Modified-Since` directives. Clients can use these headers to avoid re-downloading unchanged data. 
+The server will respond with `304 Not Modified` if the catalog metadata is unchanged.  
                   
 Clients are also encouraged to implement local caching for frequently queried metadata.
 
+The existing `all` endpoint also incentivizes clients to conserve resources via local cache to avoid making 
+many (potentially duplicate) requests.  However, the OCP console proof of concept 
+required what was deemed an unsupportable amount of code, complexity, and duration to cache, decompose, and render the 
+complete FBC.
+
+### Resource Considerations
+
+This proposal should have no impact on 
+SNO [resource minimums](https://docs.openshift.com/container-platform/4.17/installing/installing_sno/install-sno-preparing-to-install-sno.html#install-sno-requirements-for-installing-on-a-single-node_install-sno-preparing)
+- vCPU: 8
+- RAM: 16GiB
+- storage: 120GiB
+
+or Hypershift [SLOs](https://hypershift-docs.netlify.app/reference/slos/) where the primary consideration is memory uses in the 10s of MiB, not 100s.
 
 ### Risks and Mitigations
 
-Depending on the implementation of this proposal, exercise of this endpoint could function as an I/O multiplier which could starve other clients which are dependent on the same API. 
-The first iteration of this endpoint will not attempt to mitigate denial-of-service attempts via rate-limiting or other resource consumption constraints.
+Depending on the implementation of this proposal, exercise of this endpoint could function as an 
+I/O multiplier which could starve other clients which are dependent on the same API. 
+The first iteration of this endpoint will not attempt to mitigate denial-of-service attempts via 
+rate-limiting or other resource consumption constraints.
+
+The proposal does not include any provision for authentication/authorization, since there are no 
+current use-cases which require it. 
 
 <!--
 What are the risks of this proposal and how do we mitigate. Think broadly. For
@@ -331,11 +376,18 @@ Consider including folks that also work outside your immediate sub-project.
 
 ### Drawbacks
 
-Given the highly-variable nature of responses based on unbound combinations of schema/name/package, any server-side caching will be problematic if not completely impractical. Read: computationally and/or storage expensive.
+#### Caching 
+Initial implementation will not implement server-side request/response caching, and will instead assess requests' `If-Modified-Since` 
+headers against the catalog unpack timestamp and compose responses from indices generated during catalog data unpacking.
 
-For example, response for `query?schema=olm.package&name=foo` and `query?schema=olm.package&name=bar` represent disjoint sets, and the server would have to either ignore `If-Modified-Since` directives in client requests or rely on their veracity uncritically. 
+#### Complexity
+Server implementation is much more complex and resource intensive due to the need to index catalog 
+content and serve variable requests.
 
-Further, if the underlying implementation relies on anything other than a dictionary of cached requests (&parameters) to dictate date-relevant responses (for e.g. relying on the catalog unpack time), then any server-side caching would be erroneous.  
+#### Completeness
+The previous `all` endpoint always returns valid FBC.  The new service cannot make that promise, 
+so clients could make incorrect assumptions about the suitability of results.  See Open Questions.
+
 
 <!--
 The idea is to find the best form of an argument why this enhancement should
@@ -357,18 +409,18 @@ to implement the design.  For instance,
  > 1. This requires exposing previously private resources which contain sensitive
   information.  Can we do this?
 -->
- > 1. If a query comes in with `/api/v1/query?package=foo`, should we include the blob with schema: `olm.package` and name: `foo`?  
+ > 1. If a query comes in with `/api/v1/metas?package=foo`, should we include the blob with schema: `olm.package` and name: `foo`?
 
-We feel that it is incorrect for the query service endpoint to mutate the data model (specifically, to create a synthetic package attribute for the `olm.package` schema).  To access all the data modeled for an installable package, separate queries need to be made for the package-level metadata (`schema=olm.package&name=foo`) versus the channel/bundle-level metadata (`package=foo`).
+We feel that it is incorrect for the metas service endpoint to mutate the data model (specifically, to create a synthetic package attribute for the `olm.package` schema).  To access all the data modeled for an installable package, separate queries need to be made for the package-level metadata (`schema=olm.package&name=foo`) versus the channel/bundle-level metadata (`package=foo`).
 
-  > 2. What guarantees do we make about the response bodies of all and query?
-  >    - all and query return a stream of valid FBC blobs
+  > 2. What guarantees do we make about the response bodies of `all` and `metas`?
+  >    - `all` and `metas` return a stream of valid FBC blobs
   >    - Does catalogd make any guarantee that all passes opm validate-style validation?
-  >    - We definitely can't guarantee that query responses pass opm validate-style validation.
+  >    - We definitely can't guarantee that `metas` responses pass opm validate-style validation.
   >    - Do we need to clarify that it is up to clients to verify semantic validity if they need it? Are we comfortable putting that burden on clients?
 
 `all` responses will preserve existing validity of the catalog data both from an installably-complete perspective (can be used as an installation reference) as well as syntactically valid perspective (opm validate).  
-`query` responses will be valid `declcfg.Meta` elements and make no promise that the response may be installably-complete (in the sense that the response itself could be used as a fully-intact catalog) or syntactically valid.
+`metas` responses will be valid `declcfg.Meta` elements and make no promise that the response may be installably-complete (in the sense that the response itself could be used as a fully-intact catalog) or syntactically valid.
 
 ## Test Plan
 
@@ -390,6 +442,23 @@ expectations).
 ## Graduation Criteria
 
 **Note:** *Section not required until targeted at a release.*
+
+### Tech Preview
+- Initial implementation is protected by the default-disabled feature gate `APIV1MetasEndpoint`.
+- Sufficient test coverage
+- Feedback from OCP Console team. 
+- e2e feature tests are enabled for TPNU clusters.
+- origin tests demonstrating endpoint inaccessibility in non-TPNU clusters
+- resource benchmarking
+
+### Tech Preview --> GA
+- announce deprecation schedule for `all` endpoint.
+- feature gate moves to default-enabled
+- collect test data for coverage / reliability
+
+### GA --> Maturity
+- remove feature gate 
+
 <!--
 Define graduation milestones.
 
@@ -563,18 +632,26 @@ Describe how to
 
 - Do nothing 
 
-This option would require clients to query the entirety of the data (~21 MB for operatorhubio catalog) and parse the response to retrieve relevant information every time the client needs the data. Even if clients’ implement some form of caching, the first query the client does to catalogd server is still the dealbreaker. In a highly resource constrained environment (e.g. clusters in Edge devices), this basically translates to a chokepoint for the clients to get started.
+This option would require clients to query the entirety of the data (~21 MB for operatorhubio 
+catalog) and parse the response to retrieve relevant information every time the client 
+needs the data. Even if clients’ implement some form of caching, the first query the client 
+does to catalogd server is still the dealbreaker. In a highly resource constrained environment 
+(e.g. clusters in Edge devices), this basically translates to a chokepoint for the clients to get started.
 
 - A “path hierarchy” based construction of API endpoints to expose filtered FBC metadata
 
-The alternative to exposing a single, parameterized query endpoint is exposing many, “path hierarchy” based API endpoints. Eg: 
+The alternative to exposing a single, parameterized query endpoint is exposing many, “path 
+hierarchy” based API endpoints. Eg: 
 
 /api/v1/catalogs/operatorhubio/packages/, /api/v1/catalogs/operatorhubio/packages/<package-name>/, /api/v1/catalogs/operatorhubio/packages/<package-name>/bundles/
 etc.
 
-This interface creates a new API on top of the existing FBC structure. It also increases the number of discoverable endpoints by clients, with the scope for an unsustainable expansion of the API surface area in the future.
+This interface creates a new API on top of the existing FBC structure. It also increases 
+the number of discoverable endpoints by clients, with the scope for an unsustainable 
+expansion of the API surface area in the future.
 
-The main approach proposed in this document instead uses the already existing “FBC API”, with a clean API surface area
+The main approach proposed in this document instead uses the already existing “FBC API”, with 
+a clean API surface area.
 
 
 <!--
