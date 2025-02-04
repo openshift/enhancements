@@ -193,9 +193,19 @@ See the API Extensions section below for sample install-configs.
 
 For a two-node cluster to be successful, we need to ensure the following:
 1. The BMC secrets for RHEL-HA are created on disk during bootstrapping by the OpenShift installer via a MachineConfig.
-2. When pacemaker is initialized by the in-cluster entity responsible for starting pacemaker, pacemaker will try to set up fencing with this secret. If this is not successful, it throws an error and the installation fails.
-3. Pacemaker periodically checks that the fencing agent is healthy (i.e. can connect to the BMC) and throws a warning if it cannot access the BMC. There is an open question on what the user experience should be to raise this error to the user.
-4. The cluster will continue to run normally in the state where the BMC cannot be accessed, but ignoring this warning will mean that pacemaker can only provide a best-effort recovery - so operations that require fencing will need manual recovery.
+2. When pacemaker is initialized by the in-cluster entity responsible for starting pacemaker, pacemaker will try to set up fencing with this secret. If this is not successful, it throws an error which will cause degradation of the in cluster operator and would fail the installation process.
+3. Pacemaker periodically checks that the fencing agent is healthy (i.e. can connect to the BMC) and will create an alert if it cannot access the BMC.
+   * In this case, in order to allow a simple manual recovery by the user a script will be deployed on the node which will reset Pacemaker with the new fencing credentials.
+4. The cluster will continue to run normally in the state where the BMC cannot be accessed, but ignoring this alert will mean that pacemaker can only provide a best-effort recovery - so operations that require fencing will need manual recovery.
+
+Future Enhancements
+1. Allowing usage of external credentials storage services such as Vault or Conjur. In order to support this:
+   * Expose the remote access credentials to the in-cluster operator
+   * We will need an indication for using that particular mode 
+   * Introduce another operator (such as Secrets Store CSI driver) to consume the remote credentials
+   * Make sure that the relevant operator for managing remote credentials is part of the setup (potentially by using the Multi-Operator-Manager operator)
+ 2. Allowing refresh of the fencing credentials during runtime. One way to do so would be for the in-cluster operator to watch for a credential change made by the user, and update the credentials stored in Pacemaker upon such a change.
+
 
 #### Day 2 Procedures
 
@@ -242,6 +252,12 @@ The plan is for this to be changed by one of the nodes during pacemaker initiali
 While set to `External`, CEO will still need to render the configuration for the etcd container in a place where it can be consumed by pacemaker. This ensures that the etcd instance managed by pacemaker can be updated
 accordingly in the case of a upgrade event or whenever certificates are rotated.
 
+In case CEO will be used as the in-cluster operator responsible for setting up Pacemaker fencing it'll require root permissions which are currently mandatory to run the required pcs commands.
+Some mitigation or alternatives might be:
+- Use a different (new) in-cluster operator to set up Pacemaker fencing
+- Worth noting that the HA team suggests that there is a plan to adjust the pcs to a full client server architecture which will allow the pcs commands to run without root privileges. A partial faster solution may be provided by the HA team for a specific set of commands used by the pcs client.
+
+
 #### Install Config Changes
 
 In order to initialize pacemaker with valid fencing credentials, they will be consumed by the installer via the installation config and created on the cluster as a cluster secret.
@@ -269,36 +285,7 @@ pullSecret: ''
 sshKey: ''
 ```
 
-For platform baremetal, a valid configuration is quite similar.
-```
-apiVersion: v1
-baseDomain: example.com
-compute:
-- name: worker
-  replicas: 0
-controlPlane:
-  name: master
-  replicas: 2
-metadata:
-  name: <cluster-name>
-platform:
-  baremetal:
-    fencingCredentials:
-      bmc:
-          address: ipmi://<out_of_band_ip>
-          username: <user>
-          password: <password>
-    apiVIPs:
-      - <api_ip>
-    ingressVIPs:
-      - <wildcard_ip>
-pullSecret: ''
-sshKey: ''
-```
-
-Unfortunately, Baremetal Operator already has a place to specify bmc credentials. However, providing credentials like this will result in conflicts as both the
-Baremetal Operator and the pacemaker fencing agent will have control over the machine state. In short, this example shows an invalid configuration that we must check for
-in the installer.
+Since Baremetal Operator already has a place to specify bmc credentials there is no need to add them for this setup.
 ```
 apiVersion: v1
 baseDomain: example.com
