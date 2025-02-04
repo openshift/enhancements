@@ -232,9 +232,15 @@ To avoid inflating OpenShift payload images for all clusters while the feature i
 
 #### `oc adm upgrade status`
 
-The existing `oc adm upgrade status` command will be changed to consume the `UpdateStatus` resource exclusively from the cluster (doing no further checks) and present its content.
+The existing `oc adm upgrade status` command will be changed to consume the `UpdateStatus` resource exclusively from the cluster (doing no further checks) and present its content. The client will gracefully degrade in `UpdateStatus` API absence by falling back to reading `ClusterVersion` conditions and will warn about the absence of `UpdateStatus` API, preventing more details from being provided.
 
 The existing TechPreview client-based functionality will be put behind a dedicated flag and eventually deprecated. While the client-based functionality is present, the plain `oc adm upgrade status` command may hint about using it when it detects that `UpdateStatus` API is not provided by the cluster.
+
+#### Update UX in Web Console
+
+The Web Console presently contains specialized code for update progress presentation, which we hope to replace by simply reading `UpdateStatus` API. Web Console has resource discovery, so when `UpdateStatus` is present, the update progress presentation will read `UpdateStatus` API content instead of the current specialized logic. When `UpdateStatus` is not present, Web Console will gracefully degrade and display minimal information obtained from `ClusterVersion` resource's `Progressing` condition and warn about the disabled `UpdateStatus` capability, preventing more details from being provided. Clusters with enabled Web Console but disabled `UpdateStatus` will have a slightly worse experience than now (where Web Console itself interprets `Node` and `MachineConfigPool` states to show progress bars for node update), but we expect that combination to be rare.
+
+We may consider building a Web Console plugin for cluster update-related matters if the information exposed by `UpdateStatus` API grows sufficiently rich and complex.
 
 ### Risks and Mitigations
 
@@ -284,7 +290,7 @@ The API-backed `oc adm upgrade status` will lose the ability to run against olde
 
 Because of their size, the instances of the `UpdateStatus` API will likely be overwhelming for humans to read. As discussed in [API Size and Footprint][this-api-size] under [Risks][this-risks], the serialized resources will be a lot of YAML for humans to read, so humans would depend on tooling provided in the OpenShift ecosystem to benefit from the feature. Some technical users will likely dislike this because they expect Kubernetes resources to be human-readable. It is not possible to reduce the API verbosity without losing valuable information, but it should be possible to provide a human-oriented counterpart (maybe `UpdateStatusSummary`) that would contain aggregated information only. Such a counterpart could be a separate controller in the USC.
 
-The API consumers need to be aware of the possibility of `UpdateStatus` API being absent because the Capability is not enabled. The in-platform consumers (`oc adm upgrade status` and web console) can display minimal status information coming from `ClusterVersion` resource's `Progressing` condition (current behavior). The Web Console presently contains specialized code for update progress presentation, which we hope to replace by simply reading `UpdateStatus` API. We propose to ship the new update progress presentation relying on `UpdateStatus` through a web console plugin enabled by the update status Capability. The existing specialized code will be dropped and replaced with a simple presentation of the `ClusterVersion` resource's `Progressing` condition without any advanced logic. This means that clusters that enable web console but do not update status will have a slightly worse experience than now, but we believe that combination to be rare.
+The API consumers need to be aware of the possibility of `UpdateStatus` API being absent because the Capability is not enabled, and they will need to degrade gracefully.
 
 ## Open Questions [optional]
 
