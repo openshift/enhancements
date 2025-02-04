@@ -292,11 +292,14 @@ Because of their size, the instances of the `UpdateStatus` API will likely be ov
 
 The API consumers need to be aware of the possibility of `UpdateStatus` API being absent because the Capability is not enabled, and they will need to degrade gracefully.
 
+Continuously running a controller that provides value only during an update can be thought of as a waste of resources outside of it. We can mitigate this waste by managing its lifecycle externally (enable it for update and disable it when it ends) or by reducing its activity internally (USC can do most of its checks and API management only during an update and only watch for signs of a starting / ongoing one otherwise). It is hard to decide about the appropriate approach without evidence.
+
 ## Open Questions [optional]
 
 * When should the client-based prototype be deprecated and removed?
 * What is the bar for the delivery of USC via a new image in the payload? (see note in [Update Status Controller][this-usc])
 * What is the best architecture for the future system where the USC only aggregates and summarizes information (possibly provided in the form of Update Insights) from external components that want to contribute update-related information?
+* Do we need to optimize USC or its lifecycle to avoid waste outside the update, and how?
 
 ## Test Plan
 
@@ -321,6 +324,7 @@ N/A - the `UpdateStatus` feature gate is already Tech Preview
 * The `oc adm upgrade status` consumes the Status API by default and has at least feature parity with the client-based prototype.
 * Meets TRT criteria: e2e tests exist in `openshift/origin`, and a result data corpus proves the feature works and does not lower platform stability.
 * Decided whether to extract USC to a separate image or continue to ship with CVO one
+* Decided whether we need to optimize USC or its lifecycle outside the update and implemented the decision if so
 
 ### Removing a deprecated feature
 
