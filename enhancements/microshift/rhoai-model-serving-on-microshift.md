@@ -12,7 +12,7 @@ approvers: # A single approver is preferred, the role of the approver is to rais
 api-approvers:
   - None
 creation-date: 2025-01-17
-last-updated: 2025-01-31
+last-updated: 2025-02-04
 tracking-link:
   - https://issues.redhat.com/browse/OCPSTRAT-1721
 # see-also:
