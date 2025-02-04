@@ -56,6 +56,10 @@ edge using MicroShift.
 
 ## Proposal
 
+Create a RFE for RHOAI team to make changes to kserve controller to conditionally
+(controller with a env var) support ClusterServingRuntime CR as it is currently
+disabled in code.
+
 Extract kserve manifests from RHOAI Operator image and adjust them for MicroShift:
 - Make sure that cert-manager is not required, instead leverage OpenShift's service-ca.
   - This might require adding some extra annotations to resources so the service-ca injects the certs.
