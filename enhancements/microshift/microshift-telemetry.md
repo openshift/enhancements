@@ -13,7 +13,7 @@ approvers:
 api-approvers:
   - None
 creation-date: 2025-01-27
-last-updated: 2025-01-31
+last-updated: 2025-02-04
 tracking-link:
   - https://issues.redhat.com/browse/OCPSTRAT-1071
 ---
@@ -49,9 +49,6 @@ As Red Hat, I want to enable MicroShift clusters to report back to me to get
 knowledge on usage patterns of live deployments.
 
 As a MicroShift admin, I want to have the option to opt-out of telemetry.
-
-As a MicroShift admin, I want to have the option to configure how often
-telemetry data is sent.
 
 
 ### Goals
@@ -95,14 +92,13 @@ OpenShift is using the same API and the same backend, so we need a way to
 distinguish MicroShift in the pool of metrics. For this we can use labels, as
 it does not require applying for new supported metrics. MicroShift metrics
 labels summary:
-| Label | Values |
-|:---|:---|
-|_id|cluster id|
-|label_kubernetes_io_arch|amd64, aarch64|
-|resource|Used to specify K8s resource names: pods, namespaces, etc.|
-|instance|ip address of the node|
-|version|$microshift_version|
-|type|microshift-rpm, microshift-ostree|
+| Label | Values | Approximate max size |
+|:---|:---|:---|
+|_id|cluster id|40B|
+|label_kubernetes_io_arch|amd64, aarch64|32B|
+|resource|Used to specify K8s resource names: pods, namespaces, etc.|20-50B|
+|version|microshift version|16B|
+|ostree_commit|OStree commit id, if the system is deployed using ostree. This helps identifying fleets|80B|
 
 Metrics from MicroShift are already supported in the API because OpenShift is
 using them. List follows:
@@ -114,50 +110,78 @@ using them. List follows:
 * cluster:usage:resources:sum. Usage of k8s resources, in count. Number of
   pods, namespaces, services, etc.
 * cluster:usage:containers:sum. Number of active containers.
-* cluster_version. Information about the installed version.
+* cluster_version. Information about installed version.
 * instance:etcd_object_counts:sum. Number of objects etcd contains.
 
-### Sending metrics
-OpenShift is sending metrics through this API every 4.5 minutes. For MicroShift
-deployments this might be a bit excessive due to resource usage, network
-traffic and usage patterns.
+Combining metrics with their labels:
+| Metric | Labels |
+|:---|:---|
+|cluster:capacity_cpu_cores:sum|_id, label_kubernetes_io_arch, ostree_commit|
+|cluster:capacity_memory_bytes:sum|_id, label_kubernetes_io_arch, ostree_commit|
+|cluster:cpu_usage_cores:sum|_id, ostree_commit|
+|cluster:memory_usage_bytes:sum|_id, ostree_commit|
+|cluster:usage:resources:sum|_id, ostree_commit, resource|
+|cluster:usage:containers:sum|_id, ostree_commit|
+|cluster_version|_id, ostree_commit, version|
 
-MicroShift should send data once a day to minimize network traffic as it can be
-deployed in constrained environments. To allow customizations a new
-configuration option shall be added. This option will drive how often a metrics
-payload should be sent and it will default to 24h. In every MicroShift start
-all metrics shall be sent. Afterwards, it will follow the configuration option
-to schedule the next send.
+Using the names, labels sizes listed above, each sample requiring a float64
+and an int64 value, `cluster:usage:resources:sum` having 6 different time
+series (one per resource type, as listed in the proposal), all metrics combined
+are over 1.5KB and below 2KB.
+
+In order to keep metrics synchronized with those of OpenShift, in terms of API
+support, MicroShift will be using CI:
+* A job shall deploy MicroShift with Telemetry enabled.
+* A job will use the staging endpoint for Telemetry API. No added traffic
+  and no confusing data when querying.
+* At the end of the job a new check shall be performed: check there is data
+  belonging to that specific cluster in the staging environment.
+
+### Sending metrics
+OpenShift is sending metrics through this API every 4.5 minutes. This is done
+to overcome staleness in Prometheus server on the Telemetry backend. Stale data
+may yield gaps when retrieving it, making querying and dashboards more nuanced
+and harder to read.
+
+MicroShift, by its nature, needs to cover different use cases and potential
+limitations: resource constrained environments where computing power is scarce
+or limited, unreliable networks where outages are common, slow networks where
+bandwidth is not the best, private networks where all external traffic is
+audited and maybe limited, applications that are stable once they start,
+disconnected clusters, etc. The dynamic behavior that metrics help uncover is
+only one of the many use cases MicroShift has.
+For these reasons, and because the intention of this enhancement is to get the
+basic structure of a metrics reporting system, MicroShift will start using 1h
+intervals to send metrics, which is a good compromise between resource usage
+and data granularity.
+
+When MicroShift starts it should send metrics once and then schedule them every
+hour.
+It will also send metrics when issued to stop, as part of the finish process.
+This helps in sending a last report and also hint when the cluster has been
+stopped.
+This is not configurable.
 
 As described above MicroShift will be using the [direct request](https://github.com/openshift/telemeter/tree/main?tab=readme-ov-file#metricsv1receive-endpoint-receive-metrics-in-prompbwriterequest-format-from-any-client)
 endpoint.
 Each metric must follow [Prometheus WriteRequest](https://github.com/prometheus/prometheus/blob/release-2.38/prompb/remote.proto#L22)
 format.
 
-### Sampling and batching metrics
-Metrics sent by MicroShift can be categorized in:
-* Static metrics. These are fixed throughout the execution of MicroShift, such
-as memory, CPU or version.
-* Dynamic metrics. These change and evolve throughout the execution of
-MicroShift, such as resource usage or resources in the cluster.
+Using sizes in the previous section, a single MicroShift cluster will send no
+more than 48KB per day to Telemetry API.
 
-If we assume default values, metrics are sent at least once a day in those
-deployments that do not disable the functionality. While this is good enough
-for static metrics, it provides a degraded view for dynamic ones. Having
-once-per-day data on resource usage makes it virtually impossible to extract
-any patterns out of it. For this reason it might be beneficial to sample
-dynamic metrics more often and then batch them together with the static
-metrics when sending them.
+### Visualizing time series
+As hinted above, Telemetry backend server will mark any time series stale when
+there is no new data for 5min. The stale time series will get excluded from
+query results, yielding gaps in between infrequent updates.
 
-Sampling metrics means MicroShift needs to store values in between metrics
-reports. The dynamic metrics are not numerous enough to take a toll on resource
-usage, but this interval must be configurable and default to a sensible value.
+Given that MicroShift will only send data every hour, gaps are guaranteed to
+happen. The specific dashboards for MicroShift need to take this into account
+and modify their queries to accommodate longer timespans.
 
-In numbers, as seen above, each metric will be composed of a name, labels,
-values and timestamps. All of these amount to a few hundred bytes. Sampling,
-however, means we only repeat timestamps and values, which are the least space
-consuming fields, therefore the price in increased resources in MicroShift
-should be negligible.
+Initially, aggregating the different metrics per day or per week should be
+enough to cover current requirements. This must be present in the queries
+themselves, which will need to retrieve data over the latest 24h instead.
 
 ### Sensitive data
 There is no user or private data in any of the metrics in MicroShift reports.
@@ -177,10 +201,9 @@ enable/disable toggle is provided.
 
 1. MicroShift starts up.
 2. MicroShift reads configuration. If telemetry is not enabled, finish here. If telemetry is enabled proceed to next step.
-3. Collect all metrics and send them. Include dynamic metrics from sampling if available. Retry if failed.
-4. Schedule next send for `telemetry.reportInterval`.
-5. Every `telemetry.sampleInterval` collect all dynamic metrics and store them in memory.
-6. Wait until `telemetry.reportInterval` and go to step 3.
+3. Collect all metrics and send them.
+4. Every hour collect all metrics and send them.
+5. When MicroShift receives the stopping signal and before doing graceful termination, collect and send metrics again.
 
 ```mermaid
 sequenceDiagram
@@ -188,18 +211,17 @@ sequenceDiagram
     participant Red Hat Telemetry
     MicroShift ->> MicroShift: Start up. Read configuration
     loop Send Report
-    MicroShift ->> MicroShift: Collect static and dynamic metrics
-    loop Retries
-        MicroShift -->> Red Hat Telemetry: Send WriteRequest
-        Red Hat Telemetry ->> MicroShift: 200 Ok
+    MicroShift ->> MicroShift: Read dynamic metrics from the file, if it exists
+    MicroShift ->> MicroShift: Collect all metrics
+    MicroShift -->> Red Hat Telemetry: Send WriteRequest
+    Red Hat Telemetry ->> MicroShift: 200 Ok
+    MicroShift ->> MicroShift: Schedule next send loop in an hour
     end
-    MicroShift ->> MicroShift: Schedule next send loop to telemetry.reportInterval
-    loop Sampling
-    MicroShift ->> MicroShift: Collect dynamic metrics every telemetry.samplingInterval
-    MicroShift ->> MicroShift: Store dynamic metrics until next report
-    end
-    end
-    
+    MicroShift ->> MicroShift: Stop signal
+    MicroShift ->> MicroShift: Collect all metrics
+    MicroShift -->> Red Hat Telemetry: Send WriteRequest
+    Red Hat Telemetry ->> MicroShift: 200 Ok
+    MicroShift ->> MicroShift: Graceful stop
 ```
 
 ### API Extensions
@@ -208,8 +230,7 @@ The following changes in the configuration file are proposed:
 ```yaml
 telemetry:
   status: <Enabled|Disabled> # Defaults to Enabled
-  sendingInterval: <Duration> # Defaults to 24h
-  samplingInterval: <Duration> # Defaults to 1h
+  endpoint: <URL> # Defaults to https://infogw.api.openshift.com
 ```
 
 ### Topology Considerations
