@@ -337,7 +337,7 @@ The USC will be updated by the CVO very early in the update process, immediately
 There are two sources of skew:
 
 1. The updated USC needs to monitor resources of potentially old-version CRDs managed by old-version controllers. This should be fine, as CRDs are updated early in the process. The risks here are low because the resources involved in the update are stable, mature types, all in API tier 1, hence unlikely to change significantly to cause issues. The USC must be able to maintain `UpdateStatus` resources from 4.x-1, 4.x, and 4.x+1, but once the feature is GA, the `UpdateStatus` API will also become stable.
-1. `oc` client needs to be able to process and display `UpdateStatus` resources for OCP versions following the version skew policy. `oc adm upgrade status` of version 4.x must gracefully handle `UpdateStatus` resources from 4.x-1, 4.x and 4.x+1.
+1. `oc` client needs to be able to process and display `UpdateStatus` resources for OCP versions following the version skew policy. `oc adm upgrade status` of version 4.x must gracefully handle `UpdateStatus` resources from 4.x-1, 4.x and 4.x+1. After the introduction of the feature, the `oc` client also needs to gracefully handle execution against clusters running OCP versions where the API has not yet been present. This skew scenario is covered by the existing requirement to handle clusters where the `UpdateStatus` is not enabled.
 
 ## Operational Aspects of API Extensions
 
