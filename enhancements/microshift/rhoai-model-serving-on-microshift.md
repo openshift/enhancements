@@ -12,7 +12,7 @@ approvers: # A single approver is preferred, the role of the approver is to rais
 api-approvers:
   - None
 creation-date: 2025-01-17
-last-updated: 2025-02-04
+last-updated: 2025-02-05
 tracking-link:
   - https://issues.redhat.com/browse/OCPSTRAT-1721
 # see-also:
@@ -144,9 +144,12 @@ See "Proposal"
 
 ### Risks and Mitigations
 
-At the time of writing this document, kserve's Raw Deployment mode is not fully
-supported by the RHOAI. For for reason, this feature will start as Tech Preview
-and only advance to GA when RHOAI starts supporting Raw Deployment mode.
+~At the time of writing this document, kserve's Raw Deployment mode is not fully~
+~supported by the RHOAI. For for reason, this feature will start as Tech Preview~
+~and only advance to GA when RHOAI starts supporting Raw Deployment mode.~
+
+Raw Deployment mode will be supported by RHOAI in near future. It is already
+Tech Preview in RHOAI 2.17.
 
 ### Drawbacks
 
