@@ -700,7 +700,7 @@ Downgrades are not supported outside of redeployment.
 
 ## Version Skew Strategy
 
-The biggest concern with version skew would be incompatibilies between a new version of pacemaker and the currently running resource agents.
+The biggest concern with version skew would be incompatibilities between a new version of pacemaker and the currently running resource agents.
 Upgrades will not atomically replace both the RPM and the resource agent configuration, not are there any guarantees that both nodes will be running
 the same versions. It's difficult to imagine a case where such an incompatibility wouldn't be caught during upgrade testing. This will be something to keep
 a close eye on when evaluating upgrade jobs for potential race conditions.
