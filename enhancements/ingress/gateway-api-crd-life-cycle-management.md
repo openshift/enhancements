@@ -25,8 +25,10 @@ see-also:
 
 # Gateway API CRD Life-Cycle Management
 
-This enhancement describes how the [Ingress Operator](https://github.com/openshift/cluster-ingress-operator) manages Gateway API
-CRDs.
+This enhancement describes how the [Cluster Ingress Operator (CIO)] manages
+Gateway API Custom Resource Definitions (CRDs).
+
+[Cluster Ingress Operator (CIO)]:https://github.com/openshift/cluster-ingress-operator
 
 ## Summary
 
@@ -190,9 +192,6 @@ goes wrong.
 4. Run some `oc` command.
 5. Check the ingress clusteroperator again.  Now everything should be dandy.
 
-_TBD: Fill in the details for handing ownership of CRD life-cycle management to
-the Ingress Operator in the case of a conflict, using Server-Side Apply._
-
 ### API Extensions
 
 None.
@@ -275,11 +274,11 @@ better accomodate third-party solutions.
 
 > The idea is to find the best form of an argument why this enhancement should
 > _not_ be implemented.
-> 
+>
 > What trade-offs (technical/efficiency cost, user experience, flexibility,
 > supportability, etc) must be made in order to implement this? What are the reasons
 > we might not want to undertake this proposal, and how do we overcome them?
-> 
+>
 > Does this proposal implement a behavior that's new/unique/novel? Is it poorly
 > aligned with existing user expectations?  Will it be a significant maintenance
 > burden?  Is it likely to be superceded by something else in the near future?
@@ -309,15 +308,6 @@ supporting [upstream efforts] to separate experimental APIs out into their own
 group, which will provide more flexibility when users want experimental features.
 
 [upstream efforts]:https://github.com/kubernetes-sigs/gateway-api/discussions/3497
-
-## Open Questions [optional]
-
-> This is where to call out areas of the design that require closure before deciding
-> to implement the design.  For instance,
->  > 1. This requires exposing previously private resources which contain sensitive
->   information.  Can we do this?
-
-_TBD_
 
 ## Test Plan
 
@@ -368,14 +358,14 @@ N/A.
 
 > If applicable, how will the component be upgraded and downgraded? Make sure this
 > is in the test plan.
-> 
+>
 > Consider the following in developing an upgrade/downgrade strategy for this
 > enhancement:
 > - What changes (in invocations, configurations, API use, etc.) is an existing
 >   cluster required to make on upgrade in order to keep previous behavior?
 > - What changes (in invocations, configurations, API use, etc.) is an existing
 >   cluster required to make on upgrade in order to make use of the enhancement?
-> 
+>
 > Upgrade expectations:
 > - Each component should remain available for user requests and
 >   workloads during upgrades. Ensure the components leverage best practices in handling [voluntary
@@ -394,7 +384,7 @@ N/A.
 >   an operator is rolling out a daemonset, the old and new daemonset
 >   pods must continue to work correctly even while the cluster remains
 >   in this partially upgraded state for some time.
-> 
+>
 > Downgrade expectations:
 > - If an `N->N+1` upgrade fails mid-way through, or if the `N+1` cluster is
 >   misbehaving, it should be possible for the user to rollback to `N`. It is
@@ -511,36 +501,6 @@ aforementioned admin-ack gate) would be beneficial.  However, given time
 constraints, and given that we need to handle conflicts in any case, we have
 concluded that the fleet evaluation condition would not be of much benefit.
 
-### Admission webhook
-
-An admission webhook could be implemented for the Gateway API CRDs to prevent
-writes to any field that is in the CRD but isn't implemented by our Gateway API
-implementation.
-
-Note that using a webhook for this purpose would run into consistency issues and
-race conditions because the webhook would need to cross-validate multiple
-resources.  Specifically, the webhook would need to check which gatewayclasses
-specified our controller name; then the webhook would check *only* resources
-(gateways, httproutes, etc.) associated with those gatewayclasses for fields
-that our controller would not recognize.  Consistency issues could arise, for
-example, if an object were created and subsequently updated to reference a
-gatewayclass, or if a gatewayclass were created (or its controller name were
-updated) after resources that referenced that gatewayclass by name had already
-been created.
-
-_TBD: Fill in details._
-
-We conclude that this can be further evaluated and, if appropriate, implemented
-post-GA if the need arises to allow newer CRD versions than the version that our
-Gateway API implementation recognizes.
-
-### Provide an API for explicitly overriding CRD life-cycle management
-
-Inspired by CAPI's mechanism.  This could be useful in a procedure for upgrading
-a cluster with cluster-admin-owned CRDs to a cluster with operator-managed CRDs.
-
-_TBD: Fill in details._
-
 ### Validate and allow a range of CRD versions
 
 As a way to offer more flexibility for third-party implementations, we
@@ -552,11 +512,14 @@ On the other hand, allowing a range adds complexity, requires more testing, and
 still must be constrained to avoid security-problematic dead fields.  This added
 complexity has questionable value and could delay the feature.  Therefore we
 conclude that it is best to pin the CRDs to a specific version for at least the
-initial GA release of the Gateway API feature.
+initial GA release of the Gateway API feature, but we expect in time we will
+iterate into having more flexible ranges.
 
 ### Package CRDs as operator manifests that Cluster Version Operator owns
 
-_TBD_
+We considered whether we would package the CRD manifests with the CVO, but this
+approach has downsides in terms of how we develop management logic for the CIO
+and ultimately did not appear to have enough upsides.
 
 ## Infrastructure Needed [optional]
 
