@@ -60,7 +60,9 @@ edge using MicroShift.
 
 Create a RFE for RHOAI team to make changes to kserve controller to conditionally
 (controller with a env var) support ClusterServingRuntime CR as it is currently
-disabled in code.
+disabled in code. Potentially we might need to ask for changes in
+odh-controller-manager to handle Route creation for InferenceService
+(see Risks and Mitigations).
 
 Extract kserve manifests from RHOAI Operator image and adjust them for MicroShift:
 - Make sure that cert-manager is not required, instead leverage OpenShift's service-ca.
@@ -271,10 +273,11 @@ that website's relevant sections and also to [RHOAI's guide on adding NVIDIA Tri
 
 ~~Should users be instructed to use upstream releases of these components and configure them on their own?~~
 
-### ~~Do we need ODH Model Controller?~~
+### Do we need ODH Model Controller?
 
 **Update: model-controller's functionality doesn't seem necessary at this point.**
 **It might change when implementation of proper integration tests starts.**
+**See "Risks and Mitigations" section for potential need for odh-model-controller.**
 
 RHOAI Operator deploys both kserve and ODH Model Controller.
 In the catalog image for Model Controller is described as:
