@@ -17,7 +17,6 @@ creation-date: 2025-01-22
 last-updated: 2025-01-27
 tracking-link:
   - https://issues.redhat.com/browse/NE-1946
-status: provisional
 see-also:
   - "/enhancements/ingress/gateway-api-with-cluster-ingress-operator.md"
 ---
@@ -180,7 +179,7 @@ goes wrong.
 > starting state and then list the steps that the user would need to go through to
 > trigger the feature described in the enhancement. Optionally add a
 > [mermaid](https://github.com/mermaid-js/mermaid#readme) sequence diagram.
-> 
+>
 > Use sub-sections to explain variations, such as for error handling,
 > failure recovery, or alternative outcomes.
 
@@ -382,85 +381,39 @@ N/A.
 >     CVO does not currently delete resources that no longer exist in
 >     the target version.
 
-## Version Skew Strategy
+## Version Skew Strategy && Operational Aspects of API Extensions
 
-> How will the component handle version skew with other components?
-> What are the guarantees? Make sure this is in the test plan.
-> 
-> Consider the following in developing a version skew strategy for this
-> enhancement:
-> - During an upgrade, we will always have skew among components, how will this impact your work?
-> - Does this enhancement involve coordinating behavior in the control plane and
->   in the kubelet? How does an n-2 kubelet without this feature available behave
->   when this feature is used?
-> - Will any other components on the node change? For example, changes to CSI, CRI
->   or CNI may require updating that component before the kubelet.
+Other products and components that have Gateway API support will now be able to
+consistently know that Gateway API will already be present on the cluster, and
+which version will be present given the version of OpenShift. There will no
+longer be a need for them to document having their users deploy the CRDs
+manually or do any management themselves that could conflict.
 
-_TBD: Do we describe version skew with layered products here?_
+We are already aware of several projects which utilize Gateway API including
+(but not limited to):
 
-## Operational Aspects of API Extensions
+* OpenShift Service Mesh
+* Kuadrant
+* OpenShift AI Serving
 
-> Describe the impact of API extensions (mentioned in the proposal section, i.e. CRDs,
-> admission and conversion webhooks, aggregated API servers, finalizers) here in detail,
-> especially how they impact the OCP system architecture and operational aspects.
-> 
-> - For conversion/admission webhooks and aggregated apiservers: what are the SLIs (Service Level
->   Indicators) an administrator or support can use to determine the health of the API extensions
-> 
->   Examples (metrics, alerts, operator conditions)
->   - authentication-operator condition `APIServerDegraded=False`
->   - authentication-operator condition `APIServerAvailable=True`
->   - openshift-authentication/oauth-apiserver deployment and pods health
-> 
-> - What impact do these API extensions have on existing SLIs (e.g. scalability, API throughput,
->   API availability)
-> 
->   Examples:
->   - Adds 1s to every pod update in the system, slowing down pod scheduling by 5s on average.
->   - Fails creation of ConfigMap in the system when the webhook is not available.
->   - Adds a dependency on the SDN service network for all resources, risking API availability in case
->     of SDN issues.
->   - Expected use-cases require less than 1000 instances of the CRD, not impacting
->     general API throughput.
-> 
-> - How is the impact on existing SLIs to be measured and when (e.g. every release by QE, or
->   automatically in CI) and by whom (e.g. perf team; name the responsible person and let them review
->   this enhancement)
-> 
-> - Describe the possible failure modes of the API extensions.
-> - Describe how a failure or behaviour of the extension will impact the overall cluster health
->   (e.g. which kube-controller-manager functionality will stop working), especially regarding
->   stability, availability, performance and security.
-> - Describe which OCP teams are likely to be called upon in case of escalation with one of the failure modes
->   and add them as reviewers to this enhancement.
-
-_TBD: Do we need to describe anything here?_
+We will coordinate with these projects and others from release to release on
+their needs related to Gateway API version support. We expect over time that
+more flexibility with the version will eventually be needed, and we anticipate
+adding ranges of support instead of specific versions to accomodate this.
 
 ## Support Procedures
 
 ### Conflicting CRDs
 
-If the Ingress Operator detects the presence of a conflicting version of the
-Gateway API CRDs, it updates the ingress clusteroperator to report a `Degraded`
-status condition with status `True` and a message explaining the situation:
+The pre-upgrade checks should eliminate any problems with CRD conflicts.
+However it is always _technically possible_ for the admin to force through both
+the pre-upgrade check AND the admin gate. If they do this the CIO will detect
+the mismatching schema and report a `Degraded` status condition with status
+`True` and a message explaining the problem.
 
-_TBD: Insert example output from `oc get clusteroperators/ingress -o yaml`._
-
-In this situation, the cluster-admin is expected to verify that workload would
-not be broken by handing life-cycle management of the CRDs over to the Ingress
-Operator:
-
-_TBD: Insert `oc` command to make the CRD ownership transition._
-
-Then the Ingress Operator takes ownership and updates the CRDs:
-
-_TBD: Insert example `oc get clusteroperators` and `oc get crds` commands._
-
-### Overriding the Ingress Operator
-
-_TBD: Should we describe how to turn off the Ingress Operator so that the
-cluster-admin can override the CRDs, or describe how Server-Side Apply enables
-the cluster-admin to take over the CRDs?_
+In this situation the cluster-admin then has to go back and follow the upgrade
+instructions regarding Gateway API CRDs correctly and fix the state on the
+cluster before we can move out of degraded.
 
 ## Alternatives
 
