@@ -311,28 +311,15 @@ group, which will provide more flexibility when users want experimental features
 
 ## Test Plan
 
-> **Note:** *Section not required until targeted at a release.*
-> 
-> Consider the following in developing a test plan for this enhancement:
-> - Will there be e2e and integration tests, in addition to unit tests?
-> - How will it be tested in isolation vs with other components?
-> - What additional testing is necessary to support managed OpenShift service-based offerings?
-> 
-> No need to outline all of the test cases, just the general strategy. Anything
-> that would count as tricky in the implementation and anything particularly
-> challenging to test should be called out.
-> 
-> All code is expected to have adequate tests (eventually with coverage
-> expectations).
+The Ingress Operator will have tests to validate the intended functionality
+outlined in this EP:
 
-The Ingress Operator will have E2E tests to simulate the user stories outlined
-in this EP:
-
-- Delete the CRDs; verify that the operator re-installs them.
-- Install incompatible CRDs with `metadata.managedFields` set to indicate that the operator *did not* install them; verify that the operator reports the appropriate `Degraded` status.
-- Install older CRDs with `metadata.managedFields` set to indicate that an older version of the operator *did* install them; verify that the operator updates them.
-
-_TBD_
+- CIO Tests that verify the pre-upgrade check logic
+- CIO Tests that verify the post-upgrade logic:
+    - Delete the CRDs; verify that the operator re-installs them
+    - Install incompatible CRDs; verify that the operator reports `Degraded`
+    - Install experimental CRDs; verify that the operator reports `Degraded`
+    - Verify none of the above can even be done with a present VAP
 
 ## Graduation Criteria
 
