@@ -12,7 +12,7 @@ approvers: # A single approver is preferred, the role of the approver is to rais
 api-approvers:
   - None
 creation-date: 2025-01-17
-last-updated: 2025-02-05
+last-updated: 2025-02-06
 tracking-link:
   - https://issues.redhat.com/browse/OCPSTRAT-1721
 # see-also:
@@ -43,10 +43,11 @@ edge using MicroShift.
 ### Goals
 
 - Prepare RHOAI-based kserve manifests that fit MicroShift's use cases and environments.
-- Provide RHOAI supported ServingRuntimes CRs so that users can use them.
+- Provide ClusterServingRuntimes CRs based on RHOAI shipped ServingRuntimes
   - [List of supported model-serving runtimes](https://docs.redhat.com/en/documentation/red_hat_openshift_ai_self-managed/2.16/html/serving_models/serving-large-models_serving-large-models#supported-model-serving-runtimes_serving-large-models)
     (not all might be suitable for MicroShift - e.g. intended for multi model serving)
 - Document how to use kserve on MicroShift.
+  - Mostly based on RHOAI's CLI (not UI) procedures. Upstream documentation might need to be referenced.
   - Including reference to ["Tested and verified model-serving runtimes" that are not supported by Red Hat](https://docs.redhat.com/en/documentation/red_hat_openshift_ai_self-managed/2.16/html/serving_models/serving-large-models_serving-large-models#tested-verified-runtimes_serving-large-models)
 
 ### Non-Goals
@@ -64,33 +65,38 @@ disabled in code.
 Extract kserve manifests from RHOAI Operator image and adjust them for MicroShift:
 - Make sure that cert-manager is not required, instead leverage OpenShift's service-ca.
   - This might require adding some extra annotations to resources so the service-ca injects the certs.
-- Drop requirement for Istio as an Ingress Controller and use OpenShift Router instead.
-  - Done by changing kserve's setting configmap to use another ingress controller.
-  - RHOAI disables automatic Ingress creation by kserve and odh-model-controller takes over creation of appropriate CRs.
-    We need to decide if we want to re-enable it or instruct user to create Route CR themselves.
 - Use 'RawDeployment' mode, so that neither Service Mesh nor Serverless are required,
   to minimize to make the solution suitable for edge devices.
-  - Also done in the configmap.
-- Package the manifests as an RPM `microshift-kserve` for usage.
+  - This is done by creating a new ConfigMap with kserve settings based on existing RHOAI-kserve shipped one.
+- Keep the Ingress creation disabled.
+  - RHOAI's odh-model-controller creates Routes for the InferenceServices,
+    but on MicroShift users might not need to expose the service outside - a
+    consumer might be another Pod.
+  - Instruct users to create Route if they need to expose the endpoint.
 
-Provide users with ServingRuntime definitions derived from RHOAI, so they
-are not forced to use upstream manifests.
-Decision on how to do this is pending. See open questions.
+Provide ClusterServingRuntime CRs based on ServingRuntimes from RHOAI,
+so they are not forced to use upstream manifests.
+
+Package the kserve manifests and ClusterServingRuntimes CRs as an RPM for usage.
+Name to be discussed, could be `microshift-kserve`, `microshift-rhoai`, `microshift-model-serving`.
 
 ### Rebase procedure in detail
 
-1. `rebase_rhoai.sh` script shall take an argument pointing to the RHOAI Operator Bundle Image.
-1. The script will:
-   1. Extract ClusterServiceVersion (CSV) of the RHOAI Operator.
-   1. Obtain RHOAI Operator image reference from the CSV.
-   1. Extract /opt/manifests from the RHOAI Operator image.
-   1. Copy contents of /opt/manifests/kserve to MicroShift repository.
-   1. Copy contents of /opt/manifests/odh-model-controller/runtimes to MicroShift repository.
-   1. Prepare top-level kustomization.yaml with MicroShift-specific tweaks.
-      1. Create kserve settings ConfigMap to configure MicroShift-specific tweaks.
-      1. Use contents of different files from RHOAI Operator's /opt/manifests
-         to get downstream-rebuilt image references and apply them over the
-         existing manifests.
+`rebase_rhoai.sh` script shall take an argument pointing to the RHOAI Operator Bundle Image.
+The script will:
+1. Extract ClusterServiceVersion (CSV) of the RHOAI Operator.
+1. Obtain RHOAI Operator image reference from the CSV.
+1. Extract /opt/manifests from the RHOAI Operator image.
+1. Copy contents of /opt/manifests/kserve to MicroShift repository.
+1. Copy contents of /opt/manifests/odh-model-controller/runtimes to MicroShift repository.
+1. Drop the `template` part of the ServingRuntimes and change them to ClusterServingRuntimes.
+1. Prepare top-level kustomization.yaml with MicroShift-specific tweaks.
+   1. Create kserve settings ConfigMap to configure MicroShift-specific tweaks.
+   1. Use contents of different files from RHOAI Operator's /opt/manifests
+      to get downstream-rebuilt image references and apply them over the
+      existing manifests.
+1. Create release.json file with easily obtainable list of the images for
+   mirroring/embedding for disconnected environments.
 
 
 ### Workflow Description
@@ -100,13 +106,12 @@ Decision on how to do this is pending. See open questions.
 (RPM vs ostree vs bootc is skipped because it doesn't differ from any other MicroShift's RPM).
 
 1. User installs `microshift-kserve` RPM and restarts MicroShift service.
-1. Kserve manifest are deployed.
+1. Kserve manifest and ClusterServingRuntimes CRs are deployed.
 1. User configures the hardware, the OS, and additional Kubernetes components to
    make use of their accelerators.
-1. ServingRuntimes are delivered with the kserve RPM or deployed by the user.
-1. User creates InferenceService CR which references ServingRuntime of their choice
-   and reference to the model.
-1. Kserve creates Deployment, Ingress, and other.
+1. User creates manifests with InferenceService (which references
+   ClusterServingRuntime of their choice and a model) and Route CRs.
+1. Kserve creates Deployment and other resources.
 1. Resources from previous step become ready and user can make HTTP/GRPC calls
    to the model server.
 
@@ -117,6 +122,7 @@ part of the core MicroShift deployment:
 - InferenceServices
 - TrainedModels
 - ServingRuntimes
+- ClusterServingRuntimes
 - InferenceGraphs
 - ClusterStorageContainers
 - ClusterLocalModels
@@ -151,6 +157,22 @@ See "Proposal"
 Raw Deployment mode will be supported by RHOAI in near future. It is already
 Tech Preview in RHOAI 2.17.
 
+
+Another risk is MicroShift's current manifest handling mechanism.
+For example, it is not possible to apply both (Cluster)ServingRuntimes CRDs and CRs
+using a single command because CRDs need to become ready before creating CRs.
+It might not become a problem as internal kustomize service makes several
+attempts to apply the manifests. This will become more clear when RPM is
+created and deployable.
+
+On similar note, bundling InferenceService and Route in the same manifest might not work.
+When system starts and MicroShift applies manifests with kserve, InferenceService,
+and Route, creation of the Route might be rejected by API Server because
+InferenceService's `Service` (as in Kubernetes resource) does not exist yet.
+If this is true, then we might need to incorporate odh-model-controller
+(and create another RFE for Serving Team to limit the functionality of
+odh-model-controller to what MicroShift can use).
+
 ### Drawbacks
 
 At the time of writing this document, ARM architecture is not supported.
@@ -159,10 +181,10 @@ reworked (depending on how the RHOAI's manifests will look like).
 
 ## Open Questions [optional]
 
-### Tweaking Kserve setting: ingress domain
+### ~~Tweaking Kserve setting: ingress domain~~
 
-**Update: If we disable creating Ingress and instruct user to create Route if**
-**needed, there's no need to do following.**
+**Update: RHOAI's kserve disables Ingress creation by the kserve. We can keep**
+**it that way and instruct user to create Route if they need it, there's no need to do following.**
 
 Kserve settings are delivered in form of a ConfigMap:
 - [Upstream example](https://github.com/red-hat-data-services/kserve/blob/master/config/configmap/inferenceservice.yaml)
@@ -179,7 +201,9 @@ and finally apply. For this particular `ingress.ingressDomain` we could reuse va
 `dns.baseDomain` from MicroShift's config.yaml.
 
 
-### How to deliver ServingRuntime CRs
+### ~~How to deliver ServingRuntime CRs~~
+
+**Update: we're working with Serving team to re-introduce handling of ClusterServingRuntimes in RHOAI shipped kserve**
 
 From [kserve documentation](https://kserve.github.io/website/master/modelserving/servingruntimes/):
 
@@ -230,7 +254,11 @@ Potential solutions so far:
     part of the MicroShift rebase procedure.
 
 
-### No MicroShift support for GPU Operator, Node Feature Discovery, other hardware-enabling Operators, etc...
+### ~~No MicroShift support for GPU Operator, Node Feature Discovery, other hardware-enabling Operators, etc...~~
+
+**Update: If there's no existing guide on setting specific accelerator for usage with RHDE,**
+**we shall work with partners to achieve that. We want to avoid directing users**
+**to generic upstream information without any support.**
 
 [RHOAI's how to on using Raw Deployment](https://docs.redhat.com/en/documentation/red_hat_openshift_ai_self-managed/2.16/html/serving_models/serving-large-models_serving-large-models#deploying-models-on-single-node-openshift-using-kserve-raw-deployment-mode_serving-large-models) lists some requirements such as:
 > - If you want to use graphics processing units (GPUs) with your model server, you have enabled GPU support in OpenShift AI.
@@ -243,11 +271,10 @@ that website's relevant sections and also to [RHOAI's guide on adding NVIDIA Tri
 
 ~~Should users be instructed to use upstream releases of these components and configure them on their own?~~
 
-If there's no existing guide on setting specific accelerator for usage with RHDE,
-we shall work with partners to achieve that. We want to avoid directing users
-to generic upstream information without any support.
+### ~~Do we need ODH Model Controller?~~
 
-### Do we need ODH Model Controller?
+**Update: model-controller's functionality doesn't seem necessary at this point.**
+**It might change when implementation of proper integration tests starts.**
 
 RHOAI Operator deploys both kserve and ODH Model Controller.
 In the catalog image for Model Controller is described as:
@@ -328,11 +355,14 @@ EC2 instance type candidates (ordered - chepeast first in us-west-2):
 
 ### Dev Preview -> Tech Preview
 
-RHOAI's kserve on MicroShift will begin Tech Preview.
+RHOAI's kserve on MicroShift will begin as Tech Preview.
+Hopefully MicroShift's RFEs for RHOAI will be part of RHOAI 2.20 which is a
+`fast` channel release and therefore it has limited support time.
 
 ### Tech Preview -> GA
 
-Advancement to GA depends on RHOAI's support for Raw Deployments.
+RHOAI Model Serving for MicroShift can transition to GA after MicroShift starts
+using `stable` channel releases of RHOAI.
 
 ### Removing a deprecated feature
 
