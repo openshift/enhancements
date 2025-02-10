@@ -43,9 +43,10 @@ edge using MicroShift.
 ### Goals
 
 - Prepare RHOAI-based kserve manifests that fit MicroShift's use cases and environments.
-- Provide ClusterServingRuntimes CRs based on RHOAI shipped ServingRuntimes
+- Provide ServingRuntimes CRs based on RHOAI shipped templates with ServingRuntimes
   - [List of supported model-serving runtimes](https://docs.redhat.com/en/documentation/red_hat_openshift_ai_self-managed/2.16/html/serving_models/serving-large-models_serving-large-models#supported-model-serving-runtimes_serving-large-models)
     (not all might be suitable for MicroShift - e.g. intended for multi model serving)
+  - Later, when RHOAI's kserve starts supporting ClusterServingRuntimes, we'll change them
 - Document how to use kserve on MicroShift.
   - Mostly based on RHOAI's CLI (not UI) procedures. Upstream documentation might need to be referenced.
   - Including reference to ["Tested and verified model-serving runtimes" that are not supported by Red Hat](https://docs.redhat.com/en/documentation/red_hat_openshift_ai_self-managed/2.16/html/serving_models/serving-large-models_serving-large-models#tested-verified-runtimes_serving-large-models)
@@ -74,10 +75,12 @@ Extract kserve manifests from RHOAI Operator image and adjust them for MicroShif
     consumer might be another Pod.
   - Instruct users to create Route if they need to expose the endpoint.
 
-Provide ClusterServingRuntime CRs based on ServingRuntimes from RHOAI,
-so they are not forced to use upstream manifests.
+Provide ServingRuntime CRs based on ServingRuntimes templates from RHOAI,
+so users are not forced to use upstream manifests. Later, when RHOAI kserve starts
+supporting ClusterServingRuntimes, we'll transform ServingRuntimes to ClusterServingRuntimes
+to make them easier to reuse.
 
-Package the kserve manifests and ClusterServingRuntimes CRs as an RPM for usage.
+Package the kserve manifests and ServingRuntimes CRs as an RPM for usage.
 Name to be discussed, could be `microshift-kserve`, `microshift-rhoai`, `microshift-model-serving`.
 
 ### Rebase procedure in detail
@@ -89,7 +92,7 @@ The script will:
 1. Extract /opt/manifests from the RHOAI Operator image.
 1. Copy contents of /opt/manifests/kserve to MicroShift repository.
 1. Copy contents of /opt/manifests/odh-model-controller/runtimes to MicroShift repository.
-1. Drop the `template` part of the ServingRuntimes and change them to ClusterServingRuntimes.
+1. Drop the `template` part of the ServingRuntimes.
 1. Prepare top-level kustomization.yaml with MicroShift-specific tweaks.
    1. Create kserve settings ConfigMap to configure MicroShift-specific tweaks.
    1. Use contents of different files from RHOAI Operator's /opt/manifests
@@ -106,11 +109,13 @@ The script will:
 (RPM vs ostree vs bootc is skipped because it doesn't differ from any other MicroShift's RPM).
 
 1. User installs `microshift-kserve` RPM and restarts MicroShift service.
-1. Kserve manifest and ClusterServingRuntimes CRs are deployed.
+1. Kserve manifest and ServingRuntimes CRs are deployed in a `redhat-ods-applications` namespace.
 1. User configures the hardware, the OS, and additional Kubernetes components to
    make use of their accelerators.
-1. User creates manifests with InferenceService (which references
-   ClusterServingRuntime of their choice and a model) and Route CRs.
+1. User creates manifests that includes:
+   - ServingRuntime in their namespace (based on what we'll initially ship)
+   - InferenceService referencing ServingRuntime and a model
+   - Route CR
 1. Kserve creates Deployment and other resources.
 1. Resources from previous step become ready and user can make HTTP/GRPC calls
    to the model server.
@@ -122,7 +127,6 @@ part of the core MicroShift deployment:
 - InferenceServices
 - TrainedModels
 - ServingRuntimes
-- ClusterServingRuntimes
 - InferenceGraphs
 - ClusterStorageContainers
 - ClusterLocalModels
@@ -206,6 +210,8 @@ and finally apply. For this particular `ingress.ingressDomain` we could reuse va
 ### ~~How to deliver ServingRuntime CRs~~
 
 **Update: we're working with Serving team to re-introduce handling of ClusterServingRuntimes in RHOAI shipped kserve**
+**for a time being, we'll work with ServingRuntimes until CSRs are supported in code**
+**(currently there's no way to force kserve to run webhook endpoint for CSR)**
 
 From [kserve documentation](https://kserve.github.io/website/master/modelserving/servingruntimes/):
 
@@ -362,10 +368,14 @@ RHOAI's kserve on MicroShift will begin as Tech Preview.
 Hopefully MicroShift's RFEs for RHOAI will be part of RHOAI 2.20 which is a
 `fast` channel release and therefore it has limited support time.
 
+RHOAI Model Serving for MicroShift might initially ship ServingRuntimes that
+users need to copy to their namespace.
+
 ### Tech Preview -> GA
 
-RHOAI Model Serving for MicroShift can transition to GA after MicroShift starts
-using `stable` channel releases of RHOAI.
+RHOAI Model Serving for MicroShift can transition to GA after:
+- MicroShift starts using `stable` channel releases of RHOAI, and
+- RHOAI's kserve starts supporting ClusterServingRuntimes
 
 ### Removing a deprecated feature
 
