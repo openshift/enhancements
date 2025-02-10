@@ -60,9 +60,7 @@ edge using MicroShift.
 
 Create a RFE for RHOAI team to make changes to kserve controller to conditionally
 (controller with a env var) support ClusterServingRuntime CR as it is currently
-disabled in code. Potentially we might need to ask for changes in
-odh-controller-manager to handle Route creation for InferenceService
-(see Risks and Mitigations).
+disabled in code.
 
 Extract kserve manifests from RHOAI Operator image and adjust them for MicroShift:
 - Make sure that cert-manager is not required, instead leverage OpenShift's service-ca.
@@ -167,13 +165,15 @@ It might not become a problem as internal kustomize service makes several
 attempts to apply the manifests. This will become more clear when RPM is
 created and deployable.
 
-On similar note, bundling InferenceService and Route in the same manifest might not work.
-When system starts and MicroShift applies manifests with kserve, InferenceService,
-and Route, creation of the Route might be rejected by API Server because
-InferenceService's `Service` (as in Kubernetes resource) does not exist yet.
-If this is true, then we might need to incorporate odh-model-controller
-(and create another RFE for Serving Team to limit the functionality of
-odh-model-controller to what MicroShift can use).
+~~On similar note, bundling InferenceService and Route in the same manifest might not work.~~
+~~When system starts and MicroShift applies manifests with kserve, InferenceService,~~
+~~and Route, creation of the Route might be rejected by API Server because~~
+~~InferenceService's `Service` (as in Kubernetes resource) does not exist yet.~~
+~~If this is true, then we might need to incorporate odh-model-controller~~
+~~(and create another RFE for Serving Team to limit the functionality of~~
+~~odh-model-controller to what MicroShift can use).~~
+OpenShift Route CR can be created without existing backing Service.
+If the Service doesn't exist (yet), Router will simply return 503.
 
 ### Drawbacks
 
