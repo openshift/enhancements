@@ -12,7 +12,7 @@ approvers: # A single approver is preferred, the role of the approver is to rais
 api-approvers:
   - None
 creation-date: 2025-01-17
-last-updated: 2025-02-06
+last-updated: 2025-02-10
 tracking-link:
   - https://issues.redhat.com/browse/OCPSTRAT-1721
 # see-also:
@@ -81,7 +81,8 @@ supporting ClusterServingRuntimes, we'll transform ServingRuntimes to ClusterSer
 to make them easier to reuse.
 
 Package the kserve manifests and ServingRuntimes CRs as an RPM for usage.
-Name to be discussed, could be `microshift-kserve`, `microshift-rhoai`, `microshift-model-serving`.
+
+The RPM's name will be: `microshift-ai-model-serving`.
 
 ### Rebase procedure in detail
 
@@ -108,7 +109,7 @@ The script will:
 
 (RPM vs ostree vs bootc is skipped because it doesn't differ from any other MicroShift's RPM).
 
-1. User installs `microshift-kserve` RPM and restarts MicroShift service.
+1. User installs `microshift-ai-model-serving` RPM and restarts MicroShift service.
 1. Kserve manifest and ServingRuntimes CRs are deployed in a `redhat-ods-applications` namespace.
 1. User configures the hardware, the OS, and additional Kubernetes components to
    make use of their accelerators.
@@ -122,7 +123,7 @@ The script will:
 
 ### API Extensions
 
-`microshift-kserve` RPM will bring following CRDs, however they're not becoming
+`microshift-ai-model-serving` RPM will bring following CRDs, however they're not becoming
 part of the core MicroShift deployment:
 - InferenceServices
 - TrainedModels
@@ -244,9 +245,8 @@ In any of the following solutions, we need to drop the `Template` container to
 get only the `ServingRuntime` CR part.
 
 Potential solutions so far:
-- Include ServingRuntimes in a RPM as a kustomization manifest (might be 
-  `microshift-kserve`, `microshift-rhoai-runtimes`, or something else) using a
-  specific predefined namespace.
+- Include ServingRuntimes in a RPM as a kustomization manifest (
+  `microshift-ai-model-serving`) using a specific predefined namespace.
   - This will force users to either use that namespace for serving, or they can
     copy the SRs to their namespace (either at runtime, or by including it in
     their manifests).
