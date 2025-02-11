@@ -569,6 +569,20 @@ This section provides specific steps for how two-node clusters would handle inte
    3. Stop failure is optionally escalated to a node failure (fencing)
    4. Start failure defaults to leaving the service offline
 
+#### Running Two Node OpenShift with Fencing with a Failed Node
+
+An interesting aspect of TNF is that should a node fail and remain in a failed state, the cluster recovery operation will allow the survivor to restart etcd as a cluster-of-one and resume normal
+operations. In this state, we have an operation running cluster with a single control plane node. So, what is the difference between this state and running Single Node OpenShift? There are three key aspects:
+
+1. Operators that deploy to multiple nodes will become degraded.
+2. Operations that would violate pod-disruption budgets will not work.
+3. Lifecycle operations that would violate the `MaxUnavailable` setting of the control-plane [MachineConfigPool](https://docs.openshift.com/container-platform/4.17/updating/understanding_updates/understanding-openshift-update-duration.html#factors-affecting-update-duration_openshift-update-duration) cannot proceed. This includes MCO node reboots and cluster upgrades.
+
+In short - it is not recommended that users allow their clusters to remain in this semi-operational state longterm. It is intended help ensure that api-server and workloads are available as much as
+possible, but it is not sufficient for the operation of a healthy cluster longterm.
+
+Because of the flexibility it can offer users to adjust their cluster capacity according to their needs, transitioning between control-plane topologies may be introduced for evaluation in a future enhancement.
+
 #### Hypershift / Hosted Control Planes
 
 This topology is anti-synergistic with HyperShift. As the management cluster, a cost-sensitive control-plane runs counter to the the proposition of highly-scaleable hosted control-planes since your compute resources are limited. As the hosted cluster, the benefit of hypershift is that your control-planes are running as pods in the management cluster. Reducing the number of instances of control-plane nodes would trade the minimal cost of a third set of control-plane pods at the cost of having to implement fencing between your control-plane pods.
