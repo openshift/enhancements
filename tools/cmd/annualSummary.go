@@ -5,7 +5,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    http://www.apache.org/licenses/LICENSE-2.0
+	http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,7 +20,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 
 	"github.com/openshift/enhancements/tools/enhancements"
@@ -73,19 +72,6 @@ var annualSummaryCmd = &cobra.Command{
 			},
 		}
 
-		// Define a few buckets for pull requests related to work
-		// prioritized for the current or next release.
-		prioritizedMerged := stats.Bucket{
-			Rule: func(prd *stats.PullRequestDetails) bool {
-				return prd.Prioritized && prd.State == "merged" && prd.Pull.ClosedAt.After(earliestDate)
-			},
-		}
-		prioritizedOpen := stats.Bucket{
-			Rule: func(prd *stats.PullRequestDetails) bool {
-				return prd.Prioritized && prd.State != "merged" && prd.State != "closed" && prd.Pull.CreatedAt.After(earliestDate)
-			},
-		}
-
 		// Define basic groups for all of the non-prioritized pull
 		// requests.
 		otherMerged := stats.Bucket{
@@ -109,19 +95,14 @@ var annualSummaryCmd = &cobra.Command{
 		reportBuckets := []*stats.Bucket{
 			&all,
 			&ignore,
-
-			&prioritizedMerged,
-			&prioritizedOpen,
-
 			&otherMerged,
 			&otherOpen,
-
 			&remainder,
 		}
 
 		summarizer, err := enhancements.NewSummarizer()
 		if err != nil {
-			return errors.Wrap(err, "unable to show PR summaries")
+			return fmt.Errorf("unable to show PR summaries: %w", err)
 		}
 
 		theStats := &stats.Stats{
@@ -137,7 +118,7 @@ var annualSummaryCmd = &cobra.Command{
 
 		err = theStats.Populate()
 		if err != nil {
-			return errors.Wrap(err, "could not generate stats")
+			return fmt.Errorf("could not generate stats: %w", err)
 		}
 
 		fmt.Fprintf(os.Stderr, "Processed %d pull requests\n", len(all.Requests))
@@ -146,24 +127,13 @@ var annualSummaryCmd = &cobra.Command{
 
 		fmt.Printf("# The Year in Enhancements - %d\n", earliestDate.Year())
 
-		// Only print the priority section if there are prioritized pull requests
-		if anyRequests(prioritizedMerged, prioritizedOpen) {
-			fmt.Printf("\n## Enhancements for Release Priorities\n")
-
-			report.SortByID(prioritizedMerged.Requests)
-			report.ShowPRs(summarizer, "Prioritized Merged", prioritizedMerged.Requests, false, false)
-
-			report.SortByID(prioritizedOpen.Requests)
-			report.ShowPRs(summarizer, "Prioritized Open", prioritizedOpen.Requests, false, false)
-		}
-
-		fmt.Printf("\n## Other Enhancements\n")
+		fmt.Printf("\n## Enhancements\n")
 
 		report.SortByID(otherMerged.Requests)
-		report.ShowPRs(summarizer, "Other Merged", otherMerged.Requests, false, false)
+		report.ShowPRs(summarizer, "Merged", otherMerged.Requests, false, false)
 
 		report.SortByID(otherOpen.Requests)
-		report.ShowPRs(summarizer, "Other Open", otherOpen.Requests, false, false)
+		report.ShowPRs(summarizer, "Open", otherOpen.Requests, false, false)
 
 		return nil
 	},

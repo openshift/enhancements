@@ -9,7 +9,7 @@ approvers:
 api-approvers:
   - None
 creation-date: 2020-09-11
-last-updated: 2022-04-19
+last-updated: 2023-01-25
 status: implementable
 ---
 
@@ -35,12 +35,14 @@ The lifecycle for recommendation changes looks like:
   <img src="flow.svg" width="100%" />
 </div>
 
-Currently all tracking through the lifecycle is manual, and it is tedious for graph-admins to audit bugs with `UpgradeBlocker` to see where they are in the lifecycle and, when necessary, poke component teams about outstanding impact statement requests.
+It is tedious for graph-admins to audit bugs with `UpgradeBlocker` to see where they are in the lifecycle and, when necessary, poke component teams about outstanding impact statement requests.
 Having an explicit, machine-readable lifecycle reduces the chances that issues fall through the cracks by clarifying the responsible parties for moving the bug to the next stage, which supports tracking and automated reminders.
 
 *Note:*
-* `UpgradeBlocker` is added to the `Keywords` but the labels are added to the `whiteboard` field of bugzilla.
+* In Jira, all of the labels including `UpgradeBlocker` use the labels field.
 * In general when we add a label we remove the old label. For example when we add `ImpactStatementProposed` label we remove the `ImpactStatementRequested` label.
+
+## Ticket queues
 
 With the changes from this enhancement, the queues become:
 
@@ -58,14 +60,14 @@ With the changes from this enhancement, the queues become:
 
 This enhancement does not attempt to:
 
-* Cover issues which have not yet arrived in Bugzilla.
-* Cover bugs which do not have the `UpgradeBlocker` keyword.
-    For example, bugs with just the `Upgrades` keyword are not included in the update-recommendation lifecycle.
-* Remove the `UpgradeBlocker` keyword, because that might disrupt existing consumers.
+* Cover issues which have not yet arrived in the bug system.
+* Cover bugs which do not have the `UpgradeBlocker` label.
+    For example, bugs with just the `Upgrades` label are not included in the update-recommendation lifecycle.
+* Remove the `UpgradeBlocker` label, because that might disrupt existing consumers.
 
 ## Proposal
 
-Add new `Whiteboard` labels for `ImpactStatementRequested`, `ImpactStatementProposed`, and `UpdateRecommendationsBlocked`.
+Add new labels for `ImpactStatementRequested`, `ImpactStatementProposed`, and `UpdateRecommendationsBlocked`.
 Write tooling that automatically:
 
 * Removes the new labels if any labels from later in the process are set.
@@ -75,13 +77,13 @@ Write tooling that automatically:
 
 The following statement (or a link to this section) can be pasted into bugs when adding `ImpactStatementRequested`:
 
-We're asking the following questions to evaluate whether or not this bug warrants changing update recommendations from either the previous X.Y or X.Y.Z.
-The ultimate goal is to avoid delivering an update which introduces new risk or reduces cluster functionality in any way.
+We're asking the following questions to evaluate whether or not OCPBUGS-# warrants changing update recommendations from either the previous X.Y or X.Y.Z.
+The ultimate goal is to avoid recommending an update which introduces new risk or reduces cluster functionality in any way.
 In the absence of a declared update risk (the status quo), there is some risk that the existing fleet updates into the at-risk releases.
 Depending on the bug and estimated risk, leaving the update risk undeclared may be acceptable.
 
-Sample answers are provided to give more context and the ImpactStatementRequested label has been added to this bug.
-When responding, please remove ImpactStatementRequested and set the ImpactStatementProposed label.
+Sample answers are provided to give more context and the `ImpactStatementRequested` label has been added to OCPBUGS-#.
+When responding, please move this ticket to `Code Review`.
 The expectation is that the assignee answers these questions.
 
 Which 4.y.z to 4.y'.z' updates increase vulnerability?
@@ -123,7 +125,7 @@ Is this a regression?
 #### A developer wondering about a serious bug
 
 Before this enhancement, the "is this worth altering update recommendations?" process was less discoverable.
-With this enhancement, the concerned developer only needs to add the `UpgradeBlocker` keyword to initiate the process.
+With this enhancement, the concerned developer only needs to add the `UpgradeBlocker` label to initiate the process.
 And they also have access to this document to more easily understand the rest of the process, if they need to push the whole decision through before an update monitor is available to help out.
 
 #### A component maintainer assigned to a bug
@@ -175,7 +177,7 @@ Or we may port closed bugs to new strategies, if that makes implementing the nex
 
 ### Version Skew Strategy
 
-All of the data is in Bugzilla, and we control all the consumers for this internal workflow.
+All of the data is in the bug system, and we control all the consumers for this internal workflow.
 So if we pivot strategies, we can turn off any robots and port everything that needs porting at once.
 There is no need to provision for version skew.
 
@@ -203,13 +205,13 @@ No drawbacks.
 
 ### Drop `UpgradeBlocker`
 
-As an alternative to keeping the `UpgradeBlocker` keyword, we could replace it with `ImpactStatementRequestRequested` or some such if folks need bot assistance to move bugs into the component developer's queue.
+As an alternative to keeping the `UpgradeBlocker` label, we could replace it with `ImpactStatementRequestRequested` or some such if folks need bot assistance to move bugs into the component developer's queue.
 This would avoid the need for tooling to add `UpgradeBlocker` when missing, and makes it less likely that folks misconstrue a suspect (`ImpactStatementRequested`) as an actual blocker (`UpdateRecommendationsBlocked`).
 
-However, removing `UpgradeBlocker` would break folks who are expecting the current keyword.
-But it's not clear to me who would want to keep consuming that keyword after we grow the fine-grained labeling, but we have been trying to train developers to set `UpgradeBlocker` on potential blockers, and retraining developers is hard.
+However, removing `UpgradeBlocker` would break folks who are expecting the current label.
+But it's not clear to me who would want to keep consuming that label after we grow the fine-grained labeling, but we have been trying to train developers to set `UpgradeBlocker` on potential blockers, and retraining developers is hard.
 
 [graph-data-block]: https://github.com/openshift/cincinnati-graph-data/tree/0335e56cde6b17230106f137382cbbd9aa5038ed#block-edges
-[suspect-queue]: https://bugzilla.redhat.com/buglist.cgi?order=Last%20Changed&product=OpenShift%20Container%20Platform&query_format=advanced&f1=keywords&o1=casesubstring&v1=UpgradeBlocker&f2=status_whiteboard&o2=nowordssubstr&v2=ImpactStatementRequested%20ImpactStatementProposed%20UpdateRecommendationsBlocked
-[component-dev-queue]: https://bugzilla.redhat.com/buglist.cgi?order=Last%20Changed&product=OpenShift%20Container%20Platform&query_format=advanced&status_whiteboard=ImpactStatementRequested&status_whiteboard_type=casesubstring
-[graph-admin-queue]: https://bugzilla.redhat.com/buglist.cgi?order=Last%20Changed&product=OpenShift%20Container%20Platform&query_format=advanced&status_whiteboard=ImpactStatementProposed&status_whiteboard_type=casesubstring
+[suspect-queue]: https://issues.redhat.com/issues/?jql=project%20%3D%20OCPBUGS%20AND%20labels%20in%20(upgradeblocker)%20AND%20labels%20not%20in%20(ImpactStatementRequested%2C%20ImpactStatementProposed%2C%20UpdateRecommendationsBlocked)
+[component-dev-queue]: https://issues.redhat.com/issues/?filter=12400182&jql=project%20%3D%20OCPBUGS%20AND%20labels%20in%20(ImpactStatementRequested)
+[graph-admin-queue]: https://issues.redhat.com/issues/?jql=project%20%3D%20OCPBUGS%20AND%20labels%20in%20(ImpactStatementProposed)

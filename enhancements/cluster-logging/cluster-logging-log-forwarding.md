@@ -16,7 +16,8 @@ last-updated: 2020-07-20
 status: implementable
 see-also:[]
 replaces:[]
-superseded-by:[]
+superseded-by:
+  - "/enhancements/cluster-logging-v2-apis.md"
 ---
 
 # cluster-logging-log-forwarding

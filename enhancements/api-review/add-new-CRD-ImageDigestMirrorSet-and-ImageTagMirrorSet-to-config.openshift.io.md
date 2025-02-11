@@ -326,6 +326,64 @@ Phase 2:
 - components listed in the above [document](https://docs.google.com/document/d/11FJPpIYAQLj5EcYiJtbi_bNkAcJa2hCLV63WvoDsrcQ/edit?usp=sharing) migrate to new APIs ImageDigestMirrorSet, ImageTagMirrorSet
 - register and expose the CRDs.
 
+#### Implementation updates
+Actual implementation for migration path of Phase 2 was different from the original design:
+
+The webhook is not implementable. It cannot convert between different kind of resources. 
+
+If copy existing ImageContentSourcePolicy content to ImageDigestMirrorSet and allow both kind of objecting existing, the final `registries.conf` will lead to the customer implying only one of the object is honored. For example,
+
+ICSP `repositoryDigestMirrors` has:
+```yaml
+source: foo
+mirrors: 
+- a
+- b
+- c
+```
+
+IDMS `ImageDigestMirrors` has:
+```yaml
+source: foo
+mirrors:
+- c
+- b
+- a
+```
+The registries.conf will be:
+```toml
+[[registry]]
+  location = "foo"
+  [[registry.mirror]]
+    location = "a"
+	pull-from-mirror = "digest-only"
+  [[registry.mirror]]
+    location = "b"
+	pull-from-mirror = "digest-only"
+  [[registry.mirror]]
+    location = "c"
+	pull-from-mirror = "digest-only"
+```
+The order of [[registry.mirror]] is [a, b, c] and will imply the ICSP is honored.
+
+For the above reason the actual implementation for migration path:
+- implement the migration path:
+  - [openshift/kubernetes#1310](https://github.com/openshift/kubernetes/pull/1310) prohibit coexistence of ICSP and IDMS objects, or ICSP and ITMS objects.
+  - [openshift/oc#1238](https://github.com/openshift/oc/pull/1238) implemented oc command that can convert ImageContentSourcePolicy yaml to ImageDigestMirrorSet yaml. The command can be used by customer when they want to migrate from ICSP to IDMS resources.
+
+#### Update the implementation for migration path
+The ImageContentSourcePolicy(ICSP) follows the rules from [Understanding API tiers](https://docs.openshift.com/container-platform/4.13/rest_api/understanding-api-support-tiers.html). Tier 1 component
+`imagecontentsourcepolicy.operator.openshift.io/v1alpha1` should be stable within OCP 4.x. We will support it during all of 4.x and mark it deprecated and encourage users to move to IDMS while supporting both in the cluster, but will not remove ICSP in OCP 4.x.
+
+Migration plan:
+1. oc command can generate IDMS yaml files.
+2. creates IDMS objects without removing ICSP. The customer can remove ICSP objects after IDMS objects get rolled out. This will result in same `registry.conf` and hence not result in a reboot.
+
+Propose the following updates: 
+- revert the [openshift/kubernetes#1310](https://github.com/openshift/kubernetes/pull/1310) to allow both ICSP and IDMS objects exist on the cluster.
+- both the source and mirror mappings from ICSP and IDMS objects will be written to `/etc/containers/registries.conf`. The mirrors of the same source will be merged by topological sorting as below [Notes(2)](#notes).
+- [OCPNODE-1771](https://issues.redhat.com/browse/OCPNODE-1771) epic keeps track of the tickets needed for the above migration plan.
+
 #### Notes
 
 1. During the upgrade path, the container runtime config controller of MCO can watch for both old CR ImageContentSourcePolicy and new CRs and create objects.
@@ -380,23 +438,23 @@ the primary registry of the mirrors.
 
 - A Jira card [OCPNODE-717](https://issues.redhat.com/browse/OCPNODE-717) was created to record the upgrade of ImageDigestMirrorSet, and ImageTagMirrorSet. The [repositories](https://docs.google.com/document/d/11FJPpIYAQLj5EcYiJtbi_bNkAcJa2hCLV63WvoDsrcQ/edit?usp=sharing) currently rely on operator/v1alpha1 ImageContentSourcePolicy(ICSP) will be migrated to config/v1 ImageDigestMirrorSet.
 
-- The ImageContentSourcePolicy(ICSP) will follow the rules from [Deprecating an entire component](https://docs.openshift.com/container-platform/4.8/rest_api/understanding-api-support-tiers.html#deprecating-entire-component_understanding-api-tiers). The duration is
-12 months or 3 releases from the announcement of deprecation, whichever is longer.  
+- The ImageContentSourcePolicy(ICSP) will follow the rules from [Deprecating an entire component](https://docs.openshift.com/container-platform/4.13/rest_api/understanding-api-support-tiers.html). Tier 1 component
+`imagecontentsourcepolicy.operator.openshift.io/v1alpha1` is stable within a major release. We will mark it deprecated and encourage users to move to IDMS while supporting both in the cluster, but they will not be removed in OCP 4.x.  
 
 ### Upgrade / Downgrade Strategy
 
 #### Upgrade Strategy
 
-An existing cluster is required to make an upgrade to 4.12 in order to make use of the allow mirror by tags feature.
+An existing cluster is required to make an upgrade to 4.13 in order to make use of the allow mirror by tags feature.
 
 Migration path: 
 - a controller will copy existing ImageContentSourcePolicy objects to create new ImageDigestMirrorSet objects. 
 - a webhook will do the conversion from operator.openshift.io/v1alpha1/imagecontentsourcepolicies to config.openshift.io/v1/imagedigestmirrorsets.
 
 #### Downgrade Strategy
-According to [Deprecating an entire component](https://docs.openshift.com/container-platform/4.8/rest_api/understanding-api-support-tiers.html#deprecating-entire-component_understanding-api-tiers), Tier 1 component
-`imagecontentsourcepolicy.operator.openshift.io/v1alpha1` will stay 12 months or 3 releases from the announcement of deprecation, whichever is longer. During the upgrade path,
-if an 4.12 upgrade fails mid-way through, or if the 4.12 cluster is
+According to [Deprecating an entire component](https://docs.openshift.com/container-platform/4.13/rest_api/understanding-api-support-tiers.html#deprecating-entire-component_understanding-api-tiers), Tier 1 component
+`imagecontentsourcepolicy.operator.openshift.io/v1alpha1` is stable within a major release. it will not be removed in OCP 4.x. During the upgrade path,
+if an 4.13 upgrade fails mid-way through, or if the 4.13 cluster is
 misbehaving, the user can rollback to the version that supports `ImageContentSourcePolicy`.
 Their `ImageDigestMirrorSet` and `ImageTagMirrorSet` dependent workflows will be clobbered and broken if rollback to a version
 that lacks support for these CRDs. They can still configure the `ImageContentSourcePolicy` to use mirrors and keep previous behavior.
@@ -454,6 +512,7 @@ Failure can be caused by getting unexpected images when using tag pull specifica
 - [openshift/api#1126: Add CRD ImageDigestMirrorSet and ImageTagMirrorSet](https://github.com/openshift/api/pull/1126)
 - [openshift/api#1164: Do not register new ICSP CRDs, yet](https://github.com/openshift/api/pull/1164)
 - [containers/image#1411: Add pull-from-mirror for adding per-mirror level restrictions](https://github.com/containers/image/pull/1411)
+- [OCPNODE-1771: allow both CRD for migration ICSP resources to IDMS](https://issues.redhat.com/browse/OCPNODE-1771) Updates the design of migration path
 
 ## Drawbacks
 

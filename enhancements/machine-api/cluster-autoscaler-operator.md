@@ -10,7 +10,7 @@ reviewers:
 approvers:
   - "@enxebre"
 creation-date: 2020-05-19
-last-updated: 2020-05-29
+last-updated: 2023-02-03
 status: implemented
 see-also:
 replaces:
@@ -124,6 +124,11 @@ It will perform the following validation:
   - Eg maximum Node count limit is greater than 0
 - Check that the scale down options are valid
   - Eg the duration strings are correctly formatted
+- Check that the string values for GPU resource limit types are valid
+  - These must follow the [Kubernetes rules for valid label values][labels-syntax] as they will be
+    used as label values to identify Nodes with these resources by the Cluster Autoscaler.
+  - This validation will only produce a warning for users so as not to break previously valid ClusterAutoscaler objects.
+    (this validation is being added after the initial release of the operator)
 
 #### MachineAutoscaler controller
 
@@ -140,6 +145,9 @@ If a `MachineAutoscaler` resource exists,  the controller will perform the follo
 - Ensure the `MachineSet` has an owner reference pointing to the `MachineAutoscaler` resource
 - Ensure the `MachineAutoscaler` has a `finalizer` to allow it to clean up owner references and annotations should it be deleted
 - Ensure the Cluster Autoscaler annotations are set and match the current desired state of the `MachineAutoscaler` resource
+  - If adding the annotations, ensure that the `MachineSet` has set a GPU accelerator label in its `.spec.template.spec.metadata.labels`,
+    if not a warning event will be emitted to describe potential issues that can occur without this label, and a link to a related KCS
+    article providing more details.
 
 #### MachineAutoscaler Admission Webhook
 
@@ -355,3 +363,5 @@ Without an operator, it would be up to the user to do the following:
 
 This project will be hosted in the
 [openshift/cluster-autoscaler-operator](https://github.com/openshift/cluster-autoscaler-operator) repository on GitHub.
+
+[labels-syntax]: https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#syntax-and-character-set

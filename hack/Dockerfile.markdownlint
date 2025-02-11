@@ -1,4 +1,4 @@
-FROM fedora
+FROM fedora:38
 WORKDIR /workdir
 RUN dnf install -y git golang
 COPY install-markdownlint.sh /tmp

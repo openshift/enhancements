@@ -4,19 +4,16 @@ authors:
   - "@smarterclayton"
   - "@derekwaynecarr"
   - "@jwforres"
-  - "@crawford"
   - "@eparis"
 reviewers:
   - "@smarterclayton"
   - "@derekwaynecarr"
   - "@jwforres"
-  - "@crawford"
   - "@eparis"
 approvers:
   - "@smarterclayton"
   - "@derekwaynecarr"
   - "@jwforres"
-  - "@crawford"
   - "@eparis"
 creation-date: 2019-11-24
 last-updated: 2019-11-24

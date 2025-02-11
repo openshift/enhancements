@@ -12,9 +12,8 @@ approvers:
 creation-date: 2020-01-21
 last-updated: 2020-01-21
 status: implementable
-see-also:
-replaces:
 superseded-by:
+  - "enhancements/testing/improved-platform-tests.md"
 ---
 
 # Extended Platform Tests

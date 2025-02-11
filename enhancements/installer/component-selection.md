@@ -358,27 +358,49 @@ Our current plan is to only annotate resources that are not depended upon (aka "
 
 ### Test Plan
 
-1) Install clusters w/ the various add-on components included/excluded and confirm
-that the cluster is functional but only running the expected add-ons.  One of these
-tests should disable all optional components to ensure the cluster is functional.
-This will necessitate disabling or modifying tests that depend on the disabled
-component(s).
+The following subsections describe some scenarios where we want to test cluster behavior to avoid regressions.
 
-2) Upgrade a cluster to a new version that includes new resources that belong to
+#### Whole-cluster testing
+
+The following subsections excercise the cluster-version operator, the conditionality of components, and whether the remaining enabled components still form a working cluster.
+They should be run periodically, because changes to the CVO, conditional components, or remaining enabled components could all affect success.
+
+##### No-capabilities testing
+
+Install a cluster with the various add-on components excluded and confirm that the cluster is functional but only running the expected add-ons.
+This will necessitate disabling or modifying tests that depend on the disabled component(s).
+
+When introducing a new capability would introduce test-case failures, it is the responsibility of the team driving the new capability to address the issue.
+For example, they may [teach an origin test-case to reduce expectations in the face of a disabled capability][bump-origin].
+Or they may [adjust][bump-auth-1] [another component][bump-auth-2] to help it gracefully handle the new capability's absence.
+
+If a future a component change or test-suite change breaks this test (i.e. introduces or changes a test such that testing on no-capabilities clusters now fails), it is the responsibility of the team that made the breaking change to address the issue.
+
+#### Cluster-version operator testing
+
+The following subsections excercise the cluster-version operator, and only need to be run when the cluster-version operator's capability-handling logic changes.
+
+##### Updating into an expanding, enabled capability
+
+Upgrade a cluster to a new version that includes new resources that belong to
 an addon that was included in the original install.  The new resources should be
 created.
 
-3) Upgrade a cluster to a new version that includes new resources that belong to
+##### Updating into an expanding, disabled capability
+
+Upgrade a cluster to a new version that includes new resources that belong to
 an addon that was excluded in the original install.  The new resources should *not* be
 created.
 
-4) After installing a cluster, enable additional addons.  The newly enabled addons should
+##### Enabling additional capabilities
+
+After installing a cluster, enable additional addons.  The newly enabled addons should
 be installed/reconciled by the CVO.
 
-5) After installing a cluster, disable an addon.  The configuration change should be
+##### Attempting to disable capabilities
+
+After installing a cluster, disable an addon.  The configuration change should be
 rejected by the CVO.  Disabling a component post-install is not supported.
-
-
 
 ### Graduation Criteria
 
@@ -389,21 +411,37 @@ Would expect this to go directly to GA once a design is agreed upon/approved.
 1. Select a name for the new capability, like `insights`.
 2. Open a pull request adding `capability.openshift.io/name` annotations to the manifests that deliver the capability, like [this][bump-annotations].
     Some manifests should only be included if multiple capabilities are enabled, and in that case use the `+` delimiter between capability names, like `capability.openshift.io/name=insights+monitoring`.
+    1. Note if your capability has no CVO resource associated with them: The CVO relies on the presence of resources that are annotated with a particular capability in order to understand that the capability was previously enabled on the cluster (such as from a time before the capability was optional).  If your new capability doesn't include any annotated resources, the CVO will fail to recognize the capability should be implicitly enabled, resulting in the capability being disabled(in some scenarios) when the cluster upgrades from a vN where the capability was not optional, to a vN+1 where it is optional.  If your capability fits this description, you will need to work with the CVO team to find an appropriate way to teach the CVO to recognize when the capability needs to be implicitly enabled.  We are [working on a specific solution](https://issues.redhat.com/browse/OTA-1040) to this scenario.
 3. In presubmit CI for the pull request, the cluster-version operator will [exclude manifests with unrecognized capabilities][cvo-exclude-unrecognized].
     Review presubmit results for your annotation pull request to ensure that:
-    1. The capability is being completely removed, without leaving dangling resources that you forgot to annotate.
+    1. The capability is being completely removed, without leaving dangling resources that you forgot to annotate or clients/controllers trying to access it.  This includes checking:
+        1. [Resources applied by the cluster-config-operator(CCO) during bootstrap](https://github.com/openshift/cluster-config-operator/blob/03ce16f483f32b5cb46af3b2960a30603d2c7f48/Dockerfile.rhel7#L10-L16).  This component does not respect disabled capabilities so even if your resource is annotated as part of a capability, the CCO will apply them to the cluster anyway.  Since it's hard to envision a case where something can both be optional but also is needed for bootstrapping, so far we've handled this case by [moving](https://github.com/openshift/api/pull/1620) the resource in question [out of the CCO](https://github.com/openshift/cluster-config-operator/pull/360) and [into a more appropriate operator](https://github.com/openshift/cluster-openshift-controller-manager-operator/pull/306) to own the manifest.
+        2. Discovering clients/controllers that are attempting to access the resource that no longer exists.  One way to detect this is to look at api request counts on a cluster via `oc get apirequestcount`.  Request counts are tracked even for requests for apis that do not exist, so if there's a request count entry for the api even though the api is disabled, that means there is a client/controller trying to access it and failing.  That client/controller needs to be tracked down and made to not access the resource when the capability is disabled.  Looking though must-gather pod logs for errors related to the resource type is one way to approach this.
+            1. [Openshift-state-metrics](https://github.com/openshift/openshift-state-metrics/tree/774cb2ff4b9e21c452650643528c6fa190c7885a/pkg/collectors) is a specific example of this.  This component has logic to scrape certain resources and publish metrics.  If the resource it is scraping no longer exists when a cap is disabled, the logic that does the scraping also needs to be removed.
     2. CI suites which you expected to pass continue to pass.
-        You may find that some test-cases assume or require your capability's presence, and they may need to grow logic to skip or alter the test conditions when your capability is not installed (like [this][bump-origin]).
+        You may find that some test-cases assume or require your capability's presence, and they may need to grow logic to skip or alter the test conditions when your capability is not installed (like [this][bump-origin] or by adding a suitable regex to the `[Skipped:NoOptionalCapabilities]` [annotation rule][annotation-rules]).
     If your annotation addition spans multiple pull requests, either because the manifests being annotated span multiple repositories or because you also need to make test suite adjustments in other repositories), you may be able to [use cluster-bot][cluster-bot] to run tests on a release assembling multiple in-flight pull requests.
 4. Introduce the new capablity name in the openshift/api repo, like [this][bump-api].
     1. If no [versioned capability set](https://github.com/openshift/api/blob/8324d657dee1d594a8a7768e5569fea6a8f887a9/config/v1/types_cluster_version.go#L257-L291) exists for the current OCP version under development, introduce one as part of your pull request.
 5. Bump the openshift/api vendored dependency in the openshift/cluster-version-operator repo, like [this][bump-cvo-vendor], so the cluster-version operator will understand the new annotation and its `vCurrent` inclusion status.
 
-    At this point, clusters installed with the `None` set will nominally not include the new capability, but if you had un-annotated manifests in previous versions, those will still be installed.
+    While this pull request is open, you can confirm your earlier (possibly also in-flight) pull requests with [cluster bot] using commands like:
+
+    ```text
+    test e2e 4.13,openshift/origin#27657,openshift/cluster-version-operator#883,openshift/cluster-node-tuning-operator#524 aws,no-capabilities 
+    ```
+
+    Once this pull request merges, clusters installed with the `None` set will nominally not include the new capability, but if you had un-annotated manifests in previous versions, those will still be installed.
     Prereleases at this point may need to document this behavior ("this capability does not yet disable anything"), depending on the expected level of interest.
 6. Land your annotation pull request(s), so that the capability related resources will be ignored when the new capability is disabled.
 7. Bump the openshift/api vendored dependency in the openshift/installer repo, like [this][bump-installer-vendor], to allow folks to request the new capability via `additionalEnabledCapabilities` without the installer rejecting the unrecognized capability name.
 8. Check the relevant `no-capabilities` periodic, like [this][periodic], to confirm that your change has not introduced any regressions.
+
+
+In addition to the considerations described inline above:
+
+If you forget to annotate a resource that is part of your capability and ship the capability that way, and then in a future release decide to correct the error by annotating it, you will create a problem.  Since the forgotten resource will have always been created on all clusters, upon upgrade the CVO will add the annotation and then recognize that because a resource w/ that annotation exists, the capability should be implicitly enabled and create the rest of the resources associated w/ the capability.  This means a user who had tried to disable a capability will have it enabled on their cluster and have no recourse but to reinstall.  If you find yourself in this situation the best solution is to rename the resource when you annotate it.  That way the CVO will not see the existing resource as being part of the capability and will not implicitly enable it.  [We are pursuing better solutions to this problem](https://issues.redhat.com/browse/OTA-1039).
+
 
 #### Dev Preview -> Tech Preview
 N/A
@@ -501,8 +539,11 @@ it necessary that we take a tactical approach in the short term to enable this c
 N/A
 
 [admission-webhook]: https://issues.redhat.com/browse/OTA-575
+[annotation-rules]: https://github.com/openshift/origin/blob/a86fa526218f3e5c5b8e101ebb78c287a6a4b215/test/extended/util/annotate/rules.go#L342-L348
 [bump-annotations]: https://github.com/openshift/insights-operator/pull/646
 [bump-api]: https://github.com/openshift/api/pull/1212
+[bump-auth-1]: https://github.com/openshift/cluster-authentication-operator/pull/587
+[bump-auth-2]: https://github.com/openshift/cluster-authentication-operator/pull/589
 [bump-cvo-vendor]: https://github.com/openshift/cluster-version-operator/pull/737
 [bump-installer-vendor]: https://github.com/openshift/installer/pull/5645
 [bump-origin]: https://github.com/openshift/origin/pull/26998

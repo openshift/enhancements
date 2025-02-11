@@ -49,50 +49,58 @@ the API review team.
 
 ### Configuration vs Workload APIs
 
-In OpenShift, we talk about two classes of APIs, Workload and Configuration APIs.
-The majority of APIs in OpenShift are Configuration APIs, though some are also Workload APIs.
+In OpenShift, we talk about two classes of APIs: workload and configuration APIs.
+The majority of APIs in OpenShift are configuration APIs, though some are also workload APIs.
 
-A Configuration API is one that is typically cluster scoped, a singleton within the cluster and managed by a Cluster
-Administrator only. An example of a configuration API would be the Infrastructure resource that defines configuration
-for the Infrastructure of the Cluster, or the Network resource that configures the networking within the cluster.
-A Configuration API helps a user to configure a property or feature of the cluster.
+A configuration API is one that is typically cluster-scoped, a singleton within the cluster, and managed by a cluster
+administrator only. An example of a configuration API would be the Infrastructure API that defines configuration
+for the infrastructure of the cluster, or the Network API that configures the networking within the cluster.
+A configuration API helps a user to configure a property or feature of the cluster.
 
-A Workload API typically is namespaced and is used by end users of the cluster. Workload APIs exist many times within a
-cluster and often many times within a namespace. Many of the Kubernetes core resources such as the Deployment and
-DaemonSet APIs are considered to be Workload APIs.
-A Workload API helps a user to run their workload on top of OpenShift.
+A workload API typically is namespaced and is used by end users of the cluster. Workload API objects may be
+instantiated many times within a cluster and often many times within a namespace. Many of the Kubernetes core
+resources,  such as the Deployment and DaemonSet APIs, are considered to be workload APIs.
+A workload API helps a user to run their workload on top of OpenShift.
 
-You should try to identify whether your API is a Workload or Configuration API as there are different conventions
+You should try to identify whether your API is a workload or configuration API as there are different conventions
 applied to them based on which class the API falls into.
 
 #### Defaulting
 
-In Workload APIs, we typically default fields on create (or update) when the field isn't set. This sets the value
+In workload APIs, we typically default fields on create (or update) when the field isn't set. This sets the value
 on the resource and forms a part of the contract between the user and the controller fulfilling the API.
-This has the effect that you cannot change the behaviour of a default value once the resource is created.
+This has the effect that changing the default value in the API does not change the value for objects that have
+previously been created.
+This has the implication that you cannot change the behaviour of a default value once the API is defined as that would
+cause the same object to result in different behavior for different versions of the API, which would surprise users and
+compromise portability.
 
-To change the default behaviour could constitute a breaking change and disrupt the end users workload,
+To change the default behaviour could constitute a breaking change and disrupt the end user's workload;
 the behaviour must remain consistent through the lifetime of the resource.
 This also means that defaults cannot be changed without a breaking change to the API.
-If a user were to delete their Workload API resource and recreate it, the behaviour should remain the same.
+If a user were to delete their workload API resource and recreate it, the behaviour should remain the same.
 
-With Configuration APIs, we typically default fields within the controller and not within the API.
+With configuration APIs, we typically default fields within the controller and not within the API.
 This means that the platform has the ability to make changes to the defaults over time as we improve the capabilities
-of OpenShift. While we reserve the right to change a default in a Configuration API, we must ensure that when there is a
-change, that there is a smooth upgrade process between the old default and the new default and that we will not break
-existing clusters.
+of OpenShift.
 
-Typically, optional fields on Configuration APIs contain a statement within their Godoc to describe
+An API author may reserve the right to change the default value of a field or the behavior of a field value within a
+configuration API. To reserve this right, the godoc for the API field must clearly indicate that the value or behavior
+is subject to change over time.
+When changing a default value or behaviour, we must ensure that there is a smooth upgrade process between the old
+default and the new default and that we will not break existing clusters.
+
+Typically, optional fields on configuration APIs contain a statement within their Godoc to describe
 the default behaviour when they are omitted, along with a note that this is subject to change over time.
 [The documentation section](#write-user-readable-documentation-in-godoc) of the API conventions goes into more detail
 on how to write good comments on optional fields.
 
 #### Pointers
 
-In Configuration APIs specifically, we advise to avoid making fields pointers unless there is an absolute need to do so.
+In configuration APIs specifically, we advise to avoid making fields pointers unless there is an absolute need to do so.
 An absolute need being the need to distinguish between the zero value and a nil value.
 
-Using pointers makes writing code to interact with the API harder and more error prone and it also harms the
+Using pointers makes writing code to interact with the API harder and more error prone, and it also harms the
 discoverability of the API.
 
 When we use references, the marshalled version of a resource will include unset fields with their zero value.
@@ -100,6 +108,59 @@ This means, that any end user fetching the resource from the API can observe tha
 "discover" a potentially new feature or option that they were not previously aware of.
 This has the effect of helping our users to understand how they might be able to configure their cluster, without
 having to search for features or review API schemas within the product docs.
+
+##### Pointers to structs
+
+An exception to this rule is when using a pointer to a struct in combination with an API validation that requires the field to be unset.
+
+The JSON tag `omitempty` is not compatible with struct references. Meaning any struct will always, when empty, be marshalled to `{}`. If the struct **must** genuinely be omitted, it must be a pointer.
+
+When used in combination with a validation such as `minProperties` on the parent, or a required field within the struct, the struct itself must be
+omitted to avoid validations being applied to the empty struct and returning
+false positives.
+
+For a concrete example, view this [thread](https://github.com/openshift/enhancements/pull/1411/files#r1212790070).
+
+### Only one phrasing for each idea
+
+Each idea should have a single possible expression in the API structures, without having multiple ways to say the same thing.
+From [PEP 20][pep-20]:
+
+> * There should be one-- and preferably only one --obvious way to do it.
+> * Although that way may not be obvious at first unless you're Dutch.
+
+For example, [ClusterVersion's `spec.desiredUpdate`][desiredUpdate] is a pointer field.
+
+This does not meet our current API guidelines (see our [pointer
+guidelines](#pointers)) as we advise against the use of pointers in
+most cases, but, in this example, it also allows the same semantic to
+be expressed in two different ways.
+
+Both `nil`:
+
+
+```yaml
+spec: {}
+```
+
+and empty-struct:
+
+```yaml
+spec:
+  desiredUpdate: {}
+```
+
+represent the same "I do not desire an update" idea.
+
+Having a single allowed phrasing has a few benefits:
+
+* Users don't have to spend time wondering about which of several identical phrasings to use, or whether those phrasings are actually identical or not.
+* Users don't have to debate about which of several pet phrasings are most canonical.
+* There is no need to document alternative phrasings.
+* Testing and verification for alternative phrasings are simple: the non-canonical phrasing is rejected, with documentation guiding users towards the canonical phrasing.
+* When an API structure has multiple consumers, having a single phrasing for each idea reduces the scope of possible semantic divergence between consumers.
+
+For existing APIs, progress toward these ideals needs to happen within the usual [constraints on API changes][api-changes].
 
 ### Write User Readable Documentation in Godoc
 
@@ -254,7 +315,7 @@ type MyPlatformConfig struct {
   // +unionDiscriminator
   // +kubebuilder:validation:Enum:="AWS";"Azure";"GCP"
   // +kubebuilder:validation:Required
-  PlatformType string `json:"platformType,omitempty"`
+  PlatformType string `json:"platformType"`
 
   // AWS is the AWS configuration.
   // All structures within the union must be optional and pointers.
@@ -363,6 +424,49 @@ Where platform APIs may talk about a feature in terms of the implementation, we 
 in terms of the action that OpenShift and the platform will take.
 This is an easy way to help users understand the effects of their actions and provide additional value over them using
 the platform specific APIs directly.
+
+### No functions
+
+Do not add functions to the openshift/api.  Functions seem innocuous, but they have significant side effects over time.
+
+1. Dependency chain.
+   We want our dependency chain on openshift/api to be as short as possible to avoid conflicts when they are vendored
+   into other projects.
+2. Building interfaces on APIs.
+   Building interfaces on top of our structs is an anti-goal.  Even the interfaces we have today, `runtime.Object` and
+   `meta.Accessor`, cause pain when mismatched levels result in structs dropping in and out of type compliance
+
+The simplest line is "no functions".
+Functions can be added in a separate repo, possibly library-go if there are sufficient consumers.
+Helpers for accessing labels and annotations are not recommended.
+
+### No annotation-based APIs
+
+Do not use annotations for extending an API. Annotations may seem as a good candidate for introducing experimental/new
+API. Nevertheless, migration from annotations to formal schema usually never happens as it requires breaking changes
+in customer deployments.
+
+1. Validation does not always come with definition. User set values can be too broad and hard to limit later on.
+2. Lack of discoverability. There's no pre-existing schema that can be published.
+3. Validation is limited. Certain kinds of validators aren't allowed on annotations, so hooks are more frequently used instead.
+4. Hard to extend. An annotation value (a string) can not be extended with additional fields under a parent.
+5. Unclear versioning. Annotation keys can omit versioning. Or, there are multiple ways to specify a version.
+6. Users can "squat" on annotations by adding an unvalidated annotation value for a key that is used in a future version.
+
+#### Example
+
+[Enabling HTTP Strict Transport Security (HSTS) policy](https://docs.openshift.com/container-platform/4.11/networking/routes/route-configuration.html) through an annotation:
+
+```yaml
+apiVersion: v1
+kind: Route
+metadata:
+  annotations:
+    haproxy.router.openshift.io/hsts_header: max-age=31536000;includeSubDomains;preload
+```
+
+The annotation was introduced in OpenShift 3.X. At the time annotations were very popular as a means to provide experimental configuration.
+Nevertheless, after customer adoption the configuration was never migrated to a formal schema to avoid breaking changes.
 
 ## Exceptions to Kubernetes API Conventions
 
@@ -528,11 +632,11 @@ With this example, we have described through the enumerated values the action th
 Should the API need to evolve in the future, for example to add a particular method of Authentication that should be
 used, we can do so by adding a new value (e.g. `PublicKey`) to the enumeration and avoid adding a new field to the API.
 
-### Optional fields should not be pointers (in Configuration APIs)
+### Optional fields should not be pointers (in configuration APIs)
 
-In [Configuration APIs](#configuration-vs-workload-apis), we do not follow the upstream guidance of making optional
+In [configuration APIs](#configuration-vs-workload-apis), we do not follow the upstream guidance of making optional
 fields pointers.
-Pointers are difficult to work with and are more error prone than references and they also harm the discoverability
+Pointers are difficult to work with and are more error prone than references, and they also harm the discoverability
 of the API.
 
 This topic is expanded in the [Pointers](#pointers) subsection of the
@@ -547,6 +651,7 @@ See also
    in openshift/api.
 2. [CVO conditional manifests](https://github.com/openshift/enhancements/blob/6704279c30e975368f6f6fa5b6b7ee00adf4aeb9/enhancements/update/cvo-techpreview-manifests.md)
    in openshift/enhancements.
+3. [Process](https://github.com/openshift/enhancements/blob/b99a80d976385faa87f251dbbcd4260a37406921/dev-guide/featuresets.md#id-like-to-declare-a-feature-accessible-by-default--what-is-the-process) for declaring a feature Accessible-by-default
 
 This capability is important to use because it requires users to opt-in for TechPreview functionality on their cluster
 and prevents the accidental usage of TechPreview fields and types on production clusters.
@@ -684,3 +789,7 @@ When writing APIs for OpenShift, we try to make our APIs consistent with one ano
 OpenShift have an understanding of how to use our APIs intuitively. If an upstream API is not consistent with
 those conventions, you should be prepared to change your abstraction to follow conventions to maintain that consistent
 user experience within OpenShift.
+
+[api-changes]: https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api_changes.md
+[desiredUpdate]: https://github.com/openshift/api/blob/803c45de7ab5567e8d1575138f014226974768a1/config/v1/types_cluster_version.go#L43-L57
+[pep-20]: https://peps.python.org/pep-0020/

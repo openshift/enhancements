@@ -1,0 +1,39 @@
+@startuml
+'https://plantuml.com/sequence-diagram
+
+skinparam sequenceMessageAlign center
+
+autonumber
+
+actor User
+participant "OpenShift API Server" as API
+participant "cert-manager-operator" as Operator
+participant "cert-manager" as CertManagerOperand
+participant "istio-csr-agent" as IstioCSROperand
+participant "Istiod" as Istiod
+participant "Istio Proxy" as Proxy
+participant "Certificate Authority" as CA
+
+User -> API : Create istiocsr CR
+API -> Operator : Reconcile istiocsr event
+Operator -> Operator : Prepare istio-csr manifests\nbased on istiocsr config
+Operator -> API : Deploy istio-csr operand resources
+
+note over Operator
+**Certificate Request GRPC Endpoint**
+cert-manager-istio-csr.
+<istiocsr.metadata.namespace>.svc:443
+endnote
+
+Istiod -> IstioCSROperand : Request certificate
+IstioCSROperand -> API : Create CSR resource
+API -> CertManagerOperand : Notify CSR created
+CertManagerOperand -> CA : Send CSR for signing
+CA -> CertManagerOperand : Return signed certificate
+CertManagerOperand -> API : Update CSR with signed cert
+API -> IstioCSROperand : Notify signed certificate available
+IstioCSROperand -> Istiod : CertificateRequest response with signed certificate
+Istiod -> Proxy : Update Istio Proxy with cert
+Proxy -> Proxy : Use certificate for TLS
+
+@enduml

@@ -2,6 +2,7 @@
 title: dynamic-plugins
 authors:
   - "@spadgett"
+  - "@jhadvig"
 reviewers:
   - "@bparees"
   - "@shawn-hurley"
@@ -10,8 +11,8 @@ reviewers:
 approvers:
   - "@bparees"
 creation-date: 2020-08-18
-last-updated: 2021-07-22
-status: implementable
+last-updated: 2024-10-24
+status: implemented
 ---
 
 # Dynamic Plugins for OpenShift Console
@@ -22,13 +23,13 @@ status: implementable
 - [x] Design details are appropriately documented from clear requirements
 - [x] Test plan is defined
 - [x] Graduation criteria for dev preview, tech preview, GA
-- [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
+- [x] User-facing documentation is created in [openshift-docs](https://docs.openshift.com/container-platform/4.13/web_console/dynamic-plugin/overview-dynamic-plugin.html)
 
 ## Summary
 
 OpenShift Console currently has
 [static plugins](https://github.com/openshift/console/tree/master/frontend/packages/console-plugin-sdk)
-that allow teams to contribute features to the UI such as CNV and OCS. These plugins live in a
+that allow teams to contribute features to the UI such as CNV and ODF. These plugins live in a
 [packages directory](https://github.com/openshift/console/tree/master/frontend/packages)
 inside the `openshift/console` repo and extend console through a well-defined
 plugin API. Static plugins are built with console and included in the console
@@ -70,9 +71,6 @@ contributing to a single monorepo.
 
 ### Non-Goals
 
-* Initially we don't plan to make this a public API. The target use is for Red
-  Hat operators. We might reevaluate later when dynamic plugins are more
-  mature.
 * We can't prevent breaking changes in Patternfly APIs the console exposes to plugins.
 * Plugins won't be sandboxed. They will have full JavaScript access to the DOM and network.
 * This proposal does not cover allowing plugins to contribute backend console endpoints.
@@ -130,38 +128,44 @@ The console backend will proxy the plugin assets from the `Service` using the
 service CA bundle.
 
 Operators declare that they have a console plugin available by creating a
-cluster-scoped `ConsolePlugin` resource that includes the service name, port,
-and base path used to access all of the plugin's assets.
+cluster-scoped `ConsolePlugin` resource, that includes information about
+the backend service name, port, and base path used to access all of the
+plugin's assets.
 
 ```yaml
-apiVersion: console.openshift.io/v1alpha1
+apiVersion: console.openshift.io/v1
 kind: ConsolePlugin
 metadata:
   name: acm
 spec:
   displayName: 'Advanced Cluster Management'
-  service:
-    name: acm
-    namespace: open-cluster-management
-    port: 8443
-    basePath: '/'
+  backend:
+    type: Service
+    service:
+      name: acm
+      namespace: open-cluster-management
+      port: 8443
+      basePath: '/'
 ```
 
 In case the plugin needs to communicate with some in-cluster service, it can
 declare a service proxy in its `ConsolePlugin` resource using the `spec.proxy` array.
 Each entry needs to specify type and alias of the proxy, under the `type` and `alias` field.
-For the `Service` proxy type, a `service` field with `name`, `namespace` and `port` fields
-needs to be specified, to which the request will be proxied.
+Proxy request could be done to different endpoints types. For the `Service` proxy type,
+a `service` field with `name`, `namespace` and `port` fields needs to be specified,
+to which the request will be proxied.
 
 ```yaml
 spec:
   proxy:
   - type: Service
     alias: <proxy-alias>
-    service:
-      name: <service-name>
-      namespace: <service-namespace>
-      port: <service-port>
+    endpoint:
+      type: Service
+      service:
+        name: <service-name>
+        namespace: <service-namespace>
+        port: <service-port>
 ```
 
 Console backend exposes following endpoint in order to proxy the communication
@@ -171,36 +175,41 @@ between plugin and the service:
 An example proxy request path from `acm` plugin with a `search` service is:
 `/api/proxy/plugin/acm/search/pods?namespace=openshift-apiserver`
 
-Proxied request will use [service CA bundle](https://docs.openshift.com/container-platform/4.8/security/certificate_types_descriptions/service-ca-certificates.html) by default. The service must use HTTPS.
-If the service uses a custom service CA, the `caCertificate` field
-must contain the certificate bundle. In case the service proxy request
-needs to contain logged-in user's OpenShift access token, the `authorize`
-field needs to be set to `true`. The user's OpenShift access token will be
-then passed in the HTTP `Authorization` request header, for example:
+Proxied request will use
+[service CA bundle](https://docs.openshift.com/container-platform/4.8/security/certificate_types_descriptions/service-ca-certificates.html)
+by default. The service must use HTTPS. If the service uses a custom service
+CA, the `caCertificate` field must contain the certificate bundle. In case the
+service proxy request needs to contain logged-in user's OpenShift access token,
+the `authorize` field needs to be set to `true`. The user's OpenShift access
+token will be then passed in the HTTP `Authorization` request header, for
+example:
 
 `Authorization: Bearer sha256~kV46hPnEYhCWFnB85r5NrprAxggzgb6GOeLbgcKNsH0`
 
 ```yaml
-apiVersion: console.openshift.io/v1alpha1
+apiVersion: console.openshift.io/v1
 kind: ConsolePlugin
 metadata:
   name: acm
 spec:
   displayName: 'Advanced Cluster Management'
-  service:
-    name: acm
-    namespace: open-cluster-management
-    port: 8443
-    basePath: '/'
+  backend:
+    type: Service
+    service:
+      name: acm
+      namespace: open-cluster-management
+      port: 8443
+      basePath: '/'
   proxy:
   - type: Service
     alias: search
     caCertificate: '-----BEGIN CERTIFICATE-----\nMIID....'
     authorize: true
-    service:
-      name: search
-      namespace: open-cluster-management
-      port: 8443
+    endpoint:
+      service:
+        name: search
+        namespace: open-cluster-management
+        port: 8443
 ```
 
 Plugins are disabled by default. They need to be manually enabled by a cluster
@@ -433,9 +442,11 @@ const VMHeading = () => {
 };
 ```
 
-In the `v1` API version, an additional field is introduced for enabling and loading i18n namespace that
-given dynamic plugin contains. The i18n namespace name follows `plugin__{plugin-name}` naming convention.
-If i18n is not enabled in the `ConsolePlugin` resource, no i18n namespaces will be loaded for the plugin.
+In the `v1` API version, an additional `spec.i18n.loadType` field introduced for defining the loading type of i18n resrouces that
+given dynamic plugin contains. If the `loadType` is set to `Preload`, console will load all plugin's localization resources during
+loading of the plugin. If the `loadType` is set to `Lazy` or left blank, console wont preload any plugin's localization resources,
+instead will leave thier loading to runtime's lazy-loading.
+The i18n namespace name follows `plugin__{plugin-name}` naming convention.
 
 ```yaml
 apiVersion: console.openshift.io/v1
@@ -445,7 +456,7 @@ metadata:
 spec:
   displayName: 'Advanced Cluster Management'
   i18n:
-    enabled: true
+    loadType: Preload
 ```
 
 In the 4.11 release, a `console.openshift.io/use-i18n` annotation
@@ -461,6 +472,74 @@ be removed when 4.10 goes out of support in favor of the proper API.
 Prior to 4.11 release, localization resources are being loaded by default. In case these
 resources are not present in the dynamic plugin, the initial console load will be slowed 
 down. For more info check [BZ#2015654](https://bugzilla.redhat.com/show_bug.cgi?id=2015654)
+
+### Content Security Policy
+
+`ConsolePlugin` introduces the ability for dynamic plugins to specify their own Content Security Policy (CSP) directives in the OpenShift web console, using the `ConsolePluginCSP` field in the `ConsolePluginSpec`. This field is crucial for mitigating potential security risks, such as cross-site scripting (XSS) and data injection attacks, by controlling which external resources the browser can load.
+
+#### Content Security Policy (CSP) Overview
+CSP is a security feature that helps detect and mitigate attacks by specifying which sources are allowed for fetching content like scripts, styles, images, and fonts. For dynamic plugins that require loading resources from external sources, defining custom CSP rules ensures secure integration into the OpenShift console.
+For more information about the CSP directives, see:
+https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy
+
+#### Key Features of `ConsolePluginCSP`
+
+- **Directive Types**:
+  - The supported directive types include `DefaultSrc`, `ScriptSrc`, `StyleSrc`, `ImgSrc`, `FontSrc` and `ConnectSrc`, each of which allows plugins to specify valid sources for loading different types of content.
+  - Each directive type serves different purposes, e.g., `ScriptSrc` defines valid JavaScript sources, while `ImgSrc` controls where images can be loaded from.
+
+- **Values**:
+  - Each directive can have a list of values representing allowed sources. For example, `ScriptSrc` could specify multiple external scripts.
+  - These values are restricted to 1024 characters and cannot include whitespace, commas, or semicolons. Additionally, single-quoted strings and wildcard characters (`*`) are disallowed.
+
+- **Unified Policy**:
+  - The OpenShift web console aggregates the CSP directives across all enabled `ConsolePlugin` CRs and merges them with its own default policy. The combined policy is then applied via the `Content-Security-Policy` HTTP response header.
+
+#### Example
+If two plugins define overlapping CSP directives, the OpenShift web console server merges them as follows:
+- Plugin A:
+```yaml
+apiVersion: console.openshift.io/v1
+kind: ConsolePlugin
+metadata:
+  name: acm
+spec:
+  displayName: 'Advanced Cluster Management'
+  contentSecurityPolicy:
+  - directive: 'ScriptSrc'
+    values:
+    - 'https://script1.com/'
+    - 'https://script2.com/'
+```
+- Plugin B:
+```yaml
+apiVersion: console.openshift.io/v1
+kind: ConsolePlugin
+metadata:
+  name: cron-tab
+spec:
+  displayName: 'Cron Tab'
+  contentSecurityPolicy:
+  - directive: 'ScriptSrc'
+    values:
+    - 'https://script2.com/'
+    - 'https://script3.com/'
+```
+
+The resulting policy set by the OpenShift Web Console server would be:
+
+```
+script-src: 'self' https://script1.com/ https://script2.com/ https://script3.com/
+```
+
+This ensures that plugins can specify external sources while maintaining a secure environment for the entire web console.
+
+#### Validation Rules
+- Each directive can have up to 16 unique values.
+- The total size of all values across directives must not exceed 8192 bytes (8KB).
+- Each value must be unique, and there are additional validation rules to ensure no quotes, spaces, commas, or wildcard symbols are used.
+
+By defining and enforcing CSP directives, the `ConsolePluginCSP` field helps balance plugin flexibility and security, allowing dynamic plugins to specify external resources while protecting the OpenShift web console from security vulnerabilities.
 
 ### Error Handling
 
@@ -489,11 +568,6 @@ z-stream.
 
 **Mitigation**: Plugins are not enabled by default. A cluster admin must opt-in.
 
-**Risk**: Customers/ISVs will use this API before it's fully supported.
-
-**Mitigation**: Initially, we'll have an allowlist of supported plugins to make
-it clear that only these plugins should be installed.
-
 ## Design Details
 
 ### Test Plan
@@ -519,10 +593,65 @@ dynamic.
 | OpenShift | Maturity     | API version   |
 |-|-|-|
 | 4.8       | Alpha        | v1alpha1      |
-| 4.11      | GA (planned) | v1            |
+| 4.12      | GA           | v1            |
 
 Static plugins are already a supported feature. Any existing static plugin that
 is migrated to a dynamic plugin will need to have the same support level.
+
+Both `v1` and `v1alpha1` version are supported. `v1alpha1` plugins will get
+converted by the conversion webhook server into `v1` representation.
+Conversion webhook server is part of the `console-operator` pod.
+
+#### Content Security Policy
+For Content Security Policy (CSP) feature to be considered stable, the following
+requests need to be met:
+
+##### 1. Documentation updates
+
+* Update the OpenShift official documentation to include detailed guidelines
+on configuring `ConsolePluginCSP` in the `ConsoleDynamicPlugin` CRD, along with
+recommendations.
+PR link: TBD
+
+##### 2. Release notes updates
+
+* Add CSP feature to release notes.
+  * Pull request link: TBD
+
+##### 3. Extending integration and unit test suite
+
+* Extend integration and unit test suite for console-operator repository:
+    * Standart use case, with a single plugin setting valid sources and
+    validating the final CSP result set in the `console-config.yaml` file.
+    * Edge use cases, such as many plugins defining CSPs with overlapping sources,
+    and validates the final merged CSP result, set in the `console-config.yaml` file.
+    * Pull request link: https://github.com/openshift/console-operator/pull/938
+
+##### 4. Updates to demo plugin
+
+* Update one console-demo-plugin to use the new `ConsolePluginCSP` field
+in order to demonstrate the usage.
+  * Pull request link: TBD
+
+##### 5. Integration tests updates
+
+* Extend integration test suite in console repository CI to check for CSP violations.
+* PR link: [TBD](https://issues.redhat.com/browse/CONSOLE-4279)
+
+##### 6. CI updates to all dynamic plugins
+
+* All the dynamic plugins which are enabled on the cluster by default will
+update their CI to check for CSP violations.
+* PR link: TBD
+
+Currently Console uses `Content-Security-Policy-Report-Only` instead of
+`Content-Security-Policy` header. Due to that the browser will only warn about
+Console CSP violations.
+
+To ensure adequate monitoring and adjustment, Console will continue to operate
+in `Content-Security-Policy-Report-Only` mode for at least one release after
+the above requests are met. After this period, Console will switch to using the
+`Content-Security-Policy` header, enabling full enforcement of CSP policies.
 
 #### Dev Preview -> Tech Preview
 
@@ -571,6 +700,7 @@ console will only load the correct plugin.
 * 2021-06-22 - Support localization of dynamic plugins
 * 2021-10-06 - Allow dynamic plugins to proxy to services on the cluster
 * 2022-05-13 - API enhancements for GA
+* 2023-01-17 - GA (OpenShift 4.12)
 
 ## Drawbacks
 

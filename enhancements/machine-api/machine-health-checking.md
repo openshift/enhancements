@@ -1,21 +1,21 @@
 ---
 title: machine-health-checking
 authors:
-  - @bison
-  - @ingvagabund
-  - @enxebre
-  - @cynepco3hahue
-  - @JoelSpeed
+  - "@bison"
+  - "@ingvagabund"
+  - "@enxebre"
+  - "@cynepco3hahue"
+  - "@JoelSpeed"
 reviewers:
-  - @derekwaynecarr
-  - @michaelgugino
-  - @beekhof
-  - @mrunalp
+  - "@derekwaynecarr"
+  - "@michaelgugino"
+  - "@beekhof"
+  - "@mrunalp"
 approvers:
-  - @enxebre
-  - @bison
-  - @derekwaynecarr
-  - @michaelgugino
+  - "@enxebre"
+  - "@bison"
+  - "@derekwaynecarr"
+  - "@michaelgugino"
 
 creation-date: 2019-09-09
 last-updated: 2020-06-26

@@ -28,16 +28,19 @@ lint: image  ## run the markdown linter
 
 ##@ This Week in Enhancements
 
-DAYSBACK ?= 7 # number of days to include in report
-
-REPORT_FILE=this-week/$(shell date +%F).md
 ANNUAL_SUMMARY_FILE=this-week/$(shell expr $$(date +%Y) - 1).md
 
 .PHONY: report report-gen
-report: report-gen lint  ## run weekly newsletter report tool
+report: closed-stale report-gen lint  ## run weekly newsletter report tool
+
+closed-stale:  ## Leave comments on enhancements closed by the lifecycle bot
+	(cd tools && go run ./main.go closed-stale)
+
+show-stale:  ## Show the status of enhancements closed by the lifecycle bot
+	(cd tools && go run ./main.go closed-stale --dry-run)
 
 report-gen:
-	(cd ./tools; go run ./main.go report --days-back $(DAYSBACK) > ../$(REPORT_FILE))
+	./hack/this-week.sh
 
 .PHONY: annual-summary annual-summary-gen
 annual-summary: annual-summary-gen lint  ## run annual report tool

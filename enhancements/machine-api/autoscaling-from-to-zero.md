@@ -1,16 +1,16 @@
 ---
 title: Autoscaling from/to zero
 authors:
-  - @enxebre
+  - "@enxebre"
 reviewers:
-  - @frobware
-  - @bison
-  - @JoelSpeed
-  - @alexander-demichev
-  - @elmiko
-  - @michaelgugino
+  - "@frobware"
+  - "@bison"
+  - "@JoelSpeed"
+  - "@alexander-demichev"
+  - "@elmiko"
+  - "@michaelgugino"
 approvers:
-  - @bison
+  - "@bison"
 
 creation-date: 2020-23-01
 last-updated: 2020-23-01

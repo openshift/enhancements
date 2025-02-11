@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/google/go-github/v32/github"
-	"github.com/pkg/errors"
 
 	"github.com/openshift/enhancements/tools/util"
 )
@@ -106,8 +105,7 @@ func (s *Stats) ProcessOne(pr *github.PullRequest) error {
 
 	issueComments, err := s.Query.GetIssueComments(pr)
 	if err != nil {
-		return errors.Wrap(err,
-			fmt.Sprintf("could not fetch issue comments on %s", *pr.HTMLURL))
+		return fmt.Errorf("could not fetch issue comments on %s: %w", *pr.HTMLURL, err)
 	}
 	for _, c := range issueComments {
 		if c.CreatedAt.IsZero() || c.CreatedAt.Before(s.EarliestDate) {
@@ -120,8 +118,7 @@ func (s *Stats) ProcessOne(pr *github.PullRequest) error {
 
 	prComments, err := s.Query.GetPRComments(pr)
 	if err != nil {
-		return errors.Wrap(err,
-			fmt.Sprintf("could not fetch PR comments on %s", *pr.HTMLURL))
+		return fmt.Errorf("could not fetch PR comments on %s: %w", *pr.HTMLURL, err)
 	}
 	for _, c := range prComments {
 		if c.CreatedAt.IsZero() || c.CreatedAt.Before(s.EarliestDate) {
@@ -134,8 +131,7 @@ func (s *Stats) ProcessOne(pr *github.PullRequest) error {
 
 	reviews, err := s.Query.GetReviews(pr)
 	if err != nil {
-		return errors.Wrap(err,
-			fmt.Sprintf("could not fetch reviews on %s", *pr.HTMLURL))
+		return fmt.Errorf("could not fetch reviews on %s: %w", *pr.HTMLURL, err)
 	}
 	for _, r := range reviews {
 		if r.SubmittedAt == nil || r.SubmittedAt.IsZero() || r.SubmittedAt.Before(s.EarliestDate) {

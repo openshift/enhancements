@@ -16,6 +16,9 @@ approvers:
 creation-date: 2021-09-16
 last-updated: 2021-09-16
 status: implementable
+superseded-by:
+  - "/enhancements/machine-api/converting-machine-api-to-cluster-api.md"
+  - "/enhancements/cluster-api/installing-cluster-api-components-in-ocp.md"
 ---
 
 # Cluster API Integration

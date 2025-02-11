@@ -198,7 +198,6 @@ type ConditionalUpdate struct {
 
 	// conditions represents the observations of the conditional update's
 	// current status. Known types are:
-	// * Evaluating, for whether the cluster-version operator will attempt to evaluate any risks[].matchingRules.
 	// * Recommended, for whether the update is recommended for the current cluster.
 	// +patchMergeKey=type
 	// +patchStrategy=merge
@@ -314,16 +313,14 @@ Including edges which are recommended for no clusters under `conditionalEdges` g
 ### Cluster-version operator support for the enhanced schema
 
 The cluster-version operator will learn to parse [`conditionalEdges`](#enhanced-cincinnati-json-representation) into [`conditionalUpdates`](#enhanced-clusterversion-representation).
-For `conditionalUpdates` entries where each `risks` entry contains at least one recognized `matchingRules` entry, the operator will set the `Evaluating` condition to `True`.
-Otherwise the `Evaluating` condition will be set to `False`, and the `Recommended` condition can be immediately set to `False` (if there are no `matchingRules` entries at all) or `Unknown` (if there are unrecognized `matchingRules` entries).
-`edges` will continue to go straight into `availableUpdates`.
+The `Recommended` condition can be immediately set to `Unknown` until the `matchingRules` for all the update's risks have been evaluated.
 The operator will log an error if the same target is included in both `edges` and `conditionalEdges`, but will prefer the `conditionalEdges` entry in that case.
 
-Additionally, the operator will continually re-evaluate the blocking conditionals in `conditionalUpdates` and update `conditionalUpdates[].risks` accordingly.
+Additionally, the operator will continually re-evaluate the blocking conditionals in `conditionalUpdates` and update `conditionalUpdates[].conditions` accordingly.
 The timing of the evaluation and freshness are largely internal details, but to avoid [consuming excessive monitoring resources](#malicious-conditions) and because [the rules should be based on slowly-changing state](#clusters-moving-into-the-vulnerable-state-after-updating), the operator will handle polling with the following restrictions:
 
 * The cluster-version operator will cache polling results for each query, so a single query which is used in evaluating multiple risks over multiple conditional update targets will only be evaluated once per round.
-* After evaluating a PromQL query, the cluster-version operator will wait at least 10 minutes before evaluating any PromQL.
+* After evaluating a PromQL query, the cluster-version operator will wait at least 1 second before evaluating any PromQL.
     This delay will not be persisted between operator restarts, so a crash-looping CVO may result in higher PromQL load.
     But a crash-looping CVO will also cause the `KubePodCrashLooping` alert to fire, which will summon the cluster administrator.
 * After evaluating a PromQL query, the cluster-version operator will wait at least an hour before evaluating that PromQL query again.
@@ -535,10 +532,6 @@ status:
             or
             0 * cluster_infrastructure_provider
     conditions:
-    - lastTransitionTime: 2021-08-28T01:00:00Z
-      type: Evaluating
-      status: True
-      reason: Periodically evaluating risks associated with this update.
     - lastTransitionTime: 2021-08-28T01:05:00Z
       type: Recommended
       status: False
@@ -693,6 +686,8 @@ With this enhancement, the cluster-version operator will begin performing more i
 If the Prometheus implementation is not sufficiently hardened, malicious PromQL might expose the cluster to the attacker, with the simplest attacks being computationally intensive queries which cost CPU and memory resources that the administrator would rather be spending on more important tasks.
 [Future monitoring improvements][mon-1772] might reduce the risk of expensive queries.
 And it's also possible to teach the cluster-version operator to reject PromQL that does not match expected patterns.
+
+Attacks can also be mitigated by pointing ClusterVersion `spec.upstream` at an uncompromised update service, or by clearing `channel` to ask the CVO to not retrieve update recommendations at all.
 
 #### Clusters without local Prometheus stacks
 

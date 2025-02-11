@@ -2,15 +2,16 @@
 title: handle-local-volume-deletion
 authors:
   - "@gnufied"
+  - "@dobsonj"
 reviewers:
-  - "@jsafrane”
+  - "@jsafrane"
   - "@fbertina"
   - "@chuffman"
 approvers:
   - "@..."
 creation-date: 2021-04-17
-last-updated: 2021-04-17
-status: implementable
+last-updated: 2024-11-20
+status: implemented
 see-also: https://github.com/openshift/enhancements/blob/master/enhancements/storage/cleanup-lso-symlink.md
 replaces:
 superseded-by:
@@ -21,10 +22,10 @@ superseded-by:
 ## Release Signoff Checklist
 
 - [x] Enhancement is `implementable`
-- [ ] Design details are appropriately documented from clear requirements
-- [ ] Test plan is defined
-- [ ] Graduation criteria for dev preview, tech preview, GA
-- [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
+- [x] Design details are appropriately documented from clear requirements
+- [x] Test plan is defined
+- [x] Graduation criteria for dev preview, tech preview, GA
+- [x] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
 ## Summary
 
@@ -32,7 +33,7 @@ This enhancement proposes a mechanism that will allow PVs provisioned by local-s
 
 ## Motivation
 
-Currently when a user deletes `LocalVolume` or `LocalVolumeSet` objects - we do not automatically delete the PVs created from those objects and neither do we remove the symlinks created on the node. This has been documented as a limitation because removal of symlinks and PVs can be sometimes race-prone.
+Previously, when a user deleted `LocalVolume` or `LocalVolumeSet` objects - LSO did not automatically delete the PVs created from those objects and neither do we remove the symlinks created on the node. This has been documented as a limitation because removal of symlinks and PVs can be sometimes race-prone.
 
 This design fixes that problem and ensures that both PVs and symlinks are removed when `LocalVolume` and `LocalVolumeSet` objects are removed.
 
@@ -40,9 +41,6 @@ This design fixes that problem and ensures that both PVs and symlinks are remove
 
 * Do not allow deletion of `LocalVolumeSet` object if it has bound PVCs.
 * Remove unbound PVs and remove symlinks on the host if `LocalVolume` or `LocalVolumeSet` objects are removed.
-
-Note: We already do not permit deletion of `LocalVolume` objects via finalizer if it has bound PVCs. This was difficult to implement correctly for `LocalVolumeSet` objects because local-static-provisoner was being used as a daemon and tracking of individual PVs was not possible. This is discussed in more detail in - https://github.com/openshift/local-storage-operator/pull/150#discussion_r492828334
-
 
 ### Non-Goals
 
@@ -80,18 +78,40 @@ This would prevent binding of these PVs to any incoming PVCs.
 
 #### 2. Cleanup of volumes, symlinks and PVs on the node
 
-Currently reconciler loop running on the node re-creates PVs as long as a symlink for the given device exists in the LSO's pre-configured directory. When PV is marked as `Released` in step#1, the
-static provisioner code will automatically scrub the volume and delete the PV and hence changes required in reconciler loop of node daemon is:
+In this proposal, we will remove the symlink after a PV is cleaned and deleted _only if_ the `LocalVolume` / `LocalVolumeSet` owner object has a deletionTimestamp. The expected lifecycle of a PV from diskmaker's perspective is:
 
-1. If `LocalVolume` or `LocalVolumeSet` object is being deleted (has `deletionTimestamp`), it will not create new symlinks for automatically discovered volumes that match CR's device selection criteria.
-2. If `LocalVolume` or `LocalVolume` object is being deleted and symlink being evaluated exists but corresponding PV does not, then rather than creating new PV - it will remove the associated symlink.
+1. Create symlink
+2. Create PV
+3. PV eventually gets Released
+4. Clean PV
+5. Delete PV
+6. Remove symlink if the LV / LVSet was deleted
 
-This would ensure that diskmaker daemon on the node will remove symlinks and PVs that belong to CR that is being deleted.
+The symlink must not be removed before the PV is deleted, otherwise it interferes with the deletion process. Therefore, the changes required in reconciler loop of the diskmaker node daemonset are:
+
+1. Add a new finalizer `storage.openshift.com/lso-symlink-deleter` when creating the PV. This finalizer should not be removed until diskmaker has had the chance to delete the corresponding symlink.
+2. After the PV has been cleaned, the reconciler sends a Delete request for the PV and adds a deletionTimestamp, but the finalizer still exists at this point. We should not attempt to clean the PV again once the deletionTimestamp exists.
+3. After the PV is cleaned and deleted, diskmaker should remove the symlink if the LV / LVSet has a deletionTimestamp. Then it will remove the finalizer, allowing the PV object to be removed.
+4. If the `LocalVolume` or `LocalVolumeSet` object is being deleted (has `deletionTimestamp`), diskmaker should not create new symlinks or PVs for automatically discovered volumes that match CR's device selection criteria. It will only try to clean up any remaining PV's that are released.
 
 #### 3. Remove finalizer from CR if no PV exists for given CR in LSO control-plane
 
-In the control-plane of LSO if a CR is being deleted and has no associated PVs, the finalizer that prevents deletion of these CRs will be removed and hence associated `LocalVolume` and `LocalVolumeSet` objects will be deleted and successfully cleaned up.
+When diskmaker removes the `storage.openshift.com/lso-symlink-deleter` finalizer from the last PV, then the LSO control-plane will see the `LocalVolume` or `LocalVolumeSet` object is being deleted and has no associated PVs, and it will remove the `storage.openshift.com/local-volume-protection` finalizer that prevents deletion of these CRs.
+
+When the last `LocalVolume` or `LocalVolumeSet` object is deleted, at this point all the PV's associated with them are already gone, and the diskmaker daemonset is deleted.
 
 ## Drawbacks
 
 One drawback is - if user wants to keep one or more PVs around (in case they have data on it) and still delete the `LocalVolume` or `LocalVolumeSet` object - this will require users to set `ReclaimPolicy` of `Retain` on those PVs, before deleting `LocalVolume` or `LocalVolumeSet` objects and then using force delete to delete those objects.
+
+## Alternatives
+
+We discussed the possibility of _always_ deleting the symlink when the PV is deleted, even if the `LocalVolume` or `LocalVolumeSet` owner object is not deleted.
+The problem is this breaks a use case that worked before, where the user specifies `/dev/sda` in the LV for example.
+LSO converts this into `/dev/disk/by-id/...` and as long as the symlink remains, that same device will be used.
+But if we always remove the symlink when the PV is deleted, then a reboot could change device enumeration and it would then point to a different disk entirely the next time it is created.
+Because of that, we only remove the symlink when the owner object is deleted. In the future we could allow this "always delete the symlink" policy with an opt-in in the `LocalVolume` / `LocalVolumeSet` option for those who may find it useful.
+
+## Test Plan
+
+There is an e2e test to ensure when a `LocalVolume` or `LocalVolumeSet` object is deleted, the associated PV's and symlinks are also deleted.

@@ -1,11 +1,10 @@
 # See the OWNERS docs: https://git.k8s.io/community/contributors/guide/owners.md
 
 approvers:
-- LalatenduMohanty
+- PratikMahajan
 - sdodson
 reviewers:
-- jottofar
-- LalatenduMohanty
 - PratikMahajan
-- vrutkovs
 - wking
+- petr-muller
+- DavidHurta

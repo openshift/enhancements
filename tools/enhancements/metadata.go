@@ -3,9 +3,9 @@ package enhancements
 import (
 	"fmt"
 	"net/url"
+	"strings"
 
-	"github.com/pkg/errors"
-	"gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v3"
 )
 
 type MetaData struct {
@@ -22,9 +22,16 @@ type MetaData struct {
 func NewMetaData(content []byte) (*MetaData, error) {
 	result := MetaData{}
 
-	err := yaml.Unmarshal(content, &result)
+	strContent := string(content)
+	parts := strings.Split(strContent, "---")
+	if len(parts) < 3 {
+		return nil, fmt.Errorf("could not extract meta data from header: yaml was not delineated by '---' per the template")
+	}
+	yamlContent := strings.TrimSpace(parts[1])
+	yamlBytes := []byte(yamlContent)
+	err := yaml.Unmarshal(yamlBytes, &result)
 	if err != nil {
-		return nil, errors.Wrap(err, "could not extract meta data from header")
+		return nil, fmt.Errorf("could not extract meta data from header: %w", err)
 	}
 
 	return &result, nil
@@ -35,12 +42,12 @@ func NewMetaData(content []byte) (*MetaData, error) {
 func (s *Summarizer) GetMetaData(pr int) (*MetaData, error) {
 	enhancementFile, err := s.GetEnhancementFilename(pr)
 	if err != nil {
-		return nil, errors.Wrap(err, "could not determine the enhancement file name")
+		return nil, fmt.Errorf("could not determine the enhancement file name: %w", err)
 	}
 	fileRef := fmt.Sprintf("%s:%s", s.prRef(pr), enhancementFile)
 	content, err := getFileContents(fileRef)
 	if err != nil {
-		return nil, errors.Wrap(err, fmt.Sprintf("could not get content of %s", fileRef))
+		return nil, fmt.Errorf("could not get content of %q for metadata: %w", fileRef, err)
 	}
 	return NewMetaData(content)
 }
