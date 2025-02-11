@@ -195,8 +195,9 @@ For a two-node cluster to be successful, we need to ensure the following:
 1. The BMC secrets for RHEL-HA are created on disk during bootstrapping by the OpenShift installer via a MachineConfig.
 2. When pacemaker is initialized by the in-cluster entity responsible for starting pacemaker, pacemaker will try to set up fencing with this secret. If this is not successful, it throws an error which will cause degradation of the in cluster operator and would fail the installation process.
 3. Pacemaker periodically checks that the fencing agent is healthy (i.e. can connect to the BMC) and will create an alert if it cannot access the BMC.
-   * In this case, in order to allow a simple manual recovery by the user a script will be deployed on the node which will reset Pacemaker with the new fencing credentials.
+   * In this case, in order to allow a simple manual recovery by the user a script will be available on the node which will reset Pacemaker with the new fencing credentials.
 4. The cluster will continue to run normally in the state where the BMC cannot be accessed, but ignoring this alert will mean that pacemaker can only provide a best-effort recovery - so operations that require fencing will need manual recovery.
+5. When manual recovery is triggered by running the designated script on the node, it'll also update the Secret in order to make sure the Secret is aligned with the credentials kept in Pacemaker's cib file.
 
 Future Enhancements
 1. Allowing usage of external credentials storage services such as Vault or Conjur. In order to support this:
@@ -254,7 +255,8 @@ accordingly in the case of a upgrade event or whenever certificates are rotated.
 
 In case CEO will be used as the in-cluster operator responsible for setting up Pacemaker fencing it'll require root permissions which are currently mandatory to run the required pcs commands.
 Some mitigation or alternatives might be:
-- Use a different (new) in-cluster operator to set up Pacemaker fencing
+- Use a different (new) in-cluster operator to set up Pacemaker fencing 
+  - However, this approach contradicts the goal of reducing the OCP release payload, as introducing a new core operator would increase its size instead of streamlining it. Additionally, adding the operator would require more effort (release payload changes, CI setup, etc.) compared to integrating an operand into CEO. It would also still require root access, potentially raising similar concerns as using CEO, just with a different audience. 
 - Worth noting that the HA team suggests that there is a plan to adjust the pcs to a full client server architecture which will allow the pcs commands to run without root privileges. A partial faster solution may be provided by the HA team for a specific set of commands used by the pcs client.
 
 
@@ -285,7 +287,36 @@ pullSecret: ''
 sshKey: ''
 ```
 
-Since Baremetal Operator already has a place to specify bmc credentials there is no need to add them for this setup.
+For platform baremetal, a valid configuration is quite similar.
+```
+apiVersion: v1
+baseDomain: example.com
+compute:
+- name: worker
+  replicas: 0
+controlPlane:
+  name: master
+  replicas: 2
+metadata:
+  name: <cluster-name>
+platform:
+  baremetal:
+    fencingCredentials:
+      bmc:
+          address: ipmi://<out_of_band_ip>
+          username: <user>
+          password: <password>
+    apiVIPs:
+      - <api_ip>
+    ingressVIPs:
+      - <wildcard_ip>
+pullSecret: ''
+sshKey: ''
+```
+
+Unfortunately, Baremetal Operator already has a place to specify bmc credentials. However, providing credentials like this will result in conflicts as both the
+Baremetal Operator and the pacemaker fencing agent will have control over the machine state. In short, this example shows an invalid configuration that we must check for
+in the installer.
 ```
 apiVersion: v1
 baseDomain: example.com
