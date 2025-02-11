@@ -35,12 +35,14 @@ As a maintainer of an OpenShift cluster I need the ability to add bare metal hos
 
 ### Goals
 
-- Enable a migration path for existing clusters to leverage bare metal hosts
+- Enable a migration path for existing clusters to leverage nodes without cloud provider integration.
+- Cluster operators will not be `degraded` or stuck in `progressing`.
 
 ### Non-Goals
 
-- Migrating the control plane and infrastructure nodes to `platform: none`. Atleast initially, the goal is to add bare metal nodes to an existing `platform: vsphere` cluster.
-- Autoscaling or machine/cluster API management of bare metal nodes
+- Migrating the control plane and infrastructure nodes to `platform: none`. Atleast initially, the goal is to add nodes which lack cloud provider integration to an existing `platform: vsphere` cluster.
+- Autoscaling or machine/cluster API management of nodes
+- Bare metal API integration
 
 ## Proposal
 
@@ -50,9 +52,9 @@ The CSI operator will attempt to schedule daemonset pods on all nodes and [toler
 
 ### Workflow Description
 
-#### Adding a Bare Metal Node to a Platform vSphere cluster
+#### Adding a New Node Without Cloud Provider Integration to a Platform vSphere cluster
 
-1. Install a platform vSphere cluster
+1. Install a `platform: vsphere` cluster
 2. Download the RHCOS Live CD which aligns with the installed version of OpenShift.
 3. Obtain or create a worker.ign file. This will be used to bootstrap the bare metal node.
 4. Boot the new bare metal host from the RHCOS Live CD.
