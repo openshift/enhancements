@@ -64,12 +64,12 @@ coreos-installer install /dev/sdX --insecure-ignition --ignition-url=https://pat
 ```
 6. Reboot the node.
 7. Approve CSRs for the node
-8. Apply a taint to the node to block workloads from being scheduled:
+8. Apply a taint to the node to block workloads unintended workloads from being scheduled:
 ```yaml=
 spec:
   taints:
-    - key: bare-metal/no-vmware
-      value: 'true'
+    - key: cloud-provider-integration
+      value: 'NotPresent'
       effect: NoExecute
 ```
 Note: The [vSphere CSI driver daemonset](https://github.com/kubernetes-sigs/vsphere-csi-driver/blob/4479e2418f38cb93b5da4df7e043aff71a20cccc/manifests/vanilla/vsphere-csi-driver.yaml#L565-L569) tolerates all taints. I was able to disable it by making the operator unmanaged and removing the tolerations.
