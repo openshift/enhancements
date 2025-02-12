@@ -88,46 +88,78 @@ The direct write requests take raw Prometheus data and require both special
 labels (`_id` for the cluster id) and crafting the authentication headers
 (cluster id and pull secret in a specific format in HTTP headers).
 
-OpenShift is using the same API and the same backend, so we need a way to
-distinguish MicroShift in the pool of metrics. For this we can use labels, as
-it does not require applying for new supported metrics. MicroShift metrics
-labels summary:
-| Label | Values | Approximate max size |
-|:---|:---|:---|
-|_id|cluster id|40B|
-|label_kubernetes_io_arch|amd64, aarch64|32B|
-|resource|Used to specify K8s resource names: pods, namespaces, etc.|20-50B|
-|version|microshift version|16B|
-|ostree_commit|OStree commit id, if the system is deployed using ostree. This helps identifying fleets|80B|
+A comprehensive list of metrics sent by MicroShift follows.
 
-Metrics from MicroShift are already supported in the API because OpenShift is
-using them. List follows:
-* cluster:capacity_cpu_cores:sum. Number of allocated CPUs for MicroShift.
-* cluster:capacity_memory_bytes:sum. Number of bytes of memory allocated for
-  MicroShift.
-* cluster:cpu_usage_cores:sum. Usage of CPU in percentage.
-* cluster:memory_usage_bytes:sum. Usage of memory in percentage.
-* cluster:usage:resources:sum. Usage of k8s resources, in count. Number of
-  pods, namespaces, services, etc.
-* cluster:usage:containers:sum. Number of active containers.
-* cluster_version. Information about installed version.
-* instance:etcd_object_counts:sum. Number of objects etcd contains.
+#### `cluster:capacity_cpu_cores:sum`
+This metric reports the CPU cores MicroShift can use. Already supported in
+OpenShift.
 
-Combining metrics with their labels:
-| Metric | Labels |
-|:---|:---|
-|cluster:capacity_cpu_cores:sum|_id, label_kubernetes_io_arch, ostree_commit|
-|cluster:capacity_memory_bytes:sum|_id, label_kubernetes_io_arch, ostree_commit|
-|cluster:cpu_usage_cores:sum|_id, ostree_commit|
-|cluster:memory_usage_bytes:sum|_id, ostree_commit|
-|cluster:usage:resources:sum|_id, ostree_commit, resource|
-|cluster:usage:containers:sum|_id, ostree_commit|
-|cluster_version|_id, ostree_commit, version|
+Labels:
+* `_id`: cluster ID. UUID string.
+* `label_kubernetes_io_arch`: Label from the node, determines the architecture.
+  Values can be `amd64`, `aarch64`.
+* `label_node_openshift_io_os_id`: Label from the node, determines the OS type.
+  Values can be `rhel`.
+* `label_beta_kubernetes_io_instance_type`: Label from the node. MicroShift
+  sets this to `rhde`. Possible values are `rhde`.
 
-Using the names, labels sizes listed above, each sample requiring a float64
-and an int64 value, `cluster:usage:resources:sum` having 6 different time
-series (one per resource type, as listed in the proposal), all metrics combined
-are over 1.5KB and below 2KB.
+#### `cluster:capacity_memory_bytes:sum`
+This metric reports the memory MicroShift can use in bytes. Already supported
+in OpenShift.
+
+Labels:
+* `_id`: cluster ID. UUID string.
+* `label_kubernetes_io_arch`: Label from the node, determines the architecture.
+  Values can be `amd64`, `aarch64`.
+* `label_node_openshift_io_os_id`: Label from the node, determines the OS type.
+  Values can be `rhel`.
+
+#### `cluster:cpu_usage_cores:sum`
+This metric reports the CPU usage in percentage. Already supported in
+OpenShift.
+
+Labels:
+* `_id`: cluster ID. UUID string.
+
+#### `cluster:memory_usage_bytes:sum`
+This metric reports the memory usage in percentage. Already supported in
+OpenShift.
+
+Labels:
+* `_id`: cluster ID. UUID string.
+
+#### `cluster:usage:resources:sum`
+This metric reports the number of Kubernetes objects by resource type. Already
+supported in OpenShift.
+
+Labels:
+* `_id`: cluster ID. UUID string.
+* `resource`: name of the kubernetes resource. Values can be `pods`,
+  `namespaces`, `services`, `ingresses.networking.k8s.io`,
+  `routes.route.openshift.io`,
+  `customresourcedefinitions.apiextensions.k8s.io`.
+
+#### `cluster:usage:containers:sum`
+This metric reports the number of running containers. Already supported in
+OpenShift.
+
+Labels:
+* `_id`: cluster ID. UUID string.
+
+#### `microshift_version`
+This metric reports information about MicroShift version. New metric not
+supported in OpenShift.
+
+Labels:
+* `_id`: cluster ID. UUID string.
+* `version`: MicroShift version. Possible values are `\d{1}.\d{1,2}.\d{1,2}`.
+* `type`: Describes deployment type. Possible values are `rpm` and `ostree`.
+* `commit`: In case `type` is `ostree`, this will hold the ostree commit.
+  Format is a 64 character SHA.
+
+
+Using the names and labels listed above, each sample requiring a float64
+and an int64 value, all metrics combined are under 2KB.
 
 In order to keep metrics synchronized with those of OpenShift, in terms of API
 support, MicroShift will be using CI:
