@@ -17,14 +17,23 @@ give a clear target for release quality (zero unaccepted statistical regressions
 and provide a transparent record of our decisions around the release timing/quality tradeoff.
 
 This improvement comes with a new responsibility for our management team: 
-identified regressions must be accepted by engineering leadership (currently Steve Cuppett) and BU leadership (currently Tushar Katarki).
+identified regressions must be accepted by engineering leadership (Nick Stielau, David Eads) and BU leadership (Kirsten Newcomer).
 
 After written approval in the Jira bug representing the regression, the component team would reduce the acceptable reliability
-for a particular capability in OCP. as [openshift/sippy#1991](https://github.com/openshift/sippy/pull/1991) demonstrates.
-Once merged, this change will allow `operator conditions network`, with the specified set of variants, to go from 100% reliable to 66% reliable for the 4.17 release.
-It will, however, maintain the 4.16 100% baseline when 4.17 is the basis.
-The format clearly exposes
+for a particular capability in OCP.
+
+Consider [openshift/sippy#1991](https://github.com/openshift/sippy/pull/1991).
+Once merged, this change will allow `operator conditions network`, with the
+specified set of variants, to go from 100% reliable to 66% reliable for the
+4.17 release. It will, however, maintain the 4.16 100% baseline when 4.17 is the basis.
+The format clearly exposes:
 1. What is changing
 2. What the previous reliability was
 3. What the new reality is
 4. Why we are allowing the regression
+
+This "regression allowance" is due one week before the minor release date.  By
+that time anything simple low risk should have long since merged and anything
+risky must wait until an errata.  It also provides sufficient time for
+discussion and ensures that we can release with the level of quality that we've
+agreed to.
