@@ -2,19 +2,22 @@
 title: Control Group v2 Enablement
 authors:
   - "@rphillips"
+  - "@sairameshv"
 reviewers:
   - "@mrunalp"
+  - "@haircommander"
   - "@kikisdeliveryservice"
   - "@sinnykumari"
   - "@yuqi-zhang"
   - "@cgwalters"
 approvers:
   - "@mrunalp"
-  - "@sinnykumari"
+  - "@yuqi-zhang"
 api-approvers:
+  - "@deads2k"
   - "@sttts"
 creation-date: 2021-10-19
-last-updated: 2021-10-20
+last-updated: 2025-02-05
 status: implementable
 ---
 
@@ -40,12 +43,10 @@ status: implementable
 
 ## Summary
 
-Control Group v2 (cgroup v2) enablement in Kubernetes has progressed to beta
+Control Group v2 (cgroup v2) enablement in Kubernetes has progressed to stable
 [upstream](https://github.com/kubernetes/enhancements/tree/master/keps/sig-node/2254-cgroup-v2).
-The underlying runtime (cri-o) and supporting subsystems are now ready for
-customers to begin their own testing with it. Not all workloads will be
-compatible with cgroup v2, so it will *not* be enabled by default within
-OpenShift at this time.
+cgroup v2 is enabled by default in all the freshly installed Openshift clusters >= 4.14.
+Control Group v1 is a deprecated feature from OCP 4.16 and the support is intended to be removed from OCP >= 4.19
 
 Note: This enhancement is focusing on `pure` mode cgroup v2. Mixed mode environments
 may behave differently (metrics, vpa, hpa, etc) since cgroup v1 is not
@@ -70,6 +71,8 @@ Some features of cgroup v2 include:
 
 - [ ] Enable cgroup v2 within the Openshift API
 - [ ] Add kernel flags to MCO to enable cgroup v2 on nodes
+- [ ] Add an admission webhook to deny updating `CgroupMode` of the `nodes.config.openshift.io` object to `CgroupMode_V1`
+- [ ] Block the upgrades of the OCP clusters that are using cgroup v1 until migrated to cgroup v2
 
 ### Non-Goals
 
@@ -81,12 +84,10 @@ to gather data from.
 
 ## Proposal
 
-The option to enable cgroup v2 will have to reside in a centralized location.
-The [OpenShift Infrastructure config
-object](https://github.com/openshift/api/blob/master/config/v1/types_infrastructure.go#L28)
-contains information describing how a cluster functions including cloud config  
-and platform specification for each cloud. Setting the cgroup mode is an
-infrastructure setting.
+- The option to enable cgroup v2 resides in a centralized location i.e. [OpenShift Node config
+object](https://github.com/openshift/api/blob/master/config/v1/types_node.go)
+- Set the upgrade ability of the MCO cluster operator to `false` if a cluster is on cgroup v1
+- An admission hook is introduced to allow if a cluster is transitioning from "cgroup v1" -> "cgroup v2" and deny the other way of "cgroup v2" -> "cgroup v1"
 
 ### API Extensions
 
@@ -121,19 +122,19 @@ type NodeSpec struct {
 
 ### Operational Aspects of API Extensions
 
-Once the previous API is defined, the MCO will read the configured object and
-set the appropriate kernel options (on bootstrap). The MCO will report an error
+- MCO reads the configured object and
+sets the appropriate kernel options (on bootstrap).
+- The MCO will report an error
 if a user tries to modify/add cgroup related kargs within a MachineConfig.
-
-
-The following kernel command line arguments would be set when `CgroupMode_v2` is enabled:
+- An admission hook is introduced to allow if a cluster is transitioning from "cgroup v1" -> "cgroup v2" and deny the other way of "cgroup v2" -> "cgroup v1"
+- MCO also reports error if a user tries to set the `CgroupMode` to `CgroupMode_V1` and sets the cluster operator's status condition of `Upgradeble=False`
+- The following kernel command line arguments would be observed on the machine config pools by default and also when `CgroupMode_v2` is enabled:
 ```yaml
   kernelArguments:
     - systemd.unified_cgroup_hierarchy=1
     - cgroup_no_v1="all"
     - psi=1 
 ```
-
 #### Failure Modes
 
 N/A
@@ -201,19 +202,39 @@ The following jobs will be run against cgroup v2 periodically and with a minimum
 
 ### Upgrade / Downgrade Strategy
 
-Downgrading a cluster to an OpenShift version not containing cgroup v2 support
+- Downgrading a cluster to an OpenShift version not containing cgroup v2 support
 is unsupported.
-
+- Upgrading a cluster which is on cgroup v1 to a version >= 4.19 is blocked until it is migrated to cgroup v2.
+In such case, the MCO cluster operator's status condition is set to `Upgradeable=False` blocking the upgrade.
+- A user/admin has to manually set the `CgroupMode` from `v1` to `v2` as follows to make it `Upgradeable=True` again.
+```shell
+# fetch the nodes.config.openshift.io object
+oc edit nodes.config.openshift.io cluster
+# Update the `CgroupMode` field inside the spec to "v2"
+# Wait for the MCO to rollout cgroup v2 related kernel arguments on all the machine config pools
+```
 ### Version Skew Strategy
 
 A cluster installed with cgroup v2 will abide by the usual skew upgrade path.
 
 #### Removing a deprecated feature
+cgroup v1 support would be removed from the future versions of RHEL and hence the setting of `CgroupMode_V1` would be denied by an admission webhook from OCP clusters(>= 4.19)
 
-N/A
+Note: Even after removing the support to configure cgroup v1 from OCP, the `CgroupMode_V1` is not deleted as one of the enum values for the `CgroupMode` in the interest of non-breaking API changes.
 
 ## Implementation History
-
+Following code change inside the MCO [operator](https://github.com/openshift/machine-config-operator/blob/master/pkg/operator/status.go#L265)'s `pkg/operator/status.go` sets the ClusterOperator's `Upgradeable` status to `False` if the cluster is found to be using `CgroupMode_V1`
+```go
+configNode, err := optr.configClient.ConfigV1().Nodes().Get(context.Background(), ctrlcommon.ClusterNodeInstanceName, metav1.GetOptions{})
+if err != nil {
+	return err
+}
+if configNode.Spec.CgroupMode == configv1.CgroupModeV1 {
+	coStatusCondition.Status = configv1.ConditionFalse
+	coStatusCondition.Reason = "ClusterOnCgroupV1"
+	coStatusCondition.Message = "Cluster is using cgroup v1 and is not upgradable. Please update the `CgroupMode` in the `nodes.config.openshift.io` object to 'v2'. Once upgraded, the cluster cannot be changed back to cgroup v1"
+}
+```
 ## Alternatives
 
 ## Drawbacks
