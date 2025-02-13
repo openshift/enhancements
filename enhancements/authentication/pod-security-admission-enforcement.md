@@ -197,7 +197,7 @@ const (
 	// to "Restricted" on the kube-apiserver.
 	// This represents full enforcement, where both Namespace labels and the global config
 	// enforce Pod Security Admission restrictions.
-	EnforcmentModeFull PSAEnforcementMode = "FullEnforcement"
+	EnforcementModeFull PSAEnforcementMode = "FullEnforcement"
 )
 
 // PSATargetMode reflects the user’s chosen (“target”) enforcement level.
