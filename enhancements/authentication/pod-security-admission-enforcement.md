@@ -135,7 +135,7 @@ To address this, the proposal introduces:
 // ValidatedSCCSubjectTypeAnnotation indicates the subject type that allowed the
 // SCC admission. This can be used by controllers to detect potential issues
 // between user-driven SCC usage and the ServiceAccount-driven SCC usage.
-ValidatedSCCSubjectTypeAnnotation = "security.openshift.io/ValidatedSCCSubjectType"
+ValidatedSCCSubjectTypeAnnotation = "security.openshift.io/validated-scc-subject-type"
 ```
 
 This annotation will be set by the [`SecurityContextConstraint` admission](https://github.com/openshift/apiserver-library-go/blob/60118cff59e5d64b12e36e754de35b900e443b44/pkg/securitycontextconstraints/sccadmission/admission.go#L138) plugin.
