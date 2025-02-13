@@ -259,7 +259,7 @@ type PSAEnforcementConfigStatus struct {
 	// mode in the cluster. Unlike spec.targetMode, which expresses the desired mode,
 	// enforcementMode reflects the actual state after considering any existing
 	// violations or user overrides.
-	EnforcementMode PSAEnforcementMode `json:"enforcmentMode"`
+	EnforcementMode PSAEnforcementMode `json:"enforcementMode"`
 
 	// violatingNamespaces is a list of namespaces that can initially block the
 	// cluster from fully enforcing a "Restricted" mode. Administrators should
