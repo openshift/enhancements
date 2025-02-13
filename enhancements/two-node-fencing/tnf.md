@@ -138,7 +138,7 @@ At a glance, here are the components we are proposing to change:
 | [ETCD Operator](#etcd-operator-changes)                           | Add mode for disabling management of the etcd container, scaling strategy for 2 nodes, and a controller for initializing pacemaker |
 | [Install Config](#install-config-changes)                         | Update install config API to accept fencing credentials for `platform: None` and `platform: Baremetal`                             |
 | [Installer](#installer-changes)                                   | Populate the nodes with initial pacemaker configuration when deploying with 2 control-plane nodes and no arbiter                   |
-| [MCO](#mco-changes)                                               | Add an MCO extension for installating pacemaker and corosync in RHCOS; MachineConfigPool maxUnavailable set to 1                   |
+| [MCO](#mco-changes)                                               | Add an MCO extension for installing pacemaker and corosync in RHCOS; MachineConfigPool maxUnavailable set to 1                     |
 | [Authentication Operator](#authentication-operator-changes)       | Update operator to accept minimum 1 kube api servers when `ControlPlaneTopology` is `DualReplica`                                  |
 | [Hosted Control Plane](#hosted-control-plane-changes)             | Disallow HyperShift from installing on the `DualReplica` topology                                                                  |
 | [OLM Filtering](#olm-filtering-changes)                           | Leverage support for OLM to filter operators based off of control plane topology                                                   |
@@ -180,6 +180,13 @@ An important facility of the installation flow is the transition from a CEO depl
 3. The aforementioned in-cluster entity will signal CEO to relinquish control of etcd by setting CEO's `managedEtcdKind` to `External`. When this happens, CEO immediately removes the etcd container from the static pod configs. The resource agents for etcd are running from step 2, and they are configured to wait for etcd containers to be gone so they can restart them using Podman.
 4. The installation proceeds as normal once the containers start.
 If for some reason, the etcd containers cannot be started, then the installation will fail. The installer will pull logs from the control-plane nodes to provide context for this failure.
+
+###### Managing Pacemaker and Resource/Fence agent Configuration
+Pacemaker configurations (as well as its resource and fence agent configurations) do not need to be stored as files, as they are dynamically created using pcs commands. Instead, the in-cluster entity will handle triggering these commands as needed.
+
+For the initial Technical Preview phase, we will use default values for these configurations, except for fencing configurations (which are covered in the next section). 
+
+Looking ahead to General Availability (GA), we are considering a mapping solution that will allow users to specify certain values, which will then be used to generate the configurations dynamically.
 
 ###### Configuring Fencing Via MCO
 Fencing setup is the last important aspect of the cluster installation. For the cluster installation to be successful, fencing should be configured and active before we declare the installation successful. To do this, baseboard management console (BMC) credentials need to be made available to the control-plane nodes as part of pacemaker initialization.
