@@ -181,46 +181,46 @@ import (
 type PSAEnforcementMode string
 
 const (
-	// EnforcementModePrivileged indicates that no Pod Security restrictions
+	// PSAEnforcementModePrivileged indicates that no Pod Security restrictions
 	// are effectively applied.
 	// This aligns with a pre-rollout or fully "privileged" cluster state,
 	// where neither enforce labels are set nor the global config enforces "Restricted".
-	EnforcementModePrivileged PSAEnforcementMode = "Privileged"
+	PSAEnforcementModePrivileged PSAEnforcementMode = "Privileged"
 
-	// EnfrocementModeLabel indicates that the cluster is enforcing Pod Security
+	// PSAEnforcementModeLabel indicates that the cluster is enforcing Pod Security
 	// labels at the Namespace level (via the PodSecurityAdmissionLabelSynchronizationController),
 	// but the global kube-apiserver configuration is still "Privileged."
-	EnforcementModeLabel PSAEnforcementMode = "LabelEnforcement"
+	PSAEnforcementModeLabel PSAEnforcementMode = "LabelEnforcement"
 
-	// EnforcmentModeFull indicates that the cluster is enforcing
+	// PSAEnforcementModeFull indicates that the cluster is enforcing
 	// labels at the Namespace level, and the global configuration has been set
 	// to "Restricted" on the kube-apiserver.
 	// This represents full enforcement, where both Namespace labels and the global config
 	// enforce Pod Security Admission restrictions.
-	EnforcementModeFull PSAEnforcementMode = "FullEnforcement"
+	PSAEnforcementModeFull PSAEnforcementMode = "FullEnforcement"
 )
 
 // PSATargetMode reflects the user’s chosen (“target”) enforcement level.
 type PSATargetMode string
 
 const (
-	// TargetModePrivileged indicates that the user wants no Pod Security
+	// PSATargetModePrivileged indicates that the user wants no Pod Security
 	// restrictions applied. The desired outcome is that the cluster remains
 	// in a fully privileged (pre-rollout) state, ignoring any label enforcement
 	// or global config changes.
-	TargetModePrivileged PSATargetMode = "Privileged"
+	PSATargetModePrivileged PSATargetMode = "Privileged"
 
-	// TargetModeConditional indicates that the user is willing to let the cluster
+	// PSATargetModeConditional indicates that the user is willing to let the cluster
 	// automatically enforce a stricter enforcement once there are no violating Namespaces.
 	// If violations exist, the cluster stays in its previous state until those are resolved.
 	// This allows a gradual move towards label and global config enforcement without
 	// immediately breaking workloads that are not yet compliant.
-	TargetModeConditional PSATargetMode = "Conditional"
+	PSATargetModeConditional PSATargetMode = "Conditional"
 
-	// TargetModeRestricted indicates that the user wants the strictest possible
+	// PSATargetModeRestricted indicates that the user wants the strictest possible
 	// enforcement, causing the cluster to ignore any existing violations and
 	// enforce "Restricted" anyway. This reflects a final, fully enforced state.
-	TargetModeRestricted PSATargetMode = "Restricted"
+	PSATargetModeRestricted PSATargetMode = "Restricted"
 )
 
 // PSAEnforcementConfig is the config for the PSA enforcement.
