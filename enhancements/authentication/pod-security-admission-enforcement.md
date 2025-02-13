@@ -190,7 +190,7 @@ const (
 	// EnfrocementModeLabel indicates that the cluster is enforcing Pod Security
 	// labels at the Namespace level (via the PodSecurityAdmissionLabelSynchronizationController),
 	// but the global kube-apiserver configuration is still "Privileged."
-	EnfrocementModeLabel PSAEnforcementMode = "LabelEnforcement"
+	EnforcementModeLabel PSAEnforcementMode = "LabelEnforcement"
 
 	// EnforcmentModeFull indicates that the cluster is enforcing
 	// labels at the Namespace level, and the global configuration has been set
