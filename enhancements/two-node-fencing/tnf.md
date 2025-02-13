@@ -581,7 +581,20 @@ operations. In this state, we have an operation running cluster with a single co
 In short - it is not recommended that users allow their clusters to remain in this semi-operational state longterm. It is intended help ensure that api-server and workloads are available as much as
 possible, but it is not sufficient for the operation of a healthy cluster longterm.
 
-Because of the flexibility it can offer users to adjust their cluster capacity according to their needs, transitioning between control-plane topologies may be introduced for evaluation in a future enhancement.
+Because of the flexibility it can offer users to adjust their cluster capacity according to their needs, transitioning between control-plane topologies may be introduced for evaluation in a future
+enhancement.
+
+#### Notes About Installing with or Adding Compute Nodes
+
+As currently envisioned, it doesn't make sense for a customer to install a new TNF cluster with compute nodes. If the cluster has compute capacity for 3 nodes, it should always be installed as a
+highly available (3 control-plane) cluster. This becomes more complicated for customers that discover after installing a fleet of TNF clusters that they need to add compute capacity to meet a rise in
+demand. The preferred solution for this would be to support some kind of topology transition to a highly available compact (3-node) cluster. This is not currently supported, and may never be in
+OpenShift.
+
+The alternative that we expect to be asked for is to support compute nodes in TNF. For this reason, we'd like to avoid investing heavily in preventing compute nodes from joining the cluster - at
+install or runtime. It's worth noting that no variant of OpenShift currently actively prevents compute nodes from being added to the cluster.
+
+The only boundary we'd set to is declare compute nodes as unsupported in documentation. This would limit the amount of technical debt that we will likely need to undo in a future release.
 
 #### Hypershift / Hosted Control Planes
 
