@@ -398,6 +398,33 @@ As such, the versioning change should be transparent to end-users, but on the
 off chance that a customer is relying on the current semantics, we should still
 announce it in the GA release notes.
 
+### /etc/os-release
+
+Previously, the node image used a heavily customized `/etc/os-release`, mutating
+some key fields inherited from RHEL. A major theme of this enhancement and more
+largely of the Image Mode effort is re-emphasizing the fact that RHCOS simply
+builds on top of RHEL Image Mode. As such, many fields in `/etc/os-release` are
+now left untouched.
+
+Important fields that **will be different**:
+
+Key|Old Value|New Value
+---|---|---
+VERSION|419.94.202412101440-0|9.6.20250203-0 (Plow)
+VERSION_ID|4.19|9.6
+OSTREE_VERSION|419.94.202412101440-0|9.6.20250203-0
+ID|rhcos|rhel
+
+Important fields that **remain the same**:
+
+Key|Value
+---|---
+NAME|Red Hat Enterprise Linux CoreOS
+PRETTY_NAME|Red Hat Enterprise Linux CoreOS $VERSION
+VARIANT|CoreOS
+VARIANT_ID|coreos
+OPENSHIFT_VERSION|4.19
+
 #### Hidden dependencies
 
 Given that we're effectively removing packages from the bootimages, we may
