@@ -25,13 +25,10 @@ superseded-by: []
 
 ## Summary
 
-This enhancement introduces a **new cluster-scoped API**, changes to the relevant controllers and to the `OpenShiftPodSecurityAdmission` `FeatureGate` to gradually roll out [Pod Security Admission (PSA)](https://kubernetes.io/docs/concepts/security/pod-security-admission/) enforcement [in OpenShift](https://www.redhat.com/en/blog/pod-security-admission-in-openshift-4.11).
-Enforcement means that the `PodSecurityAdmissionLabelSynchronizationController` sets the `pod-security.kubernetes.io/enforce` label on Namespaces, and the PodSecurityAdmission plugin enforces the `Restricted` [Pod Security Standard (PSS)](https://kubernetes.io/docs/concepts/security/pod-security-standards/).
-By “gradually”, it means that these changes happen in separate steps.
+This enhancement introduces a **new cluster-scoped API** and changes to the relevant controllers to rollout [Pod Security Admission (PSA)](https://kubernetes.io/docs/concepts/security/pod-security-admission/) enforcement [in OpenShift](https://www.redhat.com/en/blog/pod-security-admission-in-openshift-4.11).
+Enforcement means that the `PodSecurityAdmissionLabelSynchronizationController` sets the `pod-security.kubernetes.io/enforce` label on Namespaces, and the PodSecurityAdmission plugin enforces the `Restricted` [Pod Security Standard (PSS)](https://kubernetes.io/docs/concepts/security/pod-security-standards/) globally on Namespaces without any label.
 
-The new API offers users the option to manipulate the outcome by enforcing the `Privileged` or `Restricted` PSS directly.
-The suggested default decision is `Conditional`, which only progresses if no potentially failing workloads are found.
-The progression starts with the `PodSecurityAdmissionLabelSynchronizationController` labeling **Namespaces** and finishes with the **Global Configuration**.
+The new API allows users to either enforce the `Restricted` PSS or maintain `Privileged` PSS for several releases. Eventually, all clusters will be required to use `Restricted` PSS.
 
 This enhancement expands the ["PodSecurity admission in OpenShift"](https://github.com/openshift/enhancements/blob/61581dcd985130357d6e4b0e72b87ee35394bf6e/enhancements/authentication/pod-security-admission.md) and ["Pod Security Admission Autolabeling"](https://github.com/openshift/enhancements/blob/61581dcd985130357d6e4b0e72b87ee35394bf6e/enhancements/authentication/pod-security-admission-autolabeling.md) enhancements.
 
@@ -40,8 +37,12 @@ This enhancement expands the ["PodSecurity admission in OpenShift"](https://gith
 After introducing Pod Security Admission and Autolabeling based on SCCs, some clusters were found to have Namespaces with Pod Security violations.
 Over the last few releases, the number of clusters with violating workloads has dropped significantly.
 Although these numbers are now quite low, it is essential to avoid any scenario where users end up with failing workloads.
-To ensure a smooth and safe transition, this proposal uses a gradual, conditional rollout based on the new API.
-This approach also provides an overview of which Namespaces could contain failing workloads.
+
+To ensure a safe transition, this proposal suggests that if a potential failure of workloads is being detected in release `n`, that the operator moves into `Upgradeable=false`.
+The user would need to either resolve the potential failures or set the enforcing mode to `Privileged` for now in order to be able to upgrade.
+In the following release `n+1`, the controller will then do the actual enforcement, if `Restricted` is set.
+
+An overview of the Namespaces with failures will be listed in the API's status, should help the user to fix any issues.
 
 ### Goals
 
@@ -53,7 +54,6 @@ This approach also provides an overview of which Namespaces could contain failin
 
 1. Enabling the PSA label-syncer to evaluate workloads with user-based SCC decisions.
 2. Providing a detailed list of every Pod Security violation in a Namespace.
-3. Moving seamlessly between different progressions back and forth.
 
 ## Proposal
 
@@ -66,25 +66,16 @@ As a System Administrator:
 
 ### Current State
 
-When the `OpenShiftPodSecurityAdmission` feature flag is enabled today:
+When the `OpenShiftPodSecurityAdmission` feature flag is enabled:
 - The [PodSecurity configuration](https://github.com/openshift/cluster-kube-apiserver-operator/blob/218530fdea4e89b93bc6e136d8b5d8c3beacdd51/pkg/cmd/render/render.go#L350-L358) for the kube-apiserver enforces `restricted` across the cluster.
 - The [`PodSecurityAdmissionLabelSynchronizationController`](https://github.com/openshift/cluster-policy-controller/blob/327d3cbd82fd013a9d5d5733eb04cc0dcd97aec5/pkg/cmd/controller/psalabelsyncer.go#L17-L52) automatically sets the `pod-security.kubernetes.io/enforce` label.
 
-This all-or-nothing mechanism makes it difficult to safely enforce PSA while minimizing disruptions.
+### Rollout
 
-### Gradual Process
+Release `n` will introduce the new API. It will default to `Restricted` PSS in its `spec` and list violating Namespaces with potentially failing workloads in the `status` field.
+If violating Namespaces are detected, the Operator will move into `Upgradeable=false`. To be able to upgrade, the user needs to resolve the violations or set the `spec` to `Privileged`.
 
-To allow a safer rollout of enforcement, the following steps are proposed:
-
-1. **Label Enforce**
-   The `PodSecurityAdmissionLabelSynchronizationController` will set the `pod-security.kubernetes.io/enforce` label on Namespaces, provided the cluster would have no failing workloads.
-
-2. **Global Config Enforce**
-   Once all viable Namespaces are labeled successfully (or satisfy PSS `restricted`), the cluster will set the `PodSecurity` configuration for the kube-apiserver to `Restricted`, again only if there would be no failing workloads.
-
-The feature flag `OpenShiftPodSecurityAdmission` being enabled is a pre-condition for this process to start.
-It will also serve as a break-glass option.
-If the progression causes failures for users, the rollout will be reverted by removing the `FeatureGate` from the default `FeatureSet`.
+In Release `n+1` the the controller will enforce PSA, if the `spec` is set to `Restricted`. If the `spec` is set to `Privileged` or the `FeatureGate` of `OpenShiftPodSecurityAdmission` is disable, the controllers won't enforce. The `FeatureGate` will act as a break-glass option.
 
 #### Examples
 
@@ -98,21 +89,11 @@ Examples of failing workloads include:
 
 ### User Control and Insights
 
-To allow user influence over this gradual transition, a new API called `PSAEnforcementConfig` is introduced.
+To allow user influence over this transition, a new API called `PSAEnforcementConfig` is introduced.
 It will let administrators:
-- Force `Restricted` enforcement, ignoring potential violations.
-- Remain in `Privileged` mode, regardless of whether violations exist or not.
-- Let the cluster evaluate the state and automatically enforce `Restricted` if no workloads would fail.
-- Identify Namespaces that would fail enforcement.
-
-### Release Timing
-
-The gradual process will span three releases:
-- **Release `n-1`**: Introduce the new API, improve diagnostics for identifying violating Namespaces and enable the PSA label syncer to remove enforce labels from its release `n` version.
-- **Release `n`**: Permit the `PodSecurityAdmissionLabelSynchronizationController` to set enforce labels if there are no workloads that would fail.
-- **Release `n+2`**: Enable the PodSecurity configuration to enforce `restricted` if there are no workloads that would fail.
-
-Here, `n` could be OCP `4.19`, assuming it is feasible to backport the API and diagnostics to earlier versions.
+- Enable PSA enforcement by leaving the `spec` to `Restricted` and having no violating Namespaces. 
+- Block PSA enforcement by setting the `spec` to `Privileged`.
+- Get insights which Namespaces would fail in order to resolve the issues.
 
 ## Design Details
 
