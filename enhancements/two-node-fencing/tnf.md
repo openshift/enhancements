@@ -222,7 +222,7 @@ the same considerations but these are not present during installation.
 See the API Extensions section below for sample install-configs.
 
 For a two-node cluster to be successful, we need to ensure the following:
-1. The BMC secrets for RHEL-HA are created on disk during bootstrapping by the OpenShift installer via a MachineConfig.
+1. The BMC secrets for RHEL-HA are will be in a new section of the install-config.yaml, this will trigger the default flow of creating manifests and having the API server creating the Secrets from those manifests.
 2. When pacemaker is initialized by the in-cluster entity, the in-cluster entity will pass it the fencing credentials extracted from the secret, which will be used by pacemaker to set up fencing. If this is not successful, it throws an error which
    will cause degradation of the in cluster operator and would fail the installation process.
 3. Pacemaker periodically checks that the fencing configuration is correct (i.e. can connect to the BMC) and will create an alert if it cannot access the BMC.
