@@ -172,22 +172,43 @@ goes wrong.
 
 ### Workflow Description
 
-> Explain how the user will use the feature. Be detailed and explicit.  Describe
-> all of the actors, their roles, and the APIs or interfaces involved. Define a
-> starting state and then list the steps that the user would need to go through to
-> trigger the feature described in the enhancement. Optionally add a
-> [mermaid](https://github.com/mermaid-js/mermaid#readme) sequence diagram.
->
-> Use sub-sections to explain variations, such as for error handling,
-> failure recovery, or alternative outcomes.
+The workflow in this case is an upgrade process. From the _user_ perspective the
+CRDs will be fully managed via the platform from here on out, so they only need
+to interface with the upgrade workflow on the condition that their cluster had
+previously installed Gateway API CRDs. The workflow consists of the pre-upgrade
+checks and the post-upgrade checks.
 
-**cluster-admin** is a human user responsible for managing a cluster.
+### Pre-upgrade
 
-1. Start with a 4.18 cluster with conflicting CRDs.
-2. Upgrade to 4.19.
-3. Check clusteroperators, see a conflict.
-4. Run some `oc` command.
-5. Check the ingress clusteroperator again.  Now everything should be dandy.
+1. In the CIO a pre-upgrade check verifies CRD presence
+  * IF the CRDs are present
+    * an admingate is created requiring acknowledgement of CRD succession
+    * UNTIL the schema matches an exact versions we set `Upgradable=false`
+2. Once CRDs are not present OR an exact match we set `Upgradable=true`
+
+> **Note**: A **cluster-admin** is required for these steps.
+
+> **Note**: The logic for these lives in in the previous release (4.18), but
+> does not need to be carried forward to future releases as other logic exists
+> there to handle Gateway API CRD state (see below).
+
+### Post-upgrade
+
+> **Note**: The logic for these lives in in the new release (4.19) and onward.
+
+1. The CIO is hereafter deployed alongside its CRD protection VAP
+2. The CIO constantly checks for the presence of the CRDs
+  * IF the CRDs are present
+    * UNTIL the CRD schema matches what is expected, the CIO upgrades them
+    * IF the upgrade fails `Degraded` status is set
+  * ELSE the CRDs are deployed by the CIO
+
+> **Note**: If we reach `Degraded` its expected that some tampering has
+> occurred (e.g. a cluster-admin has for some reason destroyed our VAP and
+> manually changed the CRDs). For the initial release we will simply require
+> manual intervention (support) to fix this as we can't guess too well at the
+> original intent behind the change. In future iterations we may consider more
+> solutions if this becomes a common problem for some reason.
 
 ### API Extensions
 
