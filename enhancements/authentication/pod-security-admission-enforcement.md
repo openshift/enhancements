@@ -39,11 +39,15 @@ Over the last few releases, the number of clusters with violating workloads has 
 Although these numbers are now quite low, it is essential to avoid any scenario where users end up with failing workloads.
 
 To ensure a safe transition, this proposal suggests that if a potential failure of workloads is being detected in release `n`, that the operator moves into `Upgradeable=false`.
-The user would need to either resolve the potential failures or set the enforcing mode to `Privileged` for now in order to be able to upgrade.
+The user would need to either resolve the potential failures, setting a higher PSS label for that Namespace or set the enforcing mode to `Privileged` for now in order to be able to upgrade.
 `Privileged` will keep the cluster in the previous state, the non enforcing state.
 In the following release `n+1`, the controller will then do the actual enforcement, if `Restricted` is set.
 
 An overview of the Namespaces with failures will be listed in the API's status, should help the user to fix any issues.
+
+The temporary `Privileged` mode (opt-out from PSA enforcement) exists solely to facilitate a smooth transition. Once a vast majority of clusters have adapted their workloads to operate under `Restricted` PSS, maintaining the option to run in `Privileged` mode would undermine these security objectives.
+
+OpenShift strives to offer the highest security standards. Enforcing PSS ensures that OpenShift is at least as secure as upstream Kubernetes and that OpenShift complies with upstreams security best practices.
 
 ### Goals
 
@@ -79,7 +83,7 @@ Additional diagnostics are required to confirm the full set of potential causes.
 
 While the root causes need to be identified in some cases, the result of identifying a violating Namespace is understood.
 
-#### New SCC Annotation: `security.openshift.io/ValidatedSCCSubjectType`
+#### New SCC Annotation: `security.openshift.io/validated-scc-subject-type`
 
 The annotation `openshift.io/scc` currently indicates which SCC admitted a workload, but it does not distinguish **how** the SCC was granted — whether through a user or a Pod’s ServiceAccount.
 A new annotation will help determine if a ServiceAccount with the required SCCs was used, or if a user created the workload out of band.
@@ -235,8 +239,18 @@ It must watch both the `status.enforcementMode` for `Restricted` and the `Featur
 #### PodSecurityAdmissionLabelSynchronizationController
 
 The [PodSecurityAdmissionLabelSynchronizationController (PSA label syncer)](https://github.com/openshift/cluster-policy-controller/blob/master/pkg/psalabelsyncer/podsecurity_label_sync_controller.go) must watch the `status.enforcementMode` and the `OpenShiftPodSecurityAdmission` `FeatureGate`.
-If `spec.enforcementMode` is `Restricted` and the `FeatureGate` `OpenShiftPodSecurityAdmission` is enabled, the syncer will set the `pod-security.kubernetes.io/enforce` label.
+If `spec.enforcementMode` is `Restricted` and the `FeatureGate` `OpenShiftPodSecurityAdmission` is enabled, the syncer will set the `pod-security.kubernetes.io/enforce` label on Namespaces that it manages.
 Otherwise, it will refrain from setting that label and remove any enforce labels it owns if existent.
+
+Namespaces that are **not managed** by the `PodSecurityAdmissionLabelSynchronizationController` are Namespaces that:
+
+- Are prefixed with `openshift`,
+- Have the label `security.openshift.io/scc.podSecurityLabelSync=false`.
+- Have the `pod-security.kubernetes.io/enforce` label set manually.
+- Are not a run-level zero Namespace:
+  - `kube-system`,
+  - `default` or
+  - `kube-public`.
 
 Because the ability to set `pod-security.kubernetes.io/enforce` is introduced, the ability to remove that label must exist in the release before.
 Otherwise, the cluster will be unable to revert to its previous state.
@@ -301,6 +315,8 @@ TBD
 
 ## Operational Aspects
 
+### In general
+
 - Administrators facing issues in a cluster already set to a stricter enforcement can change `spec.enforcementMode` to `Privileged` to halt enforcement for other clusters.
 - ClusterAdmins must ensure that directly created workloads (user-based SCCs) have correct `securityContext` settings.
   They can't rely on the `PodSecurityAdmissionLabelSynchronizationController`, which only watches ServiceAccount-based RBAC.
@@ -313,3 +329,70 @@ TBD
   kubectl label --dry-run=server --overwrite $NAMESPACE --all \
       pod-security.kubernetes.io/enforce=$MINIMALLY_SUFFICIENT_POD_SECURITY_STANDARD
   ```
+
+### Setting the `pod-security.kubernetes.io/enforce` label manually
+
+To assess if your Namespace is capable of running with the `Restricted` PSS, run this:
+
+```bash
+  kubectl label --dry-run=server --overwrite $NAMESPACE --all \
+      pod-security.kubernetes.io/enforce=restricted
+```
+
+To assess if your Namespace is capable of running with the `Baseline` PSS, run this:
+
+```bash
+  kubectl label --dry-run=server --overwrite $NAMESPACE --all \
+      pod-security.kubernetes.io/enforce=baseline
+```
+
+If both commands return warning messages, the Namespace needs `Privileged` PSS in its current state.
+It can be useful to read the warning messages to identify fields in the Pod manifest that could be adjusted to meet a higher security standard.
+
+To set the label, remove the `--dry-run=server` flag.
+
+### Resolving Violating Namespaces
+
+There are different reasons, why the built-in solution can't set the PSS properly in the Namespace.
+
+##### Namespace name starts with `openshift`
+
+*Hint: The `openshift` prefix is reserved for OpenShift and the PSA label syncer will not set the `pod-security.kubernetes.io/enforce` label.*
+
+The Namespace that is listed as violating has a name that starts with `openshift`.
+It happens that guides or scripts create Namespaces with the `openshift` prefix.
+Another root cause is that the team that owns the Namespace did not set the required PSA labels.
+This should not happen, and could indicate that not the newest version is being used.
+
+To solve the issue:
+
+  - If the Namespace is being created by the user:
+  	- it isn't supported that a user creates a Namespace with the `openshift` prefix and
+  	- the user should recreate the Namespace with a different name or
+  	- if not possible, set the `pod-security.kubernetes.io/enforce` label manually.
+  - If the Namespace is owned by OpenShift:
+    - Check for updates.
+    - If up to date: report as a bug.
+
+#### Namespace has disabled PSA synchronization
+
+Namespace has disabled [PSA synchronization](https://docs.openshift.com/container-platform/4.17/authentication/understanding-and-managing-pod-security-admission.html#security-context-constraints-psa-opting_understanding-and-managing-pod-security-admission).
+This can be identified by checking the label `security.openshift.io/scc.podSecurityLabelSync=false` in the Namespace manifest.
+
+To solve the issue:
+
+  - Enable PSA synchronization with `security.openshift.io/scc.podSecurityLabelSync=true` or
+  - Set the `pod-security.kubernetes.io/enforce` label manually.
+
+#### Namespace workload doesn't use ServiceAccount SCC
+
+Namespace workload doesn't use ServiceAccount SCC, but receives the SCCs by the executing user.
+This usually happens, when a workload isn't running through a deployment with a properly set up ServiceAccount.
+A way to verify that will be to check the `security.openshift.io/validated-scc-subject-type` annotation on the Pod manifest.
+
+To solve the issue:
+
+  - Update the ServiceAccount to be able to use the necessary SCCs.
+    The necessary SCC can be identified in the annotation `security.openshift.io/scc` of the existing workloads.
+	After that is done, the PSA label syncer will update the PSA labels.
+  - Otherwise set the `pod-security.kubernetes.io/enforce` label manually.
