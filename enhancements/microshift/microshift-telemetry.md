@@ -113,6 +113,8 @@ Labels:
   Values can be `amd64`, `aarch64`.
 * `label_node_openshift_io_os_id`: Label from the node, determines the OS type.
   Values can be `rhel`.
+* `label_beta_kubernetes_io_instance_type`: Label from the node. MicroShift
+  sets this to `rhde`. Possible values are `rhde`.
 
 #### `cluster:cpu_usage_cores:sum`
 This metric reports the CPU usage in percentage. Already supported in
@@ -153,9 +155,11 @@ supported in OpenShift.
 Labels:
 * `_id`: cluster ID. UUID string.
 * `version`: MicroShift version. Possible values are `\d{1}.\d{1,2}.\d{1,2}`.
-* `type`: Describes deployment type. Possible values are `rpm` and `ostree`.
-* `commit`: In case `type` is `ostree`, this will hold the ostree commit.
-  Format is a 64 character SHA.
+* `deployment_type`: Describes deployment type. Possible values are `rpm`,
+  `ostree`, `bootc`.
+* `deployment_id`: In case `deployment_type` is `ostree`, this will hold the
+  ostree commit. In case of `bootc`, include image SHA. Format is a 64
+  character SHA.
 
 
 Using the names and labels listed above, each sample requiring a float64
@@ -201,6 +205,9 @@ format.
 
 Using sizes in the previous section, a single MicroShift cluster will send no
 more than 48KB per day to Telemetry API.
+
+> Metrics are collected right before sending them and only then. There is no
+  sampling, batching or dedicated local storage.
 
 ### Visualizing time series
 As hinted above, Telemetry backend server will mark any time series stale when
