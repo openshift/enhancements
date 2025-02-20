@@ -270,6 +270,14 @@ The operator will manage these components necessary for Kueue.
 
 The operator will create and apply these resources to the cluster.
 
+The operator has the following requirements.
+
+a. Konflux integration
+b. Support for x64 and ARM
+c. Disconnected
+d. FIPS
+
+The operator will be OLM managed and hosted on OperatorHub.
 
 ### Workflow Description
 
@@ -336,14 +344,25 @@ I listed the API above.
 We want to support Hypershift. 
 This operator will allow for one to install in a namespace separate from a core openshift namespace.
 
-
 #### Standalone Clusters
 
 Yes. Standalone clusters will be able to install Kueue from OperatorHub.
 
 #### Single-node Deployments or MicroShift
 
-I am not sure how to fill this out.
+
+##### Microshift
+
+To support microshift, one would need to install OLM.
+Once OLM is enabled, one can install Cert Manager and the operator.
+After that, the operator will also require that metrics be disabled. We will include a special flag for rare cases 
+where customers would disable metrics.
+
+Microshift does not enable openshift-monitoring so metrics would be disabled in this case.
+
+##### Single-node Deployments
+
+I don't forsee any issue with SNO.
 
 ### Implementation Details/Notes/Constraints
 
@@ -353,7 +372,7 @@ I am not sure how to fill this out.
 | ------------------ | ------- | ---------------| -------- | -------
 | 0.1                | Tech Preview | 4.19 | 0.11.z | N
 | 0.1                | Tech Preview | 4.20 | 0.13.z | Y
-| 1.0                | GA | 4.19 | 0.11.z | Y
+| ?                | GA | 4.19 | ? | Y
 
 Kueue releases 6 times a year, roughly. 
 They will have roughly 2 releases per k8s version so we can take the latest version that is built with the kubernetes version that OCP comes with.
@@ -368,14 +387,65 @@ Upstream wants to promote [v1beta1 to v1beta2](https://github.com/kubernetes-sig
 
 [V1 Tracking issue](https://github.com/kubernetes-sigs/kueue/issues/3476)
 
-### Risks and Mitigations
+#### Safe Enablement of Kueue for Cluster Admins
 
+Kueue is designed to limit quota for users and to preempt based on quota. 
+During the installation of a cluster or installing of critical operators, it is necessary to not have Kueue intercept these workloads. 
+We do not want kueue gating GPUOperator Pods or any other components like that.
+
+One avenue we have to make this safer is to allow for namespace opt-in. 
+This will be necessary for pod integration and we are considering this for Job based integration also.
+
+Kueue has concepts of managedJobsWithoutQueueName and managedJobsWithNamespaceSelector. 
+These can add a default name for all workloads or target kueue on specific namespaces. managedJobsWithNamespaceSelector relies on a particular label for the namespace. 
+Admins would be required to add a label for all kueue managed namespaces.
+
+For tech preview, we will not enforce Kueue quotas on user workloads unless there is a kueue-managed label on the namespace.
+
+
+#### Telemetry
+
+Kueue has many useful metrics for adminstrators. We will use openshift-monitoring so that one can view metrics
+via the metrics dashboard in OCP console.
+
+The common requests from Product for telemetry are the following:
+
+a. Who is installing Kueue from OperatorHub (Handled by OLM)
+
+b. What kind of resources are customers using in their Cluster Queues
+  Kueue has a metric called `kueue_cluster_queue_resource_usage` which will list the resources.
+
+c. The kind of frameworks Kueue is configured with. 
+We have created an [upstream issue](https://github.com/kubernetes-sigs/kueue/issues/4336) to get this as a kueue metric.
+
+d. AI usage versus Non AI usage.
+
+This is still up in the air but one idea is that we can use telemetry for GPU or RHOAI metrics to determine AI users versus non AI users.
+
+#### Existing Usage of Kueue
+
+RHOAI is a major user of Kueue and they have already released Kueue as GA. 
+The integrations that are GA for RHOAI, as of writing this enhancement, are Kubeflow Training Operator and Ray.
+
+RHOAI also uses a single release of Kueue across the latest 4 releases of Openshift (ie 4.14, 4.15, 4.16, 4.17).
+A request from them for this operator is supporting Kueue across multiple releases of Openshift.
+
+#### Feature gates
+
+Kueue has a concept of feature gates in their configuration API. These are a series of advanced features.
+The development of Kueue is quite fast and many of these features are not yet GA. We are engaging with upstream to avoid permanent betas and to focus on graduating feature gates.
+
+Meanwhile, there are cases where one would want to test alpha features or beta features. 
+To do this, we want to provide an alpha stream in OLM that will allow one to change feature gates and set non standard options.
+We will achieve this by building a special alpha bundle that sets a flag in our deployment that will allow the changing of advanced functionality.
+
+### Risks and Mitigations
 
 Kueue is a very fast moving community. They release at least 6 times a year.
 APIs are all in beta and there is some movement to graduate them. 
 But the project does not have a LTS option yet.
 
-We are engaging with upstream to define release policies and aim to graduate their critical APIs.
+To mitigate risk, we are engaging with upstream to define release policies and aim to graduate their critical APIs.
 
 ### Drawbacks
 
@@ -383,8 +453,15 @@ Not relevant here.
 
 ## Open Questions [optional]
 
-- Autoscaling will be a followup enhancement. 
+### Autoscaling Future
+
+Autoscaling will be a followup enhancement. 
 Kueue does not provide much guidance on the safe enablement of autoscaling.
+We know that we need a secure way of enabling autoscaler and we should think through that in more detail.
+
+### RHOAI and Kueue Integration
+
+RHOAI is using Kueue as a GA product. We still need to figure out the path with RHOAI and OCP Kueue.
 
 ## Test Plan
 
@@ -447,6 +524,8 @@ Kueue has tight binding with the Kubernetes API so we recommend following Kubern
 
 ## Operational Aspects of API Extensions
 
+Fill this out.
+
 Describe the impact of API extensions (mentioned in the proposal section, i.e. CRDs,
 admission and conversion webhooks, aggregated API servers, finalizers) here in detail,
 especially how they impact the OCP system architecture and operational aspects.
@@ -482,6 +561,8 @@ especially how they impact the OCP system architecture and operational aspects.
   and add them as reviewers to this enhancement.
 
 ## Support Procedures
+
+TODO: Fill this out as we proceed.
 
 Describe how to
 - detect the failure modes in a support situation, describe possible symptoms (events, metrics,
