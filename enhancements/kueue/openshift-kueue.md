@@ -5,15 +5,15 @@ authors:
 reviewers: # Include a comment about what domain expertise a reviewer is expected to bring and what area of the enhancement you expect them to focus on. For example: - "@networkguru, for networking aspects, please look at IP bootstrapping aspect"
   - TBD
 approvers: # A single approver is preferred, the role of the approver is to raise important questions, help ensure the enhancement receives reviews from all applicable areas/SMEs, and determine when consensus is achieved such that the EP can move forward to implementation.  Having multiple approvers makes it difficult to determine who is responsible for the actual approval.
-  - TBD
+  - mrunalp
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
-  - TBD
+  - joelspeed
 creation-date: 2025-02-19
 last-updated: 2025-02-19
 tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
   - https://issues.redhat.com/browse/OCPSTRAT-1641
 see-also:
-  - "provisioning request"
+  - "https://github.com/openshift/enhancements/pull/1736"
 replaces:
   - "NA"
 superseded-by:
@@ -491,19 +491,21 @@ The operator will also test the installation of Kueue and the removing of Kueue 
 
 ## Graduation Criteria
 
-
-### Tech Preview
+### Dev Preview -> Tech Preview
 
 - Konflux releases of operator
 - E2E Testing
 - Operator functionality complete
+- Documentation
+- Telemetry
 
 ### RHOAI GA Adoption
 
 - RHOAI is able to switch their Kueue deployment for Openshift Kueue
 - Feature parity with their existing solution
+- We are discussing them adopting this as GA before we release the operator as GA for everyone.
 
-### GA 
+### Tech Preview -> GA
 
 - Once kueue APIs are V1 we can GA the kueue operator.
 
