@@ -26,7 +26,7 @@ superseded-by: []
 ## Summary
 
 This enhancement expands the "PodSecurity admission in OpenShift". It introduces
-an opt-in mechanism that allows users to to keep their workloads running when
+an opt-in mechanism that allows users to keep their workloads running when
 Pod Security Admission plugin gets turned on.
 
 ## Motivation
