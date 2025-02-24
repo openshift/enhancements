@@ -188,7 +188,10 @@ type ViolatingNamespace struct {
 	Name string `json:"name"`
 
 	// reason is a textual description explaining why the Namespace is incompatible
-	// with the requested Pod Security mode and highlights which mode is affected.
+	// with the expected Pod Security mode.
+	// It contains a prefix, indicating, which part of PSA validation is conflicting:
+	// - the global configuration, which will be set to `Restricted` or
+	// - the PSA label syncer, which tries to infer the PSS from the SCCs available to ServiceAccounts in the Namespace.
 	//
 	// Possible values are:
 	// - PSAConfig: Misconfigured OpenShift Namespace
@@ -256,6 +259,24 @@ Because the ability to set `pod-security.kubernetes.io/enforce` is introduced, t
 Otherwise, the cluster will be unable to revert to its previous state.
 
 ## Open Questions
+
+### PSA label syncer vs Global Config
+
+The Global Config is a PodSecurity configuration given to the kube-apiserver, which will enforce `Restricted` at some point.
+This means that all Namespaces without a `pod-security.kubernetes.io/enforce` label, will be object to the decision of the Global Config.
+Most user workspaces rely on the PSA label syncer to label their Namespaces with the `pod-security.kubernetes.io/enforce` label.
+If both get turned on at the same time, the Global Config could be enforced on Namespaces that were not yet labeled iby the PSA label syncer.
+
+A simpel solution would be to release the PSA label syncer in OCP `n+1` and the Global Config in `n+2` (while `n` as a reference is the introduction of the controller that manages the API).
+
+A more complex solution that could enable a release of PSA label syncer and Global Config enforcement, would be to maintain two kind of violating Namespaces lists:
+
+- The first list, lists all Namespaces that would violate, if the PSA label syncer would enforce PSA.
+- The second list, lists all Namespaces that would violate, if the Global Config would enforce PSA.
+
+The Global Config list is a list of Namespaces that don't get handled by the PSA label syncer and require a PSS that is higher than `Restricted`.
+To be able to determine this, we would need to pull the "is managed by PSA label syncer" logic and put it into library-go, such that it can be evaluated by the PodSecurityReadinessController.
+Another approach would be to set yet another annotation, which would indicate if the PSA label syncer has ownership of that Namespace.
 
 ### Fresh Installs
 
