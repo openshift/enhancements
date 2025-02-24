@@ -193,9 +193,8 @@ and data granularity.
 
 When MicroShift starts it should send metrics once and then schedule them every
 hour.
-It will also send metrics when issued to stop, as part of the finish process.
-This helps in sending a last report and also hint when the cluster has been
-stopped.
+It will also send metrics when issued to stop, as part of the finish process to
+ensure the last relevant piece of metrics is sent before going offline.
 This is not configurable.
 
 As described above MicroShift will be using the [direct request](https://github.com/openshift/telemeter/tree/main?tab=readme-ov-file#metricsv1receive-endpoint-receive-metrics-in-prompbwriterequest-format-from-any-client)
