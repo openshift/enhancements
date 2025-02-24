@@ -355,7 +355,7 @@ To set the label, remove the `--dry-run=server` flag.
 
 There are different reasons, why the built-in solution can't set the PSS properly in the Namespace.
 
-##### Namespace name starts with `openshift`
+#### Namespace name starts with `openshift`
 
 *Hint: The `openshift` prefix is reserved for OpenShift and the PSA label syncer will not set the `pod-security.kubernetes.io/enforce` label.*
 
@@ -366,13 +366,13 @@ This should not happen, and could indicate that not the newest version is being 
 
 To solve the issue:
 
-  - If the Namespace is being created by the user:
-  	- it isn't supported that a user creates a Namespace with the `openshift` prefix and
-  	- the user should recreate the Namespace with a different name or
-  	- if not possible, set the `pod-security.kubernetes.io/enforce` label manually.
-  - If the Namespace is owned by OpenShift:
-    - Check for updates.
-    - If up to date: report as a bug.
+- If the Namespace is being created by the user:
+  - it isn't supported that a user creates a Namespace with the `openshift` prefix and
+  - the user should recreate the Namespace with a different name or
+  - if not possible, set the `pod-security.kubernetes.io/enforce` label manually.
+- If the Namespace is owned by OpenShift:
+  - Check for updates.
+  - If up to date: report as a bug.
 
 #### Namespace has disabled PSA synchronization
 
@@ -381,8 +381,8 @@ This can be identified by checking the label `security.openshift.io/scc.podSecur
 
 To solve the issue:
 
-  - Enable PSA synchronization with `security.openshift.io/scc.podSecurityLabelSync=true` or
-  - Set the `pod-security.kubernetes.io/enforce` label manually.
+- Enable PSA synchronization with `security.openshift.io/scc.podSecurityLabelSync=true` or
+- Set the `pod-security.kubernetes.io/enforce` label manually.
 
 #### Namespace workload doesn't use ServiceAccount SCC
 
@@ -392,7 +392,7 @@ A way to verify that will be to check the `security.openshift.io/validated-scc-s
 
 To solve the issue:
 
-  - Update the ServiceAccount to be able to use the necessary SCCs.
-    The necessary SCC can be identified in the annotation `security.openshift.io/scc` of the existing workloads.
+- Update the ServiceAccount to be able to use the necessary SCCs.
+	The necessary SCC can be identified in the annotation `security.openshift.io/scc` of the existing workloads.
 	After that is done, the PSA label syncer will update the PSA labels.
-  - Otherwise set the `pod-security.kubernetes.io/enforce` label manually.
+- Otherwise set the `pod-security.kubernetes.io/enforce` label manually.
