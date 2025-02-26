@@ -270,7 +270,7 @@ This means that all Namespaces without a `pod-security.kubernetes.io/enforce` la
 Most user workspaces rely on the PSA label syncer to label their Namespaces with the `pod-security.kubernetes.io/enforce` label.
 If both get turned on at the same time, the Global Config could be enforced on Namespaces that were not yet labeled iby the PSA label syncer.
 
-A simpel solution would be to release the PSA label syncer in OCP `n+1` and the Global Config in `n+2` (while `n` as a reference is the introduction of the controller that manages the API).
+A simple solution would be to release the PSA label syncer in OCP `n+1` and the Global Config in `n+2` (while `n` as a reference is the introduction of the controller that manages the API).
 
 A more complex solution that could enable a release of PSA label syncer and Global Config enforcement, would be to maintain two kind of violating Namespaces lists:
 
