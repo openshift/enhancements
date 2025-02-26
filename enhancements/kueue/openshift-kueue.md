@@ -3,7 +3,9 @@ title: openshift-kueue
 authors:
   - kannon92
 reviewers: # Include a comment about what domain expertise a reviewer is expected to bring and what area of the enhancement you expect them to focus on. For example: - "@networkguru, for networking aspects, please look at IP bootstrapping aspect"
-  - TBD
+  - haircommander
+  - rphillips
+  - varshaprasad96
 approvers: # A single approver is preferred, the role of the approver is to raise important questions, help ensure the enhancement receives reviews from all applicable areas/SMEs, and determine when consensus is achieved such that the EP can move forward to implementation.  Having multiple approvers makes it difficult to determine who is responsible for the actual approval.
   - mrunalp
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
@@ -31,7 +33,7 @@ Kueue will be hosted as a Red Hat ecosystem operator in OperatorHub.
 
 Kueue has wide applications across various projects in the openshift ecosystem. 
 We want to bring them as a core platform so we can better support them in various areas. 
-RedHat AI uses kueue for AI workloads but we are also seeing autoscaling, multicluster and general batch uses. 
+Openshift AI (RHOAI) uses kueue for AI workloads but we are also seeing autoscaling, multicluster and general batch uses. 
 To better support various teams in their exploration or productization of Kueue, it is important to bring Kueue into the core platform.
 
 ### High Level View of Kueue
@@ -50,7 +52,8 @@ Kueue provides the following functionality:
 - Multi-cluster job dispatching
 - Topology-Aware Scheduling
 
-Kueue uses [Resource Flavors](https://kueue.sigs.k8s.io/docs/concepts/resource_flavor/) to describe what resources are available on a cluster to better support heterogenous clusters. Resource flavors are cluster scoped and set up by the cluster adminstrator.
+Kueue uses [Resource Flavors](https://kueue.sigs.k8s.io/docs/concepts/resource_flavor/) to describe what resources are available on a cluster to better support heterogenous clusters. 
+Resource flavors are cluster scoped and set up by the cluster adminstrator.
 
 Kueue uses [Cluster Queues](https://kueue.sigs.k8s.io/docs/concepts/cluster_queue/) to governs a pool of resources, defining usage limits and fair sharing rules.
 Cluster Queues are cluster scoped. Cluster queues are set up by a cluster administrator.
@@ -152,7 +155,6 @@ This functionality is possible once [ProvRequest in Autoscaling](https://issues.
 - Provide an API so that users can configure Kueue with their use case in mind.
 - Kueue will be forked and maintained as [openshift/kubernetes-sig-kueue](https://github.com/openshift/kubernetes-sigs-kueue)
 - [KueueOperator](https://github.com/openshift/kueue-operator) will be created to manage the installation and configuration of Kueue 
-
 
 ### Non-Goals
 
@@ -350,6 +352,7 @@ Yes. Standalone clusters will be able to install Kueue from OperatorHub.
 
 #### Single-node Deployments or MicroShift
 
+Microshift is a barebones OCP deploment where APIs like monitoring are not present.
 
 ##### Microshift
 
@@ -365,6 +368,8 @@ Microshift does not enable openshift-monitoring so metrics would be disabled in 
 I don't forsee any issue with SNO.
 
 ### Implementation Details/Notes/Constraints
+
+Cert Manager will be used to manage certificates so our operator will have a hard dependency on Cert Manager.
 
 #### Release Schedule
 
@@ -432,12 +437,7 @@ A request from them for this operator is supporting Kueue across multiple releas
 
 #### Feature gates
 
-Kueue has a concept of feature gates in their configuration API. These are a series of advanced features.
-The development of Kueue is quite fast and many of these features are not yet GA. We are engaging with upstream to avoid permanent betas and to focus on graduating feature gates.
 
-Meanwhile, there are cases where one would want to test alpha features or beta features. 
-To do this, we want to provide an alpha stream in OLM that will allow one to change feature gates and set non standard options.
-We will achieve this by building a special alpha bundle that sets a flag in our deployment that will allow the changing of advanced functionality.
 
 ### Risks and Mitigations
 
@@ -462,6 +462,17 @@ We know that we need a secure way of enabling autoscaler and we should think thr
 ### RHOAI and Kueue Integration
 
 RHOAI is using Kueue as a GA product. We still need to figure out the path with RHOAI and OCP Kueue.
+
+### Expermental Feature Support
+
+Kueue has a concept of feature gates in their configuration API. These are a series of advanced features.
+The development of Kueue is quite fast and many of these features are not yet GA. We are engaging with upstream to avoid permanent betas and to focus on graduating feature gates.
+
+Meanwhile, there are cases where one would want to test alpha features or beta features. 
+To do this, we want to provide an alpha stream in OLM that will allow one to change feature gates and set non standard options.
+We will achieve this by building a special alpha bundle that sets a flag in our deployment that will allow the changing of advanced functionality.
+
+As of now there are a few other options we need to explore.
 
 ## Test Plan
 
