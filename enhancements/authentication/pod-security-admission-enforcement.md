@@ -168,7 +168,7 @@ type PSAEnforcementConfigSpec struct {
 	EnforcementMode PSAEnforcementMode `json:"enforcementMode"`
 }
 
-// PSAEnforcementConfigStatus is a struct that signals to the user, if the cluter is going to start with PSA enforcement and if there are any violating Namespaces.
+// PSAEnforcementConfigStatus is a struct that signals to the user, if the cluster is going to start with PSA enforcement and if there are any violating Namespaces.
 type PSAEnforcementConfigStatus struct {
 	// enforcementMode indicates if PSA enforcement will happen:
 	// - "Restricted" indicates that enforcement is possible and will happen.
