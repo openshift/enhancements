@@ -157,10 +157,6 @@ Labels:
 * `version`: MicroShift version. Possible values are `\d{1}.\d{1,2}.\d{1,2}`.
 * `deployment_type`: Describes deployment type. Possible values are `rpm`,
   `ostree`, `bootc`.
-* `deployment_id`: In case `deployment_type` is `ostree`, this will hold the
-  ostree commit. In case of `bootc`, include image SHA. Format is a 64
-  character SHA.
-
 
 Using the names and labels listed above, each sample requiring a float64
 and an int64 value, all metrics combined are under 2KB.
