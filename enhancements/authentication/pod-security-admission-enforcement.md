@@ -266,7 +266,7 @@ Otherwise, the cluster will be unable to revert to its previous state.
 ### PSA label syncer vs Global Config
 
 The Global Config is a PodSecurity configuration given to the kube-apiserver, which will enforce `Restricted` at some point.
-This means that all Namespaces without a `pod-security.kubernetes.io/enforce` label, will be object to the decision of the Global Config.
+This means that all Namespaces without a `pod-security.kubernetes.io/enforce` label, will be subject to the decision of the Global Config.
 Most user workspaces rely on the PSA label syncer to label their Namespaces with the `pod-security.kubernetes.io/enforce` label.
 If both get turned on at the same time, the Global Config could be enforced on Namespaces that were not yet labeled iby the PSA label syncer.
 
