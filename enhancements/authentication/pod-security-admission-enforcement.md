@@ -38,9 +38,9 @@ After introducing Pod Security Admission and Autolabeling based on SCCs, some cl
 Over the last few releases, the number of clusters with violating workloads has dropped significantly.
 Although these numbers are now quite low, it is essential to avoid any scenario where users end up with failing workloads.
 
-To ensure a safe transition, this proposal suggests that if a potential failure of workloads is being detected in release `n`, that the operator moves into `Upgradeable=false`.
+To ensure a safe transition, this proposal suggests that if a potential failure of workloads is being detected in release `n`, that the `cluster-kube-apiserver-operator` moves into `Upgradeable=false`.
 The user would need to either resolve the potential failures, setting a higher PSS label for that Namespace or set the enforcing mode to `Privileged` for now in order to be able to upgrade.
-`Privileged` will keep the cluster in the previous state, the non enforcing state.
+`Privileged` will keep the cluster in the previous state, the non enforcing state. This means that the PodSecurity Configuration of the kube-apiserver is set to `Privileged` PSS and that the PSA label syncer doesn't set the `pod-security.kubernetes.io/enforce` label.
 In the following release `n+1`, the controller will then do the actual enforcement, if `Restricted` is set.
 
 An overview of the Namespaces with failures will be listed in the API's status, should help the user to fix any issues.
@@ -98,19 +98,22 @@ To address this, the proposal introduces:
 ValidatedSCCSubjectTypeAnnotation = "security.openshift.io/validated-scc-subject-type"
 ```
 
-This annotation will be set by the [`SecurityContextConstraint` admission](https://github.com/openshift/apiserver-library-go/blob/60118cff59e5d64b12e36e754de35b900e443b44/pkg/securitycontextconstraints/sccadmission/admission.go#L138) plugin.
+This annotation will be set in the Pod by the [`SecurityContextConstraint` admission](https://github.com/openshift/apiserver-library-go/blob/60118cff59e5d64b12e36e754de35b900e443b44/pkg/securitycontextconstraints/sccadmission/admission.go#L138) plugin.
 
 #### Set PSS Annotation: `security.openshift.io/MinimallySufficientPodSecurityStandard`
 
-The PSA label syncer must set the `security.openshift.io/MinimallySufficientPodSecurityStandard` annotation.
+The PSA label syncer must set the `security.openshift.io/MinimallySufficientPodSecurityStandard` Namespace annotation.
 Because users can modify `pod-security.kubernetes.io/warn` and `pod-security.kubernetes.io/audit`, these labels do not reliably indicate the minimal standard.
 The new annotation ensures a clear record of the minimal PSS that would be enforced if the `pod-security.kubernetes.io/enforce` label were set.
+As this annotation is being managed by the controller, any change from a user would be reconciled.
 
 #### Update the PodSecurityReadinessController
 
 By adding these annotations, the [`PodSecurityReadinessController`](https://github.com/openshift/cluster-kube-apiserver-operator/blob/master/pkg/operator/podsecurityreadinesscontroller/podsecurityreadinesscontroller.go) can more accurately identify potentially failing Namespaces and understand their root causes:
 
 - With the `security.openshift.io/MinimallySufficientPodSecurityStandard` annotation, it can evaluate Namespaces that lack the `pod-security.kubernetes.io/enforce` label but have user-overridden warn or audit labels.
+  If `pod-security.kubernetes.io/enforce` label is overriden, the PSA label syncer still owns `pod-security.kubernetes.io/enforce` in certain cases.
+  The `PSAReadinessController` isn't able to deduct in that situation, which `pod-security.kubernetes.io/enforce` would be set by the PSA label syncer, without that annotation.
 - With `ValidatedSCCSubjectType`, the controller can classify issues arising from user-based SCC workloads separately.
   Many of the remaining clusters with violations appear to involve workloads admitted by user SCCs.
 
