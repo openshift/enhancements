@@ -250,7 +250,7 @@ Otherwise, it will refrain from setting that label and remove any enforce labels
 
 Namespaces that are **not managed** by the `PodSecurityAdmissionLabelSynchronizationController` are Namespaces that:
 
-- Are prefixed with `openshift`,
+- Are prefixed with `openshift-`,
 - Have the label `security.openshift.io/scc.podSecurityLabelSync=false`.
 - Have the `pod-security.kubernetes.io/enforce` label set manually.
 - Are not a run-level zero Namespace:
