@@ -228,14 +228,14 @@ the same considerations but these are not present during installation.
 See the API Extensions section below for sample install-configs.
 
 For a two-node cluster to be successful, we need to ensure the following:
-1. The BMC secrets for RHEL-HA are created on disk during bootstrapping by the OpenShift installer via a MachineConfig.
-2. When pacemaker is initialized by the in-cluster entity responsible for starting pacemaker, pacemaker will try to set up fencing with this secret. If this is not successful, it throws an error which
+1. The BMC secrets for RHEL-HA are will be in a new section of the install-config.yaml, this will trigger the default flow of creating manifests and having the API server creating the Secrets from those manifests.
+2. When pacemaker is initialized by the in-cluster entity, the in-cluster entity will pass it the fencing credentials extracted from the secret, which will be used by pacemaker to set up fencing. If this is not successful, it throws an error which
    will cause degradation of the in cluster operator and would fail the installation process.
-3. Pacemaker periodically checks that the fencing agent is healthy (i.e. can connect to the BMC) and will create an alert if it cannot access the BMC.
-   * In this case, in order to allow a simple manual recovery by the user a script will be available on the node which will reset Pacemaker with the new fencing credentials.
+3. Pacemaker periodically checks that the fencing configuration is correct (i.e. can connect to the BMC) and will create an alert if it cannot access the BMC.
+   * In this case, in order to allow manually fixing the fencing configuration by the user, a script will be available on the node which will reset Pacemaker with the new fencing credentials.
 4. The cluster will continue to run normally in the state where the BMC cannot be accessed, but ignoring this alert will mean that pacemaker can only provide a best-effort recovery - so operations
-   that require fencing will need manual recovery.
-5. When manual recovery is triggered by running the designated script on the node, it'll also update the Secret in order to make sure the Secret is aligned with the credentials kept in Pacemaker's cib
+   that require fencing will need manual intervention.
+5. When the designated script manually run on the node, it will also update the Secret in order to make sure the Secret is aligned with the credentials kept in Pacemaker's cib
    file.
 
 Future Enhancements
@@ -295,7 +295,7 @@ set to `DualReplica`.
 While set to `External`, CEO will still need to render the configuration for the etcd container in a place where it can be consumed by pacemaker. This ensures that the etcd instance managed by
 pacemaker can be updated accordingly in the case of a upgrade event or whenever certificates are rotated.
 
-In case CEO will be used as the in-cluster operator responsible for setting up Pacemaker fencing it'll require root permissions which are currently mandatory to run the required pcs commands. Some
+In case CEO will be used as the in-cluster operator responsible for setting up Pacemaker fencing it will require root permissions which are currently mandatory to run the required pcs commands. Some
 mitigation or alternatives might be:
 - Use a different (new) in-cluster operator to set up Pacemaker fencing
   - However, this approach contradicts the goal of reducing the OCP release payload, as introducing a new core operator would increase its size instead of streamlining it. Additionally, adding the
