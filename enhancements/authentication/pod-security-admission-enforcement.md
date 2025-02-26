@@ -248,15 +248,13 @@ The [PodSecurityAdmissionLabelSynchronizationController (PSA label syncer)](http
 If `spec.enforcementMode` is `Restricted` and the `FeatureGate` `OpenShiftPodSecurityAdmission` is enabled, the syncer will set the `pod-security.kubernetes.io/enforce` label on Namespaces that it manages.
 Otherwise, it will refrain from setting that label and remove any enforce labels it owns if existent.
 
-Namespaces that are **not managed** by the `PodSecurityAdmissionLabelSynchronizationController` are Namespaces that:
+Namespaces that are **managed** by the `PodSecurityAdmissionLabelSynchronizationController` are Namespaces that:
 
-- Are prefixed with `openshift-`,
-- Have the label `security.openshift.io/scc.podSecurityLabelSync=false`.
-- Have the `pod-security.kubernetes.io/enforce` label set manually.
-- Are not a run-level zero Namespace:
-  - `kube-system`,
-  - `default` or
-  - `kube-public`.
+- are not named `kube-node-lease`, `kube-system`, `kube-public`, `default` or `openshift` and
+- are not  prefixed with `openshift-` and
+- have no `security.openshift.io/scc.podSecurityLabelSync=false` label set and
+- at least one PSA label (including `pod-security.kubernetes.io/enforce`) isn't set by the user or
+- if the user sets all PSA labels, it also has set the `security.openshift.io/scc.podSecurityLabelSync=true` label.
 
 Because the ability to set `pod-security.kubernetes.io/enforce` is introduced, the ability to remove that label must exist in the release before.
 Otherwise, the cluster will be unable to revert to its previous state.
@@ -391,7 +389,7 @@ This should not happen, and could indicate that not the newest version is being 
 To solve the issue:
 
 - If the Namespace is being created by the user:
-  - it isn't supported that a user creates a Namespace with the `openshift` prefix and
+  - it isn't supported that a user creates a Namespace with the `openshift-` prefix and
   - the user should recreate the Namespace with a different name or
   - if not possible, set the `pod-security.kubernetes.io/enforce` label manually.
 - If the Namespace is owned by OpenShift:
