@@ -343,16 +343,20 @@ I listed the API above.
 
 #### Hypershift / Hosted Control Planes
 
-We want to support Hypershift. 
-This operator will allow for one to install in a namespace separate from a core openshift namespace.
+We do not foresee any issue with integration with HCP.
+Kueue does provide webhooks on pods and that could cause some 
+performance issues in HCP. We will do performance testing on HCP. 
+
+Kueue is an upstream project and its APIs are not aware of MachineSets.
+
+The one area that Kueue can create new machines is its use of Provision requests.
+There will be work to make sure HCP works with ProvisionRequests.
 
 #### Standalone Clusters
 
 Yes. Standalone clusters will be able to install Kueue from OperatorHub.
 
 #### Single-node Deployments or MicroShift
-
-Microshift is a barebones OCP deploment where APIs like monitoring are not present.
 
 ##### Microshift
 
@@ -437,7 +441,7 @@ A request from them for this operator is supporting Kueue across multiple releas
 
 #### Feature gates
 
-
+Moved to open questions.
 
 ### Risks and Mitigations
 
@@ -466,13 +470,18 @@ RHOAI is using Kueue as a GA product. We still need to figure out the path with 
 ### Expermental Feature Support
 
 Kueue has a concept of feature gates in their configuration API. These are a series of advanced features.
-The development of Kueue is quite fast and many of these features are not yet GA. We are engaging with upstream to avoid permanent betas and to focus on graduating feature gates.
+The development of Kueue is quite fast and many of these features are not yet GA. 
+We are engaging with upstream to avoid permanent betas and to focus on graduating feature gates.
 
 Meanwhile, there are cases where one would want to test alpha features or beta features. 
-To do this, we want to provide an alpha stream in OLM that will allow one to change feature gates and set non standard options.
+To do this, we want to provide an expermental stream in OLM that will allow one to change feature gates and set non standard options.
 We will achieve this by building a special alpha bundle that sets a flag in our deployment that will allow the changing of advanced functionality.
 
 As of now there are a few other options we need to explore.
+
+- Dedicated olm bundle for expermental features
+- Feature gates in operator to allow one to change functionality (same bundle)
+- FeatureSet at OCP level
 
 ## Test Plan
 
@@ -537,7 +546,7 @@ Kueue has tight binding with the Kubernetes API so we recommend following Kubern
 
 ## Operational Aspects of API Extensions
 
-Fill this out.
+TODO: Fill this out as we proceed.
 
 Describe the impact of API extensions (mentioned in the proposal section, i.e. CRDs,
 admission and conversion webhooks, aggregated API servers, finalizers) here in detail,
