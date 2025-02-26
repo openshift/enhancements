@@ -19,6 +19,9 @@ reviewers:
   - "@frajamomo"
   - "@clobrano"
   - "@cybertron"
+  - "@joelanford"
+  - "@zaneb"
+  - "@spadgett"
 approvers:
   - "@tjungblu"
   - "@jerpeter1"
@@ -148,10 +151,11 @@ When starting etcd, the OCF script will use etcd's cluster ID and version counte
 ### Summary of Changes
 
 At a glance, here are the components we are proposing to change:
+
 | Component                                                         | Change                                                                                                                          |
 | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | [Feature Gates](#feature-gate-changes)                            | Add a new `DualReplicaTopology` feature which can be enabled via the `CustomNoUpgrade` feature set                              |
-| [Infrastructure API](#infrastructure-api-changes)                 | Add `DualReplica` as a new value for `ControlPlaneTopology`                                                                     |
+| [OpenShift API](#openshift-api-changes)                           | Add `DualReplica` as a new value for `ControlPlaneTopology`                                                                     |
 | [ETCD Operator](#etcd-operator-changes)                           | Add a mode for disabling management of the etcd container, a new scaling strategy, and a controller for initializing pacemaker  |
 | [Install Config](#install-config-changes)                         | Update install config API to accept fencing credentials for `platform: None` and `platform: Baremetal`                          |
 | [Installer](#installer-changes)                                   | Populate the nodes with initial pacemaker configuration when deploying with 2 control-plane nodes and no arbiter                |
@@ -159,10 +163,10 @@ At a glance, here are the components we are proposing to change:
 | [Authentication Operator](#authentication-operator-changes)       | Update operator to accept minimum 1 kube api servers when `ControlPlaneTopology` is `DualReplica`                               |
 | [Hosted Control Plane](#hosted-control-plane-changes)             | Disallow HyperShift from installing on the `DualReplica` topology                                                               |
 | [OLM Filtering](#olm-filtering-changes)                           | Leverage support for OLM to filter operators based off of control plane topology                                                |
-| [Assisted Installer Family](#assisted-installer-family-changes)   | Add support for deploying bare-metal clusters with 2 control-plane nodes using Assisted Installer and Agent-Based Installer     |
-| [Bare Metal Operator](#bare-metal-operator-changes)               | Prevent power-management of control-plane nodes when the infrastructureTopology is set to `DualReplica`                         |
-| [Node Health Check Operator](#node-health-check-operator-changes) | Prevent fencing of control-plane nodes when the infrastructureTopology is set to `DualReplica`                                  |
-
+| [Bare Metal Operator](#bare-metal-operator-changes)               | Prevent power-management of control-plane nodes when the controlPlaneTopology is set to `DualReplica`                           |
+| [Cluster Monitoring Operator](#monitoring-operator-changes)       | Add telemetry for topology fields of infra config and add custom alerts for failover thresholds                                 |
+| [Console Operator](#console-operator-changes)                     | Include TNF in the valid topology check                                                                                         |
+| [OpenShift Origin](#openshift-origin-changes)                     | Add `DualReplica` topology mode to the list of topologies for the monitoring tests                                              |
 
 ### Workflow Description
 
@@ -205,9 +209,10 @@ An important facility of the installation flow is the transition from a CEO depl
 control-plane nodes to provide context for this failure.
 
 ###### Managing Pacemaker and Resource/Fence agent Configuration
-Pacemaker configurations (as well as its resource and fence agent configurations) do not need to be stored as files, as they are dynamically created using pcs commands. Instead, the in-cluster entity will handle triggering these commands as needed.
+Pacemaker configurations (as well as its resource and fence agent configurations) do not need to be stored as files, as they are dynamically created using pcs commands. Instead, the in-cluster entity
+will handle triggering these commands as needed.
 
-For the initial Technical Preview phase, we will use default values for these configurations, except for fencing configurations (which are covered in the next section). 
+For the initial Technical Preview phase, we will use default values for these configurations, except for fencing configurations (which are covered in the next section).
 
 Looking ahead to General Availability (GA), we are considering a mapping solution that will allow users to specify certain values, which will then be used to generate the configurations dynamically.
 
@@ -228,15 +233,15 @@ the same considerations but these are not present during installation.
 See the API Extensions section below for sample install-configs.
 
 For a two-node cluster to be successful, we need to ensure the following:
-1. The BMC secrets for RHEL-HA are will be in a new section of the install-config.yaml, this will trigger the default flow of creating manifests and having the API server creating the Secrets from those manifests.
-2. When pacemaker is initialized by the in-cluster entity, the in-cluster entity will pass it the fencing credentials extracted from the secret, which will be used by pacemaker to set up fencing. If this is not successful, it throws an error which
-   will cause degradation of the in cluster operator and would fail the installation process.
+1. The BMC secrets for RHEL-HA are will be in a new section of the install-config.yaml, this will trigger the default flow of creating manifests and having the API server creating the Secrets from
+   those manifests.
+2. When pacemaker is initialized by the in-cluster entity, the in-cluster entity will pass it the fencing credentials extracted from the secret, which will be used by pacemaker to set up fencing. If
+   this is not successful, it throws an error which will cause degradation of the in cluster operator and would fail the installation process.
 3. Pacemaker periodically checks that the fencing configuration is correct (i.e. can connect to the BMC) and will create an alert if it cannot access the BMC.
    * In this case, in order to allow manually fixing the fencing configuration by the user, a script will be available on the node which will reset Pacemaker with the new fencing credentials.
 4. The cluster will continue to run normally in the state where the BMC cannot be accessed, but ignoring this alert will mean that pacemaker can only provide a best-effort recovery - so operations
    that require fencing will need manual intervention.
-5. When the designated script manually run on the node, it will also update the Secret in order to make sure the Secret is aligned with the credentials kept in Pacemaker's cib
-   file.
+5. When the designated script manually run on the node, it will also update the Secret in order to make sure the Secret is aligned with the credentials kept in Pacemaker's cib file.
 
 Future Enhancements
 1. Allowing usage of external credentials storage services such as Vault or Conjur. In order to support this:
@@ -270,10 +275,10 @@ The full list of changes proposed is [summarized above](#summary-of-changes). Ea
 We will define a new `DualReplicaTopology` feature that can be enabled in `install-config.yaml` to ensure the clusters running this feature cannot be upgraded until the feature is ready for general
 availability.
 
-#### Infrastructure API Changes
+#### OpenShift API Changes
 
 A mechanism is needed for components of the cluster to understand that this is a two-node control-plane topology that may require different handling. We will define a new value for the
-`infrastructureTopology` field of the Infrastructure config's `TopologyMode` enum. Specifically, the value of `DualReplica` will be added to the currently supported list, which includes
+`controlPlaneTopology` field of the Infrastructure config's `TopologyMode` enum. Specifically, the value of `DualReplica` will be added to the currently supported list, which includes
 `HighlyAvailable`, `SingleReplica`, and `External`.
 
 InfrastructureTopology is assumed to be immutable by components of the cluster. While there is strong interest in changing this to allow for topology transitions to and from TNF, this is beyond the
@@ -324,10 +329,14 @@ metadata:
 platform:
   none:
     fencingCredentials:
-      bmc:
-          address: ipmi://<out_of_band_ip>
-          username: <user>
-          password: <password>
+      - hostname: <control-0-hostname>
+        address: https://<redfish-api-url>
+        username: <username>
+        password: <password>
+      - hostname: <control-1-hostname>
+        address: https://<redfish-api-url>
+        username: <username>
+        password: <password>
 pullSecret: ''
 sshKey: ''
 ```
@@ -347,10 +356,14 @@ metadata:
 platform:
   baremetal:
     fencingCredentials:
-      bmc:
-          address: ipmi://<out_of_band_ip>
-          username: <user>
-          password: <password>
+      - hostname: <control-0-hostname>
+        address: https://<redfish-api-url>
+        username: <username>
+        password: <password>
+      - hostname: <control-1-hostname>
+        address: https://<redfish-api-url>
+        username: <username>
+        password: <password>
     apiVIPs:
       - <api_ip>
     ingressVIPs:
@@ -359,8 +372,11 @@ pullSecret: ''
 sshKey: ''
 ```
 
-Unfortunately, Bare Metal Operator already has a place to specify bmc credentials. However, providing credentials like this will result in conflicts as both the Bare Metal Operator and the pacemaker
-fencing agent will have control over the machine state. In short, this example shows an invalid configuration that we must check for in the installer.
+Unfortunately, Bare Metal Operator already has an API that accepts BMC credentials as part of configuring BareMetalHost CRDs. Adding BMC credentials to the BareMetalHost CRD allows the Baremetal
+Operator to manage the power status of that host via ironic. This is **strictly incompatible** with TNF because both the Bare Metal Operator and the pacemaker fencing agent will have control over the
+machine state.
+
+This example shows an **invalid** install configuration that the installer will reject for TNF.
 ```
 apiVersion: v1
 baseDomain: example.com
@@ -375,30 +391,47 @@ metadata:
 platform:
   baremetal:
     fencingCredentials:
-      bmc:
-          address: ipmi://<out_of_band_ip>
-          username: <user>
-          password: <password>
+      - hostname: <control-0-hostname>
+        address: https://<redfish-api-url>
+        username: <username>
+        password: <password>
+      - hostname: <control-1-hostname>
+        address: https://<redfish-api-url>
+        username: <username>
+        password: <password>
     apiVIPs:
       - <api_ip>
     ingressVIPs:
       - <wildcard_ip>
     hosts:
-      - name: openshift-master-0
+      - name: openshift-cp-0
         role: master
         bmc:
           address: ipmi://<out_of_band_ip>
-          username: <user>
+          username: <username>
           password: <password>
-      - name: <openshift_master_1>
+      - name: openshift-cp-1
         role: master
         bmc:
           address: ipmi://<out_of_band_ip>
-          username: <user>
+          username: <username>
           password: <password>
 pullSecret: ''
 sshKey: ''
 ```
+
+##### Why don't we reuse the existing APIs in the `Baremetal` platform?
+Reusing the existing APIs tightly couples separate outcomes that are important to distinguish for the end user.
+
+The `fencingCredentials` API exists for deploying TNF and is *only valid* when TNF is being deployed. Failure to define this section when using TNF will result in the installer throwing an error.
+
+The `hosts` API exists for configuring the BareMetalHost entries that will be managed by the Bare Metal Operator. For TNF clusters, we don't want the hosts to be managed by ironic via the Bare Metal
+Operator because of fencing conflicts.
+
+To keep this as simple as possible for the user, we will make `fencingCredentials` mutually exclusive with `hosts` when deploying on TNF.
+
+This will allow us to clearly define the subset of BMC options acceptable to enable fencing - which is not a one-to-one correlation with the BMC options that exists in the `hosts` API. As an example
+we will only support redfish for the initial release, whereas the `hosts` list accepts `ipmi`.
 
 #### Installer Changes
 Aside from the changes mentioned above detailing the new install config, the installer will be also be responsible for detecting a valid two-node footprint (one that specifies two control-plane nodes
@@ -421,6 +454,8 @@ Layering](../ocp-coreos-layering/ocp-coreos-layering.md ) will be investigated o
 Additionally, in order to ensure the cluster can upgrade safely, the MachineConfigPool `maxUnavailable` control-plane nodes will be set to 1. This should prevent upgrades from trying to proceed if a
 node is unavailable.
 
+One minor update is to update this [enum](https://github.com/openshift/machine-config-operator/blob/5ad8612aa1ba1ee240b545946e052d39311aaa7a/pkg/daemon/daemon.go#L2801) for technical completeness.
+
 #### Authentication Operator Changes
 The authentication operator is sensitive to the number of kube-api replicas running in the cluster for [test stability
 reasons](https://github.com/openshift/cluster-authentication-operator/commit/a08be2324f36ce89908f695a6ff3367ad86c6b78#diff-b6f4bf160fd7e801eadfbfac60b84bd00fcad21a0979c2d730549f10db015645R158-R163).
@@ -429,11 +464,14 @@ check](https://github.com/openshift/cluster-authentication-operator/blob/2d71f16
 allow for a minimum of two replicas available when using the `DualReplica` infrastructure topology to ensure test stability.
 
 #### Hosted Control Plane Changes
-Two-node clusters are no compatible with hosted control planes. A check will be needed to disallow hosted control planes when the infrastructureTopology is set to `DualReplica`.
+Two-node clusters are no compatible with hosted control planes. A check will be needed to disallow hosted control planes when the controlPlaneTopology is set to `DualReplica`.
 
 #### OLM Filtering Changes
-Layering on top of the enhancement proposal for [Two Node with Arbiter (TNA)](../arbiter-clusters.md#olm-filter-addition), it would be ideal to include the `DualReplica` infrastructureTopology as an
-option that operators can levarage to communicate cluster-compatibility.
+Layering on top of the enhancement proposal for [Two Node with Arbiter (TNA)](../arbiter-clusters.md#olm-filter-addition), it would be ideal to include the `DualReplica` controlPlaneTopology as an
+option that operators can leverage to communicate cluster-compatibility.
+
+The option suggested by the console team was to include a console filter for `features.operators.openshift.io` annotations. This are already included in the side bar when looking an the operator
+install page in the marketplace UI.
 
 #### Assisted Installer Family Changes
 In order to achieve the requirement for deploying two-node openshift with only two-nodes, we will add support for installing using 2 nodes in the Assisted and Agent-Based installers. The core of this
@@ -448,6 +486,20 @@ for the control-plane nodes. This will prevent power management operations from 
 The Node Health Check operator allows a user to create fencing requests, which are in turn remediated by other optional operators. To ensure that the control-plane nodes cannot end up in a reboot
 deadlock between fencing agents, the Node Health Check operator should be rendered inert on this topology. Another approach would be to enforce this limitation for just the control-plane nodes, but
 this proposal assumes that no dedicated compute nodes will be run in this topology.
+
+#### Monitoring Operator Changes
+In order to accurately count the number of installed TNF clusters and distiguish between this topology and the Two Node OpenShift with Arbiter, we will need to add the infrastructure config's topology
+fields to the list of fields monitoring includes in telemetry.
+
+Additionally, we are looking into how to include custom alerting for thresholds that have an impact on failover behavior. As an example, if a customer wanted to ensure that all of their workloads
+could failover to a single node, we would need an alert to determine when the CPU usage across both nodes surpasses what can be scheduled to a single node.
+
+#### Console Operator Changes
+The console operator has a strict start up validation for topologies. We need to add `DualReplica` to the list of know topologies so that the console operator comes up successfully.
+
+#### OpenShift Origin Changes
+While a review of the individual tests in Openshift origin is an important step to baselining this new topology, another key change will be to add `DualReplica` topology mode to the list of topologies
+for the monitoring tests. This will help us with setting up tools like sippy and component readiness.
 
 ### Topology Considerations
 
@@ -516,19 +568,33 @@ without keepalived at all by using the ipaddr2 resource agent for pacemaker to r
 effort to modify the out-of-the-box in-cluster networking feature for two-node OpenShift.
 
 Outside of potentially reusing the networking bits of `platform: baremetal`, we discussed potentially reusing its API for collecting BMC credentials for fencing. In this approach, we'd use the
-`platform: baremetal` BMC entries would be loaded into `BareMetalHost` CRDs and we'd extend BMO to initialize pacemaker instead of a new operator. After a discussion with the Bare Metal Platform team,
-we were advised against using the Bare Metal Operator as an inventory. Its purpose/scope is provisioning nodes.
-
-This means that the Baremetal Operator is not initially in scope for a two-node cluster because we don't intend to support compute nodes. However, if this requirement were to change for future
-business opportunities, it may still be useful to provide the user with an install-time option for deploying the Baremetal Operator.
+`platform: baremetal` BMC entries would be loaded into `BareMetalHost` CRDs and we'd extend BMO to initialize pacemaker. After a discussion with the Bare Metal Platform team, we were advised against
+using the Bare Metal Operator because the capabilities of fencing in BMO depend on a functioning read-write control plane. See [the explanation
+above](#why-dont-we-reuse-the-existing-apis-in-the-baremetal-platform) for other concerns about reusing this API.
 
 Given the likelihood of customers wanting flexibility over the footprint and capabilities of the platform operators running on the cluster, the safest path forward is to target TNF clusters on both
 `platform: none` and platform `platform: baremetal` clusters.
 
-For `platform: none` clusters, this will require customers to provide an ingress load balancer. That said, if in-cluster networking becomes a feature customers request for `platform: none` we can work
-with the Metal Networking team to prioritize this as a feature for this platform in the future.
+For `platform: none` clusters, this will require customers to provide a load balancer for ingress and API traffic. That said, if in-cluster networking becomes a feature customers request for
+`platform: none` we can work with the Metal Networking team to prioritize this as a feature for this platform in the future. Some discussion for this has already begun in this [enhancement
+proposal](https://github.com/openshift/enhancements/pull/1666).
 
-#### Graceful vs. Unplanned Reboots
+#### Handling Failures via RHEL HA
+In this section we explore in detail the steps taken to recover a cluster in the event of a node or network-level failure. The bottom line is that as long as fencing is configured properly and both
+nodes are available, the cluster should recover without manual intervention.
+
+| Section                                                                                 | Description                                                                                               |
+| --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| [Failure Modes Across Deployment Options](#failure-modes-across-deployment-options)     | A table detailing a high-level overview comparing failure modes in TNF versus other deployment options    |
+| [Graceful vs. Unplanned Reboots](#graceful-vs-unplanned-reboots)                        | A description and illustration of the two main patterns that address node-level failures in TNF           |
+| [Failure Scenario Timelines](#failure-scenario-timelines)                               | A list of interesting scenarios that two-node clusters have to solve and an outline of how to solve them  |
+| [Illustrations of Multi-Node Failures](#illustrations-of-multi-node-failures)           | A collection of diagrams that show what happens in scenarios where both nodes fail                        |
+
+##### Failure Modes Across Deployment Options
+See this [published table](https://docs.google.com/spreadsheets/d/e/2PACX-1vSbSjwiCCyIIV-0UZ7a9vWw5DPoSdtotbBIpjD4EfrqKPrOeu1glzews8Eb96iNqSCugQTsAJmlflR3/pubhtml?gid=0&single=true) for a detailed
+breakdown of failure modes across OpenShift deployment options.
+
+##### Graceful vs. Unplanned Reboots
 Events that have to be handled uniquely by a two-node cluster can largely be categorized into one of two buckets. In the first bucket, we have things that trigger graceful reboots. This includes
 events like upgrades, MCO-triggered reboots, and users sending a shutdown command to one of the nodes. In each of these cases - assuming a functioning two-node cluster - the node that is shutting down
 must wait for pacemaker to signal to etcd to remove the node from the etcd quorum to maintain e-quorum. When the node reboots, it must rejoin the etcd cluster and sync its database to the active node.
@@ -538,7 +604,11 @@ outages, or turning off a machine using a command like `poweroff -f`. The point 
 involves pacemaker restarting the etcd on the surviving node with a new cluster ID as a cluster-of-one. This way, when the other node rejoins, it must reconcile its data directory and resync to the
 new cluster before it can rejoin as an active peer.
 
-#### Failure Scenario Timelines:
+The diagram illustrates the state transition of the etcd resource agent managed by pacemaker on both nodes.
+
+![Graceful vs. Non-Graceful Shutdown Diagram](etcd-flowchart-gns-nogns-happy-paths.svg)
+
+##### Failure Scenario Timelines:
 This section provides specific steps for how two-node clusters would handle interesting events.
 
 1. Cold Boot
@@ -612,6 +682,11 @@ This section provides specific steps for how two-node clusters would handle inte
    2. Pacemaker removes etcd from the members list and restart it, so it can resync
    3. Stop failure is optionally escalated to a node failure (fencing)
    4. Start failure defaults to leaving the service offline
+
+##### Illustrations of Multi-Node Failures
+This collection of diagrams collects a series of scenarios where both nodes fail.
+
+![Diagrams of Multi-Node Failure Scenarios](etcd-flowchart-both-nodes-reboot-scenarios.svg)
 
 #### Running Two Node OpenShift with Fencing with a Failed Node
 
@@ -762,7 +837,7 @@ The initial release of TNF should aim to build a regression baseline.
 | Test  | Certificate rotation with an unhealthy node | A new TNF test to verify certificate rotation on a cluster with an unhealthy node that rejoins after the rotation |
 
 [^1]: This will be added after the initial release when more than one minor version of OpenShift is compatible with the topology.
-[^2]: These tests will be designed to make a component a randomly selected node fail.
+[^2]: These tests will be designed to make a component on a randomly selected node fail.
 
 ### QE
 This section outlines test scenarios for TNF.
