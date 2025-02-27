@@ -52,34 +52,32 @@ partner products, and other third-party implementations.
 #### Using OpenShift's Gateway API implementation on a new OpenShift cluster
 
 As a cluster-admin, I want to install a new OpenShift 4.19 cluster, and then use
-OpenShift's Gateway API implementation to configure ingress to workload on this
-cluster.
-
-_TBD_
+OpenShift's Gateway API implementation to configure ingress to a workload on
+this cluster without having to deploy and then manage the lifecycle of any CRDs
+thereafter.
 
 #### Using OpenShift's Gateway API implementation on an upgraded cluster
 
 As a cluster-admin, I want to upgrade my cluster from OpenShift 4.18 (which
 *doesn't* manage the Gateway API CRDs' life-cycle) to OpenShift 4.19 (which
-*does*).
-
-_TBD_
+*does*). If a user on my cluster or I had previously installed Gateway API
+CRDs and was managing their lifecycle, then I need OpenShift to explicitly
+confirm consent from me to take over the management of these CRDs to avoid
+disruptions to existing workloads.
 
 #### Using a third-party Gateway API implementation
 
 As a cluster-admin, I want to install a third-party Gateway API implementation
-on my OpenShift 4.19 cluster, and I want to use the third-party implementation
-without interference from OpenShift.
-
-_TBD_
+on my OpenShift 4.19 cluster, and use the third-party implementation without
+any interference from the OpenShift implementation. Relatedly, I want to be
+able to utilize both the first-party and any third-party solution alongside
+each other simultaneously and independently without any interference between the
+two.
 
 #### Future OpenShift upgrades
 
-As a cluster-admin, I want to upgrade my cluster from OpenShift 4.19 (which
-manages the Gateway API CRDs' life-cycle) to OpenShift 4.20 (which includes a
-newer version of these CRDs).
-
-_TBD_
+As a cluster-admin, I want to be able to receive updates to the Gateway API
+resources via zstream (and major) releases to add new features and capabilities.
 
 ### Goals
 
