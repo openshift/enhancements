@@ -229,17 +229,15 @@ life-cycle so that Gateway API can be configured and used post-install.
 
 #### Single-node Deployments or MicroShift
 
-The CRDs themselves use minimal resources.  Creating a GatewayClass CR can cause
-the Ingress Operator to install OpenShift Service Mesh, which in turn installs
-Istio and Envoy (see the [gateway-api-with-cluster-ingress-operator](gateway-api-with-cluster-ingress-operator.md)
-enhancement proposal), which use considerable resources.  For Single-Node
-OpenShift, the cluster-admin might be advised to pay particular attention to
-OSSM's resource requirements and the cluster's resource constraints before
-attempting to use Gateway API.
+The Cluster Ingress Operator (CIO) will be used to deploy and manage the
+lifecycle of the Gateway API CRDs for applicable clusters. CRDs and their
+management are not particularly resource intensive.
 
-MicroShift does not run the Ingress Operator and has its own design for
-supporting Gateway API (see the MicroShift [gateway-api-support](../microshift/gateway-api-support.md)
-enhancement).
+The CIO covers Single Node Deployments. MicroShift however, does not run the
+CIO has its own design for supporting Gateway API (see the [MicroShift Gateway
+API Support Enhancement]).
+
+[MicroShift Gateway API Support Enhancement]:../microshift/gateway-api-support.md
 
 ### Implementation Details/Notes/Constraints
 
@@ -251,20 +249,21 @@ enhancement).
 
 ### Risks and Mitigations
 
-#### Dead fields
+#### Unknown Fields
 
-If an installed Gateway API CRD includes some field that is not implemented by
-the installed Gateway API implementation, then updates to this field may be
-silently ignored.  In the context of a security feature, ignoring this field
-could result in a configuration that inadvertently exposes workload.
+> **Note**: aka "dead fields"
 
-Potential mitigation strategies:
+The definition of the "unknown fields" problem is provided upstream in
+[gateway-api#3624], which goes into details about the effects on Gateway API
+implementations, and what can generally go wrong. Since this problem does not
+have any standards or solutions defined in upstream at the time of writing we
+will address this by pinning to one specific version of the Gateway API CRDs
+that is tested and vetted by us to ensure "dead fields" will not cause harm to
+users of the corresponding version of our first-party implementation. When the
+upstream community provides standards and solution around this we will implement
+that solution.
 
-- Handle with an admission webhook (see [Admission webhook](#admission-webhook) under [Alternatives](#alternatives).
-- Work upstream to address this issue.  _TODO: Link to a relevant upstream discussion._
-- Defer the issue until we allow some newer CRD version than we initially allow.
-
-_TBD: Fill in more details._
+[gateway-api#3624]:https://github.com/kubernetes-sigs/gateway-api/issues/3624
 
 ### Drawbacks
 
