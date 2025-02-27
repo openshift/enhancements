@@ -103,7 +103,7 @@ resources via zstream (and major) releases to add new features and capabilities.
 OpenShift's [Cluster Ingress Operator (CIO)] will manage the _entire_
 life-cycle of the Gateway API CRDs from here onward. The CIO will be packaged
 along with a [Validating Admission Policy (VAP)] to block updates from sources
-other than the CIO, and will hold the CRDs at a specific `$CRD_VERSION`. In
+other than the CIO, and will hold the CRDs at a specific version. In
 effect, this means that the **Gateway API resources will now be treated like a
 core API.**
 
@@ -127,12 +127,12 @@ Management Succession", and cover its implications and logic below.
 #### CRD Management Succession
 
 Taking over the management of the Gateway API CRDs from a previous entity
-can be tumultuous as we will require:
+can be tumultuous as we will require the following:
 
-* no other actors managing the CRDs from here on out
-* only standard CRDs can be deployed (no experimental)
-* the CRDs to be deployed at an exact version/schema
-* OR the CRDs not to be present at all
+* no other actors to be managing the CRDs from here on out,
+* AND only standard CRDs to be deployed (no experimental),
+* AND the CRDs to be deployed at an exact version/schema;
+* OR the CRDs not to be present at all.
 
 We will require this by providing a pre-upgrade check in the previous release
 that verifies these are true and sets `Upgradable=false` if any of them are not.
@@ -148,14 +148,15 @@ that verifies these are true and sets `Upgradable=false` if any of them are not.
 > help move towards a better overall experience for users who want experimental
 > Gateway API features going forward.
 
-**We simply can not anticipate all of the negative effects** succession will
+**We simply cannot anticipate all of the negative effects** succession will
 have on existing implementations if the cluster admin forces through the upgrade
 check. As an extra precaution for users forcing upgrades precipitously, we will
 provide an admin gate to both provide an extra warning and gather consent from
 the cluster admin to take over the management of the CRDs. This will be
 accompanied by detailed documentation on what the admin should check and how to
 fufill the checks, which will also be linked from the description provided in
-the admin gate.
+the admin gate. An "unsupported config override" will be used to flag
+exceptions.
 
 The admin will be responsible for ensuring the safety of succession. If they
 force through the pre-upgrade check AND the admin gate, the admin gate will be
@@ -163,7 +164,8 @@ left behind to help aid investigation of the cause of problems when the upgrade
 goes wrong.
 
 > **Note**: Even if they force through, we will take over the CRDs once the
-> upgrade completes (or go `Degraded` if that fails for some reason).
+> upgrade completes (or go `Degraded` if that fails for some reason) unless
+> they are in "unsupported config override" mode.
 
 [Group/Version/Kind (GVK)]:https://book.kubebuilder.io/cronjob-tutorial/gvks.html
 [an effort]:https://github.com/kubernetes-sigs/gateway-api/discussions/3497
@@ -202,7 +204,7 @@ checks and the post-upgrade checks.
     * IF the upgrade fails persistently, `Degraded` status is set
   * ELSE the CRDs are deployed by the CIO
 
-> **Note**: If we reach `Degraded` its expected that some tampering has
+> **Note**: If we reach `Degraded`, it's expected that some tampering must have
 > occurred (e.g. a cluster-admin has for some reason destroyed our VAP and
 > manually changed the CRDs). For the initial release we will simply require
 > manual intervention (support) to fix this as we can't guess too well at the
@@ -231,42 +233,53 @@ life-cycle so that Gateway API can be configured and used post-install.
 
 #### Single-node Deployments or MicroShift
 
-The CRDs themselves use minimal resources.  Creating a GatewayClass CR can cause
-the Ingress Operator to install OpenShift Service Mesh, which in turn installs
-Istio and Envoy (see the [gateway-api-with-cluster-ingress-operator](gateway-api-with-cluster-ingress-operator.md)
-enhancement proposal), which use considerable resources.  For Single-Node
-OpenShift, the cluster-admin might be advised to pay particular attention to
-OSSM's resource requirements and the cluster's resource constraints before
-attempting to use Gateway API.
+The Cluster Ingress Operator (CIO) will be used to deploy and manage the
+lifecycle of the Gateway API CRDs for applicable clusters. CRDs and their
+management are not particularly resource intensive.
 
-MicroShift does not run the Ingress Operator and has its own design for
-supporting Gateway API (see the MicroShift [gateway-api-support](../microshift/gateway-api-support.md)
-enhancement).
+The CIO covers Single Node Deployments for some operations, but not CIO on MicroShift.  MicroShift has its own design for supporting Gateway API (see the [MicroShift Gateway
+API Support Enhancement]).
+
+[MicroShift Gateway API Support Enhancement]:../microshift/gateway-api-support.md
 
 ### Implementation Details/Notes/Constraints
 
-> What are some important details that didn't come across above in the
-> **Proposal**? Go in to as much detail as necessary here. This might be
-> a good place to talk about core concepts and how they relate. While it is useful
-> to go into the details of the code changes required, it is not necessary to show
-> how the code will be rewritten in the enhancement.
+The Gateway API CRDs will be hosted as YAML manifests alongside several
+manifests the Cluster Ingress Operator (CIO) hosts, and will be deployed
+via the relevant controller logic.
 
 ### Risks and Mitigations
 
-#### Dead fields
+#### Unknown Fields
 
-If an installed Gateway API CRD includes some field that is not implemented by
-the installed Gateway API implementation, then updates to this field may be
-silently ignored.  In the context of a security feature, ignoring this field
-could result in a configuration that inadvertently exposes workload.
+> **Note**: aka "dead fields"
 
-Potential mitigation strategies:
+The definition of the "unknown fields" problem is provided upstream in
+[gateway-api#3624], which goes into details about the effects on Gateway API
+implementations, and what can generally go wrong. Since this problem does not
+have any standards or solutions defined in upstream at the time of writing we
+will address this by pinning to one specific version of the Gateway API CRDs
+that is tested and vetted by us to ensure "dead fields" will not cause harm to
+users of the corresponding version of our first-party implementation. When the
+upstream community provides standards and solution around this we will evaluate
+and possibly implement that solution.
 
-- Handle with an admission webhook (see [Admission webhook](#admission-webhook) under [Alternatives](#alternatives).
-- Work upstream to address this issue.  _TODO: Link to a relevant upstream discussion._
-- Defer the issue until we allow some newer CRD version than we initially allow.
+> **Warning**: For a third party implementation, that does not support the
+> version of our Gateway API CRDs, it may be possible for a user to specify a
+> field, that has no effect immediately, but takes effect once the
+> implementation is later upgraded. This could be confusing for end users, or
+> could break their ingress during the upgrade, or it could even lead the user
+> to incorrectly believe that their their endpoints are secure where the dead
+> field is security related. Notably third party implementations do not have a
+> great way to protect themselves from dead fields until [gateway-api#3624] is
+> resolved. Until that is resolved, they will have to come up with a custom
+> solution. We will provide documentation specific to third party Gateway API
+> integrations which highlights this problem and suggests that their
+> implementations (e.g. API clients, controllers, etc) should be checking and
+> validating the JSON schema of what is actually provided by the API versus
+> the schema they expect and are aware of.
 
-_TBD: Fill in more details._
+[gateway-api#3624]:https://github.com/kubernetes-sigs/gateway-api/issues/3624
 
 ### Drawbacks
 
@@ -335,7 +348,8 @@ N/A.
 
 ### Removing a deprecated feature
 
-N/A.
+The previous technical preview code for managing Gateway API CRDs will be
+removed in favor of the new logic in the CIO.
 
 ## Upgrade / Downgrade Strategy
 
@@ -477,7 +491,7 @@ We conclude that the effort of adding an admin-ack gate isn't worth the effort.
 
 ### Use a fleet evaluation condition to detect clusters with incompatible CRDs
 
-Another option considered was to add a [fleet evaluation condition](../dev-guide/cluster-fleet-evaluation.md) to tell
+Another option considered was to add a [fleet evaluation condition](../../dev-guide/cluster-fleet-evaluation.md) to tell
 us how many clusters have conflicting CRDs already installed.  This could help
 us decide whether implementing upgrade-blocking logic (such as the
 aforementioned admin-ack gate) would be beneficial.  However, given time
