@@ -17,7 +17,6 @@ creation-date: 2025-01-22
 last-updated: 2025-01-27
 tracking-link:
   - https://issues.redhat.com/browse/NE-1946
-status: provisional
 see-also:
   - "/enhancements/ingress/gateway-api-with-cluster-ingress-operator.md"
 ---
@@ -92,87 +91,126 @@ resources via zstream (and major) releases to add new features and capabilities.
 
 ### Non-Goals
 
-- _Automatically_ replace incompatible CRDs that some other agent installed.
 - Provide an explicit override for the cluster-admin to take CRD ownership.
 - Solve CRD life-cycle management in OLM.
 - Solve OLM subscription management.
 
 ## Proposal
 
-### Life-cycle management
+### CRD Life-cycle management
 
-OpenShift's Ingress Operator monitors for the presence of the Gateway API CRDs
-and uses [Server-Side Apply](https://kubernetes.io/docs/reference/using-api/server-side-apply/) to track ownership using the following logic:
+OpenShift's [Cluster Ingress Operator (CIO)] will manage the _entire_
+life-cycle of the Gateway API CRDs from here onward. The CIO will be packaged
+along with a [Validating Admission Policy (VAP)] to block updates from sources
+other than the CIO, and will hold the CRDs at a specific version. In
+effect, this means that the **Gateway API resources will now be treated like a
+core API.**
 
-- If CRDs are absent, the Ingress Operator installs the appropriate version.
-- If CRDs are present with the Ingress Operator as owner:
-  - If they are at the appropriate version, the operator does nothing.
-  - Else, the operator updates the CRDs to the appropriate version.
-- If CRDs are present with some other owner:
-  - If CRDs are at an unexpected version, the operator signals a degraded state.
-  - Else, _TODO: Do we signal degraded, or what?_
+[Cluster Ingress Operator (CIO)]:https://github.com/openshift/cluster-ingress-operator
+[Validating Admission Policy (VAP)]:https://kubernetes.io/docs/reference/access-authn-authz/validating-admission-policy/
 
-Note that the appropriate version for the CRDs depends on the version of
-OpenShift Service Mesh (OSSM) that the Ingress Operator has pinned in a given
-OpenShift release.  Specifically, the CRDs SHOULD be the version corresponding
-to the version of Istio in that OSSM version; they MUST be of some version that
-is compatible and that we have tested with that version of Istio.  That is, in
-order for some version of the CRDs to be allowed to be accepted, Red Hat MUST
-run the upstream conformance tests and downstream end-to-end tests with the
-specific combination of OSSM version that the operator installs and CRD version
-that is desired to be installed.
+#### CRD Deployment
 
-These CRDs are necessary for the Gateway API feature to work at all.  Ideally,
-the Ingress Operator is the only agent that attempts to manage the life-cycle of
-these CRDs (that is, creating, updating, or deleting them).  However, in some
-contingencies, this is not the case:
+The CIO will now check for the presence of the CRDs on the cluster, for
+which there are two scenarios:
 
-- A cluster-admin can install the CRDs before upgrading to OpenShift 4.19.
-- A layered product or third-party controller could be actively managing them.
+1. The CRDs are not present, so we create them
+2. The CRDs are already present, so we need to take over management
 
-In any scenario in which some agent other than the Ingress Operator has
-installed the CRDs, the Ingress Operator cannot trivially infer the intent and
-potential active use of the existing CRDs.  Overwriting the existing versions
-represents a risk of breaking workload or violating the end-user's expectations.
-Thus the Ingress Operator will only detect and warn about these scenarios.
+The former is extremely straightforward and the correct version of the CRDs
+will be applied.
 
-The Ingress Operator's warning will take the form of, at a minimum, setting the
-`Degraded` status condition's status to `True` with a descriptive message on the
-ingress clusteroperator.  
+The latter situation has more complexities. We'll refer to this process as "CRD
+Management Succession", and cover its implications and logic below.
 
-The Cluster Version Operator has [an alerting rule](https://github.com/openshift/cluster-version-operator/blob/0b3f507632ce4705702fc725614bd22d25d6686c/install/0000_90_cluster-version-operator_02_servicemonitor.yaml#L106-L124) that reports when a
-clusteroperator has `Degraded` status `True`.  However, we might decide to
-implement a more specific alerting rule that provides more details on how to
-reconcile conflicting CRDs.
+#### CRD Management Succession
 
-_TBD_: Talk about how we could use Server-Side Apply for CRD updates in upgrades
-from OpenShift 4.19.0.
+Taking over the management of the Gateway API CRDs from a previous entity
+can be tumultuous as we will require the following:
 
-### Dead fields
+* no other actors to be managing the CRDs from here on out,
+* AND only standard CRDs to be deployed (no experimental),
+* AND the CRDs to be deployed at an exact version/schema;
+* OR the CRDs not to be present at all.
 
-_TBD_: Describe the issue and how we will address it in 4.19.
+We will require this by providing a pre-upgrade check in the previous release
+that verifies these are true and sets `Upgradable=false` if any of them are not.
+
+> **Note**: Upstream Gateway API unfortunately layered experimental versions of
+> CRDs on top of the same [Group/Version/Kind (GVK)] as the standard ones, so
+> unfortunately for initial release users will be unable to use experimental as
+> we can't deliver that as a part of our supported API surface. It will be
+> feasible to add a gate to enable experimental later, but because of this
+> layering this will not be a great user experience and will require the cluster
+> to become tainted. We are tracking and supporting [an effort] in upstream
+> Gateway API to separate experimental into its own group, which we expect to
+> help move towards a better overall experience for users who want experimental
+> Gateway API features going forward.
+
+**We simply cannot anticipate all of the negative effects** succession will
+have on existing implementations if the cluster admin forces through the upgrade
+check. As an extra precaution for users forcing upgrades precipitously, we will
+provide an admin gate to both provide an extra warning and gather consent from
+the cluster admin to take over the management of the CRDs. This will be
+accompanied by detailed documentation on what the admin should check and how to
+fufill the checks, which will also be linked from the description provided in
+the admin gate. An "unsupported config override" will be used to flag
+exceptions.
+
+The admin will be responsible for ensuring the safety of succession. If they
+force through the pre-upgrade check AND the admin gate, the admin gate will be
+left behind to help aid investigation of the cause of problems when the upgrade
+goes wrong.
+
+> **Note**: Even if they force through, we will take over the CRDs once the
+> upgrade completes (or go `Degraded` if that fails for some reason) unless
+> they are in "unsupported config override" mode.
+
+[Group/Version/Kind (GVK)]:https://book.kubebuilder.io/cronjob-tutorial/gvks.html
+[an effort]:https://github.com/kubernetes-sigs/gateway-api/discussions/3497
 
 ### Workflow Description
 
-> Explain how the user will use the feature. Be detailed and explicit.  Describe
-> all of the actors, their roles, and the APIs or interfaces involved. Define a
-> starting state and then list the steps that the user would need to go through to
-> trigger the feature described in the enhancement. Optionally add a
-> [mermaid](https://github.com/mermaid-js/mermaid#readme) sequence diagram.
-> 
-> Use sub-sections to explain variations, such as for error handling,
-> failure recovery, or alternative outcomes.
+The workflow in this case is an upgrade process. From the _user_ perspective the
+CRDs will be fully managed via the platform from here on out, so they only need
+to interface with the upgrade workflow on the condition that their cluster had
+previously installed Gateway API CRDs. The workflow consists of the pre-upgrade
+checks and the post-upgrade checks.
 
-**cluster-admin** is a human user responsible for managing a cluster.
+### Pre-upgrade
 
-1. Start with a 4.18 cluster with conflicting CRDs.
-2. Upgrade to 4.19.
-3. Check clusteroperators, see a conflict.
-4. Run some `oc` command.
-5. Check the ingress clusteroperator again.  Now everything should be dandy.
+1. In the CIO a pre-upgrade check verifies CRD presence
+  * IF the CRDs are present
+    * an admingate is created requiring acknowledgement of CRD succession
+    * UNTIL the schema exactly matches the version we provide we set `Upgradable=false`
+2. Once CRDs are not present OR are an exact match we set `Upgradable=true`
 
-_TBD: Fill in the details for handing ownership of CRD life-cycle management to
-the Ingress Operator in the case of a conflict, using Server-Side Apply._
+> **Note**: A **cluster-admin** is required for these steps.
+
+> **Note**: The logic for these lives in in the previous release (4.18), but
+> does not need to be carried forward to future releases as other logic exists
+> there to handle Gateway API CRD state (see below).
+
+### Post-upgrade
+
+> **Note**: The logic for these lives in in the new release (4.19) and onward.
+
+1. The CIO is hereafter deployed alongside its CRD protection [Validating Admission Policy (VAP)]
+2. The CIO constantly checks for the presence of the CRDs
+  * IF the CRDs are present
+    * IF there are unexpected CRDs (because the VAP was bypassed), the operator reports `Degraded` and logs.
+    * UNTIL the CRD schema matches what is expected, the CIO upgrades the otherwise expected CRDs
+    * IF the upgrade fails persistently, `Degraded` status is set
+  * ELSE the CRDs are deployed by the CIO
+
+> **Note**: If we reach `Degraded`, it's expected that some tampering must have
+> occurred (e.g. a cluster-admin has for some reason destroyed our VAP and
+> manually changed the CRDs). For the initial release we will simply require
+> manual intervention (support) to fix this as we can't guess too well at the
+> original intent behind the change. In future iterations we may consider more
+> solutions if this becomes a common problem for some reason.
+
+[Validating Admission Policy (VAP)]:https://kubernetes.io/docs/reference/access-authn-authz/validating-admission-policy/
 
 ### API Extensions
 
@@ -194,97 +232,132 @@ life-cycle so that Gateway API can be configured and used post-install.
 
 #### Single-node Deployments or MicroShift
 
-The CRDs themselves use minimal resources.  Creating a GatewayClass CR can cause
-the Ingress Operator to install OpenShift Service Mesh, which in turn installs
-Istio and Envoy (see the [gateway-api-with-cluster-ingress-operator](gateway-api-with-cluster-ingress-operator.md)
-enhancement proposal), which use considerable resources.  For Single-Node
-OpenShift, the cluster-admin might be advised to pay particular attention to
-OSSM's resource requirements and the cluster's resource constraints before
-attempting to use Gateway API.
+The Cluster Ingress Operator (CIO) will be used to deploy and manage the
+lifecycle of the Gateway API CRDs for applicable clusters. CRDs and their
+management are not particularly resource intensive.
 
-MicroShift does not run the Ingress Operator and has its own design for
-supporting Gateway API (see the MicroShift [gateway-api-support](../microshift/gateway-api-support.md)
-enhancement).
+The CIO covers Single Node Deployments for some operations, but not CIO on MicroShift.  MicroShift has its own design for supporting Gateway API (see the [MicroShift Gateway
+API Support Enhancement]).
+
+[MicroShift Gateway API Support Enhancement]:../microshift/gateway-api-support.md
 
 ### Implementation Details/Notes/Constraints
 
-> What are some important details that didn't come across above in the
-> **Proposal**? Go in to as much detail as necessary here. This might be
-> a good place to talk about core concepts and how they relate. While it is useful
-> to go into the details of the code changes required, it is not necessary to show
-> how the code will be rewritten in the enhancement.
+The Gateway API CRDs will be hosted as YAML manifests alongside several
+manifests the Cluster Ingress Operator (CIO) hosts, and will be deployed
+via the relevant controller logic.
 
 ### Risks and Mitigations
 
-#### Dead fields
+#### Unknown Fields
 
-If an installed Gateway API CRD includes some field that is not implemented by
-the installed Gateway API implementation, then updates to this field may be
-silently ignored.  In the context of a security feature, ignoring this field
-could result in a configuration that inadvertently exposes workload.
+> **Note**: aka "dead fields"
 
-Potential mitigation strategies:
+The definition of the "unknown fields" problem is provided upstream in
+[gateway-api#3624], which goes into details about the effects on Gateway API
+implementations, and what can generally go wrong. Since this problem does not
+have any standards or solutions defined in upstream at the time of writing we
+will address this by pinning to one specific version of the Gateway API CRDs
+that is tested and vetted by us to ensure "dead fields" will not cause harm to
+users of the corresponding version of our first-party implementation. When the
+upstream community provides standards and solution around this we will evaluate
+and possibly implement that solution.
 
-- Handle with an admission webhook (see [Admission webhook](#admission-webhook) under [Alternatives](#alternatives).
-- Work upstream to address this issue.  _TODO: Link to a relevant upstream discussion._
-- Defer the issue until we allow some newer CRD version than we initially allow.
+> **Warning**: For a third party implementation, that does not support the
+> version of our Gateway API CRDs, it may be possible for a user to specify a
+> field, that has no effect immediately, but takes effect once the
+> implementation is later upgraded. This could be confusing for end users, or
+> could break their ingress during the upgrade, or it could even lead the user
+> to incorrectly believe that their their endpoints are secure where the dead
+> field is security related. Notably third party implementations do not have a
+> great way to protect themselves from dead fields until [gateway-api#3624] is
+> resolved. Until that is resolved, they will have to come up with a custom
+> solution. We will provide documentation specific to third party Gateway API
+> integrations which highlights this problem and suggests that their
+> implementations (e.g. API clients, controllers, etc) should be checking and
+> validating the JSON schema of what is actually provided by the API versus
+> the schema they expect and are aware of.
 
-_TBD: Fill in more details._
+[gateway-api#3624]:https://github.com/kubernetes-sigs/gateway-api/issues/3624
 
 ### Drawbacks
 
 > The idea is to find the best form of an argument why this enhancement should
 > _not_ be implemented.
-> 
+>
 > What trade-offs (technical/efficiency cost, user experience, flexibility,
 > supportability, etc) must be made in order to implement this? What are the reasons
 > we might not want to undertake this proposal, and how do we overcome them?
-> 
+>
 > Does this proposal implement a behavior that's new/unique/novel? Is it poorly
 > aligned with existing user expectations?  Will it be a significant maintenance
 > burden?  Is it likely to be superceded by something else in the near future?
 
-_TBD_
+The key tradeoff is that we will start treating Gateway API effectively as if
+it were a core API. This means any perceived value someone might see in being
+able to manage and upgrade the Gateway API resources themselves, independently
+of the platform version, will be lost. Third party implementations will not be
+able to bring their own API changes.
 
-## Open Questions [optional]
+> **Note**: The API has stabilized, so it's important to note that there is
+> little expectation of any rapid change.
 
-> This is where to call out areas of the design that require closure before deciding
-> to implement the design.  For instance,
->  > 1. This requires exposing previously private resources which contain sensitive
->   information.  Can we do this?
+> **Note**: While third party implementations can not bring their own API
+> changes directly, if the need for more flexibility arises we may consider
+> adding functionality in future iterations that enables the platform to more
+> dynamically set the version deployed in the cluster.
 
-_TBD_
+> **Note**: This "downside" can actually be an upside for integrators, as we've
+> heard from projects which have Gateway API integrations (such as OSSM) which
+> appreciate having a consistent and known version of Gateway API on the
+> cluster which they can always rely on being there.
+
+Unfortunately this is not really an avoidable problem, as it is not tenable for
+us to simultaneously say that we support Gateway API as a primary and fully
+supported API surface for ingress traffic, and also have no control over which
+version of the APIs are present, or if they are even present at all (e.g. the
+cluster admin decides to delete them).
+
+To make this situation a bit easier we do anticipate providing some updates
+after the initial release. We want to eventually allow version _ranges_ in
+time after we resolve the "dead fields" problem (see more in the section about
+this above) which we expect to provide significantly more flexibility and take
+care of many concerns that would come from this change. We are also tracking and
+supporting [upstream efforts] to separate experimental APIs out into their own
+group, which will provide more flexibility when users want experimental features.
+
+[upstream efforts]:https://github.com/kubernetes-sigs/gateway-api/discussions/3497
 
 ## Test Plan
 
-> **Note:** *Section not required until targeted at a release.*
-> 
-> Consider the following in developing a test plan for this enhancement:
-> - Will there be e2e and integration tests, in addition to unit tests?
-> - How will it be tested in isolation vs with other components?
-> - What additional testing is necessary to support managed OpenShift service-based offerings?
-> 
-> No need to outline all of the test cases, just the general strategy. Anything
-> that would count as tricky in the implementation and anything particularly
-> challenging to test should be called out.
-> 
-> All code is expected to have adequate tests (eventually with coverage
-> expectations).
+The Ingress Operator will have tests to validate the intended functionality
+outlined in this EP:
 
-The Ingress Operator will have E2E tests to simulate the user stories outlined
-in this EP:
-
-- Delete the CRDs; verify that the operator re-installs them.
-- Install incompatible CRDs with `metadata.managedFields` set to indicate that the operator *did not* install them; verify that the operator reports the appropriate `Degraded` status.
-- Install older CRDs with `metadata.managedFields` set to indicate that an older version of the operator *did* install them; verify that the operator updates them.
-
-_TBD_
+- CIO Tests that verify the pre-upgrade check logic
+- CIO Tests that verify the post-upgrade logic:
+    - Delete the CRDs; verify that the operator re-installs them
+    - Install incompatible CRDs; verify that the operator reports `Degraded`
+    - Install experimental CRDs; verify that the operator reports `Degraded`
+    - Verify none of the above can even be done with a present VAP
 
 ## Graduation Criteria
 
-Note that Gateway API CRD life-cycle management will be part of the
-[gateway-api-with-cluster-ingress-operator](gateway-api-with-cluster-ingress-operator.md) enhancement, which defines its
-own graduation criteria.
+### Dev Preview -> Tech Preview
+
+This stage covers basic management for the Gateway API CRDs behind the feature
+gate, but without the [Validating Admission Policy (VAP)], allowing them to be
+disabled and for someone else to deploy and manage them.
+
+[Validating Admission Policy (VAP)]:https://kubernetes.io/docs/reference/access-authn-authz/validating-admission-policy/
+
+### Tech Preview -> GA
+
+This stage covers the CRD version bump, the [Validating Admission Policy (VAP)]
+is added (blocking anyone but the platform from deploying or managing Gateway
+API CRDs), and the pre-upgrade and post-upgrade checks to ensure CRD management
+succession are in place in the Cluster Ingress Operator (CIO).
+
+[Validating Admission Policy (VAP)]:https://kubernetes.io/docs/reference/access-authn-authz/validating-admission-policy/
 
 ### Dev Preview -> Tech Preview
 
@@ -298,184 +371,63 @@ N/A.
 
 ### Removing a deprecated feature
 
-N/A.
-
-## Upgrade / Downgrade Strategy
-
-> If applicable, how will the component be upgraded and downgraded? Make sure this
-> is in the test plan.
-> 
-> Consider the following in developing an upgrade/downgrade strategy for this
-> enhancement:
-> - What changes (in invocations, configurations, API use, etc.) is an existing
->   cluster required to make on upgrade in order to keep previous behavior?
-> - What changes (in invocations, configurations, API use, etc.) is an existing
->   cluster required to make on upgrade in order to make use of the enhancement?
-> 
-> Upgrade expectations:
-> - Each component should remain available for user requests and
->   workloads during upgrades. Ensure the components leverage best practices in handling [voluntary
->   disruption](https://kubernetes.io/docs/concepts/workloads/pods/disruptions/). Any exception to
->   this should be identified and discussed here.
-> - Micro version upgrades - users should be able to skip forward versions within a
->   minor release stream without being required to pass through intermediate
->   versions - i.e. `x.y.N->x.y.N+2` should work without requiring `x.y.N->x.y.N+1`
->   as an intermediate step.
-> - Minor version upgrades - you only need to support `x.N->x.N+1` upgrade
->   steps. So, for example, it is acceptable to require a user running 4.3 to
->   upgrade to 4.5 with a `4.3->4.4` step followed by a `4.4->4.5` step.
-> - While an upgrade is in progress, new component versions should
->   continue to operate correctly in concert with older component
->   versions (aka "version skew"). For example, if a node is down, and
->   an operator is rolling out a daemonset, the old and new daemonset
->   pods must continue to work correctly even while the cluster remains
->   in this partially upgraded state for some time.
-> 
-> Downgrade expectations:
-> - If an `N->N+1` upgrade fails mid-way through, or if the `N+1` cluster is
->   misbehaving, it should be possible for the user to rollback to `N`. It is
->   acceptable to require some documented manual steps in order to fully restore
->   the downgraded cluster to its previous state. Examples of acceptable steps
->   include:
->   - Deleting any CVO-managed resources added by the new version. The
->     CVO does not currently delete resources that no longer exist in
->     the target version.
+The previous technical preview code for managing Gateway API CRDs will be
+removed in favor of the new logic in the CIO.
 
 ## Version Skew Strategy
 
-> How will the component handle version skew with other components?
-> What are the guarantees? Make sure this is in the test plan.
-> 
-> Consider the following in developing a version skew strategy for this
-> enhancement:
-> - During an upgrade, we will always have skew among components, how will this impact your work?
-> - Does this enhancement involve coordinating behavior in the control plane and
->   in the kubelet? How does an n-2 kubelet without this feature available behave
->   when this feature is used?
-> - Will any other components on the node change? For example, changes to CSI, CRI
->   or CNI may require updating that component before the kubelet.
+> **Note**:see operational aspects of API extensions below.
 
-_TBD: Do we describe version skew with layered products here?_
+## Upgrade / Downgrade Strategy
+
+Upgrading is straightforward as Gateway API is stable and will not be making
+any backwards incompatible changes in major versions from here on out.
+
+Downgrading involves the user performing the downgrade, and then applying the
+previous versions of the CRDs to the cluster which they had previously.
+Therefore cluster admins who had the CRDs previously installed need to take
+backups or record their Gateway API CRD resources prior to the upgrade in order
+for a downgrade to be successful.
 
 ## Operational Aspects of API Extensions
 
-> Describe the impact of API extensions (mentioned in the proposal section, i.e. CRDs,
-> admission and conversion webhooks, aggregated API servers, finalizers) here in detail,
-> especially how they impact the OCP system architecture and operational aspects.
-> 
-> - For conversion/admission webhooks and aggregated apiservers: what are the SLIs (Service Level
->   Indicators) an administrator or support can use to determine the health of the API extensions
-> 
->   Examples (metrics, alerts, operator conditions)
->   - authentication-operator condition `APIServerDegraded=False`
->   - authentication-operator condition `APIServerAvailable=True`
->   - openshift-authentication/oauth-apiserver deployment and pods health
-> 
-> - What impact do these API extensions have on existing SLIs (e.g. scalability, API throughput,
->   API availability)
-> 
->   Examples:
->   - Adds 1s to every pod update in the system, slowing down pod scheduling by 5s on average.
->   - Fails creation of ConfigMap in the system when the webhook is not available.
->   - Adds a dependency on the SDN service network for all resources, risking API availability in case
->     of SDN issues.
->   - Expected use-cases require less than 1000 instances of the CRD, not impacting
->     general API throughput.
-> 
-> - How is the impact on existing SLIs to be measured and when (e.g. every release by QE, or
->   automatically in CI) and by whom (e.g. perf team; name the responsible person and let them review
->   this enhancement)
-> 
-> - Describe the possible failure modes of the API extensions.
-> - Describe how a failure or behaviour of the extension will impact the overall cluster health
->   (e.g. which kube-controller-manager functionality will stop working), especially regarding
->   stability, availability, performance and security.
-> - Describe which OCP teams are likely to be called upon in case of escalation with one of the failure modes
->   and add them as reviewers to this enhancement.
+Other products and components that have Gateway API support will now be able to
+consistently know that Gateway API will already be present on the cluster, and
+which version will be present given the version of OpenShift. There will no
+longer be a need for them to document having their users deploy the CRDs
+manually or do any management themselves that could conflict.
 
-_TBD: Do we need to describe anything here?_
+We are already aware of several projects which utilize Gateway API including
+(but not limited to):
+
+* OpenShift Service Mesh
+* Kuadrant
+* OpenShift AI Serving
+
+We will coordinate with these projects and others from release to release on
+their needs related to Gateway API version support. We expect over time that
+more flexibility with the version will eventually be needed, and we anticipate
+adding ranges of support instead of specific versions to accomodate this.
 
 ## Support Procedures
 
 ### Conflicting CRDs
 
-If the Ingress Operator detects the presence of a conflicting version of the
-Gateway API CRDs, it updates the ingress clusteroperator to report a `Degraded`
-status condition with status `True` and a message explaining the situation:
-
-_TBD: Insert example output from `oc get clusteroperators/ingress -o yaml`._
-
-In this situation, the cluster-admin is expected to verify that workload would
-not be broken by handing life-cycle management of the CRDs over to the Ingress
-Operator:
-
-_TBD: Insert `oc` command to make the CRD ownership transition._
-
-Then the Ingress Operator takes ownership and updates the CRDs:
-
-_TBD: Insert example `oc get clusteroperators` and `oc get crds` commands._
-
-### Overriding the Ingress Operator
-
-_TBD: Should we describe how to turn off the Ingress Operator so that the
-cluster-admin can override the CRDs, or describe how Server-Side Apply enables
-the cluster-admin to take over the CRDs?_
+The pre-upgrade checks should eliminate any problems with CRD conflicts.
+However it is always _technically possible_ for the admin to force through both
+the pre-upgrade check AND the admin gate. If they do this the CIO will detect
+the mismatch and will overwrite to the intended version.
 
 ## Alternatives
 
-### Use an admin-ack gate to block upgrades if incompatible CRDs exist
-
-One option considered was to add logic in OpenShift 4.18's Ingress Operator to
-detect conflicting Gateway API CRDs.  This logic would block upgrades from 4.18
-to 4.19 if conflicting CRDs were detected.  Then 4.19's Ingress Operator could
-unconditionally take ownership of the CRDs' life-cycle.
-
-This has the advantage of providing a warning *before* upgrade.  In contrast,
-the solution proposed in this enhancement allows the upgrade and then reports a
-`Degraded` status condition *after* the upgrade.  However, in either case, the
-cluster-admin is responsible for resolving the conflict.  Thus the admin-ack
-gate adds complexity without significantly improving the user experience.
-
-We conclude that the effort of adding an admin-ack gate isn't worth the effort.
-
 ### Use a fleet evaluation condition to detect clusters with incompatible CRDs
 
-Another option considered was to add a [fleet evaluation condition](../dev-guide/cluster-fleet-evaluation.md) to tell
+Another option considered was to add a [fleet evaluation condition](../../dev-guide/cluster-fleet-evaluation.md) to tell
 us how many clusters have conflicting CRDs already installed.  This could help
 us decide whether implementing upgrade-blocking logic (such as the
 aforementioned admin-ack gate) would be beneficial.  However, given time
 constraints, and given that we need to handle conflicts in any case, we have
 concluded that the fleet evaluation condition would not be of much benefit.
-
-### Admission webhook
-
-An admission webhook could be implemented for the Gateway API CRDs to prevent
-writes to any field that is in the CRD but isn't implemented by our Gateway API
-implementation.
-
-Note that using a webhook for this purpose would run into consistency issues and
-race conditions because the webhook would need to cross-validate multiple
-resources.  Specifically, the webhook would need to check which gatewayclasses
-specified our controller name; then the webhook would check *only* resources
-(gateways, httproutes, etc.) associated with those gatewayclasses for fields
-that our controller would not recognize.  Consistency issues could arise, for
-example, if an object were created and subsequently updated to reference a
-gatewayclass, or if a gatewayclass were created (or its controller name were
-updated) after resources that referenced that gatewayclass by name had already
-been created.
-
-_TBD: Fill in details._
-
-We conclude that this can be further evaluated and, if appropriate, implemented
-post-GA if the need arises to allow newer CRD versions than the version that our
-Gateway API implementation recognizes.
-
-### Provide an API for explicitly overriding CRD life-cycle management
-
-Inspired by CAPI's mechanism.  This could be useful in a procedure for upgrading
-a cluster with cluster-admin-owned CRDs to a cluster with operator-managed CRDs.
-
-_TBD: Fill in details._
 
 ### Validate and allow a range of CRD versions
 
@@ -488,11 +440,14 @@ On the other hand, allowing a range adds complexity, requires more testing, and
 still must be constrained to avoid security-problematic dead fields.  This added
 complexity has questionable value and could delay the feature.  Therefore we
 conclude that it is best to pin the CRDs to a specific version for at least the
-initial GA release of the Gateway API feature.
+initial GA release of the Gateway API feature, but we expect in time we will
+iterate into having more flexible ranges.
 
 ### Package CRDs as operator manifests that Cluster Version Operator owns
 
-_TBD_
+We considered whether we would package the CRD manifests with the CVO, but this
+approach has downsides in terms of how we develop management logic for the CIO
+and ultimately did not appear to have enough upsides.
 
 ## Infrastructure Needed [optional]
 
