@@ -81,20 +81,21 @@ resources via zstream (and major) releases to add new features and capabilities.
 
 ### Goals
 
+- Establish the owner of Gateway API CRDs as OpenShift Cluster Ingress Operator (CIO).
+- Prevent upgrades on OpenShift Clusters that have incompatible Gateway API CRDs already installed.
 - Ensure Gateway API CRDs are installed on new and upgraded OpenShift 4.19 clusters.
 - Ensure the installed Gateway API CRDs are compatible with OpenShift's needs.
+- Protect against bad updates or removals of the Gateway API CRDs.
 - Detect and warn if an incompatible version of the CRDs is installed.
-- Describe the issue of dead fields and potential risks thereof.
+- Protect users against "unknown fields"/"dead fields" (defined below).
+- Provide a method to transfer ownership of previously existing CRDs to OpenShift Ingress Cluster Operator when upgrading from 4.18 to 4.19.
 
 ### Non-Goals
 
-- Automatically replace incompatible CRDs that some other agent installed.
-- Provide a pre-upgrade check in OpenShift 4.18 for incompatible CRDs.
+- _Automatically_ replace incompatible CRDs that some other agent installed.
 - Provide an explicit override for the cluster-admin to take CRD ownership.
-- Implement an admission webhook to block updates to dead fields.
 - Solve CRD life-cycle management in OLM.
 - Solve OLM subscription management.
-- Solve CRD life-cycle management for OSSM or Istio resources.
 
 ## Proposal
 
