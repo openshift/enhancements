@@ -17,7 +17,6 @@ creation-date: 2025-01-22
 last-updated: 2025-01-27
 tracking-link:
   - https://issues.redhat.com/browse/NE-1946
-status: provisional
 see-also:
   - "/enhancements/ingress/gateway-api-with-cluster-ingress-operator.md"
 ---
