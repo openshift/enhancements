@@ -343,14 +343,57 @@ I listed the API above.
 
 #### Hypershift / Hosted Control Planes
 
+##### Webhooks
+
+Kueue has validating and mutating webhooks that run across multiple namespaces.
+To reduce the burden on Openshift, we are going to follow an opt-in approach for
+workloads. Webhooks will only be applied on namespaces that have a kueue-managed label on the namespace.
+This way we reduce the impact of webhooks across multiple namespaces.
+
+Hypershift can scale down the worker nodes (scale to zero) but the webhooks are still registered.
+Having namespace opt in can help here as we will not apply webhooks unless there is a namespace that has a label.
+
+Kueue manages webhooks via a deployment and a service. 
+To have high availability on the webhooks, we provide the ability to deploy
+Kueue with multiple replicas.
+
+Kueue webhooks are related to a service so one can monitor the webhooks service
+to determine if the webhooks are done.
+
+##### Machines
+
+Kueue will only create machines in the context of Provisioning Requests.
+There is work ongoing to implement Provising Requests in Hypershift.
+Once this is complete, Kueue can use this for autoscaling.
+
 We do not foresee any issue with integration with HCP.
 Kueue does provide webhooks on pods and that could cause some 
-performance issues in HCP. We will do performance testing on HCP. 
+performance issues in HCP. 
+We will do performance testing on HCP. 
 
 Kueue is an upstream project and its APIs are not aware of MachineSets.
 
 The one area that Kueue can create new machines is its use of Provision requests.
 There will be work to make sure HCP works with ProvisionRequests.
+
+##### Infra / Worker Nodes
+
+There should really be no issue with deploying Kueue on Infra or worker nodes.
+Kueue is agnostic to this.
+
+##### Metrics
+
+Autoscaling, based on metrics, may be tricky. Kueue will deploy its own metrics 
+on the customer workload nodes.
+The control plane will not be able to react to these metrics.
+
+##### APIServices
+
+APIService allow one to set different priorities for apiserver.
+Kueue has a feature called [VisibilityOnDemand](https://kueue.sigs.k8s.io/docs/tasks/manage/monitor_pending_workloads/pending_workloads_on_demand/#configure-api-priority-and-fairness) that requires one to deploy
+an apiservice.
+
+There are [outstanding security issues](https://github.com/kubernetes-sigs/kueue/issues/4433) for this feature so we are disabling this feature in our operator.
 
 #### Standalone Clusters
 
