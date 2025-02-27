@@ -25,17 +25,19 @@ see-also:
 
 # Gateway API CRD Life-Cycle Management
 
-This enhancement describes how the [Ingress Operator](https://github.com/openshift/cluster-ingress-operator) manages Gateway API
-CRDs.
+This enhancement describes how the [Cluster Ingress Operator (CIO)] manages
+Gateway API Custom Resource Definitions (CRDs).
+
+[Cluster Ingress Operator (CIO)]:https://github.com/openshift/cluster-ingress-operator
 
 ## Summary
 
 A key goal of Gateway API is to nurture a diverse ecosystem of implementations.
 These implementations, including OpenShift's, all rely on the same Gateway API
-CRDs.  To these ends, OpenShift must manage the life-cycle of these CRDs in a
-way that enables Red Hat to support the product, minimizes friction for the
-end-user, provides consistency, and avoids causing conflicts with other
-implementations that rely on these CRDs.
+CRDs. As such, OpenShift must manage the life-cycle of these CRDs in a way that
+enables Red Hat to support the product, minimizes friction for the end-user,
+provides consistency, and enables other implementations that rely on these
+CRDs.
 
 ## Motivation
 
