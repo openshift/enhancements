@@ -78,6 +78,28 @@ Kueue liberally uses webhooks to patch workloads depending on if the namespace i
 
 The major challange of Kueue for Openshift is configuration and support of their various frameworks and these different approaches.
 
+#### RBAC For Kueue
+
+[Kueue Upstream Docs](https://kueue.sigs.k8s.io/docs/tasks/manage/rbac/) cover this pretty well.
+
+Kueue has the concept of a Kueue admin and a kueue user. 
+
+A kueue admin has the ability to create ClusterQueues, Queues, ResourceFlavors and Workloads.
+
+A kueue user has the ability to manage general jobs (batch/jobs, ray, kubeflow etc) and to view Queues and workloads.
+A kueue user would request the admin to create a localqueue in their namespace.
+
+This separation is important because when a user creates a LocalQueue they are able to link to a 
+ClusterQueue. ClusterQueues can control things like resource quotas and autoscaling so
+localqueues are usually the job of a kueue-admin to create in the user namespace.
+
+Our operator deploys aggregated cluster roles for `kueue-admin` and `batch-user`.
+
+An admin can bind to the kueue-admin clusterroles to get "admin" access for Kueue.
+
+A user would wants to use Kueue can bind to the "batch-user" so they can view their queue
+and their workloads.
+
 ### User Stories
 
 #### Machine Learning Serving
@@ -337,7 +359,28 @@ changing of feature gates to provide more advanced functionality.
 
 ### API Extensions
 
-I listed the API above.
+Our operator will have a Kueue CRD that will trigger the installation of Kueue.
+
+Kueue operand has the CRDs:
+
+- ClusterQueue
+- AdmissionChecks
+- LocalQueue
+- Workloads
+- ResourceFlavors
+- ProvisioningRequestConfigs
+- MultiKueueClusters
+- MultiKueueConfigs
+- WorkloadPriorityClasses
+- Cohorts (alpha)
+- Topologies (alpha)
+
+Kueue has also validating and mutating webhooks for these CRDs and
+it also mutates/validates core kubernetes resources such as pods, deployments, statefulsets and jobs.
+
+Kueue provides a series of metrics that we will expose into `openshift-monitoring`.
+
+For visibility on demand, Kueue also provides an APIService to define a custom apiservice.
 
 ### Topology Considerations
 
@@ -579,7 +622,6 @@ This is not relevant.
 ## Upgrade / Downgrade Strategy
 
 This is still in flight and we are figuring out the upgrade strategy.
-
 
 ## Version Skew Strategy
 
