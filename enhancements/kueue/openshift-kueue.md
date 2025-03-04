@@ -198,8 +198,20 @@ Kueue has a series of parameters to configure the operation of Kueue.
 
 Various use cases call for the configuration of the integrations and other kueue configurations. 
 
+We will use the kueue configuration [API](https://github.com/kubernetes-sigs/kueue/blob/main/apis/config/v1beta1/configuration_types.go).
+
+The operator reads the kueue configuration and generates a ConfigMap that the kueue manager deployment will use. 
+We will only expose a limited amount of configurations.
+
+
+These values were chosen by working with IBM/RHOAI on what kind of functionality 
+they want to change.
 
 ```golang
+import (
+	kueuecfgv1beta1 "sigs.k8s.io/kueue/apis/config/v1beta1"
+)
+
 // Kueue is the Schema for the kueue API
 // +k8s:openapi-gen=true
 // +genclient
@@ -238,17 +250,17 @@ const (
 type KueueConfiguration struct {
 	// waitForPodsReady configures gang admission
 	// +optional
-	WaitForPodsReady *configapi.WaitForPodsReady `json:"waitForPodsReady,omitempty"`
+	WaitForPodsReady *kueuecfgv1beta1.WaitForPodsReady `json:"waitForPodsReady,omitempty"`
 	// integrations are the types of integrations Kueue will manager
 	// +required
-	Integrations configapi.Integrations `json:"integrations"`
+	Integrations kueuecfgv1beta1.Integrations `json:"integrations"`
 	// featureGates are advanced features for Kueue
 	// +optional
 	FeatureGates map[string]bool `json:"featureGates,omitempty"`
 	// resources provides additional configuration options for handling the resources.
 	// Supports https://github.com/kubernetes-sigs/kueue/blob/release-0.10/keps/2937-resource-transformer/README.md
 	// +optional
-	Resources *configapi.Resources `json:"resources,omitempty"`
+	Resources *kueuecfgv1beta1.Resources `json:"resources,omitempty"`
 	// ManageJobsWithoutQueueName controls whether or not Kueue reconciles
 	// jobs that don't set the annotation kueue.x-k8s.io/queue-name.
 	// Allowed values are NoQueueName and QueueName
@@ -259,7 +271,7 @@ type KueueConfiguration struct {
 	// +optional
 	ManagedJobsNamespaceSelector *metav1.LabelSelector `json:"managedJobsNamespaceSelector,omitempty"`
 	// FairSharing controls the fair sharing semantics across the cluster.
-	FairSharing *configapi.FairSharing `json:"fairSharing,omitempty"`
+	FairSharing *kueuecfgv1beta1.FairSharing `json:"fairSharing,omitempty"`
 }
 
 // KueueStatus defines the observed state of Kueue
@@ -291,6 +303,7 @@ The operator will manage these components necessary for Kueue.
 - APIService for visibility
 - Roles
 - Certificates
+- Issuers
 
 The operator will create and apply these resources to the cluster.
 
@@ -463,11 +476,11 @@ Cert Manager will be used to manage certificates so our operator will have a har
 
 #### Release Schedule
 
-| Kueue Operator     |  Stage   |  OCP Version   |  Kueue  | RHOAI GA
-| ------------------ | ------- | ---------------| -------- | -------
-| 0.1                | Tech Preview | 4.19 | 0.11.z | N
-| 0.1                | Tech Preview | 4.20 | 0.13.z | Y
-| ?                | GA | 4.19 | ? | Y
+| Kueue Operator     |  Stage       |  OCP Version   |  Kueue   | RHOAI GA
+| ------------------ | -------      | ---------------| -------- | -------
+| 0.1                | Tech Preview | 4.19           | 0.11.z   | N
+| 0.1                | Tech Preview | 4.20           | 0.13.z   | Y
+| ?                  | GA           | 4.19           | ?        | Y
 
 Kueue releases 6 times a year, roughly. 
 They will have roughly 2 releases per k8s version so we can take the latest version that is built with the kubernetes version that OCP comes with.
@@ -517,9 +530,16 @@ d. AI usage versus Non AI usage.
 
 This is still up in the air but one idea is that we can use telemetry for GPU or RHOAI metrics to determine AI users versus non AI users.
 
-#### Existing Usage of Kueue
+#### RHOAI Integration
 
-RHOAI is a major user of Kueue and they have already released Kueue as GA. 
+RHOAI has an uber operator called OpenDataHub. This operator provides the ability to install
+various upstream projects. 
+RHOAI provides the flexibility to install Kueue and treat it as a managed project. 
+
+RHOAI considers clusterqueues, localqueues, workloads, resourceflavors, and workloadpriorities as a GA API for customers.
+
+Customers are able to change the configuration of Kueue but that modification is not persisted upon upgrades.
+
 The integrations that are GA for RHOAI, as of writing this enhancement, are Kubeflow Training Operator and Ray.
 
 RHOAI also uses a single release of Kueue across the latest 4 releases of Openshift (ie 4.14, 4.15, 4.16, 4.17).
@@ -541,7 +561,7 @@ To mitigate risk, we are engaging with upstream to define release policies and a
 
 Not relevant here.
 
-## Open Questions [optional]
+## Open Questions
 
 ### Autoscaling Future
 
@@ -551,7 +571,8 @@ We know that we need a secure way of enabling autoscaler and we should think thr
 
 ### RHOAI and Kueue Integration
 
-RHOAI is using Kueue as a GA product. We still need to figure out the path with RHOAI and OCP Kueue.
+RHOAI is using Kueue as a GA product. 
+We still need to figure out the path with RHOAI and OCP Kueue.
 
 ### Expermental Feature Support
 
@@ -559,7 +580,7 @@ Kueue has a concept of feature gates in their configuration API. These are a ser
 The development of Kueue is quite fast and many of these features are not yet GA. 
 We are engaging with upstream to avoid permanent betas and to focus on graduating feature gates.
 
-Meanwhile, there are cases where one would want to test alpha features or beta features. 
+Meanwhile, there are cases where one would want to use alpha features or beta features. 
 To do this, we want to provide an expermental stream in OLM that will allow one to change feature gates and set non standard options.
 We will achieve this by building a special alpha bundle that sets a flag in our deployment that will allow the changing of advanced functionality.
 
@@ -627,7 +648,8 @@ This is still in flight and we are figuring out the upgrade strategy.
 
 Kueue has tight binding with the Kubernetes API so we recommend following Kubernetes policies.
 
-0.11.0 of Kueue is built with 1.32 APIs. We would recommend that this Kueue operator work with n-3 (ie 1.29 at the edge).
+0.11.0 of Kueue is built with 1.32 APIs. 
+We would recommend that this Kueue operator work with n-2 (ie 1.30 at the edge).
 
 ## Operational Aspects of API Extensions
 
