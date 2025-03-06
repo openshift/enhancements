@@ -1012,7 +1012,7 @@ to the right GR. Each per-network GR will only have load balancers configured on
 route to pods in its network. The logical topology would look something like this, if we use an example of having a
 cluster default primary network, a layer 3 primary network, and a layer 2 primary network:
 
-![VRF Topology](images/VRFs.svg)
+![VRF Topology](images/VRFs-transit-router.svg)
 
 In the above diagram, each network is assigned a unique conntrack zone and conntrack mark. These are required in order
 to be able to handle overlapping networks egressing into the same VRF and SNAT’ing to the host IP. Note, the default
@@ -1060,7 +1060,7 @@ implementing anycast for this SVI address.
 
 Following is a picture that illustrate all these bits with a topology
 
-![Layer 2 Egress Topology](images/multi-homing-l2-gw.svg)
+![Layer 2 Egress Topology](images/multi-homing-l2-gw-transit-router.svg)
 
 ##### Services
 
@@ -1153,7 +1153,7 @@ ovn_cluster_router and join switch separating the layer 2 switch network (transi
 this might be necessary, but for OpenShift purposes will only describe the behavior of IC in this proposal. In the layer
 2 IC model, GRs per node on a network will all be connected to the layer 2 transit switch:
 
-![Egress IP Layer 2](images/egress-ip-l2-primary.svg)
+![Egress IP Layer 2](images/egress-ip-l2-primary-transit-router.svg)
 
 In the above diagram, Node 2 is chosen to be the egress IP node for any pods in namespace A. Pod 1 and Pod 2 have
 default gateway routes to their respective GR on their node. When egress traffic leaves Pod 2, it is sent towards its
