@@ -277,7 +277,25 @@ between the management cluster and guest cluster?
 
 #### Standalone Clusters
 
-Is the change relevant for standalone clusters?
+**Is the change relevant for standalone clusters?**
+
+This change is relevant for standalone clusters, as we are making modifications to the `cluster-authentication-operator`. This operator is responsible for generating the authentication configuration and ensuring the integration of external OIDC providers. These updates will affect how the operator interacts with the configuration, particularly regarding the new fields in the API.
+
+The following updates will be necessary for standalone clusters:
+
+1. **Changes to `cluster-authentication-operator` Code:**
+
+   The file responsible for generating the authentication configuration, [externaloidc_controller.go](http://github.com/openshift/cluster-authentication-operator/blob/eb6de2ecd5097a3146e330ea24b0e66029ae5152/pkg/controllers/externaloidc/externaloidc_controller.go#L148), will be modified to ensure that the authentication configuration uses our custom API instead of the Kubernetes API for missing fields. Specifically, the method [generateAuthConfig](https://github.com/openshift/cluster-authentication-operator/blob/eb6de2ecd5097a3146e330ea24b0e66029ae5152/pkg/controllers/externaloidc/externaloidc_controller.go#L148) will be updated to extract the new fields defined in the `authentication.config.openshift.io` CRD.
+
+2. **Changes to the API Definition:**
+
+   The `authentication.config.openshift.io` CRD definition will be updated to include the new fields, including the `OIDCProvider`. This change will be reflected in the API file, located at [types_authentication.go](https://github.com/openshift/api/blob/b8da3bfeaf773d9dce2ea56edc9a1cf06cfdbd80/config/v1/types_authentication.go#L195). Specifically, we will update the definition of `OIDCProvider` to handle new fields such as `discoveryURL`, `audienceMatchPolicy`, and custom claim mappings.
+
+3. **Testing:**
+
+   The tests in [externaloidc_controller_test.go](https://github.com/openshift/cluster-authentication-operator/blob/master/pkg/controllers/externaloidc/externaloidc_controller_test.go) will need to be adjusted. In particular, the test case [TestExternalOIDCController_sync](https://github.com/openshift/cluster-authentication-operator/blob/eb6de2ecd5097a3146e330ea24b0e66029ae5152/pkg/controllers/externaloidc/externaloidc_controller_test.go#L212) will be updated to reflect the changes in the controller logic. We will also add additional test cases to validate the integration of the new fields and ensure that the operator processes them correctly.
+
+By making these updates, we ensure that standalone clusters can utilize the new authentication configurations, including custom OIDC providers and claim mappings, for enhanced authentication control and validation.
 
 #### Single-node Deployments or MicroShift
 
