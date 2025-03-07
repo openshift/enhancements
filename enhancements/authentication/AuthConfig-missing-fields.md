@@ -83,14 +83,12 @@ To enhance authentication flexibility and security, the following fields will be
 To ensure the new authentication fields are processed and applied, the following components need modifications:  
 
 1. **Cluster Authentication Operator**  
-   - Will be updated to process the new authentication fields and integrate them into OpenShift's structured authentication configuration.  
-   - Ensures that `discoveryURL`, `audienceMatchPolicy`, claim mappings, and validation rules are properly reflected in the kube-apiserver.  
+   - Today, the Cluster Authentication Operator is responsible for generating the authentication configuration by pulling settings from the `authentication.config.openshift.io` CRD and writing the corresponding configuration files used by the `kube-apiserver`.  
+   - This logic will be updated to ensure that the new fields (`discoveryURL`, `audienceMatchPolicy`, claim mappings, and validation rules) are correctly extracted from the CRD and included in the generated authentication configuration passed to the `kube-apiserver`.  
 
 2. **Hypershift Control Plane Operator**  
-   - Needs to support these configurations in hosted control planes to align authentication policies across managed clusters.  
-
-3. **Kube-apiserver Authentication Configuration**  
-   - Will be updated to use the new claim validation and user validation rules for stricter identity enforcement.  
+   - Today, the Hypershift Control Plane Operator is responsible for generating and managing authentication configurations for hosted control planes, ensuring consistency across managed clusters.  
+   - This logic will be updated to support the new fields (`discoveryURL`, `audienceMatchPolicy`, claim mappings, and validation rules) so that authentication policies remain aligned across hosted control planes. The operator will extract these configurations from the `authentication.config.openshift.io` CRD and ensure they are correctly propagated to the hosted control plane's authentication setup.  
 
 ### Current vs. Updated Behavior  
 
@@ -130,12 +128,15 @@ The process for configuring the newly added fields follows a similar pattern for
 
 ### Use Case Examples
 
-#### 1. Configuring a Non-Standard OIDC Discovery URL
-**Scenario:**  
-A cluster administrator needs to configure OpenShift to use an OIDC provider with a custom discovery URL.
+#### Precondition
+A customer has a subscription for an identity provider (IdP) that they would like their employees to use for authenticating with their OpenShift clusters. The IdP provides identity services but may have certain non-standard configurations that require customization within OpenShift.
 
-**Steps:**
-1. Update the authentication CRD:
+#### 1. Configuring a Non-Standard OIDC Discovery URL  
+**Scenario:**  
+A company is using an external identity provider to authenticate users across multiple services, including OpenShift. However, this IdP does not follow the standard OIDC discovery URL format. To integrate OpenShift with this provider, the cluster administrator must manually specify the custom discovery URL in OpenShift’s authentication configuration.  
+
+**Steps for the Cluster Administrator:**  
+1. Update the `Authentication` CRD to include the custom `discoveryURL`:  
    ```yaml
    apiVersion: config.openshift.io/v1
    kind: Authentication
@@ -145,6 +146,58 @@ A cluster administrator needs to configure OpenShift to use an OIDC provider wit
      oidcProviders:
        - issuer:
            discoveryURL: "https://custom-idp.example.com/.well-known/openid-configuration"
+    ```
+
+#### 2. Configuring `AudienceMatchPolicy` for Token Validation
+**Scenario:**  
+A cluster administrator needs to configure OpenShift to validate the audience (`aud`) claim in JWT tokens using a flexible matching policy.
+
+**Steps:**
+1. Update the authentication CRD with `AudienceMatchPolicy`:
+   ```yaml
+   apiVersion: config.openshift.io/v1
+   kind: Authentication
+   metadata:
+     name: cluster
+   spec:
+     audienceMatchPolicy: MatchAny
+     ```
+
+#### 3. Custom UID Mapping for Identity Providers
+**Scenario:**  
+A company needs to map the `uid` claim to a custom identifier in order to properly identify users across different OIDC providers.
+
+**Steps:**
+
+1. Update the authentication CRD to include the custom `uid` mapping:
+   ```yaml
+   apiVersion: config.openshift.io/v1
+   kind: Authentication
+   metadata:
+     name: cluster
+   spec:
+     tokenClaimMappings:
+       uid: claims.email  # Example of custom claim mapping
+  ```
+
+### 4. Adding Extra Claims for Role-Based Permissions
+**Scenario:**  
+A cluster administrator needs to map an extra claim (such as `role`) from the OIDC token for role-based access control (RBAC).
+
+**Steps:**
+
+1. Update the authentication CRD to include extra claims:
+   ```yaml
+   apiVersion: config.openshift.io/v1
+   kind: Authentication
+   metadata:
+     name: cluster
+   spec:
+     tokenClaimMappings:
+       extra:
+         - name: example.com/role
+           claimName: role
+  ```
 
 ### API Extensions
 
@@ -155,30 +208,6 @@ The CRD modifications include the following fields:
 #### TokenIssuer
 ```go
 type TokenIssuer struct {
-    // URL is the serving URL of the token issuer.
-    // Must use the https:// scheme.
-    //
-    // +kubebuilder:validation:Pattern=`^https:\/\/[^\s]`
-    // +required
-    URL string `json:"issuerURL"`
-
-    // audiences is an array of audiences that the token was issued for.
-    // Valid tokens must include at least one of these values in their
-    // "aud" claim.
-    // Must be set to exactly one value.
-    //
-    // +listType=set
-    // +kubebuilder:validation:MinItems=1
-    // +kubebuilder:validation:MaxItems=10
-    // +required
-    Audiences []TokenAudience `json:"audiences"`
-
-    // CertificateAuthority is a reference to a config map in the
-    // configuration namespace. The .data of the configMap must contain
-    // the "ca-bundle.crt" key.
-    // If unset, system trust is used instead.
-    CertificateAuthority ConfigMapNameReference `json:"issuerCertificateAuthority"`
-
     // discoveryURL, if specified, overrides the URL used to fetch discovery
     // information instead of using "{url}/.well-known/openid-configuration".
     // The exact value specified is used, so "/.well-known/openid-configuration"
@@ -194,20 +223,12 @@ type TokenIssuer struct {
     AudienceMatchPolicy AudienceMatchPolicyType `json:"audienceMatchPolicy,omitempty"`
 }
 ```
-For more details on the Issuer type and its fields, see [here](https://github.com/kubernetes/kubernetes/blob/75909b89201386c8a555eadc79d14fb11f91747c/staging/src/k8s.io/apiserver/pkg/apis/apiserver/types.go#L197-L237).
+For more details on the Issuer type and its fields, see [here](https://github.com/openshift/api/blob/b8a067b12e1c404dc0f8e5dff9183ef20389318c/config/v1/types_authentication.go#L228-L252).
 
 #### TokenClaimMappings
 ```go
 // TokenClaimMappings provides the claim mapping configuration for token-based identities
 type TokenClaimMappings struct {
-    // username is a name of the claim that should be used to construct
-    // usernames for the cluster identity.
-    Username UsernameClaimMapping `json:"username,omitempty"`
-
-    // groups is a name of the claim that should be used to construct
-    // groups for the cluster identity.
-    Groups PrefixedClaimMapping `json:"groups,omitempty"`
-
     // UID claim mapping
     UID ClaimOrExpression `json:"uid,omitempty"`
 
@@ -215,22 +236,12 @@ type TokenClaimMappings struct {
     Extra []ExtraMapping `json:"extra,omitempty"`
 }
 ```
-For more details on the ClaimMappings type and its fields, see [here](https://github.com/kubernetes/kubernetes/blob/75909b89201386c8a555eadc79d14fb11f91747c/staging/src/k8s.io/apiserver/pkg/apis/apiserver/types.go#L256-L262)
+For more details on the ClaimMappings type and its fields, see [here](https://github.com/openshift/api/blob/b8a067b12e1c404dc0f8e5dff9183ef20389318c/config/v1/types_authentication.go#L254-L265)
 
 
 #### TokenClaimValidationRule
 ```go
 type TokenClaimValidationRule struct {
-    // type sets the type of the validation rule
-    //
-    // +kubebuilder:validation:Enum={"RequiredClaim"}
-    // +kubebuilder:default="RequiredClaim"
-    Type TokenValidationRuleType `json:"type"`
-
-    // requiredClaim allows configuring a required claim name and its expected
-    // value
-    RequiredClaim *TokenRequiredClaim `json:"requiredClaim,omitempty"`
-
     // Expression allows configuring a custom validation rule based on an expression
     // This field defines a validation rule using a claim expression to evaluate the token
     Expression string `json:"expression,omitempty"`
@@ -239,7 +250,7 @@ type TokenClaimValidationRule struct {
     Message string `json:"message,omitempty"`
 }
 ```
-For more details on the ClaimValidationRule type and its fields, see [here](https://github.com/kubernetes/kubernetes/blob/75909b89201386c8a555eadc79d14fb11f91747c/staging/src/k8s.io/apiserver/pkg/apis/apiserver/types.go#L247)
+For more details on the ClaimValidationRule type and its fields, see [here](https://github.com/openshift/api/blob/b8a067b12e1c404dc0f8e5dff9183ef20389318c/config/v1/types_authentication.go#L440-L450)
 
 #### ToeknUserValidationRule
 ```go
