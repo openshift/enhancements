@@ -224,6 +224,9 @@ We will only expose a limited amount of configurations.
 These values were chosen by working with IBM/RHOAI on what kind of functionality 
 they want to change.
 
+The API is displayed below but we have requested an api-review [here](https://github.com/openshift/api/pull/2222).
+
+
 ```golang
 import (
 	kueuecfgv1beta1 "sigs.k8s.io/kueue/apis/config/v1beta1"
