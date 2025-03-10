@@ -171,6 +171,10 @@ Duration:        1m29s (Est. Time Remaining: 1h25m)
 Additionally, the `Updating` condition allows USC to populate the `controlPlane.conditions`-level `Updating` condition, which allows
 the clients to quickly detect whether the control plane is updating.
 
+The ClusterVersion insight can be also used for example by the Web Console update progress bar. Currently, it shows a
+progress bar for control plane update, which could be trivially powered by `.completion` without needing to perform any
+interpreting logic by web console itself.
+
 #### ClusterOperator Status Insight
 
 ```yaml
@@ -568,6 +572,10 @@ worker        Pending      0% (0/3)     3 Available, 0 Progressing, 0 Draining
 ``` 
 - `.machineConfigPool.name`, `.assessment`, `.completion` are directly mapped to the output
 - `.machineConfigPool.summaries` are used to populate the counts in the status line, some are hidden when zero
+
+The MCP insight can be also used for example by the Web Console update progress bar. Currently, it shows a single
+progress bar for each MCP, which could be trivially powered by `.completion` without needing to perform any interpreting
+logic itself. 
 
 ### Node Status Insight
 
