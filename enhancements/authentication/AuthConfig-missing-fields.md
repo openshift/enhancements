@@ -299,13 +299,11 @@ By making these updates, we ensure that standalone clusters can utilize the new 
 
 #### Single-node Deployments or MicroShift
 
-How does this proposal affect the resource consumption of a
-single-node OpenShift deployment (SNO), CPU and memory?
+**Impact on Single-node OpenShift (SNO) Resource Consumption:**  
+This proposal introduces additional API fields that will be stored in etcd and cached in specific components. However, the impact on CPU and memory consumption is expected to be negligible, as these changes primarily involve storing and retrieving small amounts of configuration data. No significant increase in resource utilization is anticipated.
 
-How does this proposal affect MicroShift? For example, if the proposal
-adds configuration options through API resources, should any of those
-behaviors also be exposed to MicroShift admins through the
-configuration file for MicroShift?
+**Impact on MicroShift:**  
+#TODO 
 
 ### Implementation Details/Notes/Constraints
 
@@ -317,15 +315,12 @@ how the code will be rewritten in the enhancement.
 
 ### Risks and Mitigations
 
-What are the risks of this proposal and how do we mitigate. Think broadly. For
-example, consider both security and how this will impact the larger OKD
-ecosystem.
-
-How will security be reviewed and by whom?
-
-How will UX be reviewed and by whom?
-
-Consider including folks that also work outside your immediate sub-project.
+#### Security Risks  
+Introducing new authentication-related API fields could expose potential misconfigurations or security vulnerabilities.  
+- **Mitigation:**  
+  - Ensure that all authentication configurations are validated before applying them.  
+  - Perform security reviews in collaboration with the OpenShift security team.  
+  - Conduct penetration testing to validate that changes do not introduce vulnerabilities.  
 
 ### Drawbacks
 
@@ -562,10 +557,7 @@ Describe how to
 
 ## Alternatives
 
-Similar to the `Drawbacks` section the `Alternatives` section is used
-to highlight and record other possible approaches to delivering the
-value proposed by an enhancement, including especially information
-about why the alternative was not selected.
+Do nothing
 
 ## Infrastructure Needed [optional]
 
