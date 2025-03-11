@@ -507,53 +507,15 @@ especially how they impact the OCP system architecture and operational aspects.
   stability, availability, performance and security.
 - Describe which OCP teams are likely to be called upon in case of escalation with one of the failure modes
   and add them as reviewers to this enhancement.
-
 ## Support Procedures
 
-Describe how to
-- detect the failure modes in a support situation, describe possible symptoms (events, metrics,
-  alerts, which log output in which component)
+### Logging and Errors  
 
-  Examples:
-  - If the webhook is not running, kube-apiserver logs will show errors like "failed to call admission webhook xyz".
-  - Operator X will degrade with message "Failed to launch webhook server" and reason "WehhookServerFailed".
-  - The metric `webhook_admission_duration_seconds("openpolicyagent-admission", "mutating", "put", "false")`
-    will show >1s latency and alert `WebhookAdmissionLatencyHigh` will fire.
+The authentication configuration is consumed by the **kube-apiserver (KAS)** pods but produced by the **Cluster Authentication Operator (CAO)**. The CAO is responsible for performing as many validations on the configuration as possible before generating the final authentication configuration that will be consumed by the KAS. This means that in case of a bad configuration, the CAO will move its status to **Degraded** and log any errors encountered.  
 
-- disable the API extension (e.g. remove MutatingWebhookConfiguration `xyz`, remove APIService `foo`)
+It is noteworthy that the CAO performs a full validation on any provided **authentication settings**, including **OIDC provider configurations, audience claims, and token mappings**. These validations help detect misconfigurations early in the process, ensuring that authentication failures do not propagate to the cluster.  
 
-  - What consequences does it have on the cluster health?
-
-    Examples:
-    - Garbage collection in kube-controller-manager will stop working.
-    - Quota will be wrongly computed.
-    - Disabling/removing the CRD is not possible without removing the CR instances. Customer will lose data.
-      Disabling the conversion webhook will break garbage collection.
-
-  - What consequences does it have on existing, running workloads?
-
-    Examples:
-    - New namespaces won't get the finalizer "xyz" and hence might leak resource X
-      when deleted.
-    - SDN pod-to-pod routing will stop updating, potentially breaking pod-to-pod
-      communication after some minutes.
-
-  - What consequences does it have for newly created workloads?
-
-    Examples:
-    - New pods in namespace with Istio support will not get sidecars injected, breaking
-      their networking.
-
-- Does functionality fail gracefully and will work resume when re-enabled without risking
-  consistency?
-
-  Examples:
-  - The mutating admission webhook "xyz" has FailPolicy=Ignore and hence
-    will not block the creation or updates on objects when it fails. When the
-    webhook comes back online, there is a controller reconciling all objects, applying
-    labels that were not applied during admission webhook downtime.
-  - Namespaces deletion will not delete all objects in etcd, leading to zombie
-    objects when another namespace with the same name is created.
+Nevertheless, in case of authentication problems that are not logged on the CAO side, one should consult the **KAS logs** and rollout progress as well. Additionally, the **KAS-operator logs** will reveal any problems related to syncing the ConfigMap, creating a revisioned authentication configuration, generating static files, or enabling the required KAS CLI arguments.  
 
 ## Alternatives
 
@@ -561,5 +523,4 @@ Do nothing
 
 ## Infrastructure Needed [optional]
 
-Use this section if you need things from the project. Examples include a new
-subproject, repos requested, github details, and/or testing infrastructure.
+N/A
