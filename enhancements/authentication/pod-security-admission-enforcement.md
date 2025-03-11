@@ -26,9 +26,11 @@ superseded-by: []
 ## Summary
 
 This enhancement introduces a **new cluster-scoped API** and changes to the relevant controllers to rollout [Pod Security Admission (PSA)](https://kubernetes.io/docs/concepts/security/pod-security-admission/) enforcement [in OpenShift](https://www.redhat.com/en/blog/pod-security-admission-in-openshift-4.11).
-Enforcement means that the `PodSecurityAdmissionLabelSynchronizationController` sets the `pod-security.kubernetes.io/enforce` label on Namespaces, and the PodSecurityAdmission plugin enforces the `Restricted` [Pod Security Standard (PSS)](https://kubernetes.io/docs/concepts/security/pod-security-standards/) globally on Namespaces without any label.
+Enforcement means that the `PodSecurityAdmissionLabelSynchronizationController` sets the `pod-security.kubernetes.io/enforce` label on Namespaces, and the PodSecurityAdmission plugin enforces the `Restricted` [Pod Security Standard (PSS)](https://kubernetes.io/docs/concepts/security/pod-security-standards/) globally on Namespaces without any `pod-security.kubernetes.io/enforce` label.
 
-The new API allows users to either enforce the `Restricted` PSS or maintain `Privileged` PSS for several releases. Eventually, all clusters will be required to use `Restricted` PSS.
+The new API automatically transitions clusters without Pod Security violations to `Restricted` PSS, while silently keeping clusters with violations in `Legacy` mode.
+Users can manually opt out by setting `spec.enforcementMode` to `Legacy` or opt in by setting `spec.enforcementMode` to `Restricted`.
+Eventually, all clusters will be required to use `Restricted` PSS.
 
 This enhancement expands the ["PodSecurity admission in OpenShift"](https://github.com/openshift/enhancements/blob/61581dcd985130357d6e4b0e72b87ee35394bf6e/enhancements/authentication/pod-security-admission.md) and ["Pod Security Admission Autolabeling"](https://github.com/openshift/enhancements/blob/61581dcd985130357d6e4b0e72b87ee35394bf6e/enhancements/authentication/pod-security-admission-autolabeling.md) enhancements.
 
@@ -38,27 +40,28 @@ After introducing Pod Security Admission and Autolabeling based on SCCs, some cl
 Over the last few releases, the number of clusters with violating workloads has dropped significantly.
 Although these numbers are now quite low, it is essential to avoid any scenario where users end up with failing workloads.
 
-To ensure a safe transition, this proposal suggests that if a potential failure of workloads is being detected in release `n`, that the `cluster-kube-apiserver-operator` moves into `Upgradeable=false`.
-The user would need to either resolve the potential failures, setting a higher PSS label for that Namespace or set the enforcing mode to `Privileged` for now in order to be able to upgrade.
-`Privileged` will keep the cluster in the previous state, the non enforcing state. This means that the PodSecurity Configuration of the kube-apiserver is set to `Privileged` PSS and that the PSA label syncer doesn't set the `pod-security.kubernetes.io/enforce` label.
-In the following release `n+1`, the controller will then do the actual enforcement, if `Restricted` is set.
+To ensure a safe transition, the `PodSecurityReadinessController` will evaluate a cluster in release `n`.
+If potential violations are found by the controller, it will move the cluster into Legacy mode.
+Legacy mode maintains the previous non-enforcing state: the kube-apiserver keeps its `Privileged` PSS configuration and the PSA label syncer doesn't set enforcement labels.
+An overview of the Namespaces that led to the decision to move the cluster into Legacy mode will be listed in the API's status, which should help the user to fix any issues.
 
-An overview of the Namespaces with failures will be listed in the API's status, should help the user to fix any issues.
+In release `n+1`, all clusters will be moved into `Restricted`, if `spec.enforcementMode = legacy` isn't set by the user or the `PodSecurityReadinessController`.
 
-The temporary `Privileged` mode (opt-out from PSA enforcement) exists solely to facilitate a smooth transition. Once a vast majority of clusters have adapted their workloads to operate under `Restricted` PSS, maintaining the option to run in `Privileged` mode would undermine these security objectives.
+The temporary legacy-mode (opt-out from PSA enforcement) exists solely to facilitate a smooth transition. Once a vast majority of clusters have adapted their workloads to operate under `Restricted` PSS, maintaining the option to run in `Legacy` mode would undermine these security objectives.
 
 OpenShift strives to offer the highest security standards. Enforcing PSS ensures that OpenShift is at least as secure as upstream Kubernetes and that OpenShift complies with upstreams security best practices.
 
 ### Goals
 
 1. Rolling out Pod Security Admission enforcement.
-2. Minimize the risk of breakage for existing workloads.
-3. Allow users to remain in “privileged” mode for a couple of releases.
+2. Filter out clusters that would have failing workloads.
+3. Allow users to remain in “Legacy” mode for several releases.
 
 ### Non-Goals
 
 1. Enabling the PSA label-syncer to evaluate workloads with user-based SCC decisions.
 2. Providing a detailed list of every Pod Security violation in a Namespace.
+3. Dynamically adjust the enforcement mode based on violating namespaces beyond release `n`.
 
 ## Proposal
 
@@ -67,7 +70,7 @@ OpenShift strives to offer the highest security standards. Enforcing PSS ensures
 As a System Administrator:
 - I want to transition to enforcing Pod Security Admission only if the cluster would have no failing workloads.
 - If there are workloads in certain Namespaces that would fail under enforcement, I want to be able to identify which Namespaces need to be investigated.
-- If I encounter issues with the Pod Security Admission transition, I want to opt out (remain privileged) across my clusters until later.
+- If I encounter issues with the Pod Security Admission transition, I want to opt out (remain in legacy mode) across my clusters until later.
 
 ## Design Details
 
@@ -98,7 +101,7 @@ To address this, the proposal introduces:
 ValidatedSCCSubjectTypeAnnotation = "security.openshift.io/validated-scc-subject-type"
 ```
 
-This annotation will be set in the Pod by the [`SecurityContextConstraint` admission](https://github.com/openshift/apiserver-library-go/blob/60118cff59e5d64b12e36e754de35b900e443b44/pkg/securitycontextconstraints/sccadmission/admission.go#L138) plugin.
+This annotation will be set in the Pod by the [`SecurityContextConstraint` admission controller](https://github.com/openshift/apiserver-library-go/blob/60118cff59e5d64b12e36e754de35b900e443b44/pkg/securitycontextconstraints/sccadmission/admission.go#L138).
 
 #### Set PSS Annotation: `security.openshift.io/MinimallySufficientPodSecurityStandard`
 
@@ -107,24 +110,29 @@ Because users can modify `pod-security.kubernetes.io/warn` and `pod-security.kub
 The new annotation ensures a clear record of the minimal PSS that would be enforced if the `pod-security.kubernetes.io/enforce` label were set.
 As this annotation is being managed by the controller, any change from a user would be reconciled.
 
+If a user disabled the PSA label syncer, with the `security.openshift.io/scc.podSecurityLabelSync=false` annotation, this annotation won't be set.
+If such a Namespace is missing `pod-security.kubernetes.io/enforce` label it will be evaluated with the `restricted` PSS.
+This is what the PodSecurity Configuration by the kube-apiserver would enforce.
+
 #### Update the PodSecurityReadinessController
 
 By adding these annotations, the [`PodSecurityReadinessController`](https://github.com/openshift/cluster-kube-apiserver-operator/blob/master/pkg/operator/podsecurityreadinesscontroller/podsecurityreadinesscontroller.go) can more accurately identify potentially failing Namespaces and understand their root causes:
 
 - With the `security.openshift.io/MinimallySufficientPodSecurityStandard` annotation, it can evaluate Namespaces that lack the `pod-security.kubernetes.io/enforce` label but have user-overridden warn or audit labels.
-  If `pod-security.kubernetes.io/enforce` label is overriden, the PSA label syncer still owns `pod-security.kubernetes.io/enforce` in certain cases.
+  If `pod-security.kubernetes.io/enforce` label is isn't set, the PSA label syncer still owns `pod-security.kubernetes.io/enforce` in certain cases.
   The `PSAReadinessController` isn't able to deduct in that situation, which `pod-security.kubernetes.io/enforce` would be set by the PSA label syncer, without that annotation.
 - With `ValidatedSCCSubjectType`, the controller can classify issues arising from user-based SCC workloads separately.
   Many of the remaining clusters with violations appear to involve workloads admitted by user SCCs.
 
-
 ### New API
 
-This API is used to support users to enforce PSA.
+This API is used to support users to manage the PSA enforcement.
 As this is a transitory process, this API will loose its usefulness once PSA enforcement isn't optional anymore.
 The API offers two things to the users:
-- offers them the ability to halt enforcement and
-- offers them the ability to identify failing namespaces.
+- offers them the ability to halt enforcement and stay in "Legacy" mode,
+- offers them the ability to enforce PSA with the "Restricted" mode,
+- offers them the ability to rely on the `PodSecurityReadinessController` to identify failing namespaces in release `n` and set the "Legacy" mode and
+  - offers them the ability to identify the root cause: failing namespaces.
 
 ```go
 package v1alpha1
@@ -137,10 +145,12 @@ import (
 type PSAEnforcementMode string
 
 const (
-	// PSAEnforcementModePrivileged indicates that the cluster should not enforce PSA restrictions and stay in Privileged mode.
-	PSAEnforcementModePrivileged PSAEnforcementMode = "Privileged"
+	// PSAEnforcementModeLegacy indicates that the cluster should not enforce PSA restrictions and stay in a privileged mode.
+	PSAEnforcementModeLegacy PSAEnforcementMode = "Legacy"
 	// PSAEnforcementModeRestricted indicates that the cluster should enforce PSA restrictions, if no violating Namepsaces are found.
 	PSAEnforcementModeRestricted PSAEnforcementMode = "Restricted"
+	// PSAEnforcementModeProgressing indicates in the status that the cluster is in the process of enforcing PSA.
+	PSAEnforcementModeProgressing PSAEnforcementMode = "Progressing"
 )
 
 // PSAEnforcementConfig is a config that supports the user in the PSA enforcement transition.
@@ -150,31 +160,35 @@ type PSAEnforcementConfig struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	// spec is a configuration option that enables the customer to influence the PSA enforcement outcome.
+	// spec is a configuration option that enables the customer to dictate the PSA enforcement outcome.
 	Spec PSAEnforcementConfigSpec `json:"spec"`
 
 	// status reflects the cluster status wrt PSA enforcement.
 	Status PSAEnforcementConfigStatus `json:"status"`
 }
 
-// PSAEnforcementConfigSpec is a configuration option that enables the customer to influence the PSA enforcement outcome.
+// PSAEnforcementConfigSpec is a configuration option that enables the customer to dictate the PSA enforcement outcome.
 type PSAEnforcementConfigSpec struct {
 	// enforcementMode gives the user different options:
-	// - Restricted enables the cluster to move to PSA enforcement, if there are no violating Namespaces detected.
-	//   If violating Namespaces are found, the operator moves into "Upgradeable=false".
-	// - Privileged enables the cluster to opt-out from PSA enforcement for now and it resolves the operator status of "Upgradeable=false" in case of violating Namespaces.
+	// - "" will be interpreted as "Restricted".
+	// - Restricted enables the cluster to enforce PSA.
+	// - Legacy enables the cluster to opt-out from PSA enforcement for now. Legacy might be set by
+  //   the PodSecurityReadinessController if violations are detected. If violations were detected,
+  //   the status.violatingNamespaces field will be populated.
 	//
-	// defaults to "Restricted"
+	// defaults to ""
 	EnforcementMode PSAEnforcementMode `json:"enforcementMode"`
 }
 
-// PSAEnforcementConfigStatus is a struct that signals to the user, if the cluster is going to start with PSA enforcement and if there are any violating Namespaces.
+// PSAEnforcementConfigStatus is a struct that signals to the user, the current status of PSA enforcement.
 type PSAEnforcementConfigStatus struct {
-	// enforcementMode indicates if PSA enforcement will happen:
-	// - "Restricted" indicates that enforcement is possible and will happen.
-	// - "Privileged" indidcates that either enforcement will not happen:
-	//   - either it is not wished or
-	//   - it isn't possible without potentially breaking workloads.
+	// enforcementMode indicates the PSA enforcement state:
+	// - "" indicates that enforcement is not enabled as of yet.
+	// - "Progressing" indicates that the enforcement is in progress:
+	//   1. The PodSecurityAdmissionLabelSynchronizationController will label all eligible Namespaces.
+	//   2. Then the kube-apiserver will enforce the global PodSecurity Configuration.
+	// - "Restricted" indicates that enforcement is enabled and reflects the state of the enforcement by the kube-apiserver.
+	// - "Legacy" indicates that enforcement won't happen.
 	EnforcementMode PSAEnforcementMode `json:"enforcementMode"`
 
 	// violatingNamespaces lists Namespaces that are violating. Needs to be resolved in order to move to Restricted.
@@ -203,24 +217,30 @@ type ViolatingNamespace struct {
 	//
 	// +optional
 	Reason string `json:"reason,omitempty"`
+
+	// state is the current state of the Namespace.
+	// Possible values are:
+	// - Current: The Namespace would currently violate the enforcement mode.
+	// - Previous: The Namespace would previously violate the enforcement mode.
+	//
+	// +optional
+	State string `json:"state,omitempty"`
+
+	// lastTransitionTime is the time at which the state transitioned.
+	LastTransitionTime time.Time `json:"lastTransitionTime,omitempty"`
 }
 ```
 
 Here is a boolean table with the expected outcomes:
 
-| `spec.enforcementMode` | length of `status.violatingNamespaces` | `status.enforcementMode` | `OperatorStatus`  |
-| ---------------------- | -------------------------------------- | ------------------------ | ----------------- |
-| Privileged             | More than 0                            | Privileged               | AsExpected        |
-| Privileged             | 0                                      | Privileged               | AsExpected        |
-| Restricted             | More than 0                            | Privileged               | Upgradeable=False |
-| Restricted             | 0                                      | Restricted               | AsExpected        |
+> Table here TODO@ibihim
 
 If a user encounters `status.violatingNamespaces` it is expected to:
 
-- resolve the violating Namespaces in order to be able to `Upgrade` or
-- set the `spec.enforcementMode=Privileged` and solve the violating Namespaces later.
+- resolve the violating Namespaces in order to be safely move to `Restricted` or
+- set the `spec.enforcementMode=Legacy` and solve the violating Namespaces later.
 
-If a user manages several clusters and there are well known violating Namespaces, the `spec.enforcementMode=Privileged` can be set as a precaution.
+If a user manages several clusters and there are well known violating Namespaces, the `spec.enforcementMode=Legacy` can be set as a precaution.
 
 ### Implementation Details
 
@@ -237,6 +257,13 @@ It already collects most of the necessary data to determine whether a Namespace 
 With the `security.openshift.io/MinimallySufficientPodSecurityStandard`, it will be able to evaluate all Namespaces for failing workloads, if any enforcement would happen.
 With the `security.openshift.io/ValidatedSCCSubjectType`, it can categorize violations more accurately and create a more accurate `ClusterFleetEvaluation`.
 
+If the controller identifies a potentially violating Namespace in release `n`, it will set `spec.enforcementMode = Legacy`.
+If `spec.enforcementMode = "Legacy"` is set in release `n+1`, it will set `status.enforcementMode = "Legacy"`.
+If `spec.enforcementMode = ""` or `spec.enforcementMode = "Restricted"` is set in release `n+1`, it will:
+
+- Set `status.enforcementMode = "Progressing"`, until the PSA label syncer is done labeling the `pod-security.kubernetes.io/enforce` label.
+- Set `status.enforcementMode = "Restricted"`, once the PSA label syncer is done labeling the `pod-security.kubernetes.io/enforce` label and the PodSecurity Configuration is set to enforcing by the kube-apiserver.
+
 #### PodSecurity Configuration
 
 A Config Observer in the `cluster-kube-apiserver-operator` manages the Global Config for the kube-apiserver, adjusting behavior based on the `OpenShiftPodSecurityAdmission` `FeatureGate`.
@@ -245,7 +272,7 @@ It must watch both the `status.enforcementMode` for `Restricted` and the `Featur
 #### PodSecurityAdmissionLabelSynchronizationController
 
 The [PodSecurityAdmissionLabelSynchronizationController (PSA label syncer)](https://github.com/openshift/cluster-policy-controller/blob/master/pkg/psalabelsyncer/podsecurity_label_sync_controller.go) must watch the `status.enforcementMode` and the `OpenShiftPodSecurityAdmission` `FeatureGate`.
-If `spec.enforcementMode` is `Restricted` and the `FeatureGate` `OpenShiftPodSecurityAdmission` is enabled, the syncer will set the `pod-security.kubernetes.io/enforce` label on Namespaces that it manages.
+If `spec.enforcementMode` is set to `Progressing` and the `FeatureGate` `OpenShiftPodSecurityAdmission` is enabled, the syncer will set the `pod-security.kubernetes.io/enforce` label on Namespaces that it manages.
 Otherwise, it will refrain from setting that label and remove any enforce labels it owns if existent.
 
 Namespaces that are **managed** by the `PodSecurityAdmissionLabelSynchronizationController` are Namespaces that:
@@ -261,23 +288,16 @@ Otherwise, the cluster will be unable to revert to its previous state.
 
 ## Open Questions
 
-### PSA label syncer vs Global Config
+## Initial evaluation by the PodSecurityReadinessController
 
-The Global Config is a PodSecurity configuration given to the kube-apiserver, which will enforce `Restricted` at some point.
-This means that all Namespaces without a `pod-security.kubernetes.io/enforce` label, will be subject to the decision of the Global Config.
-Most user workspaces rely on the PSA label syncer to label their Namespaces with the `pod-security.kubernetes.io/enforce` label.
-If both get turned on at the same time, the Global Config could be enforced on Namespaces that were not yet labeled iby the PSA label syncer.
+What happens if the `PodSecurityReadinessController`, didn't have the time to run at least once after an upgrade?
 
-A simple solution would be to release the PSA label syncer in OCP `n+1` and the Global Config in `n+2` (while `n` as a reference is the introduction of the controller that manages the API).
+If a cluster upgrades from release `n-1`, through release `n` to release `n+1`, the `PodSecurityReadinessController` might not have time to run at least once in release `n` during the upgrade.
+This will result in an unchecked transition into `Restricted` mode on release `n+1`.
 
-A more complex solution that could enable a release of PSA label syncer and Global Config enforcement, would be to maintain two kind of violating Namespaces lists:
+## PSA label syncer turned off in legacy clusters
 
-- The first list, lists all Namespaces that would violate, if the PSA label syncer would enforce PSA.
-- The second list, lists all Namespaces that would violate, if the Global Config would enforce PSA.
-
-The Global Config list is a list of Namespaces that don't get handled by the PSA label syncer and require a PSS that is higher than `Restricted`.
-To be able to determine this, we would need to pull the "is managed by PSA label syncer" logic and put it into library-go, such that it can be evaluated by the PodSecurityReadinessController.
-Another approach would be to set yet another annotation, which would indicate if the PSA label syncer has ownership of that Namespace.
+Should a cluster that settles at `status.enforcementMode = Legacy` have the PSA label syncer turned off?
 
 ### Fresh Installs
 
@@ -286,16 +306,6 @@ Needs to be evaluated. The System Administrator needs to pre-configure the new A
 ### Impact on HyperShift
 
 Needs to be evaluated.
-
-### Baseline Clusters
-
-The current suggestion differentiates between `Restricted` and `Privileged` PSS.
-It may be possible to introduce an intermediate step and set the cluster to `baseline` instead.
-
-### Enforce PSA labe syncer, fine-grained
-
-It would be possible to enforce only the `pod-security.kubernetes.io/enforce` labels on Namespaces without enforcing it globally through the `PodSecurity` configuration given to the kube-apiserver.
-It would be possible to enforce `pod-security.kubernetes.io/enforce` labels on Namespaces that we know wouldn't fail.
 
 ## Test Plan
 
@@ -307,7 +317,7 @@ Otherwise, it can't be guaranteed that all possible SCCs are mapped correctly.
 
 ## Graduation Criteria
 
-If `spec.enforcementMode = Restricted` rolls out on most clusters with no adverse effects, the ability to avoid `Upgradeable=false` with violating Namespaces by setting `spec.enforcementMode = Privileged` will be removed.
+If `spec.enforcementMode = Restricted` rolls out on most clusters with no adverse effects, we could set `Upgradeable=false` on clusters with `spec.enforcementMode = Legacy`.
 
 ## Upgrade / Downgrade Strategy
 
@@ -318,10 +328,10 @@ The API needs to be introduced before the controllers start to use it:
 - Release `n-1`:
   - Backport the API.
 - Release `n`:
-  - Enable the `PodSecurityReadinessController` to use the API by setting it's `status`.
+  - Enable the `PodSecurityReadinessController` to use the API by setting it's `status` and if violating Namespaces are found also `spec.enforcementMode = Legacy`.
 - Release `n+1`:
   - Enable the `PodSecurityAdmissionLabelSynchronizationController` and `Config Observer Controller` to enforce, if:
-    - there are no potentially failing workloads (indicated by violating Namespaces) and
+    - `spec.enforcementMode = Restricted` or `spec.enforcementMode = ""` is set and
     - the `OpenShiftPodSecurityAdmission` `FeatureGate` is enabled.
   - Enable the `OpenShiftPodSecurityAdmission` `FeatureGate`
 
