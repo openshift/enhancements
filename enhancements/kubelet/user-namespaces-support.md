@@ -373,6 +373,59 @@ that are running with a version lower than the configured version. If so, the cr
 
 MCO will read the MinimumKubeletVersion and mark machines as degraded if the node is not at least MinimumKubeletVersion.
 
+##### RequiredMinimumComponentVersion
+
+The openshift featuregate API is the way to configure featuregates in a cluster. We will plumb awareness of the minimum kubelet version to the featuregate API by adding
+a RequiredMinimumComponentVersion to the  FeatureGateAttributes structure:
+
+```
+type FeatureGateAttributes struct {
+        // name is the name of the FeatureGate.
+        // +required
+        Name FeatureGateName `json:"name"`
+
+        // requiredMinimumComponentVersion is a list of component/version pairs that declares the is the lowest version the given
+        // component may be in this cluster.
+        // Currently, the only supported component is Kubelet, and setting a required minimum kubelet component will set the
+        // minimumKubeletVersion field in the nodes.config.openshift.io CRD.
+        // +kubebuilder:validation:MaxItems:=1
+        // +listType=map
+        // +listMapKey=component
+        // +openshift:enable:FeatureGate=MinimumKubeletVersion
+        // +optional
+        RequiredMinimumComponentVersions []RequiredMinimumComponentVersion `json:"requiredMinimumComponentVersions,omitempty"`
+
+        // possible (probable?) future additions include
+        // 1. support level (Stable, ServiceDeliveryOnly, TechPreview, DevPreview)
+        // 2. description
+}
+
+// RequiredMinimumComponentVersion is a pair of Component and Version that specifies the required minimum Version of the given Component
+// to enable this feature.
+type RequiredMinimumComponentVersion struct {
+        // component is the entity whose version must be above a certain version.
+        // +required
+        Component RequiredMinimumComponent `json:"component"`
+        // version is the minimum version the given component may be in this cluster.
+        // +kubebuilder:validation:XValidation:rule="self.matches('^[0-9]*.[0-9]*.[0-9]*$')",message="minmumKubeletVersion must be in a semver compatible format of x.y.z, or empty"
+        // +kubebuilder:validation:MaxLength:=8
+        // +required
+        Version string `json:"version"`
+}
+
+// +kubebuilder:validation:Enum:=Kubelet
+type RequiredMinimumComponent string
+
+var RequiredMinimumComponentKubelet RequiredMinimumComponent = "Kubelet"
+```
+
+Then, the featuregate controller in the cluster-config-operator will be extended to filter features from the Enabled set if the minimum kubelet version isn't set old enough.
+If multiple feature gates have minimum versions set, only those that are higher than the defined minimum version will be filtered. If feature A has required minimum version
+1.0.0 and feature B has required minimum version 1.1.0, and the cluster has minimum version set to 1.0.0, the resulting featureset would have feature A enabled, but B disabled.
+
+This will give openshift feature developers a mechansim to programatically declare a feature requires a certain version of the kubelet. This will be used for user namespaces,
+and the corresponding version for user namespaces and related feature gates will be "1.30.0"
+
 ##### Alternatives to MinimumKubeletVersion
 
 It is also possible this feature should be paired with a corresponding kubelet field `minimumKubeletVersion`, where it exits if it is too old. This will prevent the kubelet from
