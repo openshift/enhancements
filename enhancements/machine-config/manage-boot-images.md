@@ -42,6 +42,7 @@ Currently, bootimage references are [stored](https://github.com/openshift/instal
 - Afterburn [[1](https://issues.redhat.com/browse/OCPBUGS-7559)],[[2](https://issues.redhat.com/browse/OCPBUGS-4769)]
 - podman [[1](https://issues.redhat.com/browse/OCPBUGS-9969)]
 - skopeo [[1](https://issues.redhat.com/browse/OCPBUGS-3621)]
+- composefs [[1](https://github.com/openshift/os/issues/1678#issuecomment-2546310833)]
 
 Additionally, the stub Ignition config [referenced](https://github.com/openshift/installer/blob/1ca0848f0f8b2ca9758493afa26bf43ebcd70410/pkg/asset/machines/gcp/machines.go#L197) in the `MachineSet` is also not managed. This stub is used by the ignition binary in firstboot to auth and consume content from the `machine-config-server`(MCS). The content served includes the actual Ignition configuration and the target OCI format RHCOS image. The ignition binary now does first boot provisioning based on this, then hands off to the `machine-config-daemon`(MCD) first boot service to do the reboot into the target OCI format RHCOS image. 
 
@@ -50,6 +51,9 @@ There has been [a previous effort](https://github.com/openshift/machine-config-o
 In certain long lived clusters, the MCS TLS cert contained within the above Ignition configuration may be out of date. Example issue [here](https://issues.redhat.com/browse/OCPBUGS-1817). While this has been partly solved [MCO-642](https://issues.redhat.com/browse/MCO-642) (which allows the user to manually rotate the cert) it would be very beneficial for the MCO to actively manage this TLS cert and take this concern away from the user. 
 
 **Note**: As of 4.19, the MCO supports [management of this TLS cert](https://issues.redhat.com/browse/MCO-1208). With this work in place, the MCO can now attempt to upgrade the stub Ignition config, instead of hardcoding to the `*-managed` stub as mentioned previously. This will help preserve any user customizations that were present in the stub Ignition config.
+
+This is also considered a blocking issue for [SigStore GA](https://issues.redhat.com/browse/OCPNODE-2619). It has caused issues such as [OCPBUGS-38809](https://issues.redhat.com/browse/OCPBUGS-38809) due to the older podman binary not being able to understand `sigstoreSigned` fields in `/etc/containers/policy.json`. There can be similar issues in the future that can be hard to anticipate. 
+
 
 This is also a soft pre-requisite for both dual-stream RHEL support in OpenShift, and on-cluster layered builds. RPM-OSTree presently does a deploy-from-self to get a new-enough rpm-ostree to deploy image-based RHEL CoreOS systems, and we would like to avoid doing this for bootc if possible. We would also like to prevent RHEL8->RHEL10 direct updates once that is available for OpenShift.
 
@@ -92,7 +96,6 @@ __Overview__
 #### Error & Alert Mechanism
 
 MSBIC sync failures may be caused by multiple reasons:
-- The MSBIC notices an OwnerReference and is able to determine that updating the `MachineSet` will likely cause thrashing. This is considered a misconfiguration and in such cases, the user is expected to exclude this `MachineSet` from boot image management.
 - The `coreos-bootimages` ConfigMap is unavailable or in an incorrect format. This will likely happen if a user manually edits the ConfigMap, overriding the CVO.
 - The `coreos-bootimages` ConfigMap takes too long to be stamped by the MCO. This indicates that there are larger problems in the cluster such as an upgrade failure/timeout or an unrelated cluster failure.
 - Patching the `MachineSet` fails. This indicates a temporary API server blip, or larger RBAC issues.
@@ -115,7 +118,7 @@ Any form factor using the MCO and `MachineSets` will be impacted by this proposa
 - Standalone OpenShift: Yes, this is the main target form factor.
 - microshift: No, as it does [not](https://github.com/openshift/microshift/blob/main/docs/contributor/enabled_apis.md) use `MachineSets`.
 - Hypershift: No, Hypershift does not have this issue.
-- Hive: Hive manages `MachineSets` via `MachinePools`. The MachinePool controller generates the `MachineSets` manifests (by invoking vendored installer code) which include the `providerSpec`. Once a `MachineSet` has been created on the spoke, the only things that will be reconciled on it are replicas, labels, and taints - [unless a backdoor is enabled](https://github.com/openshift/hive/blob/0d5507f91935701146f3615c990941f24bd42fe1/pkg/constants/constants.go#L518). If the `providerSpec` ever goes out of sync, a warning will be logged by the MachinePool controller but otherwise this discrepancy is ignored. In such cases, the MSBIC will not have any issue reconciling the `providerSpec` to the correct boot image. However, if the backdoor is enabled, both the MSBIC and the MachinePool Controller will attempt to reconcile the `providerSpec` field, causing churn. The Hive team will update the comment on the backdoor annotation to indicate that it is mutually exclusive with this feature.
+- Hive: Hive manages `MachineSets` via `MachinePools`. The MachinePool controller generates the `MachineSets` manifests (by invoking vendored installer code) which include the `providerSpec`. Once a `MachineSet` has been created on the spoke, the only things that will be reconciled on it are replicas, labels, and taints - [unless a backdoor is enabled](https://github.com/openshift/hive/blob/0d5507f91935701146f3615c990941f24bd42fe1/pkg/constants/constants.go#L518). If the `providerSpec` ever goes out of sync, a warning will be logged by the MachinePool controller but otherwise this discrepancy is ignored. In such cases, the MSBIC will not have any issue reconciling the `providerSpec` to the correct boot image. However, if the backdoor is enabled, both the MSBIC and the MachinePool Controller will attempt to reconcile the `providerSpec` field, causing churn. The Hive team has [updated the comment](https://github.com/openshift/hive/pull/2596/files) on the backdoor annotation to indicate that it is mutually exclusive with this feature.
 
 ##### Supported platforms
 
@@ -135,13 +138,14 @@ This work will be tracked in [MCO-793](https://issues.redhat.com/browse/MCO-793)
 
 ##### Projected timeline
 
-This is a tentative timeline, subject to change (GA = General Availability, TP = Tech Preview, DEF = Default-on).
+This is a tentative timeline, subject to change (GA = General Availability(opt-in), TP = Tech Preview(opt-in), DEF = Default-on(opt-out)).
 
 | Platform | TP      | GA      | DEF      |
 | -------- | ------- | ------- | ------- |
 | gcp      | [4.16](https://docs.redhat.com/en/documentation/openshift_container_platform/4.16/html-single/machine_configuration/index#mco-update-boot-images)    |[4.17](https://docs.redhat.com/en/documentation/openshift_container_platform/4.17/html-single/machine_configuration/index#mco-update-boot-images)     |4.19     |
 | aws      | [4.17](https://docs.redhat.com/en/documentation/openshift_container_platform/4.17/html-single/machine_configuration/index#mco-update-boot-images)    |[4.18](https://docs.redhat.com/en/documentation/openshift_container_platform/4.18/html-single/machine_configuration/index#mco-update-boot-images)     |4.19     |
 | vsphere  | 4.20    |4.21     |4.22     |
+| azure    | 4.20    |4.21     |4.22     |
 | baremetal|         |4.22     |4.23     |
 | openstack|         |4.22     |4.23     |
 | nutanix  |         |4.23     |4.24     |
@@ -383,6 +387,77 @@ spec:
     name: "cluster"
     namespace: "default"
 ```
+
+Alongside the implementation of default-on behavior, a Status field for ManagedBootImages is also planned. This would reflect the 
+current ManagedBootImages configuration and if unspecified, it will represent the current cluster defaults.
+```
+type MachineConfigurationStatus struct {
+  ...
+  ...
+
+	// managedBootImagesStatus reflects what the latest cluster-validated boot image configuration is
+	// and will be used by Machine Config Controller while performing boot image updates.
+	// +openshift:enable:FeatureGate=ManagedBootImages
+	// +optional
+	ManagedBootImagesStatus ManagedBootImages `json:"managedBootImagesStatus"`
+}
+
+```
+Here are some examples to illustrate how this works.
+
+Scenario: No admin configuration and the currrent release **does not** opt-in by default:
+```
+apiVersion: operator.openshift.io/v1
+kind: MachineConfiguration
+spec:
+status:
+  managedBootImagesStatus:
+    machineManagers:
+    - resource: machinesets
+      apiGroup: machine.openshift.io
+      selection:
+         mode: None
+```
+Scenario: No admin configuration and the currrent release **does** opt-in by default:
+```
+apiVersion: operator.openshift.io/v1
+kind: MachineConfiguration
+spec:
+status:
+  managedBootImagesStatus:
+    machineManagers:
+    - resource: machinesets
+      apiGroup: machine.openshift.io
+      selection:
+         mode: All
+```
+Regardless of the default-on behavior of the release, if the admin were to add a configuration, the status must reflect that in the next update.
+```
+apiVersion: operator.openshift.io/v1
+kind: MachineConfiguration
+spec:
+  managedBootImages:
+    machineManagers:
+    - resource: machinesets
+      apiGroup: machine.openshift.io
+      selection:
+         mode: Partial
+         partial:
+           machineResourceSelector:
+             matchLabels: {}
+status:
+  managedBootImagesStatus:
+    machineManagers:
+    - resource: machinesets
+      apiGroup: machine.openshift.io
+      selection:
+         mode: Partial
+         partial:
+           machineResourceSelector:
+             matchLabels: {}
+```
+  
+
 #### Skew Enforcement
 As mentioned in the timeline section, this would only be implemented after default-on behavior has been deemed to be stable across
 all platforms.
@@ -393,9 +468,10 @@ type ManagedBootImages struct {
   ...
   ...
   // skewEnforcement allows an admin to set behavior of the boot image skew enforcement mechanism.
-  // Enabled means that the MCO will degrade and prevent upgrades when the boot image skew is too large.
-  // Disabled means that the MCO will no longer degrade and will permit upgrades when the boot image skew is 
-  // too large. This may also hinder the cluster's scaling ability.
+  // Enabled means that the MCO will degrade and prevent upgrades when the boot image skew exceeds the 
+  // skew limit described by the release image.
+  // Disabled means that the MCO will no longer degrade and will permit upgrades when the boot image 
+  // exceeds the skew limit described by the release image. This will likely hinder the cluster's scaling ability.
   // +optional
   SkewEnforcement SkewEnforcementSelectorMode `json:"skewEnforcement"`
 }
@@ -535,7 +611,7 @@ MachineSet Reconciliation Loop:
 ```mermaid
 flowchart-elk TD;
     Start((Start)) -->MachineSetOwnerCheck[Does the MachineSet have an OwnerReference?]
-    MachineSetOwnerCheck -->|Yes|Error
+    MachineSetOwnerCheck -->|Yes|Stop
     MachineSetOwnerCheck -->|No| ConfigMapCheck[Has the coreos-bootimages ConfigMap been stamped by the MCO?] ;
     
     ConfigMapCheck -->|Yes|ArchType[Determine arch type of MachineSet, for eg: x86_64, aarch64] ;
@@ -548,9 +624,11 @@ flowchart-elk TD;
     subgraph PlatformSpecific[Platform Specific]
     ProviderSpec -->IgnitionCheck[Is stub Ignition referenced in ProviderSpec in spec 3 format?] ;
     IgnitionCheck -->|Yes|CompareBootImage[Compare bootimage in ProviderSpec against the coreos-bootimage ConfigMap] ;
+    IgnitionCheck -->|No| IgnitionUpgrade[Attempt Ignition Upgrade];
+    IgnitionUpgrade -->|Ignition Upgrade Successful| CompareBootImage;
     end
 
-    IgnitionCheck -->|No| Error[Throw an error to the cluster admin];
+    IgnitionUpgrade -->|Ignition Upgrade Failed| Error[Throw an error to the cluster admin];
     Error -->Stop[Stop];
     CompareBootImage -->|Mismatch| Patch[Patch MachineSet];
     CompareBootImage -->|Match| Stop[Stop];
@@ -590,8 +668,9 @@ flowchart-elk LR;
 ```
 Some points to note:
 - For bookkeeping purposes, the MCO will annotate the `MachineConfiguration` object when opting in the cluster by default.
-- If the cluster admin wishes to opt-out of the feature, they have to do so by removing the boot image configuration or explicitly opting out the cluster via the API knob. Due to the presence of the "default opted-in" annotation, the MCO will not attempt to opt-in the cluster by default again.
 - This mechanism will be active on installs and upgrades. 
+- If the cluster admin wishes to opt-out of the feature, they have to do so by explicitly opting out the cluster via the API knob prior to the upgrade. 
+- If any of the MachineSets have an OwnerReference, it will be skipped for boot image updates. This will cause an alert/warning to the cluster admin, but it will no longer cause a degrade. 
 
 
 ### Enforcement of bootimage skew
@@ -607,8 +686,7 @@ The release payload will describe the current skew policy. The structure of this
 Some combination of the following mechanisms should be implemented to alert users, particularly non-machineset backed scaled environments. The options generally fall under proactive enforcement (require users to either update or acknowledge risk before upgrading to a new version) vs. reactive enforcement (only fail when a non-compliant bootimage is being used to scale into the cluster).
 
 #### Proactive
-Introduce a new configmap in the MCO namespace that will store the last updated boot image and allows for easy comparison against the
-skew policy described in the release payload.
+Add a new field in the `coreos-bootimages` configmap in the MCO namespace that will store the cluster's current boot image and allows for easy comparison against the skew policy described in the release payload.
   - For machineset backed clusters, this would be updated by the MSBIC after it succesfully updates boot images. 
   - For non-machineset backed clusters, this would be updated by the cluster admin to indicate the last manually updated bootimage. The cluster admin would need to update this configmap every few releases, when the RHEL minor on which the RHCOS container is built on changes (e.g. 9.6->9.8). 
 
@@ -616,10 +694,7 @@ The cluster admin may also choose to opt-out of skew management via this configm
 
 A potential problem here is that the way boot images are stored in the machineset is lossy. In certain platforms, there is no way to recover the boot image metadata from the MachineSet. This is most likely to happen the first time the MCO attempts to do skew enforcement on a cluster that has never had boot image updates. In such cases, the MCO will default to the install time boot image, which can be recovered from the [aleph version](https://github.com/coreos/coreos-assembler/pull/768) of the control plane nodes. 
 
-This configmap can then be monitored to enforce skew limits. This could be done in a couple of ways:
-- **via the MCO**: If the skew is determined to be too large, the MCO can update its `ClusterOperator` object with an `Upgradeable=False` condition, along with remediation steps in the `Condition` message. This will signal to the CVO that the cluster is not suitable for an upgrade. The drawback of this approach is that the MCO is not able to signal *prior* to the start of a cluster upgrade, so if an incoming upgrade has a "stricter" skew policy, this could break scaling until the admin takes the remediation steps during the upgrade or after the upgrade is complete. This may present as strange UX to the user.
-
-- **via the CVO**: If the CVO is able to do the configmap monitoring, the enforcement can be a bit more proactive. The CVO could then potentially block an incoming upgrade based on the skew policy described in the new release payload, until the remediation steps have been done.
+This configmap can then be monitored to enforce skew limits. This could be done in a couple of ways. If the skew is determined to be too large, the MCO can update its `ClusterOperator` object with an `Upgradeable=False` condition, along with remediation steps in the `Condition` message. This will signal to the CVO that the cluster is not suitable for an upgrade.
 
 As stated earlier, to remediate, the cluster admin would then have to do one of the following:
 - Turn on boot image updates if it is a machineset backed cluster.
