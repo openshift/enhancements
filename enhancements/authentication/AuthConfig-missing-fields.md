@@ -104,7 +104,7 @@ This section describes how users will configure and utilize the newly added auth
 ### User Roles
 
 - **Cluster Administrator**: Responsible for configuring authentication settings in OpenShift.
-- **Security Engineer**: Ensures that authentication policies and validations enforce security best practices.
+- **Cluster Administrator**: Ensures that authentication policies and validations enforce security best practices.
 
 ### General Workflow
 
@@ -182,7 +182,7 @@ A company needs to map the `uid` claim to a custom identifier in order to proper
 
 ### 4. Adding Extra Claims for Role-Based Permissions
 **Scenario:**  
-A cluster administrator needs to map an extra claim (such as `role`) from the OIDC token for role-based access control (RBAC).
+A cluster administrator wants to utilize an external webhook authorizer to process custom claims (such as `role`) from the OIDC token for access control decisions.
 
 **Steps:**
 
@@ -199,42 +199,95 @@ A cluster administrator needs to map an extra claim (such as `role`) from the OI
            claimName: role
   ```
 
+#### 5. Enforcing Token Expiration Limits (Claim Validation)  
+**Scenario:**  
+A security-conscious organization wants to ensure that all OIDC tokens used for authentication have a maximum expiration time of one hour.  
+
+**Steps:**  
+1. Update the authentication CRD to enforce a maximum token expiration time:  
+   ```yaml
+   apiVersion: config.openshift.io/v1
+   kind: Authentication
+   metadata:
+     name: cluster
+   spec:
+     tokenValidation:
+       maxExpiration: 3600  # Max token lifetime in seconds (1 hour)
+  ```
+
+#### 6. Restricting Reserved Usernames (User Validation)  
+**Scenario:**  
+An OpenShift administrator wants to prevent users from being created with reserved system prefixes, such as `system:`, to avoid conflicts with system users.  
+
+**Steps:**  
+1. Update the authentication CRD to enforce username restrictions:  
+   ```yaml
+   apiVersion: config.openshift.io/v1
+   kind: Authentication
+   metadata:
+     name: cluster
+   spec:
+     userValidation:
+       disallowedPrefixes:
+         - "system:"
+  ```
+
 ### API Extensions
+To facilitate the configuration and validation of token claims, token issuers, and user validation rules, the existing `authentications.config.openshift.io` CRD is extended with new fields and structures. These extensions provide enhanced flexibility in token validation, token claim mappings, issuer configuration, and user validation. The proposed changes introduce new fields that allow administrators to define custom authentication behaviors.  
+The proposed API changes have been submitted in [openshift/api#2230](https://github.com/openshift/api/pull/2230). Below are examples of how users will configure these new fields:  
 
-To facilitate the configuration and validation of token claims, token issuers, and user validation rules, the existing `authentications.config.openshift.io` CRD is extended with new fields and structures. These extensions allow for enhanced flexibility in token validation, token claim mappings, issuer configuration, and user validation. The proposed changes aim to introduce new fields for token claim mappings, validation rules, user validation rules, and token issuer configuration, providing greater control over how authentication and token validation are managed within the system.
 
-The CRD modifications include the following fields:
-
-#### TokenIssuer
-```go
-type TokenIssuer struct {
-    // discoveryURL, if specified, overrides the URL used to fetch discovery
-    // information instead of using "{url}/.well-known/openid-configuration".
-    // The exact value specified is used, so "/.well-known/openid-configuration"
-    // must be included in discoveryURL if needed.
-    // Example:
-    // discoveryURL: "https://oidc.oidc-namespace/.well-known/openid-configuration"
-    // discoveryURL: "https://oidc.example.com/.well-known/openid-configuration"
-    DiscoveryURL string `json:"discoveryURL,omitempty"`
-
-    // AudienceMatchPolicy controls how the "aud" claim in JWT tokens is validated.
-    // It allows flexible matching of the audience value in tokens.
-    // Possible values: MatchAny, MatchAll.
-    AudienceMatchPolicy AudienceMatchPolicyType `json:"audienceMatchPolicy,omitempty"`
-}
+#### TokenIssuer  
+```yaml
+apiVersion: config.openshift.io/v1
+kind: Authentication
+metadata:
+  name: cluster
+spec:
+  oidcProviders:
+    - issuer:
+        discoveryURL: "https://custom-idp.example.com/.well-known/openid-configuration"
+        audienceMatchPolicy: MatchAny
 ```
-For more details on the Issuer type and its fields, see [here](https://github.com/openshift/api/blob/b8a067b12e1c404dc0f8e5dff9183ef20389318c/config/v1/types_authentication.go#L228-L252).
 
-#### TokenClaimMappings
-```go
-// TokenClaimMappings provides the claim mapping configuration for token-based identities
-type TokenClaimMappings struct {
-    // UID claim mapping
-    UID ClaimOrExpression `json:"uid,omitempty"`
+### TokenClaimMappings  
+```yaml
+apiVersion: config.openshift.io/v1
+kind: Authentication
+metadata:
+  name: cluster
+spec:
+  tokenClaimMappings:
+    uid: claims.email
+    extra:
+      - name: example.com/role
+        claimName: role
+```
 
-    // Extra claim mappings
-    Extra []ExtraMapping `json:"extra,omitempty"`
-}
+### TokenClaimValidationRule
+```yaml
+apiVersion: config.openshift.io/v1
+kind: Authentication
+metadata:
+  name: cluster
+spec:
+  tokenClaimValidationRules:
+    - expression: "claims.exp <= now() + 3600"
+      message: "Token expiration must not exceed 1 hour"
+
+```
+
+### TokenUserValidationRule
+```yaml
+apiVersion: config.openshift.io/v1
+kind: Authentication
+metadata:
+  name: cluster
+spec:
+  tokenUserValidationRules:
+    - expression: "!(user.metadata.name.startsWith('system:'))"
+      message: "Usernames cannot start with 'system:'"
+
 ```
 For more details on the ClaimMappings type and its fields, see [here](https://github.com/openshift/api/blob/b8a067b12e1c404dc0f8e5dff9183ef20389318c/config/v1/types_authentication.go#L254-L265)
 
@@ -266,14 +319,14 @@ For more details on the UserValidationRule type and its fields, see [here](https
 
 #### Hypershift / Hosted Control Planes
 
-Are there any unique considerations for making this change work with
-Hypershift?
+To support this change in HyperShift, updates are required in the logic responsible for generating the structured authentication configuration for the kube-apiserver.  
 
-See https://github.com/openshift/enhancements/blob/e044f84e9b2bafa600e6c24e35d226463c2308a5/enhancements/multi-arch/heterogeneous-architecture-clusters.md?plain=1#L282
+Currently, this logic is defined in the following file:  
+🔗 [auth.go](https://github.com/openshift/hypershift/blob/433f8c99016ca7a13c5587d5629d7975e134b54a/control-plane-operator/controllers/hostedcontrolplane/kas/auth.go#L39-L97).
+Similar to the `cluster-authentication-operator`, this implementation needs to be modified to map the new fields introduced in the `authentications.config.openshift.io` CRD to Kubernetes structured authentication configuration types. This ensures that the additional authentication settings are properly propagated within HyperShift environments.  
 
-How does it affect any of the components running in the
-management cluster? How does it affect any components running split
-between the management cluster and guest cluster?
+##### Impact on Management and Guest Clusters  
+There does not appear to be any impact beyond what already changes when the existing OIDC functionality is enabled. The modifications are limited to mapping new authentication fields, and they do not introduce any structural changes that would affect components running in either the management cluster or guest cluster. 
 
 #### Standalone Clusters
 
@@ -287,11 +340,7 @@ The following updates will be necessary for standalone clusters:
 
    The file responsible for generating the authentication configuration, [externaloidc_controller.go](http://github.com/openshift/cluster-authentication-operator/blob/eb6de2ecd5097a3146e330ea24b0e66029ae5152/pkg/controllers/externaloidc/externaloidc_controller.go#L148), will be modified to ensure that the authentication configuration uses our custom API instead of the Kubernetes API for missing fields. Specifically, the method [generateAuthConfig](https://github.com/openshift/cluster-authentication-operator/blob/eb6de2ecd5097a3146e330ea24b0e66029ae5152/pkg/controllers/externaloidc/externaloidc_controller.go#L148) will be updated to extract the new fields defined in the `authentication.config.openshift.io` CRD.
 
-2. **Changes to the API Definition:**
-
-   The `authentication.config.openshift.io` CRD definition will be updated to include the new fields, including the `OIDCProvider`. This change will be reflected in the API file, located at [types_authentication.go](https://github.com/openshift/api/blob/b8da3bfeaf773d9dce2ea56edc9a1cf06cfdbd80/config/v1/types_authentication.go#L195). Specifically, we will update the definition of `OIDCProvider` to handle new fields such as `discoveryURL`, `audienceMatchPolicy`, and custom claim mappings.
-
-3. **Testing:**
+2. **Testing:**
 
    The tests in [externaloidc_controller_test.go](https://github.com/openshift/cluster-authentication-operator/blob/master/pkg/controllers/externaloidc/externaloidc_controller_test.go) will need to be adjusted. In particular, the test case [TestExternalOIDCController_sync](https://github.com/openshift/cluster-authentication-operator/blob/eb6de2ecd5097a3146e330ea24b0e66029ae5152/pkg/controllers/externaloidc/externaloidc_controller_test.go#L212) will be updated to reflect the changes in the controller logic. We will also add additional test cases to validate the integration of the new fields and ensure that the operator processes them correctly.
 
@@ -303,7 +352,9 @@ By making these updates, we ensure that standalone clusters can utilize the new 
 This proposal introduces additional API fields that will be stored in etcd and cached in specific components. However, the impact on CPU and memory consumption is expected to be negligible, as these changes primarily involve storing and retrieving small amounts of configuration data. No significant increase in resource utilization is anticipated.
 
 **Impact on MicroShift:**  
-#TODO 
+MicroShift does not have a built-in authentication stack or configurable authentication layer. Instead, it relies on `kubeconfig` files for access control, which are generated at startup and used to authenticate API requests.  
+
+Given this, there are no anticipated impacts from the proposed changes, as MicroShift does not currently support authentication configuration options. However, if MicroShift's stance on authentication evolves in the future, further evaluation may be required.  
 
 ### Implementation Details/Notes/Constraints
 
@@ -316,80 +367,20 @@ how the code will be rewritten in the enhancement.
 ### Risks and Mitigations
 
 #### Security Risks  
-Introducing new authentication-related API fields could expose potential misconfigurations or security vulnerabilities.  
+Adding new authentication-related API fields could allow cluster administrators to misconfigure their authentication layer leading to security vulnerabilities. The new API fields themselves don't introduce any security risk.
 - **Mitigation:**  
-  - Ensure that all authentication configurations are validated before applying them.  
-  - Perform security reviews in collaboration with the OpenShift security team.  
-  - Conduct penetration testing to validate that changes do not introduce vulnerabilities.  
-
+  - Ensure we have robust admission and runtime validations to ensure that misconfigurations are prevented as much as possible prior to rolling out the authentication layer changes.
 ### Drawbacks
+One potential argument against implementing this enhancement is that achieving parity with the upstream Kubernetes configuration will result in supporting any configuration that a user can configure on a standard Kubernetes cluster.
 
-The idea is to find the best form of an argument why this enhancement should
-_not_ be implemented.
+This could lead to situations where customers implement configurations that have not been tested or fully validated, and they may expect support for configurations outside the scope of our tested configurations, unless we establish explicit supportability guidelines for this feature.
 
-What trade-offs (technical/efficiency cost, user experience, flexibility,
-supportability, etc) must be made in order to implement this? What are the reasons
-we might not want to undertake this proposal, and how do we overcome them?
-
-Does this proposal implement a behavior that's new/unique/novel? Is it poorly
-aligned with existing user expectations?  Will it be a significant maintenance
-burden?  Is it likely to be superceded by something else in the near future?
-
-## Open Questions [optional]
-
-This is where to call out areas of the design that require closure before deciding
-to implement the design.  For instance,
- > 1. This requires exposing previously private resources which contain sensitive
-  information.  Can we do this?
+However, despite these concerns, this drawback is not significant enough to prevent the proposed changes. The benefits of offering greater flexibility and enabling customers to integrate their existing Identity Provider (IdP) infrastructure with OpenShift's authentication layer far outweigh the potential downsides.
 
 ## Test Plan
-
-**Note:** *Section not required until targeted at a release.*
-
-Consider the following in developing a test plan for this enhancement:
-- Will there be e2e and integration tests, in addition to unit tests?
-- How will it be tested in isolation vs with other components?
-- What additional testing is necessary to support managed OpenShift service-based offerings?
-
-No need to outline all of the test cases, just the general strategy. Anything
-that would count as tricky in the implementation and anything particularly
-challenging to test should be called out.
-
-All code is expected to have adequate tests (eventually with coverage
-expectations).
+For this enhancement, we will expand on the existing OIDC test suite. The focus will be on adding tests to verify the proper functionality of the new configuration options introduced by the new API fields. These tests will confirm that the integration of these new options aligns correctly with the existing authentication functionality and performs as expected. Additionally, we will ensure that the new fields are thoroughly tested across common configurations and scenarios to guarantee reliable behavior.
 
 ## Graduation Criteria
-
-**Note:** *Section not required until targeted at a release.*
-
-Define graduation milestones.
-
-These may be defined in terms of API maturity, or as something else. Initial proposal
-should keep this high-level with a focus on what signals will be looked at to
-determine graduation.
-
-Consider the following in developing the graduation criteria for this
-enhancement:
-
-- Maturity levels
-  - [`alpha`, `beta`, `stable` in upstream Kubernetes][maturity-levels]
-  - `Dev Preview`, `Tech Preview`, `GA` in OpenShift
-- [Deprecation policy][deprecation-policy]
-
-Clearly define what graduation means by either linking to the [API doc definition](https://kubernetes.io/docs/concepts/overview/kubernetes-api/#api-versioning),
-or by redefining what graduation means.
-
-In general, we try to use the same stages (alpha, beta, GA), regardless how the functionality is accessed.
-
-[maturity-levels]: https://git.k8s.io/community/contributors/devel/sig-architecture/api_changes.md#alpha-beta-and-stable-versions
-[deprecation-policy]: https://kubernetes.io/docs/reference/using-api/deprecation-policy/
-
-**If this is a user facing change requiring new or updated documentation in [openshift-docs](https://github.com/openshift/openshift-docs/),
-please be sure to include in the graduation criteria.**
-
-**Examples**: These are generalized examples to consider, in addition
-to the aforementioned [maturity levels][maturity-levels].
-
 ### Dev Preview -> Tech Preview
 
 - Ability to utilize the enhancement end to end
@@ -401,21 +392,23 @@ to the aforementioned [maturity levels][maturity-levels].
 
 ### Tech Preview -> GA
 
-- More testing (upgrade, downgrade, scale)
-- Sufficient time for feedback
-- Available by default
-- Backhaul SLI telemetry
-- Document SLOs for the component
-- Conduct load testing
-- User facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/)
+Given that these changes are additions to the ExternalOIDC feature API, which is currently in Tech Preview for standalone OpenShift, the general approach is as follows:
 
-**For non-optional features moving to GA, the graduation criteria must include
-end to end tests.**
+- No new feature gate will be introduced.
+- The ExternalOIDC feature will not be promoted to GA without these new API fields based on product management input.
+- This approach is subject to change depending on discussions regarding HyperShift and Standalone OpenShift's unified feature maturity. For now, we will proceed with expectations for standalone OpenShift.
+  
+To graduate from Tech Preview (TP) to GA, the following criteria must be met:
+
+- User-facing documentation exists.
+- Time for early adopter feedback in Tech Preview.
+- Available by default.
+- Telemetry/Metrics are in place.
+- Additional testing will be conducted based on early adopter and anticipated user feedback, particularly for desired configurations.
 
 ### Removing a deprecated feature
 
-- Announce deprecation and support policy of the existing feature
-- Deprecate the feature
+N/A
 
 ## Upgrade / Downgrade Strategy
 
@@ -460,17 +453,9 @@ Downgrade expectations:
 
 ## Version Skew Strategy
 
-How will the component handle version skew with other components?
-What are the guarantees? Make sure this is in the test plan.
+Since this enhancement builds upon the existing OIDC functionality, it will follow the same [version skew strategy established for the original OIDC feature ](https://github.com/openshift/enhancements/blob/master/enhancements/authentication/direct-external-oidc-provider.md#version-skew-strategy). These changes do not introduce any new version skew concerns beyond those already considered in the initial implementation of OIDC support. 
 
-Consider the following in developing a version skew strategy for this
-enhancement:
-- During an upgrade, we will always have skew among components, how will this impact your work?
-- Does this enhancement involve coordinating behavior in the control plane and
-  in the kubelet? How does an n-2 kubelet without this feature available behave
-  when this feature is used?
-- Will any other components on the node change? For example, changes to CSI, CRI
-  or CNI may require updating that component before the kubelet.
+As a result, there are no additional compatibility risks or upgrade constraints beyond what has already been accounted for in the existing OIDC version skew strategy.
 
 ## Operational Aspects of API Extensions
 
@@ -507,6 +492,7 @@ especially how they impact the OCP system architecture and operational aspects.
   stability, availability, performance and security.
 - Describe which OCP teams are likely to be called upon in case of escalation with one of the failure modes
   and add them as reviewers to this enhancement.
+  
 ## Support Procedures
 
 ### Logging and Errors  
