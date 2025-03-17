@@ -3,9 +3,9 @@ title: openshift-kueue
 authors:
   - kannon92
 reviewers: # Include a comment about what domain expertise a reviewer is expected to bring and what area of the enhancement you expect them to focus on. For example: - "@networkguru, for networking aspects, please look at IP bootstrapping aspect"
-  - haircommander
+  - haircommander 
   - rphillips
-  - varshaprasad96
+  - varshaprasad96 #rhoai expert
 approvers: # A single approver is preferred, the role of the approver is to raise important questions, help ensure the enhancement receives reviews from all applicable areas/SMEs, and determine when consensus is achieved such that the EP can move forward to implementation.  Having multiple approvers makes it difficult to determine who is responsible for the actual approval.
   - mrunalp
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
@@ -19,7 +19,7 @@ see-also:
 replaces:
   - "NA"
 superseded-by:
-  - "/enhancements/our-past-effort.md"
+  - "NA"
 ---
 
 # Bringing Kueue into Openshift
@@ -66,7 +66,7 @@ Workload API is what Kueue uses to enforce its quota logic.
 All supported frameworks of Kueue translate the objects into a Workload.
 
 Kueue provides a choice of integration via either dedicated frameworks or via the use of pod scheduling gates.
-Many support frameworks use the Suspend field and Kueue will unsuspend workloads once their is capacity in their cluster.
+Many supported frameworks use the Suspend field and Kueue will unsuspend workloads once their is capacity in their cluster.
 Kueue will typically look at all namespaces of a cluster and check if that workload should be gated by Kueue.
 
 The use of pod scheduling gates is another approach that Kueue uses to enforce quota management. 
@@ -127,17 +127,6 @@ Kueue [upstream ticket](https://github.com/kubernetes-sigs/kueue/issues/2717) pr
 Serving is supported by KServe in Red Hat Openshift AI (RHOAI) Serving. Kueue has a ticket to add support for KServe. 
 Red Hat’s Kueue will inherit support of KServe and Kueue once the upstream ticket has been implemented.
 
-#### Gang Scheduling
-
-Kueue provides gang admission (admit a workload if all quota is satisfied). 
-This can alleviate gang scheduling concerns in clusters as the workload won’t be scheduled unless it is likely to be fit in the cluster.
-
-Users would like to run multiple pods as a single workload and they want to make sure their workload will schedule at similar times. 
-Workloads must be scheduled all at once or the underlying pods will fail.
-
-Kueue achieves this via a `WaitForPodsReady` field in their configuration to wait for all the pods to have quota.
-Kueue will only admit the workload if all pods are able to be admitted at once.
-
 #### Job Quota Management
 
 As a user, I run a CI platform where I have capacity constraints for my batch jobs. 
@@ -159,10 +148,9 @@ Kueue provides support for dispatching jobs across multiple clusters. I would li
 
 OCM provides a POC for how to use [MultiKueue](https://github.com/open-cluster-management-io/ocm/tree/main/solutions/kueue-admission-check).
 
-We are considering MultiKueue out of scope for tech preview.
+We are considering MultiKueue out of scope for this enhancement.
 
 #### Build Platforms
-
 
 Workflows/Pipelines can also be resource constrained. 
 One area can be the usage of Kueue’s Pod Integration to preemption workflows in Konflux. 
@@ -187,6 +175,7 @@ This ProvReq would have the cluster autoscaler create nodes that can fit the wor
 
 This functionality is possible once [ProvRequest in Autoscaling](https://issues.redhat.com/browse/OCPSTRAT-1331) is done.
 
+This will be out of scope for tech preview.
 
 ### Goals
 
@@ -218,14 +207,13 @@ Various use cases call for the configuration of the integrations and other kueue
 We will use the kueue configuration [API](https://github.com/kubernetes-sigs/kueue/blob/main/apis/config/v1beta1/configuration_types.go).
 
 The operator reads the kueue configuration and generates a ConfigMap that the kueue manager deployment will use. 
-We will only expose a limited amount of configurations.
-
-
-These values were chosen by working with IBM/RHOAI on what kind of functionality 
-they want to change.
 
 The API is displayed below but we have requested an api-review [here](https://github.com/openshift/api/pull/2222).
 
+During our api-review process, we decided to minimize the scope of our tech preview. 
+We will only focus on integrations so we can enable user stories explained above.
+
+We will use the kueue defaults for many of the features.
 
 ```golang
 import (
@@ -258,40 +246,89 @@ type KueueOperandSpec struct {
 	Config KueueConfiguration `json:"config"`
 }
 
-type ManageJobsWithoutQueueNameOption string
-
-const (
-	// NoQueueName means that all jobs will be gated by Kueue
-	NoQueueName ManageJobsWithoutQueueNameOption = "NoQueueName"
-	// QueueName means that the jobs require a queue label.
-	QueueName ManageJobsWithoutQueueNameOption = "QueueName"
-)
-
 type KueueConfiguration struct {
-	// waitForPodsReady configures gang admission
-	// +optional
-	WaitForPodsReady *kueuecfgv1beta1.WaitForPodsReady `json:"waitForPodsReady,omitempty"`
 	// integrations are the types of integrations Kueue will manager
 	// +required
 	Integrations kueuecfgv1beta1.Integrations `json:"integrations"`
-	// featureGates are advanced features for Kueue
+}
+
+// +kubebuilder:validation:Enum=batchjob;rayjob;raycluster;jobset;mpijob;paddlejob;pytorchjob;tfjob;xgboostjob;appwrapper;pod;deployment;statefulset;leaderworkerset
+type KueueIntegrations string
+
+const (
+	BatchJob        KueueIntegrations = "batchjob"
+	RayJob          KueueIntegrations = "rayjob"
+	RayCluster      KueueIntegrations = "raycluster"
+	JobSet          KueueIntegrations = "jobset"
+	MPIJob          KueueIntegrations = "mpijob"
+	PaddeJob        KueueIntegrations = "paddlejob"
+	PyTorchJob      KueueIntegrations = "pytorchjob"
+	TfJob           KueueIntegrations = "tfjob"
+	XGBoostJob      KueueIntegrations = "xgboostjob"
+	AppWrappers     KueueIntegrations = "appwrapper"
+	Pod             KueueIntegrations = "pod"
+	Deployment      KueueIntegrations = "deployment"
+	Statefulset     KueueIntegrations = "statefulset"
+	LeaderWorkerSet KueueIntegrations = "leaderworkerset"
+)
+
+// This is the GVK for an external framework.
+// Controller runtime requires this in this format
+// for api discoverability.
+type ExternalFramework struct {
+	// group of externalFramework
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:XValidation:rule="self.size() == 0 || !format.qualifiedName().validate(self).hasValue()",message="a lowercase RFC 1123 subdomain must consist of lower case alphanumeric characters, '-' or '.', and must start and end with an alphanumeric character."
+	// +required
+	Group string `json:"group"`
+	// resource of external framework
+	// +required
+	// +kubebuilder:validation:MaxLength=256
+	// +kubebuilder:validation:XValidation:rule="self.size() == 0 || !format.qualifiedName().validate(self).hasValue()",message="a lowercase RFC 1123 subdomain must consist of lower case alphanumeric characters, '-' or '.', and must start and end with an alphanumeric character."
+	// +kubebuilder:validation:MinLength=1
+	Resource string `json:"resource"`
+	// version is the version of the api
+	// +required
+	// +kubebuilder:validation:MaxLength=256
+	// +kubebuilder:validation:MinLength=1
+	Version string `json:"version"`
+}
+
+type Integrations struct {
+	// frameworks are a list of names to be enabled.
+	// This is required and must have at least one element.
+	// The frameworks are jobs that Kueue will manage.
+	// +kubebuilder:validation:MaxItems=14
+	// +kubebuilder:validation:MinItems=1
+	// kubebuilder:validation:UniqueItems=true
+	// +listMapKey=atomic
+	// +required
+	Frameworks []KueueIntegrations `json:"frameworks"`
+	// externalFrameworks are a list of GroupVersionResources
+	// that are managed for Kueue by external controllers;
+	// These are optional and should only be used if you have an external controller
+	// that integrations with kueue.
+	// +listMapKey=atomic
+	// +kubebuilder:validation:MaxItems=32
 	// +optional
-	FeatureGates map[string]bool `json:"featureGates,omitempty"`
-	// resources provides additional configuration options for handling the resources.
-	// Supports https://github.com/kubernetes-sigs/kueue/blob/release-0.10/keps/2937-resource-transformer/README.md
+	ExternalFrameworks []ExternalFramework `json:"externalFrameworks,omitempty"`
+
+	// labelKeysToCopy is a list of label keys that should be copied from the job into the
+	// workload object. It is not required for the job to have all the labels from this
+	// list. If a job does not have some label with the given key from this list, the
+	// constructed workload object will be created without this label. In the case
+	// of creating a workload from a composable job (pod group), if multiple objects
+	// have labels with some key from the list, the values of these labels must
+	// match or otherwise the workload creation would fail. The labels are copied only
+	// during the workload creation and are not updated even if the labels of the
+	// underlying job are changed.
+	// +kubebuilder:validation:items:MaxLength=317
+	// +kubebuilder:validation:MaxItems=64
+	// +kubebuilder:validation:XValidation:rule="self.size() == 0 || !format.qualifiedName().validate(self).hasValue()",message="a lowercase RFC 1123 subdomain must consist of lower case alphanumeric characters, '-' or '.', and must start and end with an alphanumeric character."
+	// +listMapKey=atomic
 	// +optional
-	Resources *kueuecfgv1beta1.Resources `json:"resources,omitempty"`
-	// ManageJobsWithoutQueueName controls whether or not Kueue reconciles
-	// jobs that don't set the annotation kueue.x-k8s.io/queue-name.
-	// Allowed values are NoQueueName and QueueName
-	// Default will be QueueName
-	// +optional
-	ManageJobsWithoutQueueName *ManageJobsWithoutQueueNameOption `json:"manageJobsWithoutQueueName,omitempty"`
-	// ManagedJobsNamespaceSelector can be used to omit some namespaces from ManagedJobsWithoutQueueName
-	// +optional
-	ManagedJobsNamespaceSelector *metav1.LabelSelector `json:"managedJobsNamespaceSelector,omitempty"`
-	// FairSharing controls the fair sharing semantics across the cluster.
-	FairSharing *kueuecfgv1beta1.FairSharing `json:"fairSharing,omitempty"`
+	LabelKeysToCopy []string `json:"labelKeysToCopy,omitempty"`
 }
 
 // KueueStatus defines the observed state of Kueue
@@ -336,6 +373,8 @@ d. FIPS
 
 The operator will be OLM managed and hosted on OperatorHub.
 
+### Feature Support
+
 ### Workflow Description
 
 #### Batch Job Administrator
@@ -355,7 +394,8 @@ spec:
          - "batch/job"
 ```
 
-This will create a Kueue deployment that will manage batch jobs.
+This will create a Kueue deployment that will manage batch jobs. 
+
 
 
 #### RHOAI Enablement
@@ -387,9 +427,6 @@ spec:
        - "AppWrapper.v1beta2.workload.codeflare.dev"
 ```
 
-RHOAI provides developer features and allows for enablement of more advanced features. 
-Due to this, it is requested that Kueue Operator will still allow the
-changing of feature gates to provide more advanced functionality.
 
 ### API Extensions
 
@@ -397,17 +434,19 @@ Our operator will have a Kueue CRD that will trigger the installation of Kueue.
 
 Kueue operand has these CRDs:
 
-- ClusterQueue
-- AdmissionChecks
-- LocalQueue
-- Workloads
-- ResourceFlavors
-- WorkloadPriorityClasses
-- ProvisioningRequestConfigs
-- MultiKueueConfigs
-- MultiKueueClusters
+- ClusterQueue (Tier 1)
+- AdmissionChecks (Tier 1)
+- LocalQueue (Tier 1)
+- Workloads (Tier 1)
+- ResourceFlavors (Tier 1)
+- WorkloadPriorityClasses (Tier 1)
+- ProvisioningRequestConfigs (Not Supported)
+- MultiKueueConfigs (Not Supported)
+- MultiKueueClusters (Not Supported)
 - Cohorts (alpha - Not Supported)
 - Topologies (alpha - Not supported)
+
+Tier 1 APIs are considered GA and supported.
 
 Kueue has also validating and mutating webhooks for these CRDs and
 it also mutates/validates core kubernetes resources such as pods, deployments, statefulsets and jobs.
@@ -495,18 +534,48 @@ I don't forsee any issue with SNO.
 
 Cert Manager will be used to manage certificates so our operator will have a hard dependency on Cert Manager.
 
+#### Tech Preview Feature Statement
+
+##### Supported Features
+
+In Tech preview, we will provide the following features:
+
+- [Preemption](https://kueue.sigs.k8s.io/docs/concepts/preemption/)
+- Advanced Resource management: Comprising: resource flavor fungibility, fair sharing, cohorts and preemption with a variety of policies between different tenants.
+- Support for GPU model servers via pod-integration
+- Namespace opt in for frameworks.
+- Metrics for Kueue in OCP monitoring.
+- [Workload Priority Classes](https://kueue.sigs.k8s.io/docs/concepts/workload_priority_class/)
+- LocalQueue, ClusterQueues, Workloads, Worklow Priorites, Admission Checks are all supported.
+- Support for deployments, pods, statefulsets.
+- [Use of resource flavors to describe heterogeous clusters](https://kueue.sigs.k8s.io/docs/concepts/resource_flavor/)
+
+##### Not Supported
+
+We will not provide the following features in tech preview.
+
+- MultiKueue
+- Autoscaling
+- TopologyAwareScheduling
+- Resource Transormations
+- KueueViz
+- LocalQueueDefaulting
+- Use of ManagedJobsWithoutQueueName
+- Fairsharing
+- [VisibilityOnDemand](https://kueue.sigs.k8s.io/docs/tasks/manage/monitor_pending_workloads/pending_workloads_on_demand/)
+- Gang scheduling
+- Topology CRD (Topology Aware Scheduling)
+- Cohort CRD (hierachial queueing)
+
 #### Release Schedule
 
 | Kueue Operator     |  Stage       |  OCP Version   |  Kueue   | RHOAI GA
 | ------------------ | -------      | ---------------| -------- | -------
-| 0.1                | Tech Preview | 4.19           | 0.11.z   | N
-| 0.1                | Tech Preview | 4.20           | 0.13.z   | Y
-| ?                  | GA           | 4.19           | ?        | Y
+| 0.1                | Tech Preview | 4-17-4.19      | 0.11.z   | N
+| 1.0                | GA           | 4.18-4.20      | 0.12.z   | Y
 
 Kueue releases 6 times a year, roughly. 
 They will have 2 releases per k8s version so we can take the latest version that is built with the kubernetes version that OCP comes with.
-
-GA release of the Kueue Operator should be with v1 apis from Kueue. We are working with upstream to get the APIs stable. 
 
 GAing Kueue on beta APIs will cause support/upgradability issues. 
 Our goal is to engage with upstream to drive stability in these APIs before we open Kueue for a general audience.
@@ -515,6 +584,37 @@ We are open to work with internal partners on GAing Kueue but upgrades may be a 
 Upstream wants to promote [v1beta1 to v1beta2](https://github.com/kubernetes-sigs/kueue/issues/768) in 2025.
 
 [V1 Tracking issue](https://github.com/kubernetes-sigs/kueue/issues/3476)
+
+#### Kueue Release Committment
+
+Kueue has confirmed that they will support n-2 releases with bug fixes and security patches.
+These releases will be tested on the supported versions of Kubernetes at the time.
+There are presubmits and periodics in test-grid that will provide a [signal](https://testgrid.k8s.io/sig-scheduling) of the release.
+
+#### Release Workflow
+
+The operand will carry the same release branches as Kueue.
+These release branches will be forked in openshift and we will run their unit, integration and e2e tests on the supported versions of Kubernetes
+that this release branches were tested with in upstream. To best explain this, I think an example is necessary.
+
+In v0.11, Kueue is tested with upstream CI for 1.30-1.31-1.32. We will provide e2e testing of operand for each of these releases.
+Openshift will keep testing these versions with this version of Kueue even after upstream drops support for those Kubernetes versions.
+This does mean that eventually v0.11 will be not be supported on newer versions of Kubernetes because upstream Kueue has never tested those.
+
+Due to this, we think release branches for operator and operand will be best.
+
+We will follow Kueue upstream branches and carry their patches into these branches. As Kueue is in support,
+we will continue to update and release patches for the operator in that release branch.
+
+We will have a release branch in our operator that will correspond to a kueue branch. So 0.1 corresponds to kueue v0.11. 
+A patch version of Kueue would be a patch version of the operator (0.1.1 <-> v0.11.1).
+Each patch that gets released for Kueue we will then provide a new patch for our operator in that zstream.
+
+Once a new kueue release is out, we will create a release branch for the operator and the operand.
+The operator will be bumped to a new minor version and we repeat our process for patches.
+A kueue operator bump that changes k8s version means that our OCP skew changes (ie v0.12 is built with OCP 1.33 then we will now support 1.31-1.33) for that release.
+
+It may be possible to stretch the testing farther but we will need to confirm and support each release with testing to determine that.
 
 #### Safe Enablement of Kueue for Cluster Admins
 
@@ -576,7 +676,7 @@ Kueue uses the v1beta1 API and Openshift will support V1 API in 4.19.
 There will be some upstream work needed to have a smarter switch so that 
 we can use the V1 API if it exists.
 
-#### No support of alpha features for lueue
+#### No support of alpha features for kueue
 
 To not break existing users, we will not install Custom Resources 
 that are alpha. This will be filtered out in the operator.
@@ -617,19 +717,16 @@ the core functionality should still be functional.
 
 ### Expermental Feature Support
 
+The following is out of scope for tech preview.
+
 Kueue has a concept of feature gates in their configuration API. These are a series of advanced features.
 The development of Kueue is quite fast and many of these features are not yet GA. 
 We are engaging with upstream to avoid permanent betas and to focus on graduating feature gates.
 
-Meanwhile, there are cases where one would want to use alpha features or beta features. 
-To do this, we want to provide an expermental stream in OLM that will allow one to change feature gates and set non standard options.
-We will achieve this by building a special alpha bundle that sets a flag in our deployment that will allow the changing of advanced functionality.
-
-As of now there are a few other options we need to explore.
-
-- Dedicated olm bundle for expermental features
-- Feature gates in operator to allow one to change functionality (same bundle)
-- FeatureSet at OCP level
+Meanwhile, there are cases where one would want to use alpha features or beta features.
+In an ideal world, we would be able to stop the upgrades of operators if the operator sets alpha features.
+This is not possible so one option is for really risky features we can set a feature gate in OCP to force
+the cluster to go into tech-preview no upgrade.
 
 ### GA timeframe of Kueue
 
@@ -675,15 +772,12 @@ The operator will also run a smoke test to verify that Kueue APIs are accessible
 - Documentation
 - Telemetry
 
-### RHOAI GA Adoption
+### Tech Preview -> GA
 
 - RHOAI is able to switch their Kueue deployment for Openshift Kueue
 - Feature parity with their existing solution
-- We are discussing them adopting this as GA before we release the operator as GA for everyone.
+- Confidence to support GAish APIs (ClusterQueues, Workloads, LocalQueues, WorkloadPriorityClasses, ResourceFlavors)
 
-### Tech Preview -> GA
-
-- Once kueue APIs are V1 we can GA the kueue operator.
 
 ### Removing a deprecated feature
 
@@ -797,5 +891,6 @@ None I can think of.
 
 - New repo added for Kueue Operand
 - New repo added for kueue operator
+- Konflux repos onboarding and new tenant in konflux org (kueue-operator-tenant)
 
 
