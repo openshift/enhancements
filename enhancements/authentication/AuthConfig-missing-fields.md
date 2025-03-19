@@ -155,12 +155,16 @@ A cluster administrator needs to configure OpenShift to validate the audience (`
 **Steps:**
 1. Update the authentication CRD with `AudienceMatchPolicy`:
    ```yaml
-   apiVersion: config.openshift.io/v1
-   kind: Authentication
-   metadata:
-     name: cluster
-   spec:
-     audienceMatchPolicy: MatchAny
+  apiVersion: config.openshift.io/v1
+  kind: Authentication
+  metadata:
+    name: cluster
+  spec:
+    type: OIDC
+    oidcProviders:
+    - name: foo
+      issuer:
+        audienceMatchPolicy: MatchAny
      ```
 
 #### 3. Custom UID Mapping for Identity Providers
@@ -172,13 +176,31 @@ A company needs to map the `uid` claim to a custom identifier in order to proper
 1. Update the authentication CRD to include the custom `uid` mapping:
    ```yaml
    apiVersion: config.openshift.io/v1
-   kind: Authentication
-   metadata:
-     name: cluster
-   spec:
-     tokenClaimMappings:
-       uid: claims.email  # Example of custom claim mapping
+    kind: Authentication
+    metadata:
+      name: cluster
+    spec:
+      type: OIDC
+      oidcProviders:
+      - name: foo
+        claimMappings:
+          uid:
+            expression: claims.email
   ```
+-------------------------------------
+```yaml
+    apiVersion: config.openshift.io/v1
+    kind: Authentication
+    metadata:
+      name: cluster
+    spec:
+      type: OIDC
+      oidcProviders:
+      - name: foo
+        claimMappings:
+          uid:
+            claim: email
+```
 
 ### 4. Adding Extra Claims for Role-Based Permissions
 **Scenario:**  
@@ -193,10 +215,12 @@ A cluster administrator wants to utilize an external webhook authorizer to proce
    metadata:
      name: cluster
    spec:
-     tokenClaimMappings:
-       extra:
-         - name: example.com/role
-           claimName: role
+    type: OIDC
+    oidcProviders:
+      - key: 'example.com/tenant'
+        claimMappings:
+          extra:
+            valueExpression: 'claims.tenant'
   ```
 
 #### 5. Enforcing Token Expiration Limits (Claim Validation)  
@@ -211,8 +235,11 @@ A security-conscious organization wants to ensure that all OIDC tokens used for 
    metadata:
      name: cluster
    spec:
-     tokenValidation:
-       maxExpiration: 3600  # Max token lifetime in seconds (1 hour)
+    type: OIDC
+    oidcProviders:
+     - expression: 'claims.exp - claims.nbf <= 86400'
+      claimValidationRules:
+        message: total token lifetime must not exceed 24 hours
   ```
 
 #### 6. Restricting Reserved Usernames (User Validation)  
@@ -222,14 +249,16 @@ An OpenShift administrator wants to prevent users from being created with reserv
 **Steps:**  
 1. Update the authentication CRD to enforce username restrictions:  
    ```yaml
-   apiVersion: config.openshift.io/v1
-   kind: Authentication
-   metadata:
-     name: cluster
-   spec:
-     userValidation:
-       disallowedPrefixes:
-         - "system:"
+  apiVersion: config.openshift.io/v1
+  kind: Authentication
+  metadata:
+    name: cluster
+  spec:
+    type: OIDC
+    oidcProviders:
+      - expression: "!user.username.startsWith('system:')" # the expression will evaluate to true, so validation will succeed.
+        userValidationRules:
+          message: 'username cannot used reserved system: prefix'
   ```
 
 ### API Extensions
@@ -238,82 +267,102 @@ The proposed API changes have been submitted in [openshift/api#2230](https://git
 
 
 #### TokenIssuer  
+## DiscoveryURL
+```yaml
+   apiVersion: config.openshift.io/v1
+   kind: Authentication
+   metadata:
+     name: cluster
+   spec:
+    type: OIDC
+    oidcProviders:
+    - issuer:
+      discoveryURL: https://discovery.example.com/.well-known/openid-configuration
+```
+## AaudienceMatchPolicy
 ```yaml
 apiVersion: config.openshift.io/v1
 kind: Authentication
 metadata:
   name: cluster
 spec:
+  type: OIDC
   oidcProviders:
-    - issuer:
-        discoveryURL: "https://custom-idp.example.com/.well-known/openid-configuration"
-        audienceMatchPolicy: MatchAny
+  - name: foo
+    issuer:
+      audienceMatchPolicy: MatchAny
 ```
 
 ### TokenClaimMappings  
+## UID
 ```yaml
-apiVersion: config.openshift.io/v1
-kind: Authentication
-metadata:
-  name: cluster
-spec:
-  tokenClaimMappings:
-    uid: claims.email
-    extra:
-      - name: example.com/role
-        claimName: role
+   apiVersion: config.openshift.io/v1
+    kind: Authentication
+    metadata:
+      name: cluster
+    spec:
+      type: OIDC
+      oidcProviders:
+      - name: foo
+        claimMappings:
+          uid:
+            expression: claims.email
+```
+```yaml
+    apiVersion: config.openshift.io/v1
+    kind: Authentication
+    metadata:
+      name: cluster
+    spec:
+      type: OIDC
+      oidcProviders:
+      - name: foo
+        claimMappings:
+          uid:
+            claim: email
+```
+## Extra
+```yaml
+   apiVersion: config.openshift.io/v1
+   kind: Authentication
+   metadata:
+     name: cluster
+   spec:
+    type: OIDC
+    oidcProviders:
+      - key: 'example.com/tenant'
+        claimMappings:
+          extra:
+            valueExpression: 'claims.tenant
 ```
 
 ### TokenClaimValidationRule
-```yaml
-apiVersion: config.openshift.io/v1
-kind: Authentication
-metadata:
-  name: cluster
-spec:
-  tokenClaimValidationRules:
-    - expression: "claims.exp <= now() + 3600"
-      message: "Token expiration must not exceed 1 hour"
-
-```
+   ```yaml
+   apiVersion: config.openshift.io/v1
+   kind: Authentication
+   metadata:
+     name: cluster
+   spec:
+    type: OIDC
+    oidcProviders:
+     - expression: 'claims.exp - claims.nbf <= 86400'
+      claimValidationRules:
+        message: total token lifetime must not exceed 24 hours
+  ```
 
 ### TokenUserValidationRule
 ```yaml
-apiVersion: config.openshift.io/v1
-kind: Authentication
-metadata:
-  name: cluster
-spec:
-  tokenUserValidationRules:
-    - expression: "!(user.metadata.name.startsWith('system:'))"
-      message: "Usernames cannot start with 'system:'"
-
-```
-For more details on the ClaimMappings type and its fields, see [here](https://github.com/openshift/api/blob/b8a067b12e1c404dc0f8e5dff9183ef20389318c/config/v1/types_authentication.go#L254-L265)
-
-
-#### TokenClaimValidationRule
-```go
-type TokenClaimValidationRule struct {
-    // Expression allows configuring a custom validation rule based on an expression
-    // This field defines a validation rule using a claim expression to evaluate the token
-    Expression string `json:"expression,omitempty"`
-
-    // Message defines a custom error message to be returned if the validation fails
-    Message string `json:"message,omitempty"`
-}
-```
-For more details on the ClaimValidationRule type and its fields, see [here](https://github.com/openshift/api/blob/b8a067b12e1c404dc0f8e5dff9183ef20389318c/config/v1/types_authentication.go#L440-L450)
-
-#### ToeknUserValidationRule
-```go
-// UserValidationRule provides the configuration for a single user validation rule.
-type ToeknUserValidationRule struct {
-	Expression string
-	Message    string
-}
-```
-For more details on the UserValidationRule type and its fields, see [here](https://github.com/kubernetes/kubernetes/blob/75909b89201386c8a555eadc79d14fb11f91747c/staging/src/k8s.io/apiserver/pkg/apis/apiserver/types.go#L284)
+  apiVersion: config.openshift.io/v1
+  kind: Authentication
+  metadata:
+    name: cluster
+  spec:
+    type: OIDC
+    oidcProviders:
+      - expression: "!user.username.startsWith('system:')" # the expression will evaluate to true, so validation will succeed.
+        userValidationRules:
+          message: 'username cannot used reserved system: prefix'
+  ```
 
 ### Topology Considerations
 
@@ -338,7 +387,7 @@ The following updates will be necessary for standalone clusters:
 
 1. **Changes to `cluster-authentication-operator` Code:**
 
-   The file responsible for generating the authentication configuration, [externaloidc_controller.go](http://github.com/openshift/cluster-authentication-operator/blob/eb6de2ecd5097a3146e330ea24b0e66029ae5152/pkg/controllers/externaloidc/externaloidc_controller.go#L148), will be modified to ensure that the authentication configuration uses our custom API instead of the Kubernetes API for missing fields. Specifically, the method [generateAuthConfig](https://github.com/openshift/cluster-authentication-operator/blob/eb6de2ecd5097a3146e330ea24b0e66029ae5152/pkg/controllers/externaloidc/externaloidc_controller.go#L148) will be updated to extract the new fields defined in the `authentication.config.openshift.io` CRD.
+The generateAuthConfig method of the ExternalOIDCController is used to map OIDC provider configurations in the authentication.config.openshift.io custom resource to the structured authentication configuration format that the Kubernetes API server understands. This method will be updated to include logic to map the new fields introduced in the authentication.config.openshift.io CRD to their existing counterparts in the Kubernetes structured authentication configuration types.
 
 2. **Testing:**
 
@@ -358,11 +407,7 @@ Given this, there are no anticipated impacts from the proposed changes, as Micro
 
 ### Implementation Details/Notes/Constraints
 
-What are some important details that didn't come across above in the
-**Proposal**? Go in to as much detail as necessary here. This might be
-a good place to talk about core concepts and how they relate. While it is useful
-to go into the details of the code changes required, it is not necessary to show
-how the code will be rewritten in the enhancement.
+N/A
 
 ### Risks and Mitigations
 
@@ -402,7 +447,6 @@ To graduate from Tech Preview (TP) to GA, the following criteria must be met:
 
 - User-facing documentation exists.
 - Time for early adopter feedback in Tech Preview.
-- Available by default.
 - Telemetry/Metrics are in place.
 - Additional testing will be conducted based on early adopter and anticipated user feedback, particularly for desired configurations.
 
@@ -412,87 +456,34 @@ N/A
 
 ## Upgrade / Downgrade Strategy
 
-If applicable, how will the component be upgraded and downgraded? Make sure this
-is in the test plan.
+## Upgrade Considerations
 
-Consider the following in developing an upgrade/downgrade strategy for this
-enhancement:
-- What changes (in invocations, configurations, API use, etc.) is an existing
-  cluster required to make on upgrade in order to keep previous behavior?
-- What changes (in invocations, configurations, API use, etc.) is an existing
-  cluster required to make on upgrade in order to make use of the enhancement?
+When upgrading from a version of OpenShift that does not include these API changes to a version that does, the upgrade process should be seamless. The new API fields will be introduced, but they will not affect existing configurations unless explicitly used. No manual intervention is required before the upgrade, and clusters should continue functioning as expected without any disruptions.
+After upgrading, customers can begin leveraging the new API fields by updating the Authentication resource to configure token claim mappings, validation rules, and user validation settings.
 
-Upgrade expectations:
-- Each component should remain available for user requests and
-  workloads during upgrades. Ensure the components leverage best practices in handling [voluntary
-  disruption](https://kubernetes.io/docs/concepts/workloads/pods/disruptions/). Any exception to
-  this should be identified and discussed here.
-- Micro version upgrades - users should be able to skip forward versions within a
-  minor release stream without being required to pass through intermediate
-  versions - i.e. `x.y.N->x.y.N+2` should work without requiring `x.y.N->x.y.N+1`
-  as an intermediate step.
-- Minor version upgrades - you only need to support `x.N->x.N+1` upgrade
-  steps. So, for example, it is acceptable to require a user running 4.3 to
-  upgrade to 4.5 with a `4.3->4.4` step followed by a `4.4->4.5` step.
-- While an upgrade is in progress, new component versions should
-  continue to operate correctly in concert with older component
-  versions (aka "version skew"). For example, if a node is down, and
-  an operator is rolling out a daemonset, the old and new daemonset
-  pods must continue to work correctly even while the cluster remains
-  in this partially upgraded state for some time.
+## Downgrade Considerations
 
-Downgrade expectations:
-- If an `N->N+1` upgrade fails mid-way through, or if the `N+1` cluster is
-  misbehaving, it should be possible for the user to rollback to `N`. It is
-  acceptable to require some documented manual steps in order to fully restore
-  the downgraded cluster to its previous state. Examples of acceptable steps
-  include:
-  - Deleting any CVO-managed resources added by the new version. The
-    CVO does not currently delete resources that no longer exist in
-    the target version.
+If a customer downgrades from a version of OpenShift where these API changes are present to a version where they are not, any configurations using the new fields will no longer be recognized. This could lead to unexpected behavior or validation errors. To ensure a smooth downgrade, customers should remove any references to the new API fields before initiating the downgrade process.
 
 ## Version Skew Strategy
 
 Since this enhancement builds upon the existing OIDC functionality, it will follow the same [version skew strategy established for the original OIDC feature ](https://github.com/openshift/enhancements/blob/master/enhancements/authentication/direct-external-oidc-provider.md#version-skew-strategy). These changes do not introduce any new version skew concerns beyond those already considered in the initial implementation of OIDC support. 
-
 As a result, there are no additional compatibility risks or upgrade constraints beyond what has already been accounted for in the existing OIDC version skew strategy.
 
 ## Operational Aspects of API Extensions
 
-Describe the impact of API extensions (mentioned in the proposal section, i.e. CRDs,
-admission and conversion webhooks, aggregated API servers, finalizers) here in detail,
-especially how they impact the OCP system architecture and operational aspects.
+## Impact of Misconfiguration on Users
 
-- For conversion/admission webhooks and aggregated apiservers: what are the SLIs (Service Level
-  Indicators) an administrator or support can use to determine the health of the API extensions
+If users configure the new API fields incorrectly, authentication may break, causing the kube-apiserver to become inaccessible. This could prevent users from logging in or interacting with the cluster.
 
-  Examples (metrics, alerts, operator conditions)
-  - authentication-operator condition `APIServerDegraded=False`
-  - authentication-operator condition `APIServerAvailable=True`
-  - openshift-authentication/oauth-apiserver deployment and pods health
+## Mitigation Strategy
 
-- What impact do these API extensions have on existing SLIs (e.g. scalability, API throughput,
-  API availability)
+We plan to add a combination of admission time and runtime checks to prevent invalid configurations from being applied. These checks will ensure that only properly formatted and functional configurations are accepted before they are rolled out to the kube-apiserver.
 
-  Examples:
-  - Adds 1s to every pod update in the system, slowing down pod scheduling by 5s on average.
-  - Fails creation of ConfigMap in the system when the webhook is not available.
-  - Adds a dependency on the SDN service network for all resources, risking API availability in case
-    of SDN issues.
-  - Expected use-cases require less than 1000 instances of the CRD, not impacting
-    general API throughput.
+## How Users Will Be Informed of a Prevented Misconfiguration
 
-- How is the impact on existing SLIs to be measured and when (e.g. every release by QE, or
-  automatically in CI) and by whom (e.g. perf team; name the responsible person and let them review
-  this enhancement)
+If an invalid configuration is rejected, users will receive a clear error message explaining what went wrong. Additionally, the cluster-authentication-operator's `clusteroperator` conditions (e.g., `AuthenticationDegraded=True`) and logs will indicate issues related to authentication misconfigurations.
 
-- Describe the possible failure modes of the API extensions.
-- Describe how a failure or behaviour of the extension will impact the overall cluster health
-  (e.g. which kube-controller-manager functionality will stop working), especially regarding
-  stability, availability, performance and security.
-- Describe which OCP teams are likely to be called upon in case of escalation with one of the failure modes
-  and add them as reviewers to this enhancement.
-  
 ## Support Procedures
 
 ### Logging and Errors  
