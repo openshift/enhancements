@@ -389,10 +389,10 @@ The operator will create and apply these resources to the cluster.
 
 The operator has the following requirements.
 
-a. Konflux integration
-b. Support for x64 and ARM
-c. Disconnected
-d. FIPS
+- Konflux integration
+- Support for x64 and ARM
+- Disconnected
+- FIPS
 
 The operator will be OLM managed and hosted on OperatorHub.
 
