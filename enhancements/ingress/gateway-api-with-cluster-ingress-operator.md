@@ -624,50 +624,170 @@ will be reconciled in any namespaces, removing the need for ServiceMeshMemberRol
 Cluster-scoped mode is a Tech Preview feature in OSSM 2.3 and fully supported in
 OSSM 2.4.
 
-#### Security Policy
+#### Gateway Topology
 
-TBD.
+Users have the option to deploy their Gateways using two distinct topologies: shared gateways or dedicated gateways.
+Each topology addresses specific customer requirements, comes with different security implications (see [Security Policy](#security-policy)),
+and will be supported in OpenShift.
+
+##### Shared Gateway Topology
+
+With shared gateway topology, a single load balancer type service and proxy deployment is created and serves
+routes across multiple namespaces. The Gateway must allow the desired application namespaces via the
+`spec.listeners.allowedRoutes.namespaces` field. This topology mirrors the existing OpenShift router topology and
+is ideal for users that are cost sensitive and do not have strict performance or security requirements.
+
+```mermaid
+flowchart TD
+    subgraph foo-app namespace
+        xRoute
+    end
+    subgraph bar-app namespace
+        xRoute2
+    end
+    subgraph openshift-ingress namespace
+        Gateway
+        ProxyDeployment
+        LBService
+    end
+    Gateway[Gateway] -.-> ProxyDeployment(Proxy Deployment)
+    Gateway[Gateway] -.-> LBService(LB Service)
+    xRoute[xRoute] --> Gateway[Gateway]
+    xRoute2[xRoute] --> Gateway[Gateway]
+```
+
+This cross-namespace topology can only be implemented using the Gateway-to-xRoute hierarchy, as Istio does not support
+cross-namespace Gateway merging. Therefore, a limitation of this topology is that xRoutes lack an API for
+specifying TLS certificates, requiring all application certificates to be managed within a cluster-wide Gateway.
+
+Users can have multiple shared Gateways, similar to the concept of [sharding](https://docs.openshift.com/container-platform/latest/networking/configuring_ingress_cluster_traffic/configuring-ingress-cluster-traffic-ingress-controller.html#nw-ingress-sharding_configuring-ingress-cluster-traffic-ingress-controller) in OpenShift. 
+
+##### Dedicated Gateway Topology
+
+With a dedicated gateway topology, a load balancer type service and proxy deployment is created to serve the xRoutes
+in a dedicated namespace. This approach is more suitable for multi-tenant environments or applications that require a
+dedicated gateway to meet specific security or performance requirements.
+
+```mermaid
+flowchart TD
+    subgraph foo-app namespace
+        xRoute
+        Gateway
+        ProxyDeployment
+        LBService
+    end
+    Gateway[Gateway] -.-> ProxyDeployment(Proxy Deployment)
+    Gateway[Gateway] -.-> LBService(LB Service)
+    xRoute[xRoute] --> Gateway[Gateway]
+```
 
 #### Automated and Manual Gateway Deployments
 
-OpenShift Service Mesh and Istio have a feature called [automated deployment](https://istio.io/latest/docs/tasks/traffic-management/ingress/gateway-api/#automated-deployment)
+Istio has a feature called [automated deployment](https://istio.io/latest/docs/tasks/traffic-management/ingress/gateway-api/#automated-deployment)
 that creates an Envoy deployment and service in the same namespace for each Gateway
-if the Gateway's `spec.addresses` field is left unset. This enables users to seamlessly
-create a "shard" per Gateway, much like how each IngressController object is a shard
-for routes. It is enabled via the `PILOT_ENABLE_GATEWAY_API_DEPLOYMENT_CONTROLLER`
-env variable.
+if the Gateway's `spec.addresses` field is left unset. It is enabled via the
+`PILOT_ENABLE_GATEWAY_API_DEPLOYMENT_CONTROLLER` env variable.
 
 Conversely, with [manual deployments](https://istio.io/latest/docs/tasks/traffic-management/ingress/gateway-api/#manual-deployment),
 if the Gateway has the `spec.addresses` field set, then it must manually link
 to an [ingress gateway](https://istio.io/latest/docs/tasks/traffic-management/ingress/ingress-control/#configuring-ingress-using-a-gateway).
 The user needs to make their own ingress gateway  service and deployment in the same
 namespace to manually link to, or they need to use the default ingress gateway (if enabled).
-
-If the ServiceMeshControlPlane's `spec.gateways.ingress.enabled` field is set to `true`,
-Istio creates an `istio-ingressgateway` service, in the same namespace as the control plane,
-that is a ready-to-use proxy which gateways can be manually linked to. Istio [discourages](https://istio.io/latest/docs/setup/additional-setup/gateway/)
-the use of this ingress gateway as it couples the gateway to the control plane.
-
-_To summarize, there are four ways a user could link Gateways to Ingress Gateways:_
-1. Use automated deployments
-2. Use a manual deployment, manually create a new ingress gateway service and deployment, and link to this service
-3. Use a manual deployment and link to the existing `istio-ingressgateway` ingress gateway
-4. Use a manual deployment and link to a previously created automated deployment ingress gateway
+Users can also link a Gateway to a previously created automated deployment belonging to another
+Gateway.
 
 OpenShift will not inhibit or alter the functionality of automated deployments, except
-restricting creation of Gateways to specific users (_see the automated deployment section
-in Risks and Mitigations_).
+restricting creation of Gateways to specific users (see [RBAC](#rbac)).
 
 Nor will OpenShift inhibit or alter the functionality of manual deployments. Users
 are responsible for understanding and creating links to manual deployments when creating
 Gateways.
 
-The choice between these two features depends on the user's desired sharding scheme. Manual
+The choice between automated and manual deployments depends on whether a user prefers control
+over creating their own ingress gateway deployments and services, and whether they want
+multiple Gateway objects to share a single ingress gateway deployment and service. Manual
 linking, being more expressive, can establish a many-to-one Gateway-to-Gateway-Deployment
 relationship, while automated deployments strictly establish a one-to-one
 Gateway-to-Gateway-Deployment relationship. Arguably, automated deployments are more portable
 among Gateway API implementations due to the fact manually deployments require linking an
 Istio-specific service address.
+
+#### Security Policy
+
+##### Allowing All Namespaces for Gateways
+
+Unlike OpenShift ingress, neither Gateway API nor Istio restrict Gateway objects to specific namespaces. This design
+allows for different operational groups to create and manage their own [dedicated Gateway](#dedicated-gateway-topology)
+in an application namespace rather than relying on a [shared Gateway](#shared-gateway-topology) residing in another
+namespace. This departs from the current OpenShift ingress approach of all router pods being confined to the
+`openshift-ingress` namespace. Our design will allow Gateways to be created in any namespace, provided the user has
+sufficient [RBAC](#rbac) permissions.
+
+###### Limiting DNS Across Namespaces
+
+As mentioned in [New Controller to Manage DNS Records for Gateway Listeners](#new-controller-to-manage-dns-records-for-gateway-listeners),
+the Ingress Operator automatically creates DNS records for Gateways. However, for our initial implementation, this
+will be limited to the `openshift-ingress` namespace to avoid introducing complexities for DNS management while
+Gateway API upstream is still defining guidelines for DNS record management (see
+[kubernetes-sigs/gateway-api#2627](https://github.com/kubernetes-sigs/gateway-api/issues/2627)).
+
+###### Gateway Merging Across Namespaces
+
+Allowing Gateways in all namespaces can pose a potential security risk for Gateways that merge listeners
+across namespaces, as one Gateway or listener could preempt another listener in a different namespace. However,
+there currently isn't a way to merge Gateways across namespaces in Istio as the `spec.addresses`
+field is [restricted](https://github.com/istio/istio/blob/915ac2bf05dbc7a08ae61a8bc39fcd6ea1f3d11a/pilot/pkg/config/kube/gateway/context.go#L78)
+to Gateways in the same namespace. Work is underway to develop a mechanism for
+[Gateway merging](https://docs.google.com/document/d/1qj7Xog2t2fWRuzOeTsWkabUaVeOF7_2t_7appe8EXwA/edit?usp=sharing),
+and it is important to review the outcome for any potential security implications.
+
+##### RBAC
+
+OpenShift ships with a set of [default ClusterRoles](https://docs.openshift.com/container-platform/latest/post_installation_configuration/preparing-for-users.html#default-roles_post-install-preparing-for-users)
+to enable users to implement RBAC. Gateway API has its own [RBAC recommendation](https://gateway-api.sigs.k8s.io/concepts/security-model/#rbac)
+defining which personas get write permission for each object. Gateway API users in OpenShift will need the ability to
+implement one of these security models. To support this, the Ingress Operator will add additional RBAC
+permissions for the following default ClusterRoles:
+
+| OpenShift ClusterRole | GatewayClass | Gateway              | xRoute Types         | ReferenceGrant |
+|-----------------------|--------------|----------------------|----------------------|----------------|
+| cluster-admin         | All          | All                  | All                  | All            |
+| admin                 | None         | **Get, List, Watch** | **All**              | None           |
+| edit                  | None         | **Get, List, Watch** | **All**              | None           |
+| view                  | None         | **Get, List, Watch** | **Get, List, Watch** | None           |
+
+For this initial RBAC implementation, write access to Gateways (other than `cluster-admin`) is not included due
+to their complexity and potential security risks. However, users can still create custom roles, such as a
+`Gateway Operator` role, to enable a role with the ability to write Gateways without requiring super-user privileges.
+
+The following diagram maps the personas in Gateway API's [Simple 3 Tier Model](https://gateway-api.sigs.k8s.io/concepts/security-model/#write-permissions-for-simple-3-tier-model) to potential OpenShift ClusterRoles:
+```mermaid
+flowchart LR
+    InfraOperator[Infrastructure Operator] --> ClusterAdmin(cluster-admin)
+    subgraph ClusterRole
+        ClusterAdmin
+        Admin
+        Edit
+    end
+    subgraph Gateway API Persona
+        InfraOperator
+        ClusterOperator
+        AppDev
+    end
+    ClusterOperator[Cluster Operator] --> ClusterAdmin(cluster-admin)
+    AppDev[Application Developer] --> Admin(admin)
+    AppDev[Application Developer] --> Edit(edit)
+```
+
+The Infrastructure Operator is generally responsible for installing and configuring the Gateway API provider
+(e.g., Istio), installing the Gateway API CRDs, and creating the GatewayClass. However, since the Ingress Operator
+handles the installation of OSSM and the CRDs, the Infrastructure Operator is only responsible for creating
+and managing the GatewayClass. Cluster Operators create and manage the Gateways, while Application Developers create
+and manage the routes.
+
+The [Advanced 4 Tier Model](https://gateway-api.sigs.k8s.io/concepts/security-model/#write-permissions-for-advanced-4-tier-model)
+is not implementable using the default ClusterRoles. However, as mentioned above, users can create a custom
+`Gateway Operator` role and bind it to a specific namespace to implement the Application Admin persona.
 
 ### Risks and Mitigations
 
@@ -675,7 +795,7 @@ Istio-specific service address.
 
 Enabling automated deployments and also allowing arbitrary users to create Gateways would
 create a new attack surface for untrusted cluster users.  For this reason, the
-default policy allows only cluster admins to create Gateways.
+default policy allows only cluster admins to create Gateways (see [RBAC](#rbac)).
 
 #### Release Alignment
 
