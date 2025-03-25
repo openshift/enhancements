@@ -94,21 +94,30 @@ The threshold to merge includes referencing the reliability of existing tests.
 
 # When can I flip my feature to make it Accessible-by-default?
 Stable features can move to accessible-by-default at any time before release branching.
-Exceptions are discouraged, but can be merged subject to staff-eng approval.
-Exceptions are more likely to be granted for features with regression protection via e2e tests in origin.
+Exceptions (promoting a feature in a z-stream) are discouraged, but can be merged subject to architect approval.
+Exceptions will only be granted for features with regression protection via e2e tests, reporting into component readiness.
 
 It’s important to note that, even with exceptions, we only make features Accessible-by-default during new minor version releases.
 This is not a technical limitation — it’s just how our support lifecycle works.
 
 ##  I'd like to declare a feature Accessible-by-default.  What is the process?
-There are a few ways to go about this.
-At a high level they involve proving that the new feature works on all supported architectures, cloud providers,
+
+To make a feature accessible by default, you must prove that the new feature works on all supported architectures, cloud providers,
 network types, and variants (FIPS, RT, cgroupsv2, crun, etc) and has not regressed any other part of OpenShift.
 
 ### Automated regression protection
-Our preferred approach is to use OpenShift CI to prove that your feature is working and that no supported topologies have regressed.
-Writing new e2e tests in openshift/origin is the only automated way to make this claim and ensure that another feature won’t come along and break yours at a later date.
-TechPreview jobs run on AWS, Azure, GCP, and VSphere.
+
+We use OpenShift CI to run tests regularly and prove that features are working and that no supported topologies have regressed.
+Writing new e2e tests either in openshift/origin or within a dedicated periodic test suite, is the only automated way to make this claim and ensure that another feature won’t come along and break yours at a later date.
+
+Dedicated test suites are generally used to demonstrate the reliabililty of long duration or disruptive tests.
+Origin testing is generally preferred and should be the first choice for new tests.
+
+It is expected while in development, that TechPreview testing will provide signal.
+Once promoted, the same signal will come from the stable jobs.
+
+When using a custom periodic suite to provide test data, you must ensure both TechPreview and stable variants exist prior to promotion.
+For origin based tests, TechPreview jobs run on AWS, Azure, GCP, and VSphere.
 
 The textbook example of this process for a complex feature is demonstrated by Egli Hila as he works to ship [workload partitioning](https://github.com/openshift/api/pull/1443).
 In his PR Egli is doing a few powerful things:
@@ -116,17 +125,30 @@ In his PR Egli is doing a few powerful things:
 This is the most powerful automated regression protection we have.
 2. He’s linked directly to the tests in sippy that aggregate results across all the jobs running in tech preview mode (AWS, Azure, GCP, VSphere).
 
-### Obtaining QE sign-off
-Since QE has the ability to fully test features behind feature gates we will allow features to merge that QE has declared done.
+Our automated testing requirements for feature promotion are:
+* At least 5 tests for each feature
+* Tests should run at least 7 times per week
+* Tests should be run on all supported platforms (we inspect AWS, Azure, GCP, vSphere and Bare Metal)
+* Each test must trackable individually with a success or failure metric (typically through JUnit)
+* Tests are shown to be passing at or above 95% success for the last 7 days
 
-The final merges will still have to make it through our release gating CI, so we will have some confidence that no other
-features have regressed even if no new tests have been added explicitly testing this feature.
-We view that as a risk, but we know there are tradeoffs for trivial features that may be difficult to test in the E2E suite.
+Component readiness ingests this data automatically, and provides statistical analysis using [Fisher's exact test](https://en.wikipedia.org/wiki/Fisher%27s_exact_test) to determine the significance of regressions over time.
+We use Fisher's test to compare the pass result of each test, on each platform over the current 7 day period to the previous 7 day period.
 
-All this said, merging features without tests shouldn’t be the norm on OpenShift.  It will likely result in a conversation or two with staff engineers.
-The conversation will go smoother if the results of E2E jobs that test the functionality and ensure that regressions in future Z and Y releases can be automatically detected are linked.
+Any test that shows over a 5% decrease in pass rate is flagged as a potential regression.
+Any test that shows over a 15% decrease in pass rate is flagged as an extreme regression.
+Both will be passed to Fishers exact to determine if the regression is likely to be significant.
 
-QE can give their sign-off for removing tech-preview by adding the qe-approved label to the PR. Bugs identified have to be communicated through the PR.
+This analysis can then be used, after promotion to identify regressions within the product, and to provide signal on where potential issues have been introduced, allowing us to quickly identify and revert the problematic change.
+
+### What if I don't have automated testing reporting into component readiness?
+
+On very rare occasions, features must be promoted prior to having all of the automated testing in place.
+
+In these circumstances, the feature owner must present a plan for how they will provide equivalent feature regression prevention to the automated approach.
+This plan should consider how to gather data from other test sources, the required frequency and quantity of tests outlined above, and how the probability of regression will be calculated.
+
+The calculated regression probability data will be expected to be presented on a weekly basis for each z-stream and the current development branch until automated testing is in place.
 
 # Working with docs team
 
