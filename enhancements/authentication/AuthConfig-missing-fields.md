@@ -295,6 +295,8 @@ spec:
 
 #### TokenClaimMappings  
 ##### UID
+This is an example of configuring uid using a CEL expression.
+
 ```yaml
    apiVersion: config.openshift.io/v1
     kind: Authentication
