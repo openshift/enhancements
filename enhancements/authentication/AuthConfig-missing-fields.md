@@ -103,8 +103,8 @@ This section describes how users will configure and utilize the newly added auth
 
 ### User Roles
 
-- **Cluster Administrator**: Responsible for configuring authentication settings in OpenShift.
-- **Cluster Administrator**: Ensures that authentication policies and validations enforce security best practices.
+- **Cluster Administrator**: Responsible for configuring authentication settings in OpenShift and ensuring that authentication policies and validations enforce security best practices.
+
 
 ### General Workflow
 
@@ -154,7 +154,7 @@ A cluster administrator needs to configure OpenShift to validate the audience (`
 
 **Steps:**
 1. Update the authentication CRD with `AudienceMatchPolicy`:
-   ```yaml
+```yaml
   apiVersion: config.openshift.io/v1
   kind: Authentication
   metadata:
@@ -165,7 +165,7 @@ A cluster administrator needs to configure OpenShift to validate the audience (`
     - name: foo
       issuer:
         audienceMatchPolicy: MatchAny
-     ```
+```
 
 #### 3. Custom UID Mapping for Identity Providers
 **Scenario:**  
@@ -209,7 +209,7 @@ A cluster administrator wants to utilize an external webhook authorizer to proce
 **Steps:**
 
 1. Update the authentication CRD to include extra claims:
-   ```yaml
+```yaml
    apiVersion: config.openshift.io/v1
    kind: Authentication
    metadata:
@@ -217,15 +217,15 @@ A cluster administrator wants to utilize an external webhook authorizer to proce
    spec:
     type: OIDC
     oidcProviders:
-      - key: 'example.com/tenant'
-        claimMappings:
-          extra:
-            valueExpression: 'claims.tenant'
-  ```
+      claimMappings:
+        extra:
+        - key: 'example.com/role'
+          valueExpression: 'claims.role'
+```
 
 #### 5. Enforcing Token Expiration Limits (Claim Validation)  
 **Scenario:**  
-A security-conscious organization wants to ensure that all OIDC tokens used for authentication have a maximum expiration time of one hour.  
+A security-conscious organization wants to ensure that all OIDC tokens used for authentication have a maximum expiration time of 24 hours.  
 
 **Steps:**  
 1. Update the authentication CRD to enforce a maximum token expiration time:  
@@ -237,8 +237,8 @@ A security-conscious organization wants to ensure that all OIDC tokens used for 
    spec:
     type: OIDC
     oidcProviders:
-     - expression: 'claims.exp - claims.nbf <= 86400'
       claimValidationRules:
+     - expression: 'claims.exp - claims.nbf <= 86400'
         message: total token lifetime must not exceed 24 hours
   ```
 
@@ -256,8 +256,8 @@ An OpenShift administrator wants to prevent users from being created with reserv
   spec:
     type: OIDC
     oidcProviders:
+      userValidationRules:
       - expression: "!user.username.startsWith('system:')" # the expression will evaluate to true, so validation will succeed.
-        userValidationRules:
           message: 'username cannot used reserved system: prefix'
   ```
 
@@ -267,7 +267,7 @@ The proposed API changes have been submitted in [openshift/api#2230](https://git
 
 
 #### TokenIssuer  
-## DiscoveryURL
+##### DiscoveryURL
 ```yaml
    apiVersion: config.openshift.io/v1
    kind: Authentication
@@ -279,7 +279,7 @@ The proposed API changes have been submitted in [openshift/api#2230](https://git
     - issuer:
       discoveryURL: https://discovery.example.com/.well-known/openid-configuration
 ```
-## AaudienceMatchPolicy
+##### AudienceMatchPolicy
 ```yaml
 apiVersion: config.openshift.io/v1
 kind: Authentication
@@ -293,8 +293,8 @@ spec:
       audienceMatchPolicy: MatchAny
 ```
 
-### TokenClaimMappings  
-## UID
+#### TokenClaimMappings  
+##### UID
 ```yaml
    apiVersion: config.openshift.io/v1
     kind: Authentication
@@ -321,7 +321,7 @@ spec:
           uid:
             claim: email
 ```
-## Extra
+##### Extra
 ```yaml
    apiVersion: config.openshift.io/v1
    kind: Authentication
@@ -330,10 +330,10 @@ spec:
    spec:
     type: OIDC
     oidcProviders:
-      - key: 'example.com/tenant'
         claimMappings:
           extra:
-            valueExpression: 'claims.tenant
+          - key: 'example.com/role'
+            valueExpression: 'claims.role'
 ```
 
 ### TokenClaimValidationRule
@@ -345,8 +345,8 @@ spec:
    spec:
     type: OIDC
     oidcProviders:
-     - expression: 'claims.exp - claims.nbf <= 86400'
       claimValidationRules:
+      - expression: 'claims.exp - claims.nbf <= 86400'
         message: total token lifetime must not exceed 24 hours
   ```
 
@@ -359,9 +359,9 @@ spec:
   spec:
     type: OIDC
     oidcProviders:
+      userValidationRules:
       - expression: "!user.username.startsWith('system:')" # the expression will evaluate to true, so validation will succeed.
-        userValidationRules:
-          message: 'username cannot used reserved system: prefix'
+        message: 'username cannot used reserved system: prefix'
   ```
 
 ### Topology Considerations
@@ -387,7 +387,7 @@ The following updates will be necessary for standalone clusters:
 
 1. **Changes to `cluster-authentication-operator` Code:**
 
-The generateAuthConfig method of the ExternalOIDCController is used to map OIDC provider configurations in the authentication.config.openshift.io custom resource to the structured authentication configuration format that the Kubernetes API server understands. This method will be updated to include logic to map the new fields introduced in the authentication.config.openshift.io CRD to their existing counterparts in the Kubernetes structured authentication configuration types.
+The [generateAuthConfig](https://github.com/liouk/cluster-authentication-operator/blob/cc82f462af153c188c2e717ea4a8d19933b7d381/pkg/controllers/externaloidc/externaloidc_controller.go#L148) method of the ExternalOIDCController is used to map OIDC provider configurations in the authentication.config.openshift.io custom resource to the structured authentication configuration format that the Kubernetes API server understands. This method will be updated to include logic to map the new fields introduced in the authentication.config.openshift.io CRD to their existing counterparts in the Kubernetes structured authentication configuration types.
 
 2. **Testing:**
 
@@ -413,8 +413,10 @@ N/A
 
 #### Security Risks  
 Adding new authentication-related API fields could allow cluster administrators to misconfigure their authentication layer leading to security vulnerabilities. The new API fields themselves don't introduce any security risk.
+
 - **Mitigation:**  
   - Ensure we have robust admission and runtime validations to ensure that misconfigurations are prevented as much as possible prior to rolling out the authentication layer changes.
+
 ### Drawbacks
 One potential argument against implementing this enhancement is that achieving parity with the upstream Kubernetes configuration will result in supporting any configuration that a user can configure on a standard Kubernetes cluster.
 
@@ -426,14 +428,6 @@ However, despite these concerns, this drawback is not significant enough to prev
 For this enhancement, we will expand on the existing OIDC test suite. The focus will be on adding tests to verify the proper functionality of the new configuration options introduced by the new API fields. These tests will confirm that the integration of these new options aligns correctly with the existing authentication functionality and performs as expected. Additionally, we will ensure that the new fields are thoroughly tested across common configurations and scenarios to guarantee reliable behavior.
 
 ## Graduation Criteria
-### Dev Preview -> Tech Preview
-
-- Ability to utilize the enhancement end to end
-- End user documentation, relative API stability
-- Sufficient test coverage
-- Gather feedback from users rather than just developers
-- Enumerate service level indicators (SLIs), expose SLIs as metrics
-- Write symptoms-based alerts for the component(s)
 
 ### Tech Preview -> GA
 
@@ -441,7 +435,6 @@ Given that these changes are additions to the ExternalOIDC feature API, which is
 
 - No new feature gate will be introduced.
 - The ExternalOIDC feature will not be promoted to GA without these new API fields based on product management input.
-- This approach is subject to change depending on discussions regarding HyperShift and Standalone OpenShift's unified feature maturity. For now, we will proceed with expectations for standalone OpenShift.
   
 To graduate from Tech Preview (TP) to GA, the following criteria must be met:
 
@@ -479,6 +472,8 @@ If users configure the new API fields incorrectly, authentication may break, cau
 ## Mitigation Strategy
 
 We plan to add a combination of admission time and runtime checks to prevent invalid configurations from being applied. These checks will ensure that only properly formatted and functional configurations are accepted before they are rolled out to the kube-apiserver.
+
+If the external OIDC authentication layer becomes misconfigured or non-functional, users will still be able to access the cluster using a kubeconfig as a break-glass scenario. This ensures that cluster administrators can regain access and correct any issues without being locked out.
 
 ## How Users Will Be Informed of a Prevented Misconfiguration
 
