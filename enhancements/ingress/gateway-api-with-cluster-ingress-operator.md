@@ -717,7 +717,7 @@ sufficient [RBAC](#rbac) permissions.
 As mentioned in [New Controller to Manage DNS Records for Gateway Listeners](#new-controller-to-manage-dns-records-for-gateway-listeners),
 the Ingress Operator automatically creates DNS records for Gateways. However, for our initial implementation, this
 will be limited to the `openshift-ingress` namespace to avoid introducing complexities for DNS management while
-Gateway API upstream is still defining guidelines for DNS record management (see
+Gateway API upstream has no standard for DNS record management (see
 [kubernetes-sigs/gateway-api#2627](https://github.com/kubernetes-sigs/gateway-api/issues/2627)).
 
 ###### Gateway Merging Across Namespaces
