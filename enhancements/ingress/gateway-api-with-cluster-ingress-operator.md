@@ -646,10 +646,12 @@ and will be supported in OpenShift.
 
 ##### Shared Gateway Topology
 
-With shared gateway topology, a single load balancer type service and proxy deployment is created and serves
-routes across multiple namespaces. The Gateway must allow the desired application namespaces via the
-`spec.listeners.allowedRoutes.namespaces` field. This topology mirrors the existing OpenShift router topology and
-is ideal for users that are cost sensitive and do not have strict performance or security requirements.
+In a shared Gateway topology, a Deployment serves routes from multiple
+namespaces or with multiple hostnames. The Gateway filters allow xRoutes from application
+namespaces using the `spec.listeners.allowedRoutes.namespaces` field. The
+Gateway serves multiple hostnames using the `spec.listeners.hostnames` field.
+This topology is ideal for multi-tenant environments where dedicated performance
+may not be as important.
 
 ```mermaid
 flowchart TD
@@ -661,40 +663,43 @@ flowchart TD
     end
     subgraph openshift-ingress namespace
         Gateway
-        ProxyDeployment
-        LBService
+        Service
     end
-    Gateway[Gateway] -.-> ProxyDeployment(Proxy Deployment)
-    Gateway[Gateway] -.-> LBService(LB Service)
+    Gateway[Gateway] -.-> Service(Service)
     xRoute[xRoute] --> Gateway[Gateway]
     xRoute2[xRoute] --> Gateway[Gateway]
 ```
 
-This cross-namespace topology can only be implemented using the Gateway-to-xRoute hierarchy, as Istio does not support
-cross-namespace Gateway merging. Therefore, a limitation of this topology is that xRoutes lack an API for
-specifying TLS certificates, requiring all application certificates to be managed within a cluster-wide Gateway.
+> **Note**: The default `spec.listeners.allowedRoutes.namespaces` is `Same`,
+> which restricts access to the same namespace, meaning that [Dedicated Gateway
+> Topology](#dedicated-gateway-topology) is the default unless otherwise
+> configured.
+
+> **Warning**: Setting `spec.listeners.allowedRoutes.namespaces` to `All`, or
+> anything other than `Same` has security implications. See the [relevant
+> section below](#allowing-all-namespaces-for-gateways) for more details.
 
 Users can have multiple shared Gateways, similar to the concept of [sharding](https://docs.openshift.com/container-platform/latest/networking/configuring_ingress_cluster_traffic/configuring-ingress-cluster-traffic-ingress-controller.html#nw-ingress-sharding_configuring-ingress-cluster-traffic-ingress-controller) in OpenShift. 
 
 ##### Dedicated Gateway Topology
 
-With a dedicated gateway topology, a load balancer type service and proxy deployment is created to serve the xRoutes
-in a dedicated namespace. This approach is more suitable for multi-tenant environments or applications that require a
-dedicated gateway to meet specific security or performance requirements.
+In a dedicated Gateway topology, the load balancer Service, its proxy, and its source xRoutes are all deployed in the same namespace.  This setup is ideal for for applications that need a dedicated gateway
+to satisfy security or performance requirements.  For example, using this topology enables restrictions on who can use the certificates on a Gateway.
 
 ```mermaid
 flowchart TD
     subgraph foo-app namespace
         xRoute
         Gateway
-        ProxyDeployment
         LBService
     end
-    Gateway[Gateway] -.-> ProxyDeployment(Proxy Deployment)
     Gateway[Gateway] -.-> LBService(LB Service)
     xRoute[xRoute] --> Gateway[Gateway]
 ```
 
+> **Note**: This is the default topology for created Gateways unless
+> `spec.listeners.allowedRoutes.namespaces` is explicitly configured to
+> something other than `Same`.
 
 #### Security Policy
 
