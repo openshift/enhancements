@@ -681,36 +681,6 @@ flowchart TD
     xRoute[xRoute] --> Gateway[Gateway]
 ```
 
-#### Automated and Manual Gateway Deployments
-
-Istio has a feature called [automated deployment](https://istio.io/latest/docs/tasks/traffic-management/ingress/gateway-api/#automated-deployment)
-that creates an Envoy deployment and service in the same namespace for each Gateway
-if the Gateway's `spec.addresses` field is left unset. It is enabled via the
-`PILOT_ENABLE_GATEWAY_API_DEPLOYMENT_CONTROLLER` env variable.
-
-Conversely, with [manual deployments](https://istio.io/latest/docs/tasks/traffic-management/ingress/gateway-api/#manual-deployment),
-if the Gateway has the `spec.addresses` field set, then it must manually link
-to an [ingress gateway](https://istio.io/latest/docs/tasks/traffic-management/ingress/ingress-control/#configuring-ingress-using-a-gateway).
-The user needs to make their own ingress gateway  service and deployment in the same
-namespace to manually link to, or they need to use the default ingress gateway (if enabled).
-Users can also link a Gateway to a previously created automated deployment belonging to another
-Gateway.
-
-OpenShift will not inhibit or alter the functionality of automated deployments, except
-restricting creation of Gateways to specific users (see [RBAC](#rbac)).
-
-Nor will OpenShift inhibit or alter the functionality of manual deployments. Users
-are responsible for understanding and creating links to manual deployments when creating
-Gateways.
-
-The choice between automated and manual deployments depends on whether a user prefers control
-over creating their own ingress gateway deployments and services, and whether they want
-multiple Gateway objects to share a single ingress gateway deployment and service. Manual
-linking, being more expressive, can establish a many-to-one Gateway-to-Gateway-Deployment
-relationship, while automated deployments strictly establish a one-to-one
-Gateway-to-Gateway-Deployment relationship. Arguably, automated deployments are more portable
-among Gateway API implementations due to the fact manually deployments require linking an
-Istio-specific service address.
 
 #### Security Policy
 
