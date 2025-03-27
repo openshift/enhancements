@@ -1062,21 +1062,12 @@ To answer this question, we need to do the following:
 * Verify that OpenShift Service Mesh will include support for this feature in time for this EP.
 * Evaluate any potential security concerns around this feature.
 
-**Resolution**: The answer depends on what version of OSSM is selected for dev
-preview. If we use OSSM 2.3, we will **NOT** enable ReferenceGrants. If we use OSSM 2.4,
-we will enable ReferenceGrants. This is because ReferenceGrants are non-functional in
-OSSM 2.3, but functional in OSSM 2.4.
+**Resolution**: Yes we will be enabling ReferenceGrant, but only for cluster admins.
 
-OSSM 2.3 uses Istio 1.14 and Istio 1.14 doesn't support ReferenceGrants; therefore,
-in OSSM 2.3, ReferenceGrants are **non-functional**. However, by default,
-Gateway API objects in OSSM 2.3 can reference objects across namespace boundaries,
-such as an HTTPRoute referencing a service in another namespace. A ReferenceGrant
-CRD has no impact on this functionality.
-
-OSSM 2.4 uses Istio 1.16 and Istio 1.16 supports ReferenceGrants; therefore,
-in OSSM 2.4, ReferenceGrants are **functional**. This means that, by default,
-Gateway API objects in OSSM 2.4 **CANNOT** reference objects across namespace
-boundaries without an appropriate ReferenceGrant object.
+Previous versions of OSSM (such as 2.3) did not support ReferenceGrants, and
+would even sometimes allow the cross-namespace functionality by default.
+However, Gateway API GA will be deployed using OSSM 3.x which _does_ fully
+support and enforce it, and therefore so will we.
 
 There are security risks to allowing cross-namespace references. A nefarious user
 could send network traffic to locations they would otherwise not have access to via a
@@ -1088,7 +1079,7 @@ for ReferenceGrants mitigates this risk.
 
 In the future, ReferenceGrant will likely be migrated out of Gateway API and into
 Kubernetes upstream. Until then, we will support ReferenceGrant as a part of
-Gateway API v1beta1 when using OSSM 2.4.
+Gateway API when using OSSM 3.x.
 
 #### Should we have a feature gate?
 
