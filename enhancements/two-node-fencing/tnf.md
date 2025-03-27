@@ -157,7 +157,7 @@ At a glance, here are the components we are proposing to change:
 | [Feature Gates](#feature-gate-changes)                            | Add a new `DualReplicaTopology` feature which can be enabled via the `CustomNoUpgrade` feature set                              |
 | [OpenShift API](#openshift-api-changes)                           | Add `DualReplica` as a new value for `ControlPlaneTopology`                                                                     |
 | [ETCD Operator](#etcd-operator-changes)                           | Add a mode for disabling management of the etcd container, a new scaling strategy, and a controller for initializing pacemaker  |
-| [Install Config](#install-config-changes)                         | Update install config API to accept fencing credentials for `platform: None` and `platform: Baremetal`                          |
+| [Install Config](#install-config-changes)                         | Update install config API to accept fencing credentials in the control plane for `platform: None` and `platform: Baremetal`     |
 | [Installer](#installer-changes)                                   | Populate the nodes with initial pacemaker configuration when deploying with 2 control-plane nodes and no arbiter                |
 | [MCO](#mco-changes)                                               | Add an MCO extension for installing pacemaker and corosync in RHCOS; MachineConfigPool maxUnavailable set to 1                  |
 | [Authentication Operator](#authentication-operator-changes)       | Update operator to accept minimum 1 kube api servers when `ControlPlaneTopology` is `DualReplica`                               |
@@ -324,11 +324,8 @@ compute:
 controlPlane:
   name: master
   replicas: 2
-metadata:
-  name: <cluster-name>
-platform:
-  none:
-    fencingCredentials:
+  fencing:
+    credentials:
       - hostname: <control-0-hostname>
         address: https://<redfish-api-url>
         username: <username>
@@ -337,6 +334,10 @@ platform:
         address: https://<redfish-api-url>
         username: <username>
         password: <password>
+metadata:
+  name: <cluster-name>
+platform:
+  none:
 pullSecret: ''
 sshKey: ''
 ```
@@ -351,11 +352,8 @@ compute:
 controlPlane:
   name: master
   replicas: 2
-metadata:
-  name: <cluster-name>
-platform:
-  baremetal:
-    fencingCredentials:
+  fencing:
+    credentials:
       - hostname: <control-0-hostname>
         address: https://<redfish-api-url>
         username: <username>
@@ -364,6 +362,10 @@ platform:
         address: https://<redfish-api-url>
         username: <username>
         password: <password>
+metadata:
+  name: <cluster-name>
+platform:
+  baremetal:
     apiVIPs:
       - <api_ip>
     ingressVIPs:
@@ -386,11 +388,8 @@ compute:
 controlPlane:
   name: master
   replicas: 2
-metadata:
-  name: <cluster-name>
-platform:
-  baremetal:
-    fencingCredentials:
+  fencing:
+    credentials:
       - hostname: <control-0-hostname>
         address: https://<redfish-api-url>
         username: <username>
@@ -399,6 +398,10 @@ platform:
         address: https://<redfish-api-url>
         username: <username>
         password: <password>
+metadata:
+  name: <cluster-name>
+platform:
+  baremetal:
     apiVIPs:
       - <api_ip>
     ingressVIPs:
@@ -423,12 +426,12 @@ sshKey: ''
 ##### Why don't we reuse the existing APIs in the `Baremetal` platform?
 Reusing the existing APIs tightly couples separate outcomes that are important to distinguish for the end user.
 
-The `fencingCredentials` API exists for deploying TNF and is *only valid* when TNF is being deployed. Failure to define this section when using TNF will result in the installer throwing an error.
+The `fencing` API exists for deploying TNF and is *only valid* when TNF is being deployed. Failure to define this section when using TNF will result in the installer throwing an error.
 
 The `hosts` API exists for configuring the BareMetalHost entries that will be managed by the Bare Metal Operator. For TNF clusters, we don't want the hosts to be managed by ironic via the Bare Metal
 Operator because of fencing conflicts.
 
-To keep this as simple as possible for the user, we will make `fencingCredentials` mutually exclusive with `hosts` when deploying on TNF.
+To keep this as simple as possible for the user, we will make `fencing` mutually exclusive with `hosts` when deploying on TNF.
 
 This will allow us to clearly define the subset of BMC options acceptable to enable fencing - which is not a one-to-one correlation with the BMC options that exists in the `hosts` API. As an example
 we will only support redfish for the initial release, whereas the `hosts` list accepts `ipmi`.
