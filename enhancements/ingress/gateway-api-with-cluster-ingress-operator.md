@@ -624,6 +624,20 @@ will be reconciled in any namespaces, removing the need for ServiceMeshMemberRol
 Cluster-scoped mode is a Tech Preview feature in OSSM 2.3 and fully supported in
 OSSM 2.4.
 
+#### Automated Deployments
+
+When a Gateway resource is created the Istio control-plane triggers the creation
+of an underlying Deployment resource to deploy the [Envoy] proxy server, and a
+Service (of type LoadBalancer by default) to expose it outside of the cluster.
+This is all intended to be opaque to the user as an implementation detail, but if
+more information on those implementation details is needed, see [Istio's
+documentation on "Automated Deployments"][istio-auto].
+
+Automated deployment (triggered by Gateway creation) is the only supported deployment mechanism in OpenShift 4.19. See [RBAC](#rbac) for more information on which roles are allowed to create Gateways.
+
+[Envoy]:https://github.com/envoyproxy/envoy
+[istio-auto]:https://istio.io/latest/docs/tasks/traffic-management/ingress/gateway-api/#automated-deployment
+
 #### Gateway Topology
 
 Users have the option to deploy their Gateways using two distinct topologies: shared gateways or dedicated gateways.
