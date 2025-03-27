@@ -720,15 +720,29 @@ will be limited to the `openshift-ingress` namespace to avoid introducing comple
 Gateway API upstream has no standard for DNS record management (see
 [kubernetes-sigs/gateway-api#2627](https://github.com/kubernetes-sigs/gateway-api/issues/2627)).
 
-###### Gateway Merging Across Namespaces
+##### Gateway Merging
 
-Allowing Gateways in all namespaces can pose a potential security risk for Gateways that merge listeners
-across namespaces, as one Gateway or listener could preempt another listener in a different namespace. However,
-there currently isn't a way to merge Gateways across namespaces in Istio as the `spec.addresses`
-field is [restricted](https://github.com/istio/istio/blob/915ac2bf05dbc7a08ae61a8bc39fcd6ea1f3d11a/pilot/pkg/config/kube/gateway/context.go#L78)
-to Gateways in the same namespace. Work is underway to develop a mechanism for
-[Gateway merging](https://docs.google.com/document/d/1qj7Xog2t2fWRuzOeTsWkabUaVeOF7_2t_7appe8EXwA/edit?usp=sharing),
-and it is important to review the outcome for any potential security implications.
+Some Gateway API implementations support the concept of  Gateway or listener Merging, i.e. multiple Gateways (and their listeners) are virtually merged to optimize traffic management. Merging can be helpful in several
+situations, notably to coalesce multiple listeners together behind a single
+proxy or load-balancer to reduce costs.  However, this can be a risk for merges that happen across namespace boundaries.
+
+Istio has historically included a form of Gateway merging by way of what is in
+part a side-effect of its [Manual Deployments Option], wherein multiple
+Gateways could specify the same `spec.addresses`. This kind of merging poses
+potential security risks as one Gateway or listener could preempt another in a
+different namespace. As such [we made it possible to disable manual
+deployments][istio#55053], and then [disabled it by default in OSSM], and now
+consider it unsupported due to safety and maintainability concerns.
+
+As such there is no supported mechanism for merging Gateways with our Gateway
+4.19 release. We are tracking and participating in [GEP-1713: ListenerSets -
+Standard Mechanism to Merge Multiple Gateways][GEP-1713] in upstream Kubernetes
+to make standardized merging available in a future release.
+
+[Manual Deployments Option]:https://istio.io/latest/docs/tasks/traffic-management/ingress/gateway-api/#manual-deployment
+[istio#55053]:https://github.com/istio/istio/pull/55053
+[disabled it by default in OSSM]:https://github.com/openshift-service-mesh/istio/pull/281
+[GEP-1713]:https://gateway-api.sigs.k8s.io/geps/gep-1713/
 
 ##### RBAC
 
