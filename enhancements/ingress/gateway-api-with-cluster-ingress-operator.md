@@ -785,8 +785,13 @@ flowchart LR
 The Infrastructure Operator is generally responsible for installing and configuring the Gateway API provider
 (e.g., Istio), installing the Gateway API CRDs, and creating the GatewayClass. However, since the Ingress Operator
 handles the installation of OSSM and the CRDs, the Infrastructure Operator is only responsible for creating
-and managing the GatewayClass. Cluster Operators create and manage the Gateways, while Application Developers create
-and manage the routes.
+and managing the GatewayClass. Cluster Operators create and manage the Gateways and ReferenceGrants, while
+Application Developers create and manage the xRoutes.
+
+> **Note**: While initially access to ReferenceGrant will be limited to cluster-admin
+> scope due to its security sensitive nature, we will consider and re-evaluate
+> the need for more specific scopes for this resource because it could be a useful
+> feature not currently available in OpenShift. 
 
 The [Advanced 4 Tier Model](https://gateway-api.sigs.k8s.io/concepts/security-model/#write-permissions-for-advanced-4-tier-model)
 is not implementable using the default ClusterRoles. However, as mentioned above, users can create a custom
