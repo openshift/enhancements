@@ -102,8 +102,8 @@ recurrence:
     by: Day
     day:
       days:
-      - day: Monday
-        week: Last
+      - daysOfWeek: Monday
+        weekOfMonth: Last
       interval: 1
 ```
 
@@ -222,7 +222,7 @@ The current, fully self-managed, update process makes one obvious risk mitigatio
 a relatively advanced strategy to employ: only updating the control-plane and leaving worker-nodes as-is.
 It is possible by pausing machine config pools, but this is certainly not an intuitive step for users. Farther back 
 in OpenShift 4's history, the strategy was not even safe to perform since it could lead to worker-node 
-certificates to expiring. 
+certificates expiring. 
 
 By separating the control-plane and worker-node updates into two separate steps, we provide a clear
 and intuitive method of deferring worker-node updates: not initiating them. Leaving this to the user's
@@ -260,7 +260,7 @@ significant forethought by the user. Even with that forethought, if an enterpris
 changes to only be applied during weekends, additional custom mechanics would need
 to be employed to ensure the change merged during the weekend without needing someone present.
 Even this approach is unavailable to our managed services customers who are restricted
-from modifying machine config pool directly.
+from modifying machine config pools directly.
 
 Contrast this complexity with the user setting a Change Management / Maintenance Schedule 
 on the cluster (or indirectly via OCM when Service Delivery exposes the option for managed clusters). 
@@ -474,18 +474,28 @@ spec:
 # other controllers, attempting to abide by change management, can easily 
 # determine whether they can initiate material changes.
 status:
-  # Go format Duration remaining until changes permitted. 0 means changes
-  # are currently permitted.
-  # nil IF Restrictive  OR  not "Ready".
-  nextPermissiveETA: 0
 
-  # Go format Duration remaining in the current permissive window.
-  # 0 if outside of a permissive window.
-  # nil if changes are permitted indefinitely or policy not "Ready".
-  permissiveRemaining: 1h4m3s
-
-  # nil if within a permissive window or policy not "Ready".
-  lastPermissiveDate: <datetime>
+  behavior:
+    current:
+      state: ChangesPaused
+      # When the state started
+      startTime: <datetime>
+      endTime: <datetime>  # null if not expected to change
+      reason: 'human readable..'
+    next:  # next must not be null if current.endTime is set.
+      state: ChangesUnpaused
+      startTime: <datetime>
+      endTime: <datetime>
+      reason: 'human readable..'
+    history:  # Includes up to 5 of the last transitions
+      - strategy: MaintenanceSchedule
+        state: ChangesUnpaused
+        startTime: <datetime>
+        endTime: <datetime>
+      - strategy: MaintenanceSchedule
+        mode: ChangesPaused
+        startTime: <datetime>
+        endTime: <datetime>
 
   conditions:
   # If a [Hosted]ChangeManagementPolicy has not calculated yet, it will not
@@ -579,21 +589,30 @@ spec:
   ...
 status:
   changeManagement:
-    # Seconds remaining until changes permitted. 0 means changes
-    # are currently permitted.
-    # nil IF pausedUntil: true or policy not "Ready".
-    nextPermissiveETA: 0
-  
-    # Number of seconds remaining in the current permissive window.
-    # 0 if outside of a permissive window.
-    # nil if changes are permitted indefinitely or policy not "Ready".
-    permissiveRemaining: 3600
-    
-    message: "human readable summary"
-    
-    # Last recorded permissive window by THIS MCP (this may be different from a recently
-    # configured [Hosted]ChangeManagementPolicy's lastPermissiveDate).
-    lastPermissiveDate: <datetime>
+
+    behavior:
+      # Combines change management information from object's configuration
+      # and any configured policy to reflect object specific status.
+      current:
+        state: Disabled
+        startTime: 2025-03-15T12:34:56Z
+        endTime: 2025-03-28T00:00:00Z
+        reason: 'Change management disabledUntil set to 2025-03-28T00:00:00Z'
+      next:  # See policy object for more details on this status information
+        state: ChangesUnpaused
+        startTime: <datetime>
+        endTime: <datetime>
+        reason: 'human readable..'
+      history:  # See policy object for more details on this status information
+        - strategy: MaintenanceSchedule
+          state: ChangesUnpaused
+          startTime: <datetime>
+          endTime: <datetime>
+        - strategy: MaintenanceSchedule
+          mode: ChangesPaused
+          startTime: <datetime>
+          endTime: <datetime>
+
   conditions:
   - type: ChangesPaused
     status: "True"
@@ -991,7 +1010,7 @@ spec:
             month: January | February | ... | December
       
       # Given the identification of a date by a recurrence rule, at what time (always UTC) can the 
-      # permissive window begin. "00:00" if unset.
+      # permissive window begin. "00:00" if unset. Validated with a regex.
       startTime: <time-of-day|null>
       
       # Given the identification of a date by a recurrence rule, after what offset from the startTime should
@@ -1000,6 +1019,7 @@ spec:
       # startTime="20:00", duration="8h" would permit material change initiation starting
       # each Saturday at 8pm and continuing through Sunday 4am (all times are UTC). The default
       # duration is 24:00-startTime (i.e. to the end of the day).
+      # Value required to be > 0.
       duration: <duration|null>
       
     
