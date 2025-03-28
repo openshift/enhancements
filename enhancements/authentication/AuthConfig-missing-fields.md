@@ -263,11 +263,23 @@ An OpenShift administrator wants to prevent users from being created with reserv
 
 ### API Extensions
 To facilitate the configuration and validation of token claims, token issuers, and user validation rules, the existing `authentications.config.openshift.io` CRD is extended with new fields and structures. These extensions provide enhanced flexibility in token validation, token claim mappings, issuer configuration, and user validation. The proposed changes introduce new fields that allow administrators to define custom authentication behaviors.  
-The proposed API changes have been submitted in [openshift/api#2230](https://github.com/openshift/api/pull/2230). Below are examples of how users will configure these new fields:  
+The proposed API changes have been submitted in [openshift/api#2245](https://github.com/openshift/api/pull/2245). Below are examples of how users will configure these new fields:  
 
 
 #### TokenIssuer  
 ##### DiscoveryURL
+- **What it does:**  
+  The `discoveryURL` field specifies the OpenID Connect (OIDC) discovery endpoint, which provides metadata about the identity provider. It allows OpenShift to automatically retrieve issuer details, supported authentication methods, and token endpoints.  
+
+- **Why users would set it:**  
+  This field is necessary when integrating OpenShift authentication with an external OIDC provider, ensuring proper token validation.  
+
+- **Constraints:**  
+  - The value must be a valid HTTPS URL.  
+  - The `discoveryURL` must be different from the `issuer.url`.  
+  - If this field is misconfigured, authentication may fail, preventing user logins.  
+
+**Example:**  
 ```yaml
    apiVersion: config.openshift.io/v1
    kind: Authentication
@@ -279,7 +291,20 @@ The proposed API changes have been submitted in [openshift/api#2230](https://git
     - issuer:
       discoveryURL: https://discovery.example.com/.well-known/openid-configuration
 ```
+
 ##### AudienceMatchPolicy
+- **What it does:**  
+  The `audienceMatchPolicy` field controls how OpenShift matches the audience (`aud`) claim in ID tokens issued by the OIDC provider.  
+
+- **Why users would set it:**  
+  This ensures that tokens are only accepted if they are intended for OpenShift, preventing replay attacks or misuse of tokens from other services.  
+
+- **Constraints:**  
+  - Supported values:  
+    - `MatchAny`: Accepts any audience value present in the configured `audiences` list.  
+  - If multiple audiences are defined, `MatchAny` must be used.  
+
+**Example:**  
 ```yaml
 apiVersion: config.openshift.io/v1
 kind: Authentication
@@ -295,8 +320,19 @@ spec:
 
 #### TokenClaimMappings  
 ##### UID
+- **What it does:**  
+  The `uid` field maps a claim from the OIDC token to the user's unique identifier in OpenShift.  
+
+- **Why users would set it:**  
+  Ensures consistent and predictable user identification across authentication sessions.  
+
+- **Constraints:**  
+  - The mapped claim must exist in the token.  
+  - If the mapped claim is missing, authentication may fail.  
+
 This is an example of configuring uid using a CEL expression.
 
+**Example:**  
 ```yaml
    apiVersion: config.openshift.io/v1
     kind: Authentication
@@ -324,6 +360,17 @@ This is an example of configuring uid using a CEL expression.
             claim: email
 ```
 ##### Extra
+- **What it does:**  
+  The `extra` field allows mapping additional claims to Kubernetes user attributes.  
+
+- **Why users would set it:**  
+  Enables passing extra metadata, such as roles or groups, to the user’s session.  
+
+- **Constraints:**  
+  - Keys must be valid Kubernetes labels.  
+  - Values must be derived from valid token claims using CEL expressions.  
+
+**Example:**  
 ```yaml
    apiVersion: config.openshift.io/v1
    kind: Authentication
@@ -339,7 +386,18 @@ This is an example of configuring uid using a CEL expression.
 ```
 
 ### TokenClaimValidationRule
-   ```yaml
+- **What it does:**  
+  Defines validation rules for token claims using Common Expression Language (CEL).  
+
+- **Why users would set it:**  
+  Enforces security policies on token claims, such as expiration times.  
+
+- **Constraints:**  
+  - The CEL expression must be valid and evaluate to `true` for authentication to succeed.  
+  - Misconfigured rules may prevent valid users from logging in.  
+
+**Example:**  
+```yaml
    apiVersion: config.openshift.io/v1
    kind: Authentication
    metadata:
@@ -350,9 +408,20 @@ This is an example of configuring uid using a CEL expression.
       claimValidationRules:
       - expression: 'claims.exp - claims.nbf <= 86400'
         message: total token lifetime must not exceed 24 hours
-  ```
+```
 
 ### TokenUserValidationRule
+- **What it does:**  
+  Defines rules to validate the user object created from an authenticated token.  
+
+- **Why users would set it:**  
+  Ensures that users comply with security policies, such as preventing reserved prefixes in usernames.  
+
+- **Constraints:**  
+  - The CEL expression must return `true` for authentication to proceed.  
+  - Invalid configurations may block valid users from accessing the cluster.  
+
+**Example:**  
 ```yaml
   apiVersion: config.openshift.io/v1
   kind: Authentication
