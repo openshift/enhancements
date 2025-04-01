@@ -310,7 +310,7 @@ const (
 	KueueIntegrationRayCluster      KueueIntegration = "RayCluster"
 	KueueIntegrationJobSet          KueueIntegration = "JobSet"
 	KueueIntegrationMPIJob          KueueIntegration = "MPIJob"
-	KueueIntegrationPaddeJob        KueueIntegration = "PaddeJob"
+	KueueIntegrationPaddleJob       KueueIntegration = "PaddleJob"
 	KueueIntegrationPyTorchJob      KueueIntegration = "PyTorchJob"
 	KueueIntegrationTFJob           KueueIntegration = "TFJob"
 	KueueIntegrationXGBoostJob      KueueIntegration = "XGBoostJob"
