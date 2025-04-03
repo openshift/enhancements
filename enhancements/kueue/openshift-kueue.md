@@ -210,287 +210,17 @@ The operator reads the kueue configuration and generates a ConfigMap that the ku
 
 The API is displayed below but we have requested an api-review [here](https://github.com/openshift/api/pull/2222).
 
-During our api-review process, we decided to minimize the scope of our tech preview. 
-We will only focus on integrations so we can enable user stories explained above.
+We have performed an API review in two stages.
 
-We will use the kueue defaults for many of the features.
+Stage 1 - https://github.com/openshift/api/pull/2222
 
-```golang
-package v1alpha1
+Stage 1 added Integrations as a required field for the operator.
 
-import (
-	operatorv1 "github.com/openshift/api/operator/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-)
+Stage 2 - https://github.com/openshift/api/pull/2250
+Stage 2 added support for ManagedJobWithoutQueueName, Fairsharing, and WaitForPodsReady.
 
-// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-
-// Kueue is the CRD to represent the Kueue operator
-// This CRD defines the configuration that the Kueue
-// Compatibility level 4: No compatibility is provided, the API can change at any point for any reason. These capabilities should not be used by applications needing long term support.
-// +openshift:compatibility-gen:level=4
-// +kubebuilder:object:root=true
-// +kubebuilder:resource:path=kueue,scope=Cluster
-// +k8s:openapi-gen=true
-// +genclient
-// +genclient:nonNamespaced
-// +kubebuilder:storageversion
-// +kubebuilder:subresource:status
-// +kubebuilder:validation:XValidation:rule="self.metadata.name == 'cluster'",message="Kueue is a singleton, .metadata.name must be 'cluster'"
-type Kueue struct {
-	...
-	// spec holds user settable values for configuration
-	// +required
-	Spec KueueOperandSpec `json:"spec"`
-	// status holds observed values from the cluster. They may not be overridden.
-	// +optional
-	Status KueueStatus `json:"status,omitempty"`
-}
-
-type KueueOperandSpec struct {
-	operatorv1.OperatorSpec `json:",inline"`
-	// config is the desired configuration
-	// for the Kueue operator.
-	// +required
-	Config KueueConfiguration `json:"config"`
-}
-
-type KueueConfiguration struct {
-	// integrations is a required field that configures the Kueue's workload integrations.
-	// Kueue has both standard integrations, known as job frameworks, and external integrations known as external frameworks.
-	// Kueue will only manage workloads that correspond to the specified integrations.
-	// +required
-	Integrations Integrations `json:"integrations"`
-	// queueLabelPolicy controls how kueue manages workloads
-	// The default behavior of Kueue will manage workloads that have a queue-name label.
-	// This field is optional.
-	// +optional
-	QueueLabelPolicy QueueLabelPolicy `json:"queueLabelPolicy,omitempty"`
-	// kueueGangSchedulingPolicy controls how Kueue admits workloads.
-	// Gang Scheduling is the act of all or nothing scheduling.
-	// Kueue provides this ability.
-	// This field is optional.
-	// +optional
-	KueueGangSchedulingPolicy KueueGangSchedulingPolicy `json:"kueueGangSchedulingPolicy,omitempty"`
-	// premption is the process of evicting one or more admitted Workloads to accommodate another Workload.
-	// Kueue has classical premption and preemption via fair sharing.
-	// +optional
-	Premption Premption `json:"premption,omitempty"`
-}
-
-// KueueStatus defines the observed state of Kueue
-type KueueStatus struct {
-	operatorv1.OperatorStatus `json:",inline"`
-}
-
-// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-
-// KueueList contains a list of Kueue
-//
-// Compatibility level 4: No compatibility is provided, the API can change at any point for any reason. These capabilities should not be used by applications needing long term support.
-// +openshift:compatibility-gen:level=4
-type KueueList struct {
-	metav1.TypeMeta `json:",inline"`
-	// metadata for the list
-	// +optional
-	metav1.ListMeta `json:"metadata,omitempty"`
-	// items is a slice of Kueue
-	// this is a cluster scoped resource and there can only be 1 Kueue
-	// +kubebuilder:validation:MaxItems=1
-	// +required
-	Items []Kueue `json:"items"`
-}
-
-// +kubebuilder:validation:Enum=BatchJob;RayJob;RayCluster;JobSet;MPIJob;PaddleJob;PytorchJob;TFJob;XGBoostJob;AppWrapper;Pod;Deployment;StatefulSet;LeaderWorkerSet
-type KueueIntegration string
-
-const (
-	KueueIntegrationBatchJob        KueueIntegration = "BatchJob"
-	KueueIntegrationRayJob          KueueIntegration = "RayJob"
-	KueueIntegrationRayCluster      KueueIntegration = "RayCluster"
-	KueueIntegrationJobSet          KueueIntegration = "JobSet"
-	KueueIntegrationMPIJob          KueueIntegration = "MPIJob"
-	KueueIntegrationPaddleJob       KueueIntegration = "PaddleJob"
-	KueueIntegrationPyTorchJob      KueueIntegration = "PyTorchJob"
-	KueueIntegrationTFJob           KueueIntegration = "TFJob"
-	KueueIntegrationXGBoostJob      KueueIntegration = "XGBoostJob"
-	KueueIntegrationAppWrapper      KueueIntegration = "AppWrapper"
-	KueueIntegrationPod             KueueIntegration = "Pod"
-	KueueIntegrationDeployment      KueueIntegration = "Deployment"
-	KueueIntegrationStatefulSet     KueueIntegration = "StatefulSet"
-	KueueIntegrationLeaderWorkerSet KueueIntegration = "LeaderWorkerSet"
-)
-
-// This is the GVR for an external framework.
-// Controller runtime requires this in this format
-// for api discoverability.
-type ExternalFramework struct {
-	// group is the API group of the externalFramework.
-	// Must be a valid DNS 1123 subdomain consisting of of lower-case alphanumeric characters,
-	// hyphens and periods, of at most 253 characters in length.
-	// Each period separated segment within the subdomain must start and end with an alphanumeric character.
-	// +kubebuilder:validation:MaxLength=253
-	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:XValidation:rule="self.size() == 0 || !format.dns1123Label().validate(self).hasValue()",message="a lowercase RFC 1123 subdomain must consist of lower case alphanumeric characters, '-' or '.', and must start and end with an alphanumeric character."
-	// +required
-	Group string `json:"group"`
-	// resource is the Resource type of the external framework.
-	// Resource types are lowercase and plural (e.g. pods, deployments).
-	// Must be a valid DNS 1123 label consisting of a lower-case alphanumeric string
-	// and hyphens of at most 63 characters in length.
-	// The value must start and end with an alphanumeric character.
-	// +kubebuilder:validation:MaxLength=63
-	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:XValidation:rule="self.size() == 0 || !format.dns1123Label().validate(self).hasValue()",message="a lowercase RFC 1123 label must consist of lower case alphanumeric characters and '-', and must start and end with an alphanumeric character."
-	// +required
-	Resource string `json:"resource"`
-	// version is the version of the api (e.g. v1alpha1, v1beta1, v1).
-	// Must be a valid DNS 1035 label consisting of a lower-case alphanumeric string
-	// and hyphens of at most 63 characters in length.
-	// The value must start with an alphabetic character and end with an alphanumeric character.
-	// +kubebuilder:validation:MaxLength=63
-	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:XValidation:rule="self.size() == 0 || !format.dns1035Label().validate(self).hasValue()",message="a lowercase RFC 1035 label must consist of lower case alphanumeric characters, '-' or '.', and must start with an alphabetic character and end with an alphanumeric character."
-	// +required
-	Version string `json:"version"`
-}
-
-// This is the integrations for Kueue.
-// Kueue uses these apis to determine
-// which jobs will be managed by Kueue.
-type Integrations struct {
-	// frameworks are a unique list of names to be enabled.
-	// This is required and must have at least one element.
-	// Each framework represents a type of job that Kueue will manage.
-	// Frameworks are a list of frameworks that Kueue has support for.
-	// The allowed values are BatchJob, RayJob, RayCluster, JobSet, MPIJob, PaddleJob, PytorchJob, TFJob, XGBoostJob, AppWrapper, Pod, Deployment, StatefulSet and LeaderWorkerSet.
-	// +kubebuilder:validation:MaxItems=14
-	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x == y))",message="each item in frameworks must be unique"
-	// +listType=atomic
-	// +required
-	Frameworks []KueueIntegration `json:"frameworks"`
-	// externalFrameworks are a list of GroupVersionResources
-	// that are managed for Kueue by external controllers.
-	// These are optional and should only be used if you have an external controller
-	// that integrates with Kueue.
-	// +listType=atomic
-	// +kubebuilder:validation:MaxItems=32
-	// +optional
-	ExternalFrameworks []ExternalFramework `json:"externalFrameworks,omitempty"`
-	// labelKeysToCopy are a list of label keys that are copied once a workload is created.
-	// These keys are persisted to the internal Kueue workload object.
-	// If not specified, only the Kueue labels will be copied.
-	// +kubebuilder:validation:MaxItems=64
-	// +listType=atomic
-	// +optional
-	LabelKeysToCopy []LabelKeys `json:"labelKeysToCopy,omitempty"`
-}
-
-type LabelKeys struct {
-	// key is the label key
-	// A label key must be a valid qualified name consisting of a lower-case alphanumeric string,
-	// and hyphens of at most 63 characters in length.
-	// The name must start and end with an alphanumeric character.
-	// The name may be optionally prefixed with a subdomain consisting of lower-case alphanumeric characters,
-	// hyphens and periods, of at most 253 characters in length.
-	// Each period separated segment within the subdomain must start and end with an alphanumeric character.
-	// The optional prefix and the name are separate by a forward slash (/).
-	// +kubebuilder:validation:MaxLength=317
-	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:XValidation:rule="!format.qualifiedName().validate(self).hasValue()",message="a qualified name must consist of a lower-case alphanumeric and hyphenated string of at most 63 characters in length, starting and ending with alphanumeric chracters. The name may be optionally prefixed with a subdomain consisting of lower-case alphanumeric characters, hyphens and periods, of at most 253 characters in length. Each period separated segment within the subdomain must start and end with an alphanumeric character."
-	// +optional
-	Key string `json:"key,omitempty"`
-}
-
-// +kubebuilder:validation:Enum=ByWorkload;Disabled
-type KueueGangSchedulingPolicyOptions string
-
-const (
-	KueueGangSchedulingPolicyEvictNotReadyWorkloads KueueGangSchedulingPolicyOptions = "ByWorkload"
-	KueueGangSchedulingPolicyDisabled               KueueGangSchedulingPolicyOptions = "Disabled"
-)
-
-// +kubebuilder:validation:Enum=Parallel;Sequential
-type KueueGangSchedulingAdmissionOptions string
-
-const (
-	KueueGangSchedulingAdmissionOptionsSequential KueueGangSchedulingAdmissionOptions = "Sequential"
-	KueueGangSchedulingAdmissionOptionsParallel   KueueGangSchedulingAdmissionOptions = "Parallel"
-)
-
-// Kueue provides the ability to admit workloads all in one (gang admission)
-// and evicts workloads if they are not ready within a specific time.
-type KueueGangSchedulingPolicy struct {
-	// policy allows for changing the kinds of gang scheduling Kueue does.
-	// This is an optional field.
-	// The allowed values are ByWorkload and Disabled.
-	// The default value will be Disabled.
-	// ByWorkload allows for configuration how admission is performed
-	// for Kueue.
-	// +optional
-	Policy KueueGangSchedulingPolicyOptions `json:"policy"`
-	// byWorkload controls how admission is done.
-	// When admission is set to Sequential, only pods from the currently processing workload will be admitted.
-	// Once all pods from the current workload are admitted, and ready, Kueue will process the next workload.
-	// Sequential processing may slow down admission when the cluster has sufficient capacity for multiple workloads,
-	// but provides a higher guarantee of workloads scheduling all pods together successfully.
-	// When set to Parallel, pods from any workload will be admitted at any time.
-	// This may lead to a deadlock where workloads are in contention for cluster capacity and
-	// pods from another workload having successfully scheduled prevent pods from the current workload scheduling.
-	// +kubebuilder:validation:XValidation:rule="self.policy==ByWorkload",message="byWorkload is only valid if policy equals ByWorkload"
-	// +optional
-	ByWorkload KueueGangSchedulingAdmissionOptions `json:"byWorkload"`
-}
-
-// +kubebuilder:validation:Enum=QueueNameRequired;QueueNameOptional
-type QueueLabelNamePolicy string
-
-const (
-	QueueLabelNamePolicyRequired QueueLabelNamePolicy = "QueueNameRequired"
-	QueueLabelNamePolicyOptional QueueLabelNamePolicy = "QueueNameOptional"
-)
-
-type QueueLabelPolicy struct {
-	// queueLabelPolicy controls whether or not Kueue reconciles
-	// jobs that don't set the label kueue.x-k8s.io/queue-name.
-	// The allowed values are QueueNameRequired and QueueNameOptional.
-	// If set to QueueNameRequired, then those jobs will be suspended and never started unless
-	// they are assigned a queue and eventually admitted. This also applies to
-	// jobs created before starting the kueue controller.
-	// Defaults to QueueNameRequired; therefore, those jobs are not managed and if they are created
-	// unsuspended, they will start immediately.
-	// +optional
-	QueueLabelPolicy QueueLabelNamePolicy `json:"queueLabelPolicy"`
-}
-
-// +kubebuilder:validation:Enum=Classical;FairSharing
-type PreemptionStrategy string
-
-const (
-	PreemeptionStrategyClassical   PreemptionStrategy = "Classical"
-	PreemeptionStrategyFairsharing PreemptionStrategy = "FairSharing"
-)
-
-type Preemption struct {
-	// preemptionStrategy are the types of preemption kueue allows.
-	// Kueue has two types of preemption: classical and fair sharing.
-	// Classical means that an incoming workload, which does
-	// not fit within the unusued quota, is eligible to issue preemptions
-	// when the requests of the workload are below the
-	// resource flavor's nominal quota or borrowWithinCohort is enabled
-	// on the Cluster Queue.
-	// FairSharing is a more heavy weight algorithm.
-	// ClusterQueues with pending Workloads can preempt other Workloads
-	// in their cohort until the preempting ClusterQueue
-	// obtains an equal or weighted share of the borrowable resources.
-	// The borrowable resources are the unused nominal quota
-	// of all the ClusterQueues in the cohort.
-	// +optional
-	PreemptionStrategy PreemptionStrategy `json:"preemptionStrategy"`
-}
-```
-
+The API is defined in those PRs and in our operator.
+We will highlight how it can used in this enhancement rather than list out the API and distract the reader with code.
 We will use the kueue configuration [API](https://github.com/kubernetes-sigs/kueue/blob/main/apis/config/v1beta1/configuration_types.go).
 
 The operator reads the kueue configuration and generates a ConfigMap that the kueue manager deployment will use. 
@@ -521,7 +251,6 @@ The operator will create and apply these resources to the cluster.
 The operator has the following requirements.
 
 - Konflux integration
-- Support for x64 and ARM
 - Disconnected
 - FIPS
 
@@ -536,7 +265,7 @@ The operator will be OLM managed and hosted on OperatorHub.
 As a admin, I want to enable Kueue to manage batch jobs.
 
 ```yaml
-apiVersion: operator.openshift.io/v1beta1
+apiVersion: operator.openshift.io/v1alpha1
 kind: Kueue
 metadata:
  name: cluster
@@ -596,11 +325,11 @@ spec:
       - RayJob
       - RayCluster
       - PyTorchJob
-    kueueGangSchedulingPolicy:
+    gangSchedulingPolicy:
       policy: ByWorkload
       byWorkload: Parallel
     queueLabelPolicy:
-      queueLabelPolicy: QueueNameRequired
+      policy: QueueNameRequired
     preemption:
       preemptionStrategy: Classical
 ```
@@ -622,10 +351,10 @@ spec:
     integrations:
       frameworks:
       - AppWrapper
-    kueueGangSchedulingPolicy:
+    gangSchedulingPolicy:
       policy: Disabled
     queueLabelPolicy:
-      queueLabelPolicy: QueueNameOptional
+      policy: QueueNameOptional
     preemption:
       preemptionStrategy: FairSharing
 ```
@@ -742,7 +471,7 @@ I don't forsee any issue with SNO.
 
 Cert Manager will be used to manage certificates so our operator will have a hard dependency on Cert Manager.
 
-#### Tech Preview Feature Statement
+#### GA Feature Statement
 
 ##### Supported Features
 
@@ -757,8 +486,12 @@ In Tech preview, we will provide the following features:
 - LocalQueue, ClusterQueues, Workloads, Worklow Priorites, Admission Checks are all supported.
 - Support for deployments, pods, statefulsets.
 - [Use of resource flavors to describe heterogeous clusters](https://kueue.sigs.k8s.io/docs/concepts/resource_flavor/)
+- Use of ManagedJobsWithoutQueueName
+  - LocalQueueDefaulting
+- Gang admission via `WaitForPodsReady` Kueue configurations.
+- Fairsharing
 
-##### Not Supported
+##### Not Supported for initial GA
 
 We will not provide the following features in tech preview.
 
@@ -767,33 +500,31 @@ We will not provide the following features in tech preview.
 - TopologyAwareScheduling
 - Resource Transformations
 - KueueViz
-- LocalQueueDefaulting
-- Use of ManagedJobsWithoutQueueName
-- Fairsharing
 - [VisibilityOnDemand](https://kueue.sigs.k8s.io/docs/tasks/manage/monitor_pending_workloads/pending_workloads_on_demand/)
-- Gang admission via `WaitForPodsReady` Kueue configurations.
 - Topology CRD (Topology Aware Scheduling)
 - Cohort CRD (hierachial queueing)
 
-#### GA Feature Statement
+##### Future
 
-We wanted to limit scope for tech preview so we decided to only support what we considered GA.
-As new features are requested, we can enable the not supported features in a selective way via feature requests.
-New features should be included in the API of the operator so we can selectively enable these features.
+Each of these features are valid. We will add support for them as dedicated RFE.
+Our focus for initial phase will be the supported features above.
 
 #### Release Schedule
 
-| Kueue Operator     |  Stage       |  OCP Version   |  Kueue   | RHOAI GA
-| ------------------ | -------      | ---------------| -------- | -------
-| 0.1                | Tech Preview | 4-17-4.19      | 0.11.z   | N
-| 1.0                | GA           | 4.18-4.20      | 0.12.z   | Y
+| Kueue Operator     |  Stage       |  OCP Version   |  Kueue   |
+| ------------------ | -------      | ---------------| -------- |
+| 1.0                | GA           | 4-18-4.19      | 0.11.z   |
+| 1.1                | GA           | 4.19-4.20      | 0.12.z   |
+| 1.2                | GA           | 4.20-4.21      | 0.13.z   |
 
 Kueue releases 6 times a year, roughly. 
 They will have 2 releases per k8s version so we can take the latest version that is built with the kubernetes version that OCP comes with.
 
-GAing Kueue on beta APIs will cause support/upgradability issues. 
-Our goal is to engage with upstream to drive stability in these APIs before we open Kueue for a general audience.
-We are open to work with internal partners on GAing Kueue but upgrades may be a lot harder to guarantee.
+There will be no tech preview for this operator and we will go to a GA release.
+
+#### Stability of APIs
+
+A goal will be to engage with upstream to promote APIs to v1 and aim to graduate these APIs to stable.
 
 Upstream wants to promote [v1beta1 to v1beta2](https://github.com/kubernetes-sigs/kueue/issues/768) in 2025.
 
@@ -929,18 +660,6 @@ A major requirement of RHOAI is that Kueue should be functional across all suppo
 Some features may not work on certain versions of Openshift but 
 the core functionality should still be functional.
 
-### Expermental Feature Support
-
-The following is out of scope for tech preview.
-
-Kueue has a concept of feature gates in their configuration API. These are a series of advanced features.
-The development of Kueue is quite fast and many of these features are not yet GA. 
-We are engaging with upstream to avoid permanent betas and to focus on graduating feature gates.
-
-Meanwhile, there are cases where one would want to use alpha features or beta features.
-In an ideal world, we would be able to stop the upgrades of operators if the operator sets alpha features.
-This is not possible so one option is for really risky features we can set a feature gate in OCP to force
-the cluster to go into tech-preview no upgrade.
 
 ### GA timeframe of Kueue
 
@@ -992,6 +711,12 @@ The operator will also run a smoke test to verify that Kueue APIs are accessible
 - Feature parity with their existing solution
 - Confidence to support GAish APIs (ClusterQueues, Workloads, LocalQueues, WorkloadPriorityClasses, ResourceFlavors)
 
+### Notes
+
+During this operator work, it was decided from Product and Business Unit that there is no
+reason for a tech preview for this feature.
+RHOAI already supports this for GA so our tech preview will be an internal release.
+The goal will be to GA this operator in July 2025 timeframe.
 
 ### Removing a deprecated feature
 
@@ -1012,90 +737,18 @@ We would recommend that this Kueue operator work with n-2 (ie 1.30 at the edge).
 
 ## Operational Aspects of API Extensions
 
-TODO: Fill this out as we proceed.
-
-Describe the impact of API extensions (mentioned in the proposal section, i.e. CRDs,
-admission and conversion webhooks, aggregated API servers, finalizers) here in detail,
-especially how they impact the OCP system architecture and operational aspects.
-
-- For conversion/admission webhooks and aggregated apiservers: what are the SLIs (Service Level
-  Indicators) an administrator or support can use to determine the health of the API extensions
-
-  Examples (metrics, alerts, operator conditions)
-  - authentication-operator condition `APIServerDegraded=False`
-  - authentication-operator condition `APIServerAvailable=True`
-  - openshift-authentication/oauth-apiserver deployment and pods health
-
-- What impact do these API extensions have on existing SLIs (e.g. scalability, API throughput,
-  API availability)
-
-  Examples:
-  - Adds 1s to every pod update in the system, slowing down pod scheduling by 5s on average.
-  - Fails creation of ConfigMap in the system when the webhook is not available.
-  - Adds a dependency on the SDN service network for all resources, risking API availability in case
-    of SDN issues.
-  - Expected use-cases require less than 1000 instances of the CRD, not impacting
-    general API throughput.
-
-- How is the impact on existing SLIs to be measured and when (e.g. every release by QE, or
-  automatically in CI) and by whom (e.g. perf team; name the responsible person and let them review
-  this enhancement)
-
-- Describe the possible failure modes of the API extensions.
-- Describe how a failure or behaviour of the extension will impact the overall cluster health
-  (e.g. which kube-controller-manager functionality will stop working), especially regarding
-  stability, availability, performance and security.
-- Describe which OCP teams are likely to be called upon in case of escalation with one of the failure modes
-  and add them as reviewers to this enhancement.
+We have explained this above. Kueue uses webhooks.
 
 ## Support Procedures
 
-TODO: Fill this out as we proceed.
+### Healthy Startup
 
-Describe how to
-- detect the failure modes in a support situation, describe possible symptoms (events, metrics,
-  alerts, which log output in which component)
+The operator consists of the operand and the operator.
 
-  Examples:
-  - If the webhook is not running, kube-apiserver logs will show errors like "failed to call admission webhook xyz".
-  - Operator X will degrade with message "Failed to launch webhook server" and reason "WehhookServerFailed".
-  - The metric `webhook_admission_duration_seconds("openpolicyagent-admission", "mutating", "put", "false")`
-    will show >1s latency and alert `WebhookAdmissionLatencyHigh` will fire.
+A healthy operator will deploy the operator and operand deployments. If neither of these are started,
+it is recommended to look at the logs of each component. 
 
-- disable the API extension (e.g. remove MutatingWebhookConfiguration `xyz`, remove APIService `foo`)
-
-  - What consequences does it have on the cluster health?
-
-    Examples:
-    - Garbage collection in kube-controller-manager will stop working.
-    - Quota will be wrongly computed.
-    - Disabling/removing the CRD is not possible without removing the CR instances. Customer will lose data.
-      Disabling the conversion webhook will break garbage collection.
-
-  - What consequences does it have on existing, running workloads?
-
-    Examples:
-    - New namespaces won't get the finalizer "xyz" and hence might leak resource X
-      when deleted.
-    - SDN pod-to-pod routing will stop updating, potentially breaking pod-to-pod
-      communication after some minutes.
-
-  - What consequences does it have for newly created workloads?
-
-    Examples:
-    - New pods in namespace with Istio support will not get sidecars injected, breaking
-      their networking.
-
-- Does functionality fail gracefully and will work resume when re-enabled without risking
-  consistency?
-
-  Examples:
-  - The mutating admission webhook "xyz" has FailPolicy=Ignore and hence
-    will not block the creation or updates on objects when it fails. When the
-    webhook comes back online, there is a controller reconciling all objects, applying
-    labels that were not applied during admission webhook downtime.
-  - Namespaces deletion will not delete all objects in etcd, leading to zombie
-    objects when another namespace with the same name is created.
+Once both deployments are ready, the Kueue APIs are accessible.
 
 ## Alternatives
 
