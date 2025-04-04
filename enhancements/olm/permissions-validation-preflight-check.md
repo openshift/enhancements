@@ -5,13 +5,14 @@ authors:
   - "@Tayler Geiger"
   - "@jkeister"
 reviewers: # Include a comment about what domain expertise a reviewer is expected to bring and what area of the enhancement you expect them to focus on. For example: - "@networkguru, for networking aspects, please look at IP bootstrapping aspect"
-  - "@k8s auth, for authentication API use ()"
+  - "@ilias, for k8s auth interactions"
+  - "@krzys, for k8s auth interactions"
 approvers: # A single approver is preferred, the role of the approver is to raise important questions, help ensure the enhancement receives reviews from all applicable areas/SMEs, and determine when consensus is achieved such that the EP can move forward to implementation.  Having multiple approvers makes it difficult to determine who is responsible for the actual approval.
-  - TBD
+  - "@joelanford"
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
   - "None"
 creation-date: 2025-03-17
-last-updated: 2025-03-31
+last-updated: 2025-04-04
 tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
   - https://issues.redhat.com/browse/OPRUN-3781
 ---
@@ -42,7 +43,7 @@ Start by filling out the header with the metadata for this enhancement. -->
 
 # Permissions Validation Preflight Check
 
-
+<!-- 
 This is the title of the enhancement. Keep it simple and descriptive. A good
 title can help communicate what the enhancement is and should be considered as
 part of any review.
@@ -51,7 +52,7 @@ The YAML `title` should be lowercased and spaces/punctuation should be
 replaced with `-`.
 
 The `Metadata` section above is intended to support the creation of tooling
-around the enhancement process.
+around the enhancement process. -->
 
 ## Summary
 
@@ -78,24 +79,28 @@ Installing a ClusterExtension in OLMv1 requires users to provide a ServiceAccoun
 Introduce a preflight check that evaluates the permissions granted to the provided ServiceAccount against the permissions required by the ClusterExtension bundle. If any permissions are missing, the system will:
 - Provide a detailed, user-friendly error message listing missing permissions.
 - Prevent installation or upgrades from proceeding until the issue is resolved.
-- The pre-flight check implemented as part of this work should include more than just surfacing the RBAC in the bundle. Generally, it should surface any permissions that are needed to stamp out all resources in the bundle on the cluster.
+- The pre-flight check implemented as part of this work should include more than just surfacing the RBAC in the bundle. Generally, it should surface any permissions that are needed to stamp out all resources in the bundle on the cluster.  It should include any additional rules requirements for a service account that OLM might exert.
 - Any bundle introspection is about what needs to be applied to the cluster by OLM. OLM doesn't, and shouldn't, care about what permissions the cluster extension needs to operate as expected in the cluster. 
 
 
 ### Non-Goals
 
-- Only what is necessary to install the ClusterExtension based on what is provided in the bundle should be verified. OLM will only have knowledge of Kubernetes and applying Kubernetes resources so we won't be able to verify something like access to an external secret store as part of an extension's installation. 
-- Optionality of the preflight check.
+- Replacing or superceding the cluster's authorization chain.
+- Evaluating access to resources beyond what is necessary to install the ClusterExtension based on bundle contents. OLM will only have knowledge of Kubernetes and applying Kubernetes resources so we won't be able to verify something like access to an external secret store as part of an extension's installation. 
+- Optionality of the preflight check.  
+(**Note to auth reviewers:** it is (un)reasonable to have a mandatory check that assumes RBAC authorization for ClusterExtension service accounts?)
 
 ## Proposal
 
-The preflight check will extend the existing preflight interface in the operator controller. Key components:
-1. Permission Analysis
-   - Use the ServiceAccount token to verify access against required permissions declared in the ClusterExtension’s bundle.
-2. Error Reporting:
-   - Output detailed messages describing missing permissions in a user-friendly format.
-3. Integration:
-   - Hook into the ClusterExtension reconciliation workflow, ensuring preflight checks run before installation or upgrades.
+The preflight check will extend the existing preflight interface in the operator controller.   
+Key components:
+1. *Permission Analysis:*  
+   Build a local cache of all RBAC and perform a local best-effort evaluation against required permissions declared in the ClusterExtension’s bundle.
+2. *Error Reporting:*  
+   Output detailed messages describing missing permissions in a user-friendly format.
+3. *Integration:*  
+   Hook into the ClusterExtension reconciliation workflow, ensuring preflight checks run before installation or upgrades.
+
 
 Validation Workflow:
 1. Extract RBAC information from the ClusterExtension bundle.
@@ -120,8 +125,8 @@ the document. -->
 Our approach can be broken down into two parts.
 
 Part 1: Validating permissions required for installing the Cluster Extension:
-- An initial fail-fast check that ensures the provided ServiceAccount has GET permissions required to perform the Helm dry-run. GET permissions are needed because the Helm dry-run API simulates the installation by rendering manifests and checking the Kubernetes API server for resource existence and state. Without these permissions, Helm cannot validate or resolve dependencies, leading to authorization errors or incomplete simulation.
-- Create a permissions validation preflight check which checks the provided installer ServiceAccount for all of the following permissions:
+- Perform a client-only template rendering.
+- Create a permissions validation preflight check which checks the local-only generated manifest(s) for all of the following permissions:
    - Necessary permissions checked by the Helm dry-run.
       - Currently, a Helm dry-run is performed inside a function called getReleaseState() which is called inside helm.Apply().
       - Errors from this Helm dry-run will be surfaced as a group and in a digestible manner.
