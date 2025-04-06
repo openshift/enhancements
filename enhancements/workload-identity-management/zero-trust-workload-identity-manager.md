@@ -26,28 +26,31 @@ The solution introduces a identity management framework designed to address the 
 
 
 ## Motivation
+Customers deploying OpenShift require a zero-trust workload identity solution that goes beyond static credentials and perimeter-based security models. Traditional approaches, such as long-lived certificates or manual secret injection, struggle to secure dynamic microservices architectures where workloads scale, migrate, and communicate across clusters. These methods introduce operational complexity, increase the risk of credential leakage, and fail to provide granular, cryptographically verifiable authentication for ephemeral workloads.  
 
-Customers deploying OpenShift increasingly require a robust zero-trust approach to workload identity management that goes beyond traditional network security models. As microservices architectures become more complex, organizations need a solution that provides dynamic, cryptographically verifiable identities for their workloads, enabling secure and granular authentication across distributed systems. The current approach to identity management often relies on static, perimeter-based security mechanisms that fail to address the sophisticated security challenges of modern cloud-native environments. By implementing a Zero-Trust Workload Identity Manager, customers can achieve more comprehensive protection, reduce manual operational overhead, and ensure that every service interaction is explicitly verified and secured.
+The `Zero-Trust Workload Identity Manager` addresses these challenges by integrating `SPIFFE/SPIRE` natively into OpenShift. This provides automated issuance of short-lived, cryptographically signed identities (SVIDs) to workloads, replacing error-prone manual processes with dynamic identity lifecycle management. By enforcing mutual TLS (mTLS) by default and enabling fine-grained trust boundaries, organizations can secure service-to-service communication in multi-tenant or hybrid environments while reducing operational overhead and aligning with zero-trust security mandates.
 
 ### User Stories
 
-- As an OpenShift user, I want to have an option to dynamically deploy `spire-sever`, so that it can be used only when required by creating the custom resource.
-- As an OpenShift user, I want to have an option to dynamically attest `spiffe-csi-driver` on the nodes, so that it can be used only when required by creating the custom resource.
-- As an OpenShift user, I want `spire-agents` to mount workload identity tokens using the `spiffe-csi-driver` so that applications can consume workload identities securely.
-- As an OpenShift user, I want `spire` to automatically issue and manage `SVIDs` for workloads so that workloads can authenticate securely.
-- As an OpenShift user, I want to dynamically configure `trust domains` so that I can manage trust relationships between workloads and clusters securely.
+- As a openshift cluster administrator, I want to deploy SPIRE components via an operator so that workload identities are managed automatically across the cluster.
+- As a openshift cluster administrator, I want to configure trust domains via CRDs so that I can enforce secure isolation between teams or environments.
+- As an application developer, I want SPIFFE identities injected into my workloads via the CSI Driver so that I avoid manual certificate management.
+- As a security engineer, I want workloads to use short-lived, auto-rotated SVIDs so that mTLS is enforced by default for zero-trust security.
+- As a cluster administrator, I want SPIRE metrics in OpenShift Monitoring so that I can proactively resolve identity-related issues.
 
-### Goals  
-- Integrate SPIFFE/SPIRE via an operator for automated workload identity lifecycle management.  
-- Automate SVID issuance/rotation for workloads without manual intervention.  
-- Securely provision identities to workloads via SPIFFE CSI Driver.  
-- Enable dynamic trust domain configuration via CRs for multi-cluster/tenant scenarios.  
-- Enforce zero-trust with mutual authentication (mTLS) for workloads.  
-- Integrate with OpenShift Monitoring for observability.  
+
+### Goals
+
+- Automate SPIRE server/agent deployment and lifecycle management via an operator.
+- Dynamically provision SPIFFE identities (SVIDs) to workloads using the CSI Driver.
+- Enable trust domain configuration through CRDs for secure multi-tenant/multi-cluster isolation.
+- Ensure SVIDs have a TTL with automatic rotation to enforce credentials freshness.
+- Integrate SPIRE health and performance metrics into OpenShift Monitoring.
+- Maintain high availability for SPIRE servers and resilience for agents during failures.  
 
 ### Non-Goals  
 - Replace existing auth systems (e.g., Service Accounts, OAuth).  
-- Manage non-workload identities (users/machines).  
+- Manage non-workload identities (users).  
 - Enforce network-level security policies.  
 - Support non-SPIFFE systems or legacy PKI.  
 - Establish cross-cluster trust without explicit configuration.  
@@ -87,8 +90,8 @@ The operator will create and manage the following resources to deploy SPIRE and 
 3. RBAC & Security
     - ClusterRoles:
         - `spire-agent` (read pods/nodes)
-        - `spire-mgmt-spire-controller-manager` (manage SPIRE CRDs)
-        - `spire-mgmt-spire-server` (token reviews, node/pod access)
+        - `spire-controller-manager` (manage SPIRE CRDs)
+        - `spire-server` (token reviews, node/pod access)
 
     - ClusterRoleBindings:
         - Bind roles to SPIRE ServiceAccounts (e.g., `spire-agent`, `spire-server`).
@@ -475,6 +478,819 @@ None.
 None.
 
 ### Implementation Details/Notes/Constraints
+Below are the example static manifests used for creating required resources for installing `zero-trust-workload-identity-manager`.
+
+1. ServiceAccounts
+
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: spire-spiffe-csi-driver
+  namespace: <operand-namespace>
+  labels:
+    app.kubernetes.io/name: spiffe-csi-driver
+```
+
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: spire-spiffe-oidc-discovery-provider
+  namespace: <operand-namespace>
+  labels:
+    app.kubernetes.io/name: spiffe-oidc-discovery-provider
+```
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: spire-agent
+  namespace: <operand-namespace>
+  labels:
+    app.kubernetes.io/name: spire-agent
+```
+
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: spire-server
+  namespace: <operand-namespace>
+  labels:
+    app.kubernetes.io/name: spire-server
+
+```
+
+2. ClusterRoles and Roles required by `zero-trust-workload-identity-manager`.
+
+```yaml
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: spire-agent
+rules:
+  - apiGroups: [""]
+    resources:
+      - pods
+      - nodes
+      - nodes/proxy
+    verbs: ["get"]
+```
+
+``` yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: spire-controller-manager
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["admissionregistration.k8s.io"]
+    resources: ["validatingwebhookconfigurations"]
+    verbs: ["get", "list", "patch", "watch"]
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["endpoints"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["spire.spiffe.io"]
+    resources: ["clusterfederatedtrustdomains"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["spire.spiffe.io"]
+    resources: ["clusterfederatedtrustdomains/finalizers"]
+    verbs: ["update"]
+  - apiGroups: ["spire.spiffe.io"]
+    resources: ["clusterfederatedtrustdomains/status"]
+    verbs: ["get", "patch", "update"]
+  - apiGroups: ["spire.spiffe.io"]
+    resources: ["clusterspiffeids"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["spire.spiffe.io"]
+    resources: ["clusterspiffeids/finalizers"]
+    verbs: ["update"]
+  - apiGroups: ["spire.spiffe.io"]
+    resources: ["clusterspiffeids/status"]
+    verbs: ["get", "patch", "update"]
+  - apiGroups: ["spire.spiffe.io"]
+    resources: ["clusterstaticentries"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  - apiGroups: ["spire.spiffe.io"]
+    resources: ["clusterstaticentries/finalizers"]
+    verbs: ["update"]
+  - apiGroups: ["spire.spiffe.io"]
+    resources: ["clusterstaticentries/status"]
+    verbs: ["get", "patch", "update"]
+```
+
+```yaml
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: spire-server
+rules:
+  - apiGroups: [authentication.k8s.io]
+    resources: [tokenreviews]
+    verbs:
+      - get
+      - watch
+      - list
+      - create
+  - apiGroups: [""]
+    resources: [nodes, pods]
+    verbs:
+      - get
+      - list
+```
+
+```yaml
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: spire-agent
+subjects:
+  - kind: ServiceAccount
+    name: spire-agent
+    namespace: <operand-namespace>
+roleRef:
+  kind: ClusterRole
+  name: spire-agent
+  apiGroup: rbac.authorization.k8s.io
+```
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: spire-controller-manager
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: spire-controller-manager
+subjects:
+- kind: ServiceAccount
+  name: spire-server
+  namespace: <operand-namespace>
+```
+
+```yaml
+# Binds above cluster role to spire-server service account
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: spire-server
+
+subjects:
+- kind: ServiceAccount
+  name: spire-server
+  namespace: <operand-namespace>
+roleRef:
+  kind: ClusterRole
+  name: spire-server
+  apiGroup: rbac.authorization.k8s.io
+```
+
+```yaml 
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: spire-controller-manager-leader-election
+  namespace: <operand-namespace>
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+
+```
+
+```yaml
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: spire-bundle
+  namespace: <operand-namespace>
+rules:
+  - apiGroups: [""]
+    resources: [configmaps]
+    resourceNames: [spire-bundle]
+    verbs:
+      - get
+      - patch
+```
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: spire-controller-manager-leader-election
+  namespace: <operand-namespace>
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: spire-controller-manager-leader-election
+
+subjects:
+- kind: ServiceAccount
+  name: spire-server
+  namespace: <operand-namespace>
+
+```
+
+```yaml 
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: spire-bundle
+  namespace: <operand-namespace>
+
+subjects:
+- kind: ServiceAccount
+  name: spire-server
+  namespace: <operand-namespace>
+roleRef:
+  kind: Role
+  name: spire-bundle
+  apiGroup: rbac.authorization.k8s.io
+```
+
+3. Service for `spire` operands.
+```yaml 
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: spire-spiffe-oidc-discovery-provider
+  namespace: <operand-namespace>
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: spiffe-oidc-discovery-provider
+    app.kubernetes.io/instance: spire
+```
+
+```yaml 
+apiVersion: v1
+kind: Service
+metadata:
+  name: spire-controller-manager-webhook
+  namespace: <operand-namespace>
+  labels:
+    app.kubernetes.io/name: spire-server
+spec:
+  type: ClusterIP
+  ports:
+    - name: https
+      port: 443
+      targetPort: https
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: server
+    app.kubernetes.io/instance: spire
+
+```
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: spire-server
+  namespace: <operand-namespace>
+  labels:
+    app.kubernetes.io/name: spire-server
+spec:
+  type: ClusterIP
+  ports:
+    - name: grpc
+      port: 443
+      targetPort: grpc
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: spire-server
+    app.kubernetes.io/instance: spire
+```
+4. DaemonSets for `spire-agents` and `spiffe-csi-driver`
+```yaml
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: spire-spiffe-csi-driver
+  namespace: <operand-namespace>
+  labels:
+    helm.sh/chart: spiffe-csi-driver-0.1.0
+    app.kubernetes.io/name: spiffe-csi-driver
+    app.kubernetes.io/instance: spire
+    app.kubernetes.io/version: "0.2.3"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: spiffe-csi-driver
+      app.kubernetes.io/instance: spire
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: spiffe-csi-driver
+        app.kubernetes.io/instance: spire
+    spec:
+      serviceAccountName: spire-spiffe-csi-driver
+      
+      initContainers:
+        - name: set-context
+          command:
+            - chcon
+            - '-Rvt'
+            - container_file_t
+            - spire-agent-socket/
+          image: registry.access.redhat.com/ubi9:latest
+          imagePullPolicy: Always
+          securityContext:
+            capabilities:
+              drop:
+                - all
+            privileged: true
+          volumeMounts:
+            - name: spire-agent-socket-dir
+              mountPath: /spire-agent-socket
+          terminationMessagePolicy: File
+          terminationMessagePath: /dev/termination-log
+      containers:
+        # This is the container which runs the SPIFFE CSI driver.
+        - name: spiffe-csi-driver
+          image: <SPIFFE-CSI-IMAGE-NAME>
+          imagePullPolicy: IfNotPresent
+          args: [
+            "-workload-api-socket-dir", "/spire-agent-socket",
+            "-plugin-name", "csi.spiffe.io",
+            "-csi-socket-path", "/spiffe-csi/csi.sock",
+          ]
+          env:
+            # The CSI driver needs a unique node ID. The node name can be
+            # used for this purpose.
+            - name: MY_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          volumeMounts:
+            # The volume containing the SPIRE agent socket. The SPIFFE CSI
+            # driver will mount this directory into containers.
+            - mountPath: /spire-agent-socket
+              name: spire-agent-socket-dir
+              readOnly: true
+            # The volume that will contain the CSI driver socket shared
+            # with the kubelet and the driver registrar.
+            - mountPath: /spiffe-csi
+              name: spiffe-csi-socket-dir
+            # The volume containing mount points for containers.
+            - mountPath: /var/lib/kubelet/pods
+              mountPropagation: Bidirectional
+              name: mountpoint-dir
+          securityContext:
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - all
+            privileged: true
+          resources:
+            {}
+        # This container runs the CSI Node Driver Registrar which takes care
+        # of all the little details required to register a CSI driver with
+        # the kubelet.
+        - name: node-driver-registrar
+          image: registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.9.4
+          imagePullPolicy: IfNotPresent
+          args: [
+            "-csi-address", "/spiffe-csi/csi.sock",
+            "-kubelet-registration-path", "/var/lib/kubelet/plugins/csi.spiffe.io/csi.sock",
+            "-health-port", "9809"
+          ]
+          volumeMounts:
+            # The registrar needs access to the SPIFFE CSI driver socket
+            - mountPath: /spiffe-csi
+              name: spiffe-csi-socket-dir
+            # The registrar needs access to the Kubelet plugin registration
+            # directory
+            - name: kubelet-plugin-registration-dir
+              mountPath: /registration
+          ports:
+            - containerPort: 9809
+              name: healthz
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: healthz
+            initialDelaySeconds: 5
+            timeoutSeconds: 5
+          resources:
+            {}
+      volumes:
+        - name: spire-agent-socket-dir
+          hostPath:
+            path: /run/spire/agent-sockets
+            type: DirectoryOrCreate
+        # This volume is where the socket for kubelet->driver communication lives
+        - name: spiffe-csi-socket-dir
+          hostPath:
+            path: /var/lib/kubelet/plugins/csi.spiffe.io
+            type: DirectoryOrCreate
+        # This volume is where the SPIFFE CSI driver mounts volumes
+        - name: mountpoint-dir
+          hostPath:
+            path: /var/lib/kubelet/pods
+            type: Directory
+        # This volume is where the node-driver-registrar registers the plugin
+        # with kubelet
+        - name: kubelet-plugin-registration-dir
+          hostPath:
+            path: /var/lib/kubelet/plugins_registry
+            type: Directory
+```
+
+```yaml 
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: spire-agent
+  namespace: <operand-namespace>
+  labels:
+    app.kubernetes.io/name: spire-agent
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agent
+      app.kubernetes.io/instance: spire
+      app.kubernetes.io/component: default
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: spire-agent
+        checksum/config: 6843076b7bd6f18317742c45125cfdea234ded3126f63cc508cab7ce9bd6f505
+      labels:
+        app.kubernetes.io/name: agent
+        app.kubernetes.io/instance: spire
+        app.kubernetes.io/component: default
+    spec:
+      hostPID: true
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      serviceAccountName: spire-agent
+      securityContext:
+        {}
+      
+      initContainers:
+        - name: ensure-alternate-names
+          image: <IMAGE-NAME>
+          imagePullPolicy: Always
+          command: ["bash", "-xc"]
+          args:
+            - |
+              cd /run/spire/agent-sockets
+              L=`readlink socket`
+              [ "x$L" != "xspire-agent.sock" ] && rm -f socket
+              [ ! -L socket ] && ln -s spire-agent.sock socket
+              L=`readlink api.sock`
+              [ "x$L" != "xspire-agent.sock" ] && rm -f api.sock
+              [ ! -L api.sock ] && ln -s spire-agent.sock api.sock
+              [ -L spire-agent.sock ] && rm -f spire-agent.sock
+              exit 0
+          resources:
+            {}
+          volumeMounts:
+            - name: spire-agent-socket-dir
+              mountPath: /run/spire/agent-sockets
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+      containers:
+        - name: spire-agent
+          image: <SPIFFE-CSI-IMAGE-NAME>
+          imagePullPolicy: IfNotPresent
+          args: ["-config", "/opt/spire/conf/agent/agent.conf"]
+          securityContext:
+            {}
+          env:
+            - name: PATH
+              value: "/opt/spire/bin:/bin"
+            - name: MY_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          ports:
+            - containerPort: 9982
+              name: healthz
+          volumeMounts:
+            - name: spire-config
+              mountPath: /opt/spire/conf/agent
+              readOnly: true
+            - name: spire-bundle
+              mountPath: /run/spire/bundle
+              readOnly: true
+            - name: spire-agent-socket-dir
+              mountPath: /tmp/spire-agent/public
+              readOnly: false
+            - name: spire-token
+              mountPath: /var/run/secrets/tokens
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: healthz
+            initialDelaySeconds: 15
+            periodSeconds: 60
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: healthz
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            {}
+      volumes:
+        - name: spire-config
+          configMap:
+            name: spire-agent
+        - name: spire-agent-admin-socket-dir
+          emptyDir: {}
+        - name: spire-bundle
+          configMap:
+            name: spire-bundle
+        - name: spire-token
+          projected:
+            sources:
+            - serviceAccountToken:
+                path: spire-agent
+                expirationSeconds: 7200
+                audience: spire-server
+        - name: spire-agent-socket-dir
+          hostPath:
+            path: /run/spire/agent-sockets
+            type: DirectoryOrCreate
+
+```
+
+5. Deployment for `spire-spiffe-oidc-discovery-provider`
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spire-spiffe-oidc-discovery-provider
+  namespace: <operand-namespace>
+  labels:
+    app.kubernetes.io/name: spiffe-oidc-discovery-provider
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: spiffe-oidc-discovery-provider
+      app.kubernetes.io/instance: spire
+  template:
+    metadata:
+      annotations:
+      labels:
+        component: oidc-discovery-provider
+    spec:
+      serviceAccountName: spire-spiffe-oidc-discovery-provider
+      securityContext:
+        {}
+      initContainers:
+      containers:
+        - name: spiffe-oidc-discovery-provider
+          securityContext:
+            {}
+          image: <IMAGE-NAME>
+          imagePullPolicy: IfNotPresent
+          args:
+            - -config
+            - /run/spire/oidc/config/oidc-discovery-provider.conf
+          ports:
+            - containerPort: 8008
+              name: healthz
+          volumeMounts:
+            - name: spiffe-workload-api
+              mountPath: /spiffe-workload-api
+              readOnly: true
+            - name: spire-oidc-sockets
+              mountPath: /run/spire/oidc-sockets
+              readOnly: false
+            - name: spire-oidc-config
+              mountPath: /run/spire/oidc/config/oidc-discovery-provider.conf
+              subPath: oidc-discovery-provider.conf
+              readOnly: true
+            - name: certdir
+              mountPath: /certs
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: healthz
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: healthz
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            {}
+        - name: nginx
+          securityContext:
+            {}
+          image: <IMAGE-NAME>
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              name: http
+          volumeMounts:
+            - name: spire-oidc-sockets
+              mountPath: /run/spire/oidc-sockets
+              readOnly: true
+            - name: spire-oidc-config
+              mountPath: /etc/nginx/conf.d/default.conf
+              subPath: default.conf
+              readOnly: true
+            - name: nginx-tmp
+              mountPath: /tmp
+              readOnly: false
+          resources:
+            {}
+      volumes:
+        - name: spiffe-workload-api
+          csi:
+            driver: "csi.spiffe.io"
+            readOnly: true
+        - name: spire-oidc-sockets
+          emptyDir: {}
+        - name: spire-oidc-config
+          configMap:
+            name: spire-spiffe-oidc-discovery-provider
+        - name: nginx-tmp
+          emptyDir: {}
+        - name: certdir
+          emptyDir: {}
+```
+
+6. StatefulSet for `spire-server`
+```yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: spire-server
+  namespace: <operand-namespace>
+  labels:
+    app.kubernetes.io/name: spire-server
+spec:
+  replicas: 1
+  serviceName: spire-server
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: spire-server
+      app.kubernetes.io/instance: spire
+      app.kubernetes.io/component: spire-server
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: spire-server
+      labels:
+        app.kubernetes.io/name: spire-server
+    spec:
+      serviceAccountName: spire-server
+      shareProcessNamespace: true
+      securityContext:
+        {}
+      
+      containers:
+        - name: spire-server
+          securityContext:
+            {}
+          image: ghcr.io/spiffe/spire-server:1.9.6
+          imagePullPolicy: IfNotPresent
+          args:
+            - -expandEnv
+            - -config
+            - /run/spire/config/server.conf
+          env:
+          - name: PATH
+            value: "/opt/spire/bin:/bin"
+          ports:
+            - name: grpc
+              containerPort: 8081
+              protocol: TCP
+            - containerPort: 8080
+              name: healthz
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: healthz
+            failureThreshold: 2
+            initialDelaySeconds: 15
+            periodSeconds: 60
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: healthz
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            {}
+          volumeMounts:
+            - name: spire-server-socket
+              mountPath: /tmp/spire-server/private
+              readOnly: false
+            - name: spire-config
+              mountPath: /run/spire/config
+              readOnly: true
+            - name: spire-data
+              mountPath: /run/spire/data
+              readOnly: false
+            - name: server-tmp
+              mountPath: /tmp
+              readOnly: false
+        
+        - name: spire-controller-manager
+          securityContext:
+            {}
+          image: <IMAGE_NAME>
+          imagePullPolicy: IfNotPresent
+          args:
+            - --config=controller-manager-config.yaml
+          env:
+            - name: ENABLE_WEBHOOKS
+              value: "true"
+          ports:
+            - name: https
+              containerPort: 9443
+              protocol: TCP
+            - containerPort: 8083
+              name: healthz
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: healthz
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: healthz
+          resources:
+            {}
+          volumeMounts:
+            - name: spire-server-socket
+              mountPath: /tmp/spire-server/private
+              readOnly: true
+            - name: controller-manager-config
+              mountPath: /controller-manager-config.yaml
+              subPath: controller-manager-config.yaml
+              readOnly: true
+            - name: spire-controller-manager-tmp
+              mountPath: /tmp
+              subPath: spire-controller-manager
+              readOnly: false
+      volumes:
+        - name: server-tmp
+          emptyDir: {}
+        - name: spire-config
+          configMap:
+            name: spire-server
+        - name: spire-server-socket
+          emptyDir: {}
+        - name: spire-controller-manager-tmp
+          emptyDir: {}
+        - name: controller-manager-config
+          configMap:
+            name: spire-controller-manager
+  volumeClaimTemplates:
+    - metadata:
+        name: spire-data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi
+```
 
 ### Risks and Mitigations
 
@@ -500,10 +1316,6 @@ None.
   - Measure identity issuance overhead
   - Benchmark credential management performance
 
-- **Security Testing**
-  - Vulnerability scanning
-  - Penetration testing
-  - Compliance checks
 
 ## Graduation Criteria
 
