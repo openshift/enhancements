@@ -66,7 +66,7 @@ A new zero-trust-workload-identity-manager operator will manage the deployment a
 - `SPIFFE CSI Driver` as a DaemonSet to inject workload identities (`SVIDs`) into pods.
 - Resources `(RBAC, ServiceAccount, ClusterRole, etc.)` are created from static manifest templates.
 
-The operator will create and manage the following resources to deploy SPIRE and SPIFFE components:
+The operator will create and manage the following resources to deploy SPIRE and SPIFFE components, Please refer `Implementation Details/Notes/Constraints` section for more details:
 
 1. Core Infrastructure
     - Namespaces:
@@ -145,6 +145,75 @@ Refer below links for more information on the labels used
 - [Well-Known Labels, Annotations and Taints](https://kubernetes.io/docs/reference/labels-annotations-taints/)
 
 ### Workflow Description
+
+#### 1. **Operator Installation**  
+- **Action**: Install the operator via **OpenShift OperatorHub** or CLI.  
+- **Result**: The operator deploys:  
+  - **SPIRE Server** (`StatefulSet`) as the certificate authority (CA).  
+  - **SPIRE Agents** (`DaemonSet`) for per-node workload attestation.  
+  - **SPIFFE CSI Driver** (`DaemonSet`) to inject SVIDs into pods.  
+  - **SPIFFE OIDC Provider** (`Deployment`) for OIDC token issuance.  
+
+#### 2. **Workload Deployment**  
+- **Action**: Deploy a pod with labels matching a `ClusterSPIFFEID` policy (e.g., `app: secure`).  
+- **Result**:  
+  - The SPIRE Agent on the node detects the pod and validates:  
+    1. Pod labels/annotations.  
+    2. Service account and namespace.  
+    3. Node identity (e.g., Kubernetes node UID).  
+
+#### 3. **SVID Issuance**  
+- **Action**: The SPIRE Server processes the attestation request.  
+- **Result**:  
+  - Generates a short-lived **SVID** (X.509/JWT) with a default 1-hour TTL.  
+  - Signs SVIDs using its CA or delegates to an external enterprise PKI.  
+
+#### 4. **SVID Injection**  
+- **Action**: The SPIFFE CSI Driver mounts the SVID into the pod.  
+- **Result**:  
+  - SVIDs are stored at `/var/run/secrets/spiffe` as read-only volumes.  
+  - Auto-rotated 10 minutes before expiration.  
+
+#### 5. **Secure Communication**  
+- **Action**: Workloads authenticate using SVIDs.  
+- **Result**:  
+  - **Mutual TLS (mTLS)**: Services validate each other’s SVIDs during TLS handshakes.  
+  - **OIDC Integration**: Workloads fetch tokens for external systems (e.g., Kubernetes API).  
+
+#### 6. **Advanced Scenarios**  
+- **Federated Trust**:  
+  - Define cross-cluster trust via `ClusterFederatedTrustDomains` CR.  
+  - Example: Trust workloads from `cluster-a.example` in `cluster-b.example`.  
+- **Static Identities**:  
+  - Use `ClusterStaticEntries` to pre-register identities for system components (e.g., `kube-apiserver`).  
+
+---
+
+#### Visual Workflow  
+
+```mermaid
+graph TD
+  %% 1. Operator Installation
+  A[Install Operator] -->|Deploys| B[SPIRE Server]
+  A -->|Deploys| C[SPIRE Agents]
+  A -->|Deploys| D[SPIFFE CSI Driver]
+  A -->|Creates| E[CRDs]
+
+  %% 2. Workflow
+  F[Workload] -->|Detected by| C
+  C -->|Validates Pod & Node| B
+  B -->|Issues SVID| C
+  C -->|Sends SVID| D
+  D -->|Mounts SVID to Pod| F
+
+  %% 3. Secure Communication
+  F -->|mTLS with SVID| G[Other Workload]
+  F -->|Fetches OIDC Token| H[OIDC Provider]
+
+  %% 4. Trust Federation
+  E -->|Defines Trust| B
+  B -->|Shares Trust Bundle| I[External Cluster]
+  ```
 
 ### API Extensions
 
