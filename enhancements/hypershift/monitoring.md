@@ -153,7 +153,7 @@ N/A.
 #### Failure Modes
 #### Support Procedures
 
-## Alternatives
+## Alternatives (Not Implemented)
 ### Using stack in management cluster
 #### Use the Platform monitoring stack
 Use the cluster monitoring operator platform stack to collect metrics from control plane components. This requires that we add a label to each control plane namespace and that we add a role/rolebinding to allow the prometheus service account access to services/pods.

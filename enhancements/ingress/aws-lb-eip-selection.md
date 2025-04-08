@@ -341,7 +341,7 @@ In the `IngressController` status, check the status for the following:
   oc get ingresscontroller <ingresscontroller name> -o yaml
 ```
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ## Infrastructure Needed
 

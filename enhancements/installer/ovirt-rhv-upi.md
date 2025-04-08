@@ -147,7 +147,7 @@ but also for CI, QE, Documentation, and others. Resources could be spent to impr
 IPI process; however, as already specified in the `Motivation` section, support for UPI is
 highly requested by the users.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 People not using the IPI workflow can follow the Bare Metal UPI document.
 That implies more manual work and the necessary knowledge to identify oVirt/RHV specific

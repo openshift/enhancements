@@ -221,4 +221,4 @@ This should already be consistent with standard tech preview practices.
 ## Implementation History
 
 
-## Alternatives
+## Alternatives (Not Implemented)

@@ -212,7 +212,7 @@ func ReconcileLokiStackLogStore(k8sClient client.Client, deletionTimestamp *v1.T
 ### Test Plan
 TBD
 
-## Alternatives
+## Alternatives (Not Implemented)
 TBD
 
 ### Graduation Criteria

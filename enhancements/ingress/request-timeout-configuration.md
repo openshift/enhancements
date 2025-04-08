@@ -251,6 +251,6 @@ of the value in `tlsInspectDelay`.
 - Setting the timeout too low can cause connection closure before the server or
   client has enough time to respond
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 N/A

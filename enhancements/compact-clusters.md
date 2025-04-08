@@ -261,7 +261,7 @@ on-premise clusters (which we have already started supporting for tech preview).
 We may be impacted if the Kubernetes work around master placement is reverted, which
 is very unlikely. The gates would be the only impact.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 We considered and rejected running single masters outside of RHCoS, but this loses
 a large chunk of value.

@@ -201,7 +201,7 @@ No implementation.
 
 No drawbacks.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Drop `UpgradeBlocker`
 

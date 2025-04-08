@@ -939,7 +939,7 @@ the HSTS annotation is not inadvertently applied to the HTTP route.  Do not use 
 
 ## Drawbacks
 N/A
-## Alternatives
+## Alternatives (Not Implemented)
 An abandoned alternative was discussed in the superseded document in
 enhancements/enhancements/ingress/global-options-enable-hsts.md
 

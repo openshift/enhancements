@@ -279,7 +279,7 @@ It's not entirely clear, ultimately, if OVN sbdb is the right integration point.
 
 The OVN control plane is "heavy-weight" - that is to say, it has high resource draw and is a complicated piece of software. Taking responsibility for its availability is certainly an operational burden. For end-users, however, it is a distinct advantage.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Run two copies of the CNO
 

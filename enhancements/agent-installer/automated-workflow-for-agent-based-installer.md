@@ -577,7 +577,7 @@ https://github.com/openshift-agent-team/fleeting
 
 N/A
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 The image generator could produce one image per host so that the
 settings inside each image are less complex. This approach was

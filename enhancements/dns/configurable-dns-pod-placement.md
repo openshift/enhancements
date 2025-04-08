@@ -323,7 +323,7 @@ N/A.
   the DNS DaemonSet into two DaemonSets and implements the DNS Pod placement
   API.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Approaches to configure the DNS service to prefer a node-local DNS Pod have been
 investigated.  However, preferring a node-local endpoint would not prevent

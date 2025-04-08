@@ -280,7 +280,7 @@ and tests will need to be generous when defining provisioning times. Tests and
 documentation should also be made flexible about facilities and device model
 choices to avoid physical limitations.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 People not using the IPI workflow can follow the [Equinix Metal
 UPI](https://github.com/RedHatSI/terraform-packet-openshift#openshift-via-terraform-on-packet)

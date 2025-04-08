@@ -244,7 +244,7 @@ Not applicable
 
 Customer owned networking components means the cluster cannot automatically change things about the networking during upgrade.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Not applicable
 

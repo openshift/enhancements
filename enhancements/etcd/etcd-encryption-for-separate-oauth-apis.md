@@ -185,7 +185,7 @@ See the upgrade/downgrade strategy.
 Major milestones in the life cycle of a proposal should be tracked in `Implementation
 History`.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 1. Turn off encryption before upgrading to new version and turn it on right after. It would be simple but not desirable by the end users.
 

@@ -373,7 +373,7 @@ provide reasons for not implementing this feature, to summarise:
 - We cannot supply this feature for control plane machines without replacing the control plane machines as a day 2
   operation
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 The alternative to adding support for EFA interfaces on MAPI is to reject the RFE. In this case, the end user must use
 some method outside of OpenShift to attach new instances to their clusters. This prevents the user from leveraging the

@@ -241,7 +241,7 @@ We need to have a proper upgrade strategy from our LTS version to the version th
 Given the OCP cert signing service does not allow for mTLS configuration with custom fields that the ES cluster requires, we are unable to use it so we have to implement something similar to a pre-existing service.https://bugzilla.redhat.com/show_bug.cgi?id=1925627
 None
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Continue using cert generation in disparate way
 

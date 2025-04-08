@@ -291,7 +291,7 @@ N/A
 
 * https://github.com/openshift/microshift/pull/2952
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 We could limit the ability to skip versions so that it is possible to
 go from an even version (EUS) to the next odd or even version, but not

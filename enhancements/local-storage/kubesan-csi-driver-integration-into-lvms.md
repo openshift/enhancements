@@ -469,7 +469,7 @@ Regular product support for LVMS will continue to be established through the LVM
 - **Phase 6**: General Availability (GA) release with proven stability and performance in production environments.
 
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 - Continue using TopoLVM exclusively for local storage provisioning.
 - Evaluate and integrate other CSI drivers that support shared storage.

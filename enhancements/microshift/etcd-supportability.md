@@ -231,7 +231,7 @@ N/A (this section is about API extension support)
 - Obsolete [enhancement describing data directory changes](https://github.com/openshift/enhancements/pull/1356)
 - [Defragmentation enhancement](https://github.com/openshift/enhancements/pull/1350)
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 We considered using snapshots for backups immediately, but decided
 that because we need something that works when the database is offline

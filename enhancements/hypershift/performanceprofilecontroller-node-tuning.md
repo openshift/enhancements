@@ -384,7 +384,7 @@ N/A.
 
 #### Support Procedures
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ## Design Details
 

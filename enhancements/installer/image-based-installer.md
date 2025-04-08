@@ -330,7 +330,7 @@ N/A
 
 N/A
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Downloading the installation ISO from Assisted Installer SaaS
 

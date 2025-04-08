@@ -217,7 +217,7 @@ Inspect must-gather, driver and operator logs. If the issue is related to the co
 
 - 2024-02-09: Initial draft
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 #### Alternative 1: Add a specific API field for the maximum limit of snapshots
 

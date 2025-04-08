@@ -346,7 +346,7 @@ TODO
 
 TODO
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 TODO
 

@@ -866,7 +866,7 @@ check the AWS CCM logs of the leader CCM pod for errors in provisioning the load
 oc logs -n openshift-cloud-controller-manager aws-cloud-controller-manager-86b68698cd-wfhgz
 ```
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Day 1 `default` IngressController Subnet Selection via Installer Manifests Alternative
 

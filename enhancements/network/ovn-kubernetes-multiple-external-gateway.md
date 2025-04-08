@@ -173,5 +173,5 @@ N/A
 ## Implementation History
 First implementation targeting OpenShift 4.14 in GA capacity.
 
-## Alternatives
+## Alternatives (Not Implemented)
 Currently the annotation based implementation is the only alternative available to this enhancement.

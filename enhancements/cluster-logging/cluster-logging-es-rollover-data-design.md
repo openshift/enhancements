@@ -191,7 +191,7 @@ Downgrades should be discouraged unless we know for certain the Elasticsearch ve
 The drawback to not implementing this change is that Cluster Logging will:
 * Continue to experience performance and scaling issues directly related to a less then optimal data schema
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 There are no current alternatives
 

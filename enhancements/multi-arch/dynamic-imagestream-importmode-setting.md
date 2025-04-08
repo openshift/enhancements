@@ -500,7 +500,7 @@ affected customers about the remediation.
     setting, it will be communicated through email to affected
     customers informing them of the remediation.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 - Manual setting of import mode through editing
   imagestreams or patching.

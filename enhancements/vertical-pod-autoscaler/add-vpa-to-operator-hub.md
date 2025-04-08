@@ -190,7 +190,7 @@ the VPA must restart a workload for the limit adjustments to take effect. Some
 customers may consider this workflow to be too disruptive and may choose not to
 deploy the VPA.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Many workloads support horizontal scaling and could use the Horizontal Pod
 Autoscaler (HPA) instead to meet their scalability goals. Not every workload is

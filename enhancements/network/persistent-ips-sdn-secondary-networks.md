@@ -697,7 +697,7 @@ Our proposal is for the KubeVirt validating webhook to reject VM foreground/
 orphaned delete propagations **whenever** it features an interface for which
 a persistent IP was requested.
 
-#### Alternatives for preventing the premature release of an IP to the pool
+#### Alternatives (Not Implemented) for preventing the premature release of an IP to the pool
 
 We could also decorate the `IPAMClaim` with a finalizer, and remove it once
 the corresponding VMI is deleted. The finalizer would be set by whoever creates
@@ -788,7 +788,7 @@ be thrown, and the error logged.
 We can also create some `condition`s to highlight some specific errors in the
 `IPAMClaim` - e.g. IP pool is full, etc.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Have OVN-Kubernetes create the `IPAMClaim`
 This alternative does **not** require the `IPAMClaim` CRD to have a status

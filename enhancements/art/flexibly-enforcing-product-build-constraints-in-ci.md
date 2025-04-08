@@ -289,7 +289,7 @@ ART equivalent images upstream.
   If an image does not need to install any RPMs, they should be able to docker build the upstream Dockerfiles directly.
   There are means by which we can try to address this, but this enhancement does not attempt to.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 1. Eliminating centralized configuration of golang versions and allowing upstream teams to choose their own
    ART equivalent versions freely and indefinitely. Announce deprecation of ART equivalents as they become

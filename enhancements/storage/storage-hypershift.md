@@ -946,7 +946,7 @@ Major milestones in the life cycle of a proposal should be tracked in `Implement
 History`.
 -->
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Add CSI driver + csi-snapshot-controller creation directly to control-plane-operator
 

@@ -154,4 +154,4 @@ These PRs enable the CBO on the AWS platform:
 * https://github.com/openshift/cluster-baremetal-operator/pull/301
 * https://github.com/openshift/cluster-baremetal-operator/pull/304
 
-## Alternatives
+## Alternatives (Not Implemented)

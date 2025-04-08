@@ -193,7 +193,7 @@ Not applicable.
 The internal registry has always been a core part of OpenShift.
 This enhancement furthers the case that it may be OK to remove the registry.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Continue the current path of defauling storage to `EmptyDir` on baremetal, and
 bring the registry up as `Managed`. This was discussed in

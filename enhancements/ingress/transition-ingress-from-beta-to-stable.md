@@ -285,7 +285,7 @@ N/A.
 * 2020-06-17, the Ingress API graduated to `networking.k8s.io/v1` (https://github.com/kubernetes/kubernetes/pull/89778).
 * 2020-06-25, leading up to Kubernetes 1.19, the v1beta1 versions of the Ingress API were deprecated (https://github.com/kubernetes/kubernetes/pull/92484).
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 An alternative to supporting the `networking.k8s.io/v1` API version would be to
 continue using the `networking.k8s.io/v1beta1` API version, which would require

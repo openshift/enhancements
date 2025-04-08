@@ -135,7 +135,7 @@ Not yet started
 * User can shoot self in foot.
 * Possible future conflicts/confusion between the "recommended" way and the "tuning" way to accomplish a given result.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 * Use unmanaged logging, allows free-for-all hacking on fluentd configuration. Possible now.
 * Design generic API for output tuning.

@@ -208,7 +208,7 @@ N/A
 - If the user attempts to set the quota to a lower value than the current (e.g. 21GiB -> 16GiB), the API will not accept the value and return an error.
 - If the value is accepted, an etcd rollout will automatically occur and re-render the etcd podspec with the new quota - this will not cause the etcd instances to immediately reserve disk space, it will only allow them to grow up to the new value.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Discrete Profile values
 

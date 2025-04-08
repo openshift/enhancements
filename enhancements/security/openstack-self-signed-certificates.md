@@ -198,6 +198,6 @@ This should not affect the Upgrade/Downgrade functionality.
 1. This only fixes the problem for OpenStack
 2. All services patches with the CA cert in OpenShift now have access to the `cloud.conf`
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 - [X509-trust](https://github.com/openshift/enhancements/pull/115)

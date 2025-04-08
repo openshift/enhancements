@@ -230,7 +230,7 @@ Major milestones in the life cycle of a proposal should be tracked in `Implement
 
 TBD
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 None
 

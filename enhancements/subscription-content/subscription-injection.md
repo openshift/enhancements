@@ -629,7 +629,7 @@ on the cluster and the associated injected volumes will remain intact.
 - Cluster admins need to manually obtain their entitlement keys, add them to the cluster, and
   configure appropriate `ClusterBundle` objects.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Document what we have
 

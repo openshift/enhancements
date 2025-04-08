@@ -304,7 +304,7 @@ NA
 
 4.11: Initial implementation
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Implement this somewhat like the
 [existing workaround](https://github.com/yboaron/kepalived-v6) - create a

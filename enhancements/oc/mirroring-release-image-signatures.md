@@ -243,7 +243,7 @@ That's convenient when it works, but increases the chance that users are surpris
 The narrow release image signature scoping does not extend gracefully if we need to gather multiple types of information from the wider internet.
 For example `--apply-release-image-signature --apply-cincinnati-operator --apply-image-content-source-policy ...` is a lot to type.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Narrowly for release signatures, we have discussed serving signatures via the Cincinnati graph JSON.
 However, even in that case, users would have to gather information from the wider internet (e.g. graph snapshots from Red Hat's Cincinnati service) to feed their in-cluster Cincinnati, so I don't see a way around something like this enhancement to facilitate that capture.

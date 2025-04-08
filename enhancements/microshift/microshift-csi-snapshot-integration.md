@@ -450,6 +450,6 @@ If you need to delve deeper, the logs can be examined with the following command
 
 ## Implementation History
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 MicroShift design does not support CSI snapshotting.

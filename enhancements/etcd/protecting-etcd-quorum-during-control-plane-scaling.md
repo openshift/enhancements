@@ -418,7 +418,7 @@ No implementation of this proposal currently exists.
   This may mean additional complexity if this mechanism were to be needed in the Centrally Managed Infrastructure
   project or if OpenShift were to migrate to Cluster API.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Use a separate component for this mechanism
 

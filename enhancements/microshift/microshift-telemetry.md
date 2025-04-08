@@ -320,7 +320,7 @@ N/A
 ## Support Procedures
 N/A
 
-## Alternatives
+## Alternatives (Not Implemented)
 * Insights API was also considered for this enhancement. The Insights API is
   intended to analyze clusters and extract data to provide recommendations.
   After a report is sent a series of pipelines take action to produce different

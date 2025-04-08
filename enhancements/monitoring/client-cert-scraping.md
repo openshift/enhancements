@@ -117,7 +117,7 @@ Since service monitor's don't have to change, we don't need risk destabilizing c
 
 I have to stop here to make dinner.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Similar to the `Drawbacks` section the `Alternatives` section is used to
 highlight and record other possible approaches to delivering the value proposed

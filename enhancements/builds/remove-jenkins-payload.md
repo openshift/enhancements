@@ -228,7 +228,7 @@ Cluster admins are also accustomed to updating Jenkins by updating their OpenShi
 We will continue to maintain a Jenkins imagestream and use ImageChange triggers on supported templates.
 Customers will need to ensure that their Jenkins deployments use the ImageChange trigger to maintain this capability.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 The only meaningful alternative is to keep the status quo and deliver Jenkins via the payload.
 

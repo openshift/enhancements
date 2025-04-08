@@ -590,7 +590,7 @@ kind](https://github.com/kubernetes-sigs/gateway-api/blob/master/apis/v1alpha2/h
 defines no equivalent API field; this gap could impede users from migrating from
 the Route API to Gateway API.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Require explicit `spec.host` and multiple Routes per domain (the status quo)
 

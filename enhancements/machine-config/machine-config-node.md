@@ -501,7 +501,7 @@ None.
 As of Openshift 4.15, the feature went under the tech-preview FeatureGate. The basic functionality was implemented and provides users with a way to track node progressions during updates.
 In 4.16, the UncordonedNode column was added to the -o wide output. Many bugs were fixed as well in this version with creation and deletion of nodes.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Implementation wise, there has been discussion of who should own these objects: the MachineConfigDaemon or a new Controller called the MachineStateController. While either approach would work, there are positive and negative impacts to each.
 

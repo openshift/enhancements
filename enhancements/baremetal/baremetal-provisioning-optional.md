@@ -188,7 +188,7 @@ Additionally, removing the provisioning network means that the BMC's
 need to reachable from an external network, which may not be suitable in
 some environments.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 We originally considered and rejected the idea that we could just leave
 fields blank to indicate a particular feature should be turned off. For

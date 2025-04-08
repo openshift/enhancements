@@ -209,7 +209,7 @@ N/A.
 #### Failure Modes
 #### Support Procedures
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 
 ## Design Details

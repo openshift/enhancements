@@ -122,6 +122,6 @@ both MCO and installer, with the MCO one needed first.
 
 We're not at a point where we can fully manage that Secret from the MCO as we don't run early enough to support UPI needing ignition configs. This drawbacks is going to be later caputured in a GitHub issue and/or enhacement here where we would like to have the installer use the MAO to provision the control plane.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Most notable alternative is https://github.com/openshift/machine-config-operator/issues/683#issuecomment-493193902 but it's far from being something we could implement during one release as it requires changing how the MAO work.

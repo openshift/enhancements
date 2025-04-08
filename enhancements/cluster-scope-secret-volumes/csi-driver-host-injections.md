@@ -416,7 +416,7 @@ N/A
 
 N/A
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Operator/Controller solutions for specific API Object types, like say OpenShift Builds, would not require a CSI driver/
 plugin solution.  But the call for a generic solution around host/node level injection/consumption is clear and

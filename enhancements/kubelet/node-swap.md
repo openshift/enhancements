@@ -297,7 +297,7 @@ See [KEP-2400: Drawbacks].
 
 [KEP-2400: Drawbacks]: https://github.com/kubernetes/enhancements/blob/master/keps/sig-node/2400-node-swap/README.md#drawbacks
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 See [KEP-2400: Alternatives].
 

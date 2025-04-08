@@ -179,7 +179,7 @@ one fell swoop.
 For example, as part of the multi-arch work, early adopters have requested that since samples exist out of the box for x86
 they should as well for s390x or ppc64le.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 See the `Non-Goals` section for items that could also be classified as `Alternatives`.
 

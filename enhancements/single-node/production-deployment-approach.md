@@ -461,7 +461,7 @@ History`.
    communicate the relevant limitations and the approaches to deal
    with them clearly.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Single-node deployments using a cluster profile
 

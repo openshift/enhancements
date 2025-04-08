@@ -388,7 +388,7 @@ TBD
 - A Release controller has been setup to generate nightly payloads and is running an e2e informing job. More will be added in the future.
 - oc commands in 4.11 have support for creating, mirroring and extracting from heterogeneous payloads
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 The alternative to a heterogeneous architecture cluster would be having multiple clusters with workloads communicating between each other but this
 would have latency and cost implications not to mention the additional failure mode of cluster connectivity.

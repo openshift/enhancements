@@ -330,7 +330,7 @@ appNetUtil Library:
 
 ## Drawbacks
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ## Infrastructure Needed [optional]
 

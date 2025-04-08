@@ -172,7 +172,7 @@ N/A
 
 N/A
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Other integration options for 3rd party IAM exist, but the complexity involved in
 deploying and maintaining them is reportedly considerable.

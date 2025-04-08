@@ -186,7 +186,7 @@ There are no major milestones in the implementation history.
 
 There should not be any significant drawbacks. The possible drawback is that the `pull-secret` update will not take place during the migration window (possible problems are described above). The original secret will continue to work and we will notify user (via alert as described above) and the procedure will need to be repeated.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 - In the future, we may have more flow of data from the OCM API to a cluster and we will revisit if we need a dedicated operator for such flows. However, we do not want to add an entirely new operator for the `pull-secret` flow today.
 

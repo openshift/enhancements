@@ -162,7 +162,7 @@ Not applicable; this enhancement makes no API Extensions.
 
 Migration to multi-arch is implemented through a cluster upgrade. A bug that might be introduced unexpectedly by this enhancement could lead to failures on upgrading an cluster and then the migration that gets blocked.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 An alternative to the above approach is extending `ClusterOperator.status.version` in `openshift.api` with a `architecture` or `image` field.
 Then operators produce the new field that is consumed by CVO.

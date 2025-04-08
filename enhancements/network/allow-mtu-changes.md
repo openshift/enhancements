@@ -353,7 +353,7 @@ end veth interface.
 
 ## Drawbacks
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 * An alternative was considered to perform the MTU change "live", rolling out
   the ovnkube-node daemon set with a new MTU value and changing all the running

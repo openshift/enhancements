@@ -287,5 +287,5 @@ NA
 https://github.com/openshift/cluster-network-operator/pull/2076
 https://github.com/openshift/cluster-network-operator/pull/2154
 https://github.com/openshift/cluster-network-operator/pull/1874
-## Alternatives
+## Alternatives (Not Implemented)
 NA

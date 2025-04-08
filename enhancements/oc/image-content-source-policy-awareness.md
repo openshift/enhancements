@@ -124,7 +124,7 @@ Given a `mirrored-registry.example.com/repo/release:tag`, mirrored from `registr
     the two files into a single flag, because enough users are already using the signature-to-dir flag.
     In the absence of the flag, the ICSP file will be written to a configured path or current directory.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Added logic in `oc adm release mirror|info|extract` to replace the `registry/repo/name` of a referenced image with a user-given image.  This
 worked, but was a hack.  ICSP awareness needs to be added.

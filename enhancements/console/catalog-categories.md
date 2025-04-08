@@ -181,7 +181,7 @@ None
 
 - As soon as the admin customizes the Developer Catalog categories, a cluster update will not add new default categories or drop existing categories.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 - Stay with non-configable static categories.
 - Introduce a new CRD.

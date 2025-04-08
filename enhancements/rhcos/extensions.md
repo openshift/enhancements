@@ -104,7 +104,7 @@ Writing containers should be preferred - but, we cannot do that all at once, for
 
 The MCO will update the OS and extensions as one unit.  All shipped extensions will have been tested with the same version of the host.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Multiple OS builds: Becomes a combinatorial nightmare.
 

@@ -387,7 +387,7 @@ the logging API in part formalizes the unsupported annotation.
 Finally,
 [openshift/cluster-ingress-operator#374](https://github.com/openshift/cluster-ingress-operator/pull/374) implements this enhancement.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Cluster Logging Log Forwarding API
 

@@ -307,7 +307,7 @@ Most modern shells include an alias feature that could be used to mitigate this,
 
 One major drawback is that Windows users will require administrative access to their machines to install plugins. See [this issue](https://github.com/kubernetes-sigs/krew/issues/378) for more information.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 * An addition to `oc plugin` was originally proposed and prototyped, but once `krew`-compatibility was successfully implemented in the prototype, we could leverage upstream efforts instead of creating something new
 * ["Uc" PoC by Hiram](https://github.com/chirino/uc) - manages Kubernetes CLI clients with an online catalog of releases.

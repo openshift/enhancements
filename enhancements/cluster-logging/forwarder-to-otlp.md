@@ -195,7 +195,7 @@ Not Applicable since this adds a new feature
 
 ## Support Procedures
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Wait for the upstream collector project to implement OTLP sink
 

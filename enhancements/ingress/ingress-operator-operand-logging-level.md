@@ -225,7 +225,7 @@ N/A
 ## Drawbacks
 
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 * Don't provide any Ingress logging level APIs for the operator and router (current behavior)
 * Raise current verbosity of the Ingress Operator and router (not desirable)

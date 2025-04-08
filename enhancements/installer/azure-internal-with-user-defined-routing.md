@@ -242,6 +242,6 @@ This configuration will only be supported for new installations and therefore ha
 
 Highlighted in [risks][#Risks-and-Mitigations]
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 None yet.

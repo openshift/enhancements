@@ -259,6 +259,6 @@ pod makes it hard for the Prometheus to monitor Windows nodes. The
 limitation of not able to run windows_exporter on Windows nodes as a pod is
 because of support reasons as mentioned in the [WMCO_enhancement](https://github.com/openshift/enhancements/blob/master/enhancements/windows-containers/windows-machine-config-operator.md#justification).
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 None known.

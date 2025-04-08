@@ -145,7 +145,7 @@ TODO
 
 TODO
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Defragmentation from cron
 This approach would have the defragmentation condition(s) checked via a cron-job. When Microshift is installed, the cron-job(s) could be added to the tab and the system would handle the timing of the pure periodic and/or the threshold calculation.

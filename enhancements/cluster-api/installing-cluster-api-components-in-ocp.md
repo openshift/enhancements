@@ -261,7 +261,7 @@ To detect the failure modes in a support situation, admins can look at the clust
   * [Cluster API Integration](https://github.com/openshift/enhancements/blob/master/enhancements/machine-api/cluster-api-integration.md)
 
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 * **Extend CVO capabilities to selectively deploy CAPI providers manifests**
   * *PROs*: this would allow us to directly apply the CAPI manifests from the CAPI providers repositories `/manifests` folder by leveraging CVO capabilities

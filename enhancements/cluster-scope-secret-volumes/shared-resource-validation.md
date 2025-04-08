@@ -476,7 +476,7 @@ Initial submission of this EP
 
 - Customers prove inexplicably resistant to reserving "openshift-" naming prefixes for Shared Resources (though they seem to have accepted similar restrictions for namespaces)
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 First, currently see no reasons to use the older method (like in the early 3.0 days) of an admission plugin inside openshift-apiserver
 for validation, like you see for older API like Builds, DeploymentConfigs, ImageStreams, and Templates, could be found.

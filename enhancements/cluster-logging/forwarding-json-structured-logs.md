@@ -262,7 +262,7 @@ Both CLO and ELO must be upgraded before using the new features.
 * Additional complexity in the API.
 * Additional implementation complexity.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Unmanaged mode.
 

@@ -312,7 +312,7 @@ N/A
 
 N/A
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 We could have our own custom CRD for OVNK like other
 plugins (Calico, Cilium, Antrea) have which might be faster but we

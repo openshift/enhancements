@@ -238,7 +238,7 @@ comparatively small by OCP standards, 50Mb of memory is a non-trivial amount on 
 
 - N/A
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Do Nothing. Continue to use the MicroShift or LVMD config to determine deployment of LVMS and/or snapshotting. Directing
 the user to leverage low-level processes to achieve this goal is an anti-pattern and would provide a poor UX.

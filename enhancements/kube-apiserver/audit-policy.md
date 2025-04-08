@@ -642,7 +642,7 @@ History`.
 
 The idea is to find the best form of an argument why this enhancement should _not_ be implemented.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 - we considered offering more fine-grained policies in order to reduce resource overhead. This turned out
   to be unnecessary as the overhead (CPU, memory, IO) is smaller than expected:

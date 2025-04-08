@@ -485,7 +485,7 @@ $ oc get gateway demo-gateway -n openshift-gateway-api -o yaml | yq '.status.lis
       kind: GRPCRoute
 ```
 
-## Alternatives
+## Alternatives (Not Implemented)
 As listed [here](https://gateway-api.sigs.k8s.io/implementations/) there is a
 list of potential implementations for the API. The one selected for this
 enhancement (OSSM) is based on Istio. This was done to reduce workload on the

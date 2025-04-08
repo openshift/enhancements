@@ -245,7 +245,7 @@ It can take up to a year to deprecate a Tier 1 API feature, which does not inclu
 The downside of this is outweighed by the flexibility this configuration option provides.
 Cluster admins will be able to enable JenkinsPipeline builds while potentially taking advantage of other features, such as tech preview features and high performance features.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Similar to the `Drawbacks` section the `Alternatives` section is used to
 highlight and record other possible approaches to delivering the value proposed

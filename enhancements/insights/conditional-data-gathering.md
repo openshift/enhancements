@@ -283,7 +283,7 @@ History`.
 
 None?
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Thin IO idea (https://github.com/openshift/enhancements/pull/465) could also solve this, but thin IO was about adding
 new code bypassing the standard release process which could potentially be very dangerous.

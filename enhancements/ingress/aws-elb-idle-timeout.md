@@ -314,7 +314,7 @@ parameter that a user could misconfigure by setting a short timeout value,
 causing empty responses when the network has high latency, OpenShift router
 is overloaded, or a backend pod is slow to respond.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 One alternative is to support users' directly setting the
 `service.beta.kubernetes.io/aws-load-balancer-connection-idle-timeout`

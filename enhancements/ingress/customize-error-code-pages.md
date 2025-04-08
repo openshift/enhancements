@@ -159,5 +159,5 @@ Following are the most salient PRs in the feature's history:
    a. Controller to sync configmaps from the `openshift-config` namespace to the `openshift-ingress` namespace ([NE-535](https://issues.redhat.com/browse/NE-535)).
    b. Mount router deployment with the configmap ([NE-543](https://issues.redhat.com/browse/NE-543)).
 3. https://github.com/openshift/router/pull/274 Add errorfile stanzas and dummy default html files to the router.
-## Alternatives
+## Alternatives (Not Implemented)
 N/A.

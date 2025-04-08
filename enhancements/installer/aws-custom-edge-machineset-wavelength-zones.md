@@ -557,7 +557,7 @@ N/A.
 The 'edge compute pool' was introduced in installer when Local Zones was supported.
 See [the enhancement](https://github.com/openshift/enhancements/blob/master/enhancements/installer/aws-custom-edge-machineset-local-zones.md) for more information.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Manual deployment, similar full UPI:
 - create the subnets in Wavelength Zones

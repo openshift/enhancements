@@ -212,7 +212,7 @@ N/A
 
 - No additional support procedures required.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 - Similar to other operators like Azure or AWS we decide on using WIF configuration based on environment variables
 availability in the operator pod only and reflect the values in CredentialsRequest object; CCO then creates a secret

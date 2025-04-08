@@ -172,7 +172,7 @@ all cloud providers as it requires nested virtualization support. Given these
 limitations customers could potentially get a degraded experience with Windows
 workloads when compared to Linux workloads on the cluster.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 An alternate approach to this design is to follow the operator approach where in
 the user will first install an operator from OperatorHub. The operator will

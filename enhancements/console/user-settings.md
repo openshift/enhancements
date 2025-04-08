@@ -138,6 +138,6 @@ None
 
 - Three resources per user are created.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 The alternative is to continue to use browser local storage. While it is possible to store all the users' settings in the browser, the settings cannot be shared across different browsers or devices.

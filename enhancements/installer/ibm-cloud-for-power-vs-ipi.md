@@ -378,7 +378,7 @@ Major milestones in the life cycle of a proposal should be tracked in `Implement
 The greatest argument against IPI on Power VS would be the opportunity cost. That said, for the Multi-Arch team, we believe
 this is the best return on investment when compared to the many other platforms asked of our team.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 The are other options for supporting IPI for Power hardware. One option we use internally is IPI on KVM via libvirt;
 however, as this is not supported outside of development purposes for x86 and KVM adoption on Power goes against the

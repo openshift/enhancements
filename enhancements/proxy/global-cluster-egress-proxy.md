@@ -282,7 +282,7 @@ v4.2.0: initial implementation GA.
 This feature requires touchpoints across many many components, all of which are impacted
 as the design/implementation evolves.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Make every component define its own configuration mechanism for proxy support and require
 admins to modify all of them and keep them in sync.

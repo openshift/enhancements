@@ -303,6 +303,6 @@ We will be working on making sure that similar or equivalent events, metrics and
 
 ## Drawbacks
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ## Infrastructure Needed

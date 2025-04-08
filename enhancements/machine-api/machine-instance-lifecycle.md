@@ -157,6 +157,6 @@ Operators must revendor the lastest openshift/cluster-api version. The actuator 
 
 ## Drawbacks
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ## Infrastructure Needed

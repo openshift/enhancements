@@ -260,7 +260,7 @@ History`.
 
 To be discussed.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 * Rely on manual configuration of the NOO and the CNO separately. Stick with a single deployment model available for the collector, as Deployment + Service.
 

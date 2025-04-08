@@ -136,7 +136,7 @@ strategy will be defined in https://github.com/openshift/enhancements/blob/maste
 
 ### Version Skew Strategy
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Native ignition support for early-network config
 

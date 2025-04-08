@@ -464,4 +464,4 @@ Requirements for reaching GA (in addition to tech preview criteria):
 2021-03-18: Added sections on ImageStreamImage and ImageStreamImport.
 2021-03-23: Added note about ImageStreamLayers.
 
-## Alternatives
+## Alternatives (Not Implemented)

@@ -235,6 +235,6 @@ TODO
 None
 ## Drawbacks
 Complexity
-## Alternatives
+## Alternatives (Not Implemented)
 None proposed
 

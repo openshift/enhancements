@@ -417,7 +417,7 @@ Additional communication will be sent when we’re ready to turn on this functio
 
 N/A
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 N/A
 

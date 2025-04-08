@@ -107,7 +107,7 @@ This is a sketch of a possible path.
  4. If your pod fails, it will not fail the e2e job.  If you need to fail an e2e job reliably, you need something else.
  5. Your pod must terminate when asked.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Modify each type of job
 Given the matrix of dimensions, this seems impractical.

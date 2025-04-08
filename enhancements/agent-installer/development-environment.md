@@ -249,7 +249,7 @@ The biggest argument against it is that by using dev-scripts as the base is we d
 inherit the work that was done previously in validating Assisted Installer in 
 assisted-test-infra.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 The choices for making a new development environment for the agent installer project were:
 

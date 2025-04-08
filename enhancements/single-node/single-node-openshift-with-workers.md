@@ -577,7 +577,7 @@ topology, control-plane topology, and ingress placement) - such complexity
 would probably have to be documented in the CRD definitions and may confuse
 users.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 - Instead of adding this new `DefaultPlacement` field to the Ingress config CR,
 add two new status fields to the Ingress config CR, one for the `replicas`

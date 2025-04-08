@@ -325,7 +325,7 @@ N/A.
 
 ## Implementation History
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 As an alternative to adding this API, we can add a release note telling cluster
 administrators about the issue and suggesting fixing legacy applications to

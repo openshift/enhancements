@@ -708,7 +708,7 @@ console will only load the correct plugin.
   they no longer share a repo.
 * We have to handle version skew between plugins and core console.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 RHACM has an architecture where each component is a microservice that
 contributes its own UI behind a single ingress with a shared masthead and

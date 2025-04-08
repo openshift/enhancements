@@ -193,7 +193,7 @@ Not applicable.
 
 Customer owned networking components means the cluster cannot automatically alter those components to track evolving best-practices. The user owns those components and is responsible for maintaining them.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ## Infrastructure Needed
 

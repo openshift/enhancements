@@ -246,7 +246,7 @@ The OCP Storage team would be the point of contact for support escalations relat
 
 - 2023-06-09: Initial draft
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 N/A
 

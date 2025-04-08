@@ -443,7 +443,7 @@ N/A
 
 N/A
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 The alternative to adding support for Ultra Disks on MAPI is to reject the RFE. In this case, the end user must use some method outside of OpenShift to attach Ultra Disks to the instances of their clusters. This prevents the user from leveraging this type of high performance disk with Machine API.
 

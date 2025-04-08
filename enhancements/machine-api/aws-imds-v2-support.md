@@ -266,7 +266,7 @@ This will require further API extension and respective controllers/installer cha
 
 N/A
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Do not provide any additional knobs in MachineAPI and in install-config, leave users to deal with it themselves manually
 via AWS interfaces (web-console, cli)

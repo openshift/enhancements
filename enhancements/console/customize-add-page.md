@@ -185,6 +185,6 @@ None, console is the only consumer of this configuration.
 
 Customization does not allow the cluster admin to add own actions. Hide actions is only available via YAML.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Allow the cluster admin to deactivate features or extentions in a more generic way instead of only allowing this on the add page.

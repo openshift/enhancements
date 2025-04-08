@@ -305,7 +305,7 @@ N/A, it's managed by OLM and allows to run on any OCP within the boundaries set 
 
 ## Drawbacks
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ## Infrastructure Needed [optional]
 

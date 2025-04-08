@@ -282,7 +282,7 @@ KUBELET_NODEIP_HINT was implemented in 4.11 and backported to older releases
 to improve the user experience where they needed to override the default logic
 in nodeip-configuration.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 * Leave things basically as they are, but teach services like configure-ovs and
   keepalived to understand KUBELET_NODEIP_HINT so they all select the same IP

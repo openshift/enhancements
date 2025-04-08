@@ -418,7 +418,7 @@ Nothing.
 There is an initial prototype exploring some of the implementation details
 described here in this [https://github.com/jhernand/upgrade-tool](repository).
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 The alternative to this is to manually pull the images in all the nodes of the
 cluster, manually create the `/etc/crio/crio.conf.d/pin.conf` file and manually

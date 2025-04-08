@@ -353,7 +353,7 @@ The backup of (2) must happen shortly after (1) (before another write-key is set
 1. Complicates disaster recovery and backups
 1. Possible performance impacts
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 1. Skipping this enchantment and instead going straight to KMS - difficult to do because it is hard to support KMS universally whereas the file based approach will always work
 

@@ -232,7 +232,7 @@ MVP attributes.  Advanced queries using [logQL](https://grafana.com/docs/loki/la
 
 ## Support Procedures
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 
 As an alternative to the above proposed solution (support of OpenTelemetry Semantic Conventions formatted log records via OTLP in addition to ViaQ) 

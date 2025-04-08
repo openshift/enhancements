@@ -349,7 +349,7 @@ While the admission plugin is tech preview, it can be disabled by removing TechP
 - 2022-01-12: Initial draft
 - 2022-09-08: Updates to original proposal
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Augment the PodSecurityAdmission Plugin
 

@@ -284,7 +284,7 @@ N/A
 
 - 2022-05-19: : Initial draft proposal
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 N/A
 

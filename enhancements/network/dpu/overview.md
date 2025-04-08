@@ -254,7 +254,7 @@ N/A
 
 ## Drawbacks
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Running RHCOS But Not OCP on the NIC
 

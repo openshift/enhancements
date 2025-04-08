@@ -195,7 +195,7 @@ Version skew is not relevant because it is contained within the image for Kibana
 
 Currently there is a legal battle going on regarding Elasticsearch and Floragunn (including some aspects of OpenDistro), this could possibly compromise our ability to use OpenDistro.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 * Maintaining using our approach to rewrite Kibana index requests.
 

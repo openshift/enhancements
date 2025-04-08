@@ -342,7 +342,7 @@ This is installed and enabled by the ZTP DU profile, and is used in production
 on many Telco customers' systems, both for SingleNode OpenShift and standard
 clusters, with no reported issues.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 - Enhance systemd to support unsharing namespaces at the slice level, then put
   `crio.service` and `kubelet.service` in the same slice

@@ -679,7 +679,7 @@ WIP
 
 WIP
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 We originally had tried using the pre-existing features in OCP, such as setting
 a node as NoSchedule to avoid customer workloads going on the arbiter node.

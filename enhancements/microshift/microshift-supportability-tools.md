@@ -364,7 +364,7 @@ N/A
 ## Implementation History
 N/A
 
-## Alternatives
+## Alternatives (Not Implemented)
 ### oc adm must-gather
 [must-gather](https://github.com/openshift/must-gather) is the tool of choice
 for OpenShift. While this tool covers all that has been discussed in this

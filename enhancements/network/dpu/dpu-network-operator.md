@@ -202,7 +202,7 @@ N/A
 ## Drawbacks
 N/A
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Implement the above-mentioned function in the Cluster Network Operator. Enable
 this feature when the Cluster Network Operator is running in the infra cluster.

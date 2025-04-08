@@ -608,7 +608,7 @@ In summary the general drawbacks to introduce an alternative log store into clus
 3. The switch from Elasticsearch to Loki requires switching operational mentality. Loki is built upon distributed stateless applications rather than stateful cluster nodes. In turn this requires separate capacity planning for ingestion and query path.
 4. Loki is bound to the replication policy and this translates in required ingester replicas and the compactor additionally. It is bound to query load scenarios and might require caching integration. In addition it could be eventually scaled by an autoscaler. In turn all this adds to the learning curve to handle the whole system (e.g. adding caching, autoscaling).
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 None.
 

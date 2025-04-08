@@ -79,7 +79,7 @@ No known version skew is present.
 
 This adds a novel platform type and release topology to the product without consulting any of the teams that purportedly make it work.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 1. Build from kube-control-plane out.
    This approach makes the openshift org work for you:

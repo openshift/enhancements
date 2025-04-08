@@ -153,7 +153,7 @@ N/A
 
 N/A
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 * [Access the K8s API directly from the console](https://github.com/mariomac/console/pull/1).
   - Drawback 1: this feature would be available only to administrator users.

@@ -155,7 +155,7 @@ Currently this is not possible in the OpenDistro Index Management plugin and cau
 
 The naming convention "MinAge" when paired with "PercentUsage" could give a false impression -- we may end up deleting indices before they reach the "MinAge" because they are the oldest indices and with "Usage" being reached. This may just need to be framed differently within the docs and field descriptions.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Using the lightweight-curator (link below)
 

@@ -412,6 +412,6 @@ N/A
 
 We create more log entries, which increases the space that the logs will occupy.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 The alternative is to keep on relying on `oauthaccesstoken` audit events with the aforementioned drawbacks.

@@ -278,7 +278,7 @@ already GA upstream.
 * This is more restrictive than the current options for configuration, and limits users to enabling
 descheduling potentially with some other strategies that they don't intend.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 * One alternative is adding a `policy` field which would take a raw Descheduler policy config map and simply
 pass that to the operand (similar to how scheduler currently works). This exposes much more combinations of

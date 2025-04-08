@@ -239,7 +239,7 @@ To enable OpenShift profiles, MicroShift will get the `apiserver.auditLog.profil
 
 - openshift/library-go and openshift/api are shared core libraries of OpenShift components and thus are included in each OpenShift release.  Version skew is not an issue.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 * Continue using hardcoded audit logging policy
 * Disabling api-server log rotation behavior entirely and referring users to the `logrotate` system utility to manage logs.

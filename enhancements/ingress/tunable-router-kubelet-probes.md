@@ -264,7 +264,7 @@ TBD.
 Implementing this enhancement gives users an option that is easy to misuse or
 use to mask deeper issues that may worsen over time.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Provide explicit API fields
 

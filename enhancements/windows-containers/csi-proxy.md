@@ -276,7 +276,7 @@ will be collected as part of must-gather, which should be attached to each custo
 The implementation history can be tracked by following the associated work items in Jira and source code improvements in
 the WMCO Github repo.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 The ideal solution for this problem is for the Windows CSI node drivers to be added to each OpenShift CSI operator,
 such as the [vmware-vsphere-csi-driver-operator](https://github.com/openshift/vmware-vsphere-csi-driver-operator),

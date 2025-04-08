@@ -539,7 +539,7 @@ I expect "images are failing to meet the relevant image policy/policies" to be s
 
 The process for disabling the image policy is described in [the *Upgrade / Downgrade Strategy* section](#upgrade--downgrade-strategy).
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Continue with OpenPGP signatures
 

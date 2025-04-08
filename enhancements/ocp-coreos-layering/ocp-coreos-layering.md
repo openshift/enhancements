@@ -296,7 +296,7 @@ We intend to make it extremely clear from a support perspective via official doc
 
 There was a prior version of this proposal which was OpenShift specific and called for a custom build strategy.  Since then, the "CoreOS layering" effort has been initiated, and this proposal is now dedicated to the OpenShift-specific aspects of using this functionality, rather than also containing machinery to build custom images.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Continue as is - supporting both RHEL CoreOS and traditional RHEL (where it's more obvious how to make arbitrary changes at the cost of upgrade reliability), for example.
 

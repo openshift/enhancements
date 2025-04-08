@@ -140,4 +140,4 @@ They can change at any time, for any reason, without any notice.
 
 ## Drawbacks
 
-## Alternatives
+## Alternatives (Not Implemented)

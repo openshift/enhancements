@@ -179,7 +179,7 @@ More investigation should be done for what pieces from the etcd [backup](https:/
 
 TODO
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### etcd Logs
 If we decide not to run etcd in a transient systemd unit, we'll need to make updates to the etcd Zap logger to have it write out logs in a consistent format to the other modules in MicroShift - currently, etcd writes logs in JSON format.

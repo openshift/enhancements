@@ -112,7 +112,7 @@ Any component can use this, as long as they are installed after the creation of 
 
 N/A
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Each component creates its own priority classes, this would lead to confusion from user perspective as there would be x
 number of classes, but also possible problems with some lower priority components being scheduled over higher system

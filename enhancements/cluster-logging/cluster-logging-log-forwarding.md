@@ -342,7 +342,7 @@ Drawbacks to providing this enhancement are:
   * What happens when the customer managed endpoint is down?  How well does the collector handle the back pressure? When do logs get dropped because they can not be shipped?
 * Setting customer expectations of the capabilities of log forwarding and guarantees (e.g. rates, delivery, reliability, message loss)
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Provide a recipe for customer's to deploy their own log collector to move the responsibility to the customer.
 

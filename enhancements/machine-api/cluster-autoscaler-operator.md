@@ -345,7 +345,7 @@ The `MinReplicas` and `MaxReplicas` values will be copied onto the target `Machi
 
 ## Drawbacks
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Don't provide an operator
 

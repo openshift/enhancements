@@ -163,7 +163,7 @@ We should instruct users on how to debug or review their operators when this err
 
 N/A 
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 We should seriously consider whether this logic should go into the cluster-version
 operator rather than the installer. (Or if it should be in both, perhaps just the CVO

@@ -440,7 +440,7 @@ N.A
 
 N.A
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Secret Injector
 

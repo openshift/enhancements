@@ -269,7 +269,7 @@ This is consistent with our general versioning story where new features cannot b
 
 The idea is to find the best form of an argument why this enhancement should _not_ be implemented.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### cluster-admin created roles and rolebindings
 This avoids the transitive privilege escalation to read secrets based on update rights to ingresses.config.openshift.io

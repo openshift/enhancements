@@ -759,7 +759,7 @@ Istio-csr will be supported for OpenShift Service Mesh Operator 2.4+, Istio v1.1
 
 None
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Instead of having `cert-manager-operator` manage `istio-csr`, having `istio-csr` itself as a product was
 considered. But since `istio-csr` is an agent dependent on `cert-manager` for obtaining the certificates

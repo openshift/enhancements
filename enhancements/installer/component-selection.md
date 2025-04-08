@@ -499,7 +499,7 @@ N/A - no api extensions are being introduced in this proposal
 
 N/A
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 * CVO already supports a CLUSTER_PROFILE env variable.  We could define specific profiles like "headless"
 that disables the console.  CLUSTER_PROFILE isn't a great fit because the idea there is to define a relatively

@@ -283,7 +283,7 @@ History`.
 
 - `baremetal-runtimecfg` requires control plane nodes hostname to contain `master`
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Similar to the `Drawbacks` section the `Alternatives` section is used to
 highlight and record other possible approaches to delivering the value proposed

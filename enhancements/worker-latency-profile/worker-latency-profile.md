@@ -329,7 +329,7 @@ So even though 100% reliable network connections amongst master nodes is assumed
 
 ## Drawbacks
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Since we don't want users to manually modify the arguments for the components involved, there isn't any viable alternative that could safely work.
 

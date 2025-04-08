@@ -269,7 +269,7 @@ Upgrade will require new boot image since this is Ignition bounded.
 - Greater customizability of the underlying OS exponentially expands the amount
   of potential test cases
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 1. Store how to find/mount root device in kernel command-line arguments
     * Pros:

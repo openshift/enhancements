@@ -300,7 +300,7 @@ The disadvantage to this is that each release branch is not managed by ART.
 * We would have to handle the automation of updates ourselves
 * The special downstream branch is kind of janky
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Monorepo
 One alternative is to have a monorepo and sync all upstream repos to a single

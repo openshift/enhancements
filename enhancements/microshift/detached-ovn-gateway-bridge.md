@@ -447,7 +447,7 @@ N/A
 
 N/A
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 There're 2 other alternatives that can also work.
 

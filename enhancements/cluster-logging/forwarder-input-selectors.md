@@ -289,4 +289,4 @@ Following is an example of a **ClusterLogForwarder** that redefines "infrastruct
 ## Implementation History
 
 
-## Alternatives
+## Alternatives (Not Implemented)

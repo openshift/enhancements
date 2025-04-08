@@ -274,7 +274,7 @@ I1113 10:58:29.104762       1 httplog.go:134] "HTTP" verb="POST" URI="/validate-
 
 Cross-referencing these with the apiserver logs should provide detailed insights on a per-request basis.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Wait for CRD based configs to be GA. See [OBSDA-212](https://issues.redhat.com/browse/OBSDA-212) and the related [proposal](https://github.com/openshift/enhancements/pull/1627).
 As a reminder, this proposal does not intend to prevent or postpone the planned CRD based effort, see [Motivation](#motivation) and [Non-Goals](#non-goals)

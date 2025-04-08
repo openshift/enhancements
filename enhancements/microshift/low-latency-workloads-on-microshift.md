@@ -569,7 +569,7 @@ To discover any performance issues not related to missing configuration:
 - Adapting some parts of OpenShift documentation.
 - Referring user to [Red Hat Enterprise Linux for Real Time](https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux_for_real_time/9) documentation.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Deploying Node Tuning Operator
 

@@ -184,6 +184,6 @@ remain backwards compatible.
 
 Same as [Route Admission Policy](https://github.com/openshift/enhancements/blob/master/enhancements/ingress/openshift-route-admission-policy.md#drawbacks)
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Same as [Route Admission Policy](https://github.com/openshift/enhancements/blob/master/enhancements/ingress/openshift-route-admission-policy.md#alternatives)

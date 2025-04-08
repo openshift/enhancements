@@ -240,7 +240,7 @@ Some broad reasons this proposal might _not_ be acceptable are:
   preempting the CVO) seems underspecified and too risky to form a stable
   foundation for additional such procedures.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 * Introduce additional `config.openshift.io` API surface generic enough to
   improve defaulting in such a way that a custom IngressController is

@@ -106,7 +106,7 @@ This is a good condition both for forcing stability and for separating update ca
 All the repos where we have done this so far have benefited from the looser coupling in terms of stability, understandability, and
 motivation for investment in upstreams.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 1. Move kubelet, kube-apiserver, kube-controller-manager, kube-scheduler to a different repo.
 This is functionally equivalent to moving the tests, but it has more parts and infrastructure around it.

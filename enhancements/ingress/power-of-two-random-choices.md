@@ -218,7 +218,7 @@ N/A.
 
 ## Implementation History
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 The HAProxy configuration template has a `ROUTER_BACKEND_PROCESS_ENDPOINTS`
 environment variable that can be configured so that the router shuffles the

@@ -181,6 +181,6 @@ The `oc` command must skew +/- one like normal commands.
 
 ## Drawbacks
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ## Infrastructure Needed

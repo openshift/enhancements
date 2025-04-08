@@ -162,7 +162,7 @@ No caveats or issues.  Standard, existing approaches apply.
 
 ## Drawbacks
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Remove samples operator as a CVO operator.  Make it a Day 2, Day X operation, where all of the existing samples
 today are installed via OLM Operator Hub.  The selections on the Hub can then explicitly note whether or not they

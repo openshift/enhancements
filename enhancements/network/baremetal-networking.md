@@ -302,7 +302,7 @@ IPAM server might be an option.
 - Currently only provides a single default VIP for Ingress
 - Bootstrap will maintain its role as keepalived master until some intervention which in our case is destroying the bootstrap node.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Unknown
 

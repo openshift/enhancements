@@ -131,6 +131,6 @@ If OpenShift is downgraded, there are two cases that can occur
 
 If there are customers making heavy use of appregistry-backed catalogs, outright removal of the feature may be an issue for them.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 We could continue to support appregistry-backed catalogs indefinitely. The support on the Quay side would need to be negotiated, since Marketplace is one of if not the only consumer of this API.

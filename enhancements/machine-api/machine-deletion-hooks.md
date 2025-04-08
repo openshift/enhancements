@@ -478,7 +478,7 @@ We do not expect any issues with version skew as this is a new feature.
 * If misused, this could prevent Machines from being deleted and lead to an increase in support
 cases to determine if it is safe to override the feature.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Custom Machine Controller
 Require advanced users to fork and customize.

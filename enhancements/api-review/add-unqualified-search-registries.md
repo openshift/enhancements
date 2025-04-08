@@ -205,4 +205,4 @@ History`.
 
 ## Drawbacks
 
-## Alternatives
+## Alternatives (Not Implemented)

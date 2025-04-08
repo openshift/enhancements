@@ -610,7 +610,7 @@ This may cause confusion for users as they may wish to use the feature for the c
 To mitigate this, users may, as a day 2 operation, replace their control plane instances using the already documented
 recovery procedures.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 There is no alternative feature within AWS that allows users to place groups of instances in different ways. If we wish
 to allow users to have control over the placement of their instances on AWS, we must support placement groups.

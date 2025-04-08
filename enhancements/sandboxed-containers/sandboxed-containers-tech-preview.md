@@ -364,7 +364,7 @@ version skew strategy will be handled by the MCO.
 ## Drawbacks
 
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 
 ## Infrastructure Needed [optional

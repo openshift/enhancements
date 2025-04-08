@@ -486,7 +486,7 @@ Feb 06 13:51:11 dev microshift[1476]: kubelet E0206 13:51:11.696565    1476 kube
 Feb 06 13:51:11 dev microshift[1476]: kubelet E0206 13:51:11.696625    1476 pod_workers.go:1298] "Error syncing pod, skipping" err="failed to \"CreatePodSandbox\" for \"samplepod_default(5fa13105-1bfb-4c6b-aee7-3437cfb50e25)\" with CreatePodSandboxError: \"Failed to create sandbox for pod \\\"samplepod_default(5fa13105-1bfb-4c6b-aee7-3437cfb50e25)\\\": rpc error: code = Unknown desc = failed to create pod network sandbox k8s_samplepod_default_5fa13105-1bfb-4c6b-aee7-3437cfb50e25_0(7517818bd8e85f07b551f749c7529be88b4e7daef0dd572d049aa636950c76c6): error adding pod default_samplepod to CNI network \\\"multus-cni-network\\\": plugin type=\\\"multus\\\" name=\\\"multus-cni-network\\\" failed (add): Multus: [default/samplepod/5fa13105-1bfb-4c6b-aee7-3437cfb50e25]: error loading k8s delegates k8s args: TryLoadPodDelegates: error in getting k8s network for pod: GetNetworkDelegates: failed getting the delegate: getKubernetesDelegate: cannot find a network-attachment-definition (bad-conf) in namespace (default): network-attachment-definitions.k8s.cni.cncf.io \\\"bad-conf\\\" not found\"" pod="default/samplepod" podUID="5fa13105-1bfb-4c6b-aee7-3437cfb50e25"
 ```
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Thick plugin architecture
 

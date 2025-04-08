@@ -500,7 +500,7 @@ N/A
 
 ## Implementation History
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 [IngressController sharding](https://docs.openshift.com/container-platform/4.10/networking/configuring_ingress_cluster_traffic/configuring-ingress-cluster-traffic-ingress-controller.html#nw-ingress-sharding-route-labels_configuring-ingress-cluster-traffic-ingress-controller)
 

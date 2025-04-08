@@ -283,7 +283,7 @@ Implementing this feature requires development and testing resources
 that could otherwise be utilised elsewhere. In addition, it increases
 the support surface of the OpenShift and OpenStack integration.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Don't Do It
 

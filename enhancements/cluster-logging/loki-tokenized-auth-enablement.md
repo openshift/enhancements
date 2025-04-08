@@ -395,7 +395,7 @@ The LokiStack resource will support another degraded error condition if the Cred
 | ---     | ---                      |
 | 5.9.0   | **GA** - Initial release |
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Not applicable here.
 

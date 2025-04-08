@@ -169,7 +169,7 @@ None
 
 None, console is the only consumer of this configuration.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 - Store specific resource references to Role or ClusterRole. See Open Question 1
 - Store a back-reference as label in Roles and ClusterRoles, like: `openshift.io/project-access-role: true`

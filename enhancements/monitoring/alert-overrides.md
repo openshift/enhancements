@@ -565,7 +565,7 @@ Initial proofs-of-concept:
   *Update*: Looks like this isn't a fit for upstream.  It has been moved to
   cluster-monitoring-operator.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 - Primary alternative: https://github.com/openshift/enhancements/pull/958
 

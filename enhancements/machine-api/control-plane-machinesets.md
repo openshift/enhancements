@@ -225,7 +225,7 @@ webhooks and new controllers will not be running to prevent bad user actions.
 
 Some users might not want this behavior at all.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Previous proposals:
 * https://github.com/openshift/enhancements/pull/278

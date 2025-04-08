@@ -667,7 +667,7 @@ Current estimates:
 
 Requirement to separate CCM from Kubelet and KCM complicates bootstrap process. Currnent bootstrap machine components are platform independent and share common configuration. `CCM` in bootstrap requires configuration to communicate with the cloud api, making bootstrap dependent on the platform the cluster is deployed on.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 1. Continue development and support for in-tree cloud providers after exclusion from upstream as a carry patch.
 2. Integrate external CCM with KCMO and proceed with support for new cloud providers this way, yet following described requirements for bootstrap and post install phases.

@@ -236,7 +236,7 @@ The series of actions performed on the recovery node by `cluster-restore.sh` can
 
 ## Drawbacks
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ## Infrastructure Needed
 

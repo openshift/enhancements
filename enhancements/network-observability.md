@@ -380,7 +380,7 @@ and resolve issues that you might not know exist.  The value you get
 may not be obvious because it is difficult to calculate how much you
 save by preventing something from happening such as a network failure.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Rather than having network observability, the troubleshooting aspect
 can be done by creating scripts and standalone applications to enhance

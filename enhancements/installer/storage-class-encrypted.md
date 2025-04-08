@@ -297,7 +297,7 @@ to set the default storage class.
 Major milestones in the life cycle of a proposal should be tracked in `Implementation
 History`.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Instead of using the existing fields in the machinepools of the install config, it would be possible to define a new
 top-level field to define a default storage class. I have decided against this idea, because it has a broader scope

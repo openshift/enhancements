@@ -410,7 +410,7 @@ We plan to develop the solution in multiple deliverable milestones:
 
 One of the drawbacks of the proposed solution is the upfront investment needed for the development of a new operator. However, we expect such an investment to pay off in the long run by improving the team’s velocity and feedback loop and being future proof for the Hypershift use-case.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Full Forwarding Mode with local, external or hosted Observatorium
 

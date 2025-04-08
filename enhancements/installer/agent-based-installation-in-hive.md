@@ -634,7 +634,7 @@ History`.
 
 The idea is to find the best form of an argument why this enhancement should _not_ be implemented.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Expose a non-k8s-native REST API
 

@@ -418,7 +418,7 @@ However it is always _technically possible_ for the admin to force through both
 the pre-upgrade check AND the admin gate. If they do this the CIO will detect
 the mismatch and will overwrite to the intended version.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Use a fleet evaluation condition to detect clusters with incompatible CRDs
 

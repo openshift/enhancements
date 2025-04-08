@@ -182,7 +182,7 @@ Version skew will introduce no added complexity.
 
 Non-OpenShift clusters will not report metrics back to Telemeter, however these clusters will expose data to admins about the health of installed operators.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 As discussed earlier in this enhancement, operator health information should eventually be sent to the Insights Operator rather than Telemeter to prevent users from creating their own time series.
 

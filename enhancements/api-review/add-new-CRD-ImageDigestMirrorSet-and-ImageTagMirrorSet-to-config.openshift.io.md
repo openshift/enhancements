@@ -518,6 +518,6 @@ Failure can be caused by getting unexpected images when using tag pull specifica
 
 See [Risks and Mitigations](###risks-and-mitigations)
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ## Infrastructure Needed [optional]

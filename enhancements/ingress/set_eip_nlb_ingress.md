@@ -861,7 +861,7 @@ In the `IngressController` status, check the status for the following:
  ```
 
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Immutability
 

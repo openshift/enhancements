@@ -449,7 +449,7 @@ N/A
 ## Implementation History
 N/A
 
-## Alternatives
+## Alternatives (Not Implemented)
 * Merge certificates.
    If trust domains are merged into a single one then there will only be a
    single certificate for all possible connections. This means the certificate

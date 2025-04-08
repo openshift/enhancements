@@ -435,7 +435,7 @@ The data gathering can be disabled by the configuration (see the [config API enh
 
 As noted in the [Graduation criteria](#graduation-criteria) section, the first API version will be behind the `TechPreviewNoUpgrade` feature gate.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 - Current alternative is to delete the Insights operator Pod and let the replication controller start a new Pod that will run new data gathering almost immediately. 
 - ~~Run the on-demand gathering within an existing container. This approach would use very similar `datagather.insights.openshift.io` CR (as mentioned above) to run the on-demand Insights data gathering, but the operator wouldn't spawn any new container.~~ 

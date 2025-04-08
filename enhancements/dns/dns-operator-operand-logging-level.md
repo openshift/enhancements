@@ -224,7 +224,7 @@ N/A
 ## Drawbacks
 
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 * Don't provide any DNS logging level APIs for the operator and coredns (current behavior)
 * Raise current verbosity of the DNS Operator and coredns (not desirable)

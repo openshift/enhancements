@@ -227,7 +227,7 @@ History`.
 
 ## Drawbacks
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 - we have talked about starting the new apiserver in parallel and to have some proxy or iptables mechanism to switch over only when the new revision is ready. This was rejected as we don't have the memory resources on nodes to run two apiservers in parallel.
   Instead, it was decided that 60s downtime of the API for the happy-case (= configuration is not bad) is acceptable.

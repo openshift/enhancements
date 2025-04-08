@@ -529,7 +529,7 @@ History`.
 2. Coreos-installer cannot be used in a cloud environment.
 3. We need to build new integration with RHACM and Hive for orchestration.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Installing using remote bootstrap node
 
@@ -638,7 +638,7 @@ We decided to add `single-node-ignition-config` target to in order to gain:
 2. We can avoid creating unnecessary assets (master.ign and worker.ign).
 3. Less prune to user errors than environment variable.
 
-### Alternatives for managing the operating system installation step
+### Alternatives (Not Implemented) for managing the operating system installation step
 
 Before settling on adding a minimal set of fields to
 `install-config.yaml`, we identified several options for installing

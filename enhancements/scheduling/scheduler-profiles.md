@@ -231,7 +231,7 @@ for very specific or unique default scheduler configs they may not be able to ac
 * Some newer scheduler plugins have their own configurable arguments (such as `PodTopologySpread`, which provides cluster defaults).
 Users will not be able to set these parameters (however with enough demand we could provide them as additional operator spec settings).
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 * The inclusion of a `profiles` field which behaves more similarly to the current `policy` field in the scheduler operator, with users
 providing a configmap containing the raw scheduler profiles themselves (see the [docs](https://docs.openshift.com/container-platform/4.1/nodes/scheduling/nodes-scheduler-default.html)

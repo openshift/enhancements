@@ -97,7 +97,7 @@ Additional references:
 
 ## Drawbacks
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ## Infrastructure Needed
 

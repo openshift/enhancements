@@ -422,7 +422,7 @@ config applied. If there is a problem, the config will be rolled back and the
 NNCP will be set to an error state. At worst this should result in a temporary
 outage on a single node.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Continue adding features and customizability to configure-ovs. This has not
 proven to be an effective strategy up to now, but it is an option.

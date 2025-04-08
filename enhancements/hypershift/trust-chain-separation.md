@@ -188,7 +188,7 @@ failing controller or manually rotating the certificate/key pairs in question.
 Major milestones in the life cycle of a proposal should be tracked in `Implementation
 History`.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Similar to the `Drawbacks` section the `Alternatives` section is used to
 highlight and record other possible approaches to delivering the value proposed

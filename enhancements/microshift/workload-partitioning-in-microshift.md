@@ -303,7 +303,7 @@ Kubelet configuration will be exposed in MicroShift config as a passthrough.
 
 ## Support Procedures
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Deploying Node Tuning Operator
 

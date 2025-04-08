@@ -203,7 +203,7 @@ none.
 for E-W the main diff is that pluto logs are now on the host. and is still guarded with CNO (so `Full` mode and failing ipsec should result in degraded CNO)
 for N-S (`External` mode) the main troubleshooting point is those said pluto logs.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 - Create a full CRD API for N-S IPsec tunnels within CNO. this would have generate much more work for the SDN team to support something that is unrelated to the SDN. probably first releases were limited because covering everything libreswan offers is difficult and takes time. while with the proposed approach, customers can enjoy anything libreswan have to offer.
 

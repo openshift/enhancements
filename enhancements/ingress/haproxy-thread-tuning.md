@@ -211,6 +211,6 @@ N/A
 
 ## Drawbacks
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 [IngressController sharding](https://docs.openshift.com/container-platform/4.7/networking/configuring_ingress_cluster_traffic/configuring-ingress-cluster-traffic-ingress-controller.html#nw-ingress-sharding-route-labels_configuring-ingress-cluster-traffic-ingress-controller)

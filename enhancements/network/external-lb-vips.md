@@ -287,7 +287,7 @@ NA
    For backward compatibility, we'll keep it supported only on vsphere so their customers aren't broken
    during an update.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 * Implement another internal loadbalancer like it was proposed with [BGP](https://github.com/openshift/enhancements/pull/1281). This idea was rejected for now because it didn't get much traction outside of the OpenStack team. The External LB solution was meeting our customer requirements as was a cross-platform interest so we decided to take that direction for now.
 * Change the Keepalived configuration to be active-active, but this will involve complex configuration and still the need

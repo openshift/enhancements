@@ -147,7 +147,7 @@ TBD
 
 no known drawbacks
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 In case a machine enters the `Failed` state and does not have a NodeRef or a ProviderID do not perform remediation on that machine.
 

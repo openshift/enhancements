@@ -104,7 +104,7 @@ When the last `LocalVolume` or `LocalVolumeSet` object is deleted, at this point
 
 One drawback is - if user wants to keep one or more PVs around (in case they have data on it) and still delete the `LocalVolume` or `LocalVolumeSet` object - this will require users to set `ReclaimPolicy` of `Retain` on those PVs, before deleting `LocalVolume` or `LocalVolumeSet` objects and then using force delete to delete those objects.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 We discussed the possibility of _always_ deleting the symlink when the PV is deleted, even if the `LocalVolume` or `LocalVolumeSet` owner object is not deleted.
 The problem is this breaks a use case that worked before, where the user specifies `/dev/sda` in the LV for example.

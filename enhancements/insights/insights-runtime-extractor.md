@@ -617,7 +617,7 @@ Failures to inspect running containers will be reported as an error in the `"wor
 
 Major milestones in the life cycle of a proposal should be tracked in `Implementation History`.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Red Hat has complementary products that are able to gather runtime information (through RHEL Insights, Insights for App Services). However these solutions require users to:
 

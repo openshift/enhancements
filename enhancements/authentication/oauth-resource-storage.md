@@ -202,7 +202,7 @@ Intentionally left empty. To be filled in the future.
 
 The idea is to find the best form of an argument why this enhancement should _not_ be implemented.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Similar to the `Drawbacks` section the `Alternatives` section is used to
 highlight and record other possible approaches to delivering the value proposed

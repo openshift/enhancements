@@ -741,7 +741,7 @@ carrying downstream indefinitely. Some version of a more general "CPU
 pool" feature may be acceptable upstream, and we could reimplement
 management workload partitioning to use that new implementation.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Force pods into the management CPU pool without opt-in
 

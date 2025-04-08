@@ -507,6 +507,6 @@ The drawback to not implementing this feature is we are unable to integrate Loki
 
 The multi-tenant feature of Openshift Logging enables namespace-based tenancy since Openshift maintains this global view on resourses. The developer has access only to namespaces (most of the times only application workload namespaces) granted by RBAC. The administrator has access to all namespaces including audit logs.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 TBD

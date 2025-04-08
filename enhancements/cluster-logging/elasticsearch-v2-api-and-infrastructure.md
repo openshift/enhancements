@@ -308,7 +308,7 @@ There is much more details but at a high level the memory requirements for a nod
 the benefit this brings should not be overlooked and will also help the operator to not need to track node UUIDs or more complex structures
 internally.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 * Continue to only use the current V1 API
 

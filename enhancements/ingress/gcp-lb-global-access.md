@@ -216,7 +216,7 @@ N/A
 
 None.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 A cluster administrator can already create a custom service that is not managed by the Cluster Ingress Operator. The administrator can then configure
 these kinds of settings on the custom, administrator-managed LoadBalancer service.

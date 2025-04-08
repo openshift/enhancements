@@ -455,7 +455,7 @@ N/A
 
 N/A
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 One alternative is to stick with the current way of user workload monitoring
 by launching prometheus operator via OLM.
