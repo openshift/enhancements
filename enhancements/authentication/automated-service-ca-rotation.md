@@ -346,6 +346,6 @@ Forced Rotation: https://github.com/openshift/service-ca-operator/pull/77
 
 ?
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ?

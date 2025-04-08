@@ -158,7 +158,7 @@ N/A
 
 This will increase the number of steps in IPI deployments and take longer.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Modify manifest files
 

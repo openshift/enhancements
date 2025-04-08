@@ -593,7 +593,7 @@ OCP 4.13 will not contain the `CloudControllerManagerSpec` part.
 
 - [related PR](https://github.com/openshift/api/pull/1434)
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Status Quo
 

@@ -350,7 +350,7 @@ sudo journalctl -u greenboot-healthcheck.service
 ## Implementation History
 N/A
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 The basic assumption is that `greenboot` must be used for implementing health
 checks on `rpm-ostree` based systems. It is possible to also implement

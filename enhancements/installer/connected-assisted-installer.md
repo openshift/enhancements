@@ -267,7 +267,7 @@ OpenShift, if necessary.
 
 The idea is to find the best form of an argument why this enhancement should _not_ be implemented.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 The telco/edge bare metal team is working on support for automating
 virtual media and dropping the need for a separate provisioning

@@ -711,7 +711,7 @@ The OCP Node team is likely to be called upon in case of escalation with one of 
 - [OCPNODE-1628: Sigstore Support - OpenShift Container Image Validation for cluster wide policies (Dev Preview)](https://issues.redhat.com/browse/OCPNODE-1628) epic will keep track of the ClusterImagePolicy implementation.
 - [OCPNODE-2253: OpenShift Container Image Validation for namespaced policies](https://issues.redhat.com/browse/OCPNODE-2253) epic will keep track of the ImagePolicy implementation.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Not applicable.
 

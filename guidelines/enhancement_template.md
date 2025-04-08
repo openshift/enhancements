@@ -265,6 +265,13 @@ Does this proposal implement a behavior that's new/unique/novel? Is it poorly
 aligned with existing user expectations?  Will it be a significant maintenance
 burden?  Is it likely to be superceded by something else in the near future?
 
+## Alternatives (Not Implemented)
+
+Similar to the `Drawbacks` section the `Alternatives` section is used
+to highlight and record other possible approaches to delivering the
+value proposed by an enhancement, including especially information
+about why the alternative was not selected.
+
 ## Open Questions [optional]
 
 This is where to call out areas of the design that require closure before deciding
@@ -484,13 +491,6 @@ Describe how to
     labels that were not applied during admission webhook downtime.
   - Namespaces deletion will not delete all objects in etcd, leading to zombie
     objects when another namespace with the same name is created.
-
-## Alternatives
-
-Similar to the `Drawbacks` section the `Alternatives` section is used
-to highlight and record other possible approaches to delivering the
-value proposed by an enhancement, including especially information
-about why the alternative was not selected.
 
 ## Infrastructure Needed [optional]
 

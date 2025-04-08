@@ -258,7 +258,7 @@ Because a networking failure is likely to make a node inaccessible, it may be ne
 Adds a dependency on NMState. However, NMState provides a strong backward compatibility
 promise (much like NetworkManager itself), so this should be a stable interface.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Use Kubernetes-NMState NodeNetworkConfigurationPolicy custom resources
 

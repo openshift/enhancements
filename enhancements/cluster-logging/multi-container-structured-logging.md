@@ -164,6 +164,6 @@ None
 
 Additional complexity.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 None known.

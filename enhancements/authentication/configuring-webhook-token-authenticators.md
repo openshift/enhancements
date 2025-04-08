@@ -163,7 +163,7 @@ History`.
 
 The idea is to find the best form of an argument why this enhancement should _not_ be implemented.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 An alternative to having users create their own kubeconfigs is to have a CRD that takes
 care of any copy-pasting that would otherwise have to be done manually

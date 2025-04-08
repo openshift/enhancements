@@ -785,7 +785,7 @@ When the controller is restored, it should, unless there are persistent errors i
 
 - [ ] Enhancement merged (YYYY-MM-DD)
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Conversion Alternatives
 

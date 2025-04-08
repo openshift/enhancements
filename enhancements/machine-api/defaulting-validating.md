@@ -130,7 +130,7 @@ Existing functional machines should remain untouched. Either because we choose t
 ## Drawbacks
 
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 - Introduce a new CRD for the `providerSpec`. Externalise it from the machine object. Introduce an `objectRef` in the machine object to reference `providerSpec` resources. This would let the `providerSpec` become a natural extension of the Kubernetes API. Although we still might need a webhook for clever defaulting/validation we'd get for free all the features coming from [structural schemes](https://github.com/kubernetes/enhancements/blob/master/keps/sig-api-machinery/20190425-structural-openapi.md)
 

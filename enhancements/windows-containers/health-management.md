@@ -431,7 +431,7 @@ v1: Initial Proposal
 The only drawback to this is that complexity increases by distributing responsibilities between WMCO and WICD.
 This is not enough to outweigh the benefits of the proposal.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Instead of using a ConfigMap, a CRD can be added. It did not feel like there was enough reasoning to require a CRD,
 but that remains an alternative in the future if desired.

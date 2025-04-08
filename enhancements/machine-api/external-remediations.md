@@ -237,6 +237,6 @@ its template CRD need to exist.
 
 no known drawbacks
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 - Keep the existing annotation based mechanism.

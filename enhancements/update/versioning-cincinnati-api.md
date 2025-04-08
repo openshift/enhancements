@@ -135,7 +135,7 @@ GA. When it works, we ship it.
 ## Drawbacks
 
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### URI Versioning
 

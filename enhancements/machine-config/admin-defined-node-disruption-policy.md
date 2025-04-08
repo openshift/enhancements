@@ -249,7 +249,7 @@ We will add this behind a featuregate during the 4.16 timeframe. This at most on
 ## Implementation History
 
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 #### A new NodeDisruptionPolicy CRD
 

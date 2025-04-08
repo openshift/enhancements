@@ -277,7 +277,7 @@ N/A
 
 This enhancement is being implemented in OpenShift 4.12.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 This can be done (is already being done by some customers) by directly 
 setting `.Spec.LoadBalancerSourceRanges` or by adding 

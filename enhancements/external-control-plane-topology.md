@@ -120,6 +120,6 @@ IBM ROKS will need to be regression tested by IBM Cloud QE. There is no impact t
 
 None
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 None

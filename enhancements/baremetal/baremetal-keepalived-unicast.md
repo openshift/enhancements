@@ -194,7 +194,7 @@ The Machine Config operator portion can be found here:
 * Multicast is a simpler configuration with fewer moving parts. However, not every
   environment allows multicast, whereas all environments would allow unicast.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 An alternative would be to absolutely require multicast for installation and
 operation.

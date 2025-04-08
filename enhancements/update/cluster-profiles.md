@@ -170,7 +170,7 @@ This will probably need to be backported.
 
 * Teach cluster-version operator about profiles, [cvo#404](https://github.com/openshift/cluster-version-operator/pull/404), in flight.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 A potential use for this enhancement would be to include/exclude certain operators based on
 the hardware platform, as in the case of the baremetal operator.  However, the general problem

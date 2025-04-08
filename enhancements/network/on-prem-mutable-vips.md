@@ -229,7 +229,7 @@ NA
 
 NA
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 The original enhancement for dual-stack VIPs introduced an idea of creating a separate instance of keepalived for the second IP stack. It was mentioned as something with simpler code changes but following this path would mean we can have two fundamentally different architectures of OpenShift clusters running in the field.
 

@@ -247,7 +247,7 @@ issues customers could run into.
 
 This enhancement is being implemented in OpenShift 4.12.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 One potential alternative would be to do this in the infrastructure CoreDNS but that could run the risk of 
 overloading a core functionality of the cluster and could make failure modes more impactful.

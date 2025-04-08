@@ -599,7 +599,7 @@ Describe how to
   - Namespaces deletion will not delete all objects in etcd, leading to zombie
     objects when another namespace with the same name is created.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 TBD
 

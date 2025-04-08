@@ -332,7 +332,7 @@ Major milestones in the life cycle of a proposal should be tracked in `Implement
 
 1. Additional resource utilization (i.e. memory) on each node required for the forward plugin, health checks, etc..
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Possible alternatives are listed [here](https://docs.google.com/document/d/17OEwYs9HuCeGtFKfJLwtk809C6MIjZmguce5-LQYxIM/edit?usp=sharing).
 

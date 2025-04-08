@@ -167,9 +167,9 @@ No special consideration.
 ## Implementation History
 
 
-## Alternatives
+## Alternatives (Not Implemented)
 
-### Alternatives in proposed new API
+### Alternatives (Not Implemented) in proposed new API
 
 #### Fetching custom signatures serially from signature stores
 

@@ -644,7 +644,7 @@ N/A
 - Started prototyping the [deppy](https://github.com/operator-framework/deppy) OLM 1.x component upstream.
 - Created an EP for the platform operator phases.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Implement phase 0 requirements using OLM 0.x
 

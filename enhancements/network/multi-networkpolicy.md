@@ -171,7 +171,7 @@ hence we could say that it is not kubernetes-version sensitive.
 
 ## Drawbacks
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Packet filtering could be done not only iptables also elsewhere (like ToR switch), but none is integrated
 with Kubernetes secondary network interface.

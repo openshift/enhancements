@@ -192,4 +192,4 @@ If the frequency of reloads compromises the performance of HAProxy, and the reve
 
 ## Implementation History
 
-## Alternatives
+## Alternatives (Not Implemented)

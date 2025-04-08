@@ -192,7 +192,7 @@ a build has been started, its pod configuration cannot change.
    this feature, since the layers used to assemble an application are often not present in the
    resulting deployed image.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 1. Use persistent volumes to cache layers for builds
    1. General build volume support is being considered as a separate enhancement.

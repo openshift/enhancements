@@ -331,7 +331,7 @@ user should check the `NetworkDiagnosticsAvailable` status condition in
 `cluster/network.config.openshift.io` and verify that there is a pod running in the 
 `openshift-network-diagnostics` namespace.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 The only alternative to this enhancement is to disable the network diagnostics feature with the 
 existing `.spec.disableNetworkDiagnostics` field in `network.operator.openshift.io`. This was 

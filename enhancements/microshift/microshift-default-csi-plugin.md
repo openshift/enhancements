@@ -397,7 +397,7 @@ the PVC's events for a message indicating the volume group does not have adequat
 
 ## Implementation History
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 [KubeVirt CSI Hostpath Provisioner](https://github.com/kubevirt/hostpath-provisioner#kubevirtiohostpath-provisioner) 
 (KV-CSI-HPP) was also considered as a production-grade storage solution.  While it demonstrated a lower resource overhead

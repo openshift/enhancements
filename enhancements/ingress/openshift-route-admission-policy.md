@@ -153,7 +153,7 @@ The API defines `empty` equivalent to `Strict`, therefore all the clients will h
 
 This only implements one existing feature in the OpenShift Router that existed in OpenShift 3.x, whereas there are many more configurations.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 - There are many environment variables exposed by the OpenShift Router which are not included in this proposal. An alternative proposal would be to allow setting environment variables directly through the ingress-controller CRD, but this would expose more feature in an uncontrolled manner.
 - This proposal implements an enum based [comment](https://github.com/openshift/api/pull/416#issuecomment-523658482), but there are only two values. This could be implemented as a boolean. There is an [existing PR](https://github.com/openshift/api/pull/416) with this implementation.

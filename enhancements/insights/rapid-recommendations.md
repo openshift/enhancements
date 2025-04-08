@@ -651,7 +651,7 @@ then we will continue with data identifiable by its group, version, type.
 As one of the last steps, we can consider some remote configuration for Prometheus metrics data, 
 but as mentioned, this will require an update to this proposal.    
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Keep Status Quo
 

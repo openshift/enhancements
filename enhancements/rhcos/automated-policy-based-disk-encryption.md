@@ -341,7 +341,7 @@ Note: Impact on will be workload dependent. See:  The [comparision of Linux encr
 
 The default mode may create a false sense of security, see `Risks, and Migitations.`
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Previous ideas have explored various models, including:
 * Embedded OSTree in the Initramfs and using Ignition to setup

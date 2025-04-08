@@ -259,6 +259,6 @@ The cluster logging project provides a component to gather metrics about the vol
 
 ## Implementation History
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 

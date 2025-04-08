@@ -422,7 +422,7 @@ N/A
 * CRI-O changes: https://github.com/cri-o/cri-o/pull/7502
 * CI job added to NTO: https://github.com/openshift/release/pull/46767
 
-## Alternatives
+## Alternatives (Not Implemented)
 * Taint the nodes with `NoSchedule`, `NoExecute` in order to keep the node from scheduling/run on nodes when
 the plugin is not ready (critical for reboot scenarios). 
 This replaces the `workload.openshift.io/enable-shared-cpus` request and eliminate the need in device plugin API.

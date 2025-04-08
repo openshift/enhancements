@@ -316,7 +316,7 @@ This command will determine if the ingress capability is enabled on the cluster.
 ## Implementation History
 N/A
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Implement the ingress capability for the standalone OpenShift
 

@@ -208,7 +208,7 @@ N/A
 * The amount of time required to build and maintain the operator.
 * The amount of time involved in supporting new Kubernetes APIs.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Use Ingress Operator instead of Contour to implement Service APIs.
 

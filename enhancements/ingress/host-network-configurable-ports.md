@@ -307,7 +307,7 @@ N/A.
 
 Additional operational complexity, which will increase the needed test matrix, frustration for users, and volume of customer cases.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 * Advise users to use the NodePortService endpoint publishing strategy type. 
 * Augment the NodePortService strategy to allow the user to specify requested ports within the nodeport range. 

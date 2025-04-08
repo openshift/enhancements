@@ -258,7 +258,7 @@ Since this feature is controlled using the `KubeletConfig`, upgrade/downgrade st
 
 This solution utilizes kubelet command line flags. Kubelet command line flags have been deprecated in favour of config file, so there is risk for this solution if those flags are actually purged. Having said that, those flags are quite widely used today. So there has not been much traction on actually removing those flags even though they have been marked deprecated.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 1. Enhance kubelet itself to be more smart about calculating node sizing values. We have an actively debated [KEP](https://github.com/kubernetes/enhancements/pull/2370) in sig-node around this idea.
 2. Modify MCO the way it handles kubeletconfig. Instead of passing `--system-reserved` argument to the kubelet, maybe there is a possibility to make sure MCO is more tolerant of changes to the kubelet config file. This way we will modify the config file to add system reserve values instead of passing them as `--system-reserved`.

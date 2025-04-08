@@ -137,6 +137,6 @@ History`.
 
 - 2020-05-29 [tnozicka] Updated the proposal to reflect implementation shipped in OCP 4.5
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 This process can be run by a laborious and error prone manual process that three existent teams have already had trouble with.

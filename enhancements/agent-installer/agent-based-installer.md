@@ -285,7 +285,7 @@ it after boot. A total of three boots (which are very slow on baremetal due to
 RAM testing at startup) will still be required for each host to come up as an
 OpenShift node.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Run assisted-service outside of the cluster hosts
 

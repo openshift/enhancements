@@ -171,7 +171,7 @@ N/A
 
 None
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Arbitrary parameter values
 Instead of restricting the customer to predefined profiles, this would allow them direct access to the parameters and allow them to set arbitrary values (within some bounds).

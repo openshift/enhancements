@@ -136,7 +136,7 @@ There should be no issues with Version Skew as it is deployed in conjunction wit
 
 The drawback to not implementing this feature is we are unable to support migration to Elasticsearch 6.x and the current multi-tenant featurs of OpenShift Logging
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Alternatively we can spend more effort trying to migrate the existing plugin to v6
 

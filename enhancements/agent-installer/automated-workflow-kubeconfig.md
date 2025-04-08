@@ -252,7 +252,7 @@ The changes to the agent installer to generate the kubeconfig and pass the
 certificate/key files to the assisted-service were implemented in
 [openshift/installer#5959](https://github.com/openshift/installer/pull/5959).
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 The agent installer could attempt to download the kubeconfig from the
 assisted-service during installation. However, since it is up to the user to

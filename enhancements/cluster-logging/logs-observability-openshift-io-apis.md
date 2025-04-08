@@ -591,7 +591,7 @@ that is unable to be converted, for example, a forwarder that is utilizing the F
 
 ## Support Procedures
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Given most of the changes will result in an operator that manages only log collection and forwarding, we could release a new operator for that purpose only that provides only *ClusterLogForwarder.observability.openshift.io/v1* APIs
 

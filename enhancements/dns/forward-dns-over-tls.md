@@ -353,7 +353,7 @@ This enhancement adds additional complexity to the `UpstreamResolver` and
 the future (away from CoreDNS) we would need to ensure that the new 
 technology supported the same capabilities.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 This could potentially be done with systemd-resolved, however, that's not 
 enabled by default in RHEL and would add a dependency into the core OS 

@@ -229,7 +229,7 @@ PR to generate wildcard certificates: https://github.com/openshift/service-ca-op
 
 See Risks above.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Do Nothing
 Manage the StatefulSet certificates manually, using some other CA.

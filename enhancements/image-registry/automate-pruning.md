@@ -339,7 +339,7 @@ deleted, leading to `ImagePullBackoff` conditions in deployments.
 For this reason we have previously never made explicit recommendations on
 when/how admins should run pruning.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 In 4.2 we documented how to deploy pruning as a scheduled `CronJob`.
 Cluster admins can use the published YAML template to install the pruning job

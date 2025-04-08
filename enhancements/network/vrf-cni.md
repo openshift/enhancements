@@ -161,6 +161,6 @@ Basic tests can be added under openshift/origin test suite too.
 
 ## Implementation History
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 When granted enough privileges, the application is able to set the VRF by itself.

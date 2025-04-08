@@ -152,7 +152,7 @@ N/A.
 
 #### Support Procedures
 
-## Alternatives
+## Alternatives (Not Implemented)
 A few alternative ideas were considered while planning the design outlined in this enhancement:
 - Run the TuneD daemon directly on the hosted node OS rather than in a privileged container.
   - We did not pursue this option as it would entail significant changes to the NTO design. It does not seem to address the biggest challenges involved in enabling NTO on HyperShift such as how to move the TuneD configuration out of the hosted cluster and into the management cluster, how to get the TuneD profiles to the hosted nodes

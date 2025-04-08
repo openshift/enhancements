@@ -432,7 +432,7 @@ TBD
 ## Implementation History
 TBD
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 The existing OpenShift router could be modified to provision ALBs for Ingresses
 which specify it through an annotation. The disadvantage would that the router

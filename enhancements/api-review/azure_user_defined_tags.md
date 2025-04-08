@@ -352,6 +352,6 @@ On downgrade:
 
 ## Implementation History
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ## Infrastructure Needed [optional]

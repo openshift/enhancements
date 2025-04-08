@@ -169,7 +169,7 @@ There are no other major milestones in the implementation history than the gradu
 
 The performance of the OCM API can be a possible drawback, but the certificates are cached in the OCM API server so the expected impact should be minimal.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 - Alternative is to implement this functionality in another control plane component/operator (e.g openshift-controller-manager).
 - Another option is to create a new component/operator for this functionality. This would probably require the most effort and would require additional CPU and memory resources in a cluster.

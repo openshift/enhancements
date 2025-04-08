@@ -224,7 +224,7 @@ N/A
 
 N/A
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Implement a k8s Cloud Controller Manager for MicroShift. The Cloud Controller
 Manager will be running in the pod of the MicroShift Cluster.

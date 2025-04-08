@@ -216,6 +216,6 @@ None
 
 None
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 These are primarily still open questions.

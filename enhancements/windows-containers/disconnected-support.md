@@ -381,7 +381,7 @@ environments. Releases 10.15.z and below will not have support disconnected supp
 The implementation history can be tracked by following the associated work items in Jira and source code improvements in
 the WMCO Github repo.
 
-## Alternatives & Justification
+## Alternatives (Not Implemented) & Justification
  
 For disconnected support, we could make the kubelet pause image location configurable. This is a nice to have, but may 
 be out of scope of disconnected support as it could require a larger undertaking to make the containerd config file

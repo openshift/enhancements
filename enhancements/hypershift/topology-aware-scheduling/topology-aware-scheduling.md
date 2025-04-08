@@ -259,7 +259,7 @@ The later are expected to be skipped while CI running on HCP.
 ## Support Procedures
 * N/A
 * 
-## Alternatives
+## Alternatives (Not Implemented)
 
 1. Running NROP on the MNG-cluster and the managed components are deployed on the hosted-cluster as in the original proposal
 Upside: KubeletConfig can be accessed directly.

@@ -128,4 +128,4 @@ N/A.
 
 ## Implementation History
 
-## Alternatives
+## Alternatives (Not Implemented)

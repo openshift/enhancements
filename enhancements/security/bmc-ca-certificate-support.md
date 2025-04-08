@@ -260,7 +260,7 @@ TBD
 
 TBD
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 An alternative approach would be to add these CA certificates through the `additionalTrustBundle`.
 However, this has been discussed in a similar [enhancement][OpenStack enhancement]

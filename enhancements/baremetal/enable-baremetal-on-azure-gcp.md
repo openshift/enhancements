@@ -156,4 +156,4 @@ These PRs enable the CBO on the Azure and GCP platforms:
 * https://github.com/openshift/cluster-baremetal-operator/pull/309
 * https://github.com/openshift/cluster-baremetal-operator/pull/316
 
-## Alternatives
+## Alternatives (Not Implemented)

@@ -383,7 +383,7 @@ The OIDC configuration is consumed by the kube-apiserver (KAS) pods, but produce
 
 Nevertheless, in case of OIDC problems that are not logged on the CAO side, one should consult the KAS logs and rollout progress as well. Additionally, the KAS-operator logs will also reveal any problems with syncing the ConfigMap and creating a revisioned one, creating a static file and enabling the OIDC KAS CLI argument.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 n/a
 

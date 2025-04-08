@@ -237,6 +237,6 @@ if configNode.Spec.CgroupMode == configv1.CgroupModeV1 {
 	coStatusCondition.Message = "Cluster is using cgroup v1 and is not upgradable. Please update the `CgroupMode` in the `nodes.config.openshift.io` object to 'v2'. Once upgraded, the cluster cannot be changed back to cgroup v1"
 }
 ```
-## Alternatives
+## Alternatives (Not Implemented)
 
 ## Drawbacks

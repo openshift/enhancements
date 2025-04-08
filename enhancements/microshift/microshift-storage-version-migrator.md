@@ -245,7 +245,7 @@ oc get storageversionmigrations
 
 N/A
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 In my searching I did not find a tool alternative for this issue. However, we
 did try some alternative ways at approaching this problem for our needs.

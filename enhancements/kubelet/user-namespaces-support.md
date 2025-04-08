@@ -373,7 +373,7 @@ that are running with a version lower than the configured version. If so, the cr
 
 MCO will read the MinimumKubeletVersion and mark machines as degraded if the node is not at least MinimumKubeletVersion.
 
-##### Alternatives to MinimumKubeletVersion
+##### Alternatives (Not Implemented) to MinimumKubeletVersion
 
 It is also possible this feature should be paired with a corresponding kubelet field `minimumKubeletVersion`, where it exits if it is too old. This will prevent the kubelet from
 running before it seeks to get credentials from the kube-apiserver, but also adds additional code overhead and backporting, plus given this feature would be added in z-streams, it's not
@@ -502,7 +502,7 @@ needed.
 
 There should be no issues to pods without `hostUsers: false`.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 - Less integration with SCC is possible, as currently proposed it gives the most flexibility for admins to mandate which users can access user namespaces.
 - It was previously discussed to have a mechanism to allow a kubelet to fail to run if user namespaces aren't supported.

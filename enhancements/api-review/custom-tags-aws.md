@@ -176,7 +176,7 @@ If a customer decides they do not want these tags applied to new resources, ther
 
 In the future we will want to introduce a spec field where a customer can specify and edit these tags, which will be reflected into status when changed, and we will expect consuming components to reconcile changes to the set of tags by applying net new tags to existing resources (but they will still not remove tags that are dropped from the list of tags).
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Proposal for managing user-defined tags in day2 operations is discussed in the following sections.
 
@@ -526,7 +526,7 @@ If a user decides that they do not want these tags applied to new resources, the
 3. User would have to manually update user-defined tags for AWS resources which are not managed by an operator.
 4. User would have to manually update user-defined tags for AWS resources where update logic is not supported by an operator.
 
-## Alternatives considered to support day2 operations
+## Alternatives (Not Implemented) considered to support day2 operations
 
 1. An operator can be designed to behave similar to how the installer's destroy behaves, namely by using the resource tagging API to search for resources with the kubernetes.io/.../cluster=owned tag.
 The operator would reconcile on changes to the infrastructure CR to ensure that resources owned by the cluster have tags matching what is in the infrastructure CR.

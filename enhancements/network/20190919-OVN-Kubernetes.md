@@ -107,7 +107,7 @@ version skew can occur between nodes.
 
 ## Drawbacks
 
-## Alternatives
+## Alternatives (Not Implemented)
 There are many. But we’ve been involved in the OVN and OVN-Kubernetes
 communities for a long time. We have the expertise, and we think it’s
 worth the investment.

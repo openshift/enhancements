@@ -198,7 +198,7 @@ TODO
 ## Drawbacks
 None.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Forward all logs and filter in an external agent. We forward log events with
 labels attached an external agent could do this filtering.

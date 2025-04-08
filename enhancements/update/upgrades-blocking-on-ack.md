@@ -204,7 +204,7 @@ Major milestones in the life cycle of a proposal should be tracked in `Implement
 * Keys will not be portable across products that use a different versioning scheme than OCP.
 * `Upgradeable=false` is the default state and results if there is any issue accessing either configmap or if an invalid key is found in the `admin-acks` configmap.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### API-server sets `Upgradeable=False`
 

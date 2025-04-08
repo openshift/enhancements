@@ -303,7 +303,7 @@ History`.
 
 The idea is to find the best form of an argument why this enhancement should _not_ be implemented.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Define a new Capabilities API
 

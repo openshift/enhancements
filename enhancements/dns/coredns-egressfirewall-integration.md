@@ -727,7 +727,7 @@ The following 2 scenarios may occur during the upgrade process:
 ## Implementation History
 
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 The following solutions are alternatives for the proposed solution.
 

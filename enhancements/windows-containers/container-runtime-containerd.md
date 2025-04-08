@@ -232,7 +232,7 @@ As part of the existing submodules update process, containerd will also be updat
 
 v1: Initial Proposal
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 There are few alternatives, but they are either not cost-effective or depend on the competitor's less modular
 components.

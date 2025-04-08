@@ -345,6 +345,6 @@ Not applicable
 
 * Current implementation: https://github.com/openshift/origin/pull/28305
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 None known

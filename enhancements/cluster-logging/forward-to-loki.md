@@ -270,7 +270,7 @@ For example a CI test cluster that constantly creates and destroys randomly-name
 
 ## Drawbacks
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ## Implementation History
 

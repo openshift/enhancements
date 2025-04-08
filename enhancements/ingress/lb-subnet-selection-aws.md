@@ -668,7 +668,7 @@ the IngressController with have a status with a relevant error:
     type: LoadBalancerReady
 ```
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Automatically Recreating the Load Balancer
 

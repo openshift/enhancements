@@ -397,7 +397,7 @@ HAProxy to a different implementation, we would need to ensure that the new
 implementation supported the same capabilities.
 
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 We could refer users to third-party ingress controllers that implement this
 functionality.  Alternatively, we could defer support for this feature until

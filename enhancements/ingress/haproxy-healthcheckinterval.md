@@ -297,7 +297,7 @@ efforts of the cluster administrator to set a global healthcheck interval for al
 
 ## Implementation History
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 - This customer request is similar to the HSTS customer request, in that users can set the value already
 via route annotation but administrators want to make it mandatory on all routes, or to be global.  We

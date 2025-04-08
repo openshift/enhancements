@@ -756,7 +756,7 @@ Dynamic edge status that is dependent on cluster state makes [the graph-data rep
 This is mitigated by ClusterVersion's [`status.history[].acceptedRisks`](#enhanced-clusterversion-representation), which records any cluster-version operator objections which the cluster administrator chose to override.
 It is possible that cluster administrators would chose to clear that data, but it seems unlikely that they would invest significant effort in trying to cover their tracks when [the edges are supported regardless of whether they were recommended][openshift-docs-32091].
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### A positive edges schema in graph-data
 

@@ -208,5 +208,5 @@ N/A
 
 ## Implementation History
 Implementation [PR](https://github.com/openshift/microshift/pull/4000) for Micorshift
-## Alternatives
+## Alternatives (Not Implemented)
 N/A

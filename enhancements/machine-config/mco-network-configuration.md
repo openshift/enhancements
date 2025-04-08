@@ -306,7 +306,7 @@ The MCO integration should be able to operate independently of the kubernetes-nm
 
 ## Drawbacks
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Option A Alternative
 

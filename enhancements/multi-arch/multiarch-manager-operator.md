@@ -859,7 +859,7 @@ The following points have been identified as critical for the documentation we w
   to add a scheduling gate and sets nodeAffinity for gated pods:
   https://github.com/multi-arch/multiarch-operator
 
-## Alternatives
+## Alternatives (Not Implemented)
 - Modify pod specifications manually by adding nodeSelectors/nodeAffinities
   containing the correct architectures based on manual image inspection to
   control pod placement. Similar methods are outlined in OCP doc[^5]

@@ -214,7 +214,7 @@ N/A - the operator is very simple and does not interact with any other component
 
 The operator will be idle for most of the time.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 We considered:
 

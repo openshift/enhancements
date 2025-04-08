@@ -422,7 +422,7 @@ N/A
 
 TBD
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Custom Solution using Keepalived
 

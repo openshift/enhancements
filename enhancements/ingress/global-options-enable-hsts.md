@@ -417,7 +417,7 @@ Otherwise, it would not be possible to use a per-route setting.
 ## Design Details
 ## Drawbacks
 N/A
-## Alternatives
+## Alternatives (Not Implemented)
 N/A
 
 ### Open Questions

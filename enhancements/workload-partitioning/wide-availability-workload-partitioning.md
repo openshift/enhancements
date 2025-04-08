@@ -791,7 +791,7 @@ N/A
 
 WIP
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 When we first discussed the global identifier we looked for ways to add it with
 out involving any changes to the `Installer`, however, a few things made that

@@ -177,7 +177,7 @@ When testing on production clouds, we may face challenges, like bugs, issues wit
 
 - The operator will also have a pre-submit job to run the Kubernetes external storage tests against the CSI driver installed by it.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Only one alternative is to keep the deprecated in-tree driver in OpenShift and support it with our own resources.
 

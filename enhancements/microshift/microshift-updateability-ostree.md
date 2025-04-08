@@ -819,7 +819,7 @@ See [manual interventions](#manual-interventions).
 
 - [MicroShift Upgrade and Rollback Enhancement](https://github.com/openshift/enhancements/pull/1312)
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Deciding to backup or restore based on MicroShift health, rather than system's
 

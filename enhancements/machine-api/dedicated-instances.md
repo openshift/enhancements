@@ -193,7 +193,7 @@ PR with aws implementation https://github.com/openshift/cluster-api-provider-aws
 
 ## Drawbacks
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ## Infrastructure Needed
 

@@ -332,7 +332,7 @@ of the `ExternalDNS` object.
   modified the CI job to explicitly execute the shared VPC subset of E2E tests, which were seperated during the code
   review of the E2E tests.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Bumping the API
 

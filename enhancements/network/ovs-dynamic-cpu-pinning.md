@@ -198,6 +198,6 @@ spec:
 
 ## Implementation History
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 N/A

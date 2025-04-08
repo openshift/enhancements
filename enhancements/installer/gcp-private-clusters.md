@@ -166,7 +166,7 @@ Implementation PR: openshift/installer#2522
 
 A limitation of this design is that no health check for the machine config server (/healthz) will be run. The health of an instance will be determined entirely by the /readyz check on port 6443. This is mostly because two ILBs cannot share a single IP address, whereas twp NLBs can share a single external IP.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Other alternatives were considered but this is the only known feasible design. As mentioned above, using external network load balancers and limiting public access with firewalls is not possible, because tagged VM instances can not be granted access through source tags.
 

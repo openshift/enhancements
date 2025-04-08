@@ -465,7 +465,7 @@ CRIO Implementation: https://github.com/cri-o/cri-o/pull/7822
 
 Webhook Implementation: https://github.com/openshift/kubernetes/pull/1902
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 N/A
 

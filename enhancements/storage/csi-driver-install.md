@@ -316,7 +316,7 @@ Container images should have the same pattern as github repos - `ose-<github rep
 | Azure Disk |  |  |  |
 | Azure File |  |  |  |
 
-## Alternatives considered
+## Alternatives (Not Implemented) considered
 
 ### Install CSI driver operators via a new operator in `openshift-cluster-csi-drivers` namespace
 Instead of CSO, CSI driver operators could be started by a new operator, say `cluster-platform-csi-operator`, that

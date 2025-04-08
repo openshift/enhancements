@@ -385,7 +385,7 @@ If no, use build volumes.
 Documentation of this feature should encourage users to mount Secrets using the new Volume API, instead of the current "source" API.
 Users will need to opt-in to this feature - BuildConfigs that inject secrets today will need to be updated to take advantage of this feature.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Updating the existing injection apis to have a "asVolume" field was considered as it would be a simpler implementation (more code reuse) but it was rejected as there is a long term goal to allow builds to mount traditional volumes as well.
 The existing injection api can't easily be extended to support such a thing, so the design proposed in this enhancement is a better stepping stone to that goal.

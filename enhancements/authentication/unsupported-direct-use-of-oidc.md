@@ -351,7 +351,7 @@ History`.
 
 TBD
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 TBD
 

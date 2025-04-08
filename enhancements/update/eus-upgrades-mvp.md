@@ -420,7 +420,7 @@ above. Otherwise nothing specifically tied to this effort.
 
 The idea is to find the best form of an argument why this enhancement should _not_ be implemented.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### MCO Kubelet Skew Enforcement
 

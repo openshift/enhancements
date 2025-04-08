@@ -404,7 +404,7 @@ or create is successful.
 Mutable scope has a troubled history.  There is a risk that yet more unforeseen
 complications exist.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Users can manually delete and recreate IngressControllers.  This alternative
 causes more disruption (i.e., more downtime) than just deleting a Service does.

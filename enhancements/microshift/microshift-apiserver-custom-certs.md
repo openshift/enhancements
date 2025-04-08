@@ -227,7 +227,7 @@ This condition will cause Microshift to accept the certificate with a warning in
 ## Implementation History
 Prototype implentation details https://github.com/openshift/microshift/pull/3130
 
-## Alternatives
+## Alternatives (Not Implemented)
 - Use [cert-manager](https://cert-manager.io/docs/) for managing Microshift external custom certs
  which allow MicroShift administrators to rotate certificates automatically (e.g. via ACME).
  cert-manager is not supported on Microshift because it requires a lot of internal API changes.

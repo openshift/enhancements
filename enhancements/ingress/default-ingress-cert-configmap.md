@@ -209,7 +209,7 @@ Consumers must read the `default-ingress-cert` ConfigMap, which is inconsistent
 with other patterns for cluster configuration, described in "Alternatives"
 below.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Cluster Configuration API
 

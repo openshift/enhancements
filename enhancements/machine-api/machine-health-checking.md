@@ -236,7 +236,7 @@ https://gist.github.com/bison/403bb921e1d5ed72f7edec2ccb47471c#remediationstrate
 
 ## Drawbacks
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Considered to bake this functionality into machineSets. This was discarded as different controllers than a machineSet could be owning the targeted machines. For those cases as a user you still want to benefit from automated node remediation.
 

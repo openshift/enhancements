@@ -253,7 +253,7 @@ None
 People might have rules around the existing broken alerts.  They will have to
 change some of these rules.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Document policies, but not make any backwards-incompatible changes to the
 existing alerts and only apply the policies to new alerts.

@@ -378,7 +378,7 @@ type EgressServiceStatus struct {
 
 By stating all of the limitations to the user and with enough test coverage we can be confident that the feature is behaving properly for the main use-case.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 EgressIP already does some of the stuff described here, such as steering the traffic of multiple pods through a single node and SNATing their traffic to a single IP. However tying it to a service's ingress IP would require some degree of coordination between the service resource and the EgressIP resource (via a controller).
 

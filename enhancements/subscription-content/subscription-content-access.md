@@ -269,7 +269,7 @@ subscription becomes an “extra” feature.
 The projected resource driver also introduces a potential attack vector. Without proper precautions,
 an attacker can gain access to sensitive information.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Use MachineConfigs to Mount Entitlements
 

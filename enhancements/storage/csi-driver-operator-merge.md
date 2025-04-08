@@ -550,7 +550,7 @@ Once migration is complete, we should perform following post migration steps to 
 Major milestones in the life cycle of a proposal should be tracked in `Implementation
 History`.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Merge operators in a single binary + image
 

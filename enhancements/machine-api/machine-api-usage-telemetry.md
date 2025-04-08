@@ -386,7 +386,7 @@ that are expressed about information gathering in the current era of computing.
 While this may be a drawback, it should be tempered against the fact that users
 are free to disable telemetry from their operations.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 It might be possible to achieve some of the same metrics observances by watching
 associated activity to infer behavior. For example, without instrumenting more

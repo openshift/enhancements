@@ -218,7 +218,7 @@ None
 
 None
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 People not using the IPI installation can follow the Alibaba UPI document(Link TBD will be added after UPI document is published). This requires more manual work and the necessary knowledge without any automation help.
 SLB

@@ -306,7 +306,7 @@ someone attempting to install OpenShift will get feedback on failure.  The
 pre-flight checks have not exposed OpenShift to needing to bubble up appropriate
 information when certain types of cloud API errors are encountered.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Working with AWS to enhance the permissions simulation API to cover these
 complex permissions situations.

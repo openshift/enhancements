@@ -1186,7 +1186,7 @@ TBD.
 
 TBD.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Using external-dns for DNS management
 

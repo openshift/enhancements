@@ -331,7 +331,7 @@ The original reason for having the config in the `support` secret was the basic 
 Currently the preferred authentication option is to use the token provided in the `pull-secret` secret, 
 but the basic authentication option might be still valid for some use cases (e.g testing with Ingress service in the staging environment) so we should preserve this option. This is described more in the [Graduation](#graduation-criteria) and [Upgrade / Downgrade Strategy](#upgrade--downgrade-strategy) sections.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 The alternative is to keep all the original configuration options in the `support` secret, but this is not very suitable for the new configuration options (`ForceGatherReason` and `DisabledGatherers`) introduced in this enhancement and it does not allow to expose the Insights status in the API.
 

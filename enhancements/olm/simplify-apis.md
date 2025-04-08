@@ -661,7 +661,7 @@ N/A
 - Listing operators becomes a privileged operation that leaks info about existing namespaces and resources
 - Implict agreement that an operator is a cluster singleton
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 We can define a namespace-scoped operator resource in addition to the cluster-scoped one. We can use the cluster-scoped resource to indicate an operator may span multiple namespaces, and a namespace scoped operator to indicate it should be installed only in a specific namespace.
 

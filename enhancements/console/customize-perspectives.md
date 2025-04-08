@@ -272,7 +272,7 @@ N/A
 
 N/A
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 - Allow the admin to define a list of enabled perspectives for users or groups.
 - Enable plugins to specify required permissions for their perspectives.

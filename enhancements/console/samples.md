@@ -299,7 +299,7 @@ N/A
 
 * Initial version
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Add annotations to the Builder images
 

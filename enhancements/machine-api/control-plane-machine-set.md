@@ -1091,7 +1091,7 @@ implemented.
 - We will need confidence in the project before we can ship it
   - We need to decide how to ship the project, will we ship it as GA or TP in the first instance?
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Previous iterations of this enhancement linked in the metadata describe alternative ways we could implement this
 feature.

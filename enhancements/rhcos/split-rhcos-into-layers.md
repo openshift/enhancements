@@ -543,7 +543,7 @@ In general, support procedures will be exactly the same as they currently are fo
 OS-level issues. However, awareness that the node image is now a layered image will
 make it easier for the support team to debug issues by looking in the right places.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 1. Taken to its extreme, one alternative of this proposal is to get rid of
 RHCOS completely and just use the same bootimages as RHEL. This would have

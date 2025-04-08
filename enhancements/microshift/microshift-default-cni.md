@@ -272,7 +272,7 @@ N/A
 * [openshift/microshift](https://github.com/openshift/microshift)
 * [Design guidelines](https://github.com/openshift/microshift/blob/main/docs/design.md)
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### bridge-cni
 

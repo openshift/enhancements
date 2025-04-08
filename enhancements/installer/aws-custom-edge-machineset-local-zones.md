@@ -1172,7 +1172,7 @@ it supports only network load balancers (NLB/CLB), which are not supported on Lo
 The controller bug track is [OCPBUGSM-46513](https://issues.redhat.com/browse/OCPBUGSM-46513).
 
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 - Cluster admins can create subnets and the MachineSet manifest at the day zero operations
   using the installer option `create manifest`, then trigger the cluster creation.

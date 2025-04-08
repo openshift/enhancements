@@ -179,7 +179,7 @@ all cloud providers as it requires nested virtualization support. Given these
 limitations customers could potentially get a degraded experience with Windows
 workloads when compared to Linux workloads on the cluster.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Instead of using the MachineSet as the point of entry to enable Windows
 workloads, we can introduce a Windows specific CRD to do the same as we have

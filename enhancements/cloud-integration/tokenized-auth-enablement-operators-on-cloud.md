@@ -423,7 +423,7 @@ resources to the status of an appropriate resource to let admins know there are 
 
 Not implemented yet.
 
-## Alternatives
+## Alternatives (Not Implemented)
 - Leverage CredentialsRequest after Operator Installation
 
 1. Browse catalog, select Logging Operator

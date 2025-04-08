@@ -310,7 +310,7 @@ migration issues, alerts implemented as events related to those routed should be
 
 4.14: Initial implementation
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Use multi-homing L2 with a subnet and connect it to default pod network
 

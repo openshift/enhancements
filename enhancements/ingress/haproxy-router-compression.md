@@ -359,5 +359,5 @@ By implementing this proposal we are giving the user tools that could threaten t
 Improper configuration of the MIME types or general over-use of compression could allow the HAProxy to
 dedicate more processing time to compression than to its main duties of routing and traffic management.
 
-## Alternatives
+## Alternatives (Not Implemented)
 n/a

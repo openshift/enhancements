@@ -189,7 +189,7 @@ N/A
 
 N/A
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 We have decided to pursue implementing our own credentials exec plugin embedded in oc. But there are other options that
 were considered as alternatives.

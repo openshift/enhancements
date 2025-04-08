@@ -173,7 +173,7 @@ N/A
 The feature is fairly isoloated and does not make changes to the cluster
 itself. As such it should not cause any 
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 It is possible to obtain the provided information already, e.g. by running
 the `df` command on a mounted volume from a pod or querying PV, PVC and node

@@ -248,7 +248,7 @@ N/A
 
 N/A
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 1. The alternative would be creating a standalone Metrics Server operator that would work in conjuntion with CMO.
 But for the foreseeable future we’ll have CMO in the picture, but with a reduced profile.

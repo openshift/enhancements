@@ -205,7 +205,7 @@ N/A
 At the moment we investigated and documented all manifest modifications needed to
 deploy OCP on AWS outpost.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 No known alternatives to proposed solution.
 

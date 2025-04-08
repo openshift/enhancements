@@ -604,7 +604,7 @@ are made in OpenShift components. The component teams themselves are
 much better positioned to control how changes they make impact all
 supported cluster profiles.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 An alternative approach would be to start with some new installer that
 is intended for minimal single node deployments such as the proposed

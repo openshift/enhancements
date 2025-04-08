@@ -89,7 +89,7 @@ strategy of their drivers along with the sidecars those drivers use.
 
 ## Drawbacks
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Users could use the upstream sidecar instead of the one proposed here.
 

@@ -177,7 +177,7 @@ The enhancement introduces the additional latency of the CPaaS pipeline into the
 Assuming that the pipeline is fully automated, the latency introduced is expected to be at the order of minutes.
 This seems to be an acceptable latency with regards to its worst-case scenario, where it's added on top of the duration of blocking an update path via the path of the repository.
 
-## Alternatives
+## Alternatives (Not Implemented)
 I want to clearly state that none of the alternatives mentioned below have all the same benefits as the enhancement described here.
 
 * Instead of proceeding with this enhancement, we could continue to work with, or rather around, the current implementation of secondary metadata distribution in Cincinnati.

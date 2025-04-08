@@ -154,6 +154,6 @@ to create and manage cloud credentials outside the cluster for AWS cloud. The de
 * Push-button upgrades will not work in *manual* mode as the cluster no longer has the admin credentials to mint credentials
   (with fine-grained permissions) for in-cluster components.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ## Infrastructure Needed [optional]

@@ -279,4 +279,4 @@ reducing failure modes in general.
 
 ## Implementation History
 
-## Alternatives
+## Alternatives (Not Implemented)

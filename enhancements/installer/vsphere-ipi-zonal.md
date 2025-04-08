@@ -794,7 +794,7 @@ configuration - maybe documentation.
 
 - Extensive modifications to installer
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 - None
 

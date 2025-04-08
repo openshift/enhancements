@@ -137,7 +137,7 @@ The biggest drawback is that we lose visibility into the openvswitch processes. 
 
 This proposal does not cleanly provide for multiple consumers of OpenVSwitch. It is expected that, in the near future, other node-level components would like to consume it. They may make the assumption that ovs is always enabled, which is currently true but may not always be. A mechanism for requesting generic systemd units would more easily fit this.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 We can continue using our existing containerized openvswitch. However, we’ve seen that this causes connection disruption that is unlikely to be tolerated.
 

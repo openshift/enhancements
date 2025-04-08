@@ -498,7 +498,7 @@ See https://github.com/openshift/enhancements/pull/456.
 * Building an operator that is compatible with both OpenShift and vanilla Kubernetes adds complexity to the operator source code in general.
 
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 * Use Ingress Operator instead of ExternalDNS to manage openshift/route DNS records.
 * Productize ExternalDNS, but don't provide an operator to configure it (and instead provide thorough documentation).

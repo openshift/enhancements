@@ -95,7 +95,7 @@ Immediatly GA.
 
 ## Support Procedures
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Customers need to manually set the clock in the BIOS for each server which is tedious and error-prone.
 

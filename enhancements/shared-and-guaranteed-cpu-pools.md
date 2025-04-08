@@ -448,7 +448,7 @@ N/A
 
 N/A
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Add new first class CPU resource
 

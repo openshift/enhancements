@@ -251,6 +251,6 @@ None special.
 None special.
 ## Operational Aspects of API Extensions
 ## Support Procedures
-## Alternatives
+## Alternatives (Not Implemented)
 
 Expose detailed vector configuration: fails our overall mission of simplified configuration.

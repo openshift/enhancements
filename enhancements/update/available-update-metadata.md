@@ -194,7 +194,7 @@ The YAML rendering of the old and updated type are compatible, with the only dif
 
 Drawbacks for the chosen approach are discussed in the individual [*alternatives*](alternatives) subsections.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Components like the web console could bypass ClusterVersion and talk to the upstream Cincinnati directly, but this would require significant code duplication.
 

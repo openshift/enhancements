@@ -209,7 +209,7 @@ TUI proof-of-concept: <https://github.com/openshift-agent-team/tui>
 Investigation of adding a binary to the ISO: [AGENT-469](https://issues.redhat.com/browse/AGENT-469)
 Prototype of adding a binary to the ISO: <https://github.com/andfasano/gasoline>
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 The `whiptail` binary shows a TUI that is consistent in style with `nmtui`, and
 uses only command-line arguments as input. It is already present in CoreOS. In

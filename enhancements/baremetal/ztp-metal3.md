@@ -294,7 +294,7 @@ case, the new Ironic agent image must still be used, otherwise the
 
 - The converged flow is more complex than each of the old flows.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 - Keep both flows separate, implement all required features (currently
   firmware (BIOS) settings and iPXE boot, potentially hardware RAID and

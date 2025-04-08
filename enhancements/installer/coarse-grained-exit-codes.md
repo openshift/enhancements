@@ -152,7 +152,7 @@ This is also the case today.
 In addition, if a consumer wishes to identify exact behavior, the `openshift-installer version` command
 can be used to determine version and react accordingly.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 A more detailed solution involved structured, machine readable output could be created.
 Such a solution would be more expressive, but additional expression isn't required for several use-cases today.

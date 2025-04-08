@@ -90,6 +90,6 @@ History`.
 
 If we have to carry forward the old CoreOS installer for a significant amount of time, maintenance will be a bit of a burden.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Keep the existing CoreOS installer and add tweaks to it to report provisioning success, etc.  This would quickly approach the general case though that the new Live CoreOS installer handles.

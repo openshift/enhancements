@@ -166,7 +166,7 @@ Given we are adding an optional spec/field to an existing API there should be mi
 
 Currently we are unable to leverage using Opendistro plugins, so we must continue forward with using cronjobs.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 None
 

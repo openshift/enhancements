@@ -303,7 +303,7 @@ This feature, when enabled, could result in potentially confusing outdated
 alerts being presented to the user, especially during unusual events (e.g.,
 cluster upgrades).
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Other notification approaches are currently being developed, but all of them
 either focus on a different aspect or seem to be aimed at a more distant future,

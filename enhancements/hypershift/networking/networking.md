@@ -274,7 +274,7 @@ TODO (flesh out).
 ### Operational Aspects of API Extensions
 #### Failure Modes
 #### Support Procedures
-## Alternatives
+## Alternatives (Not Implemented)
 
 ## Design Details
 

@@ -196,7 +196,7 @@ report along with must-gather.
 
 * OCP 4.16 - initial implementation (Tech Preview)
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 * Create RPM package for `azcopy` and ship it with the driver. This would require to create a new repo
   for `azcopy` and maintain it. We don't want to do that.

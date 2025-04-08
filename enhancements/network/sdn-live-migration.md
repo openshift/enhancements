@@ -457,7 +457,7 @@ N/A
 ## Implementation History
 N/A
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Instead of switching the network provider for an existing cluster, we can spin
 up a new cluster and move the workload to it.

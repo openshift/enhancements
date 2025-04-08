@@ -416,7 +416,7 @@ error will detail the cause.
 
 - [2022-01-25] Initial enhancement proposal
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 - We originally considered reusing `openshift-config-managed/kube-cloud-config`
 for CCM, but version skew issues would make the upgrade process more complex and

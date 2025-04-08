@@ -253,7 +253,7 @@ ideal, the fact that this change allows us to remove the RHEL-based IPA image
 already being shipped in the release payload means it is actually a net
 improvement.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 We could use the prototype
 [coreos-diskimage-rehydrator](https://github.com/cgwalters/coreos-diskimage-rehydrator)

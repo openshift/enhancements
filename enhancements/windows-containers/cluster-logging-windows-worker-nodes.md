@@ -159,7 +159,7 @@ as good as their linux counterparts, causing a degraded experience to
 customers.
 
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 An alternative approach would be to make changes to cluster logging operator to
 ensure that it can manage fluentd DaemonSet pod on the Windows nodes

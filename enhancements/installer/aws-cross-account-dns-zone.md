@@ -279,7 +279,7 @@ TODO
 Major milestones in the life cycle of a proposal should be tracked in `Implementation
 History`.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Instead of passing the role ARN in the API, it is possible to pass the role ARN as a named
 profile directly in the AWS creds. The implementation suggested in this enhancement is

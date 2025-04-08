@@ -138,5 +138,5 @@ To downgrade an existing 4.18 OCP Nutanix cluster to a prior version, if any of 
 
 ## Support Procedures
 
-## Alternatives
+## Alternatives (Not Implemented)
 

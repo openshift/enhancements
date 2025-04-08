@@ -1165,7 +1165,7 @@ Reference: https://github.com/haproxy/haproxy/issues/1309
 
 ## Implementation History
 
-## Alternatives
+## Alternatives (Not Implemented)
 ### Avoid Using Union Types
 Using union types makes the newly added API fields more verbose and deeply nested than is strictly necessary. The API could be designed to avoid the use of unions
 by changing the `IngressControllerHTTPHeader` and `RouteHTTPHeaders` types to flat structures, using CEL to require or prohibit specifying a header value based on the specified action.

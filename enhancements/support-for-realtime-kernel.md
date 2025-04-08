@@ -266,7 +266,7 @@ This configuration is not tested or supported.  The MCO will reject any
 MachineConfigs that contain `kernelType=realtime` if `fips=true` is already
 being used on the RHCOS nodes; an error message will be logged in this case.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 The alternative model for delivering the `kernel-rt` packages would be to
 create an additional ostree commit in the `machine-os-content` image which

@@ -279,7 +279,7 @@ Need to investigate this and ensure we arent leaking internal IPs externally.
 ## Implementation History
 4.14: Initial implementation
 
-## Alternatives
+## Alternatives (Not Implemented)
 N/A
 
 ### Drawbacks

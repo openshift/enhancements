@@ -398,7 +398,7 @@ downgrade to `B` from `A`.
 ## Drawbacks
 
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Continue with the BMO under the MAO
 

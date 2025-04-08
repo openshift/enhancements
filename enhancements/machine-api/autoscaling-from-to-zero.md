@@ -149,7 +149,7 @@ machine.openshift.io/maxPods
 
 ## Drawbacks
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 The [machine API autoscaler provider](https://github.com/openshift/kubernetes-autoscaler/tree/master/cluster-autoscaler/cloudprovider/openshiftmachineapi) could contain the specific logic for each provider. This would defeat one of the main benefits of the machine API which let all the provider implementation details belong to one single place and keep consumers provider agnostic.
 

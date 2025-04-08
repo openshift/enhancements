@@ -163,7 +163,7 @@ None
 * User testing to confirm there are no errors, the collector is authenticated and logs are forwarded to GCP Cloud Logging.
 * User testing of token-renewal after one hour, ensuring the collector is able to reload the latest token.
 
-## Alternatives
+## Alternatives (Not Implemented)
 * Build our own authentication 'side-car' service that handles the authentication process outside the collector, 
 managing the WIF token-exchange process and maintaining a valid access token on behalf of the collector.
 * Wait longer for vector to swap out their entire GCP 'goauth' library, or wait for library to be updated then 

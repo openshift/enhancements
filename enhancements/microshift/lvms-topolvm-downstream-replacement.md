@@ -273,7 +273,7 @@ N/A
 
 * https://github.com/openshift/lvm-operator/pull/576
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 We could continously maintain the TopoLVM images in MicroShift, but this would
 require additional effort and would not be in line with our goal to reduce the

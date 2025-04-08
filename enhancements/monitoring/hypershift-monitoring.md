@@ -353,7 +353,7 @@ NOTE: This list excludes RHOBS work items, which are managed by Observability te
 * Different than OSD team effort to maintain critical Observability dependency with high SLO.
 * No local alerting and querying for HSRE.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Let's look on various alternatives.
 

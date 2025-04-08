@@ -190,6 +190,6 @@ Why don't I receive audit logs?
 
 None.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 None.

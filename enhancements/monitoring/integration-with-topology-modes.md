@@ -176,7 +176,7 @@ If CMO gets any error while reading the resource:
 
 N/A
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 * Do nothing. CMO would deploy multiple replicas for Prometheus Alertmanager,
   Thanos querier, Thanos ruler and prometheus-adapter. As a result, the

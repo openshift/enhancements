@@ -205,7 +205,7 @@ The changes to the API objects are backwards compatible and therefore there shou
 
 None
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 We could treat all the non-public Azure cloud environments as Custom Azure cloud environment requiring the users to provide resource management endpoint. But that would not be great UX because,
 

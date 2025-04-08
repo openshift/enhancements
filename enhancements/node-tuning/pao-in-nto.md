@@ -261,7 +261,7 @@ The proposed change adds more code to the NTO component increasing the probabili
 
 However using Performance Profile is optional and so users that do not use this way of tuning should be not affected at all.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Alternative upgrade Implementation
 Have the PAO copy in NTO disable itself when the standalone version is installed, updating the ClusterOperator resource with that reason.

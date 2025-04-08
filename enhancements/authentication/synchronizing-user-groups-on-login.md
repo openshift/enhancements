@@ -231,7 +231,7 @@ There are two drawbacks to the current solution:
   described in this enhancement does not distinguish the groups when the user attempts
   to use their token and just uses all the OpenShift groups the user appears in.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### oauth-server alternative
 

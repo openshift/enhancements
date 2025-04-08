@@ -196,7 +196,7 @@ N/A
 
 N/A
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Each agent wanting to verify a service serving cert could read the ca
 bundle configmap from the operand namespace and write it to whatever

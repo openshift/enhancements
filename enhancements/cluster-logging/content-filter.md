@@ -206,5 +206,5 @@ Not yet.
 ## Version Skew Strategy
 ## Operational Aspects of API Extensions
 ## Support Procedures
-## Alternatives
+## Alternatives (Not Implemented)
 

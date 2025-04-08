@@ -187,7 +187,7 @@ None
 
 We will need to maintain accurate translations for every language we support and ensure that all new text in the front-end is considered for localization going forward. Testing and maintainence will also be a concern.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 UXD [did an analysis](https://github.com/patternfly/patternfly-react/issues/3952) of two internationalization frameworks, [react-intl](https://formatjs.io/docs/getting-started/installation/) and [react-i18next](https://react.i18next.com/), in April.
 

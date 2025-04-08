@@ -420,7 +420,7 @@ So procedures for debugging OCP router are to be followed.
 Other cases might involve hardware integration failures, those might depend
 on individual components.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 N/A
 

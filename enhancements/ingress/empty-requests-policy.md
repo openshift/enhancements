@@ -288,7 +288,7 @@ sprawl).  Additionally, if the default ingress controller implementation were to
 change away from HAProxy to a different implementation, we would need to ensure
 that the new implementation supported the same capabilities.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Filtering out empty requests from logs could be performed on the consumer side,
 and an external firewall or proxy could modify the response behavior.  However,

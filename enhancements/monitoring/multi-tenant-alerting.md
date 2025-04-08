@@ -603,7 +603,7 @@ History`.
 
 N/A
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Status-quo
 

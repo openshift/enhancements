@@ -173,7 +173,7 @@ enhancement:
 ## Drawbacks
 
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 1. Use a service-account token from the beginning.
    This is impractical because service account tokens are signed JWTs that contain a UID claim.

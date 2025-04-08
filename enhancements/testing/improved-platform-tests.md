@@ -417,7 +417,7 @@ N/A
 - *2022-11-16* - Initial draft.
 - *2023-05-31* - Updated document based on the proof of concept implementation.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Runtime Assembly - Multiple pods
 

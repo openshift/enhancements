@@ -292,7 +292,7 @@ to WMCO 9.0.0, the proxy support will be available.
 The implementation history can be tracked by following the associated work items in Jira and source code improvements in
 the WMCO Github repo.
 
-## Alternatives & Justification
+## Alternatives (Not Implemented) & Justification
 
 ### Design
 

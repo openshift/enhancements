@@ -239,7 +239,7 @@ The risks primarily fall into 4 categories:
 - tech debt: that the implementation may need to be replaced if a more holistic
   approach is identified
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 - Improve the MCD's logic for handling changes to CRDs.  This may require a
   lot of things that need to be plumbed through in the MCO and may not be

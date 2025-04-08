@@ -266,7 +266,7 @@ https://learn.microsoft.com/en-us/azure/azure-monitor/logs/data-collector-api?ta
 
 ## Implementation History
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Non-Goals"
 

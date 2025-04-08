@@ -520,7 +520,7 @@ Jan 24 14:37:14 microshift-dev microshift[8828]: microshift-loadbalancer-service
 ## Implementation History
 N/A
 
-## Alternatives
+## Alternatives (Not Implemented)
 - Instead of using a LoadBalancer service type, hostNetwork may be applied to
   the router pod. This approach does not allow NetworkPolicies to work with
   them, as they bypass networking. The metrics port would also get exposed on

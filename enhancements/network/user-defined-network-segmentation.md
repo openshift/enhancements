@@ -1502,4 +1502,4 @@ in other sections of this document.
 
 ## Support Procedures
 
-## Alternatives
+## Alternatives (Not Implemented)

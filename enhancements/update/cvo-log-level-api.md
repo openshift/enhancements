@@ -408,7 +408,7 @@ HyperShift component will generate the configuration file for the hosted CVO.
 
 Not applicable.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### The CVO state will be represented by the ClusterVersion resource
 

@@ -395,7 +395,7 @@ so that if a MachineHealthCheck has remediated a Machine recently, it should not
 
 ## Drawbacks
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Completely delegate the spot instance/feet behaviour to the provider in the fashion of [MachinePool](https://github.com/kubernetes-sigs/cluster-api/pull/1703).
 This would be a more disruptive change since the current OCP design expects a one to one relation between machine resources, provider instances and kubernetes nodes.

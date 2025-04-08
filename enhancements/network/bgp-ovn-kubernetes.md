@@ -804,4 +804,4 @@ within the provider's BGP network.
 
 ## Support Procedures
 
-## Alternatives
+## Alternatives (Not Implemented)

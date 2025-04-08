@@ -187,7 +187,7 @@ This PR is the current WIP implementation: https://github.com/openshift/cluster-
 There is concern that *random* customers will use this feature out of context
 and create support burden.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Customers can instead create a dedicated baremetal cluster to use as the hub
 cluster.

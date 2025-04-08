@@ -227,7 +227,7 @@ Nothing new.
 
 None.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 - Improve filtering at the API server instead of `ClusterLogForwarder`
   - does not meet the requirement of multiple independent filters.

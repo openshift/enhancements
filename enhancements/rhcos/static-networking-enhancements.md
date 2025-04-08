@@ -172,5 +172,5 @@ Any hosts that have been installed with static networking configured should be a
   - Confirm VM boots successfully using provided network config
   - Confirm VM reboots successfully and networking persists into the installed system
 
-## Alternatives
+## Alternatives (Not Implemented)
 - [RHCOS Ignition Fail to Live](https://github.com/openshift/enhancements/pull/256)
