@@ -793,6 +793,42 @@ importance of a regular disaster recovery readiness checks will be an interestin
 The existence of 1, 2, and 3+ node control-plane sizes will likely generate customer demand to move between them as their needs change. Satisfying this demand would come with significant technical and
 support overhead which is out of scope for this enhancement.
 
+## Alternatives (Not Implemented)
+
+#### Active-Passive Single-Node OpenShift
+One of the first options that comes to mind when thinking about how to run OpenShift with two control plane nodes at scale without the risk of split-brain is deploying 2 Single-Node OpenShift
+instances and setting them up as an active node with a passive backup.
+
+This option requires the user to run external software like keepalived in front of the instances to ensure that only one instance is the active instance and receiving traffic at a time.
+
+The advantage of this this kind of set up is that failures of each instance is reliably deterministic. A failure of the active instance passes traffic over to the passive instance, and a failure of
+the passive instance doesn't interrupt the active instance. Since both instances cannot be the active instance at the same time, there is no risk of a split-brain situation. Additionally, each Single
+Node OpenShift instance is a cluster by itself - meaning it does not need the other instance to be operational for it to proceed with upgrade or configuration operations that require a node reboot.
+
+That said, there are major tradeoffs of structuring the nodes in the fashion. Firstly, all aspects of the customer's applications must be available on both nodes. This means that the cluster
+administrator needs to actively synchronize both nodes so that either of them could become the active node at any given time. How this data is synchronized between the SNO instances is left as an a
+challenge for the solutions architect. For some applications, this results in more overhead on each node since both need to be able to run fully independently. For example, a deployment that specifies
+two replicas would end up with two replicas on each SNO instance. Furthermore, stateful workloads require special configuration to synchronize data between the active and passive clusters. Finally,
+the end user cannot utilize the full capacity of both nodes at the same time.
+
+The bottom line is that this solution may be viable for simple setups with stateless workloads, but it becomes logistically much harder to deploy and maintain for workloads that need to maintain
+synchronised state between the OpenShift instances. Solving the state synchronization challenges means having to solve the same core issues TNF faces around maintaining data integrity - without
+actively benefiting from the computation power of the second server.
+
+#### MicroShift
+MicroShift was considered as an alternative but it was ruled out because it does not support multi-node and has a very different experience than OpenShift which does not match the TNF initiative which
+is on getting the OpenShift experience on two nodes
+
+#### 2 SNO + KCP:
+[KCP](https://github.com/kcp-dev/kcp/) allows you to manage multiple clusters from a single control-plane, reducing the complexity of managing each cluster independently. With kcp, you can manage the
+two single-node clusters, each single-node OpenShift cluster can continue to operate independently even if the central kcp management plane becomes unavailable. The main advantage of this approach is
+that it doesn’t require inventing a new Openshift flavor and we don’t need to create a new installation flow to accommodate it.
+
+Disadvantages:
+* Production readiness
+* KCP itself could become a single point of failure (need to configure pacemaker to manage KCP)
+* KCP adds additional complexity to the architecture
+
 ## Open Questions [optional]
 1. Are there any normal lifecycle events that would be interpreted by a peer as a failure, and where the resulting "recovery" would create unnecessary downtime? How can these be avoided?
 
@@ -944,42 +980,6 @@ upgrade testing. This will be something to keep a close eye on when evaluating u
 - A BMC connection failure detected after the cluster is installed can be remediated as long as the cluster is healthy. A new MachineConfig can be applied to update the secrets file. If the cluster is
   down, this file would need to be updated manually.
 - In the case of a failed two-node cluster, there is no supported way of migrating to a different topology. The most practical option would be to deploy a fresh environment.
-
-## Alternatives
-
-#### Active-Passive Single-Node OpenShift
-One of the first options that comes to mind when thinking about how to run OpenShift with two control plane nodes at scale without the risk of split-brain is deploying 2 Single-Node OpenShift
-instances and setting them up as an active node with a passive backup.
-
-This option requires the user to run external software like keepalived in front of the instances to ensure that only one instance is the active instance and receiving traffic at a time.
-
-The advantage of this this kind of set up is that failures of each instance is reliably deterministic. A failure of the active instance passes traffic over to the passive instance, and a failure of
-the passive instance doesn't interrupt the active instance. Since both instances cannot be the active instance at the same time, there is no risk of a split-brain situation. Additionally, each Single
-Node OpenShift instance is a cluster by itself - meaning it does not need the other instance to be operational for it to proceed with upgrade or configuration operations that require a node reboot.
-
-That said, there are major tradeoffs of structuring the nodes in the fashion. Firstly, all aspects of the customer's applications must be available on both nodes. This means that the cluster
-administrator needs to actively synchronize both nodes so that either of them could become the active node at any given time. How this data is synchronized between the SNO instances is left as an a
-challenge for the solutions architect. For some applications, this results in more overhead on each node since both need to be able to run fully independently. For example, a deployment that specifies
-two replicas would end up with two replicas on each SNO instance. Furthermore, stateful workloads require special configuration to synchronize data between the active and passive clusters. Finally,
-the end user cannot utilize the full capacity of both nodes at the same time.
-
-The bottom line is that this solution may be viable for simple setups with stateless workloads, but it becomes logistically much harder to deploy and maintain for workloads that need to maintain
-synchronised state between the OpenShift instances. Solving the state synchronization challenges means having to solve the same core issues TNF faces around maintaining data integrity - without
-actively benefiting from the computation power of the second server.
-
-#### MicroShift
-MicroShift was considered as an alternative but it was ruled out because it does not support multi-node and has a very different experience than OpenShift which does not match the TNF initiative which
-is on getting the OpenShift experience on two nodes
-
-#### 2 SNO + KCP:
-[KCP](https://github.com/kcp-dev/kcp/) allows you to manage multiple clusters from a single control-plane, reducing the complexity of managing each cluster independently. With kcp, you can manage the
-two single-node clusters, each single-node OpenShift cluster can continue to operate independently even if the central kcp management plane becomes unavailable. The main advantage of this approach is
-that it doesn’t require inventing a new Openshift flavor and we don’t need to create a new installation flow to accommodate it.
-
-Disadvantages:
-* Production readiness
-* KCP itself could become a single point of failure (need to configure pacemaker to manage KCP)
-* KCP adds additional complexity to the architecture
 
 ## Infrastructure Needed [optional]
 
