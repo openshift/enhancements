@@ -156,16 +156,17 @@ At a glance, here are the components we are proposing to change:
 | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | [Feature Gates](#feature-gate-changes)                            | Add a new `DualReplicaTopology` feature which can be enabled via the `CustomNoUpgrade` feature set                              |
 | [OpenShift API](#openshift-api-changes)                           | Add `DualReplica` as a new value for `ControlPlaneTopology`                                                                     |
-| [ETCD Operator](#etcd-operator-changes)                           | Add a mode for disabling management of the etcd container, a new scaling strategy, and a controller for initializing pacemaker  |
+| [ETCD Operator](#etcd-operator-changes)                           | Add a mode to stop managing the etcd container, a new scaling strategy, and new TNF controller for initializing pacemaker       |
 | [Install Config](#install-config-changes)                         | Update install config API to accept fencing credentials in the control plane for `platform: None` and `platform: Baremetal`     |
 | [Installer](#installer-changes)                                   | Populate the nodes with initial pacemaker configuration when deploying with 2 control-plane nodes and no arbiter                |
 | [MCO](#mco-changes)                                               | Add an MCO extension for installing pacemaker and corosync in RHCOS; MachineConfigPool maxUnavailable set to 1                  |
+| [RHEL CoreOS](#rhcos-changes)                                     | A symbolic link will be added to /usr/lib to ensure that we can install podman-etcd via a MachineConfig                         |
 | [Authentication Operator](#authentication-operator-changes)       | Update operator to accept minimum 1 kube api servers when `ControlPlaneTopology` is `DualReplica`                               |
 | [Hosted Control Plane](#hosted-control-plane-changes)             | Disallow HyperShift from installing on the `DualReplica` topology                                                               |
 | [OLM Filtering](#olm-filtering-changes)                           | Leverage support for OLM to filter operators based off of control plane topology                                                |
 | [Bare Metal Operator](#bare-metal-operator-changes)               | Prevent power-management of control-plane nodes when the controlPlaneTopology is set to `DualReplica`                           |
 | [Cluster Monitoring Operator](#monitoring-operator-changes)       | Add telemetry for topology fields of infra config and add custom alerts for failover thresholds                                 |
-| [Console Operator](#console-operator-changes)                     | Include TNF in the valid topology check                                                                                         |
+| [OpenShift Console](#openshift-console-changes)                   | Include TNF in the valid topology check                                                                                         |
 | [OpenShift Origin](#openshift-origin-changes)                     | Add `DualReplica` topology mode to the list of topologies for the monitoring tests                                              |
 
 ### Workflow Description
@@ -201,16 +202,17 @@ Three aspects of cluster creation need to happen for a vanilla two-node cluster 
 An important facility of the installation flow is the transition from a CEO deployed etcd to one controlled by RHEL-HA. The basic transition works as follows:
 1. [MCO extensions](https://docs.openshift.com/container-platform/4.17/machine_configuration/machine-configs-configure.html#rhcos-add-extensions_machine-configs-configure) are used to ensure that the
    pacemaker and corosync RPMs are installed. The installer also creates MachineConfig manifests to pre-configure resource agents.
-2. Upon detection that the cluster infrastructure is using the DualReplica controlPlaneTopology in the infrastructure config, an in-cluster entity (likely a new controller running in CEO) will run a
-   command on one of the cluster nodes to initialize pacemaker. The outcome of this is that the resource agent will be started on both nodes.
-3. The aforementioned in-cluster entity will signal CEO to relinquish control of etcd by setting CEO's `managedEtcdKind` to `External`. When this happens, CEO immediately removes the etcd container
-   from the static pod configs. The resource agents for etcd are running from step 2, and they are configured to wait for etcd containers to be gone so they can restart them using Podman.
+2. Upon detecting that the DualReplica controlPlaneTopology is set in the infrastructure config, CEO will trigger a job to start a TNF controller to run commands on the cluster nodes to initialize
+   pacemaker. The outcome of this is that the podman-etcd resource agent will be started on both nodes.
+3. The aforementioned TNF controller will signal CEO to relinquish control of etcd by setting CEO's `useUnsupportedUnsafeEtcdContainerRemoval` and `useExternalEtcdSupport` flags. When this happens,
+   CEO immediately removes the etcd container from the static pod configs. The resource agents for etcd are running from step 2, and they are configured to wait for etcd containers to be gone so they
+   can restart them using Podman.
 4. The installation proceeds as normal once the containers start. If for some reason, the etcd containers cannot be started, then the installation will fail. The installer will pull logs from the
 control-plane nodes to provide context for this failure.
 
 ###### Managing Pacemaker and Resource/Fence agent Configuration
-Pacemaker configurations (as well as its resource and fence agent configurations) do not need to be stored as files, as they are dynamically created using pcs commands. Instead, the in-cluster entity
-will handle triggering these commands as needed.
+Pacemaker configurations (as well as its resource and fence agent configurations) do not need to be stored as files, as they are dynamically created using pcs commands run by new controller called the
+TNF controller.
 
 For the initial Technical Preview phase, we will use default values for these configurations, except for fencing configurations (which are covered in the next section).
 
@@ -233,10 +235,10 @@ the same considerations but these are not present during installation.
 See the API Extensions section below for sample install-configs.
 
 For a two-node cluster to be successful, we need to ensure the following:
-1. The BMC secrets for RHEL-HA are will be in a new section of the install-config.yaml, this will trigger the default flow of creating manifests and having the API server creating the Secrets from
-   those manifests.
-2. When pacemaker is initialized by the in-cluster entity, the in-cluster entity will pass it the fencing credentials extracted from the secret, which will be used by pacemaker to set up fencing. If
-   this is not successful, it throws an error which will cause degradation of the in cluster operator and would fail the installation process.
+1. The BMC secrets for RHEL-HA, located in a new section of the install-config.yaml, are consumed by the installer which renders Secret manifests and applies them to the openshift-etcd namespace
+   during cluster bootstrap.
+2. When pacemaker is initialized by the TNF controller, the TNF controller will pass it the fencing credentials extracted from the secrets in openshift-etcd, which will be used by pacemaker to set up
+   fencing. If this is not successful, it throws an error which will cause the degradation of CEO to fail the installation process.
 3. Pacemaker periodically checks that the fencing configuration is correct (i.e. can connect to the BMC) and will create an alert if it cannot access the BMC.
    * In this case, in order to allow manually fixing the fencing configuration by the user, a script will be available on the node which will reset Pacemaker with the new fencing credentials.
 4. The cluster will continue to run normally in the state where the BMC cannot be accessed, but ignoring this alert will mean that pacemaker can only provide a best-effort recovery - so operations
@@ -245,12 +247,12 @@ For a two-node cluster to be successful, we need to ensure the following:
 
 Future Enhancements
 1. Allowing usage of external credentials storage services such as Vault or Conjur. In order to support this:
-   * Expose the remote access credentials to the in-cluster operator
+   * Expose the remote access credentials to the TNF controller
    * We will need an indication for using that particular mode
    * Introduce another operator (such as Secrets Store CSI driver) to consume the remote credentials
    * Make sure that the relevant operator for managing remote credentials is part of the setup (potentially by using the Multi-Operator-Manager operator)
- 2. Allowing refresh of the fencing credentials during runtime. One way to do so would be for the in-cluster operator to watch for a credential change made by the user, and update the credentials
-    stored in Pacemaker upon such a change.
+ 2. Allowing refresh of the fencing credentials during runtime. One way to do so would be for CEO to watch for a credential change made by the user, and re-trigger the TNF controller job to update the
+    pacemaker resources.
 
 
 #### Day 2 Procedures
@@ -287,28 +289,33 @@ scope of this enhancement proposal and should be detailed in its own enhancement
 #### etcd Operator Changes
 
 Initially, the creation of an etcd cluster will be driven in the same way as other platforms. Once the cluster has two members, the etcd daemon will be removed from the static pod definition and
-recreated as a resource controlled by RHEL-HA. At this point, the cluster-etcd-operator (CEO) will be made aware of this change so that some membership management functionality that is now handled by
-RHEL-HA can be disabled. This will be achieved by having the same entity that drives the configuration of RHEL-HA use the OpenShift API to update a field in the CEO's `ConfigMap` - which can only
-succeed if the control-plane is healthy.
+recreated as a resource controlled by a RHEL-HA resource agent called podman-etcd. At this point, the cluster-etcd-operator (CEO) will be made aware of this change so that some membership management
+functionality that is now handled by RHEL-HA can be disabled. To enable this flow, we set the `useUnsupportedUnsafeEtcdContainerRemoval` flag in the `etcd` cluster resource.
 
-To enable this flow, we propose the addition of a `managedEtcdKind` field which defaults to `Cluster` but will be set to `External` during installation, and will only be respected if the
-`Infrastructure` CR's `TopologyMode` is `DualReplicaTopologyMode`. This will allow the use of a credential scoped to `ConfigMap`s in the `openshift-etcd-operator` namespace, to make the change.
+While set to `External`, CEO will still need to render the configuration for the etcd container to be consumed by pacemaker. This ensures that the etcd instance managed by pacemaker's podman-etcd
+resource agent can be updated accordingly in the case of an upgrade event or whenever certificates are rotated. To enable this, we set `useExternalEtcdSupport` in the `etcd` cluster resource.
 
-The plan is for this to be changed by one of the nodes during pacemaker initialization. Pacemaker initialization should be initiated by CEO when it detects that the cluster controlPlane topology is
-set to `DualReplica`.
+In future iterations, we will explore driving both changes from the `useExternalEtcdSupport` option.
 
-While set to `External`, CEO will still need to render the configuration for the etcd container in a place where it can be consumed by pacemaker. This ensures that the etcd instance managed by
-pacemaker can be updated accordingly in the case of a upgrade event or whenever certificates are rotated.
+Additionally, we need to introduce new bootstrap scaling modes to ensure that bootstrap would complete if only two control-plane etcd instances were available (or one control-plane etcd instance in
+the case of the assisted and agent-based installers).
 
-In case CEO will be used as the in-cluster operator responsible for setting up Pacemaker fencing it will require root permissions which are currently mandatory to run the required pcs commands. Some
-mitigation or alternatives might be:
-- Use a different (new) in-cluster operator to set up Pacemaker fencing
-  - However, this approach contradicts the goal of reducing the OCP release payload, as introducing a new core operator would increase its size instead of streamlining it. Additionally, adding the
-    operator would require more effort (release payload changes, CI setup, etc.) compared to integrating an operand into CEO. It would also still require root access, potentially raising similar
-    concerns as using CEO, just with a different audience.
-- Worth noting that the HA team suggests that there is a plan to adjust the pcs to a full client server architecture which will allow the pcs commands to run without root privileges. A partial faster
-  solution may be provided by the HA team for a specific set of commands used by the pcs client.
+##### The TNF Controller
+Pacemaker initialization is done by a new job in CEO that runs a TNF controller when it detects that the cluster's control-plane topology is set to `DualReplica`. This job and controller pair separate
+the concerns of managing TNF-specific behavior from the rest of CEO. The TNF controller is responsible for invoking the `pcs` commands needed to initialize pacemaker and ensures CEO ends up in a
+degraded state if they are unsuccessful. You can think of this controller as the component responsible for ensuring that etcd is healthy and set up to properly handle split-brain and node-failure
+events in TNF clusters.
 
+The TNF controller requires privileged mode because it will call the `pcs` utility to configure the pacemaker cluster (which needs elevated permissions). CEO has the `cluster-admin` RBAC role and the
+openshift-etcd namespace has the `pod-security.kubernetes.io/enforce: privileged` label, so we can deploy our new controller via a job in this namespace. The controller will run in the
+`openshift-etcd` namespace in privileged mode with `hostPID = true`.
+
+A full discussion of the CEO changes, as well as alternatives to this this approach, is available in our [TNF in CEO design
+document](https://docs.google.com/document/d/1ZqRYPM2OZ6kdD_tua4lB-gf3iSL-cuAoicvqIbM10MQ/edit?usp=sharing).
+
+In the future, it may be possible to lower the privilege level of the TNF controller once the RHEL-HA team rearchitects `pcs` to a full client-server architecture which would allow the `pcs` commands
+to run without root privileges. We are working with the RHEL-HA team to identify the specific set of commands that we use to narrow the scope of progress towards this goal. This remains a long-term
+objective for both teams.
 
 #### Install Config Changes
 
@@ -451,13 +458,22 @@ Additionally, we will enforce that 2-node clusters are only allowed on platform 
 the number of supportable configurations. If use cases emerge, cloud support for this topology may be considered in the future.
 
 #### MCO Changes
-The delivery of RHEL-HA components will be opaque to the user and be delivered as an [MCO Extension](../rhcos/extensions.md) in the 4.19 timeframe. A switch to [MCO
+The delivery of RHEL-HA components will be opaque to the user and be delivered as an [MCO Extension](../rhcos/extensions.md) in the 4.19 timeframe. This extension, called `two-node-ha`, is enabled on
+the control-plane nodes as part of the MCO-rendered MachineConfig for the control-plane machine pool. This MachineConfig will also be updated with a few systemd one shot services to initialize pcsd,
+as well as baked in podman-etcd agent. This agent is planned to be delivered as part of the `resource-agents` rpm in the `two-node-ha` extension in future releases. A switch to [MCO
 Layering](../ocp-coreos-layering/ocp-coreos-layering.md ) will be investigated once it is GA in a shipping version of OpenShift.
 
 Additionally, in order to ensure the cluster can upgrade safely, the MachineConfigPool `maxUnavailable` control-plane nodes will be set to 1. This should prevent upgrades from trying to proceed if a
 node is unavailable.
 
 One minor update is to update this [enum](https://github.com/openshift/machine-config-operator/blob/5ad8612aa1ba1ee240b545946e052d39311aaa7a/pkg/daemon/daemon.go#L2801) for technical completeness.
+
+#### RHCOS Changes
+The podman-etcd agent needs to be installed via a MachineConfig in the 4.19 timeframe. Since this would require writing a new file to `/usr/lib/ocf/resource.d/...`, we cannot do this purely in a
+MachineConfig because `/usr/lib` is readonly. To keep this simple in RHCOS, we will introduce a symbolic link pointing `/usr/lib/ocf/resource.d/ocp-tnf/podman-etcd` to
+`/usr/local/lib/ocf/resource.d/ocp-tnf/podman-etcd`. When the podman-etcd agent merges into the `resource-agents` rpm is and is picked up in the `two-node-ha` extension, it will be included in
+`/usr/lib/ocf/heartbeat/podman-etcd`, preventing a file conflict. At this point, we'll update RHCOS to repoint the symbolic link to the new source of truth, and then retire the symbolic link entirely
+in future release. This should help us keep upgrade behavior safe and consistent across releases.
 
 #### Authentication Operator Changes
 The authentication operator is sensitive to the number of kube-api replicas running in the cluster for [test stability
@@ -497,8 +513,8 @@ fields to the list of fields monitoring includes in telemetry.
 Additionally, we are looking into how to include custom alerting for thresholds that have an impact on failover behavior. As an example, if a customer wanted to ensure that all of their workloads
 could failover to a single node, we would need an alert to determine when the CPU usage across both nodes surpasses what can be scheduled to a single node.
 
-#### Console Operator Changes
-The console operator has a strict start up validation for topologies. We need to add `DualReplica` to the list of know topologies so that the console operator comes up successfully.
+#### OpenShift Console Changes
+The console container has a strict start up validation for topologies. We need to add `DualReplica` to the list of know topologies so that the console replicas come up successfully.
 
 #### OpenShift Origin Changes
 While a review of the individual tests in Openshift origin is an important step to baselining this new topology, another key change will be to add `DualReplica` topology mode to the list of topologies
@@ -521,9 +537,8 @@ bootstrap from one of the target machines to remove the requirement for a bootst
 So far, we've discovered topology-sensitive logic in ingress, authentication, CEO, and the cluster-control-plane-machineset-operator. We expect to find others once we introduce the new infrastructure
 topology.
 
-Once installed, the configuration of the RHEL-HA components will be done via an in-cluster entity. This entity could be a dedicated in-cluster TNF setup operator or a function of CEO triggering a
-script on one of the control-plane nodes. This script needs to be run with root permissions, so this is another factor to consider when evaluating if a new in-cluster operator is needed. Regardless,
-this initialization will require that RedFish details have been collected by the installer and synced to the nodes.
+Once installed, the configuration of the RHEL-HA components will be done via a TNF controller, which runs as a job triggered by the cluster-etcd-operator (CEO). This organization aims to maintain a
+separation of concerns in CEO, while still allowing the new TNF controller to run in privileged mode in the `openshift-etcd` namespace.
 
 Sensible defaults will be chosen where possible, and user customization only where necessary.
 
@@ -582,7 +597,9 @@ For `platform: none` clusters, this will require customers to provide a load bal
 `platform: none` we can work with the Metal Networking team to prioritize this as a feature for this platform in the future. Some discussion for this has already begun in this [enhancement
 proposal](https://github.com/openshift/enhancements/pull/1666).
 
-#### Handling Failures via RHEL HA
+With the ongoing discussion around `platform: none` being deprecated in favor of `platform: external`, we will ensure that any `platform: none` specific changes also apply to `platform: external`.
+
+#### Handling Failures via RHEL-HA
 In this section we explore in detail the steps taken to recover a cluster in the event of a node or network-level failure. The bottom line is that as long as fencing is configured properly and both
 nodes are available, the cluster should recover without manual intervention.
 
@@ -723,7 +740,7 @@ The only boundary we'd set to is declare compute nodes as unsupported in documen
 
 #### Hypershift / Hosted Control Planes
 
-This topology is anti-synergistic with HyperShift. As the management cluster, a cost-sensitive control-plane runs counter to the the proposition of highly-scaleable hosted control-planes since your
+This topology is anti-synergistic with HyperShift. As the management cluster, a cost-sensitive control-plane runs counter to the proposition of highly-scaleable hosted control-planes since your
 compute resources are limited. As the hosted cluster, the benefit of hypershift is that your control-planes are running as pods in the management cluster. Reducing the number of instances of
 control-plane nodes would trade the minimal cost of a third set of control-plane pods at the cost of having to implement fencing between your control-plane pods.
 
@@ -783,33 +800,15 @@ support overhead which is out of scope for this enhancement.
 
 2. In the test plan, which subset of layered products needs to be evaluated for the initial release (if any)?
 
-3. Can we do pacemaker initialization without the introduction of a new operator?
-
-   We've talked over the pros and cons of a new operator to handle aspects of the TNF setup. The primary job of a TNF setup operator would be to initialize pacemaker and to ensure that it reaches a
-   healthy state. This becomes a simple way of kicking off the transition from CEO controlled etcd to RHEL-HA controlled etcd. As an operator, it can also degrade during installation to ensure that
-   installation fails if fencing credentials are invalid or the etcd containers cannot be started. The last benefit is that the operator could later be used to communicate information about pacemaker
-   to a cluster admin in case the resource and/or fencing agents become unhealthy.
-
-   After some discussion, we're prioritizing an exploration of a solution to this initialization without introducing a new operator. The operator that is closest in scope to pacemaker initialization
-   is the cluster-etcd-operator. Ideally, we could have it be responsible for kicking off the initialization of pacemaker, since the core of a successful TNF setup is to ensure etcd ownership is
-   transitioned to a healthy RHEL-HA deployment. While it is a little unorthodox for a core operator to initialize an external component, that component is tightly coupled with the health of etcd to
-   begin with and they benefit from being deployed and tested together.  Additionally, most cases that would result in pacemaker failing to initialize would result in CEO being degraded as well. One
-   concern raised for this approach is that we may introduce a greater security risk since CEO permissions need to be elevated so that a container can run as root to initialize pacemaker. The other
-   challenge to solve with this approach is how we communicate problems discovered by pacemaker to the user.
-
-4. How do we notify the user of problems found by pacemaker?
+3. How do we notify the user of problems found by pacemaker?
 
    Pacemaker will be running as a system daemon and reporting errors about its various agents to the system journal. The question is, what is the best way to expose these to a cluster admin? A simple
-   example of this would be an issue where pacemaker discovers that its fencing agent can no longer talk to the BMC. What is the best way to raise this error to the cluster admin, such that they can
-   see that their cluster may be at risk of failure if no action is taken to resolve the problem? If we introduce a TNF setup operator, this could be one of the ongoing functions of this operator. In
-   our current design, we'd likely need to explore what kinds of errors we can bubble up through existing cluster health APIs to see if something suitable can be reused.
+   example would be an issue where pacemaker discovers that its fencing agent can no longer talk to the BMC. What is the best way to raise this error to the cluster admin, such that they can see that
+   their cluster may be at risk of failure if no action is taken to resolve the problem? In our current design, we'd likely need to explore what kinds of errors we can bubble up through existing
+   cluster health APIs to see if something suitable can be reused.
 
-5. How do we handle updates to the etcd container?
-
-   Things like certificate rotations and image updates will necessitate updates to the pacemaker-controlled etcd container. We will need to introduce some kind of mechanism where CEO can describe the
-   changes that need to happen and trigger an image update. We might be able to leverage [podman play kube](https://docs.podman.io/en/v4.2/markdown/podman-play-kube.1.html) to map the static pod
-   definition to a container, but we will need to find a way to get CEO to render what would usually be the contents of the static pod config to somewhere pacemaker can see updates and respond to
-   them.
+   For situations where we recognize a risk to etcd health if no action is taken, we plan on monitoring the pacemaker status via the TNF controller and setting CEO to degraded with a message to
+   explain the action(s) needed. This has the added benefit of ensuring that the installer fails during deployment if we cannot properly set up etcd under pacemaker.
 
 ## Test Plan
 
@@ -984,4 +983,4 @@ Disadvantages:
 
 ## Infrastructure Needed [optional]
 
-A new repository in the OpenShift GitHub organization will be created for the TNF setup operator if we decide to proceed with this design.
+Bare-metal systems will be needed from Beaker to test and gather performance metrics.
