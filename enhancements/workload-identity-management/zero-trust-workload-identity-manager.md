@@ -192,27 +192,94 @@ Refer below links for more information on the labels used
 #### Visual Workflow  
 
 ```mermaid
-graph TD
-  %% 1. Operator Installation
-  A[Install Operator] -->|Deploys| B[SPIRE Server]
-  A -->|Deploys| C[SPIRE Agents]
-  A -->|Deploys| D[SPIFFE CSI Driver]
-  A -->|Creates| E[CRDs]
+flowchart TD
+    %% User Configuration
+    subgraph User Config
+        A1[Admin deploys zero-trust-workload-identity-manager Operator]
+        A2[Admin creates ZeroTrustWorkloadIdentityManager CR]
+        A3[Operator watches ZeroTrustWorkloadIdentityManager CR via controller-runtime]
+    end
 
-  %% 2. Workflow
-  F[Workload] -->|Detected by| C
-  C -->|Validates Pod & Node| B
-  B -->|Issues SVID| C
-  C -->|Sends SVID| D
-  D -->|Mounts SVID to Pod| F
+    %% SPIFFE/SPIRE Infrastructure Setup
+    subgraph SPIFFE/SPIRE Infra Setup
+        B1[Operator deploys spire-server StatefulSet config from ZeroTrustWorkloadIdentityManager CR]
+        B2[Operator deploys spire-agent DaemonSet on all nodes]
+        B3[Operator deploys spiffe-csi-driver DaemonSet]
+        B4[Operator optionally deploys spiffe-oidc-provider Deployment]
+    end
 
-  %% 3. Secure Communication
-  F -->|mTLS with SVID| G[Other Workload]
-  F -->|Fetches OIDC Token| H[OIDC Provider]
+    %% Health Management & Status Updates
+    subgraph Health Management
+        B5[Operator performs health checks on all Spire components]
+        B6[Operator updates ZeroTrustWorkloadIdentityManager.status with component conditions]
+    end
 
-  %% 4. Trust Federation
-  E -->|Defines Trust| B
-  B -->|Shares Trust Bundle| I[External Cluster]
+    %% Workload Identity Provisioning
+    subgraph Workload Identity Provisioning
+        C1[User deploys workload with annotated ServiceAccount]
+        C2[Kubelet schedules Pod]
+        C3[spiffe-csi-driver NodePublishVolume invoked]
+        C4[spiffe-csi-driver contacts local spire-agent]
+        C5[spire-agent fetches SVID from spire-server Workload API]
+        C6[CSI driver writes SVID cert/key to workload volume]
+    end
+
+    %% SPIRE Registration Management
+    subgraph SPIRE Registration
+        D1[Operator monitors annotated ServiceAccounts & Namespaces]
+        D2[Operator derives SPIFFE ID for workload]
+        D3[Operator creates/updates SPIRE RegistrationEntry spire-server gRPC]
+    end
+
+    %% SVID Consumption (mTLS)
+    subgraph SVID Consumption mTLS
+        E1[Workload mounts SVID volume]
+        E2[Workload initiates mTLS connection using SVID]
+        E3[Peer workload validates SPIFFE ID using local spire-agent cache]
+    end
+
+    %% Optional OIDC Integration
+    subgraph Optional OIDC Integration
+        F1[spiffe-oidc-provider exposes JWKS endpoint]
+        F2[Workload requests JWT-SVID from local spire-agent]
+        F3[Workload uses JWT-SVID to authenticate to external services]
+        F4[External service validates JWT-SVID using JWKS]
+    end
+
+    %% Connections
+    A1 --> A2
+    A2 --> A3
+    A3 --> B1
+    A3 --> D1
+
+    B1 --> B2
+    B2 --> B3
+    B2 -- Optional --> B4
+
+    B1 --> B5
+    B2 --> B5
+    B3 --> B5
+    B4 --> B5
+    B5 --> B6
+
+    C1 --> C2
+    C2 --> C3
+    C3 --> C4
+    C4 --> C5
+    C5 --> C6
+    C6 --> E1
+
+    D1 --> D2
+    D2 --> D3
+    D3 --> B1
+
+    E1 --> E2
+    E2 --> E3
+
+    C5 -- JWT-SVID Request --> F2
+    B4 --> F1
+    F2 --> F3
+    F3 --> F4
   ```
 
 ### API Extensions
