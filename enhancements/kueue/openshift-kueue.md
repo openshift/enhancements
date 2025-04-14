@@ -325,13 +325,9 @@ spec:
       - RayJob
       - RayCluster
       - PyTorchJob
-    gangSchedulingPolicy:
+    gangScheduling:
       policy: ByWorkload
       byWorkload: Parallel
-    queueLabelPolicy:
-      policy: QueueNameRequired
-    preemption:
-      preemptionStrategy: Classical
 ```
 
 #### IBM Enablement
@@ -351,10 +347,10 @@ spec:
     integrations:
       frameworks:
       - AppWrapper
-    gangSchedulingPolicy:
+    gangScheduling:
       policy: Disabled
-    queueLabelPolicy:
-      policy: QueueNameOptional
+    workloadManagement:
+      labelPolicy: None
     preemption:
       preemptionStrategy: FairSharing
 ```
@@ -487,7 +483,6 @@ In Tech preview, we will provide the following features:
 - Support for deployments, pods, statefulsets.
 - [Use of resource flavors to describe heterogeous clusters](https://kueue.sigs.k8s.io/docs/concepts/resource_flavor/)
 - Use of ManagedJobsWithoutQueueName
-  - LocalQueueDefaulting
 - Gang admission via `WaitForPodsReady` Kueue configurations.
 - Fairsharing
 
@@ -504,17 +499,19 @@ We will not provide the following features in tech preview.
 - Topology CRD (Topology Aware Scheduling)
 - Cohort CRD (hierachial queueing)
 
-##### Future
+##### Feature support post GA
 
 Each of these features are valid. We will add support for them as dedicated RFE.
 Our focus for initial phase will be the supported features above.
 
 #### Release Schedule
 
+Need to finalize this.
+
 | Kueue Operator     |  Stage       |  OCP Version   |  Kueue   |
 | ------------------ | -------      | ---------------| -------- |
-| 1.0                | GA           | 4-18-4.19      | 0.11.z   |
-| 1.1                | GA           | 4.19-4.20      | 0.12.z   |
+| 1.0                | GA           | 4-17-4.19      | 0.11.z   |
+| 1.1                | GA           | 4.18-4.20      | 0.12.z   |
 | 1.2                | GA           | 4.20-4.21      | 0.13.z   |
 
 Kueue releases 6 times a year, roughly. 
