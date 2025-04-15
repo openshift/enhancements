@@ -747,7 +747,7 @@ it is recommended to look at the logs of each component.
 
 Once both deployments are ready, the Kueue APIs are accessible.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 None I can think of.
 
