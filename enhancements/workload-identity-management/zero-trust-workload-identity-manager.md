@@ -146,141 +146,80 @@ Refer below links for more information on the labels used
 
 ### Workflow Description
 
-#### 1. **Operator Installation**  
-- **Action**: Install the operator via **OpenShift OperatorHub** or CLI.  
-- **Result**: The operator deploys:  
-  - **SPIRE Server** (`StatefulSet`) as the certificate authority (CA).  
-  - **SPIRE Agents** (`DaemonSet`) for per-node workload attestation.  
-  - **SPIFFE CSI Driver** (`DaemonSet`) to inject SVIDs into pods.  
-  - **SPIFFE OIDC Provider** (`Deployment`) for OIDC token issuance.  
+The Zero-Trust Workload Identity Manager Operator automates the following workflow within OpenShift cluster:
 
-#### 2. **Workload Deployment**  
-- **Action**: Deploy a pod with labels matching a `ClusterSPIFFEID` policy (e.g., `app: secure`).  
-- **Result**:  
-  - The SPIRE Agent on the node detects the pod and validates:  
-    1. Pod labels/annotations.  
-    2. Service account and namespace.  
-    3. Node identity (e.g., Kubernetes node UID).  
+1.  **Installation and Initial Setup:**
+    * The operator is installed via the OpenShift OperatorHub or CLI, managed by OLM.
+    * Upon deployment, the operator registers watches for relevant Kubernetes resources (Deployments, StatefulSets, DaemonSets, CustomResourceDefinitions).
+    * The operator applies the necessary SPIRE Custom Resource Definitions (CRDs) to the OpenShift cluster.
+    * The operator applies foundational RBAC resources (ClusterRoles, ClusterRoleBindings, ServiceAccounts) for the SPIRE components.
 
-#### 3. **SVID Issuance**  
-- **Action**: The SPIRE Server processes the attestation request.  
-- **Result**:  
-  - Generates a short-lived **SVID** (X.509/JWT) with a default 1-hour TTL.  
-  - Signs SVIDs using its CA or delegates to an external enterprise PKI.  
+2.  **SPIRE Operand Deployment and Management:**
+    * Based on its internal logic, the operator deploys and manages the lifecycle of the core SPIRE operands:
+        * Deploying and maintaining the `spire-server` as a StatefulSet.
+        * Deploying and maintaining the `spiffe-csi-driver` as a DaemonSet.
+        * Deploying and maintaining the `spire-agents` as a DaemonSet.
+        * Deploying and maintaining the `spiffe-oidc-discovery-provider` as a Deployment.
 
-#### 4. **SVID Injection**  
-- **Action**: The SPIFFE CSI Driver mounts the SVID into the pod.  
-- **Result**:  
-  - SVIDs are stored at `/var/run/secrets/spiffe` as read-only volumes.  
-  - Auto-rotated 10 minutes before expiration.  
+3.  **SPIRE Configuration and Policy Management:**
+    * The operator configures the SPIRE Server with trust domain information and manages policies for workload attestation and SPIFFE ID assignment. (Note: Specific mechanisms for policy management might evolve.)
+    * The operator handles configurations for federated trust and static identities based on any relevant custom resources it manages.
 
-#### 5. **Secure Communication**  
-- **Action**: Workloads authenticate using SVIDs.  
-- **Result**:  
-  - **Mutual TLS (mTLS)**: Services validate each other’s SVIDs during TLS handshakes.  
-  - **OIDC Integration**: Workloads fetch tokens for external systems (e.g., Kubernetes API).  
-
-#### 6. **Advanced Scenarios**  
-- **Federated Trust**:  
-  - Define cross-cluster trust via `ClusterFederatedTrustDomains` CR.  
-  - Example: Trust workloads from `cluster-a.example` in `cluster-b.example`.  
-- **Static Identities**:  
-  - Use `ClusterStaticEntries` to pre-register identities for system components (e.g., `kube-apiserver`).  
+4.  **Monitoring and Status Reporting:**
+    * The operator continuously monitors the health and status of the deployed SPIRE operands.
+    * The operator reports the status of the managed SPIRE deployment through its own status on the Kubernetes API Server, indicating any errors or successful deployments.
+    * The operator performs reconciliation loops to ensure the desired state of the SPIRE infrastructure is maintained.
 
 ---
 
 #### Visual Workflow  
 
 ```mermaid
-flowchart TD
-    %% User Configuration
-    subgraph User Config
-        A1[Admin deploys zero-trust-workload-identity-manager Operator]
-        A2[Admin creates ZeroTrustWorkloadIdentityManager CR]
-        A3[Operator watches ZeroTrustWorkloadIdentityManager CR via controller-runtime]
+sequenceDiagram
+    participant User
+    participant OLM
+    participant Operator
+    participant "Kubernetes API Server"
+
+    User ->> OLM: Install zero-trust-workload-identity-manager Operator
+    OLM ->> "Kubernetes API Server": Create Operator Deployment
+    OLM ->> "Kubernetes API Server": Monitor Operator Health and Lifecycle
+
+    Operator ->> "Kubernetes API Server": Register Watch for (Deployments, StatefulSets, DaemonSets, CRDs)
+
+    Note over Operator, "Kubernetes API Server": Operator Setup & Watching
+
+    Operator ->> "Kubernetes API Server": Apply SPIRE CRDs
+    Operator ->> "Kubernetes API Server": Apply RBAC for SPIRE Components
+
+    Operator ->> "Kubernetes API Server": Create/Update spire-server StatefulSet
+    Operator ->> "Kubernetes API Server": Create/Update spiffe-csi-driver DaemonSet
+    Operator ->> "Kubernetes API Server": Create/Update spire-agents DaemonSet
+    Operator ->> "Kubernetes API Server": Create/Update spire-oidc-discovery-provider Deployment
+
+    Note over Operator, "Kubernetes API Server": Operator Deploys SPIRE Operands
+
+    loop Reconciliation Loop
+        Operator ->> "Kubernetes API Server": Get Status of (spire-server, CSI Driver, Agents, OIDC Provider)
+        Operator ->> Operator: Analyze Operand Status
+        alt Error in Operands
+            Operator ->> "Kubernetes API Server": Update Operator Status (Error)
+        else Operands Healthy
+            Operator ->> "Kubernetes API Server": Update Operator Status (Success)
+        end
+        Operator ->> Operator: Check for SPIRE Configuration/Policy Changes
+        alt Configuration/Policy Change Detected
+            Operator ->> "Kubernetes API Server": Update SPIRE Server Configuration (if applicable)
+            Operator ->> "Kubernetes API Server": Manage SPIRE Policies (e.g., Registration Entries)
+        else No Configuration/Policy Change
+            Operator ->> Operator: Wait for next reconciliation or event
+        end
     end
 
-    %% SPIFFE/SPIRE Infrastructure Setup
-    subgraph SPIFFE/SPIRE Infra Setup
-        B1[Operator deploys spire-server StatefulSet config from ZeroTrustWorkloadIdentityManager CR]
-        B2[Operator deploys spire-agent DaemonSet on all nodes]
-        B3[Operator deploys spiffe-csi-driver DaemonSet]
-        B4[Operator optionally deploys spiffe-oidc-provider Deployment]
-    end
+    OLM ->> "Kubernetes API Server": Monitor Operator Status
+    Note over OLM, "Kubernetes API Server": OLM ensures Operator is running and healthy
 
-    %% Health Management & Status Updates
-    subgraph Health Management
-        B5[Operator performs health checks on all Spire components]
-        B6[Operator updates ZeroTrustWorkloadIdentityManager.status with component conditions]
-    end
-
-    %% Workload Identity Provisioning
-    subgraph Workload Identity Provisioning
-        C1[User deploys workload with annotated ServiceAccount]
-        C2[Kubelet schedules Pod]
-        C3[spiffe-csi-driver NodePublishVolume invoked]
-        C4[spiffe-csi-driver contacts local spire-agent]
-        C5[spire-agent fetches SVID from spire-server Workload API]
-        C6[CSI driver writes SVID cert/key to workload volume]
-    end
-
-    %% SPIRE Registration Management
-    subgraph SPIRE Registration
-        D1[Operator monitors annotated ServiceAccounts & Namespaces]
-        D2[Operator derives SPIFFE ID for workload]
-        D3[Operator creates/updates SPIRE RegistrationEntry spire-server gRPC]
-    end
-
-    %% SVID Consumption (mTLS)
-    subgraph SVID Consumption mTLS
-        E1[Workload mounts SVID volume]
-        E2[Workload initiates mTLS connection using SVID]
-        E3[Peer workload validates SPIFFE ID using local spire-agent cache]
-    end
-
-    %% Optional OIDC Integration
-    subgraph Optional OIDC Integration
-        F1[spiffe-oidc-provider exposes JWKS endpoint]
-        F2[Workload requests JWT-SVID from local spire-agent]
-        F3[Workload uses JWT-SVID to authenticate to external services]
-        F4[External service validates JWT-SVID using JWKS]
-    end
-
-    %% Connections
-    A1 --> A2
-    A2 --> A3
-    A3 --> B1
-    A3 --> D1
-
-    B1 --> B2
-    B2 --> B3
-    B2 -- Optional --> B4
-
-    B1 --> B5
-    B2 --> B5
-    B3 --> B5
-    B4 --> B5
-    B5 --> B6
-
-    C1 --> C2
-    C2 --> C3
-    C3 --> C4
-    C4 --> C5
-    C5 --> C6
-    C6 --> E1
-
-    D1 --> D2
-    D2 --> D3
-    D3 --> B1
-
-    E1 --> E2
-    E2 --> E3
-
-    C5 -- JWT-SVID Request --> F2
-    B4 --> F1
-    F2 --> F3
-    F3 --> F4
-  ```
+```
 
 ### API Extensions
 
