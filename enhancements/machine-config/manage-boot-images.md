@@ -143,13 +143,12 @@ This is a tentative timeline for managed platforms, subject to change:
 | aws      | [4.17](https://docs.redhat.com/en/documentation/openshift_container_platform/4.17/html-single/machine_configuration/index#mco-update-boot-images)    |[4.18](https://docs.redhat.com/en/documentation/openshift_container_platform/4.18/html-single/machine_configuration/index#mco-update-boot-images)     |4.19     |
 | vsphere  | 4.20    |4.21     |4.22     |
 | azure    | 4.20    |4.21     |4.22     |
-| baremetal| 4.21    |4.22     |4.23     |
 | openstack| 4.21        |4.22     |4.23     |
-| nutanix  |   4.22      |4.23     |4.24     |
+| nutanix  |   4.21      |4.22     |4.23     |
 | ibmcloud |   4.22      |4.23     |4.24     |
 | non-managed | *    |*        |4.23*        |
 
-For **non-managed*** cases, boot image updates will be user initiated and supported via documentation. Hence, this will not be guarded by a feature gate, and the 4.23 timeline described above is for documentation. For managed cases, depending on initial feedback received from default-on behavior, it may be viable for the GA stage to be opt-out as well. This will be evaluated on a platform by platform basis. 
+For **non-managed***(including baremetal) cases, boot image updates will be user initiated and supported via documentation. Hence, this will not be guarded by a feature gate, and the 4.23 timeline described above is for documentation. For managed cases, depending on initial feedback received from default-on behavior, it may be viable for the GA stage to be opt-out as well. This will be evaluated on a platform by platform basis. 
 
 The skew enforcement mechanism could be developed in parallel to the above timeline, in a platform agnostic manner:
 |  | DevPreview      | TechPreview      | GA      |
@@ -494,7 +493,7 @@ type SkewEnforcementSelector struct {
 	// +kubebuilder:validation:XValidation:rule="self.matches('^[0-9]*.[0-9]*.[0-9]*$')",message="bootImageOCPVersion must be in a semver compatible format of x.y.z"
 	// +kubebuilder:validation:MaxLength:=8	
 	// +optional
-  BootImageOCPVersion string `json:"bootImageOCPVersion,omitempty"`
+	BootImageOCPVersion string `json:"bootImageOCPVersion,omitempty"`
 }
 
 
