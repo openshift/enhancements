@@ -252,7 +252,7 @@ type WorkloadIdentityManagerSpec struct {
 }
 
 // OperatorControllerConfig is for configuring the operator for setting up
-// defaults to install external-secrets.
+// defaults to install zero-trust-workload-identity-manager.
 type OperatorControllerConfig struct {
 	// namespace is for configuring the namespace to install the spire operand.
 	// +kubebuilder:validation:Optional
@@ -265,7 +265,7 @@ type OperatorControllerConfig struct {
 	Labels map[string]string `json:"labels,omitempty"`
 }
 
-// WorkloadIdentityManagerConfig is for configuring the external-secrets behavior.
+// WorkloadIdentityManagerConfig is for configuring the zero-trust-workload-identity-manager behavior.
 type WorkloadIdentityManagerConfig struct {
 	// logLevel supports value range as per [kubernetes logging guidelines](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-instrumentation/logging.md#what-method-to-use).
 	// +kubebuilder:default:=1
@@ -274,8 +274,7 @@ type WorkloadIdentityManagerConfig struct {
 	// +kubebuilder:validation:Optional
 	LogLevel int32 `json:"logLevel,omitempty"`
 
-	// operatingNamespace is for restricting the external-secrets operations to provided namespace.
-	// And when enabled `ClusterSecretStore` and `ClusterExternalSecret` are implicitly disabled.
+	// operatingNamespace is for restricting the zero-trust-workload-identity-manager operations to provided namespace.
 	// +kubebuilder:validation:Optional
 	OperatingNamespace string `json:"operatingNamespace,omitempty"`
 
@@ -374,7 +373,119 @@ type SpiffeOIDCProviderConfig struct {
 type SpireAgentConfig struct {
 	// Enabled specifies whether the Spire Agent is enabled.
 	// +kubebuilder:validation:Optional
+	// +kubebuilder:default=false
 	Enabled bool `json:"enabled,omitempty"`
+
+	// NodeAttestor specifies the configuration for the Node Attestor.
+	// +kubebuilder:validation:Optional
+	NodeAttestor *NodeAttestor `json:"nodeAttestor,omitempty"`
+
+	// WorkloadAttestors specifies the configuration for the Workload Attestors.
+	// +kubebuilder:validation:Optional
+	WorkloadAttestors *WorkloadAttestors `json:"workloadAttestors,omitempty"`
+}
+
+// NodeAttestor defines the configuration for the Node Attestor.
+// +kubebuilder:validation:Optional
+type NodeAttestor struct {
+	// HTTPChallenge specifies the configuration for HTTP Challenge attestation.
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:default={enabled: false, agentName: "", port: 0, advertisedPort: 0}
+	HTTPChallenge struct {
+		// Enabled specifies whether the HTTP Challenge attestor is enabled.
+		// +kubebuilder:validation:Optional
+		// +kubebuilder:default=false
+		Enabled bool `json:"enabled,omitempty"`
+
+		// AgentName specifies the name of the agent in the HTTP Challenge attestor.
+		// +kubebuilder:validation:Optional
+		// +kubebuilder:default=""
+		AgentName string `json:"agentName,omitempty"`
+
+		// Port specifies the port on which the HTTP Challenge attestor listens.
+		// +kubebuilder:validation:Minimum=1
+		// +kubebuilder:validation:Maximum=65535
+		Port int `json:"port,omitempty"`
+
+		// AdvertisedPort specifies the advertised port for the HTTP Challenge attestor.
+		// +kubebuilder:validation:Minimum=1
+		// +kubebuilder:validation:Maximum=65535
+		AdvertisedPort int `json:"advertisedPort,omitempty"`
+	} `json:"httpChallenge,omitempty"`
+
+	// TPMDirect specifies the configuration for TPM Direct attestation.
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:default={enabled: false, plugin: {image: "", checksum: "", path: ""}, pubHash: {enabled: false, image: ""}}
+	TPMDirect struct {
+		// Enabled specifies whether TPM Direct attestation is enabled.
+		// +kubebuilder:validation:Optional
+		// +kubebuilder:default=false
+		Enabled bool `json:"enabled,omitempty"`
+
+		// Plugin specifies the configuration for the TPM Direct attestor plugin.
+		// +kubebuilder:validation:Optional
+		Plugin struct {
+			// Image specifies the image for the TPM Direct attestor plugin.
+			// +kubebuilder:validation:Pattern="^[a-z0-9]+([\-\.]{1}[a-z0-9]+)*:[a-zA-Z0-9\-\.]+$"
+			Image string `json:"image,omitempty"`
+
+			// Checksum specifies the checksum for the TPM Direct plugin.
+			// +kubebuilder:validation:Optional
+			Checksum string `json:"checksum,omitempty"`
+
+			// Path specifies the path to the TPM Direct plugin.
+			// +kubebuilder:validation:Optional
+			Path string `json:"path,omitempty"`
+		} `json:"plugin,omitempty"`
+
+		// PubHash specifies the configuration for the public hash attestation.
+		// +kubebuilder:validation:Optional
+		PubHash struct {
+			// Enabled specifies whether public hash attestation is enabled.
+			// +kubebuilder:validation:Optional
+			// +kubebuilder:default=false
+			Enabled bool `json:"enabled,omitempty"`
+
+			// Image specifies the image for the public hash attestation plugin.
+			// +kubebuilder:validation:Pattern="^[a-z0-9]+([\-\.]{1}[a-z0-9]+)*:[a-zA-Z0-9\-\.]+$"
+			Image string `json:"image,omitempty"`
+		} `json:"pubHash,omitempty"`
+	} `json:"tpmDirect,omitempty"`
+}
+
+// WorkloadAttestors defines the configuration for the Workload Attestors.
+// +kubebuilder:validation:Optional
+type WorkloadAttestors struct {
+	// Verification specifies the configuration for the verification of the Kubernetes workload.
+	// +kubebuilder:validation:Optional
+	Verification struct {
+		// Type specifies the type of verification to be used.
+		// +kubebuilder:validation:Enum="cert"
+		// +kubebuilder:default="cert"
+		Type string `json:"type,omitempty"`
+
+		// HostCert specifies the configuration for the host certificate verification.
+		// +kubebuilder:validation:Optional
+		HostCert struct {
+			// BasePath specifies the base path for the host certificate.
+			// +kubebuilder:validation:Optional
+			BasePath string `json:"basePath,omitempty"`
+
+			// FileName specifies the file name for the host certificate.
+			// +kubebuilder:validation:Optional
+			FileName string `json:"fileName,omitempty"`
+		} `json:"hostCert,omitempty"`
+	} `json:"verification,omitempty"`
+
+	// DisableContainerSelectors specifies whether to disable container selectors in the Kubernetes workload attestor.
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:default=false
+	DisableContainerSelectors bool `json:"disableContainerSelectors,omitempty"`
+
+	// UseNewContainerLocator specifies whether to use the new container locator in the Kubernetes workload attestor.
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:default=false
+	UseNewContainerLocator bool `json:"useNewContainerLocator,omitempty"`
 }
 
 // SpireServerConfig defines the configuration for the Spire Server.
@@ -425,7 +536,7 @@ type SpireIngress struct {
 
 	// TLSSecret specifies the name of the TLS secret.
 	// +kubebuilder:validation:Optional
-	TlSSecret string `json:"tlsSecret,omitempty"`
+	TLSSecret string `json:"tlsSecret,omitempty"`
 }
 
 // CASubject defines the subject information for the Spire CA.
@@ -494,6 +605,13 @@ type TLSConfig struct {
 			// DNSNames defines the DNS names for the certificate.
 			// +kubebuilder:validation:Optional
 			DNSNames []string `json:"dnsNames,omitempty"`
+			// IssuerRef represents a reference to a cert-manager issuer or cluster issuer.
+			IssuerRef struct {
+				// Group of the issuer
+				Group string `json:"group,omitempty"`
+				// Name of the issuer resource
+				Name string `json:"name,omitempty"`
+			} `json:"issuerRef,omitempty"`
 		} `json:"certificate,omitempty"`
 	} `json:"certManager,omitempty"`
 }
@@ -534,10 +652,17 @@ type Condition struct {
 	// +kubebuilder:validation:Format=date-time
 	LastTransitionTime metav1.Time `json:"lastTransitionTime,omitempty"`
 
+	// reason contains a programmatic identifier indicating the reason for the condition's last transition.
+	// It should be a one-word, CamelCase string. It may be empty.
+	// +optional
 	Reason string `json:"reason,omitempty"`
 
+	// message is a human-readable message indicating details about the transition.
+	// This may be an empty string.
+	// +optional
 	Message string `json:"message,omitempty"`
 }
+
 
 ```
 
