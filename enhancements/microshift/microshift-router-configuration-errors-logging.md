@@ -71,20 +71,23 @@ configuration reference for more information.
 As mentioned in the proposal, there is an entire new section in the configuration:
 ```yaml
 ingress:
-    httpErrorCodePages: <string>
-    accessLogging: <Enable/Disable>
-    httpCaptureHeaders:
-      request:
-        - maxLength: <integer. Min 1>
-          name: <string regex: ^[-!#$%&'*+.0-9A-Z^_`a-z|~]*$. Must comply with RFC 2616 section 4.2>
-      response:
-        - maxLength: <integer. Min 1>
-          name: <string regex: ^[-!#$%&'*+.0-9A-Z^_`a-z|~]*$. Must comply with RFC 2616 section 4.2>
-    httpCaptureCookies:
-      - matchType: <string. Can be Exact or Prefix>
-        maxLength: <integer. Min 1, Max 1024>
-        name: <string regex: ^[-!#$%&'*+.0-9A-Z^_`a-z|~]+$. Must comply with RFC 6265 section 4.1>
-        namePrefix: <string regex: ^[-!#$%&'*+.0-9A-Z^_`a-z|~]+$. Must comply with RFC 6265 section 4.1>
+    httpErrorCodePages:
+      name: <string>
+    accessLogging:
+      status: <Enabled|Disabled>
+      format: <string>
+      httpCaptureHeaders:
+        request:
+          - maxLength: <integer>
+            name: <string>
+        response:
+          - maxLength: <integer>
+            name: <string>
+      httpCaptureCookies:
+        - matchType: <Exact|Prefix>
+          maxLength: <integer>
+          name: <string>
+          namePrefix: <string>
 ```
 
 For more information check each individual section.
@@ -119,28 +122,36 @@ logs from the router.
 This approach does not require configuring rsyslogd in the host and is self
 contained, not dedicating any resources in case it is not enabled.
 
-Configuring either of `ingress.httpCaptureHeaders` or
-`ingress.httpCaptureCookies` will also enable `ingress.accessLogging`.
+Configuring either of `ingress.accessLogging.httpCaptureHeaders` or
+`ingress.accessLogging.httpCaptureCookies` will also enable `ingress.accessLogging.status`.
 
-`ingress.accessLogging` defaults to `Disable`.
+`ingress.accessLogging.status` defaults to `Disabled`.
+
+#### Configuring access log format
+`ingress.accessLogging.format` specifies the format of the log message for an
+HTTP request. If this field is empty, log messages use the implementation's
+default HTTP log format, which is described [here](http://cbonte.github.io/haproxy-dconv/2.0/configuration.html#8.2.3).
+
+Note that this format only applies to cleartext and encryption terminated
+requests.
 
 #### Configuring custom error code pages
 To configure custom error code pages the user needs to specify a configmap name
-in `httpErrorCodePages`. This configmap must be in the `openshift-config`
-namespace and should have keys in the format of `error-page-<error code>.http`
-where `<error code>` is an HTTP status code.
+in `ingress.httpErrorCodePages.name`. This configmap must be in the
+`openshift-config` namespace and should have keys in the format of
+`error-page-<error code>.http` where `<error code>` is an HTTP status code.
 
 Each value in the configmap should be the full response, including HTTP
 headers.
 
 As of today, only errors for 503 and 404 can be customized.
 
-`ingress.httpErrorCodePages` defaults to empty.
+`ingress.httpErrorCodePages.name` defaults to empty.
 
 #### Capturing headers
 To configure specific HTTP header capture so they are included in the access
-logs the user needs to create entries in `ingress.httpCaptureHeaders`. This
-field is a list and allows capturing request and response headers
+logs the user needs to create entries in `ingress.accessLogging.httpCaptureHeaders`.
+This field is a list and allows capturing request and response headers
 independently. Each of the entries in the list has different parameters that
 follow. If the list is empty (which is the default value) no headers will be
 captured.
@@ -156,18 +167,18 @@ Each element of the list includes:
 
 Both elements have the same fields:
 * `maxLength`. Specifies a maximum length for the header value. If a header
-  value exceeds this length, the value will be truncated in the log message.
+  value exceeds this length, the value will be truncated in the log message. Minimum value 1.
 * `name`. Specifies a header name.  Its value must be a valid HTTP header name
-  as defined in RFC 2616 section 4.2.
+  as defined in RFC 2616 section 4.2. String regex ```^[-!#$%&'*+.0-9A-Z^_`a-z|~]+$```.
 
 If configured, it is mandatory to include at least `maxLength` and `name`.
 
-`ingress.httpCaptureHeaders` defaults to an empty list.
+`ingress.accessLogging.httpCaptureHeaders` defaults to an empty list.
 
 #### Capturing cookies
 To configure specific HTTP cookie capture so they are included in the access
-logs the user needs to create an entry in `ingress.httpCaptureCookies`. This
-field is a list (limited to 1 element) which includes information on which
+logs the user needs to create an entry in `ingress.accessLogging.httpCaptureCookies`.
+This field is a list (limited to 1 element) which includes information on which
 cookie to capture. If the list is empty (which is the default value) no cookies
 will be captured.
 
@@ -177,15 +188,17 @@ In each element of the list we find:
 * `maxLength`. Specifies a maximum length of the string that will be logged,
   which includes the cookie name, cookie value, and one-character delimiter.
   If the log entry exceeds this length, the value will be truncated in the log
-  message.
+  message. Minimum value 1, maximum value 1024.
 * `name`. Specifies a cookie name. It must be a valid HTTP cookie name as
-  defined in RFC 6265 section 4.1.
+  defined in RFC 6265 section 4.1. String regex ```^[-!#$%&'*+.0-9A-Z^_`a-z|~]*$```.
+  Minimum length 0, maximum length 1024.
 * `namePrefix`. Specifies a cookie name prefix. It must be a valid HTTP cookie
-  name as defined in RFC 6265 section 4.1.
+  name as defined in RFC 6265 section 4.1. String regex ```^[-!#$%&'*+.0-9A-Z^_`a-z|~]*$```.
+  Minimum length 0, maximum length 1024.
 
 If configured, it is mandatory to include at least `matchType` and `maxLength`.
 
-`ingress.httpCaptureCookies` defaults to an empty list.
+`ingress.accessLogging.httpCaptureCookies` defaults to an empty list.
 
 #### How config options change manifests
 Each of the configuration options described above has a direct effect on the
@@ -203,7 +216,7 @@ enhancement.
 N/A
 
 ## Open Questions
-* Do we also allow configuring the access log format?
+N/A
 
 ## Test Plan
 All configuration changes will be included in already existing e2e router
