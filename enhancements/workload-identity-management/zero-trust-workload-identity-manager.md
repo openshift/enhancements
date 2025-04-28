@@ -1497,6 +1497,9 @@ spec:
 ### Drawbacks
 None.
 
+## Alternatives (Not Implemented)
+None.
+
 ## Test Plan
 
 ### Testing Strategies
@@ -1542,9 +1545,6 @@ zero-trust-workload-indentity-manager will be supported for OpenShift versions 4
 
 
 ## Support Procedures
-None.
-
-## Alternatives
 None.
 
 ## Infrastructure Needed [optional]
