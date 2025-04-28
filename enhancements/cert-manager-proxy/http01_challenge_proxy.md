@@ -38,7 +38,7 @@ The gap arises due to how the ACME HTTP01 challenge works. The following scenari
 2. **Compact Clusters**: The node hosting the API VIP may also host an OpenShift Router. If no router is present on the node hosting the VIP, the challenge will fail.
 3. **SNO (Single Node OpenShift)**: The same nodes host both the ingress and API components. Both FQDNs (`api` and wildcard) resolve to the same IP, making the challenge feasible.
 
-To address this gap, a small proxy was developed. This proxy runs on the cluster as a DaemonSet (control plane nodes) and ensures that connections reaching the API on port 80 are redirected to the OpenShift Ingress Routers. The proxy implementation creates a reverse proxy to the apps VIP and uses `nftables` to redirect traffic from `API:80` to `PROXY:8888`.
+To address this gap, a small proxy was developed. This proxy runs on the cluster as a DaemonSet (control plane nodes) and then adds iptables rules to the nodes and ensures that connections reaching the API on port 80 are redirected to the OpenShift Ingress Routers. The proxy implementation creates a reverse proxy to the apps VIP and uses `nftables` to redirect traffic from `API:80` to `PROXY:8888`.
 
 - **Proxy Code**: [GitHub Repository](https://github.com/mvazquezc/cert-mgr-http01-proxy/tree/main)
 - **Deployment Manifest**: [Manifest Link](https://github.com/mvazquezc/cert-mgr-http01-proxy/blob/main/manifests/deploy-in-ocp.yaml)
@@ -105,4 +105,25 @@ None
 - [ACME HTTP01 Challenge](https://letsencrypt.org/docs/challenge-types/#http-01-challenge)
 - [Proxy Code Repository](https://github.com/mvazquezc/cert-mgr-http01-proxy/tree/main)
 - [Deployment Manifest](https://github.com/mvazquezc/cert-mgr-http01-proxy/blob/main/manifests/deploy-in-ocp.yaml)
+
+### Non-Goals
+
+- This enhancement does not aim to replace or modify the existing OpenShift Ingress functionality.
+- It does not provide support for non-HTTP01 challenge types (e.g., DNS-01).
+- It does not address certificate management for endpoints other than the API endpoint (`api.cluster.example.com`).
+- It does not provide a solution for environments where `nftables` is not supported.
+
+### Workflow Description
+
+1. Cert Manager initiates an HTTP01 challenge for the API endpoint (`api.cluster.example.com`).
+2. The HTTP01 challenge request is directed to the API VIP on port 80.
+3. The HTTP01 Challenge Proxy intercepts the traffic using `nftables` and redirects it to the proxy pod on port 8888.
+4. The proxy pod forwards the request to the OpenShift Ingress Router, which serves the challenge response from the Cert Manager challenge pod.
+5. The ACME CA validates the challenge and issues the certificate for the API endpoint.
+
+### Topology Considerations
+
+- **Standard Clusters**: The API VIP is hosted on control plane nodes. The proxy ensures that HTTP01 challenges are redirected to the OpenShift Ingress Routers.
+- **Compact Clusters**: The proxy handles scenarios where the API VIP node may or may not host an OpenShift Router, ensuring consistent challenge redirection.
+- **SNO (Single Node OpenShift)**: The proxy is not strictly required in this topology, as the API and wildcard FQDNs resolve to the same IP. However, it can still be deployed for consistency.
 
