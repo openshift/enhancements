@@ -40,7 +40,7 @@ These changes enhance identity validation, support complex authentication setups
 
 The current OpenShift authentication API lacks key fields necessary for organizations that require advanced OIDC configurations, fine-grained identity control, and stronger security enforcement. By adding missing fields such as **Issuer configurations** (`DiscoveryURL`, `AudienceMatchPolicy`), **ClaimMappings** (`UID`, `Extra`), **ClaimValidationRules**, and **UserValidationRules**, this enhancement addresses critical gaps in authentication flexibility, security, and multi-tenancy support.  
 
-## User Stories  
+### User Stories  
 
 - **As a customer**, I want to configure the `DiscoveryURL` and `AudienceMatchPolicy` in OpenShift so that my OIDC provider’s metadata is correctly accessed, and tokens are validated for the correct audience—even in complex networking setups or multi-cluster environments.  
 
@@ -48,13 +48,13 @@ The current OpenShift authentication API lacks key fields necessary for organiza
 
 - **As a security engineer**, I want to use **ClaimValidationRules** with **CEL expressions** to enforce advanced token validation logic (e.g., checking token expiration or validating multiple claims). Additionally, I want to implement **UserValidationRules** to prevent the use of reserved system usernames and groups, reducing security risks and preventing privilege escalation.  
 
-## Goals  
+### Goals  
 
 1. Enable administrators to configure and validate advanced authentication settings, including `DiscoveryURL`, `AudienceMatchPolicy`, `UID`, `Extra` claims, `ClaimValidationRules`, and `UserValidationRules`.  
 2. Support flexible claim mapping, multi-cluster authentication, and integration with external identity providers.  
 3. Strengthen security by enforcing advanced validation rules and identity policies to ensure proper access control.  
 
-## Non-Goals  
+### Non-Goals  
 
 - This enhancement does **not** introduce new authentication mechanisms beyond OIDC.  
 
@@ -499,6 +499,9 @@ However, despite these concerns, this drawback is not significant enough to prev
 For this enhancement, we will expand on the existing OIDC test suite. The focus will be on adding tests to verify the proper functionality of the new configuration options introduced by the new API fields. These tests will confirm that the integration of these new options aligns correctly with the existing authentication functionality and performs as expected. Additionally, we will ensure that the new fields are thoroughly tested across common configurations and scenarios to guarantee reliable behavior.
 
 ## Graduation Criteria
+
+### Dev Preview -> Tech Preview
+N/A
 
 ### Tech Preview -> GA
 
