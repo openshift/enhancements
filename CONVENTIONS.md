@@ -424,7 +424,11 @@ spec:
 ```
 
 Tolerating this taint should suffice for the vast majority of core OpenShift
-operators.  In exceptional cases, an operator may tolerate one or more of the
+operators. Despite `node-role.kubernetes.io/control-plane` labels, there is no
+plan to add a corresponding taint, and no need for control plane components to
+tolerate a `node-role.kubernetes.io/control-plane` taint.
+
+In exceptional cases, an operator may tolerate one or more of the
 following taints if doing so is necessary to form a functional Kubernetes node:
 
 * `node.kubernetes.io/disk-pressure`
