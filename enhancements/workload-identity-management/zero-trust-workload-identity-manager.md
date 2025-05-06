@@ -45,8 +45,7 @@ The `Zero-Trust Workload Identity Manager` addresses these challenges by integra
 - Dynamically provision SPIFFE identities (SVIDs) to workloads using the CSI Driver.
 - Enable trust domain configuration through CRDs for secure multi-tenant/multi-cluster isolation.
 - Ensure SVIDs have a TTL with automatic rotation to enforce credentials freshness.
-- Integrate SPIRE health and performance metrics into OpenShift Monitoring.
-- Maintain high availability for SPIRE servers and resilience for agents during failures.  
+- Integrate SPIRE health and performance metrics into OpenShift Monitoring.  
 
 ### Non-Goals  
 - Replace existing auth systems (e.g., Service Accounts, OAuth).  
@@ -179,45 +178,45 @@ sequenceDiagram
     participant User
     participant OLM
     participant Operator
-    participant "Kubernetes API Server"
+    participant API Server
 
     User ->> OLM: Install zero-trust-workload-identity-manager Operator
-    OLM ->> "Kubernetes API Server": Create Operator Deployment
-    OLM ->> "Kubernetes API Server": Monitor Operator Health and Lifecycle
+    OLM ->> API Server: Create Operator Deployment
+    OLM ->> API Server: Monitor Operator Health and Lifecycle
 
-    Operator ->> "Kubernetes API Server": Register Watch for (Deployments, StatefulSets, DaemonSets, CRDs)
+    Operator ->> API Server: Register Watch for (Deployments, StatefulSets, DaemonSets, CRDs)
 
-    Note over Operator, "Kubernetes API Server": Operator Setup & Watching
+    Note over Operator, API Server: Operator Setup & Watching
 
-    Operator ->> "Kubernetes API Server": Apply SPIRE CRDs
-    Operator ->> "Kubernetes API Server": Apply RBAC for SPIRE Components
+    Operator ->> API Server: Apply SPIRE CRDs
+    Operator ->> API Server: Apply RBAC for SPIRE Components
 
-    Operator ->> "Kubernetes API Server": Create/Update spire-server StatefulSet
-    Operator ->> "Kubernetes API Server": Create/Update spiffe-csi-driver DaemonSet
-    Operator ->> "Kubernetes API Server": Create/Update spire-agents DaemonSet
-    Operator ->> "Kubernetes API Server": Create/Update spire-oidc-discovery-provider Deployment
+    Operator ->> API Server: Create/Update spire-server StatefulSet
+    Operator ->> API Server: Create/Update spiffe-csi-driver DaemonSet
+    Operator ->> API Server: Create/Update spire-agents DaemonSet
+    Operator ->> API Server: Create/Update spire-oidc-discovery-provider Deployment
 
-    Note over Operator, "Kubernetes API Server": Operator Deploys SPIRE Operands
+    Note over Operator, API Server: Operator Deploys SPIRE Operands
 
     loop Reconciliation Loop
-        Operator ->> "Kubernetes API Server": Get Status of (spire-server, CSI Driver, Agents, OIDC Provider)
+        Operator ->> API Server: Get Status of (spire-server, CSI Driver, Agents, OIDC Provider)
         Operator ->> Operator: Analyze Operand Status
         alt Error in Operands
-            Operator ->> "Kubernetes API Server": Update Operator Status (Error)
+            Operator ->> API Server: Update Operator Status (Error)
         else Operands Healthy
-            Operator ->> "Kubernetes API Server": Update Operator Status (Success)
+            Operator ->> API Server: Update Operator Status (Success)
         end
         Operator ->> Operator: Check for SPIRE Configuration/Policy Changes
         alt Configuration/Policy Change Detected
-            Operator ->> "Kubernetes API Server": Update SPIRE Server Configuration (if applicable)
-            Operator ->> "Kubernetes API Server": Manage SPIRE Policies (e.g., Registration Entries)
+            Operator ->> API Server: Update SPIRE Server Configuration (if applicable)
+            Operator ->> API Server: Manage SPIRE Policies (e.g., Registration Entries)
         else No Configuration/Policy Change
             Operator ->> Operator: Wait for next reconciliation or event
         end
     end
 
-    OLM ->> "Kubernetes API Server": Monitor Operator Status
-    Note over OLM, "Kubernetes API Server": OLM ensures Operator is running and healthy
+    OLM ->> API Server: Monitor Operator Status
+    Note over OLM, API Server: OLM ensures Operator is running and healthy
 
 ```
 
