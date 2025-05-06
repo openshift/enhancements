@@ -2,37 +2,37 @@
 title: metrics-collection-profiles
 authors:
   - JoaoBraveCoding
+  - rexagod
 reviewers:
   - openshift/openshift-team-monitoring
 approvers:
   - TBD
-api-approvers: "None"
+api-approvers:
+  - TBD
 creation-date: 2022-12-06
-last-updated: 2023-07-24
+last-updated: 2025-05-06
 tracking-link:
   - https://issues.redhat.com/browse/MON-2483
   - https://issues.redhat.com/browse/MON-3043
+  - https://issues.redhat.com/browse/MON-3808
 ---
 
 # Metrics collection profiles
 
 ## Terms
 
-monitors - refers to the CRDs ServiceMonitor, PodMonitor and Probe from
-Prometheus Operator;
-
-users - refers to end-users of OpenShift who manage an OpenShift installation
-i.e cluster-admins;
-
-developers - refers to OpenShift developers that build the platform i.e. RedHat
-associates and OpenSource contributors;
-
+- Monitors: Refers to the CRDs ServiceMonitor, PodMonitor and Probe from
+  Prometheus Operator.
+- Users: Refers to end-users of OpenShift who manage an OpenShift installation
+  i.e cluster-admins.
+- Developers: Refers to OpenShift developers that build the platform i.e. RedHat
+  associates and OpenSource contributors.
 
 ## Summary
 
 The core OpenShift components ship a large number of metrics. A 4.12-nightly
 cluster on AWS (3 control plane nodes + 3 worker nodes) currently produces
-around 350,000 unique timeseries, and adding optional operators increases that
+around 350,000 unique time-series, and adding optional operators increases that
 number. Users have repeatedly asked for a supported method of making Prometheus
 consume less memory and CPU, either by increasing the scraping interval or by
 scraping fewer targets.
@@ -51,14 +51,14 @@ Nevertheless, users have repeatedly asked for the ability to reduce the amount
 of memory consumed by Prometheus either by lowering the Prometheus scrape
 intervals or by modifying monitors.
 
-Users currently can not control the aforementioned monitors scraped by
-Prometheus since some of the metrics collected are essential for other parts of
-the system to function properly: recording rules, alerting rules, console
-dashboards, and Red Hat Telemetry. Users also are not allowed to tune the
-interval at which Prometheus scrapes targets as this again can have unforeseen
-results that can hinder the platform: a low scrape interval value may overwhelm
-the platform Prometheus instance while a high interval value may render some of
-the default alerts ineffective.
+Users currently cannot control the aforementioned monitors scraped by Prometheus
+since some of the metrics collected are essential for other parts of the system
+to function properly: recording rules, alerting rules, console dashboards, and
+Red Hat Telemetry. Users also are not allowed to tune the interval at which
+Prometheus scrapes targets as this again can have unforeseen results that can
+hinder the platform: a low scrape interval value may overwhelm the platform
+Prometheus instance while a high interval value may render some of the default
+alerts ineffective.
 
 The goal of this proposal is to allow users to pick their desired level of
 scraping while limiting the impact this might have on the platform, via
@@ -80,10 +80,9 @@ the `minimal` to the `full` profile. More details can be consulted in this
 
 Moreover, through Telemetry, we collect for each cluster the top 3 Prometheus
 jobs that generate the biggest amount of samples. With this data, we know that
-for OpenShift 4.11 the 5 components most often reported as the biggest producers
-are: the Kubernetes API servers, the Kubernetes schedulers, kube-state-metrics,
-kubelet and the network daemon.
-
+for recent OpenShift versions, the 5 components most often reported as the
+biggest producers are: the Kubernetes API servers, the Kubernetes schedulers,
+kube-state-metrics, kubelet and the network daemon.
 
 ### User Stories
 
@@ -179,7 +178,7 @@ The goal is to support 2 profiles:
 
 - `full` (same as today)
 - `minimal` (only collect metrics necessary for recording rules, alerts,
-  dashboards, HPA and VPA and telemetry)
+  dashboards, HPA, VPA and telemetry)
 
 When the cluster admin enables the `minimal` profile, the Prometheus
 resource would be configured accordingly:
@@ -253,7 +252,7 @@ spec:
  ```
 
 Note: 
-- the `metricRelabelings` section keeps only two metrics, while the rest is
+- the `metricRelabelings` section keeps only two metrics, while the rest are
 dropped.
 - the metrics in the `keep` section were obtained with the help of a script that
   parsed all Alerts, PrometheusRules and Console dashboards to determine what
@@ -316,17 +315,16 @@ not. To aid teams with this effort the monitoring team will provide:
   to utilize all aspects of this feature into their component's workflow.
 - an origin/CI test that validates for all Alerts and PrometheusRules that the
   metrics used by them are present in the `keep` expression of the
-  monitor for the `minimal` profile
-
+  monitor for the `minimal` profile.
 
 ### Risks and Mitigations
 
-- How are monitors supposed to be kept up to date? In 4.12 a metric that wasn't
-  being used in an alert is now required, how does the monitor responsible for
+- How are monitors supposed to be kept up to date? A metric that wasn't being
+  used earlier in an alert is now required, how does the monitor responsible for
   that metric get updated?
   - The origin/CI test mentioned in the previous section will fail if there is a
     resource (Alerts/PrometheusRules/Dashboards) using a metric which is not
-    present in the monitor in question;
+    present in the monitor in question.
 
 - What happens if a user provides an invalid value for a metrics collection
   profile?
@@ -337,29 +335,24 @@ not. To aid teams with this effort the monitoring team will provide:
   - Our current validation strategy with only two profiles is quite linear,
     however, things start becoming more complex and hard to maintain as we
     introduce new profiles to the mix. 
-  - Some of the things to consider if new profiles are introduce are:
-      - How would we validate such profile?
-      - How would we ensure teams that adopted metrics collection profiles
-        implement the new profile?
-      - How would we aid developers implementing the new profile?
 
 ### Drawbacks
 
-- Extra CI cycles
+- Extra CI cycles.
 
 ## Design Details
 
 ### Open Questions
 
-### Test Plan
+## Test Plan
 
-- Unit tests in CMO to validate that the correct monitors are being selected
-- E2E tests in CMO to validate that everything works correctly 
+- Unit tests in CMO to validate that the correct monitors are being selected.
+- E2E tests in CMO to validate that everything works correctly.
 - For the `minimal` profile, origin/CI test to validate that every metric used
 in a resource (Alerts/PrometheusRules/Dashboards) exists in the `keep`
 expression of a minimal monitors.
 
-### Graduation Criteria
+## Graduation Criteria
 
 - Released as TechPreview: the default being `full`, it
 shouldn't impact operations.
@@ -368,7 +361,13 @@ shouldn't impact operations.
 profile out-of-the-box and removes the earlier-imposed
 TechPreview gate. PTAL at the section below for more details.
 
-#### Tech Preview -> GA
+- GA'd in 4.19: https://github.com/openshift/api/pull/2286
+
+### Dev Preview -> Tech Preview
+
+- [Design scrape profiles in CMO](https://issues.redhat.com/browse/MON-2483)
+
+### Tech Preview -> GA
 
 - [Automation to update metrics in collection profiles](https://issues.redhat.com/browse/MON-3106)
 - [Telemetry signal for collection profile usage](https://issues.redhat.com/browse/MON-3231)
@@ -378,12 +377,17 @@ TechPreview gate. PTAL at the section below for more details.
 - [origin/CI tool to validate collection profiles](https://issues.redhat.com/browse/MON-3105)
 - [User facing documentation created in OpenShift-docs](https://issues.redhat.com/browse/OBSDOCS-330)
 
-#### Removing a deprecated feature
+### Removing a deprecated feature
 
-- Announce deprecation and support policy of the existing feature
-- Deprecate the feature
+Deprecation, in the scope of collection profiles, is unlikely as that would
+entail moving all existing ServiceMonitors in that profile to either accomodate
+themselves in other profiles, or simply not exist anymore, which will need to be
+done for all teams. Either of these measures will require teams to rollback
+drastically on behaviours they built around in the first place. As it is right
+now, we do not plan on deprecating the exposed `full` or `minimal` profiles at
+all.
 
-### Upgrade / Downgrade Strategy
+## Upgrade / Downgrade Strategy
 
 - If metrics collection profiles is accepted and is released to 4.13 then we
   must backport the new monitors selectors to 4.12. The reason being that when
@@ -395,29 +399,14 @@ TechPreview gate. PTAL at the section below for more details.
 - Once we backport the new monitors selectors upgrades and
   downgrades are not expected to present a significant challenge.
 
-### Version Skew Strategy
-
-TBD but I don't think it applies here
-
-### minimal Aspects of API Extensions
-
-TBD but I don't think it applies here
-
-#### Failure Modes
-
-TBD but I don't think it applies here
-
-#### Support Procedures
-
-TBD but I don't think it applies here
-
 ## Implementation History
 
-Initial proofs-of-concept:
-
 - https://github.com/openshift/cluster-monitoring-operator/pull/1785
+- https://github.com/openshift/cluster-monitoring-operator/pull/2030
+- https://github.com/openshift/cluster-monitoring-operator/pull/2047
+- https://github.com/openshift/origin/pull/28889
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 - Make CMO injecting metric relabelling for all service monitors based on the
   rules being deployed, but this is not a good idea because: 
@@ -453,18 +442,21 @@ Initial proofs-of-concept:
 - Recently Azure also added support for metrics collection profiles:
   - [Azure
     Docs](https://learn.microsoft.com/en-us/azure/azure-monitor/essentials/prometheus-metrics-scrape-configuration-minimal)
-  -  https://github.com/Azure/prometheus-collector
+  - https://github.com/Azure/prometheus-collector
   - In their approach they also have
-  [hardcoded](https://github.com/Azure/prometheus-collector/blob/66ed1a5a27781d7e7e3bb1771b11f1da25ffa79c/otelcollector/configmapparser/tomlparser-default-targets-metrics-keep-list.rb#L28)
-  set of metrics that are only consumed when the minimal profile is enabled.
-  However, customers are also able to extend this minimal profile with regexes
-  to include metrics which might be interesting to them.
-- Leverage [installer capabilities](https://docs.google.com/document/d/1I-YT7LKKDHSBLB6Hmg0tZ54DWjrAxlVdXxlViShMu-0/edit#heading=h.848jsje80fru)
+    [hardcoded](https://github.com/Azure/prometheus-collector/blob/66ed1a5a27781d7e7e3bb1771b11f1da25ffa79c/otelcollector/configmapparser/tomlparser-default-targets-metrics-keep-list.rb#L28)
+    set of metrics that are only consumed when the minimal profile is enabled.
+    However, customers are also able to extend this minimal profile with regexes
+    to include metrics which might be interesting to them.
+- Leverage [installer
+  capabilities](https://docs.google.com/document/d/1I-YT7LKKDHSBLB6Hmg0tZ54DWjrAxlVdXxlViShMu-0/edit#heading=h.848jsje80fru)
   - After some consideration we decided to abandon this idea since it would only
     work for resources controlled by CVO which is not the case for the majority
     of ServiceMonitors.
-
-## Infrastructure Needed [optional]
+  - Additionally, this requires users to "commit" to one profile throughout the
+    cluster lifecycle, which is a bit static for our needs, for more details,
+    PTAL at [the reasoning
+    here](https://github.com/openshift/enhancements/pull/1298#issuecomment-1895513051).
 
 ### Adopted metrics collection profiles
 
@@ -481,3 +473,37 @@ and implementation status. Possible implementation status:
 | Monitoring Team | kube-state-metrics | Implemented                |
 | Monitoring Team | node-exporter      | Implemented                |
 | Monitoring Team | prometheus-adapter | Implemented                |
+
+### Topology Considerations
+
+Supported on all topologies that deploy CMO.
+
+#### Hypershift / Hosted Control Planes
+
+N/A
+
+#### Standalone Clusters
+
+N/A
+
+#### Single-node Deployments or MicroShift
+
+N/A
+
+## Support Procedures
+
+- The `full` collection profile is meant to be synonymous with the exhibited
+behavior before the introduction of this patch, as such, users can switch to it
+if other profiles are not working as expected.
+- The aforementioned utilities (for eg., CPV) can be used to help diagnose the
+issue further.
+
+## Version Skew Strategy
+
+The feature-set depends on Prometheus-operator as the provider component for
+the resources it works on, which is shipped with CMO. No version skew is
+expected.
+
+## Operational Aspects of API Extensions
+
+N/A
