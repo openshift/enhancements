@@ -298,7 +298,7 @@ To ensure commonality in behavior between standalone OpenShift and HyperShift, H
 - Managing the `RoleBindingRestriction` CRD
 - Setting the appropriate flags on the kube-apiserver when oauth stack is not desired
 
-This enhancement proposal is scoped only to standalone OpenShift, and while the changes made as part of this EP won't break HyperShift it is recommended that HyperShift is updated in this way. 
+This enhancement proposal is scoped only to standalone OpenShift, and while the changes made as part of this EP won't break HyperShift it is recommended that HyperShift is updated in this way.
 
 ##### Considerations for MicroShift
 
@@ -307,7 +307,7 @@ As MicroShift does not run with the OpenShift OAuth stack, it should be updated 
 - The `RoleBindingRestriction` CRD is not present
 - Setting the appropriate flags on the kube-apiserver when oauth stack is not desired
 
-This enhancement proposal is scoped only to standalone OpenShift, and while the changes made as part of this EP won't break MicroShift it is recommended that MicroShift is updated in this way. 
+This enhancement proposal is scoped only to standalone OpenShift, and while the changes made as part of this EP won't break MicroShift it is recommended that MicroShift is updated in this way.
 
 #### Authentication disruptions
 
@@ -348,16 +348,47 @@ Finally, in order to make sure that others can test their components in an exter
 
 ### Dev Preview -> Tech Preview
 
-- build a baseline e2e test (within the TechPreviewNoUpgrade/ExternalOIDC feature gate) that sets up an external OIDC provider, issues a token with it and uses that token to authenticate via the kube-apiserver
 - unit test coverage
-- complete work on all related components to the implementation (kube-apiserver-operator, cluster-authentication-operator) within the TechPreviewNoUpgrade/ExternalOIDC feature gate
+- complete work on all related components to OIDC enablement (kube-apiserver-operator, cluster-authentication-operator) within the TechPreviewNoUpgrade/ExternalOIDC feature gate
 - some minimal documentation to be used as guidance should exist
-- make clusters configured with an external OIDC available in the CI for others to run their tests on
 
 ### Tech Preview -> GA
 
-- write a complete set of e2e tests that covers all aspects of the implementation (as described in the Test Plan)
-- complete documentation
+#### **Functionality**
+
+- Built-in OAuth stack deactivation on successful enablement of external OIDC
+- Disabling of kube-apiserver admission plugins that depend on the built-in OAuth stack
+- Improved admission time API validations
+
+_Stretch goals_
+
+- Multiple IDP provider support
+- Expose metrics, such as:
+  - total number of authentication attempts
+  - number of successful authentication attempts
+  - number of failed authentication attempts
+  - labeled with requesting client information
+- Configuration parity with upstream Structured Authentication Config format
+
+#### **Testing**
+
+- CAO pre-submit E2E tests that cover enablement/function/OAuth deactivation
+  - create CI job that uses TechPreviewNoUpgrade and run said tests before promotion
+- periodic/payload testing:
+  - create cluster profile/variant where external OIDC is configured
+  - run origin tests on said cluster
+  - write external OIDC specific E2E tests that cover enablement/function/OAuth deactivation
+- kube-rbac-proxy testing
+
+_Stretch goals_
+
+- HyperShift E2E testing
+
+_Documentation_
+
+- Improved API field documentation
+- Feature enablement documentation and guide
+- Troubleshooting
 
 ### Removing a deprecated feature
 
