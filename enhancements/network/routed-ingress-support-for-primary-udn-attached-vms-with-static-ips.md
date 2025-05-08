@@ -1,19 +1,20 @@
 ---
-title: neat-enhancement-idea
+title: routed-ingress-support-for-primary-udn-attached-vms-with-static-ips
 authors:
-  - TBD
+  - @maiqueb
 reviewers: # Include a comment about what domain expertise a reviewer is expected to bring and what area of the enhancement you expect them to focus on. For example: - "@networkguru, for networking aspects, please look at IP bootstrapping aspect"
   - TBD
 approvers: # A single approver is preferred, the role of the approver is to raise important questions, help ensure the enhancement receives reviews from all applicable areas/SMEs, and determine when consensus is achieved such that the EP can move forward to implementation.  Having multiple approvers makes it difficult to determine who is responsible for the actual approval.
   - TBD
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
   - TBD
-creation-date: yyyy-mm-dd
+creation-date: 2025-05-07
 last-updated: yyyy-mm-dd
 tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
   - TBD
 see-also:
-  - "/enhancements/this-other-neat-thing.md"
+  - "/enhancements/network/user-defined-network-segmentation.md"
+  - "/enhancements/network/bgp-ovn-kubernetes.md"
 replaces:
   - "/enhancements/that-less-than-great-idea.md"
 superseded-by:
@@ -44,103 +45,69 @@ See ../README.md for background behind these instructions.
 
 Start by filling out the header with the metadata for this enhancement.
 
-# Neat Enhancement Idea
-
-This is the title of the enhancement. Keep it simple and descriptive. A good
-title can help communicate what the enhancement is and should be considered as
-part of any review.
-
-The YAML `title` should be lowercased and spaces/punctuation should be
-replaced with `-`.
-
-The `Metadata` section above is intended to support the creation of tooling
-around the enhancement process.
+# Routed ingress support for primary UDN attached VMs with static IPs
 
 ## Summary
 
-The `Summary` section is important for producing high quality
-user-focused documentation such as release notes or a development roadmap. It
-should be possible to collect this information before implementation begins in
-order to avoid requiring implementors to split their attention between writing
-release notes and implementing the feature itself.
+There's an ongoing interest to migrate Virtual Machines (VMs) from other
+virtualization platforms into OpenShift. These users are both after a managed IP
+experience (which they have on their existing platform), and also want to
+consume existing Kubernetes features, like network policies, and sometimes
+services.
 
-Your summary should be one paragraph long. More detail
-should go into the following sections.
+Traditional virtualization users have some expectations on what a
+virtualization platform should provide. Live-migration, and IP address
+persistence across reboots are paramount features for any virtualization
+solution, and OpenShift Virtualization currently supports these features on its
+primary UserDefinedNetworks (UDNs).
+
+These users have additional requirements, like routed ingress into their VMs,
+and, to import the VMs with the MAC, IPs, and gateway configuration the VM had
+on the previous platform.
+
+Routed ingress into the VMs is being added to OpenShift already, and is tracked
+by [this enhancement](https://github.com/openshift/enhancements/pull/1636/files)
+which tracks adding BGP support to OpenShift.
+
+Given the aggressive time-frame we're attempting, adding support for importing
+a VM into OpenShift with it's MAC, IPs, and gateway on top of primary UDN is the
+missing piece we should pursue.
 
 ## Motivation
 
-This section is for explicitly listing the motivation, goals and non-goals of
-this proposal. Describe why the change is important and the benefits to users.
+Some users are running VMs in virtualization platforms having a managed IP
+configuration.
+
+For this kind of users, we need to have a way to enable their existing VMs to
+run properly after being migrated into OpenShift, without any guest
+configuration changes. For that, we need to import the VMs from their existing
+platforms, preserving their existing MACs, IPs, and gateway configuration.
 
 ### User Stories
 
-Detail the things that people will be able to do if this is implemented and
-what goal that allows them to achieve. In each story, explain who the actor
-is based on their role, explain what they want to do with the system,
-and explain the underlying goal they have, what it is they are going to
-achieve with this new feature.
-
-Use the standard three part formula:
-
-> "As a _role_, I want to _take some action_ so that I can _accomplish a
-goal_."
-
-Make the change feel real for users, without getting bogged down in
-implementation details.
-
-Here are some example user stories to show what they might look like:
-
-* As an OpenShift engineer, I want to write an enhancement, so that I
-  can get feedback on my design and build consensus about the approach
-  to take before starting the implementation.
-* As an OpenShift engineer, I want to understand the rationale behind
-  a particular feature's design and alternatives considered, so I can
-  work on a new enhancement in that problem space knowing the history
-  of the current design better.
-* As a product manager, I want to review this enhancement proposal, so
-  that I can make sure the customer requirements are met by the
-  design.
-* As an administrator, I want a one-click OpenShift installer, so that
-  I can easily set up a new cluster without having to follow a long
-  set of operations.
-
-In each example, the persona's goal is clear, and the goal is clearly provided
-by the capability being described.
-The engineer wants feedback on their enhancement from their peers, and writing
-an enhancement allows for that feedback.
-The product manager wants to make sure that their customer requirements are fulfilled,
-reviewing the enhancement allows them to check that.
-The administrator wants to set up his OpenShift cluster as easily as possible, and
-reducing the install to a single click simplifies that process.
-
-Here are some real examples from previous enhancements:
-* [As a member of OpenShift concerned with the release process (TRT, dev, staff engineer, maybe even PM),
-I want to opt in to pre-release features so that I can run periodic testing in CI and obtain a signal of
-feature quality.](https://github.com/openshift/enhancements/blob/master/enhancements/installer/feature-sets.md#user-stories)
-* [As a cloud-provider affiliated engineer / platform integrator / RH partner
-I want to have a mechanism to signal OpenShift's built-in operators about additional
-cloud-provider specific components so that I can inject my own platform-specific controllers into OpenShift
-to improve the integration between OpenShift and my cloud provider.](https://github.com/openshift/enhancements/blob/master/enhancements/cloud-integration/infrastructure-external-platform-type.md#user-stories)
-* [As an OpenShift cluster administrator, I want to add worker nodes to my
-existing single control-plane node cluster, so that it'll be able to meet
-growing computation demands.](https://github.com/openshift/enhancements/blob/master/enhancements/single-node/single-node-openshift-with-workers.md#user-stories)
-
-Include a story on how this proposal will be operationalized:
-life-cycled, monitored and remediated at scale.
+- As the owner of a VM running in a traditional virtualization platform, I want
+to import said VM - whose IPs were statically configured - into Kubernetes,
+attaching it to an overlay network. I want to ingress/egress using the same IP
+address (the one assigned to the VM).
+- As the owner of a VM running in a traditional virtualization platform, I want
+to import said VM into Kubernetes, attaching it to an overlay network. I want to
+be able to consume Kubernetes features like network policies, and services, to
+benefit from the Kubernetes experience.
 
 ### Goals
 
-Summarize the specific goals of the proposal. How will we know that
-this has succeeded?  A good goal describes something a user wants from
-their perspective, and does not include the implementation details
-from the proposal.
+- Preserve the original VM's MAC address
+- Preserve the original VM's IP address
+- Specify the gateway IP address of the imported VM so it can keep the same
+default route
+- Allow excludeSubnets to be used with L2 UDNs to ensure OVNK does not use an IP
+address from the range that VMs have already been assigned outside the
+cluster (or for secondary IP addresses assigned to the VM's interfaces)
 
 ### Non-Goals
 
-What is out of scope for this proposal? Listing non-goals helps to
-focus discussion and make progress. Highlight anything that is being
-deferred to a later phase of implementation that may call for its own
-enhancement.
+Handle importing VMs without a managed IP experience - i.e. IPs were defined
+statically in the guest.
 
 ## Proposal
 
