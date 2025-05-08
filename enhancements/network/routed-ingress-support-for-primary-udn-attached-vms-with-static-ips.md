@@ -111,17 +111,102 @@ statically in the guest.
 
 ## Proposal
 
-This section should explain what the proposal actually is. Enumerate
-*all* of the proposed changes at a *high level*, including all of the
-components that need to be modified and how they will be
-different. Include the reason for each choice in the design and
-implementation that is proposed here.
+This proposal to import VMs from other virtualization platforms while
+preserving their networking configuration will impact three different OpenShift
+components:
+- MTV
+- KubeVirt's ipam-extensions
+- OVN-Kubernetes
 
-To keep this section succinct, document the details like API field
-changes, new images, and other implementation details in the
-**Implementation Details** section and record the reasons for not
-choosing alternatives in the **Alternatives** section at the end of
-the document.
+We will elaborate the overall flow first, before digging into details in each
+of the components.
+
+MTV currently introspects the VM to learn the MAC addresses of the interfaces,
+and templates the VM which will be created in OpenShift Virtualization with the
+required MAC address. We would need MTV to somehow also figure out what IP
+addresses are on the aforementioned interfaces.
+
+**NOTE:** a separate component can introspect the VMs in their source cluster
+and identify their IPs. It really does **not** need to be MTV to do it.
+
+For doing this, we need to have a MAC to IP addresses association stored in the
+cluster (*at least* for the VMs which will be migrated into OpenShift Virt).
+There are two alternatives to persist this information: a
+[centralized approach](#centralized-ip-management),
+which has the benefits of a single centralized place an admin type of user
+could provision / get information from, or a
+[de-centralized approach](#de-centralized-ip-management), similar
+to the existing `IPAMClaim` CRD, where each VM connection to a primary UDN
+information would be recorded.
+
+Independently of which option we take, the API between OpenShift Virt (CNV) and
+OVN-Kubernetes will be the same, and is roughly described in
+[CNV to OVN-Kubernetes API](#cnv-ovnk-api).
+
+A new CRD - named `IPPool`, or `DHCPLeaseConfig` (or the like) - will be
+created, and is associated to a UDN (both UDN, and C-UDN). This CRD holds the
+association of MAC address to IPs for a UDN. When importing the VM into
+OpenShift Virt, MTV (or a separate, dedicated component) will provision /
+update this object with the required information (MAC to IPs association).
+This object is providing to the admin user a single place to check the IP
+address MAC to IPs mapping. On an first implementation phase, we can have the
+admin provision these CRs manually. Later on, MTV (or any other cluster
+introspection tool) can provision these on behalf of the admin.
+
+The `ipam-extensions` mutating webhook will kick in whenever a virt launcher
+pod is created - it will identify when the VM has a primary UDN attachment
+(already happens today), and will also identify when the pod network attachment
+has a MAC address configuration request.
+It will then access the `IPPool` (or `DHCPLeaseConfig` for the UDN) to extract
+which IP addresses are assigned to said MAC address.
+Finally, the `ipam-extensions` mutating webhook will mutate the launcher pod to
+customize the primary UDN attachment using the multus default network
+annotation. This annotation (with an associated example) would look like:
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-example
+  annotations:
+    v1.multus-cni.io/default-network: '{
+      "name": "isolated-net",
+      "namespace": "myisolatedns",
+      "mac": "02:03:04:05:06:07",
+      "ips": [
+        "192.0.2.20/24",
+        "fd90:1234::14/64"
+      ]
+}'
+```
+
+OVN-Kubernetes will then act upon this information, by configuring the
+requested MAC and IPs in the pod. If the allocation of the IP is successful,
+said IPs will be persisted in the corresponding `IPAMClaim` CR (which already
+happens today). If it fails (e.g. that IP address is already in use in the
+subnet), the CNI will fail, crash-looping the pod. The error condition will be
+reported in the associated `IPAMClaim` CR, and an event logged in the pod.
+
+This flow is described in the following sequence diagram:
+```mermaid
+sequenceDiagram
+actor Admin
+actor VM Owner
+
+participant MTV
+participant CNV
+participant o as OVN-Kubernetes
+
+Admin ->> CNV: provision IPPool
+CNV -->> Admin: OK
+
+VM Owner ->> MTV: import VM
+MTV ->> CNV: create VM(name=<...>, primaryUDNMac=origMAC)
+CNV ->> CNV: ips = getIPsForMAC(mac=origMAC)
+CNV ->> o: create pod(mac=origMAC, IPs=ips)
+o -->> CNV: OK
+CNV -->> MTV: OK
+MTV -->> VM Owner: OK
+```
 
 ### Workflow Description
 
