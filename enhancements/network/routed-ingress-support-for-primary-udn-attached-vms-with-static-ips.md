@@ -179,6 +179,7 @@ metadata:
       "name": "isolated-net",
       "namespace": "myisolatedns",
       "mac": "02:03:04:05:06:07",
+      "ipam-claim-reference": "myvm.isolated-net",
       "ips": [
         "192.0.2.20/24",
         "fd90:1234::14/64"
