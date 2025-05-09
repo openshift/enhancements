@@ -119,7 +119,14 @@ components:
 - OVN-Kubernetes
 
 We will elaborate the overall flow first, before digging into details in each
-of the components.
+of the components. There will be two sub-sections: one about preserving the
+[IP addresses](#preserving-the-original-vm-ip-address),
+another about preserving the
+[gateway configuration](#preserving-the-vm-gateway).
+MTV already introspects the VM on the source cluster, and templates the VM with
+its original MAC addresses.
+
+### Preserving the original VM IP address
 
 MTV currently introspects the VM to learn the MAC addresses of the interfaces,
 and templates the VM which will be created in OpenShift Virtualization with the
@@ -207,6 +214,24 @@ o -->> CNV: OK
 CNV -->> MTV: OK
 MTV -->> VM Owner: OK
 ```
+
+### Preserving the VM gateway
+Preserving the gateway will require changes to the OVN-Kubernetes API. Both the
+UDN and C-UDN CRDs should be updated - adding a gateway definition - and the
+OVN-Kubernetes
+[NetConf](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/2643dabe165bcb2d4564866ee1476a891c316fe3/go-controller/pkg/cni/types/types.go#L10)
+CNI structure should also be updated with a `gateway` attribute.
+
+The primary UDN gateway code will need to be updated to parametrize the gateway
+IP address, since today it is using the UDN subnet first IP address.
+To keep the feature backwards compatible, that would be the default if the UDN
+does **not** feature the gateway configuration. This will ensure the
+DHCP/RA flows on the logical switch are advertising the correct gateway
+information to the guests on the network, and also that the gateway is properly
+configured to allow features like Kubernetes `Services`.
+
+This flow is described in more detail (and presents alternatives to it) in the
+[OVN-Kubernetes enhancement proposal](https://github.com/ovn-kubernetes/ovn-kubernetes/pull/5238).
 
 ### Workflow Description
 
