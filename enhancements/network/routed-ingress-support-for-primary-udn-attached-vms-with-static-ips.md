@@ -150,6 +150,8 @@ Independently of which option we take, the API between OpenShift Virt (CNV) and
 OVN-Kubernetes will be the same, and is roughly described in
 [CNV to OVN-Kubernetes API](#cnv-ovnk-api).
 
+#### Centralized IP management
+
 A new CRD - named `IPPool`, or `DHCPLeaseConfig` (or the like) - will be
 created, and is associated to a UDN (both UDN, and C-UDN). This CRD holds the
 association of MAC address to IPs for a UDN. When importing the VM into
@@ -159,6 +161,32 @@ This object is providing to the admin user a single place to check the IP
 address MAC to IPs mapping. On an first implementation phase, we can have the
 admin provision these CRs manually. Later on, MTV (or any other cluster
 introspection tool) can provision these on behalf of the admin.
+
+This approach has the following advantages:
+- single place the admin to manage for UDN
+- similar to what is done on VmWare
+- simple association between the `IPPool` and the logical network
+
+This approach requires the `IPAMClaim` CRD to be updated, specifically its
+status sub-resource - we need to introduce `Conditions` so we can report errors
+when allocating IPs which were requested by the user - what if the address is
+already in use within the UDN ?
+
+#### De-centralized IP management
+
+This approach requires having N CRs with a 1:1 association between a primary
+UDN attachment and the MAC and IPs it had on the original platform.
+
+We could either introduce a new CRD with IPs and MAC association (which would
+deprecate the IPAMClaim CRD), or, assuming clunkiness in all its glory, we
+could change the IPAMClaim CRD to have MAC and IP addresses being requested in
+the spec stanza as well.
+
+OVN-Kubernetes would read the CR, attempt to reserve the requested MAC and IP,
+and then persist that information in the IPAMClaim status - reporting a
+successful sync in the `IPAMClaim` status - or a failure otherwise.
+
+#### CNV OVNK API
 
 The `ipam-extensions` mutating webhook will kick in whenever a virt launcher
 pod is created - it will identify when the VM has a primary UDN attachment
@@ -215,6 +243,51 @@ o -->> CNV: OK
 CNV -->> MTV: OK
 MTV -->> VM Owner: OK
 ```
+
+Hence, the required changes would be:
+- ipam-extensions (CNV component) and OVN-Kubernetes API will need to be
+  changed, to work with the multus default network annotation. Depending on the
+  VM's specification, it will request a specific MAC and IP addresses for the
+  primary UDN attachment. The `ipam-claim-reference` will also be requested via
+  this annoation.
+- the `IPAMClaim` CRD will need to be updated, adding a `Conditions` array to
+  its status. This way we will be able to report errors back to the user (e.g.
+  the desired IP allocation is already in use)
+- new CRD to be added, where the MAC <-> IPs addresses association will be
+  persisted. Only required for the
+  [centralized IP management](#centralized-ip-management) option
+- ipam-extensions (CNV component) will now also read the `IPPool` CRs for VMs
+  having primary UDNs in their namespaces, and requesting a specific MAC address
+  in their specs. These CRs will be used to generate the multus default network
+  annotation, which will be set in the pods by the mutating webhook.
+
+On a second stage, MTV (or other source cluster introspection tool) will
+provision the `IPPool` CR for the UDN on behalf of the admin user, thus
+simplifying the operation of the solution, making it more robust and less
+error-prone.
+
+In the following sub-sections we will detail each of these changes.
+
+#### IPPool CRD
+This IPPool CRD has a 1:1 association to a UDN (or. For now, it'll only apply
+to a primary UDN though. In the future, nothing prevents these CRs from being
+used for secondary UDNs.
+
+The IPPool CRD is a non-namespaced object associated to a UDN via the NAD name,
+since we want to have this feature upstream in the k8snetworkplumbingwg, rather
+than in OVN-Kubernetes.
+
+The `IPPool` spec will have an attribute via which the admin can point to a
+UDN - by the logical network name. The admin (which is the only actor able to
+create the `IPPool`) has read access to all NADs in all namespaces, hence they
+can inspect the NAD object to extract the network name.
+
+An alternative would be to reference the UDN by the NAD name - with that
+information, whatever controller reconciling the `IPPool` CRs can access the
+NAD, and extract the network name. This approach would require a validating
+webhook to ensure that you can't have multiple `IPPool`s referencing the same
+logical network (since multiple NADs with the same logical network name - in
+**different** namespaces can exist).
 
 ### Preserving the VM gateway
 Preserving the gateway will require changes to the OVN-Kubernetes API. Both the
