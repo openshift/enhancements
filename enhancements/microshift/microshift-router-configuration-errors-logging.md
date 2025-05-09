@@ -14,7 +14,7 @@ approvers:
 api-approvers:
   - None
 creation-date: 2025-04-24
-last-updated: 2025-04-24
+last-updated: 2025-05-09
 tracking-link:
   - https://issues.redhat.com/browse/USHIFT-4092
 ---
@@ -51,7 +51,7 @@ Allow users to configure the additional Router customization parameters.
 N/A
 
 ## Proposal
-Microshift doesnt use [ingress operator](https://github.com/openshift/cluster-ingress-operator),
+Microshift doesn't use [ingress operator](https://github.com/openshift/cluster-ingress-operator),
 which means all the customization is performed through the configuration file.
 The configuration will propagate to the router deployment [manifest](https://github.com/openshift/microshift/blob/aea40ae1ee66dc697996c309268be1939b018f56/assets/components/openshift-router/deployment.yaml) through environment variables, just like what the ingress operator does.
 
@@ -71,23 +71,23 @@ configuration reference for more information.
 As mentioned in the proposal, there is an entire new section in the configuration:
 ```yaml
 ingress:
-    httpErrorCodePages:
-      name: <string>
-    accessLogging:
-      status: <Enabled|Disabled>
-      format: <string>
-      httpCaptureHeaders:
-        request:
-          - maxLength: <integer>
-            name: <string>
-        response:
-          - maxLength: <integer>
-            name: <string>
-      httpCaptureCookies:
-        - matchType: <Exact|Prefix>
-          maxLength: <integer>
-          name: <string>
-          namePrefix: <string>
+  httpErrorCodePages:
+    name: <string>
+  accessLogging:
+    status: <Enabled|Disabled>
+    format: <string>
+    httpCaptureHeaders:
+      request:
+      - maxLength: <integer>
+        name: <string>
+      response:
+      - maxLength: <integer>
+        name: <string>
+    httpCaptureCookies:
+      - matchType: <Exact|Prefix>
+        maxLength: <integer>
+        name: <string>
+        namePrefix: <string>
 ```
 
 For more information check each individual section.
