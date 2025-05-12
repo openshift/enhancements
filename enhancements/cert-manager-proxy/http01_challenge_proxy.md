@@ -51,7 +51,13 @@ This enhancement aims to provide a robust solution for managing certificates for
 2. **As a cluster administrator on a baremetal platform**, I want a reliable solution to handle HTTP01 challenges for the API endpoint, even when the endpoint is not managed by OpenShift Ingress, so that I can avoid manual workarounds.
 3. **As a developer**, I want a simple deployment mechanism for the HTTP01 challenge proxy, so that I can easily integrate it into my existing cluster setup.
 
-### Proposal
+### Goals
+
+- Provide a reliable mechanism for Cert Manager to complete HTTP01 challenges for the API endpoint (`api.cluster.example.com`) in baremetal environments.
+- Ensure compatibility with various OpenShift topologies, including Standard Clusters, Compact Clusters, and SNO.
+- Minimize operational complexity by using a DaemonSet-based deployment and `nftables` for traffic redirection.
+
+## Proposal
 
 The HTTP01 Challenge Proxy will be implemented via DaemonSet running on the cluster. It will:
 
@@ -86,9 +92,19 @@ A new CR type may be created and can be applied to clusters.  This new typed wil
 2. **Additional Resource Usage**: Running the proxy as a DaemonSet introduces additional resource usage on the cluster nodes while the proxy pod is applying its nftable rules.
 3. **Complexity**: The solution adds another component to the cluster, which may increase operational complexity.
 
-### Alternatives
+### Alternatives (Not Implemented)
 
-None
+The alternatives were actually implemented if you look through the presentation [slides](https://docs.google.com/presentation/d/1mJ1pnsPiEwb-U5lHwhM2UkyRmkkLeYxj3cfE4F7dOx0/edit#slide=id.g547716335e_0_260) but the approaches are all listed below.
+
+1. **RHACM Manages Cert Manager Deployment**: RHACM (Red Hat Advanced Cluster Management) manages the deployment of Cert Manager and certificates on the spokes using Policies. Each managed cluster runs its own Cert Manager instance. This approach decentralizes certificate management but requires Cert Manager to be deployed and maintained on each spoke cluster.
+
+2. **Single Addon on the Hub**: A single addon runs on the hub and watches the spoke clusters' APIs for `Certificate` and `CertificateRequest` related events. When these APIs are created, updated, or deleted in the spoke, the addon syncs the contents back and forth between the hub and the spokes. This approach centralizes management but introduces additional complexity in syncing data.
+
+3. **Cert Manager Controller per Spoke**: A Cert Manager controller is configured for each spoke cluster on the hub. These controllers run in the spoke cluster namespace and are configured to use the spoke’s `system:admin` kubeconfig. This approach allows centralized control but requires managing multiple controllers on the hub.
+
+4. **Single Cert Manager Controller on the Hub**: A single Cert Manager controller runs on the hub. Certificates and `CertificateRequests` for each spoke cluster are created with data known beforehand (e.g., API, Ingress, CNFs). The resulting secrets are synced to the spokes via RHACM Policies. This approach simplifies the deployment but requires pre-configured data for each spoke.
+
+More information about the investigation can be found [here](https://docs.google.com/presentation/d/1mJ1pnsPiEwb-U5lHwhM2UkyRmkkLeYxj3cfE4F7dOx0/edit#slide=id.g547716335e_0_260).
 
 ### Risks and Mitigations
 
@@ -127,3 +143,55 @@ None
 - **Compact Clusters**: The proxy handles scenarios where the API VIP node may or may not host an OpenShift Router, ensuring consistent challenge redirection.
 - **SNO (Single Node OpenShift)**: The proxy is not strictly required in this topology, as the API and wildcard FQDNs resolve to the same IP. However, it can still be deployed for consistency.
 
+#### Hypershift / Hosted Control Planes
+
+This enhancement does not directly apply to Hypershift deployments, as the API endpoint management in Hypershift differs from baremetal environments. However, the proxy's design could be adapted for similar use cases in Hypershift if needed.
+
+#### Standalone Clusters
+
+For standalone clusters, the proxy ensures that HTTP01 challenges for the API endpoint are redirected to the OpenShift Ingress Routers, regardless of whether the API VIP node hosts a router.
+
+#### Single-node Deployments or MicroShift
+
+In SNO or MicroShift deployments, the proxy is not strictly required, as the API and wildcard FQDNs resolve to the same IP. However, deploying the proxy ensures consistency and simplifies certificate management.
+
+## Test Plan
+
+1. **Unit Tests**: Validate the proxy's functionality in isolation, including traffic redirection and error handling.
+2. **Integration Tests**: Deploy the proxy in a test cluster and verify that HTTP01 challenges for the API endpoint succeed.
+3. **Performance Tests**: Measure the proxy's impact on cluster performance and resource usage.
+4. **Topology Tests**: Test the proxy in Standard Clusters, Compact Clusters, and SNO environments to ensure compatibility.
+
+## Graduation Criteria
+
+### Dev Preview -> Tech Preview
+
+- The proxy is implemented and tested in development environments.
+- Documentation is available for deploying and configuring the proxy.
+
+### Tech Preview -> GA
+
+- The proxy is deployed in production environments and successfully handles HTTP01 challenges for various OCP topologies.
+- Performance and reliability meet production-grade requirements.
+
+### Removing a deprecated feature
+
+This enhancement does not deprecate any existing features.
+
+## Upgrade / Downgrade Strategy
+
+Updated versions of the proxy can be applied to the cluster similar to initial deployment
+
+## Version Skew Strategy
+
+Any changes to the proxy's behavior will be documented to ensure compatibility with older cluster versions.
+
+## Operational Aspects of API Extensions
+
+- **Monitoring**: Logs and metrics will be exposed to help administrators monitor the proxy's behavior and troubleshoot issues.
+- **Resource Usage**: The proxy's resource requirements will be minimal, as it only handles HTTP01 challenge traffic.
+- **Failure Recovery**: Health checks will ensure that the proxy is running correctly, and failed pods will be automatically restarted.
+
+## Support Procedures
+
+Support for the proxy will be provided through standard OpenShift support channels. Administrators can refer to the deployment documentation and logs for troubleshooting.
