@@ -233,7 +233,7 @@ Conditions determine when the CVO considers certain actions complete, the follow
 | Begin upgrade(patch) | any | any | any | any | any
 | Begin upgrade(minor) | any | any | any | any | not false
 | Begin upgrade (w/ force) | any | any | any | any | any
-| Upgrade completion[2]| newVersion(target version for the upgrade) | true | false | any | any
+| Upgrade completion[2]| newVersion(target version for the upgrade) | true | any | any | any
 
 [1] Install works on all components in parallel, it does not wait for any component to complete before starting another one.
 
