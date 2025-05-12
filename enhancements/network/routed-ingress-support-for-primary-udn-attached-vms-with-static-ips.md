@@ -340,21 +340,91 @@ and https://github.com/openshift/enhancements/blob/master/enhancements/agent-ins
 
 ### API Extensions
 
-API Extensions are CRDs, admission and conversion webhooks, aggregated API servers,
-and finalizers, i.e. those mechanisms that change the OCP API surface and behaviour.
+#### IPAMClaim CRD
 
-- Name the API extensions this enhancement adds or modifies.
-- Does this enhancement modify the behaviour of existing resources, especially those owned
-  by other parties than the authoring team (including upstream resources), and, if yes, how?
-  Please add those other parties as reviewers to the enhancement.
+The IPAMClaim CRD status sub-resource will need to be updated, adding
+conditions.
 
-  Examples:
-  - Adds a finalizer to namespaces. Namespace cannot be deleted without our controller running.
-  - Restricts the label format for objects to X.
-  - Defaults field Y on object kind Z.
+For traceability, we also suggest adding to the `IPAMClaim` spec an attribute
+to indicate which pod is holding the claim at any given time. On a VM live
+migration, the OVN-Kubernetes control plane would update the `OwnerPod` after
+the claim has been consumed by a different pod. Same for VM start/stop
+scenarios.
 
-Fill in the operational impact of these API Extensions in the "Operational Aspects
-of API Extensions" section.
+If we choose the [de-centralized IP management](#de-centralized-ip-management)
+alternative, we will also need to change the IPAMClaim CRD spec, adding it an
+attribute to request specific IPs for the workload which will consume the
+claim.
+
+Below you'll see the changes requested:
+```go
+type IPAMClaimSpec struct {
+	// The network name for which this persistent allocation was created
+	Network string `json:"network"`
+	// The pod interface name for which this allocation was created
+	Interface string `json:"interface"`
++	// The IPs requested by the user
++	// +optional
++	IPRequests []CIDR `json:"ipRequests,omitempty"`
+}
+
+// IPAMClaimStatus contains the observed status of the IPAMClaim.
+type IPAMClaimStatus struct {
+    // The list of IP addresses (v4, v6) that were allocated for the pod interface
+-   IPs []string `json:"ips"`
++   IPs []CIDR `json:"ips"`
++   // The name of the pod holding the IPAMClaim
++   OwnerPod string `json:"ownerPod"`
++   // Conditions contains details for one aspect of the current state of this API Resource
++   Conditions []metav1.Condition `json:"conditions,omitempty"`
+}
+```
+
+The `IPAMClaim` status will have (at least) the following conditions:
+- SuccessfulAllocation: reports the IP address was successfully allocated for
+  the workload
+- AllocationConflict: reports the requested allocation was not successful - i.e.
+  the requested IP address is already present in the network
+
+#### New IPPool CRD
+
+The IPPool CRD will operate as a place to store the MAC to IP addresses
+association for a logical network.
+
+```go
+type IPPool struct {
+    metav1.TypeMeta     `json:",inline"`
+    metav1.ObjectMeta   `json:"metadata,omitempty"`
+
+	Spec   IPPoolSpec   `json:"spec,omitempty"`
+	Status IPPoolStatus `json:"status,omitempty"`
+}
+
+type IPPoolSpec struct {
+    NetworkName string                      `json:"network-name"`
+	Entries map[net.HardwareAddr][]net.IP   `json:"entries"`
+}
+
+type IPPoolStatus struct {
+	Conditions []Condition
+	AssociatedNADs []NADInfo
+}
+
+type NADInfo struct {
+	Name string `json:"name"`
+}
+```
+
+The `IPPool` CRD will have at least the following conditions:
+- DuplicateMACAddresses: will indicate to the admin that a MAC address appears
+  multiple times in the `Entries` list
+- DuplicateIPAddresses: will indicate to the admin that an IP address appears
+  multiple times associated to different MAC addresses in the `Entries` list
+- Success: the data present in the spec is valid (no duplicate MACs or IPs)
+
+We plan on reporting in the `IPPool` the name of the NADs which are holding the
+configuration for the network which this pool stores the MAC <=> IPs
+associations.
 
 ### Topology Considerations
 
