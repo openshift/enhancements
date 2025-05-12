@@ -71,6 +71,25 @@ The proxy will ensure compatibility with various OCP topologies, including SNO, 
 
 A new CR type may be created and can be applied to clusters.  This new typed will be stored in the [openshift/api](https://github.com/openshift/api) repo.
 
+Potential Example of a CR:
+
+```
+apiVersion: network.openshift.io/v1alpha1
+kind: HTTP01ChallengeProxy
+metadata:
+  name: example-http01challengeproxy
+  namespace: default
+spec:
+  # Add fields here to specify the desired state of the HTTP01ChallengeProxy
+status:
+  conditions:
+    - type: Ready
+      status: "True"
+      lastTransitionTime: "2025-05-12T00:00:00Z"
+      reason: "Initialized"
+      message: "HTTP01ChallengeProxy is ready"
+```
+
 ### Implementation Details/Notes/Constraints
 
 - The proxy will be deployed as a DaemonSet to ensure it runs on all nodes which may host the API VIP in the cluster.
