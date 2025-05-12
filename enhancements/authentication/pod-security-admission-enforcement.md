@@ -135,6 +135,10 @@ By adding these annotations, the [`PodSecurityReadinessController`](https://gith
   The controller needs to iterate over the workloads in such a namespace and identify if there are workloads that run with user-based SCCs and map those SCCs against PSS.
   Many of the remaining clusters with violations appear to involve workloads admitted by such user-based SCCs.
 
+If violating workloads are found, it will be necessary to create an alert for the user to create a call-to-action.
+In particular, we should nudge the user to not use user-based SCCs for workloads.
+Informing the user at least a release upfront gives them the ability to prepare for the change.
+
 ### New API
 
 This API is used to support users to manage the PSA enforcement.
@@ -145,7 +149,7 @@ The API enables users to:
 - offers them the ability to rely on the `PodSecurityReadinessController` to identify failing namespaces in release `n` and set the "Legacy" mode, if necessary and
 - offers them the ability to identify the root cause: failing namespaces.
 
-```go`
+```go
 package v1alpha1
 
 import (
@@ -323,6 +327,12 @@ Otherwise, the cluster will be unable to revert to its previous state.
 
 ## Open Questions
 
+## Rerun the evaluation before enforcing
+
+It could be better to run the evaluation before enforcing `Restricted` mode as the last run can be a couple of months old.
+With alerts in place in the release before, it could be sufficient to run the evaluation just before enforcing `Restricted` mode.
+In addition we could list the Namespaces that are violating the PSS in the `status.violatingNamespaces` field.
+
 ## Initial evaluation by the PodSecurityReadinessController
 
 What happens if the `PodSecurityReadinessController`, didn't have the time to run at least once after an upgrade?
@@ -336,17 +346,21 @@ This will give the user the ability to see how old the basis for the decision is
 
 Should a cluster that settles at `status.enforcementMode = Legacy` have the PSA label syncer turned off?
 
-### Fresh Installs
-
-Fresh installs will default to `Restricted` in release `n+1`.
-The System Administrator needs to configure the new API’s `spec.enforcementMode`, for `spec.enforcementMode = Legacy` to revert this.
-There is no need for the PodSecurityReadinessController to run as it will start with `spec.enforcementMode = Restricted` or be set to `spec.enforcementMode = Legacy` manually.
-
 ### Impact on HyperShift
 
 Needs to be evaluated.
 
 ## Test Plan
+
+### Break-glass mechanism
+
+The break-glass mechanism must be tested to ensure that it works as expected.
+
+### Switch to legacy mode and back
+
+The switch to legacy mode and back must be tested to ensure that it works as expected.
+
+### Non-urgent, but important: Hardcoded SCC to PSA mapping
 
 The PSA label syncer currently maps SCCs to PSS through a hard-coded rule set, and the PSA version is set to `latest`.
 This setup risks becoming outdated if the mapping logic changes upstream.
@@ -382,7 +396,9 @@ The changes that will be made on enforcement, need to be able to be reverted:
 
 ## New Installation
 
-TBD
+Fresh installs will default to `Restricted` in release `n+1`.
+The System Administrator needs to configure the new API’s `spec.enforcementMode`, for `spec.enforcementMode = Legacy` to revert this.
+There is no need for the PodSecurityReadinessController to run as it will start with `spec.enforcementMode = Restricted` or be set to `spec.enforcementMode = Legacy` manually.
 
 ## Operational Aspects
 
