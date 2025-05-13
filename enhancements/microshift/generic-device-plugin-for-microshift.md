@@ -135,6 +135,18 @@ genericDevicePlugin:
             - path: /dev/snd/pcmC0D0c
 ```
 
+Note:
+
+Setting `count: 10` means that a device can be attached to up to 10 containers simultaneously.
+It's important to note that this does not create 10 physical copies of the device.
+If a Pod requests 4 allocations of this device, only a single instance of the
+device (e.g. `/dev/snd`) will appear within the container.
+
+Conversely, if a device path uses a glob pattern like `/dev/ACM*` and has
+`count: 1` (default), and multiple devices match the pattern, requesting two serial
+devices will result in both matching devices (e.g. `/dev/ACM0` and `/dev/ACM1`)
+being mounted into the container.
+
 ### Topology Considerations
 
 #### Hypershift / Hosted Control Planes
