@@ -23,30 +23,6 @@ replaces: []
 superseded-by: []
 ---
 
-To get started with this template:
-1. **Pick a domain.** Find the appropriate domain to discuss your enhancement.
-1. **Make a copy of this template.** Copy this template into the directory for
-   the domain.
-1. **Fill out the metadata at the top.** The embedded YAML document is
-   checked by the linter.
-1. **Fill out the "overview" sections.** This includes the Summary and
-   Motivation sections. These should be easy and explain why the community
-   should desire this enhancement.
-1. **Create a PR.** Assign it to folks with expertise in that domain to help
-   sponsor the process.
-1. **Merge after reaching consensus.** Merge when there is consensus
-   that the design is complete and all reviewer questions have been
-   answered so that work can begin.  Come back and update the document
-   if important details (API field names, workflow, etc.) change
-   during code review.
-1. **Keep all required headers.** If a section does not apply to an
-   enhancement, explain why but do not remove the section. This part
-   of the process is enforced by the linter CI job.
-
-See ../README.md for background behind these instructions.
-
-Start by filling out the header with the metadata for this enhancement.
-
 # Routed ingress support for primary UDN attached VMs with static IPs
 
 ## Summary
