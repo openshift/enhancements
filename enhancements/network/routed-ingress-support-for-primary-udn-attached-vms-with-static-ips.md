@@ -582,28 +582,24 @@ status:
 
 #### Hypershift / Hosted Control Planes
 
-Are there any unique considerations for making this change work with
-Hypershift?
+The management cluster should have no reason to import an existing VM from
+another virtualization platform into OpenShift Virtualization.
 
-See https://github.com/openshift/enhancements/blob/e044f84e9b2bafa600e6c24e35d226463c2308a5/enhancements/multi-arch/heterogeneous-architecture-clusters.md?plain=1#L282
+It makes more sense to import VMs into the hosted clusters, in order to provide
+tenants with routed ingress into their hosted cluster workloads.
 
-How does it affect any of the components running in the
-management cluster? How does it affect any components running split
-between the management cluster and guest cluster?
+There should be no hypershift platform-specific considerations with this
+feature.
 
 #### Standalone Clusters
 
-Is the change relevant for standalone clusters?
+Full support.
 
 #### Single-node Deployments or MicroShift
 
-How does this proposal affect the resource consumption of a
-single-node OpenShift deployment (SNO), CPU and memory?
-
-How does this proposal affect MicroShift? For example, if the proposal
-adds configuration options through API resources, should any of those
-behaviors also be exposed to MicroShift admins through the
-configuration file for MicroShift?
+Full support; there might be some increased resource usage when scaling up
+number of VMs requesting IP and MAC address, since it will mean more processing
+in OVN-Kubernetes, and more CRs to reconcile.
 
 ### Implementation Details/Notes/Constraints
 
