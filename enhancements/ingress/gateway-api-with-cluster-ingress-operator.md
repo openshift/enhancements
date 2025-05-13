@@ -182,8 +182,14 @@ connection to the "example-app" service.
   * Automatically install OSSM when a GatewayClass is created, if needed.
   * Manage a LoadBalancer-type service and wildcard DNS for Gateways.
   * Provide a default security policy, which the cluster admin may modify.
-* Enable use of Gateway API v1beta1 features that are supported by OSSM.
+* Enable use of stable Gateway API features that are supported by OSSM.
   * Allow cleartext HTTP and edge-terminated HTTPS traffic.
+  * Support [Gateway](https://gateway-api.sigs.k8s.io/reference/spec/#gateway),
+      [GatewayClass](https://gateway-api.sigs.k8s.io/reference/spec/#gatewayclass),
+      [GRPCRoute](https://gateway-api.sigs.k8s.io/reference/spec/#grpcroute),
+      [HTTPRoute](https://gateway-api.sigs.k8s.io/reference/spec/#httproute),
+      and
+      [ReferenceGrant](https://gateway-api.sigs.k8s.io/reference/spec/#referencegrant_1).
 * Use a unified control-plane (i.e. a single Istio control-plane deployment for ingress and mesh).
   * Enable the cluster admin to install OSSM and then Gateway API or vice versa.
   * Work harmoniously with OpenShift Service Mesh for service mesh use-cases.
@@ -192,11 +198,10 @@ connection to the "example-app" service.
 
 ### Non-Goals
 
-* Gateway API features that are not yet beta status (as of Gateway API v0.5.1) are not supported.
-  * [GRPCRoute](https://gateway-api.sigs.k8s.io/references/spec/#gateway.networking.k8s.io/v1alpha2.GRPCRoute),
-    [TCPRoute](https://gateway-api.sigs.k8s.io/references/spec/#gateway.networking.k8s.io/v1alpha2.TCPRoute),
-    [TLSRoute](https://gateway-api.sigs.k8s.io/references/spec/#gateway.networking.k8s.io/v1alpha2.TLSRoute),
-    and [UDPRoute](https://gateway-api.sigs.k8s.io/references/spec/#gateway.networking.k8s.io/v1alpha2.UDPRoute)
+* Gateway API features that are not yet stable status as of Gateway API v1.2.1 are not supported.
+    [TCPRoute](https://gateway-api.sigs.k8s.io/reference/spec/#tcproute),
+    [TLSRoute](https://gateway-api.sigs.k8s.io/reference/spec/#tlsroute),
+    and [UDPRoute](https://gateway-api.sigs.k8s.io/reference/spec/#udproute)
     are still alpha, and so they are not supported at this time.
   * Support for TLS passthrough requires TLSRoute, so it is not supported.
   * [Policy attachment](https://gateway-api.sigs.k8s.io/references/policy-attachment/) is experimental, and so it is not supported at this time.
@@ -982,24 +987,26 @@ cluster-wide watches for Gateway API resources as mentioned above.
 
 #### Can we use the Gateway API v1beta1 CRDs?
 
-OSSM 2.3 is based on Istio 1.14, which recently added Gateway API v1beta1 support,
-and OSSM 2.4 is based on Istio 1.16, which also supports Gateway API v1beta1.
-Supporting v1beta1 is highly desirable, and OSSM 2.4 brings many other changes
-that are of interest for this enhancement. We need to determine whether we will
-be able to use OSSM 2.4 for this enhancement. Istio 1.14, the version found in
-OSSM 2.3, is now [EOL](https://istio.io/latest/news/support/announcing-1.14-eol-final/)
-which is less than desirable for dev preview. 
+The dev preview versions of this feature are based on upstream Istio and OSSM 2;
+the GA version of this feature is based on OSSM 3.
 
-If OSSM 2.4 is not released in time for OpenShift 4.13, we may resort to using
-OSSM 2.3 or a pre-release development build of OSSM 2.4 for dev preview.  While
-using a pre-release version is not ideal, OSSM 2.4 has sufficient advantages to
-outweigh the disadvantages of using development build in the context of a dev
-preview.
+- For OpenShift 4.12, the initial dev preview uses Istio 1.15.1, which the user
+  installs using an upstream build; this dev preview uses Gateway API v0.5.1
+  (v1beta1).
+- For OpenShift 4.13, the dev preview uses OSSM 2.4.0, based on Istio 1.16.5,
+  and Gateway API v0.5.1 (more precisely, v0.5.1-0.20220921185115-ee7a83814203;
+  still v1beta1).
+- For OpenShift 4.17, the dev preview uses OSSM 2.5.2, based on Istio 1.18.2,
+  and Gateway API v0.6.2 (still v1beta1).
+- For OpenShift 4.18, the dev preview uses OSSM 2.6.0, based on Istio 1.20.8,
+  and Gateway API v1.0.0.
+- For OpenShift 4.19, the feature uses OSSM 3.0.0, based on Istio 1.24.3, and
+  Gateway API v1.2.1.
 
-**Resolution**: Yes. OSSM 2.3.1 is based on Istio 1.14.5, which has support for
-Gateway API v1beta1. OSSM 2.4 is based on Istio 1.16, which also supports Gateway
-API v1beta1. More specifically, both OSSM versions support Gateway API v0.5.1.
-We will support the v1beta1 CRDs that are promoted in Gateway API v0.5.1.
+As of Gateway API v1.2.1, the core APIs are now all v1beta1 or v1, and OSSM
+3.0.0 supports all of these APIs.
+
+**Resolution**: Yes.  We support all v1 and v1beta1 APIs in Gateway API v1.2.1.
 
 #### Should we use the "openshift-ingress" namespace for Gateway CRs?
 
