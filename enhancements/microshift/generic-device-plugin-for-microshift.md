@@ -57,6 +57,9 @@ initialization) to Pods without potentially compromising on security.
   to `github.com/openshift` organization. Generic Device Plugin has Apache 2.0
   license and forking should not be a problem. Forked repository should include
   a reference to original repository.
+  * Repository fork will be a place where we can fix things as soon as possible
+    and potentially allow us to implement changes that could get rejected from
+    the upstream.
 * Modify fork to make it more "code import friendly"
 * Import Generic Device Plugin fork into MicroShift binary
 * Integrate the Generic Device Plugin's configuration into MicroShift config
@@ -323,6 +326,12 @@ engineering, QE, and documentation.
 
 Since the Generic Device Plugin (GDP) can be disabled via configuration, users
 retain the flexibility to utilize upstream Akri if their needs require it.
+
+### Not forking the upstream
+
+Although forking introduces overhead such as extra repository to maintain and a
+need to setup some kind of smoke test CI, it will allow us to implement that are
+time sensitive (like security fixes) or simply rejected by the upstream.
 
 ## Open Questions [optional]
 
