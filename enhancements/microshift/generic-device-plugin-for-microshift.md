@@ -78,6 +78,25 @@ initialization) to Pods without potentially compromising on security.
 1. User deploys a workload utilizing some device
    (could be at any point, it won't be scheduled/started until the device is available)
 
+In order for workload to get the device attached, the **container** specification
+must include the device in its limits. Below is an example of StatefulSet which
+references a device in a container's limits.
+```yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: WORKLOAD
+  namespace: NAMESPACE
+spec:
+  template:
+    spec:
+      containers:
+      - name: CONTAINER
+        resources:
+          limits:
+            device.microshift.io/serial: "1"
+```
+
 ### API Extensions
 
 By including Generic Device Plugin (GDP) as code import, MicroShift configuration file
