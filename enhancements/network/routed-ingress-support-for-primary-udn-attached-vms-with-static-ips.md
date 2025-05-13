@@ -269,6 +269,14 @@ This flow is described in more detail (and presents alternatives to it) in the
 
 ### Workflow Description
 
+### Workflow Description
+
+#### Roles
+- admin: a user with cluster admin rights. They can list NADs in all
+  namespaces, create cluster UDNs, and create / update `IPPool`s.
+- VM owner: a user without cluster admin rights. They own their namespaces.
+  They will either import - or create - a VM in the namespace they own.
+
 We'll list here the workflow for both the
 [centralized IP management](#centralized-ip-management) option, and the
 [de-centralized IP management](#de-centralized-ip-management)) option.
@@ -324,6 +332,28 @@ provision the `IPPool` CR for the UDN on behalf of the admin user, thus
 simplifying the operation of the solution, making it more robust and less
 error-prone.
 
+##### Admin user flows for centralized approach
+
+The admin user will have to perform the following operations:
+- provision the cluster UDN CR having the overlay definition.
+  - layer2 topology ; IPAM lifecycle `Persistent` are a **must**
+- provision the `IPPool` object, pointing at the logical network created in the
+  previous step via the `IPPool.Spec.NetworkName attribute`. This is only
+  required until another tool automatically provisions the `IPPool` on behalf of
+  the admin
+- fill out the `IPPool` with the MAC to IPs association on the cluster from
+  which the VMs are being imported. This is only required until another tool
+  (able to introspect the source virtualization cluster) can perform this
+  operation on behalf of the admin
+
+As indicated above, when a tool exists that can introspect the source cluster
+to learn the VM's IP addresses, the admin user will only require provisioning
+the cluster UDN CR.
+
+##### VM owner flows for centralized approach
+
+The VM owner just has to use MTV to import the VM into CNV.
+
 #### De-centralized IP management workflow
 
 The [de-centralized IP management](#de-centralized-ip-management) flow is
@@ -366,6 +396,24 @@ This option has the network admin create the IPAMClaim, and request a MAC and
 IP addresses for the VM; in a second stage of the implementation, MTV (or any
 other component able to introspect the source cluster for the VM's MAC and IPs)
 will create the IPAMClaim on behalf of the admin user.
+
+##### Admin user flows for de-centralized approach
+
+The admin user will have to perform the following operations:
+- provision the cluster UDN CR having the overlay definition.
+  - layer2 topology ; IPAM lifecycle `Persistent` are a **must**
+- provision the `IPAMClaim` object, whose name **must** be created like
+  `<vm name>.<logical network name>`. The `IPAMClaim` must have both the IP and
+  MAC addresses for the VM attachment. This is only required until another tool
+  automatically provisions the `IPAMClaim`s on behalf of the admin
+
+As indicated above, when a tool exists that can introspect the source cluster
+to learn the VM's IP addresses, the admin user will only require provisioning
+the cluster UDN CR.
+
+##### VM owner flows for de-centralized approach
+
+The VM owner just has to use MTV to import the VM into CNV.
 
 ### API Extensions
 
