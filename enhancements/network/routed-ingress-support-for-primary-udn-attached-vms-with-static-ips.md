@@ -1,24 +1,26 @@
 ---
 title: routed-ingress-support-for-primary-udn-attached-vms-with-static-ips
 authors:
-  - @maiqueb
+  - "@maiqueb"
 reviewers: # Include a comment about what domain expertise a reviewer is expected to bring and what area of the enhancement you expect them to focus on. For example: - "@networkguru, for networking aspects, please look at IP bootstrapping aspect"
-  - TBD
+  - "@qinqon"
+  - "@ormergi"
+  - "@eddev"
+  - "@tssurya"
+  - "@kyrtapz"
 approvers: # A single approver is preferred, the role of the approver is to raise important questions, help ensure the enhancement receives reviews from all applicable areas/SMEs, and determine when consensus is achieved such that the EP can move forward to implementation.  Having multiple approvers makes it difficult to determine who is responsible for the actual approval.
-  - TBD
+  - "@trozet"
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
-  - TBD
+  - "@joelspeed"
 creation-date: 2025-05-07
-last-updated: yyyy-mm-dd
+last-updated: 2025-05-13
 tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
-  - TBD
+  - https://issues.redhat.com/browse/CORENET-5999
 see-also:
   - "/enhancements/network/user-defined-network-segmentation.md"
   - "/enhancements/network/bgp-ovn-kubernetes.md"
-replaces:
-  - "/enhancements/that-less-than-great-idea.md"
-superseded-by:
-  - "/enhancements/our-past-effort.md"
+replaces: []
+superseded-by: []
 ---
 
 To get started with this template:
