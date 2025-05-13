@@ -242,7 +242,8 @@ happens today). If it fails (e.g. that IP address is already in use in the
 subnet), the CNI will fail, crash-looping the pod. The error condition will be
 reported in the associated `IPAMClaim` CR, and an event logged in the pod.
 
-This flow is described in the following sequence diagram:
+The [centralized IP management](#centralized-ip-management) flow is described
+in the following sequence diagram:
 ```mermaid
 sequenceDiagram
 actor Admin
@@ -285,6 +286,35 @@ On a second stage, MTV (or other source cluster introspection tool) will
 provision the `IPPool` CR for the UDN on behalf of the admin user, thus
 simplifying the operation of the solution, making it more robust and less
 error-prone.
+
+The [de-centralized IP management](#de-centralized-ip-management) flow is
+described in the following sequence diagram:
+
+```mermaid
+sequenceDiagram
+actor Admin
+actor VM Owner
+
+participant MTV
+participant CNV
+participant o as OVN-Kubernetes
+
+Admin ->> CNV: provision IPAMClaim w/ MAC and IP requests
+CNV -->> Admin: OK
+
+VM Owner ->> MTV: import VM
+MTV ->> CNV: create VM(name=<...>, primaryUDNMac=origMAC)
+CNV ->> CNV: ips = getIPsForMAC(mac=origMAC)
+CNV ->> o: create pod(mac=origMAC, IPs=ips)
+o -->> CNV: OK
+CNV -->> MTV: OK
+MTV -->> VM Owner: OK
+```
+
+This option has the network admin create the IPAMClaim, and request a MAC and
+IP addresses for the VM; in a second stage of the implementation, MTV (or any
+other component able to introspect the source cluster for the VM's MAC and IPs)
+will create the IPAMClaim on behalf of the admin user.
 
 In the following sub-sections we will detail each of these changes.
 
