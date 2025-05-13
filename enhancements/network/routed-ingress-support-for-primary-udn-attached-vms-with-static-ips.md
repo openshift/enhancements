@@ -212,8 +212,12 @@ pod is created - it will identify when the VM has a primary UDN attachment
 has a MAC address configuration request (defined in the KubeVirt
 `VMI.Spec.Domain.Devices.Interfaces` attribute).
 
-It will then access the `IPPool` (or `DHCPLeaseConfig` for the UDN) to extract
-which IP addresses are assigned to said MAC address.
+It will then access the `IPPool` (in the
+[centralized IP management option](#centralized-ip-management-workflow)) **or**
+the
+[de-centralized IP management option](#de-centralized-ip-management-workflow))
+to extract which IP addresses are assigned to said MAC address.
+
 Finally, the `ipam-extensions` mutating webhook will mutate the launcher pod to
 customize the primary UDN attachment using the multus default network
 annotation. This annotation (with an associated example) would look like:
@@ -241,80 +245,6 @@ said IPs will be persisted in the corresponding `IPAMClaim` CR (which already
 happens today). If it fails (e.g. that IP address is already in use in the
 subnet), the CNI will fail, crash-looping the pod. The error condition will be
 reported in the associated `IPAMClaim` CR, and an event logged in the pod.
-
-The [centralized IP management](#centralized-ip-management) flow is described
-in the following sequence diagram:
-```mermaid
-sequenceDiagram
-actor Admin
-actor VM Owner
-
-participant MTV
-participant CNV
-participant o as OVN-Kubernetes
-
-Admin ->> CNV: provision IPPool
-CNV -->> Admin: OK
-
-VM Owner ->> MTV: import VM
-MTV ->> CNV: create VM(name=<...>, primaryUDNMac=origMAC)
-CNV ->> CNV: ips = getIPsForMAC(mac=origMAC)
-CNV ->> o: create pod(mac=origMAC, IPs=ips)
-o -->> CNV: OK
-CNV -->> MTV: OK
-MTV -->> VM Owner: OK
-```
-
-Hence, the required changes would be:
-- ipam-extensions (CNV component) and OVN-Kubernetes API will need to be
-  changed, to work with the multus default network annotation. Depending on the
-  VM's specification, it will request a specific MAC and IP addresses for the
-  primary UDN attachment. The `ipam-claim-reference` will also be requested via
-  this annoation.
-- the `IPAMClaim` CRD will need to be updated, adding a `Conditions` array to
-  its status. This way we will be able to report errors back to the user (e.g.
-  the desired IP allocation is already in use)
-- new CRD to be added, where the MAC <-> IPs addresses association will be
-  persisted. Only required for the
-  [centralized IP management](#centralized-ip-management) option
-- ipam-extensions (CNV component) will now also read the `IPPool` CRs for VMs
-  having primary UDNs in their namespaces, and requesting a specific MAC address
-  in their specs. These CRs will be used to generate the multus default network
-  annotation, which will be set in the pods by the mutating webhook.
-
-On a second stage, MTV (or other source cluster introspection tool) will
-provision the `IPPool` CR for the UDN on behalf of the admin user, thus
-simplifying the operation of the solution, making it more robust and less
-error-prone.
-
-The [de-centralized IP management](#de-centralized-ip-management) flow is
-described in the following sequence diagram:
-
-```mermaid
-sequenceDiagram
-actor Admin
-actor VM Owner
-
-participant MTV
-participant CNV
-participant o as OVN-Kubernetes
-
-Admin ->> CNV: provision IPAMClaim w/ MAC and IP requests
-CNV -->> Admin: OK
-
-VM Owner ->> MTV: import VM
-MTV ->> CNV: create VM(name=<...>, primaryUDNMac=origMAC)
-CNV ->> CNV: ips = getIPsForMAC(mac=origMAC)
-CNV ->> o: create pod(mac=origMAC, IPs=ips)
-o -->> CNV: OK
-CNV -->> MTV: OK
-MTV -->> VM Owner: OK
-```
-
-This option has the network admin create the IPAMClaim, and request a MAC and
-IP addresses for the VM; in a second stage of the implementation, MTV (or any
-other component able to introspect the source cluster for the VM's MAC and IPs)
-will create the IPAMClaim on behalf of the admin user.
 
 In the following sub-sections we will detail each of these changes.
 
@@ -361,34 +291,103 @@ This flow is described in more detail (and presents alternatives to it) in the
 
 ### Workflow Description
 
-Explain how the user will use the feature. Be detailed and explicit.
-Describe all of the actors, their roles, and the APIs or interfaces
-involved. Define a starting state and then list the steps that the
-user would need to go through to trigger the feature described in the
-enhancement. Optionally add a
-[mermaid](https://github.com/mermaid-js/mermaid#readme) sequence
-diagram.
+We'll list here the workflow for both the
+[centralized IP management](#centralized-ip-management) option, and the
+[de-centralized IP management](#de-centralized-ip-management)) option.
+On both alternatives, we plan on initially having the admin provision the
+required CR(s) with the relevant data (MAC and IP addresses) - in the future,
+MTV or another source cluster introspection mechanism can provision these with
+the required data.
 
-Use sub-sections to explain variations, such as for error handling,
-failure recovery, or alternative outcomes.
+#### Centralized IP management workflow
 
-For example:
+The [centralized IP management](#centralized-ip-management) flow is described
+in the following sequence diagram:
+```mermaid
+sequenceDiagram
+actor Admin
+actor VM Owner
 
-**cluster creator** is a human user responsible for deploying a
-cluster.
+participant MTV
+participant CNV
+participant o as OVN-Kubernetes
 
-**application administrator** is a human user responsible for
-deploying an application in a cluster.
+Admin ->> CNV: provision IPPool
+CNV -->> Admin: OK
 
-1. The cluster creator sits down at their keyboard...
-2. ...
-3. The cluster creator sees that their cluster is ready to receive
-   applications, and gives the application administrator their
-   credentials.
+VM Owner ->> MTV: import VM
+MTV ->> CNV: create VM(name=<...>, primaryUDNMac=origMAC)
+CNV ->> CNV: ips = getIPsForMAC(mac=origMAC)
+CNV ->> o: create pod(mac=origMAC, IPs=ips)
+o -->> CNV: OK
+CNV -->> MTV: OK
+MTV -->> VM Owner: OK
+```
 
-See
-https://github.com/openshift/enhancements/blob/master/enhancements/workload-partitioning/management-workload-partitioning.md#high-level-end-to-end-workflow
-and https://github.com/openshift/enhancements/blob/master/enhancements/agent-installer/automated-workflow-for-agent-based-installer.md for more detailed examples.
+Hence, the required changes would be:
+- ipam-extensions (CNV component) and OVN-Kubernetes API will need to be
+  changed, to work with the multus default network annotation. Depending on the
+  VM's specification, it will request a specific MAC and IP addresses for the
+  primary UDN attachment. The `ipam-claim-reference` will also be requested via
+  this annoation.
+- the `IPAMClaim` CRD will need to be updated, adding a `Conditions` array to
+  its status. This way we will be able to report errors back to the user (e.g.
+  the desired IP allocation is already in use)
+- new CRD to be added, where the MAC <-> IPs addresses association will be
+  persisted. Only required for the
+  [centralized IP management](#centralized-ip-management) option
+- ipam-extensions (CNV component) will now also read the `IPPool` CRs for VMs
+  having primary UDNs in their namespaces, and requesting a specific MAC address
+  in their specs. These CRs will be used to generate the multus default network
+  annotation, which will be set in the pods by the mutating webhook.
+
+On a second stage, MTV (or other source cluster introspection tool) will
+provision the `IPPool` CR for the UDN on behalf of the admin user, thus
+simplifying the operation of the solution, making it more robust and less
+error-prone.
+
+#### De-centralized IP management workflow
+
+The [de-centralized IP management](#de-centralized-ip-management) flow is
+described in the following sequence diagram:
+
+```mermaid
+sequenceDiagram
+actor Admin
+actor VM Owner
+
+participant MTV
+participant CNV
+participant o as OVN-Kubernetes
+
+Admin ->> CNV: provision IPAMClaim w/ MAC and IP requests
+CNV -->> Admin: OK
+
+VM Owner ->> MTV: import VM
+MTV ->> CNV: create VM(name=<...>, primaryUDNMac=origMAC)
+CNV ->> CNV: ips = getIPsForMAC(mac=origMAC)
+CNV ->> o: create pod(mac=origMAC, IPs=ips)
+o -->> CNV: OK
+CNV -->> MTV: OK
+MTV -->> VM Owner: OK
+```
+
+Hence, the required changes would be:
+- the `IPAMClaim` CRD status sub-resource will need to be updated, adding a
+  `Conditions` array. This way we will be able to report errors back to the
+  user (e.g. the desired IP allocation is already in use).
+- the `IPAMClaim` CRD spec will need to be updated, adding `MAC` and `IPs`
+requests.
+- OVN-Kubernetes will need to try to apply the MAC and IP addresses requested
+  in its spec. If any conflicts are found for either MAC or IPs, the error will
+  be persisted in the `IPAMClaim` status (in the conditions array).
+- OVN-Kubernetes will record the requested IPs in the status sub-resource
+  (already does so today), along with a `Success` condition.
+
+This option has the network admin create the IPAMClaim, and request a MAC and
+IP addresses for the VM; in a second stage of the implementation, MTV (or any
+other component able to introspect the source cluster for the VM's MAC and IPs)
+will create the IPAMClaim on behalf of the admin user.
 
 ### API Extensions
 
