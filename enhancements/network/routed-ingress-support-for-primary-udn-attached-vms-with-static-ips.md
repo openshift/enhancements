@@ -93,6 +93,9 @@ address (the one assigned to the VM).
 to import said VM into Kubernetes, attaching it to an overlay network. I want to
 be able to consume Kubernetes features like network policies, and services, to
 benefit from the Kubernetes experience.
+- As the owner of a VM running in a traditional virtualization platform, I want
+to import said VM into Kubernetes, attaching it to an overlay network, without
+having to reconfigure the VM's networking configuration (MAC, IPs, gateway).
 
 ### Goals
 
@@ -103,11 +106,23 @@ default route
 - Allow excludeSubnets to be used with L2 UDNs to ensure OVNK does not use an IP
 address from the range that VMs have already been assigned outside the
 cluster (or for secondary IP addresses assigned to the VM's interfaces)
+- Ensure it is possible to enable non-NATed traffic for pods with the static
+network configuration by exposing the network through BGP
+
+**NOTE:** all the goals mentioned above will be fulfilled **only** for the
+**cluster** UDN type.
 
 ### Non-Goals
 
-Handle importing VMs without a managed IP experience - i.e. IPs were defined
+- Handle importing VMs without a managed IP experience - i.e. IPs were defined
 statically in the guest.
+- Importing a VM whose gateway is outside the subnet of the network.
+- Adding non default routes to the VM when importing it into OpenShift Virt.
+- Modifying the default gateway and management IPs of a primary UDN after it was created.
+- Modifying a pod's network configuration after the pod was created.
+
+**NOTE:** implementing support on UDNs (achieving the namespace isolation
+use-case) is outside the scope for this feature.
 
 ## Proposal
 
@@ -153,10 +168,10 @@ OVN-Kubernetes will be the same, and is roughly described in
 #### Centralized IP management
 
 A new CRD - named `IPPool`, or `DHCPLeaseConfig` (or the like) - will be
-created, and is associated to a UDN (both UDN, and C-UDN). This CRD holds the
-association of MAC address to IPs for a UDN. When importing the VM into
-OpenShift Virt, MTV (or a separate, dedicated component) will provision /
-update this object with the required information (MAC to IPs association).
+created, and is associated to a cluster UDN. This CRD holds the association of
+MAC address to IPs for a UDN. When importing the VM into OpenShift Virt, MTV
+(or a separate, dedicated component) will provision / update this object with
+the required information (MAC to IPs association).
 This object is providing to the admin user a single place to check the IP
 address MAC to IPs mapping. On an first implementation phase, we can have the
 admin provision these CRs manually. Later on, MTV (or any other cluster
@@ -171,6 +186,9 @@ This approach requires the `IPAMClaim` CRD to be updated, specifically its
 status sub-resource - we need to introduce `Conditions` so we can report errors
 when allocating IPs which were requested by the user - what if the address is
 already in use within the UDN ?
+
+The flow is described in more detail in the
+[implementation details](#implementation-detailsnotesconstraints) section.
 
 #### De-centralized IP management
 
@@ -191,7 +209,9 @@ successful sync in the `IPAMClaim` status - or a failure otherwise.
 The `ipam-extensions` mutating webhook will kick in whenever a virt launcher
 pod is created - it will identify when the VM has a primary UDN attachment
 (already happens today), and will also identify when the pod network attachment
-has a MAC address configuration request.
+has a MAC address configuration request (defined in the KubeVirt
+`VMI.Spec.Domain.Devices.Interfaces` attribute).
+
 It will then access the `IPPool` (or `DHCPLeaseConfig` for the UDN) to extract
 which IP addresses are assigned to said MAC address.
 Finally, the `ipam-extensions` mutating webhook will mutate the launcher pod to
@@ -273,14 +293,16 @@ This IPPool CRD has a 1:1 association to a UDN (or. For now, it'll only apply
 to a primary UDN though. In the future, nothing prevents these CRs from being
 used for secondary UDNs.
 
-The IPPool CRD is a non-namespaced object associated to a UDN via the NAD name,
-since we want to have this feature upstream in the k8snetworkplumbingwg, rather
-than in OVN-Kubernetes.
+The IPPool CRD is a cluster-scoped object associated to a UDN via the logical
+network name (`NAD.Spec.Config.Name` attribute), since we want to have this
+feature upstream in the k8snetworkplumbingwg, rather than in OVN-Kubernetes.
 
 The `IPPool` spec will have an attribute via which the admin can point to a
-UDN - by the logical network name. The admin (which is the only actor able to
-create the `IPPool`) has read access to all NADs in all namespaces, hence they
-can inspect the NAD object to extract the network name.
+cluster UDN - by the logical network name. The admin (which is the only actor
+able to create the `IPPool`) has read access to all NADs in all namespaces,
+hence they can inspect the NAD object to extract the network name. We could
+even update the cluster UDN type to feature the generated network name in its
+status sub-resource, to simplify the UX of the admin user.
 
 An alternative would be to reference the UDN by the NAD name - with that
 information, whatever controller reconciling the `IPPool` CRs can access the
@@ -290,8 +312,8 @@ logical network (since multiple NADs with the same logical network name - in
 **different** namespaces can exist).
 
 ### Preserving the VM gateway
-Preserving the gateway will require changes to the OVN-Kubernetes API. Both the
-UDN and C-UDN CRDs should be updated - adding a gateway definition - and the
+Preserving the gateway will require changes to the OVN-Kubernetes API. The
+cluster UDN CRD should be updated - adding a gateway definition - and the
 OVN-Kubernetes
 [NetConf](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/2643dabe165bcb2d4564866ee1476a891c316fe3/go-controller/pkg/cni/types/types.go#L10)
 CNI structure should also be updated with a `gateway` attribute.
@@ -386,7 +408,28 @@ The `IPAMClaim` status will have (at least) the following conditions:
 - AllocationConflict: reports the requested allocation was not successful - i.e.
   the requested IP address is already present in the network
 
+These conditions will look like - **successful** allocation:
+```
+type: SuccessfulAllocation
+status: "True"
+reason: IPAllocated
+message: "IP 192.168.1.5 allocated successfully"
+lastTransitionTime: "2025-05-13T11:56:00Z"
+```
+
+These conditions will look like - **failed** allocation:
+```
+type: AllocationConflict
+status: "True"
+reason: IPAlreadyExists
+message: "Requested IP 192.168.1.5 is already assigned in the network"
+lastTransitionTime: "2025-05-13T11:56:00Z"
+```
+
 #### New IPPool CRD
+
+**NOTE:** this CRD is only required if we go with a
+[centralized IP allocation](#centralized-ip-management) design.
 
 The IPPool CRD will operate as a place to store the MAC to IP addresses
 association for a logical network.
@@ -401,13 +444,14 @@ type IPPool struct {
 }
 
 type IPPoolSpec struct {
-    NetworkName string                      `json:"network-name"`
-	Entries map[net.HardwareAddr][]net.IP   `json:"entries"`
+    NetworkName string                         `json:"network-name"`
+	Entries map[net.HardwareAddr][]net.IPNet   `json:"entries"`
 }
 
 type IPPoolStatus struct {
 	Conditions []Condition
-	AssociatedNADs []NADInfo
+	AssociatedNADs []NADInfo    // this is an optional improvement for
+	                            // improving the UX. It is not **required**.
 }
 
 type NADInfo struct {
@@ -425,6 +469,59 @@ The `IPPool` CRD will have at least the following conditions:
 We plan on reporting in the `IPPool` the name of the NADs which are holding the
 configuration for the network which this pool stores the MAC <=> IPs
 associations.
+
+You can find below the conditions for when the IPPool information is correct
+(no conflicts):
+
+```
+apiVersion: ippool.k8s.cni.cncf.io/v1alpha
+kind: IPPool
+metadata:
+  name: example-ip-pool
+spec:
+  network-name: "prod-network"
+  entries:
+    "00:1a:4b:12:34:56": ["10.0.0.0/24", "10.0.1.0/24"]
+status:
+  conditions:
+  - type: Success
+    status: "true"
+    lastTransitionTime: "2025-05-13T12:05:00Z"
+```
+
+You can find below the conditions for when the IPPool information has
+conflicts:
+
+```
+apiVersion: ippool.k8s.cni.cncf.io/v1alpha
+kind: IPPool
+metadata:
+  name: example-ip-pool
+spec:
+  network-name: "prod-network"
+  entries:
+    "00:1a:4b:12:34:56": ["10.0.0.2/24", "10.0.1.10/24"]
+    "00:1a:4b:12:34:56": ["10.0.0.14/24", "10.0.1.110/24"]
+status:
+  conditions:
+  - type: Success
+    status: "False"
+    reason: DuplicatesExist
+    message: "Duplicate MAC 00:1a:4b:12:34:56 found in entries"
+    lastTransitionTime: "2025-05-13T12:05:00Z"
+
+  - type: DuplicateMACAddresses
+    status: "True"
+    reason: DuplicateMACFound
+    message: "MAC address 00:1a:4b:12:34:56 appears 2 times"
+    lastTransitionTime: "2025-05-13T12:05:00Z"
+
+  - type: DuplicateIPAddresses
+    status: "False"
+    reason: NoIPDuplicates
+    message: "All IP addresses are unique per MAC"
+    lastTransitionTime: "2025-05-13T12:05:00Z"
+```
 
 ### Topology Considerations
 
@@ -488,10 +585,7 @@ burden?  Is it likely to be superceded by something else in the near future?
 
 ## Alternatives (Not Implemented)
 
-Similar to the `Drawbacks` section the `Alternatives` section is used
-to highlight and record other possible approaches to delivering the
-value proposed by an enhancement, including especially information
-about why the alternative was not selected.
+
 
 ## Open Questions [optional]
 
