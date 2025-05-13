@@ -55,7 +55,9 @@ initialization) to Pods without potentially compromising on security.
 ## Proposal
 
 * Fork the [Generic Device Plugin](https://github.com/squat/generic-device-plugin)
-  to `github.com/openshift` organization
+  to `github.com/openshift` organization. Generic Device Plugin has Apache 2.0
+  license and forking should not be a problem. Forked repository should include
+  a reference to original repository.
 * Modify fork to make it's more "code import friendly"
 * Import Generic Device Plugin fork into MicroShift binary
 * Integrate the Generic Device Plugin's configuration into MicroShift config
