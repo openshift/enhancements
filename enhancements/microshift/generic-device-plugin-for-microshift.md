@@ -147,6 +147,101 @@ Conversely, if a device path uses a glob pattern like `/dev/ACM*` and has
 devices will result in both matching devices (e.g. `/dev/ACM0` and `/dev/ACM1`)
 being mounted into the container.
 
+#### Schema
+
+Copied from Generic Device Plugin's codebase.
+
+**DeviceSpec**
+```go
+// DeviceSpec defines a device that should be discovered and scheduled.
+// DeviceSpec allows multiple host devices to be selected and scheduled fungibly under the same name.
+// Furthermore, host devices can be composed into groups of device nodes that should be scheduled
+// as an atomic unit.
+type DeviceSpec struct {
+	// Name is a unique string representing the kind of device this specification describes.
+	Name string `json:"name"`
+	// Groups is a list of groups of devices that should be scheduled under the same name.
+	Groups []*Group `json:"groups"`
+}
+```
+
+**Group**
+```go
+// Group represents a set of devices that should be grouped and mounted into a container together as one single meta-device.
+type Group struct {
+	// Paths is the list of devices of which the device group consists.
+	// Paths can be globs, in which case each device matched by the path will be schedulable `Count` times.
+	// When the paths have differing cardinalities, that is, the globs match different numbers of devices,
+	// the cardinality of each path is capped at the lowest cardinality.
+	Paths []*Path `json:"paths"`
+	// USBSpecs is the list of USB specifications that this device group consists of.
+	USBSpecs []*USBSpec `json:"usb"`
+	// Count specifies how many times this group can be mounted concurrently.
+	// When unspecified, Count defaults to 1.
+	Count uint `json:"count,omitempty"`
+}
+```
+
+**Path**
+```go
+// Path represents a file path that should be discovered.
+type Path struct {
+	// Path is the file path of a device in the host.
+	Path string `json:"path"`
+	// MountPath is the file path at which the host device should be mounted within the container.
+	// When unspecified, MountPath defaults to the Path.
+	MountPath string `json:"mountPath,omitempty"`
+	// Permissions is the file-system permissions given to the mounted device.
+	// Permissions apply only to mounts of type `Device`.
+	// This can be one or more of:
+	// * r - allows the container to read from the specified device.
+	// * w - allows the container to write to the specified device.
+	// * m - allows the container to create device files that do not yet exist.
+	// When unspecified, Permissions defaults to mrw.
+	Permissions string `json:"permissions,omitempty"`
+	// ReadOnly specifies whether the path should be mounted read-only.
+	// ReadOnly applies only to mounts of type `Mount`.
+	ReadOnly bool `json:"readOnly,omitempty"`
+	// Type describes what type of file-system node this Path represents and thus how it should be mounted.
+	// When unspecified, Type defaults to Device.
+	Type PathType `json:"type"`
+	// Limit specifies up to how many times this device can be used in the group concurrently when other devices
+	// in the group yield more matches.
+	// For example, if one path in the group matches 5 devices and another matches 1 device but has a limit of 10,
+	// then the group will provide 5 pairs of devices.
+	// When unspecified, Limit defaults to 1.
+	Limit uint `json:"limit,omitempty"`
+}
+```
+
+**PathType**
+```go
+// PathType represents the kinds of file-system nodes that can be scheduled.
+type PathType string
+
+const (
+	// DevicePathType represents a file-system device node and is mounted as a device.
+	DevicePathType PathType = "Device"
+	// MountPathType represents an ordinary file-system node and is bind-mounted.
+	MountPathType PathType = "Mount"
+)
+```
+
+**USBSpec**
+```go
+// USBSpec represents a USB device specification that should be discovered.
+// A USB device must match exactly on all the given attributes to pass.
+type USBSpec struct {
+	// Vendor is the USB Vendor ID of the device to match on.
+	// (Both of these get mangled to uint16 for processing - but you should use the hexadecimal representation.)
+	Vendor USBID `json:"vendor"`
+	// Product is the USB Product ID of the device to match on.
+	Product USBID `json:"product"`
+	// Serial is the serial number of the device to match on.
+	Serial string `json:"serial"`
+}
+```
+
 ### Topology Considerations
 
 #### Hypershift / Hosted Control Planes
