@@ -23,8 +23,8 @@ tracking-link:
 ## Summary
 
 [Generic Device Plugin](https://github.com/squat/generic-device-plugin) is a
-straightforward device plugin for devices not needing special initialization
-such as serial, USB, certain video devices. The goal of this enhancement is to
+solution for attaching devices not needing special initialization
+(e.g. serial, USB, certain video devices) to containers. The goal of this enhancement is to
 outline its adoption for MicroShift.
 
 ## Motivation
@@ -45,12 +45,11 @@ initialization) to Pods without potentially compromising on security.
 
 * Include functionality of
   [Generic Device Plugin](https://github.com/squat/generic-device-plugin)
-  in MicroShift binary (as a controller)
+  in MicroShift
 
 ### Non-Goals
 
-* Create container images
-* Adapt Generic Device Plugin (e.g. create Operator) for OpenShift
+* Adapt Generic Device Plugin (e.g. create Operator) for OpenShift or other Kubernetes distribution
 
 ## Proposal
 
@@ -58,7 +57,7 @@ initialization) to Pods without potentially compromising on security.
   to `github.com/openshift` organization. Generic Device Plugin has Apache 2.0
   license and forking should not be a problem. Forked repository should include
   a reference to original repository.
-* Modify fork to make it's more "code import friendly"
+* Modify fork to make it more "code import friendly"
 * Import Generic Device Plugin fork into MicroShift binary
 * Integrate the Generic Device Plugin's configuration into MicroShift config
   and add a toggle option
@@ -74,7 +73,7 @@ initialization) to Pods without potentially compromising on security.
 1. MicroShift starts the Generic Device Plugin controller which creates plugin
    goroutines for each device group.
 1. Plugin goroutines detect the devices and report them with the Kubelet
-1. Kubelet updates its status with new devices
+1. Kubelet updates the Node's status with new devices for scheduler to be aware of Node's capabilities
 1. User deploys a workload utilizing some device
    (could be at any point, it won't be scheduled/started until the device is available)
 
