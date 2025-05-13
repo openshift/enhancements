@@ -592,7 +592,18 @@ burden?  Is it likely to be superceded by something else in the near future?
 
 ## Alternatives (Not Implemented)
 
+Another option which would provide a simpler implementation would be to modify
+the VMI specification, adding a way for the user (or the tool templating the
+VM - e.g. MTV) to specify which IP address they want the VM's interface to take.
 
+It would be updating the
+[v1.Interface](https://kubevirt.io/api-reference/main/definitions.html#_v1_interface)
+with an ipAddresses array. This attribute is defined in
+`VMI.Spec.Domain.Devices.Interfaces`.
+
+This option (despite being the simplest to implement) is not taken into
+consideration since we're already past the KubeVirt 1.5 API freeze - as a
+result, we wouldn't be able to get this in OpenShift 4.20.
 
 ## Open Questions [optional]
 
