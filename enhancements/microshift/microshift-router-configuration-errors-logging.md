@@ -76,6 +76,15 @@ ingress:
   accessLogging:
     status: <Enabled|Disabled>
     format: <string>
+    destination:
+      type: <Container|Syslog>
+      container:
+        maxLength: <int>
+      syslog:
+        address: <ip address>
+        facility: <string>
+        maxLength: <int>
+        port: <int>
     httpCaptureHeaders:
       request:
       - maxLength: <integer>
@@ -112,9 +121,9 @@ Based on the configuration parameters, the manifest for the router pod will
 mutate to translate all the new options.
 
 #### Enabling access logging
+TODO reword this.
 HAProxy allows configuration for access logging. This happens through rsyslog,
-which requires another container in the router. This is the equivalent to the
-`Container` approach in OpenShift Router access logging.
+which needs to be running in an endpoints. Options for this are discussed below.
 
 The second container (named `access-log`) will print through stdout all the
 logs from the router.
@@ -126,6 +135,29 @@ Configuring either of `ingress.accessLogging.httpCaptureHeaders` or
 `ingress.accessLogging.httpCaptureCookies` will also enable `ingress.accessLogging.status`.
 
 `ingress.accessLogging.status` defaults to `Disabled`.
+
+##### Access logging destination
+There are two supported ways of configuring the destination: container or
+remote.
+
+These are configured by means of `ingress.accessLogging.destination.type`,
+which is an enum accepting either `Container` or `Syslog`.
+If `ingress.accessLogging.status` is `Enabled` it defaults to `Container`.
+
+`Container` destination type configuration:
+* `maxLength`: maximum length of the log message. Range between 480 and 8192.
+  Defaults to 1024. Optional.
+
+`Syslog` destination type configuration:
+* `address`: IP address of the syslog endpoint that receives log messages.
+  Required.
+* `port`: UDP port number of the syslog endpoint that receives log messages.
+  Required.
+* `facility`: Syslog facility of log messages. If empty it will default to
+  `local1`. Allowed values: `kern;user;mail;daemon;auth;syslog;lpr;news;uucp;cron;auth2;ftp;ntp;audit;alert;cron2;local0;local1;local2;local3;local4;local5;local6;local7`.
+  Optional.
+* `maxLength`: maximum length of the log message. Range between 480 and 8192.
+  Defaults to 1024. Optional.
 
 #### Configuring access log format
 `ingress.accessLogging.format` specifies the format of the log message for an
