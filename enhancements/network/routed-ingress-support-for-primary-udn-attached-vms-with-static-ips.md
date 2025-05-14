@@ -504,9 +504,9 @@ type IPPoolSpec struct {
 }
 
 type IPPoolStatus struct {
-	Conditions []Condition
-	AssociatedNADs []NADInfo    // this is an optional improvement for
-	                            // improving the UX. It is not **required**.
+	Conditions []Condition      `json:"conditions"`
+	// this is an optional improvement for improving the UX
+	AssociatedNADs []NADInfo    `json:"associated-nads,omitempty"`
 }
 
 type NADInfo struct {
