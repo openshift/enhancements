@@ -609,36 +609,24 @@ in OVN-Kubernetes, and more CRs to reconcile.
 
 ### Implementation Details/Notes/Constraints
 
-What are some important details that didn't come across above in the
-**Proposal**? Go in to as much detail as necessary here. This might be
-a good place to talk about core concepts and how they relate. While it is useful
-to go into the details of the code changes required, it is not necessary to show
-how the code will be rewritten in the enhancement.
+TODO
 
 ### Risks and Mitigations
 
-What are the risks of this proposal and how do we mitigate. Think broadly. For
-example, consider both security and how this will impact the larger OKD
-ecosystem.
-
-How will security be reviewed and by whom?
-
-How will UX be reviewed and by whom?
-
-Consider including folks that also work outside your immediate sub-project.
+TODO
 
 ### Drawbacks
 
-The idea is to find the best form of an argument why this enhancement should
-_not_ be implemented.
+The biggest drawback we have to implementing this feature is lack of clear
+asks from customers - we're pretty much guessing what they would want to use.
 
-What trade-offs (technical/efficiency cost, user experience, flexibility,
-supportability, etc) must be made in order to implement this? What are the reasons
-we might not want to undertake this proposal, and how do we overcome them?
-
-Does this proposal implement a behavior that's new/unique/novel? Is it poorly
-aligned with existing user expectations?  Will it be a significant maintenance
-burden?  Is it likely to be superceded by something else in the near future?
+We do not know (for instance):
+- is this feature only for VMs ?
+- is this feature only about importing VMs ? Should we allow creating new VMs
+  with dedicated MAC / IP / gateway requests ?
+- are the end users (admins) after a centralized IP management alternative ?
+  Do they want to have a single place to check their network address
+  assignments ?
 
 ## Alternatives (Not Implemented)
 
