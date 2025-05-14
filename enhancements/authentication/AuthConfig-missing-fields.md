@@ -564,9 +564,9 @@ It is noteworthy that the CAO performs a full validation on any provided **authe
 
 Nevertheless, in case of authentication problems that are not logged on the CAO side, one should consult the **KAS logs** and rollout progress as well. Additionally, the **KAS-operator logs** will reveal any problems related to syncing the ConfigMap, creating a revisioned authentication configuration, generating static files, or enabling the required KAS CLI arguments.  
 
-## Alternatives 
+## Alternatives
 
-Do nothing
+n/a
 
 ## Infrastructure Needed [optional]
 
