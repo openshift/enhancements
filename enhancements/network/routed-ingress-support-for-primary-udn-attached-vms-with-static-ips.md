@@ -650,13 +650,6 @@ This option (despite being the simplest to implement) is not taken into
 consideration since we're already past the KubeVirt 1.5 API freeze - as a
 result, we wouldn't be able to get this in OpenShift 4.20.
 
-## Open Questions [optional]
-
-This is where to call out areas of the design that require closure before deciding
-to implement the design.  For instance,
- > 1. This requires exposing previously private resources which contain sensitive
-  information.  Can we do this?
-
 ## Test Plan
 
 * E2E upstream and downstream jobs covering VM creation with requested
