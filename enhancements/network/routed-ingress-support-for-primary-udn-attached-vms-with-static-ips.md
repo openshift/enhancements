@@ -664,78 +664,33 @@ to implement the design.  For instance,
 
 ## Test Plan
 
-**Note:** *Section not required until targeted at a release.*
-
-Consider the following in developing a test plan for this enhancement:
-- Will there be e2e and integration tests, in addition to unit tests?
-- How will it be tested in isolation vs with other components?
-- What additional testing is necessary to support managed OpenShift service-based offerings?
-
-No need to outline all of the test cases, just the general strategy. Anything
-that would count as tricky in the implementation and anything particularly
-challenging to test should be called out.
-
-All code is expected to have adequate tests (eventually with coverage
-expectations).
+* E2E upstream and downstream jobs covering VM creation with requested
+  IP/MAC/gateway configuration for both IPv4 and dual-stack configurations
+* E2E downstream jobs covering a VM (having a network configuration which must
+  be kept) import via MTV is successful for both IPv4 and dual-stack
+  configurations
+* E2E tests covering the existing features (network policies, IP spoof
+  protection, services) for an imported VM works as expected for both IPv4 and
+  dual-stack configurations
 
 ## Graduation Criteria
 
-**Note:** *Section not required until targeted at a release.*
-
-Define graduation milestones.
-
-These may be defined in terms of API maturity, or as something else. Initial proposal
-should keep this high-level with a focus on what signals will be looked at to
-determine graduation.
-
-Consider the following in developing the graduation criteria for this
-enhancement:
-
-- Maturity levels
-  - [`alpha`, `beta`, `stable` in upstream Kubernetes][maturity-levels]
-  - `Dev Preview`, `Tech Preview`, `GA` in OpenShift
-- [Deprecation policy][deprecation-policy]
-
-Clearly define what graduation means by either linking to the [API doc definition](https://kubernetes.io/docs/concepts/overview/kubernetes-api/#api-versioning),
-or by redefining what graduation means.
-
-In general, we try to use the same stages (alpha, beta, GA), regardless how the functionality is accessed.
-
-[maturity-levels]: https://git.k8s.io/community/contributors/devel/sig-architecture/api_changes.md#alpha-beta-and-stable-versions
-[deprecation-policy]: https://kubernetes.io/docs/reference/using-api/deprecation-policy/
-
-**If this is a user facing change requiring new or updated documentation in [openshift-docs](https://github.com/openshift/openshift-docs/),
-please be sure to include in the graduation criteria.**
-
-**Examples**: These are generalized examples to consider, in addition
-to the aforementioned [maturity levels][maturity-levels].
-
 ### Dev Preview -> Tech Preview
 
-- Ability to utilize the enhancement end to end
-- End user documentation, relative API stability
-- Sufficient test coverage
-- Gather feedback from users rather than just developers
-- Enumerate service level indicators (SLIs), expose SLIs as metrics
-- Write symptoms-based alerts for the component(s)
+There will be no Dev Preview for this feature.
 
 ### Tech Preview -> GA
 
-- More testing (upgrade, downgrade, scale)
-- Sufficient time for feedback
-- Available by default
-- Backhaul SLI telemetry
-- Document SLOs for the component
-- Conduct load testing
-- User facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/)
-
-**For non-optional features moving to GA, the graduation criteria must include
-end to end tests.**
+Targeting GA in OCP version 4.20.
 
 ### Removing a deprecated feature
 
-- Announce deprecation and support policy of the existing feature
-- Deprecate the feature
+The annotation currently being used for indicating to OVN-Kubernetes what is
+the `IPAMClaim` to use for the primary UDN attachment will be deprecated, and
+we plan on using the [multus default annotation](#cnv-ovnk-api) for it.
+
+The deprecation strategy is described in the OVN-Kubernetes
+[OKEP](https://github.com/ovn-kubernetes/ovn-kubernetes/pull/5238).
 
 ## Upgrade / Downgrade Strategy
 
@@ -780,17 +735,7 @@ Downgrade expectations:
 
 ## Version Skew Strategy
 
-How will the component handle version skew with other components?
-What are the guarantees? Make sure this is in the test plan.
-
-Consider the following in developing a version skew strategy for this
-enhancement:
-- During an upgrade, we will always have skew among components, how will this impact your work?
-- Does this enhancement involve coordinating behavior in the control plane and
-  in the kubelet? How does an n-2 kubelet without this feature available behave
-  when this feature is used?
-- Will any other components on the node change? For example, changes to CSI, CRI
-  or CNI may require updating that component before the kubelet.
+N/A
 
 ## Operational Aspects of API Extensions
 
