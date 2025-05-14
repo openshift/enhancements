@@ -119,8 +119,10 @@ In the following OpenShift releases the published matrix will be splitted by
 platforms:
 - Standard AWS/GCP clusters
 - Standard baremetal clusters
+- Standard NonePlatformType clusters
 - Single-node AWS/GCP deployments
 - Single-node baremetal deployments
+- Single-node NonePlatformType deployments
 
 The module allows to generate the communication matrix in various formats:
 - *YAML/JSON*: data is represented as key-value pairs
@@ -187,6 +189,21 @@ in https://kubernetes.io/docs/concepts/services-networking/endpoint-slices/#mana
 Additional information can be added to the communication matrix to describe the use 
 of the ports, for example traffic flows from master-to-master or from node-to-master
 (an API change is required, could be indicated with annotations on the `Service`).
+
+For NonePlatformType the generated communication matrix reflects the actual 
+observed state of the cluster without applying any platform-specific assumptions.
+This matrix serves as the base communication matrix and acts as a common baseline.
+For single-node deployments, the NonePlatformType matrix should be 
+equivalent to the generated matrix for the master role and worker but with the role master 
+(since, in such cases, we consider only the master role if the node has multiple roles).
+For standard clusters, it should represent a combination of master and worker flows.
+Since NonePlatformType is not associated with any specific infrastructure provider or
+installer-driven configuration,no additional platform-specific operators are deployed,
+and the matrix remains generic.
+
+This base matrix is reused for other platforms, such as AWS and BareMetal, which introduce 
+additional platform-specific operator (e.g., cloud controllers, storage drivers).
+These components contribute extra network flows on top of the base matrix.
 
 Periodic tests will be added to `openshift-tests` to validate an up-to-date 
 generated communication matrix matches the communication matrix documented
