@@ -53,15 +53,7 @@ initialization) to Pods without potentially compromising on security.
 
 ## Proposal
 
-* Fork the [Generic Device Plugin](https://github.com/squat/generic-device-plugin)
-  to `github.com/openshift` organization. Generic Device Plugin has Apache 2.0
-  license and forking should not be a problem. Forked repository should include
-  a reference to original repository.
-  * Repository fork will be a place where we can fix things as soon as possible
-    and potentially allow us to implement changes that could get rejected from
-    the upstream.
-* Modify fork to make it more "code import friendly"
-* Import Generic Device Plugin fork into MicroShift binary
+* Import Generic Device Plugin code into MicroShift binary
 * Integrate the Generic Device Plugin's configuration into MicroShift config
   and add a toggle option
 
@@ -116,6 +108,7 @@ genericDevicePlugin:
             - path: /dev/ttyUSB*
         - paths:
             - path: /dev/ttyACM*
+              mountPath: /dev/ttyACM0
     - name: video
       groups:
         - paths:
@@ -144,10 +137,12 @@ It's important to note that this does not create 10 physical copies of the devic
 If a Pod requests 4 allocations of this device, only a single instance of the
 device (e.g. `/dev/snd`) will appear within the container.
 
-Conversely, if a device path uses a glob pattern like `/dev/ACM*` and has
+Conversely, if a device path uses a glob pattern like `/dev/ttyACM*` and has
 `count: 1` (default), and multiple devices match the pattern, requesting two serial
-devices will result in both matching devices (e.g. `/dev/ACM0` and `/dev/ACM1`)
-being mounted into the container.
+devices will result in both matching devices (e.g. `/dev/ttyACM0` and `/dev/ttyACM1`)
+being mounted into the container. If both devices are attached to different Pods
+then it's possible to use `mountPath` setting to make both devices appear as
+`/dev/ttyACM0` in both containers.
 
 #### Schema
 
@@ -260,17 +255,17 @@ Enhancement is intended for MicroShift and it will extend MicroShift configurati
 
 ### Implementation Details/Notes/Constraints
 
+It was decided that initially the Generic Device Plugin will not be forked.
+Instead we'll work with the upstream on contributing changes that would be useful to us.
+Potentially but not necessarily:
+- Switch to the `klog` to avoid importing another logging library by the MicroShift.
+- Restructure `main` module into submodules for easier reuse within MicroShift
+  (instead of copying the contents of `main`).
+
 "Code import" approach was chosen to avoid the effort associated with
 productizing a new image. The MicroShift team at this time does not own any
 images and the RPMs are managed by ART. See "Alternatives" section for "container" approach.
 
-- Following the fork, we will opt-in into the OpenShift CI to ensure it's in 
-  sync and it's part of the branching automation.
-- Code change to the fork should be delicate to avoid complicating
-  synchronization with the upstream repository. Currently, planned changes include:
-  - Switching to the `klog` to avoid importing another logging library by the MicroShift.
-  - Possibly restructuring `main` module into submodules for easier reuse within MicroShift
-    (instead of copying).
 - Importing the code as controller into the MicroShift binary means more or less
   replicating the functionality of the `main()` function.
 - A duplicate of GDP's configuration structs may be used in MicroShift's 
@@ -282,10 +277,10 @@ images and the RPMs are managed by ART. See "Alternatives" section for "containe
 
 ### Risks and Mitigations
 
-- Making changes to the fork may result in an additional effort when syncing
-  upstream changes (e.g. resolving conflicts; unless we contribute the changes).
-  Fortunately, GDP is not very complex product, nor it's subject to fast paced
-  development because for its purpose it's mostly complete.
+Not forking means that time sensitive fixes (like security) will need to be vendor-patched.
+
+Changes we propose might get rejected from the upstream. In such case we can
+vendor-patch or create fork.
 
 ### Drawbacks
 
@@ -293,6 +288,15 @@ MicroShift team will need to manage the go.mod importing with all the
 consequences of the Go modules versioning.
 
 ## Alternatives (Not Implemented)
+
+### Forking
+
+Generic Device Plugin fork would provide us a place to quickly patch time
+sensitive issue (e.g. security, CVEs) however it would permanently add a
+recurring maintenance effort for MicroShift team.
+
+Trying to avoid that, team decided to skip forking and try upstream first approach,
+and only if it's really necessary fork the project.
 
 ### Container approach
 
@@ -327,13 +331,9 @@ engineering, QE, and documentation.
 Since the Generic Device Plugin (GDP) can be disabled via configuration, users
 retain the flexibility to utilize upstream Akri if their needs require it.
 
-### Not forking the upstream
-
-Although forking introduces overhead such as extra repository to maintain and a
-need to setup some kind of smoke test CI, it will allow us to implement that are
-time sensitive (like security fixes) or simply rejected by the upstream.
-
 ## Open Questions [optional]
+
+N/A
 
 ## Test Plan
 
@@ -342,10 +342,6 @@ Usually device plugins are tested using real hardware to make sure everything wo
 We'll need to get creative and implement some kind of dummy serial device to
 test communication between Pod utilizing the device and fake device
 (in the form of a daemon on the system).
-
-MicroShift's robust testing framework can host the integration tests, but it
-would be good to implement a simple test (like successful compilation with the 
-changes and start of MicroShift) in the GDP's fork repository.
 
 ## Graduation Criteria
 
@@ -378,13 +374,7 @@ the configuration fields of the new feature will be ignored by older binary.
 
 ## Version Skew Strategy
 
-Generic Device Plugin fork will follow OpenShift's versioning and release schedule.
-
-However, it might not be required for MicroShift to track the fork GDP's HEAD of a branch
-to be up to date depending on the development velocity.
-For example, if by 4.25 we discover we need to make a fix in GDP, unless there
-were breaking changes between 4.20 and 4.25, we might only need to update the
-GDP's main branch and `go.mod` in each of the MicroShift's affected branches.
+N/A
 
 ## Operational Aspects of API Extensions
 
@@ -468,4 +458,4 @@ logs of the Generic Device Plugin will contain a `generic-device-plugin` marker.
 
 ## Infrastructure Needed [optional]
 
-- Fork of https://github.com/squat/generic-device-plugin inside github.com/openshift organization.
+N/A
