@@ -264,6 +264,12 @@ DHCP/RA flows on the logical switch are advertising the correct gateway
 information to the guests on the network, and also that the gateway is properly
 configured to allow features like Kubernetes `Services`.
 
+Another aspect to take into consideration is the gateway MAC address; when we
+import a VM into OpenShift Virtualization, the VM is started from scratch on
+the destination cluster. Hence, the neighbor caches (ARP, NDP) will be updated.
+This means there's nothing special we need to do on this regard - other than
+ensuring the gateway MAC address is not already available in the logical network.
+
 This flow is described in more detail (and presents alternatives to it) in the
 [OVN-Kubernetes enhancement proposal](https://github.com/ovn-kubernetes/ovn-kubernetes/pull/5238).
 
