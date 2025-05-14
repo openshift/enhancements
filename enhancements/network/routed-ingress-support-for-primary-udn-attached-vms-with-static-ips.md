@@ -260,9 +260,15 @@ The primary UDN gateway code will need to be updated to parametrize the gateway
 IP address, since today it is using the UDN subnet first IP address.
 To keep the feature backwards compatible, that would be the default if the UDN
 does **not** feature the gateway configuration. This will ensure the
-DHCP/RA flows on the logical switch are advertising the correct gateway
+DHCP flows on the logical switch are advertising the correct gateway
 information to the guests on the network, and also that the gateway is properly
 configured to allow features like Kubernetes `Services`.
+
+For IPv6 the flow will be different; IPv6 gateways are dynamic ! Hence, when a
+VM is imported into OpenShift Virtualization, the OVN control plane must send a
+RouterAdvertisement to the VM instructing it to forget about the old gateway -
+i.e. send an RA with `lifetime = 0` with the source address of the gateway
+defined for the VM in the old cluster.
 
 Another aspect to take into consideration is the gateway MAC address; when we
 import a VM into OpenShift Virtualization, the VM is started from scratch on
