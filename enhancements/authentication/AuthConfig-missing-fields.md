@@ -1,5 +1,6 @@
 ---
-title: Add Missing Authentication Configuration Fields to OpenShift API
+title: AuthConfig-missing-fields
+
 authors:
   - "@ShazaAldawamneh"
 reviewers: # Include a comment about what domain expertise a reviewer is expected to bring and what area of the enhancement you expect them to focus on. For example: - "@networkguru, for networking aspects, please look at IP bootstrapping aspect"
