@@ -584,6 +584,13 @@ status:
     lastTransitionTime: "2025-05-13T12:05:00Z"
 ```
 
+On a follow-up, we could reconcile the `IPPool` CR with the MAC <-> IPs
+association of all workloads attached to that network - i.e. also for the
+workloads being created without MAC / IP requests. That would be useful to the
+network admin / service engineer to get the full view on whatever's connected
+to a network at any given time. This would require a separate enhancement to
+get better understanding of the use-cases, and how to implement said feature.
+
 ### Topology Considerations
 
 #### Hypershift / Hosted Control Planes
@@ -702,7 +709,14 @@ VM owner starts importing VMs into the OpenShift Virt cluster via MTV.
 
 ## Support Procedures
 
-TODO
+Issues with an imported VM should be logged in the launcher pod events, and
+persisted in the corresponding `IPAMClaim` so the support team can check what
+failed in the address allocation requests.
+
+The `IPPool` CRD would help the support engineer get a grasp of the MAC <-> IPs
+being used for a network at any given time. Having this notion will simplify
+the support procedures on the cluster. This is an optional step, described in
+the [centralized IP management](#centralized-ip-management) section.
 
 ## Infrastructure Needed [optional]
 
