@@ -66,8 +66,10 @@ communication ingress flows matrix.
 - A communication matrix describing the expected flows of incoming traffic will 
   be included in every OpenShift release documentation.
 
-- A new `oc` command will be added to generate a current snapshot of known 
-  listening ports in a running cluster, `oc adm communication-matrix generate`.
+- A new `oc` Krew plugin named commatrix will be provided to generate a current 
+  snapshot of known listening ports and observed ingress traffic in a running cluster.
+  It is run using the `oc commatrix generate` command, which produces a communication matrix 
+  file in the specified format and location.
 
 - A new option will be added to OpenShift web console to generate an up-to-date
   communication matrix.
@@ -80,8 +82,9 @@ communication ingress flows matrix.
 - The admin reviews OpenShift release documentation to get the included communication
   matrix describing the expected flows of incoming traffic.
 
-- The admin uses the OpenShift command-line interface (CLI) to generate an up-to-date 
-  communication matrix using the following command `oc adm communication-matrix generate`.
+- The admin uses the OpenShift CLI with a Krew plugin to generate an up-to-date 
+  communication matrix by running the `oc commatrix generate` command. The output is 
+  written to the specified destination directory (destDir) in the chosen format (e.g., JSON or YAML).
 
 - Optionally, the admin uses the OpenShift web console to generate an up-to-date
   communication matrix.
@@ -119,8 +122,10 @@ In the following OpenShift releases the published matrix will be splitted by
 platforms:
 - Standard AWS/GCP clusters
 - Standard baremetal clusters
+- Standard NonePlatformType clusters
 - Single-node AWS/GCP deployments
 - Single-node baremetal deployments
+- Single-node NonePlatformType deployments
 
 The module allows to generate the communication matrix in various formats:
 - *YAML/JSON*: data is represented as key-value pairs
@@ -188,6 +193,21 @@ Additional information can be added to the communication matrix to describe the 
 of the ports, for example traffic flows from master-to-master or from node-to-master
 (an API change is required, could be indicated with annotations on the `Service`).
 
+For NonePlatformType the generated communication matrix reflects the actual 
+observed state of the cluster without applying any platform-specific assumptions.
+This matrix serves as the base communication matrix and acts as a common baseline.
+For single-node deployments, the NonePlatformType matrix should be 
+equivalent to the generated matrix for the master role and worker but with the role master 
+(since, in such cases, we consider only the master role if the node has multiple roles).
+For standard clusters, it should represent a combination of master and worker flows.
+Since NonePlatformType is not associated with any specific infrastructure provider or
+installer-driven configuration,no additional platform-specific operators are deployed,
+and the matrix remains generic.
+
+This base matrix is reused for other platforms, such as AWS and BareMetal, which introduce 
+additional platform-specific operator (e.g., cloud controllers, storage drivers).
+These components contribute extra network flows on top of the base matrix.
+
 Periodic tests will be added to `openshift-tests` to validate an up-to-date 
 generated communication matrix matches the communication matrix documented
 in OpenShift release documents.
@@ -201,7 +221,7 @@ run E2E `openshift-tests` and upgrade the OpenShift version to validate the rule
 are acceptable by the current and next OCP release.
 
 A user will be able to run `openshift-tests` or a new `oc` command, 
-`oc adm communication-matrix validate`, to validate the `EndpointSlices` 
+`oc commatrix generate --host-open-ports`, to validate the `EndpointSlices` 
 in the cluster match a current snapshot of the node's listening ports.
 
 ### Risks and Mitigations
