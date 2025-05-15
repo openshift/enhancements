@@ -1,5 +1,5 @@
 ---
-title: external-secrets-operator-for-redhat-openshift
+title: external-secrets-operator
 authors:
   - “@bhb”
 reviewers:
@@ -504,11 +504,47 @@ None
 
 ## Test Plan
 
-- Install external-secrets by creating `externalsecrets.operator.openshift.io` CR and check the behavior with default configurations.
-- Install external-secrets by creating the `externalsecrets.operator.openshift.io` CR with permutations of configurations and validate 
-  the behavior.
-- Sufficient time for feedback from the QE.
-- The feature is available by default and does not have any specific featureGate defined.
+The following scenarios will be covered to ensure that the External Secrets Operator functions as expected and integrates properly with the OpenShift ecosystem:
+
+### 1. Basic Installation Verification
+
+- Install external-secrets by creating an `ExternalSecrets` custom resource (`externalsecrets.operator.openshift.io`) with default configurations.
+- Verify that all core components are deployed and become ready, including:
+    - Controller manager
+    - Webhook (if enabled)
+    - Custom Resource Definitions (CRDs)
+- Validate default behavior and ensure basic sync functionality works.
+
+### 2. Configuration Testing
+
+- Apply configuration overrides such as:
+    - Custom resource limits (CPU/memory)
+    - Replicas and horizontal scaling
+    - Disabling webhook or cert-manager components
+- Ensure the operator reflects and respects configuration changes appropriately.
+
+### 3. Provider Adaptation Testing
+
+Verify compatibility and correct behavior with each officially supported backend provider:
+- AWS Secrets Manager
+- AWS Parameter Store
+- HashiCorp Vault
+- Google Cloud Secret Manager
+- Azure Key Vault
+- IBM Cloud Secrets Manager (if supported)
+  For each provider:
+- Create a valid `SecretStore` or `ClusterSecretStore`.
+- Create one or more `ExternalSecret` resources referencing secrets in the backend.
+- Verify that:
+    - Secrets are successfully synced.
+    - Updates in the backend reflect in Kubernetes secrets.
+    - Misconfigurations produce appropriate status conditions.
+
+### 4. Upgrade and Uninstall Testing
+
+- Test upgrading from a previous operator version to the current version.
+- Ensure existing secrets and `ExternalSecret` resources remain intact and continue syncing.
+- Validate that uninstalling the operator cleans up associated resources without leaving orphaned components.
 
 ## Graduation Criteria
 
