@@ -66,8 +66,10 @@ communication ingress flows matrix.
 - A communication matrix describing the expected flows of incoming traffic will 
   be included in every OpenShift release documentation.
 
-- A new `oc` command will be added to generate a current snapshot of known 
-  listening ports in a running cluster, `oc adm communication-matrix generate`.
+- A new `oc` Krew plugin named commatrix will be provided to generate a current 
+  snapshot of known listening ports and observed ingress traffic in a running cluster.
+  It is run using the `oc commatrix generate` command, which produces a communication matrix 
+  file in the specified format and location.
 
 - A new option will be added to OpenShift web console to generate an up-to-date
   communication matrix.
@@ -80,8 +82,9 @@ communication ingress flows matrix.
 - The admin reviews OpenShift release documentation to get the included communication
   matrix describing the expected flows of incoming traffic.
 
-- The admin uses the OpenShift command-line interface (CLI) to generate an up-to-date 
-  communication matrix using the following command `oc adm communication-matrix generate`.
+- The admin uses the OpenShift CLI with a Krew plugin to generate an up-to-date 
+  communication matrix by running the `oc commatrix generate` command. The output is 
+  written to the specified destination directory (destDir) in the chosen format (e.g., JSON or YAML).
 
 - Optionally, the admin uses the OpenShift web console to generate an up-to-date
   communication matrix.
@@ -218,7 +221,7 @@ run E2E `openshift-tests` and upgrade the OpenShift version to validate the rule
 are acceptable by the current and next OCP release.
 
 A user will be able to run `openshift-tests` or a new `oc` command, 
-`oc adm communication-matrix validate`, to validate the `EndpointSlices` 
+`oc commatrix generate --host-open-ports`, to validate the `EndpointSlices` 
 in the cluster match a current snapshot of the node's listening ports.
 
 ### Risks and Mitigations
