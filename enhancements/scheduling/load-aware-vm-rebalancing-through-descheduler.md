@@ -5,13 +5,14 @@ authors:
   - "@ricardomaraschini"
   - "@tiraboschi"
 reviewers: # Include a comment about what domain expertise a reviewer is expected to bring and what area of the enhancement you expect them to focus on. For example: - "@networkguru, for networking aspects, please look at IP bootstrapping aspect"
-  - TBD
+  - "@atiratree, for the controllers aspects"
+  - "@tiraboschi, for the virtualization aspects"
 approvers: # A single approver is preferred, the role of the approver is to raise important questions, help ensure the enhancement receives reviews from all applicable areas/SMEs, and determine when consensus is achieved such that the EP can move forward to implementation.  Having multiple approvers makes it difficult to determine who is responsible for the actual approval.
   - "@tkashem"
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
-  - TBD
+  - None
 creation-date: 2025-02-17
-last-updated: 2025-02-26
+last-updated: 2025-05-04
 tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
   - https://issues.redhat.com/browse/CNV-55593
 see-also:
@@ -52,7 +53,7 @@ This creates an asymmetry with the scheduler, particularly the default kube-sche
 ### Goals
 
 * **Load-aware eviction**: VM pods are evicted based on their actual resource consumption, such as high PSI (Pressure Stall Information) resource pressure. The descheduler will be enhanced to incorporate Prometheus metrics for classifying node utilization.
-* **Guided scheduling**: While keeping the default Kubernetes scheduler unchanged, nodes are soft-tainted when their actual resource utilization exceeds a predefined threshold. Soft taints help prevent overutilized nodes from becoming completely unschedulable while making them less desirable for scheduling. A soft taint (`effect: PreferNoSchedule`) acts as a preference rather than a strict rule, meaning the scheduler will attempt to avoid placing pods on nodes flagged as overutilized by the descheduler, but it is not guaranteed.
+* **Guided scheduling**: While keeping the default Kubernetes scheduler unchanged, nodes are soft-tainted when their actual resource utilization exceeds a  threshold. Soft taints help prevent overutilized nodes from becoming completely unschedulable while making them less desirable for scheduling. A soft taint (`effect: PreferNoSchedule`) acts as a preference rather than a strict rule, meaning the scheduler will attempt to avoid placing pods on nodes flagged as overutilized by the descheduler, but it is not guaranteed.
 * **Keeping rbac rules restricted**: The descheduler should have read-only permissions, except for accessing the eviction API. Any expansion of permitted rules must be kept to a minimum.
 * **Limited tuning**: Eviction, scheduling, and node-tainting are independent actions, which makes VM pod rebalancing not fully predictable. Therefore, experimental parameter tuning will be introduced to accommodate various scenarios:
   * **Multi soft tainting**: Apply one or more soft-taints based on actual utilization—higher utilization results in a greater number of soft-taints.
@@ -184,13 +185,14 @@ Currently, there is no dependency between the descheduler and the scheduler, so 
 
 On the descheduler side:
 1. The node classification thresholds gets configured as static (using `thresholds` and `targetThresholds`, as configured in the current `LowNodeUtilization` plugin) or dynamic, based on the state of other nodes in the cluster (using the `useDeviationThresholds` option within the plugin).
-1. The `LowNodeUtilization` plugin classifies nodes into three categories: under-utilized, appropriately-utilized, and over-utilized, as it does today. The metric used for classification will be derived from a PromQL query executed against a Prometheus instance. Prometheus will handle the aggregation of historical data and time series processing. The query is expected to return a scalar [0-1] value for each node.
+1. The `LowNodeUtilization` plugin classifies nodes into three categories: under-utilized, appropriately-utilized, and over-utilized, as it does today. The metric used for classification will be derived from a PromQL query executed against a Prometheus instance. Prometheus will handle the aggregation of historical data and time series processing. The query is expected to return a scalar [0-1] value for each node. To precompute frequently needed time series a recording rules on the Prometheus side can be created to keep aggregation of historical data and simplify the provided query.
 1. The `LowNodeUtilization` plugin will keep identifying pods for eviction. A single or multiple pods with the lowest priority are evicted during each descheduling cycle.
 
 On the soft-tainter controller side:
 1. The soft-tainter controller reads the same Prometheus metrics as the descheduler to generate the updated node classification. This ensures that both components are aligned in their understanding of node utilization and can act accordingly based on the latest metrics.
 1. Looping through the node list:
-    1. The soft-tainter controller will apply a soft taint (`effect: PreferNoSchedule`) to the node if it is not already present and the node is classified as overutilized.
+    1. The soft-tainter controller will apply a soft taint (`effect: PreferNoSchedule`) to the node if it is not already present and the node is classified as overutilized. In addition, highly overutilized nodes can be tainted with more soft taints to increase the repulsion effect.
+
     1. The soft-tainter controller will remove the soft taint from the node if it is present and the node is now classified as either low or appropriately utilized.
 
 ### API Extensions
@@ -413,7 +415,7 @@ Rebalancing is an inherently chaotic process. Multiple iterations of customer fe
 
 - List of key tuning options is identified
 - Customers confirm the tuning options lead to sufficiently fast rebalancing
-- The new descheduler operator profile is available by default
+- The new descheduler operator profile is available by default with reasonable default configuration to fit a relevant amount of typical cluster sizes
 
 ### Removing a deprecated feature
 
@@ -439,7 +441,7 @@ N/A
 - Check the taint controller logs if nodes are incorrectly soft-tainted.
 - Review the operator logs or its status to identify potential configuration issues or problems with the descheduler/taint controller not running properly.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Extend LowNodeUtilization plugin with ability to soft-taint highly-utilized nodes
 
