@@ -80,10 +80,7 @@ having to reconfigure the VM's networking configuration (MAC, IPs, gateway).
 - Preserve the original VM's MAC address
 - Preserve the original VM's IP address
 - Specify the gateway IP address of the imported VM so it can keep the same
-default route
-- Allow excludeSubnets to be used with L2 UDNs to ensure OVNK does not use an IP
-address from the range that VMs have already been assigned outside the
-cluster (or for secondary IP addresses assigned to the VM's interfaces)
+default route. This gateway is common to the entire logical network.
 - Ensure it is possible to enable non-NATed traffic for pods with the static
 network configuration by exposing the network through BGP
 
@@ -98,6 +95,11 @@ statically in the guest.
 - Adding non default routes to the VM when importing it into OpenShift Virt.
 - Modifying the default gateway and management IPs of a primary UDN after it was created.
 - Modifying a pod's network configuration after the pod was created.
+- Support importing a "live" VM into the OpenShift virtualization cluster (i.e.
+  without requiring a VM restart).
+- Allow excludeSubnets to be used with L2 UDNs to ensure OVNK does not use an IP
+  address from the range that VMs have already been assigned outside the
+  cluster (or for secondary IP addresses assigned to the VM's interfaces).
 
 **NOTE:** implementing support on UDNs (achieving the namespace isolation
 use-case) is outside the scope for this feature.
@@ -181,6 +183,11 @@ the spec stanza as well.
 OVN-Kubernetes would read the CR, attempt to reserve the requested MAC and IP,
 and then persist that information in the IPAMClaim status - reporting a
 successful sync in the `IPAMClaim` status - or a failure otherwise.
+
+In this option, the [CNV to OVN-Kubernetes API](#cnv-ovnk-api) **remains** as
+defined today - i.e. OVN-Kubernetes will be pointed to an `IPAMClaim` via a
+particular annotation on the pod. This means there is no need to implement the
+changes described in the aforementioned section.
 
 #### CNV OVNK API
 
@@ -310,6 +317,9 @@ participant MTV
 participant CNV
 participant o as OVN-Kubernetes
 
+Admin ->> o: cluster UDN
+o -->> Admin: OK
+
 Admin ->> CNV: provision IPPool
 CNV -->> Admin: OK
 
@@ -379,6 +389,9 @@ actor VM Owner
 participant MTV
 participant CNV
 participant o as OVN-Kubernetes
+
+Admin ->> o: cluster UDN
+o -->> Admin: OK
 
 Admin ->> CNV: provision IPAMClaim w/ MAC and IP requests
 CNV -->> Admin: OK
@@ -454,7 +467,8 @@ type IPAMClaimSpec struct {
 	Interface string `json:"interface"`
 +	// The IPs requested by the user
 +	// +optional
-+	IPRequests []CIDR `json:"ipRequests,omitempty"`
++	IPRequests []CIDR           `json:"ipRequests,omitempty"`
++	MACRequest net.HardwareAddr `json:"macRequest,omitempty"`
 }
 
 // IPAMClaimStatus contains the observed status of the IPAMClaim.
@@ -503,15 +517,15 @@ association for a logical network.
 
 ```go
 type IPPool struct {
-    metav1.TypeMeta     `json:",inline"`
-    metav1.ObjectMeta   `json:"metadata,omitempty"`
+	metav1.TypeMeta     `json:",inline"`
+	metav1.ObjectMeta   `json:"metadata,omitempty"`
 
 	Spec   IPPoolSpec   `json:"spec,omitempty"`
 	Status IPPoolStatus `json:"status,omitempty"`
 }
 
 type IPPoolSpec struct {
-    NetworkName string                         `json:"network-name"`
+	NetworkName string                         `json:"network-name"`
 	Entries map[net.HardwareAddr][]net.IPNet   `json:"entries"`
 }
 
