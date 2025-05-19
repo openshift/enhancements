@@ -56,7 +56,7 @@ The following outlines the approach taken by Kruize for auto scaling CPU and Mem
 8. VPA applies the changes whenever it notices a new recommendation  
 9. This loop continues for each experiment that has the “auto” mode specified.
 
-![Kruize VPA Integration][kruize-vpa-block-dia.png]
+![Kruize VPA Integration](kruize-vpa-block-dia.png)
 
 **Fig 1\. Kruize \- VPA Integration Block Diagram**
 
@@ -75,7 +75,7 @@ Here is a more detailed description of the workflow
    1. Kruize experiment mode is updated from “auto” or “recreate” to “monitor”  
    2. The Kruize experiment is deleted  
 
-![Kruize VPA Workflow][kruize-vpa-workflow.png]
+![Kruize VPA Workflow](kruize-vpa-workflow.png)
 **Fig 2\. Experiment Workflow**
 
 2. **GPU Autoscaler**
