@@ -29,7 +29,7 @@ how the external-secrets project can be deployed by an optional operator on Open
 Note: Throughout the document, the following terminology means.
 - `external-secrets-operator` is the dedicated operator in Red Hat OpenShift for managing the external-secrets project deployment.
 - `external-secrets` is the operand managed by the external-secrets-operator.
-- `externalsecretsoperator.operator.openshift.io` and `externalsecrets.operator.openshift.io` are the custom resources for interacting 
+- `externalsecretsmanager.operator.openshift.io` and `externalsecrets.operator.openshift.io` are the custom resources for interacting 
   with `external-secrets-operator` to install, configure and uninstall the `external-secrets` deployment in Red Hat OpenShift.
 
 ## Motivation
@@ -100,9 +100,9 @@ created for installing external-secrets and the user will have to manually clean
 `externalsecrets.operator.openshift.io` CR status sub-resource will be used for updating the status of the external-secrets installation, 
 any error encountered while creating the required resources or the reconciling the state.
 
-`externalsecretsoperator.operator.openshift.io` is another CR object, which is made available for configuring global options and to 
-enable optional or TechPreview features. The CR object will be created during the operator installation with default values and user can
-modify or update the CR as required. 
+`externalsecretsmanager.operator.openshift.io` is another CR object, which is made available for configuring global options and to 
+enable optional or TechPreview features. The CR object will be created by the operator with the default values and user can
+modify or update the CR as required.
 
 A fork of upstream [external-secrets](https://github.com/external-secrets/external-secrets) will be created [downstream](https://github.com/openshift/external-secrets) for better version management.
 
@@ -158,7 +158,7 @@ sequenceDiagram
 
 ### API Extensions
 
-Below new APIs `externalsecretsoperator.operator.openshift.io` and `externalsecrets.operator.openshift.io` are introduced for managing 
+Below new APIs `externalsecretsmanager.operator.openshift.io` and `externalsecrets.operator.openshift.io` are introduced for managing 
 `external-secrets` deployment by the `external-secrets-operator`.
 
 ```go
@@ -167,14 +167,14 @@ package v1alpha1
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 //+kubebuilder:object:root=true
 
-// ExternalSecretsOperatorList is a list of ExternalSecretsOperator objects.
-type ExternalSecretsOperatorList struct {
+// ExternalSecretsManagerList is a list of ExternalSecretsManager objects.
+type ExternalSecretsManagerList struct {
 	metav1.TypeMeta `json:",inline"`
 
 	// metadata is the standard list's metadata.
 	// More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata
 	metav1.ListMeta `json:"metadata"`
-	Items           []ExternalSecretsOperator `json:"items"`
+	Items           []ExternalSecretsManager `json:"items"`
 }
 
 // +genclient
@@ -183,33 +183,33 @@ type ExternalSecretsOperatorList struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster
 
-// ExternalSecretsOperator describes configuration and information about the managed external-secrets
-// deployment. The name must be `cluster` to make ExternalSecretsOperator a singleton that is, to
-// allow only one instance of ExternalSecretsOperator per cluster.
+// ExternalSecretsManager describes configuration and information about the deployments managed by
+// the operator. The name must be `cluster` to make ExternalSecretsManager a singleton that is, to
+// allow only one instance of ExternalSecretsManager per cluster.
 //
-// ExternalSecretsOperator is mainly for configuring the global options and enabling the features, which
+// ExternalSecretsManager is mainly for configuring the global options and enabling the features, which
 // serves as a common/centralized config for managing multiple controllers of the operator. The object
 // will be created during the operator installation.
 //
-// +kubebuilder:validation:XValidation:rule="self.metadata.name == 'cluster'",message="ExternalSecretsOperator is a singleton, .metadata.name must be 'cluster'"
-// +operator-sdk:csv:customresourcedefinitions:displayName="ExternalSecretsOperator"
-type ExternalSecretsOperator struct {
+// +kubebuilder:validation:XValidation:rule="self.metadata.name == 'cluster'",message="ExternalSecretsManager is a singleton, .metadata.name must be 'cluster'"
+// +operator-sdk:csv:customresourcedefinitions:displayName="ExternalSecretsManager"
+type ExternalSecretsManager struct {
 	metav1.TypeMeta `json:",inline"`
 
 	// metadata is the standard object's metadata.
 	// More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	// spec is the specification of the desired behavior of the ExternalSecretsOperator.
+	// spec is the specification of the desired behavior of the ExternalSecretsManager.
 	// +kubebuilder:validation:Required
-	Spec ExternalSecretsOperatorSpec `json:"spec,omitempty"`
+	Spec ExternalSecretsManagerSpec `json:"spec,omitempty"`
 
-	// status is the most recently observed status of the ExternalSecretsOperator.
-	Status ExternalSecretsOperatorStatus `json:"status,omitempty"`
+	// status is the most recently observed status of the ExternalSecretsManager.
+	Status ExternalSecretsManagerStatus `json:"status,omitempty"`
 }
 
-// ExternalSecretsOperatorSpec is the specification of the desired behavior of the ExternalSecretsOperator.
-type ExternalSecretsOperatorSpec struct {
+// ExternalSecretsManagerSpec is the specification of the desired behavior of the ExternalSecretsManager.
+type ExternalSecretsManagerSpec struct {
 	// globalConfig is for configuring the external-secrets-operator behavior.
 	// +kubebuilder:validation:Optional
 	GlobalConfig *GlobalConfig `json:"globalConfig,omitempty"`
@@ -262,8 +262,8 @@ type Feature struct {
 	Enabled bool   `json:"enabled"`
 }
 
-// ExternalSecretsOperatorStatus is the most recently observed status of the ExternalSecretsOperator.
-type ExternalSecretsOperatorStatus struct {
+// ExternalSecretsManagerStatus is the most recently observed status of the ExternalSecretsManager.
+type ExternalSecretsManagerStatus struct {
 	// conditions holds information of the current state of the external-secrets deployment.
 	ConditionalStatus `json:",inline,omitempty"`
 }
