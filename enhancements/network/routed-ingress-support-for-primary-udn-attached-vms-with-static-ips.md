@@ -121,6 +121,11 @@ another about preserving the
 MTV already introspects the VM on the source cluster, and templates the VM with
 its original MAC addresses.
 
+### Current limitations
+
+- MTV does **not** support importing VMs with IPv6 addresses. Whatever support
+  for IPv6 we come up with, will probably be limited by this.
+
 ### Preserving the original VM IP address
 
 MTV currently introspects the VM to learn the MAC addresses of the interfaces,
