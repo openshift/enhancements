@@ -345,11 +345,7 @@ test communication between Pod utilizing the device and fake device
 
 ## Graduation Criteria
 
-Generic Device Plugin for MicroShift could start as GA.
-
-However, if we conclude that we're uncertain about "code import" method, we
-could publish GDP for MicroShift as Dev or Tech preview, gather the feedback,
-and decide if we want to transition to the "container" approach.
+Generic Device Plugin for MicroShift will start as Tech Preview.
 
 ### Dev Preview -> Tech Preview
 
