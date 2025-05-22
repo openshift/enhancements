@@ -34,7 +34,7 @@ superseded-by:
 
 ## Summary
 
-This enhancement proposes adding support for automatically creating and managing A AWS Security Group (SG) for Network Load Balancer (NLB) used by the default OpenShift Ingress Controller when deployed on AWS.
+This enhancement proposes adding support for automatically creating and managing an AWS Security Group (SG) for Network Load Balancer (NLB) used by the default OpenShift Ingress Controller when deployed on AWS.
 
 This feature will be opt-in via a configuration setting in the `install-config.yaml`, allowing administrators to enhance the security of their ingress traffic by provisioning a Service type LoadBalancer NLB with Security Group, similar to how Security Group is managed for Classic Load Balancers (CLBs) today. The implementation will primarily involve changes within the AWS Cloud Controller Manager (CCM), OpenShift Cluster Ingress Operator (CIO), and the OpenShift Installer.
 
@@ -42,7 +42,7 @@ This feature will be opt-in via a configuration setting in the `install-config.y
 
 Customers deploying OpenShift on AWS using Network Load Balancers (NLBs) for the default router have expressed the need for a similar security configuration as provided by Classic Load Balancers (CLBs), where a security group is created by CCM and associated with the load balancer. This allows for more granular control over inbound and outbound traffic at the load balancer level, aligning with AWS security best practices and addressing security findings that flag the lack of security groups on NLBs provisioned by the default CCM.
 
-The default router in OpenShift, a IngressController object managed by Cluster Ingress Controller Operator (CIO), can be created with a Service type Load Balancer NLB instead of default Classic Load Balancer (CLB) during installation by enabling it in the `install-config.yaml`. Currently, the Cloud Controller Manager (CCM), which satisfies Service resources, provisions an AWS Load Balancer of type NLB without a Security Group (SG) directly attached to it. Instead, security rules are managed on the worker nodes' security groups.
+The default router in OpenShift, an IngressController object managed by Cluster Ingress Controller Operator (CIO), can be created with a Service type Load Balancer NLB instead of default Classic Load Balancer (CLB) during installation by enabling it in the `install-config.yaml`. Currently, the Cloud Controller Manager (CCM), which satisfies Service resources, provisions an AWS Load Balancer of type NLB without a Security Group (SG) directly attached to it. Instead, security rules are managed on the worker nodes' security groups.
 
 AWS [announced support for Security Groups when deploying a NLB in August 2023][nlb-supports-sg], and the CCM for AWS (within kubernetes/cloud-provider-aws) does not currently implement the feature of automatically creating and managing a security groups for service type LoadBalancer NLB. While the [AWS Load Balancer Controller (ALBC/LBC)][aws-lbc] project already supports deploying security groups for NLBs, this enhancement focuses on adding minimal, opt-in support to the existing CCM to address immediate customer needs without a full migration to the LBC. This approach aims to provide the necessary functionality without requiring significant changes in other OpenShift components like the Ingress Controller, installer, ROSA, etc.
 
@@ -239,6 +239,7 @@ metadata:
     - Configure Ingress rules in the Security Group to allow traffic on the ports defined in the Service's `spec.ports`. The source for these rules will be determined by the `service.beta.kubernetes.io/load-balancer-source-ranges` annotation on the Service (if present, otherwise default to allowing from all IPs).
     - Configure Egress rules in the Security Group to allow traffic to the backend pods on the targetPort specified in the Service's `spec.ports` and the health check port. Initially, this should be restricted to the cluster's VPC CIDR or the specific CIDRs of the worker nodes.
     - When creating the NLB using the AWS ELBv2 API, the CCM will include the ID of the newly created Security Group in the `SecurityGroups` parameter of the `CreateLoadBalancerInput.`
+  - When the Service annotation is added after the Service is created, the CCM will (?)
   - When the Service is deleted, the CCM will also delete the associated Security Group, ensuring proper cleanup.
 
 #### OpenShift Managed (TBD)
@@ -270,9 +271,7 @@ const ServiceAnnotationLoadBalancerManagedSecurityGroup = "service.beta.kubernet
 
 #### Cluster Ingress Operator (CIO)
 
-- FeatureGate TP
-- Receive an flag to enable Security Groups on Network Load Balancer structure
-
+- FeatureGate TechPreview (TODO describe the name?)
 - Introduce a new boolean field `managedSecurityGroup` in the `NetworkLoadBalancer` provider parameters within the IngressController API (`operator.openshift.io/v1`).
 
 ```go
@@ -288,7 +287,7 @@ type AWSNetworkLoadBalancerParameters struct {
 }
 ```
 
-- The CIO controller will set the `service.beta.kubernetes.io/aws-load-balancer-managed-security-group: "true"` annotation on the default router Service if the `managedSecurityGroup` field in the IngressController spec is set to true.
+- The CIO will set the `service.beta.kubernetes.io/aws-load-balancer-managed-security-group: "true"` annotation on the default router Service if the `managedSecurityGroup` field in the IngressController spec is set to true.
 
 #### Installer
 
@@ -379,17 +378,17 @@ type IngressController struct {
 
 > TODO/TBD
 
-### **Defaulting to AWS Load Balancer Controller (ALBC) for the default router**:
+### **Defaulting to AWS Load Balancer Controller (ALBC) for the Default Router**:
 
 While ALBC provides more comprehensive support for NLB security groups, this option was deemed out of scope for the initial goal of minimal changes and addressing immediate customer needs for security issues within the existing CCM framework.
 
-Migrating to ALBC would involve more significant architectural changes and potentially impact existing deployments. However, this remains a viable long-term strategy.
+Migrating to ALBC would involve significant architectural changes and could potentially impact existing deployments. However, this remains a viable long-term strategy.
 
 Here is an overall effort:
-- There might need to work out how we manage ALBC: ALBO will be used, or CCM will manage ALBC? Neither ALBO nor ALBC is in payload at this time. Moving either one into payload requires migrating from CPaaS to Prow, requiring approval to add a new component to the core payload; When ALBO was created, the messaging was that all new components should be addons, no new components in the core payload.
-- Migrating from CCM to ALBC is going to require either disruption for customer workloads when delete and recreate the LB, or a huge investment in effort from engineering to re-architect the way is managed router deployments, LBs, and DNS to enable having two ELBs in parallel for the same router deployment, bleeding traffic over, and then deleting the old ELB.
-- Red Hat might need to continue to support using CCM indefinitely for customers who are unwilling to do this migration, so this isn't necessarily just a one-release migration; it would most likely end up supporting all these configurations (CLB with CCM, NLB with CCM, NLB with ALBC) as well as the migration process in perpetuity.
-- Currently there were only scratched the surface of special cases, such as custom security groups, custom DNS, or potential regressions going from CCM to ALBC.
+- Determine how ALBC will be managed: Will ALBO be used, or will CCM manage ALBC? Neither ALBO nor ALBC is currently included in the payload. Moving either into the payload requires migrating from CPaaS to Prow and obtaining approval to add a new component to the core payload. When ALBO was created, the guidance was that all new components should be addons, with no new components added to the core payload.
+- Migrating from CCM to ALBC would require either disruption to customer workloads (e.g., deleting and recreating the load balancer) or a significant engineering effort to re-architect the way router deployments, load balancers, and DNS are managed. This would involve enabling two ELBs in parallel for the same router deployment, gradually shifting traffic, and then deleting the old ELB.
+- Red Hat may need to continue supporting CCM indefinitely for customers unwilling to migrate, meaning this would not be a one-release migration. It would likely require supporting all configurations (CLB with CCM, NLB with CCM, NLB with ALBC) as well as the migration process in perpetuity.
+- The above points only scratch the surface of special cases, such as custom security groups, custom DNS configurations, or potential regressions when transitioning from CCM to ALBC.
 
 ### **Day-2 operations to switch the default router to use ALBC/LBC**:
 
@@ -397,13 +396,19 @@ This would require users to manually deploy and configure ALBC after cluster ins
 
 ## Open Questions [optional]
 
-> WIP/TODO
-
-- Q: Is the annotation name be changed to include "nlb" in the name? There is no similar annotation in ALBC.
+> WIP
 
 - Q: Is it required to create a KEP to the CCM changes?
 
+A: [No][a1]. But we will need to document the feature in the CCM repo.
+
+- Q: Is the annotation name be changed to include "nlb" in the name? There is no similar annotation in ALBC.
+
 - Q: Does the CIO recreates the service when the managed flag is added? Does CCM requires to recreate the NLB when annotation is added?
+
+
+
+[a1]: https://github.com/openshift/enhancements/pull/1802#discussion_r2101097973
 
 ## Test Plan
 
@@ -456,13 +461,11 @@ The E2E tests should be consistently passing and a PR will be created to enable 
 
 ## Upgrade / Downgrade Strategy
 
-> TODO/TBD: depends on the options.
+No upgrade or downgrade concerns are anticipated because all changes are backward-compatible and opt-in. Existing configurations will remain unaffected unless the feature is explicitly enabled.
 
-No upgrade or downgrade* concerns because all changes are compatible or in the installer.
+There is no plan to migrate existing routers with NLB to use Security Groups, as NLBs must be recreated to attach a Security Group. Instead, Day-2 operations must be manually performed, and objects patched if the user wants to consume this feature. For example, users can enable this feature by manually patching the IngressController and associated Service objects to include the required annotations. Note that this may require recreating the NLB, which could result in temporary downtime.
 
-There is no goal to migrate existing Routers with NLB to use Security Group, instead, Day-2 operations must be manually added if the user wants to consume this feature.
-
-*is there any downgrade supported path to hit the scenario of an service with managed SG annotation to downgrade to a CCM which does not support it?
+In the case of a downgrade to a CCM version that does not support the `service.beta.kubernetes.io/aws-load-balancer-managed-security-group` annotation, the annotation will be ignored, and the Security Group will not be managed by the CCM. Users must manually manage Security Groups in such scenarios.
 
 ## Version Skew Strategy
 
