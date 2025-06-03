@@ -277,7 +277,7 @@ type MachineManagerSelector struct {
 	// Valid values are All and Partial.
 	// All means that every resource matched by the machine manager will be updated.
 	// Partial requires specified selector(s) and allows customisation of which resources matched by the machine manager will be updated.
-  // None means that every resource matched by the machine manager will NOT be updated.
+	// None means that every resource matched by the machine manager will NOT be updated.
 	// +unionDiscriminator
 	// +kubebuilder:validation:Required
 	Mode MachineManagerSelectorMode `json:"mode"`
@@ -464,7 +464,7 @@ status:
 
 Note: This section is still a WIP and will require thorough API review. Once the form of the API has been settled, this will be updated again.
 
-This would introduced as an new knob in the `MachineConfiguration` Spec:
+This would be introduced as a new knob in the `MachineConfiguration` Spec:
 ```
 type MachineConfigurationSpec struct {
   ...
@@ -497,8 +497,8 @@ type SkewEnforcementSelector struct {
 	ClusterBootImage ClusterBootImage `json:"clusterBootImage,omitempty"`
 }
 
-// MachineManager describes a target machine resource that is registered for boot image updates. It stores identifying information
-// such as the resource type and the API Group of the resource. It also provides granular control via the selection field.
+// ClusterBootImage describes the boot image of a cluster. It stores the RHCOS version of the boot image and 
+// the OCP release version which shipped with that RHCOS boot image.
 type ClusterBootImage struct {
 	// ocpVersion provides a string which represents the OCP version of the boot image
 	// +kubebuilder:validation:XValidation:rule="self.matches('^[0-9]*.[0-9]*.[0-9]*$')",message="bootImageOCPVersion must be in a semver compatible format of x.y.z"
@@ -734,7 +734,7 @@ Add a new field in the `MachineConfiguration` object for configuration of the sk
   - For machineset backed clusters, this would be updated by the MSBIC after it successfully updates boot images for all machine resources in the cluster. 
   - For non-machineset backed clusters, this would be updated by the cluster admin to indicate the last manually updated bootimage. The cluster admin would need to update this API object every few releases, when the RHEL minor on which the RHCOS container is built on changes (e.g. 9.6->9.8). 
 
-The cluster admin may also choose to opt-out of skew management via this field, acknowledge that their scaling ability may be limited.
+The cluster admin may also choose to opt-out of skew management via this field, acknowledging that their scaling ability may be limited.
 
 This object can then be monitored to enforce skew limits. If the skew is determined to be too large, the MCO can update its `ClusterOperator` object with an `Upgradeable=False` condition, along with remediation steps in the `Condition` message. This will signal to the CVO that the cluster is not suitable for an upgrade to the next y stream release.
 
@@ -747,7 +747,7 @@ A potential problem here is that the way boot images are stored in the machinese
 
 #### Reactive
 1. Have the MCS reject new ignition requests if the aformentioned object indicates that the cluster's bootimages are out of date. The MCS would then signal to the cluster admin that scale-up is not available until the skew has been resolved. Raising the alarm from the MCS at the cluster level will help prevent additional noise for the cluster infra team, and make apparent that the scaling failure was intentional. The MCS will also attempt to serve an Ignition config that writes a message to `/etc/issue` explaining that the bootimage is too old, which will be visible from the node's console.
-2. Add a service to be shipped via RHCOS/MCO templates, which will do a check on incoming OS container image vs currently booted RHCOS version. This runs on firstboot right after the MCD pulls the new image, and will prevent the node to rebase to the updated image if the drift is too far.
+2. Add a service to be shipped via RHCOS/MCO templates, which will do a check on incoming OS container image vs currently booted RHCOS version. This runs on firstboot right after the MCD pulls the new image, and will prevent the node to rebase to the updated image if the drift is too far. This would cover environments that do not use the MCS such as [installing via ISO on bare metal](https://docs.redhat.com/en/documentation/openshift_container_platform/4.18/html/installing_on_bare_metal/user-provisioned-infrastructure#installation-user-infra-machines-iso_installing-bare-metal).
 
 RHEL major versions will no longer be cross-compatible. i.e. if you wish to have a RHEL10 machineconfigpool, you must use a RHEL10 bootimage.
 
