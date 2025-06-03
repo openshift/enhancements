@@ -78,9 +78,10 @@ apiVersion: network.openshift.io/v1alpha1
 kind: HTTP01ChallengeProxy
 metadata:
   name: example-http01challengeproxy
-  namespace: default
 spec:
   # Add fields here to specify the desired state of the HTTP01ChallengeProxy
+  # Default port is 8888.
+  internalport: 8888
 status:
   conditions:
     - type: Ready
@@ -97,6 +98,20 @@ status:
 - The implementation relies on `nftables` for traffic redirection, which must be supported and enabled on the cluster nodes.
 - The demo deployment manifest for the proxy is available [here](https://github.com/mvazquezc/cert-mgr-http01-proxy/blob/main/manifests/deploy-in-ocp.yaml).
 - An example implementation can be found in this [repository](https://github.com/mvazquezc/cert-mgr-http01-proxy/tree/main).
+- The proxy will listen on a configurable port (default: 8888) for HTTP01 challenge traffic. The port can be set via the CR to avoid conflicts with other workloads that may require port 8888 on the host.
+- 8888 was chosen as a reasonable default because it is commonly unused, but clusters with a conflict can override this value in the CR.
+- The [host port registry](https://github.com/openshift/enhancements/blob/master/dev-guide/host-port-registry.md) should be updated to reflect the use of port 80 on apiServer nodes when this feature is enabled, to avoid conflicts and ensure proper documentation of port usage.
+- The priority (order) of the `nftables` entries relative to other services should be coordinated with the OpenShift networking team to ensure it follows established precedent and does not interfere with other networking rules.
+
+#### nftables Presence and Management
+
+- `nftables` is always present as part of the RHCOS payload. Baremetal and AWS (at least) OCP clusters install `nftables` tables, chains, and rules by default.
+- The `nftables` systemd unit is disabled by default, but the netfilter subsystem is active and can be configured via the `nft` CLI/API without enabling the systemd unit.
+- OVN-Kubernetes relies on netfilter (iptables/nftables) for features like UDN, Egress, and Services.
+- The Machine Config Operator (MCO) does not manage `nftables` directly, but users can explicitly disable or modify `nftables` via MachineConfig if desired.
+- If a user disables or removes `nftables`, this is considered an explicit user-driven action and is not managed or expected by OpenShift.
+- If `nftables` is not present or is disabled, the proxy will not function as intended. Detection of this condition should be implemented (e.g., by checking for the presence of the `nft` binary and ability to apply rules), and the operator should surface a clear error or degraded status.
+- Based on current RHCOS and OCP design, it is not possible to remove the underlying netfilter subsystem, so the feature can reliably depend on its presence unless a user takes explicit unsupported action.
 
 ### Design Details
 
@@ -127,7 +142,17 @@ More information about the investigation can be found [here](https://docs.google
 
 ### Risks and Mitigations
 
-1. **Proxy Failure**: If the proxy fails, HTTP01 challenges for the API endpoint will not succeed. Mitigation: Use health checks and monitoring to ensure the proxy is running correctly.
+1. **Proxy Failure**: If the proxy fails, HTTP01 challenges for the API endpoint will not succeed. This does **not** prevent users from accessing their cluster, but may result in the API certificate expiring if not renewed.
+   - **User Impact**: 
+     - End-users and system components can still access the API endpoint, but may encounter certificate warnings or errors if the certificate is expired or invalid.
+     - Users may need to accept insecure connections (e.g., use `--insecure-skip-tls-verify` with `oc` or `kubectl`) until the certificate is renewed.
+     - Automated systems or integrations that require valid certificates may fail or refuse to connect.
+   - **Remediation/Workaround**:
+     - Restore the proxy DaemonSet and ensure it is healthy so Cert Manager can retry and complete HTTP01 challenges.
+     - If the API certificate has expired, use insecure connection flags to access the cluster and perform remediation.
+     - Monitor for certificate expiry and configure alerts to notify administrators before expiry occurs.
+   - **Detection**: Configure alerts for expiring certificates. Warning alerts should be triggered when certificates are close to expiry, and critical alerts when certificates have expired. This allows administrators to take action before cluster API access is impacted.
+
 2. **Traffic Interference**: The proxy could inadvertently interfere with other traffic. Mitigation: Carefully scope the proxy's functionality to only handle HTTP01 challenge traffic.
 
 ### Implementation History
@@ -199,7 +224,11 @@ This enhancement does not deprecate any existing features.
 
 ## Upgrade / Downgrade Strategy
 
-Updated versions of the proxy can be applied to the cluster similar to initial deployment
+- Updated versions of the proxy can be applied to the cluster similar to initial deployment.
+- The proxy DaemonSet must use a `Recreate` update strategy to ensure that only one instance of the proxy runs per node at any time, as the proxy listens on a fixed port (`8888`) in the host network. This prevents port collisions during upgrades.
+- Rolling upgrades are not supported due to the singleton nature of the proxy per node; the `Recreate` policy ensures the old pod is terminated before the new one starts.
+- If an upgrade fails midway, administrators should roll back to the previous working DaemonSet image or manifest. The cluster will not have a running proxy until the DaemonSet is restored, so HTTP01 challenges will fail during this window.
+- The proxy code should maintain backwards compatibility for nftables rules and configuration to minimize upgrade risks.
 
 ## Version Skew Strategy
 
@@ -211,6 +240,58 @@ Any changes to the proxy's behavior will be documented to ensure compatibility w
 - **Resource Usage**: The proxy's resource requirements will be minimal, as it only handles HTTP01 challenge traffic.
 - **Failure Recovery**: Health checks will ensure that the proxy is running correctly, and failed pods will be automatically restarted.
 
+#### Recovery Procedures
+
+If the proxy DaemonSet enters a `CrashLoopBackOff` state, HTTP01 challenges for the API endpoint will fail, and certificate renewal will not complete. This may result in the API certificate expiring, which could impact cluster operations.
+
+**Recovery steps:**
+- Cluster administrators can disable or remove the proxy by deleting the DaemonSet or updating the relevant CR/manifest.
+- If the API certificate has expired, recovery may require connecting to the cluster's API server while ignoring certificate validation errors (e.g., using `--insecure-skip-tls-verify` with `oc` or `kubectl`).
+- After resolving the issue (e.g., fixing the DaemonSet, node configuration, or proxy image), re-deploy the proxy to restore HTTP01 challenge functionality.
+- The proxy should surface clear status and error messages to help identify and resolve CrashLoopBackOff or degraded states.
+
 ## Support Procedures
 
-Support for the proxy will be provided through standard OpenShift support channels. Administrators can refer to the deployment documentation and logs for troubleshooting.
+### Detecting Failure Modes
+
+- **Symptoms**: 
+  - Cert Manager HTTP01 challenges for the API endpoint (`api.cluster.example.com`) fail to complete.
+  - Certificates for the API endpoint are not issued or renewed.
+  - The proxy DaemonSet pods are in `CrashLoopBackOff` or `Error` state.
+  - Events in the `openshift-cert-manager` or relevant namespace indicate pod failures.
+  - The operator managing the proxy (if any) reports a degraded or error status.
+  - Logs from the proxy pod show errors related to `nftables` or port binding.
+  - The API server logs may show failed ACME challenge requests or timeouts.
+
+- **Metrics/Alerts**:
+  - Custom metrics (if implemented) such as `cert_manager_proxy_up` or `cert_manager_proxy_errors_total` may indicate proxy health.
+  - Alerts can be configured for DaemonSet unavailability or excessive restarts.
+
+### Disabling the API Extension
+
+- **How to disable**: 
+  - Remove or scale down the proxy DaemonSet.
+  - Remove or update the associated CR (if using a CRD).
+  - Remove any MachineConfig or configuration that enables the proxy.
+- **Consequences**:
+  - HTTP01 challenges for the API endpoint will not be possible.
+  - Certificates for the API endpoint will not be issued or renewed.
+  - If the API certificate expires, cluster API access may be impacted until a valid certificate is restored.
+
+### Impact on Existing, Running Workloads
+
+- Existing workloads and API traffic will continue to function as long as the API certificate is valid.
+- If the API certificate expires and is not renewed, clients may fail to connect to the API server due to certificate errors.
+- No direct impact on running pods or services, unless they rely on the API endpoint with a valid certificate.
+
+### Impact on Newly Created Workloads
+
+- New certificate requests for the API endpoint will fail.
+- New clusters or workloads that require a valid API certificate for bootstrap or integration may fail to initialize.
+
+### Graceful Failure and Recovery
+
+- The proxy is not on the critical path for existing API traffic; it only affects HTTP01 challenge completion.
+- When the proxy is restored, Cert Manager can retry failed HTTP01 challenges and resume certificate issuance/renewal.
+- No risk of data loss or cluster inconsistency; functionality resumes when the proxy is re-enabled and healthy.
+- If the API certificate has expired, recovery may require connecting with `--insecure-skip-tls-verify` until a new certificate is issued.
