@@ -98,7 +98,7 @@ MSBIC sync failures may be caused by multiple reasons:
 - The `coreos-bootimages` ConfigMap is unavailable or in an incorrect format. This will likely happen if a user manually edits the ConfigMap, overriding the CVO.
 - The stub Ignition referenced in the `MachineSet` could not be upgraded to the spec 3 format. This will only happen when a user has heavily customized their Ignition stub, which is quite rare(and unsupported potentially). Resolving this will need manual intervention and this will be explained in the documentation.
 - Patching the `MachineSet` fails. This indicates a temporary API server blip, or larger RBAC issues.
-- The same `MachineSet` is patched multiple times to the same boot image. This indicates that there is atleast one external actor actively stomping on the value applied by the MSBIC.
+- The same `MachineSet` is patched multiple times to the same boot image. This indicates that there is at least one external actor actively stomping on the value applied by the MSBIC.
 
 An error condition will be applied on the operator level `MachineConfiguration` object when the sync failures of a given `MachineSet` exceed a threshold amount for a period of time. The condition will include information regarding the sync failures and the logs of the MSBIC can be checked for additional details.
 
@@ -646,7 +646,7 @@ The goal of this is to provide information about the "lineage" of a machine mana
 
 ### Implementation Details/Notes/Constraints [optional]
 The reconciliation loop below is run on any `MachineSet` that is opted in for updates when any of the following in-cluster resources are added or updated:
-1. A `MachineSet`'s providerSpec field. This is where a MachineSet's boot image references reference are stored.
+1. A `MachineSet`'s providerSpec field. This is where a MachineSet's boot image references are stored.
 2. The `coreos-bootimages` ConfigMap, which is the cluster's golden reference for boot images. This is typically updated by the CVO during an upgrade.
 3. The singleton `MachineConfiguration` object called `cluster`. This is used to configure the Managed Boot Images feature.
 
@@ -721,7 +721,7 @@ Some points to note:
 
 ### Enforcement of bootimage skew
 
-There should be some mechanism that will alert the user when a cluster's bootimage are out of date. To allow for this, the `coreos-bootimages` configmap will gain a new field, which will store the the boot image required for upgrading to the next y stream release.
+There should be some mechanism that will alert the user when a cluster's bootimage are out of date. To allow for this, the `coreos-bootimages` configmap will gain a new field, which will store the boot image required for upgrading to the next y stream release.
 
 Generally speaking, we would like to keep the bootimage version aligned to the RHEL version we are shipping in the payload. For example, a 9.6 bootimage will be allowed until 9.8 is shipped via RHCOS. We would like to keep this customizable, such that any major breaking changes outside of RHEL major/minor can still be enforced as a one-off.
 
