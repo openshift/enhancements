@@ -723,7 +723,7 @@ Some points to note:
 
 There should be some mechanism that will alert the user when a cluster's bootimage are out of date. To allow for this, the `coreos-bootimages` configmap will gain a new field, which will store the boot image required for upgrading to the next y stream release.
 
-Generally speaking, we would like to keep the bootimage version aligned to the RHEL version we are shipping in the payload. For example, a 9.6 bootimage will be allowed until 9.8 is shipped via RHCOS. We would like to keep this customizable, such that any major breaking changes outside of RHEL major/minor can still be enforced as a one-off.
+Generally speaking, we would like to keep the minimum required bootimage version aligned to the RHEL version we are shipping in the payload and constant for a given release's z stream. For example, a 9.6 bootimage will be allowed until 9.8 is shipped via RHCOS. We would like to keep this customizable, such that any major breaking changes outside of RHEL major/minor can still be enforced as a one-off.
 
 #### Enforcement options
 
@@ -743,7 +743,7 @@ To remediate, the cluster admin would then have to do one of the following:
 - Manually update the boot image and update the skew enforcement object if it is a non machineset backed cluster.
 - Opt-out of skew enforcement altogether, giving up scaling ability.
 
-A potential problem here is that the way boot images are stored in the machineset is lossy. In certain platforms, there is no way to recover the boot image metadata from the MachineSet. This is most likely to happen the first time the MCO attempts to do skew enforcement on a cluster that has never had boot image updates. In such cases, the MCO will use the OCP version from install time to determine skew instead. 
+A potential problem here is that the way boot images are stored in the machineset is lossy. In certain platforms, there is no way to recover the boot image metadata from the MachineSet. This is most likely to happen the first time the MCO attempts to do skew enforcement on a cluster that has never had boot image updates. In such cases, the MCO will use the OCP version from install time(derived from the [`clusterversion`](https://github.com/openshift/enhancements/blob/master/enhancements/update/clusterversion-history-pruning.md) object) to determine skew instead. 
 
 #### Reactive
 1. Have the MCS reject new ignition requests if the aformentioned object indicates that the cluster's bootimages are out of date. The MCS would then signal to the cluster admin that scale-up is not available until the skew has been resolved. Raising the alarm from the MCS at the cluster level will help prevent additional noise for the cluster infra team, and make apparent that the scaling failure was intentional. The MCS will also attempt to serve an Ignition config that writes a message to `/etc/issue` explaining that the bootimage is too old, which will be visible from the node's console.
