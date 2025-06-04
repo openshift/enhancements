@@ -152,9 +152,9 @@ type PolicyRootOfTrust struct {
 	// +optional
 	FulcioCAWithRekor *FulcioCAWithRekor `json:"fulcioCAWithRekor,omitempty"`
 
-    // PKI defines the root of trust based on Root CA(s) and corresponding intermediate certificates.
-    // +optional
-    PKI *PKI `json:"pki,omitempty"`
+        // PKI defines the root of trust based on Root CA(s) and corresponding intermediate certificates.
+        // +optional
+        PKI *PKI `json:"pki,omitempty"`
 }
 
 // +kubebuilder:validation:Enum=PublicKey;FulcioCAWithRekor
