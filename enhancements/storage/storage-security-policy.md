@@ -1,5 +1,5 @@
 ---
-title: podfsGroupChangePolicy
+title: Setting Pod's storage security policies on per-namespace basis
 authors:
   - "@gnufied"
 reviewers:
@@ -14,7 +14,7 @@ replaces:
 superseded-by:
 ---
 
-# Defaulting of fsgroupChangePolicy for pods in a particular namespace
+# Defaulting of fsgroupChangePolicy and selinuxChangePolicy for pods in a particular namespace
 
 ## Release Signoff Checklist
 
@@ -28,7 +28,11 @@ superseded-by:
 
 We want to allow Openshift admins to change `FSGroupChangePolicy` defaulting policies for certain namespaces so as pods in the given namespace can start faster.
 
+We also want to allow Openshift admins to set `SELinuxChangePolicy` for certain namespaces, so as they can opt-out of potentially breaking changes being introduced via `SELinuxMount` feature upcoming in future k8s releases.
+
 ## Motivation
+
+### Motivation for fsgroupchangepolicy defaulting
 
 Currently it can take a long time for volume's permission to be changed to match pod's `fsGroup`. This is a well known problem
 in Kubernetes and Openshift. See - https://access.redhat.com/solutions/6221251 for more details.
