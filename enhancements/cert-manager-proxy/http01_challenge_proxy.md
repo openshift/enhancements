@@ -94,7 +94,7 @@ status:
 ### Implementation Details/Notes/Constraints
 
 - The proxy will be deployed as a DaemonSet to ensure it runs on all nodes which may host the API VIP in the cluster.
-- The nftables rules will be added to the nodes. The proxy will listen on port 8888 and redirect traffic to the OpenShift Ingress Routers.
+- When the proxy starts, it checks which version of OCP it's running on. If it's 4.17+ it will proceed to configure MCO restart the nftables service rather than reboot the node when the file /etc/sysconfig/nftables.conf is modified. After that it creates the MC that configures the file + service.
 - The implementation relies on `nftables` for traffic redirection, which must be supported and enabled on the cluster nodes.
 - The demo deployment manifest for the proxy is available [here](https://github.com/mvazquezc/cert-mgr-http01-proxy/blob/main/manifests/deploy-in-ocp.yaml).
 - An example implementation can be found in this [repository](https://github.com/mvazquezc/cert-mgr-http01-proxy/tree/main).
