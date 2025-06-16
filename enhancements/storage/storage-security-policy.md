@@ -54,12 +54,16 @@ This will speed up time spent while recursively changing selinux policies of a v
 
 By allowing cluster-admins to set namespace default of `selinuxChangePolicy` we want to give control over how these changes are applied to Openshift clusters, without explicitly  changing pods themselves.
 
+### User Stories
+
+N/A
+
 ### Goals
 
 - Allow Openshift admins to configure per-namespace default of `fsGroupChangePolicy`.
 - Allow Openshift admins to configure per-namespace default of `selinuxChangePolicy`.
 
-## Non-Goals
+### Non-Goals
 
 * Change Openshift default globally.
 
@@ -71,7 +75,7 @@ We propose a label `storage.openshift.io/fsgroup-change-policy` if that is set t
 
 ```go
 func getPodFsGroupChangePolicy(ns *corev1.Namespace) *api.PodFSGroupChangePolicy {
-    fsGroupPolicy, ok := ns.Labels[securityv1.OnRootMismatchFSGroupPolicy]
+    fsGroupPolicy, ok := ns.Labels[securityv1.FSGroupChangePolicy]
     if !ok {
         return nil
     }
@@ -137,7 +141,7 @@ which will be feature-gated while in Tech Preview.
 
 ### Risks and Mitigations
 
-I am not aware of any risks as such.
+This feature requires storage to be enabled for this to work. See Operational Aspect section for more details.
 
 ### Drawbacks
 
@@ -145,12 +149,45 @@ The admission hook implementation should be replaced by Mutating Admission Hook 
 
 ## Alternatives (Not Implemented)
 
-#### Graduation
+None
 
-##### Status during tech-preview
+## Open Questions [optional]
 
-During the initial development this feature will be behind a Openshift feature gate and will not be generally available.
+None
 
-##### GA
+## Test Plan
 
-This is relatively simple feature and hence, for GA we should be able to just rename the annotation. We could also implement this thing as GA from get-go.
+We will add e2e tests that validate if labels are working as intended. These would be either part of CSO tests or `openshift/origin` tests.
+
+## Graduation Criteria
+
+The feature will be behind a feature-gate during tech-preview.
+
+### Dev Preview -> Tech Preview
+
+N/A
+
+### Tech Preview -> GA
+
+During the initial development this feature will be behind a Openshift feature gate and will not be generally available. When we move this feature-gate to GA,
+it should be as simple as removal of the Openshift feature-gate.
+
+### Removing a deprecated feature
+
+N/A
+
+## Upgrade / Downgrade Strategy
+
+This should not have any impact on Upgrade and Downgrade strategy.
+
+## Version Skew Strategy
+
+Since this feature only applies to control-plane defautling, IMO we should be fine even older version of kubelets etc.
+
+## Operational Aspects of API Extensions
+
+There is obvious aspect of supporting forever a label on namespace as a API extension in Openshift. For most practical purposes
+this should work fine.
+
+When we remove the admission hook and switch to using MAP, CSO is the one that will install the MAP hook and hence storage *must* be
+enabled for the future to work.
