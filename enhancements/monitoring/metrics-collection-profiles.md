@@ -1,14 +1,20 @@
 ---
 title: metrics-collection-profiles
 authors:
-  - JoaoBraveCoding
-  - rexagod
+  - "@JoaoBraveCoding"
+  - "@rexagod"
 reviewers:
-  - openshift/openshift-team-monitoring
-approvers:
-  - "@openshift/openshift-team-monitoring"
-api-approvers:
+  - "@bparees"
   - "@dgrisonnet"
+  - "@dmage"
+  - "@jan--f"
+  - "@juzhao"
+  - "@simonpasquier"
+approvers:
+  - "@jan--f"
+  - "@simonpasquier"
+api-approvers:
+  - "@JoelSpeed"
 creation-date: 2022-12-06
 last-updated: 2025-05-06
 tracking-link:
