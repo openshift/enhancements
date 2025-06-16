@@ -101,6 +101,50 @@ This would serve similar purpose as admission hook we are carrying as go code.
 
 We have already implemented a proof-of-concept https://github.com/openshift/kubernetes/pull/2311/files, which works and does the job. But this uses existing SCC admission hook.
 
+
+### Workflow Description
+
+Admins that want to set defaults of `fsGroupChangePolicy` and `selinuxChangePolicy` will set `storage.openshift.io/fsgroup-change-policy` or `storage.openshift.io/selinux-change-policy`
+labels in corresponding namespaces.
+
+This will result in setting these fields in all pods in affected namespace if these fields are *not* already set.
+
+### API Extensions
+
+Adds following labels as API conventions for defaulting of security policies:
+
+- `storage.openshift.io/fsgroup-change-policy`
+- `storage.openshift.io/selinux-change-policy`
+
+### Topology Considerations
+
+#### Hypershift / Hosted Control Planes
+
+It should not have effect on Hypershift deployments.
+
+#### Standalone Clusters
+
+It should not have effect on Standalone deployments.
+
+#### Single-node Deployments or MicroShift
+
+It should not have effect on Single-Node deployments.
+
+### Implementation Details/Notes/Constraints
+
+We will implement the necessary admission hooks in - https://github.com/openshift/apiserver-library-go/tree/master/pkg ,
+which will be feature-gated while in Tech Preview.
+
+### Risks and Mitigations
+
+I am not aware of any risks as such.
+
+### Drawbacks
+
+The admission hook implementation should be replaced by Mutating Admission Hook and hence it is kinda busy work while we wait for MAP implementation to go GA in upstream.
+
+## Alternatives (Not Implemented)
+
 #### Graduation
 
 ##### Status during tech-preview
