@@ -190,4 +190,9 @@ There is obvious aspect of supporting forever a label on namespace as a API exte
 this should work fine.
 
 When we remove the admission hook and switch to using MAP, CSO is the one that will install the MAP hook and hence storage *must* be
-enabled for the future to work.
+enabled for the feature to work.
+
+## Support Procedures
+
+If the admission hook is not working properly then the defaults specified by `storage.openshift.io/selinux-change-policy` and `storage.openshift.io/fsgroup-change-policy` will
+not apply to pods created in particular namespace. We will have to look into `kube-apiserver` logs to find out what went wrong in that case.
