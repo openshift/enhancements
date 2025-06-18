@@ -124,6 +124,28 @@ N/A
 
 To separate graduation of OCI image and OCI artifact, we are going to add a new option to disable OCI artifact in CRI-O and disable OCI artifact mount by default via MCO.
 
+#### OCI Image
+
+OCI images are mounted using the [`MountImage` function from containers/storage](https://github.com/cri-o/cri-o/blob/30d575118c5adabae7fd0c367ea5dbf23f1c8fdc/vendor/github.com/containers/storage/store.go#L2833).
+This function creates a mount point, which is mounted as overlayfs.
+
+#### OCI Artifact
+
+OCI artifacts use a different mounting strategy than images:
+
+- Artifacts are stored locally in [OCI layout format](https://specs.opencontainers.org/image-spec/image-layout/)
+- Each artifact layer is treated as an individual file
+- Files are bind-mounted from the OCI layout to their specified container paths
+- Filename resolution follows this priority order:
+  1. `org.opencontainers.image.title` annotation
+  2. `org.cnai.model.filepath` annotation
+
+**Note**: The OCI artifact implementation details are subject to change before GA release. See [Graduation Criteria](#graduation-criteria).
+
+Like OCI images, artifacts are:
+- Accessible through standard image CRI APIs
+- Subject to the same garbage collection policies as container images
+
 ### Risks and Mitigations
 
 See [KEP-4639: Risks and Mitigations](https://github.com/kubernetes/enhancements/tree/master/keps/sig-node/4639-oci-volume-source#risks-and-mitigations)
@@ -165,6 +187,7 @@ they are not run on OCP clusters. We should implement equivalent tests.
 - Complete user documentation
 - Collect use cases and feedback
 - Comprehensive e2e tests in both CRI-O and OCP
+- Finalize implementation and move it to appropriate containers lib
 
 ### Removing a deprecated feature
 
