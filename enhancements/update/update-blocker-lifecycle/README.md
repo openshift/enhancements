@@ -9,7 +9,7 @@ approvers:
 api-approvers:
   - None
 creation-date: 2020-09-11
-last-updated: 2023-01-25
+last-updated: 2025-06-18
 status: implementable
 ---
 
@@ -92,7 +92,7 @@ Which 4.y.z to 4.y'.z' updates increase vulnerability?
 
 Which types of clusters?
 * reasoning: This allows us to populate [`matchingRules` in conditional update recommendations][graph-data-block] for "clusters like `$THIS`".
-* example: GCP clusters with thousands of namespaces, approximately 5% of the subscribed fleet.  Check your vulnerability with `oc ...` or the following PromQL `count (...) > 0`.
+* example: GCP clusters with thousands of namespaces, approximately 5% of the subscribed fleet.  Check your vulnerability with `oc ...` or the following PromQL `count (...) > 0`. If PromQL is provided and the underlying bug might impact updates on a [4.19.0](https://docs.redhat.com/en/documentation/openshift_container_platform/4.19/html-single/release_notes/index#ocp-4-19-monitoring-metrics-collection-profiles-ga) or newer cluster, please list [the metrics collection profiles](https://docs.redhat.com/en/documentation/openshift_container_platform/4.19/html-single/monitoring/index#choosing-a-metrics-collection-profile_configuring-performance-and-scalability) with which the PromQL works.
 
 The two questions above are sufficient to declare an initial update risk, and we would like as much detail as possible on them as quickly as you can get it.
 Perfectly crisp responses are nice, but are not required.
