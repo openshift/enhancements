@@ -13,7 +13,7 @@ approvers: # A single approver is preferred, the role of the approver is to rais
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
   - "@joelspeed"
 creation-date: 2025-05-07
-last-updated: 2025-06-02
+last-updated: 2025-06-17
 tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
   - https://issues.redhat.com/browse/CORENET-5999
 see-also:
@@ -63,10 +63,10 @@ platforms, preserving their existing MACs, IPs, and gateway configuration.
 
 ### User Stories
 
-- As the owner of a VM running in a traditional virtualization platform, I want
-to import said VM - whose IPs were statically configured - into Kubernetes,
-attaching it to an overlay network. I want to ingress/egress using the same IP
-address (the one assigned to the VM).
+- As the owner of a VM running in a traditional virtualization platform, which
+provides a managed IP UX, I want to import said VM - whose IPs were statically
+configured - into Kubernetes, attaching it to an overlay network. I want to
+ingress/egress using the same IP address (the one assigned to the VM).
 - As the owner of a VM running in a traditional virtualization platform, I want
 to import said VM into Kubernetes, attaching it to an overlay network. I want to
 be able to consume Kubernetes features like network policies, and services, to
@@ -85,7 +85,8 @@ default route. This gateway is common to the entire logical network.
 network configuration by exposing the network through BGP
 
 **NOTE:** all the goals mentioned above will be fulfilled **only** for the
-**cluster** UDN type.
+**cluster** UDN type, since BGP (which provides direct pod IP routed ingress
+is only implemented for cluster UDNs).
 
 ### Non-Goals
 
@@ -93,16 +94,20 @@ network configuration by exposing the network through BGP
 statically in the guest.
 - Importing a VM whose gateway is outside the subnet of the network.
 - Adding non default routes to the VM when importing it into OpenShift Virt.
-- Modifying the default gateway and management IPs of a primary UDN after it was created.
+- Modifying the default gateway and management IPs of a primary UDN after it
+was created.
 - Modifying a pod's network configuration after the pod was created.
 - Support importing a "live" VM into the OpenShift virtualization cluster (i.e.
   without requiring a VM restart).
-- Allow excludeSubnets to be used with L2 UDNs to ensure OVNK does not use an IP
-  address from the range that VMs have already been assigned outside the
-  cluster (or for secondary IP addresses assigned to the VM's interfaces).
+- Allow excludeSubnets to be used with L2 UDNs to ensure OVNK does not use an
+IP address from the range that VMs have already been assigned outside the
+cluster (or for secondary IP addresses assigned to the VM's interfaces).
+- Importing VMs attached to IPv6 networks. More details in the
+[limitations](#current-limitations) section.
 
 **NOTE:** implementing support on UDNs (achieving the namespace isolation
-use-case) is outside the scope for this feature.
+use-case) is outside the scope for this feature, since BGP (which provides
+direct pod IP routed ingress is only implemented for cluster UDNs).
 
 ## Proposal
 
@@ -208,8 +213,8 @@ metadata:
   name: pod-example
   annotations:
     v1.multus-cni.io/default-network: '[{
-      "name": "isolated-net",
-      "namespace": "myisolatedns",
+      "name": "default",
+      "namespace": "openshift-ovn-kubernetes",
       "mac": "02:03:04:05:06:07",
       "ipam-claim-reference": "myvm.isolated-net",  # added by the mutating webhook
       "ips": [
@@ -225,6 +230,14 @@ happens today). If it fails (e.g. that IP address is already in use in the
 subnet), the CNI will fail, crash-looping the pod. The error condition will be
 reported in the associated `IPAMClaim` CR `status.conditions`, and an event
 logged in the pod.
+
+Analogously, if OVN-Kubernetes spots a MAC address conflict, it will also fail,
+crash-loop the pod, and log an event in the pod.
+
+Both these errors should be seen when a user `describe`s the failed pod in a
+clear actionable message, so they can know what happened, and if possible,
+address the error (e.g. delete and re-create the VM that holds the desired
+IP/MAC).
 
 This workflow is described in more detail in the
 [Workflow Description](#workflow-description) section.
@@ -264,14 +277,14 @@ This flow is described in more detail (and presents alternatives to it) in the
 #### Roles
 - admin: a user with cluster admin rights. They can list NADs in all
   namespaces, create cluster UDNs, and create / update `IPPool`s.
-- VM owner: a user without cluster admin rights. They own their namespaces.
+- Project admin: a user without cluster admin rights. They own their namespaces.
   They will either import - or create - a VM in the namespace they own.
 
 #### Sequence diagram for the proposed workflow
 ```mermaid
 sequenceDiagram
   actor Admin
-  actor VM Owner
+  actor Project admin
 
   participant MTV
   participant CNV
@@ -280,12 +293,12 @@ sequenceDiagram
   Admin ->> o: provision cluster UDN
   o -->> Admin: OK
 
-  VM Owner ->> MTV: import VM
+  Project admin ->> MTV: import VM
   MTV ->> CNV: create VM(primaryUDNMac=origMAC, primaryUDNIPs=...)
   CNV ->> o: create pod(mac=origMAC, IPs=ips)
   o -->> CNV: OK
   CNV -->> MTV: OK
-  MTV -->> VM Owner: OK
+  MTV -->> Project admin: OK
 ```
 
 ### API Extensions
@@ -316,15 +329,21 @@ type IPAMClaimStatus struct {
 ```
 
 The `IPAMClaim` status will have (at least) the following conditions:
-- IPAllocated: when the status is "True", it reports the IP address was
+- IPsAllocated: when the status is "True", it reports the IP address was
   successfully allocated for the workload. The reason will be
   `SuccessfulAllocation`. When the status is "False", it reports an IP
-  allocation error, and more details will be provided in the `reason`, and
-  `message` attributes.
+  allocation error, with a specific `reason`, and more details will be provided
+  in the `message` attribute.
+
+The reason enums are described below:
+- IPAddressConflict
+- RequestedIPOutsideSubnet
+- ReservedIPRequested (in case we want to be pedantic and differentiate with
+  the IPs reserved for management port, gateway, or the subnet excluded IPs)
 
 These conditions will look like - **successful** allocation:
 ```
-type: IPAllocated
+type: IPsAllocated
 status: "True"
 reason: SuccessfulAllocation
 message: "IP 192.168.1.5 allocated successfully"
@@ -333,10 +352,26 @@ lastTransitionTime: "2025-05-13T11:56:00Z"
 
 These conditions will look like - **failed** allocation:
 ```
-type: IPAllocated
+type: IPsAllocated
 status: "False"
-reason: IPAlreadyExists
+reason: IPAddressConflict
 message: "Requested IP 192.168.1.5 is already assigned in the network"
+lastTransitionTime: "2025-05-13T11:56:00Z"
+```
+
+```
+type: IPsAllocated
+status: "False"
+reason: RequestedIPOutsideSubnet
+message: "Requested IP 200.168.1.5 is outside the UDN subnet 192.168.0.0/16"
+lastTransitionTime: "2025-05-13T11:56:00Z"
+```
+
+```
+type: IPsAllocated
+status: "False"
+reason: ReservedIPRequested
+message: "The user requested IP address 192.168.200.123 which was explicitly excluded by the admin"
 lastTransitionTime: "2025-05-13T11:56:00Z"
 ```
 
@@ -422,10 +457,10 @@ created, and is associated to a cluster UDN. This CRD holds the association of
 MAC address to IPs for a UDN. When importing the VM into OpenShift Virt, MTV
 (or a separate, dedicated component) will provision / update this object with
 the required information (MAC to IPs association).
-This object is providing to the admin user a single place to check the IP
-address MAC to IPs mapping. On an first implementation phase, we can have the
-admin provision these CRs manually. Later on, MTV (or any other cluster
-introspection tool) can provision these on behalf of the admin.
+This object is providing to the admin user a single place to check the MAC to
+IPs mapping. On an first implementation phase, we can have the admin provision
+these CRs manually. Later on, MTV (or any other cluster introspection tool) can
+provision these on behalf of the admin.
 
 This approach has the following advantages:
 - single place the admin to manage for UDN
@@ -468,7 +503,7 @@ in the following sequence diagram:
 ```mermaid
 sequenceDiagram
 actor Admin
-actor VM Owner
+actor Project admin
 
 participant MTV
 participant CNV
@@ -480,13 +515,13 @@ o -->> Admin: OK
 Admin ->> CNV: provision IPPool
 CNV -->> Admin: OK
 
-VM Owner ->> MTV: import VM
+Project admin ->> MTV: import VM
 MTV ->> CNV: create VM(name=<...>, primaryUDNMac=origMAC)
 CNV ->> CNV: ips = getIPsForMAC(mac=origMAC)
 CNV ->> o: create pod(mac=origMAC, IPs=ips)
 o -->> CNV: OK
 CNV -->> MTV: OK
-MTV -->> VM Owner: OK
+MTV -->> Project admin: OK
 ```
 
 Hence, the required changes would be:
@@ -529,9 +564,9 @@ As indicated above, when a tool exists that can introspect the source cluster
 to learn the VM's IP addresses, the admin user will only require provisioning
 the cluster UDN CR.
 
-###### VM owner flows for centralized approach
+###### Project admin flows for centralized approach
 
-The VM owner just has to use MTV to import the VM into CNV.
+The Project admin just has to use MTV to import the VM into CNV.
 
 ###### IPPool CRD
 
@@ -666,7 +701,7 @@ described in the following sequence diagram:
 ```mermaid
 sequenceDiagram
 actor Admin
-actor VM Owner
+actor Project admin
 
 participant MTV
 participant CNV
@@ -678,13 +713,13 @@ o -->> Admin: OK
 Admin ->> CNV: provision IPAMClaim w/ MAC and IP requests
 CNV -->> Admin: OK
 
-VM Owner ->> MTV: import VM
+Project admin ->> MTV: import VM
 MTV ->> CNV: create VM(name=<...>, primaryUDNMac=origMAC)
 CNV ->> CNV: ips = getIPsForMAC(mac=origMAC)
 CNV ->> o: create pod(mac=origMAC, IPs=ips)
 o -->> CNV: OK
 CNV -->> MTV: OK
-MTV -->> VM Owner: OK
+MTV -->> Project admin: OK
 ```
 
 Hence, the required changes would be:
@@ -718,9 +753,9 @@ As indicated above, when a tool exists that can introspect the source cluster
 to learn the VM's IP addresses, the admin user will only require provisioning
 the cluster UDN CR.
 
-###### VM owner flows for de-centralized approach
+###### Project admin flows for de-centralized approach
 
-The VM owner just has to use MTV to import the VM into CNV.
+The Project admin just has to use MTV to import the VM into CNV.
 
 ## Test Plan
 
@@ -762,21 +797,18 @@ N/A
 
 ## Operational Aspects of API Extensions
 
-The proposed `IPPool` CRD must be provisioned by the admin (or the source
-cluster introspection tool) before the VMs are migrated into OpenShift virt,
-otherwise, they will lose the IP addresses they had on the source cluster.
-
-The gateway for the network must be configured in the cluster UDN CR at
-creation time, as any other cluster UDN parameter.
+The gateway, and excluded IPs for the network must be configured in the cluster
+UDN CR at creation time, as any other cluster UDN parameter.
 
 Hence, some planning and preparation are required from the admin before the
-VM owner starts importing VMs into the OpenShift Virt cluster via MTV.
+Project admin starts importing VMs into the OpenShift Virt cluster via MTV.
 
 ## Support Procedures
 
-Issues with an imported VM should be logged in the launcher pod events, and
-persisted in the corresponding `IPAMClaim` so the support team can check what
-failed in the address allocation requests.
+Issues with an imported VM should be seen the launcher pod events (thus visible
+on `kubectl describe pod/<pod name>`, and when appropriate persisted in the
+corresponding `IPAMClaim` so the support team can check what failed in the
+address allocation requests.
 
 The `IPPool` CRD would help the support engineer get a grasp of the MAC <-> IPs
 being used for a network at any given time. Having this notion will simplify
@@ -786,4 +818,5 @@ the [centralized IP management](#centralized-ip-management) section.
 ## Infrastructure Needed [optional]
 
 We'll need a virt-aware lane with CNV (and MTV) installed so we can e2e test
-the features.
+the features. This platform **must** have BGP enabled, to allow us to test
+direct pod access (without NAT).
