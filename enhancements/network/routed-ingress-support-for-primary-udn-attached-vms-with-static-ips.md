@@ -151,11 +151,13 @@ interfaces in the `spec.template.spec.domain.devices.interfaces` array.
 Unfortunately, there isn't a place in the KubeVirt API to request the IP
 addresses for the interface (or network attachment). Given we're already past
 the 4.20 KubeVirt feature freeze, we propose templating the VM with an
-annotation where the interface's IPs and MAC will be defined. This annotation
-will be the multus default network annotation, which enables users to customize
-the default cluster network attachment. This annotation's value is a
+annotation where the interface's IPs will be defined. This annotation
+will be KubeVirt specific, and will be consumed by the KubeVirt
+`ipam-extensions` project, which will mutate the launcher pod to customize the
+cluster default network attachment, by using the multus default network
+feature. The multus default network annotation's value is a
 network-selection-element, which we can use to instruct the pod's IPs and MAC
-addresses. The annotation will look like:
+addresses. The annotation on the VMs will look like:
 ```yaml
 apiVersion: kubevirt.io/v1
 kind: VirtualMachine
@@ -167,14 +169,7 @@ spec:
   template:
     metadata:
       annotations:
-        v1.multus-cni.io/default-network: '[{
-          "name": "default",
-          "namespace": "openshift-ovn-kubernetes",
-          "mac": "02:03:04:05:06:07",
-          "ips": [
-            "10.0.0.5/24"
-          ]
-        }]'
+        network.kubevirt.io/addresses: '{"iface1": ["192.168.0.1/24", "fd23:3214::123/64"]}'
 ```
 
 When KubeVirt sees this VM, it will create a running VMI with the template's
@@ -186,14 +181,7 @@ metadata:
   name: vm-server
   namespace: blue
   annotations:
-    v1.multus-cni.io/default-network: '[{
-          "name": "default",
-          "namespace": "openshift-ovn-kubernetes",
-          "mac": "02:03:04:05:06:07",
-          "ips": [
-            "10.0.0.5/24"
-          ]
-        }]'
+    network.kubevirt.io/addresses: '{"iface1": ["192.168.0.1/24", "fd23:3214::123/64"]}'
 spec:
 ...
 ```
