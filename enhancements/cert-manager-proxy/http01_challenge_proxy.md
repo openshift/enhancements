@@ -55,7 +55,14 @@ This enhancement aims to provide a robust solution for managing certificates for
 
 - Provide a reliable mechanism for Cert Manager to complete HTTP01 challenges for the API endpoint (`api.cluster.example.com`) in baremetal environments.
 - Ensure compatibility with various OpenShift topologies, including Standard Clusters, Compact Clusters, and SNO.
-- Minimize operational complexity by using a DaemonSet-based deployment and `nftables` for traffic redirection.
+- Low operational complexity to secure communication with a cluster's API endpoint.
+
+### Non-Goals
+
+- This enhancement does not aim to replace or modify the existing OpenShift Ingress functionality.
+- It does not provide support for non-HTTP01 challenge types (e.g., DNS-01).
+- It does not address certificate management for endpoints other than the API endpoint (`api.cluster.example.com`).
+- It does not provide a solution for environments where `nftables` is not supported.
 
 ## Proposal
 
@@ -126,7 +133,7 @@ status:
 2. **Additional Resource Usage**: Running the proxy as a DaemonSet introduces additional resource usage on the cluster nodes while the proxy pod is applying its nftable rules.
 3. **Complexity**: The solution adds another component to the cluster, which may increase operational complexity.
 
-### Alternatives (Not Implemented)
+## Alternatives (Not Implemented)
 
 The alternatives were actually implemented if you look through the presentation [slides](https://docs.google.com/presentation/d/1mJ1pnsPiEwb-U5lHwhM2UkyRmkkLeYxj3cfE4F7dOx0/edit#slide=id.g547716335e_0_260) but the approaches are all listed below.
 
@@ -165,13 +172,6 @@ More information about the investigation can be found [here](https://docs.google
 - [ACME HTTP01 Challenge](https://letsencrypt.org/docs/challenge-types/#http-01-challenge)
 - [Proxy Code Repository](https://github.com/mvazquezc/cert-mgr-http01-proxy/tree/main)
 - [Deployment Manifest](https://github.com/mvazquezc/cert-mgr-http01-proxy/blob/main/manifests/deploy-in-ocp.yaml)
-
-### Non-Goals
-
-- This enhancement does not aim to replace or modify the existing OpenShift Ingress functionality.
-- It does not provide support for non-HTTP01 challenge types (e.g., DNS-01).
-- It does not address certificate management for endpoints other than the API endpoint (`api.cluster.example.com`).
-- It does not provide a solution for environments where `nftables` is not supported.
 
 ### Workflow Description
 
