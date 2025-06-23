@@ -55,7 +55,7 @@ This enhancement aims to provide a robust solution for managing certificates for
 
 - Provide a reliable mechanism for Cert Manager to complete HTTP01 challenges for the API endpoint (`api.cluster.example.com`) in baremetal environments.
 - Ensure compatibility with various OpenShift topologies, including Standard Clusters, Compact Clusters, and SNO.
-- Minimize operational complexity by using a DaemonSet-based deployment and `nftables` for traffic redirection.
+- Low operational complexity to secure communication with a cluster's API endpoint.
 
 ## Proposal
 
