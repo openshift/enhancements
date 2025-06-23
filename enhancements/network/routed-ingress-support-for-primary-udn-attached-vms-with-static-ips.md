@@ -169,7 +169,19 @@ spec:
   template:
     metadata:
       annotations:
+        # the annot below defines the IPs for this logical network of the imported VM
         network.kubevirt.io/addresses: '{"iface1": ["192.168.0.1/24", "fd23:3214::123/64"]}'
+    spec:
+      domain:
+        devices:
+          interfaces:
+            - name: iface1
+              macAddress: 02:03:04:05:06:07 # define the MAC address of the imported VM
+              binding:
+                name: l2bridge
+      networks:
+        - name: iface1
+          pod: {}
 ```
 
 When KubeVirt sees this VM, it will create a running VMI with the template's
@@ -206,7 +218,8 @@ metadata:
       "mac": "02:03:04:05:06:07",
       "ipam-claim-reference": "myvm.isolated-net",  # added by the mutating webhook
       "ips": [
-        "10.0.0.5/24"
+        "192.168.0.1/24",
+        "fd23:3214::123/64"
       ]
 }]'
 ```
