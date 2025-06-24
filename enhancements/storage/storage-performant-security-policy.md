@@ -6,9 +6,13 @@ reviewers:
   - "@openshift/storage"
 approvers:
   - "@openshift/openshift-architects"
+api-approvers:
+  - "@JoelSpeed"
 creation-date: 2025-05-22
 last-updated: 2025-05-22
 status: implementable
+tracking-link:
+  - https://issues.redhat.com/browse/STOR-2370
 see-also:
 replaces:
 superseded-by:
