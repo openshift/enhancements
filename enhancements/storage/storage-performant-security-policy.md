@@ -1,5 +1,5 @@
 ---
-title: Setting Pod's storage security policies on per-namespace basis
+title: storage-performant-security-policy
 authors:
   - "@gnufied"
 reviewers:
