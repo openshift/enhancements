@@ -161,7 +161,7 @@ We will add e2e tests that validate if labels are working as intended. These wou
 
 ## Graduation Criteria
 
-The feature will be behind a feature-gate during tech-preview.
+The feature will be behind a feature-gate `StoragePerformantSecurityPolicy` during tech-preview.
 
 ### Dev Preview -> Tech Preview
 
