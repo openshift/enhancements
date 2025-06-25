@@ -1,5 +1,5 @@
 ---
-title: routed-ingress-support-for-primary-udn-attached-vms-with-static-ips
+title: requesting-staticips-for-vms-being-migrated-into-primary-l2-udns-using-MTV
 authors:
   - "@maiqueb"
 reviewers: # Include a comment about what domain expertise a reviewer is expected to bring and what area of the enhancement you expect them to focus on. For example: - "@networkguru, for networking aspects, please look at IP bootstrapping aspect"
@@ -23,7 +23,7 @@ replaces: []
 superseded-by: []
 ---
 
-# Routed ingress support for primary UDN attached VMs with static IPs
+# Requesting StaticIPs for VMs being migrated into Primary L2 UDNs using MTV
 
 ## Summary
 
@@ -37,7 +37,7 @@ Traditional virtualization users have some expectations on what a
 virtualization platform should provide. Live-migration, and IP address
 persistence across reboots are paramount features for any virtualization
 solution, and OpenShift Virtualization currently supports these features on its
-primary UserDefinedNetworks (UDNs).
+primary layer 2 UserDefinedNetworks (UDNs).
 
 These users have additional requirements, like routed ingress into their VMs,
 and, to import the VMs with the MAC, IPs, and gateway configuration the VM had
@@ -73,16 +73,20 @@ be able to consume Kubernetes features like network policies, and services, to
 benefit from the Kubernetes experience.
 - As the owner of a VM running in a traditional virtualization platform, I want
 to import said VM into Kubernetes, attaching it to an overlay network, without
-having to reconfigure the VM's networking configuration (MAC, IPs, gateway).
+having to reconfigure the VM's networking configuration (MAC, IPv4 IPs, IPv4
+gateway).
 
 ### Goals
 
 - Preserve the original VM's MAC address
-- Preserve the original VM's IP address
-- Specify the gateway IP address of the imported VM so it can keep the same
-default route. This gateway is common to the entire logical network.
+- Preserve the original VM's IPv4 address
+- Specify the default gateway IPv4 address of the imported VM so it can keep
+the same default route. This gateway is common to the entire logical network.
 - Ensure it is possible to enable non-NATed traffic for pods with the static
 network configuration by exposing the network through BGP
+- Ensure the user / admin can define way to reserve a range of IP addresses
+within the primary Layer2 UDN network that OVN-Kubernetes avoids for automatic
+assignment, but from which I can still request specific IPs for my workloads.
 
 **NOTE:** all the goals mentioned above will be fulfilled **only** for the
 **cluster** UDN type, since BGP (which provides direct pod IP routed ingress
@@ -99,15 +103,14 @@ was created.
 - Modifying a pod's network configuration after the pod was created.
 - Support importing a "live" VM into the OpenShift virtualization cluster (i.e.
   without requiring a VM restart).
-- Allow excludeSubnets to be used with L2 UDNs to ensure OVNK does not use an
-IP address from the range that VMs have already been assigned outside the
-cluster (or for secondary IP addresses assigned to the VM's interfaces).
 - Importing VMs attached to IPv6 networks. More details in the
 [limitations](#current-limitations) section.
 
 **NOTE:** implementing support on UDNs (achieving the namespace isolation
 use-case) is outside the scope for this feature, since BGP (which provides
-direct pod IP routed ingress is only implemented for cluster UDNs).
+direct pod IP routed ingress is only implemented for cluster UDNs). Once
+OVN-Kubernetes provides BGP for UDNs, we should follow-up with ensuring this
+feature works for UDNs as well.
 
 ## Proposal
 
@@ -170,7 +173,7 @@ spec:
     metadata:
       annotations:
         # the annot below defines the IPs for this logical network of the imported VM
-        network.kubevirt.io/addresses: '{"iface1": ["192.168.0.1/24", "fd23:3214::123/64"]}'
+        network.kubevirt.io/ip-addresses: '{"iface1": ["192.168.0.1/24", "fd23:3214::123/64"]}'
     spec:
       domain:
         devices:
@@ -193,7 +196,7 @@ metadata:
   name: vm-server
   namespace: blue
   annotations:
-    network.kubevirt.io/addresses: '{"iface1": ["192.168.0.1/24", "fd23:3214::123/64"]}'
+    network.kubevirt.io/ip-addresses: '{"iface1": ["192.168.0.1/24", "fd23:3214::123/64"]}'
 spec:
 ...
 ```
@@ -255,11 +258,10 @@ IP address, since today it is using the UDN subnet first IP address.
 To keep the feature backwards compatible, that would be the default if the UDN
 does **not** feature the gateway configuration. This will ensure the
 DHCP flows on the logical switch are advertising the correct gateway
-information to the guests on the network, and also that the gateway is properly
-configured to allow features like Kubernetes `Services`.
+information to the guests on the network.
 
 For IPv6 the flow will be different; IPv6 gateways are dynamic ! Hence, when a
-VM is imported into OpenShift Virtualization, the OVN control plane must send a
+VM is imported into OpenShift Virtualization, the OVN GW must send a
 RouterAdvertisement to the VM instructing it to forget about the old gateway -
 i.e. send an RA with `lifetime = 0` with the source address of the gateway
 defined for the VM in the old cluster.
@@ -401,18 +403,20 @@ in OVN-Kubernetes, and more CRs to reconcile.
 
 ### Implementation Details/Notes/Constraints
 
-TODO
+N/A
 
 ### Risks and Mitigations
 
-TODO
+N/A
 
 ### Drawbacks
 
-The biggest drawback we have to implementing this feature is lack of clear
-asks from customers - we're pretty much guessing what they would want to use.
+The scope of this feature was limited to VM importing, which is what customers
+are asking for. Still, having had more customer / stake-holder insight would
+have helped to understand if a bigger scope would address more customer
+demands. 
 
-We do not know (for instance):
+For instance, we do not know:
 - is this feature only for VMs ?
 - is this feature only about importing VMs ? Should we allow creating new VMs
   with dedicated MAC / IP / gateway requests ?
@@ -763,11 +767,12 @@ The Project admin just has to use MTV to import the VM into CNV.
 * E2E upstream and downstream jobs covering VM creation with requested
   IP/MAC/gateway configuration for both IPv4 and dual-stack configurations
 * E2E downstream jobs covering a VM (having a network configuration which must
-  be kept) import via MTV is successful for both IPv4 and dual-stack
-  configurations
+  be kept) import via MTV is successful for both IPv4 configurations
 * E2E tests covering the existing features (network policies, IP spoof
   protection, services) for an imported VM works as expected for both IPv4 and
   dual-stack configurations
+* E2E downstream upgrade lane to prove backwards compatibility of the feature
+* 
 
 ## Graduation Criteria
 
@@ -790,7 +795,24 @@ The deprecation strategy is described in the OVN-Kubernetes
 
 ## Upgrade / Downgrade Strategy
 
-N/A
+There are no specific requirements to be able to upgrade.
+
+VMs that do not request IPs on their primary network attachment will get an
+automatic IP selected by the OVN-Kubernetes IPAM component.
+
+Existing VMs with primary UDN attachments (featuring persistent IPs) will still
+preserve the same IP they had before.
+
+Existing VMs with primary UDN attachments *cannot* use this feature - this is
+only for newly imported VMs.
+
+Existing VMs using this new feature will **not** lose their reserved IPs on a
+cluster downgrade, since the IPs they requested are held on an `IPAMClaim`
+object.
+
+An upgrade from 4.20 to 4.21 for existing VMs using this feature will preserve
+their IPs, since their addresses will be well preserved in an existing
+`IPAMClaim`.
 
 ## Version Skew Strategy
 
