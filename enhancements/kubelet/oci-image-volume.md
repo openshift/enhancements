@@ -139,6 +139,11 @@ OCI artifacts use a different mounting strategy than images:
 - Filename resolution follows this priority order:
   1. `org.opencontainers.image.title` annotation
   2. `org.cnai.model.filepath` annotation
+- Signatures for artifacts are also stored in OCI layout and can be verified when pulled and mounted
+- Layers are automatically untarred if applicable:
+  - mediaType `application/vnd.oci.image.layer.v1.tar` get untarred
+  - mediaType `application/vnd.oci.image.layer.v1.tar+gzip` (and analogous ...+compression) get uncompressed and untarred
+  - any other mediaTypes get mounted as a file with title
 
 **Note**: The OCI artifact implementation details are subject to change before GA release. See [Graduation Criteria](#graduation-criteria).
 
