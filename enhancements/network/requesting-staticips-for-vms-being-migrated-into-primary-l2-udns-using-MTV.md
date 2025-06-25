@@ -202,7 +202,11 @@ spec:
 ```
 
 When virt-controller templates the pod for holding this VM it will carry over
-the multus default-network annotation and define that in the launcher pod.
+the multus default-network annotation and define that in the launcher pod. If
+the VM has both a secondary "default" network (which would result in the
+KubeVirt API generating a multus default network annotation) and request for
+MTV provided static IP addresses, the VM creation will fail, with an actionable
+error, to provide a simple and clear user flow.
 
 The `ipam-extensions` mutating web-hook will intercept the launcher pod
 creation, and mutate the multus default network annotation: it will decorate
