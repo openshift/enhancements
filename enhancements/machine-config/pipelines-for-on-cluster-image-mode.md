@@ -21,82 +21,48 @@ superseded-by:
 
 ## Summary
 
-This is a proposal to utilize OpenShfit Pipelines to customize the existing On Cluster Image Mode workflow. This feature will be 
+Provide a mechanism to customize the existing On Cluster Image Mode workflow using Openshift Pipelines. 
 
 ## Motivation
 
-This section is for explicitly listing the motivation, goals and non-goals of
-this proposal. Describe why the change is important and the benefits to users.
+On Cluster Image Mode enables the user to customize the underlying node operating
+system. However this image build and deploy workflow deprives the user from
+customizing their build pipelines to their liking. Operations like testing OS 
+images before deployment, scanning for vulnerabilites, verifying image signatures 
+and caching image builds cannot be integrated in the existing workflow.
+Enabling the user to modify their OS image build workflow builds trust and
+increases production readiness. This can be accomplished by leveraging
+the concept of modular Tasks and Pipelines from Openshift Pipelines.
 
 ### User Stories
 
-Detail the things that people will be able to do if this is implemented and
-what goal that allows them to achieve. In each story, explain who the actor
-is based on their role, explain what they want to do with the system,
-and explain the underlying goal they have, what it is they are going to
-achieve with this new feature.
+#### Add/Modify a Pre-build task to the Build Pipeline
 
-Use the standard three part formula:
+As the administrator of a cluster, I should be able to add and modify custom 
+tasks like containerfile linting and tests that execute prior to building 
+the bootable container image, so that errors in ContainerFile and the 
+build environment can be caught early preventing the pipeline from executing
+and successfully saving compute resources.
 
-> "As a _role_, I want to _take some action_ so that I can _accomplish a
-goal_."
+#### Add/Modify a Post-build task to the Build Pipeline
 
-Make the change feel real for users, without getting bogged down in
-implementation details.
-
-Here are some example user stories to show what they might look like:
-
-* As an OpenShift engineer, I want to write an enhancement, so that I
-  can get feedback on my design and build consensus about the approach
-  to take before starting the implementation.
-* As an OpenShift engineer, I want to understand the rationale behind
-  a particular feature's design and alternatives considered, so I can
-  work on a new enhancement in that problem space knowing the history
-  of the current design better.
-* As a product manager, I want to review this enhancement proposal, so
-  that I can make sure the customer requirements are met by the
-  design.
-* As an administrator, I want a one-click OpenShift installer, so that
-  I can easily set up a new cluster without having to follow a long
-  set of operations.
-
-In each example, the persona's goal is clear, and the goal is clearly provided
-by the capability being described.
-The engineer wants feedback on their enhancement from their peers, and writing
-an enhancement allows for that feedback.
-The product manager wants to make sure that their customer requirements are fulfilled,
-reviewing the enhancement allows them to check that.
-The administrator wants to set up his OpenShift cluster as easily as possible, and
-reducing the install to a single click simplifies that process.
-
-Here are some real examples from previous enhancements:
-* [As a member of OpenShift concerned with the release process (TRT, dev, staff engineer, maybe even PM),
-I want to opt in to pre-release features so that I can run periodic testing in CI and obtain a signal of
-feature quality.](https://github.com/openshift/enhancements/blob/master/enhancements/installer/feature-sets.md#user-stories)
-* [As a cloud-provider affiliated engineer / platform integrator / RH partner
-I want to have a mechanism to signal OpenShift's built-in operators about additional
-cloud-provider specific components so that I can inject my own platform-specific controllers into OpenShift
-to improve the integration between OpenShift and my cloud provider.](https://github.com/openshift/enhancements/blob/master/enhancements/cloud-integration/infrastructure-external-platform-type.md#user-stories)
-* [As an OpenShift cluster administrator, I want to add worker nodes to my
-existing single control-plane node cluster, so that it'll be able to meet
-growing computation demands.](https://github.com/openshift/enhancements/blob/master/enhancements/single-node/single-node-openshift-with-workers.md#user-stories)
-
-Include a story on how this proposal will be operationalized:
-life-cycled, monitored and remediated at scale.
+As the administrator of a cluster, I should be able to add and modify custom 
+tasks like tests, signing the image and caching builds that execute after 
+building the bootable container image, so that the OS Image can be tested
+and verified prior to its deployment in production.
 
 ### Goals
 
-Summarize the specific goals of the proposal. How will we know that
-this has succeeded?  A good goal describes something a user wants from
-their perspective, and does not include the implementation details
-from the proposal.
+Provide a mechanism that cluster administrators can use to add, modify,
+delete and reorder custom tasks in a build workflow pre and post
+OS Image build.
 
 ### Non-Goals
 
-What is out of scope for this proposal? Listing non-goals helps to
-focus discussion and make progress. Highlight anything that is being
-deferred to a later phase of implementation that may call for its own
-enhancement.
+We do not want to own or manage the custom tasks that the user has 
+defined. We just manage their execution and display its status.
+We do not want to support the individual components of the Tekton API
+but just leverage them. 
 
 ## Proposal
 
