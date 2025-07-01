@@ -31,7 +31,6 @@ This enhancement proposal adds missing authentication fields to the structured a
 
 Key additions include:  
 - **Issuer fields** (`DiscoveryURL`, `AudienceMatchPolicy`) for advanced OIDC configuration.  
-- **ClaimMappings** (`UID`, `Extra`) for customizable user identity resolution.  
 - **ClaimValidationRules** to enable advanced token validation via CEL expressions.  
 - **UserValidationRules** to enforce security policies on usernames and groups.  
 
@@ -70,10 +69,6 @@ To enhance authentication flexibility and security, the following fields will be
 - **Issuer Configuration**  
   - `.spec.oidcProviders[].issuer.discoveryURL`: Allows specifying a custom OIDC discovery endpoint.  
   - `.spec.oidcProviders[].issuer.audienceMatchPolicy`: Enables flexible audience validation rules.  
-
-- **Claim Mappings**  
-  - `.spec.oidcProviders[].claimMappings.uid`: Defines a claim for user identification.  
-  - `.spec.oidcProviders[].claimMappings.extra`: Allows storing additional claims for authorization purposes.  
 
 - **Claim and User Validation Rules**  
   - `.spec.oidcProviders[].claimValidationRules.expression`: Supports CEL-based validation of claims.  
@@ -166,62 +161,6 @@ A cluster administrator needs to configure OpenShift to validate the audience (`
     - name: foo
       issuer:
         audienceMatchPolicy: MatchAny
-```
-
-#### 3. Custom UID Mapping for Identity Providers
-**Scenario:**  
-A company needs to map the `uid` claim to a custom identifier in order to properly identify users across different OIDC providers.
-
-**Steps:**
-
-1. Update the authentication CRD to include the custom `uid` mapping:
-   ```yaml
-   apiVersion: config.openshift.io/v1
-    kind: Authentication
-    metadata:
-      name: cluster
-    spec:
-      type: OIDC
-      oidcProviders:
-      - name: foo
-        claimMappings:
-          uid:
-            expression: claims.email
-  ```
--------------------------------------
-```yaml
-    apiVersion: config.openshift.io/v1
-    kind: Authentication
-    metadata:
-      name: cluster
-    spec:
-      type: OIDC
-      oidcProviders:
-      - name: foo
-        claimMappings:
-          uid:
-            claim: email
-```
-
-### 4. Adding Extra Claims for Role-Based Permissions
-**Scenario:**  
-A cluster administrator wants to utilize an external webhook authorizer to process custom claims (such as `role`) from the OIDC token for access control decisions.
-
-**Steps:**
-
-1. Update the authentication CRD to include extra claims:
-```yaml
-   apiVersion: config.openshift.io/v1
-   kind: Authentication
-   metadata:
-     name: cluster
-   spec:
-    type: OIDC
-    oidcProviders:
-      claimMappings:
-        extra:
-        - key: 'example.com/role'
-          valueExpression: 'claims.role'
 ```
 
 #### 5. Enforcing Token Expiration Limits (Claim Validation)  
@@ -317,73 +256,6 @@ spec:
   - name: foo
     issuer:
       audienceMatchPolicy: MatchAny
-```
-
-#### TokenClaimMappings  
-##### UID
-- **What it does:**  
-  The `uid` field maps a claim from the OIDC token to the user's unique identifier in OpenShift.  
-
-- **Why users would set it:**  
-  Ensures consistent and predictable user identification across authentication sessions.  
-
-- **Constraints:**  
-  - The mapped claim must exist in the token.  
-  - If the mapped claim is missing, authentication may fail.  
-
-This is an example of configuring uid using a CEL expression.
-
-**Example:**  
-```yaml
-   apiVersion: config.openshift.io/v1
-    kind: Authentication
-    metadata:
-      name: cluster
-    spec:
-      type: OIDC
-      oidcProviders:
-      - name: foo
-        claimMappings:
-          uid:
-            expression: claims.email
-```
-```yaml
-    apiVersion: config.openshift.io/v1
-    kind: Authentication
-    metadata:
-      name: cluster
-    spec:
-      type: OIDC
-      oidcProviders:
-      - name: foo
-        claimMappings:
-          uid:
-            claim: email
-```
-##### Extra
-- **What it does:**  
-  The `extra` field allows mapping additional claims to Kubernetes user attributes.  
-
-- **Why users would set it:**  
-  Enables passing extra metadata, such as roles or groups, to the user’s session.  
-
-- **Constraints:**  
-  - Keys must be valid Kubernetes labels.  
-  - Values must be derived from valid token claims using CEL expressions.  
-
-**Example:**  
-```yaml
-   apiVersion: config.openshift.io/v1
-   kind: Authentication
-   metadata:
-     name: cluster
-   spec:
-    type: OIDC
-    oidcProviders:
-        claimMappings:
-          extra:
-          - key: 'example.com/role'
-            valueExpression: 'claims.role'
 ```
 
 ### TokenClaimValidationRule
@@ -508,9 +380,9 @@ N/A
 
 Given that these changes are additions to the ExternalOIDC feature API, which is currently in Tech Preview for standalone OpenShift, the general approach is as follows:
 
-- No new feature gate will be introduced.
-- The ExternalOIDC feature will not be promoted to GA without these new API fields based on product management input.
-  
+- We will introduce a new feature gate called `ExternalOIDCWithNewAuthConfigFields`
+- The ExternalOIDC feature GA will no longer be blocked on this feature.
+
 To graduate from Tech Preview (TP) to GA, the following criteria must be met:
 
 - User-facing documentation exists.
@@ -540,6 +412,8 @@ As a result, there are no additional compatibility risks or upgrade constraints 
 
 ## Operational Aspects of API Extensions
 
+This enhancement builds upon the existing OIDC functionality and will follow the same operational practices defined in the earlier OIDC enhancements. In particular, it inherits the ART considerations outlined in the [adding UID and extra claim mapping configuration enhancement](https://github.com/openshift/enhancements/blob/master/enhancements/authentication/adding-uid-and-extra-claim-mapping-configuration-options-for-external-oidc.md#operational-aspects-of-api-extensions).
+
 ## Impact of Misconfiguration on Users
 
 If users configure the new API fields incorrectly, authentication may break, causing the kube-apiserver to become inaccessible. This could prevent users from logging in or interacting with the cluster.
@@ -555,6 +429,8 @@ If the external OIDC authentication layer becomes misconfigured or non-functiona
 If an invalid configuration is rejected, users will receive a clear error message explaining what went wrong. Additionally, the cluster-authentication-operator's `clusteroperator` conditions (e.g., `AuthenticationDegraded=True`) and logs will indicate issues related to authentication misconfigurations.
 
 ## Support Procedures
+
+This enhancement builds upon the existing OIDC support infrastructure. As with previous enhancements such as [adding UID and extra claim mapping configuration options for external OIDC](https://github.com/openshift/enhancements/blob/master/enhancements/authentication/adding-uid-and-extra-claim-mapping-configuration-options-for-external-oidc.md#support-procedures), supportability is ensured through existing tools and workflows.
 
 ### Logging and Errors  
 
