@@ -128,15 +128,16 @@ Adds following labels as API conventions for defaulting of security policies:
 
 #### Hypershift / Hosted Control Planes
 
-It should not have effect on Hypershift deployments.
+The defaulting of `fsGroupChangePolicy` and `seLinuxChangePolicy` should work same on HCP clusters as standalone clusters, because this feature is entirely controlled by `kube-apiserver` admission hook. We will ensure that, the e2e metrics cover HCP clusters too.
 
 #### Standalone Clusters
 
-It should not have effect on Standalone deployments.
+The defaulting of `fsGroupChangePolicy` and `seLinuxChangePolicy` should work same in standalone clusters, because this feature is entirely controlled by `kube-apiserver` admission hook. As such, it should not require any special considerations.
+
 
 #### Single-node Deployments or MicroShift
 
-It should not have effect on Single-Node deployments.
+The defaulting of `fsGroupChangePolicy` and `seLinuxChangePolicy` should work same in single-node clusters as other type of clusters, because this feature is entirely controlled by `kube-apiserver` admission hook. We will ensure that, the e2e metrics cover single-node clusters and microsift too.
 
 ### Implementation Details/Notes/Constraints
 
