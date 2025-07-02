@@ -172,13 +172,18 @@ select monitors as the union of the 2 sets:
 
 OpenShift teams can decide if they want to adopt this feature. Without any
 change to a monitor, if a user picks a profile in the CMO config, things
-will work as they did before. When an OpenShift team wants to implement
-metrics collection profiles, they need to provide monitors for all profiles,
-making sure they do not provide monitors without the profile label. If a team
-implements metrics collection profiles they must ensure that all their monitors
-have the label `monitoring.openshift.io/collection-profile` set with the
-appropriate value, otherwise their component might end up being double scraped
-or not scraped at all.
+will work as they did before.
+
+When an OpenShift team wants to implement metrics collection profiles, they need
+to provide monitors for all profiles, making sure they do not provide monitors
+without the profile label. If a team implements metrics collection profiles they
+must ensure that all their monitors have the label
+`monitoring.openshift.io/collection-profile` set with the appropriate value,
+otherwise their component might end up being double scraped or not scraped at
+all.
+
+Once set up, the implementation within the operator that defines its behavior
+for such profiles will decide how it reconciles under such conditions.
 
 The goal is to support 2 profiles:
 
@@ -342,6 +347,20 @@ not. To aid teams with this effort the monitoring team will provide:
     however, things start becoming more complex and hard to maintain as we
     introduce new profiles to the mix. 
 
+- What are the requirements for introducing more profiles in the future?
+  - Profiles need service or pod monitors to accompany them into transitioning
+    the cluster's metrics targets' scope to the desired one. If a third profile
+    is planned, the monitoring team will need to make sure we have the adequate
+    set of monitors that will be deployed to create as much of a complete base
+    experience as possible, as expected from that profile, before introducing
+    it.
+  - These monitors will need to be created by the component owners. Once the
+    profile goes live, all teams that initially created (and other that will do
+    so later on) monitors for that profile will be able to support it for their
+    workloads should the cluster admin choose to use that profile. As such,
+    teams that do not have monitors for the newer profile will have their metric
+    targets excluded, until they deploy a corresponding monitor.
+
 ### Drawbacks
 
 - Extra CI cycles.
@@ -486,7 +505,9 @@ Supported on all topologies that deploy CMO.
 
 #### Hypershift / Hosted Control Planes
 
-N/A
+Note that HyperShift controls the scrape configuration of the control plane
+components, so the metrics collection profiles feature-set does not apply to HCP
+clusters.
 
 #### Standalone Clusters
 
