@@ -146,29 +146,26 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 
 ## Localhost-only
 
-| Port  | Process                                               | Protocol | Control-plane only | Owning Team   | Since | Notes                                     |
-|-------|-------------------------------------------------------|----------|--------------------|---------------|-------|-------------------------------------------|
-| 4180  | machine-config-daemon oauth-proxy                     |          |                    | node          |       |
-| 8797  | machine-config-daemon                                 |          |                    | node          | 4.0   | metrics                                   |
-| 9259  | cluster-cloud-controller-manager-operator             |          | yes                | cluster infra | 4.9   | healthz                                   |
-| 9260  | cluster-cloud-controller-manager-operator-config-sync |          | yes                | cluster infra | 4.10  | healthz                                   |
-| 9443  | kube-controller-manager                               |          |                    | workloads     |       | recovery-controller                       |
-| 9977  | etcd                                                  |          |                    | etcd          |       | ?                                         |
-| 10248 | kubelet                                               |          |                    | node          |       | healthz                                   |
-| 10300 | various CSI drivers                                   |          |                    | storage       | 4.6   | healthz                                   |
-| 10301 | various CSI drivers                                   |          |                    | storage       | 4.6   | healthz                                   |
-| 10302 | various CSI drivers                                   |          |                    | storage       | 4.7   | healthz                                   |
-| 10303 | various CSI drivers                                   |          |                    | storage       | 4.9   | healthz                                   |
-| 11443 | kube-scheduler                                        |          |                    | workloads     |       | recovery-controller                       |
-| 29102 | kube-proxy                                            | HTTP     | no                 | sdn           |       | metrics, third-party network plugins only |
-| 29103 | ovn-kubernetes                                        | HTTP     | no                 | sdn           |       | metrics                                   |
-| 29105 | ovn-kubernetes                                        | HTTP     | no                 | sdn           | 4.10  | metrics                                   |
-| 29108 | ovn-kubernetes                                        | HTTP     | yes                | sdn           | 4.14  | metrics                                   |
-| 29150 | metallb                                               |          |                    | sdn           | 4.9   | metrics                                   |
-| 29151 | metallb                                               |          |                    | sdn           | 4.9   | metrics                                   |
-| 29445 | haproxy                                               |          |                    | sdn           | 4.7   | on-prem internal loadbalancer, stats port |
-| 39300 | manager                                               |          |                    | sdn           | 4.12  | metrics, ingress node firewall            |
-| 39301 | daemon                                                |          |                    | sdn           | 4.12  | metrics, ingress node firewall            |
+| Port        | Process                                               | Protocol | Control-plane only | Owning Team   | Since | Notes                                     |
+|-------------|-------------------------------------------------------|----------|--------------------|---------------|-------|-------------------------------------------|
+| 4180        | machine-config-daemon oauth-proxy                     |          |                    | node          |       |                                           |
+| 8797        | machine-config-daemon                                 |          |                    | node          | 4.0   | metrics                                   |
+| 9259        | cluster-cloud-controller-manager-operator             |          | yes                | cluster infra | 4.9   | healthz                                   |
+| 9260        | cluster-cloud-controller-manager-operator-config-sync |          | yes                | cluster infra | 4.10  | healthz                                   |
+| 9443        | kube-controller-manager                               |          |                    | workloads     |       | recovery-controller                       |
+| 9977        | etcd                                                  |          |                    | etcd          |       | ?                                         |
+| 10248       | kubelet                                               |          |                    | node          |       | healthz                                   |
+| 10300-10313 | various CSI drivers                                   |          |                    | storage       | 4.6   | healthz                                   |
+| 11443       | kube-scheduler                                        |          |                    | workloads     |       | recovery-controller                       |
+| 29102       | kube-proxy                                            | HTTP     | no                 | sdn           |       | metrics, third-party network plugins only |
+| 29103       | ovn-kubernetes                                        | HTTP     | no                 | sdn           |       | metrics                                   |
+| 29105       | ovn-kubernetes                                        | HTTP     | no                 | sdn           | 4.10  | metrics                                   |
+| 29108       | ovn-kubernetes                                        | HTTP     | yes                | sdn           | 4.14  | metrics                                   |
+| 29150       | metallb                                               |          |                    | sdn           | 4.9   | metrics                                   |
+| 29151       | metallb                                               |          |                    | sdn           | 4.9   | metrics                                   |
+| 29445       | haproxy                                               |          |                    | sdn           | 4.7   | on-prem internal loadbalancer, stats port |
+| 39300       | manager                                               |          |                    | sdn           | 4.12  | metrics, ingress node firewall            |
+| 39301       | daemon                                                |          |                    | sdn           | 4.12  | metrics, ingress node firewall            |
 
 ## Previously allocated
 
