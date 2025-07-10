@@ -18,7 +18,7 @@ replaces:
 superseded-by:
 ---
 
-# Defaulting of fsgroupChangePolicy and selinuxChangePolicy for pods in a particular namespace
+# Defaulting of fsgroupChangePolicy and seLinuxChangePolicy for pods in a particular namespace
 
 ## Release Signoff Checklist
 
@@ -32,7 +32,7 @@ superseded-by:
 
 We want to allow Openshift admins to change `fsGroupChangePolicy` defaulting policies for certain namespaces so as pods in the given namespace can start faster.
 
-We also want to allow Openshift admins to set `selinuxChangePolicy` for certain namespaces, so as they can opt-out of potentially breaking changes being introduced via `SELinuxMount` feature upcoming in future k8s releases.
+We also want to allow Openshift admins to set `seLinuxChangePolicy` for certain namespaces, so as they can opt-out of potentially breaking changes being introduced via `SELinuxMount` feature upcoming in future k8s releases.
 
 ## Motivation
 
@@ -50,13 +50,13 @@ Having said that, `fsGroupChangePolicy` still defaults to `Always`, which means 
 
 But for most intent and purpose, it can be a reasonable default and hence this proposal allows admins to configure a namespace such that, all pods created in the namespace will default to `OnRootMismatch` policy if pod does not specify a policy of its own. If a pod specifies its own `fsGroupChangePolicy` that is still used as a default and will not be overridden.
 
-### Motivation for selinuxChangePolicy defaulting
+### Motivation for seLinuxChangePolicy defaulting
 
-https://github.com/kubernetes/enhancements/issues/1710 is bringing changes which can be breaking for certain pods which use different selinux contexts for same volume between different pods or same pod.
+https://github.com/kubernetes/enhancements/issues/1710 is bringing changes which can be breaking for certain pods which use different selinux contexts for same volume between different pods or same pod. Once `SELinuxMount` feature becomes generally available, whenever supported (i.e CSI driver supports it, which will be true for all CSI drivers OCP ships by default), volumes will be mounted with selinux mount options, rather than container-runtime recursively `chcon`ing the volume.
 
-This will speed up time spent while recursively changing selinux policies of a volume.
+Applying SELinux label as a mount option by default will eliminate time spent by container-runtime in recursively changing selinux labels of a volume. We have determined this to be mostly safe by observing usage patterns and metrics collected during beta process. Having said that, we also are aware that certain workloads will be broken with this default. Workloads that use same volume in multiple pods or mount same volume in different containers with different selinux policies *may* break.
 
-By allowing cluster-admins to set namespace default of `selinuxChangePolicy` we want to give control over how these changes are applied to Openshift clusters, without explicitly  changing pods themselves.
+By allowing cluster-admins to set namespace default of `seLinuxChangePolicy` we want to give control over how these changes are applied to Openshift clusters, without explicitly  changing pods themselves.
 
 ### User Stories
 
@@ -65,7 +65,7 @@ N/A
 ### Goals
 
 - Allow Openshift admins to configure per-namespace default of `fsGroupChangePolicy`.
-- Allow Openshift admins to configure per-namespace default of `selinuxChangePolicy`.
+- Allow Openshift admins to configure per-namespace default of `seLinuxChangePolicy`.
 
 ### Non-Goals
 
@@ -91,11 +91,11 @@ func getPodFsGroupChangePolicy(ns *corev1.Namespace) *api.PodFSGroupChangePolicy
 }
 ```
 
-### Allow admins to opt-in to `selinuxChangePolicy` via namespace label
+### Allow admins to opt-in to `seLinuxChangePolicy` via namespace label
 
-Similar to mechanism proposed above,  we propose to use label `storage.openshift.io/selinux-change-policy` to define namespace wide `selinuxChangePolicy` if none are specified in a pod.
+Similar to mechanism proposed above,  we propose to use label `storage.openshift.io/selinux-change-policy` to define namespace wide `seLinuxChangePolicy` if none are specified in a pod.
 
-### Setting of `fsGroupChangePolicy` and `selinuxChangePolicy` during admission
+### Setting of `fsGroupChangePolicy` and `seLinuxChangePolicy` during admission
 
 We propose to add a new admission hook (which will be eventually replaced with MAP) which will trigger the defautling logic, similar to how SCC matching hooks are triggered.
 
@@ -103,7 +103,9 @@ We propose to add a new admission hook (which will be eventually replaced with M
 
 We want to replace admission plugin with Mutating Admission Policy once the feature becomes generally available. Once Mutating Admission Policy becomes GA, we propose to replace the admission hook with MAP on the lines of https://docs.google.com/document/d/13xa7imyvQzok3IJ66mheGqemQGhkNySl-He1h1iRuSM/edit?usp=sharing
 
-This would serve similar purpose as admission hook we are carrying as go code.
+This would serve similar purpose as admission hook we are carrying as go code. We will also install corresponding VAP to prevent invalid values of the label when implementing this via Mutating Admission Policy.
+
+We expect the MAP and VAP to be static and installed by CVO.
 
 ### Proof of concept
 
@@ -112,7 +114,7 @@ We have already implemented a proof-of-concept https://github.com/openshift/kube
 
 ### Workflow Description
 
-Admins that want to set defaults of `fsGroupChangePolicy` and `selinuxChangePolicy` will set `storage.openshift.io/fsgroup-change-policy` or `storage.openshift.io/selinux-change-policy`
+Admins that want to set defaults of `fsGroupChangePolicy` and `seLinuxChangePolicy` will set `storage.openshift.io/fsgroup-change-policy` or `storage.openshift.io/selinux-change-policy`
 labels in corresponding namespaces.
 
 This will result in setting these fields in all pods in affected namespace if these fields are *not* already set.
