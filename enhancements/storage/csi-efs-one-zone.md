@@ -207,6 +207,22 @@ Manual test:
 There is no DevPreview / TechPreview for OLM based operators. The feature is enabled by presence of a second env. var. in the operator Subscription.
 We will need to disable it before the operator is released if One Zone volume support is not GA.
 
+### Dev Preview -> Tech Preview
+
+N/A
+
+### Tech Preview -> GA
+
+N/A
+
+### Removing a deprecated feature
+
+N/A
+
+## Upgrade / Downgrade Strategy
+
+The operator will follow generic OLM upgrade path, and we do not support downgrade of the operator.
+
 ## Version Skew Strategy
 
 There is a skew when the CSI driver is being upgraded. Until all CSI driver Pods are on the new version, the old Pods may not be able to mount One Zone volumes. Such skew is typically short, as it depends only on a DaemonSet upgrading its Pods.
