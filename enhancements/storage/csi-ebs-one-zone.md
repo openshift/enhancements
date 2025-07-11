@@ -98,7 +98,7 @@ I.e., no change in support of reginal EFS volumes.
             value: arn:aws:iam::269733383066:role/jsafrane-1-l2mqv-openshift-cluster-csi-drivers-node-aws-efs-clou
     ```
 3. OLM + CCO + AWS EFS CSI driver operator make sure that both roles are propagated into the AWS EFS CSI driver Pods. The CSI driver node pods will use the role + minted token to resolve One Zone volumes during mount.
-4 The cluster admin / users can use One Zone volumes.
+4. The cluster admin / users can use One Zone volumes.
 
 Without the steps 2+3, the cluster admin / user can still use regional EFS volumes as usual, i.e. with just the controller IAM role. When using an One Zone PVs, they will see odd errors like:
 ```
