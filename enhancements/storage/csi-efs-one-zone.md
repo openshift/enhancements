@@ -1,5 +1,5 @@
 ---
-title: csi-ebs-one-zone
+title: csi-efs-one-zone
 authors:
   - "@jsafrane"
 reviewers: # Include a comment about what domain expertise a reviewer is expected to bring and what area of the enhancement you expect them to focus on. For example: - "@networkguru, for networking aspects, please look at IP bootstrapping aspect"
