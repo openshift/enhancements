@@ -46,9 +46,7 @@ We want cluster admins to be able to use One Zone volumes in OpenShift.
 ### Non-Goals
 
 * Solve One Zone EFS volumes topology.
-  * **Dynamic provisioning of One Zone volumes in a multi-AZ cluster is unsupported.**  The CSI driver does not support topology and thus the scheduler does not know where the volumes are and will schedule pods to wrong zones. See [an upstream issue](https://github.com/kubernetes-sigs/aws-efs-csi-driver/issues/1153).
-  * Manual provisioning is supported, as long as the cluster admin provides `spec.nodeAffinity` in PVs, so the scheduler knows where the volumes are.
-  
+  * **Dynamic provisioning of One Zone volumes in a multi-AZ cluster is unsupported.**  The CSI driver does not support topology and thus the scheduler does not know where the volumes are and will schedule pods to wrong zones. See [an upstream issue](https://github.com/kubernetes-sigs/aws-efs-csi-driver/issues/1153). It is still possible to have a working application in multi-AZ cluster, however, it is left to the user to set the right node selectors to their apps.
 
 ## Proposal
 
