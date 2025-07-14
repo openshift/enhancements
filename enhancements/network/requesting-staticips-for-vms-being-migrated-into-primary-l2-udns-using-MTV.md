@@ -105,6 +105,8 @@ was created.
   without requiring a VM restart).
 - Importing VMs attached to IPv6 networks. More details in the
 [limitations](#current-limitations) section.
+- specifying anything DNS related. That will eventually be addressed on other
+  enhancements
 
 **NOTE:** implementing support on UDNs (achieving the namespace isolation
 use-case) is outside the scope for this feature, since BGP (which provides
@@ -407,26 +409,22 @@ in OVN-Kubernetes, and more CRs to reconcile.
 
 ### Implementation Details/Notes/Constraints
 
-N/A
+The implementation details are already covered in the [Proposal](#proposal) section.
 
 ### Risks and Mitigations
 
-N/A
+All identified risks have been mitigated in the [Proposal](#proposal) section.
 
 ### Drawbacks
 
-The scope of this feature was limited to VM importing, which is what customers
-are asking for. Still, having had more customer / stake-holder insight would
-have helped to understand if a bigger scope would address more customer
-demands. 
-
-For instance, we do not know:
-- is this feature only for VMs ?
-- is this feature only about importing VMs ? Should we allow creating new VMs
-  with dedicated MAC / IP / gateway requests ?
-- are the end users (admins) after a centralized IP management alternative ?
-  Do they want to have a single place to check their network address
-  assignments ?
+The scope of this feature was limited to VM importing, which is what end users
+are asking for urgently. As first part of doing this, we plan to support MTV as
+the end user that can request for static network configurations on OpenShift
+during VM migration into OpenShift. We know its only a matter of time before
+someone asks us to also have a proper user facing API to do these also not just
+for migrated VMs but also for new VMs because of some corner case method of
+deployment. But as of now we will go with requirements that are clearly known
+and anything else will be added as incremental features on top.
 
 ## Alternatives (Not Implemented)
 
