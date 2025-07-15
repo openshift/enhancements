@@ -1,5 +1,5 @@
 ---
-title: optional-vips-with-extlb
+title: optional-on-prem-dns-records
 authors:
   - bnemec
 reviewers:
@@ -20,13 +20,12 @@ superseded-by:
   - NA
 ---
 
-# Optional VIPs with External Loadbalancer
+# Optional On-Prem DNS Records
 
 ## Summary
 
-Stop requiring VIP configuration when an external loadbalancer is in use.
-This will allow external loadbalancer customers to use their own DNS as well,
-effectively disabling most of the internal DNS and LB infrastructure.
+Allow deployers to disable the internal DNS records for api, api-int, and
+ingress when external loadbalancers are used.
 
 ## Motivation
 
@@ -63,10 +62,10 @@ we're not doing this:
 
 ## Proposal
 
-When an external loadbalancer is configured we will stop requiring VIPs to be
-specified for creating DNS records. If VIPs are not provided, we will not
-configure any DNS records for the api, api-int, and ingress addresses. The
-deployer will then be wholly responsible for providing those records.
+Add a configuration option for the internal DNS records so they can be disabled
+when an external loadbalancer is in use. When this configuration is used, the
+deployer will be wholly responsible for providing loadbalancer and DNS services
+to the cluster.
 
 Note that api and ingress are already required external records, so in reality
 the only addition here is api-int.
@@ -75,11 +74,14 @@ the only addition here is api-int.
 
 The deployer will configure external DNS and loadbalancing, similar to how
 they would for a UPI deployment. They will then deploy an IPI cluster with
-the loadbalancer set to UserManaged and no VIPs configured.
+the loadbalancer set to UserManaged and DNS set to disabled.
 
 ### API Extensions
 
-The VIP fields will no longer be mandatory for all on-prem IPI deployments.
+A new field will be added to control whether DNS records are deployed.
+
+[Existing API](https://github.com/openshift/api/blob/674ad74beffcbdf6aa7a577bf23a269c24f92fe8/config/v1/types_infrastructure.go#L964)
+[Existing Validations](https://github.com/openshift/installer/blob/97030df02861425054b980db72d31d36de1fcb20/pkg/types/validation/installconfig.go#L953)
 
 ### Topology Considerations
 
@@ -100,17 +102,16 @@ reduce resources requirements slightly.
 
 ### Implementation Details/Notes/Constraints
 
-A configuration to use this new functionality would look like the following:
+An install-config snippet to use this new functionality would look like the
+following:
 
 ```yaml
 platform:
   baremetal:
     loadBalancer:
       type: UserManaged
+    dnsRecordsEnabled: false
 ```
-
-Note the lack of the apiVIPs and ingressVIPs fields, which previously would
-have been mandatory with this configuration.
 
 ### Risks and Mitigations
 
@@ -127,7 +128,28 @@ is already impossibly large so it won't move the needle noticeably though.
 
 ## Alternatives (Not Implemented)
 
-Two other options were considered, but rejected for the following reasons:
+There is an alternative/variation we should consider here:
+
+* Move these options to the networking object. The number of platforms using
+  the internal loadbalancer and DNS infrastructure is increasing all the time,
+  and at this point it is in use for more platforms than it isn't. Making these
+  options platform-independent would significantly reduce the duplication
+  across the different infrastructure objects.
+
+  While this may not be strictly required for this specific feature, if we're
+  going to move these options it should probably happen before we add more to
+  the existing location as that will just make it more difficult to change
+  later.
+
+Other options were considered, but rejected for the following reasons:
+
+* Add another type to the existing loadbalancer setting that would disable
+  both the loadbalancer and DNS services. This was not favored because the
+  DNS infrastructure is distinct from the loadbalancer and it would overload
+  the meaning of the loadbalancer setting. Additionally, it could get quite
+  messy if we add any more options to either the loadbalancer or DNS. We
+  would have to enumerate every possible combination of options. With only
+  two per service it wouldn't be too bad, but it could quickly escalate.
 
 * Support multiple VIPs in the coredns configuration. This would have
   significantly increased the complexity of our coredns configuration
@@ -143,17 +165,7 @@ Two other options were considered, but rejected for the following reasons:
 
 ## Open Questions [optional]
 
-How will the validation for these fields work? Currently the VIP fields are
-always required, but with this feature they will only be mandatory if the
-external loadbalancer option is not set. I don't have enough experience with
-the API to know how that will work. Worst-case, we can add a validation to
-the installer though.
-
-How does this interact with the existing VSphere UPI configuration? The VIPs
-are already optional on that platform (which is how UPI is deployed), so we
-may need to rework some logic around that to account for the loadbalancer
-parameter as well. Alternatively we can just not support this on VSphere,
-but that may be undesirable.
+What does tech preview look like for this?
 
 ## Test Plan
 
@@ -163,8 +175,7 @@ shouldn't be difficult.
 
 ## Graduation Criteria
 
-This is a variation on an existing supported deployment scenario, so we don't
-plan to pursue a graduation process. It will be GA from initial implementation.
+TBD
 
 ### Dev Preview -> Tech Preview
 
@@ -189,9 +200,7 @@ There will also be no version skew.
 
 ## Operational Aspects of API Extensions
 
-It will now be possible for the VIP fields in the on-prem Infrastructure
-record to be empty. We largely already handle this because of VSphere
-UPI, but it may now happen in circumstances where it previously wouldn't.
+Because they can only be set at deploy-time I don't expect a lot of impact here.
 
 ## Support Procedures
 
