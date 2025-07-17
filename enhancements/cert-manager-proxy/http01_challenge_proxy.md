@@ -43,7 +43,7 @@ To address this gap, a small proxy was developed. This proxy runs on the cluster
 - **Proxy Code**: [GitHub Repository](https://github.com/mvazquezc/cert-mgr-http01-proxy/tree/main)
 - **Deployment Manifest**: [Manifest Link](https://github.com/mvazquezc/cert-mgr-http01-proxy/blob/main/manifests/deploy-in-ocp.yaml)
 
-This enhancement aims to provide a robust solution for managing certificates for the API endpoint in baremetal environments.
+This enhancement aims to provide a robust solution for managing certificates for the API endpoint, particularly for baremetal customers using non cloud-ready DNS servers. Cloud providers typically offer cloud provider DNS services that integrate directly with cert-manager for DNS01 challenges, but baremetal environments often lack these integrations and rely on HTTP01 challenges instead.
 
 ### User Stories
 
@@ -66,41 +66,96 @@ This enhancement aims to provide a robust solution for managing certificates for
 
 ## Proposal
 
-The HTTP01 Challenge Proxy will be implemented via DaemonSet running on the cluster. It will:
+The HTTP01 Challenge Proxy will be implemented as a **core component of the OpenShift payload** and managed by an existing cluster operator, specifically the **cluster-kube-apiserver-operator**, which already manages API endpoint configuration and lifecycle.
 
-- Redirect HTTP traffic from the API endpoint (`api.cluster.example.com`) on port 80 to the OpenShift Ingress Routers.
-- Use `nftables` for traffic redirection from `API:80` to `PROXY:8888`.
-- Be deployed using a manifest that includes all necessary configurations.
+**Deployment Architecture:**
+- **Core Integration**: This feature is part of the core OpenShift distribution, not an optional OLM-installable operator
+- **Operator Management**: The cluster-kube-apiserver-operator will deploy and manage the proxy DaemonSet
+- **Conditional Deployment**: The proxy is only deployed when `APIServer.spec.http01ChallengeProxy.enabled = true`
+- **Platform Targeting**: Limited to baremetal platforms where HTTP01 challenges are needed for API certificates
+
+**Operational Responsibilities:**
+- Deploy and manage a DaemonSet running on control plane nodes that may host the API VIP
+- **Traffic Filtering**: Only redirect HTTP traffic destined for `<API_VIP>/.well-known/acme-challenge/*` paths (ACME HTTP01 challenge traffic)
+- **Path Validation**: Use path-based filtering rather than SNI (Server Name Indication) to identify HTTP01 challenge requests
+- Redirect filtered HTTP traffic from the API endpoint (`api.cluster.example.com`) on port 80 to the OpenShift Ingress Routers  
+- Use `nftables` for traffic redirection from `API:80` to `PROXY:8888`
+- Handle lifecycle management, upgrades, and configuration of the proxy
 
 The proxy will ensure compatibility with various OCP topologies, including SNO, MNO, and Compact clusters, addressing the challenges of HTTP01 validation for the API endpoint.
 
 ### API Extensions
 
-A new CR type may be created and can be applied to clusters.  This new typed will be stored in the [openshift/api](https://github.com/openshift/api) repo.
+Rather than creating a new CRD, the HTTP01 Challenge Proxy configuration will be added as a new field to the existing **APIServer** CRD in the [openshift/api](https://github.com/openshift/api) repo. This approach aligns with the pattern used by other API server features like audit, encryption, and TLS configuration.
 
-Potential Example of a CR:
+The configuration will be added to the `APIServerSpec` struct and managed by the cluster-kube-apiserver-operator as part of its normal reconciliation loop. Since the APIServer CRD is already a singleton (named "cluster"), no additional enforcement mechanisms are needed.
 
+**API Changes to config/v1/types_apiserver.go:**
+
+```go
+type APIServerSpec struct {
+    // ... existing fields ...
+    
+    // http01ChallengeProxy contains configuration for the HTTP01 challenge proxy
+    // that redirects traffic from the API endpoint on port 80 to ingress routers.
+    // This enables cert-manager to perform HTTP01 ACME challenges for API endpoint certificates.
+    // +optional
+    HTTP01ChallengeProxy *HTTP01ChallengeProxySpec `json:"http01ChallengeProxy,omitempty"`
+}
+
+type HTTP01ChallengeProxySpec struct {
+    // enabled controls whether the HTTP01 challenge proxy is active.
+    // When enabled, the proxy redirects HTTP traffic from API:80 to ingress routers.
+    // +optional
+    Enabled bool `json:"enabled"`
+    
+    // internalPort specifies the internal port used by the proxy service.
+    // +kubebuilder:validation:Minimum=1024
+    // +kubebuilder:validation:Maximum=65535
+    // +optional
+    InternalPort int32 `json:"internalPort,omitempty"`  // default: 8888
+}
 ```
-apiVersion: network.openshift.io/v1alpha1
-kind: HTTP01ChallengeProxy
+
+**Example Configuration:**
+
+```yaml
+apiVersion: config.openshift.io/v1
+kind: APIServer
 metadata:
-  name: example-http01challengeproxy
+  name: cluster
 spec:
-  # Add fields here to specify the desired state of the HTTP01ChallengeProxy
-  # Default port is 8888.
-  internalport: 8888
+  # existing fields...
+  http01ChallengeProxy:
+    enabled: true
+    internalPort: 8888
 status:
+  # existing status fields...
   conditions:
-    - type: Ready
+    - type: HTTP01ChallengeProxyReady
       status: "True"
       lastTransitionTime: "2025-05-12T00:00:00Z"
       reason: "Initialized"
       message: "HTTP01ChallengeProxy is ready"
 ```
+    message: "Only one HTTP01ChallengeProxy instance named 'cluster' is allowed per cluster"
+```
+
+This design ensures that:
+- Only one `HTTP01ChallengeProxy` instance can exist cluster-wide
+- The instance must be named `cluster` to enforce the singleton pattern
+- The ValidatingAdmissionPolicy prevents creation of additional instances
+- The cluster-kube-apiserver-operator manages this singleton instance
 
 ### Implementation Details/Notes/Constraints
 
-- The proxy will be deployed as a DaemonSet to ensure it runs on all nodes which may host the API VIP in the cluster.
+- The **cluster-kube-apiserver-operator** will be responsible for deploying and managing the proxy as a DaemonSet on control plane nodes that may host the API VIP.
+- **Deployment Conditions**: The operator deploys the proxy DaemonSet only when:
+  - `APIServer.spec.http01ChallengeProxy.enabled = true` is set in the cluster's APIServer configuration
+  - The cluster is running on a baremetal or supported platform (not cloud platforms with integrated DNS01 support)
+  - The operator validates that nftables/netfilter subsystem is available on target nodes
+- **Component Integration**: The operator will integrate the proxy lifecycle with existing API server management, ensuring consistent behavior and upgrade/downgrade strategies.
+- **Singleton Enforcement**: Only one proxy configuration per cluster is supported, enforced by the singleton nature of the APIServer CRD.
 - When the proxy starts, it checks which version of OCP it's running on. If it's 4.17+ it will proceed to configure MCO restart the nftables service rather than reboot the node when the file /etc/sysconfig/nftables.conf is modified. After that it creates the MC that configures the file + service.
 - The implementation relies on `nftables` for traffic redirection, which must be supported and enabled on the cluster nodes.
 - The demo deployment manifest for the proxy is available [here](https://github.com/mvazquezc/cert-mgr-http01-proxy/blob/main/manifests/deploy-in-ocp.yaml).
@@ -122,10 +177,17 @@ status:
 
 ### Design Details
 
-- **Proxy Deployment**: The proxy will be deployed using a Kubernetes DaemonSet. The daemonset will implement an nftable rule via pod that runs to completion.
+- **Operator Integration**: The cluster-kube-apiserver-operator will manage the complete lifecycle of the HTTP01 challenge proxy, including deployment, configuration, upgrades, and removal.
+- **Proxy Deployment**: The operator will deploy the proxy feature as a DaemonSet on control plane nodes. The daemonset will implement nftable rules via pods that run to completion.
 - **Traffic Redirection**: This will use `nftables` rules to redirect incoming traffic on `API:80` to `PROXY:8888`.
-- **Security**: The proxy will only handle HTTP traffic for the HTTP01 challenge and will not interfere with other traffic or services.
+- **Security**: The proxy implements selective traffic filtering, only handling HTTP requests with paths matching `/.well-known/acme-challenge/*` destined for the API VIP. 
+  - **ACME Traffic**: Requests to `<API_VIP>/.well-known/acme-challenge/*` are redirected to the ingress routers for certificate validation.
+    - **Valid ACME Data**: Properly formatted challenge requests are forwarded to cert-manager challenge pods for validation.
+    - **Invalid ACME Data**: Malformed challenge requests to the correct path are still forwarded to cert-manager, which handles the validation failure (same behavior as without the proxy).
+  - **Non-ACME Traffic**: HTTP requests to the API VIP on port 80 with other paths receive a **403 Forbidden** response with the message "Only /.well-known/acme-challenge/* is allowed".
+  - **HTTPS Traffic**: All HTTPS traffic (port 443) to the API endpoint continues to function normally and is unaffected by the proxy.
 - **Monitoring**: Logs and metrics will be exposed to help administrators monitor the proxy's behavior and troubleshoot issues.
+- **Configuration Management**: The operator will watch the `HTTP01ChallengeProxy` CR and reconcile the proxy state accordingly.
 
 ### Drawbacks
 
@@ -134,6 +196,10 @@ status:
 3. **Complexity**: The solution adds another component to the cluster, which may increase operational complexity.
 
 ## Alternatives (Not Implemented)
+
+**Important Note**: The alternatives listed below address **certificate management at scale** (how to deploy and manage cert-manager across multiple clusters), which is a different problem than what this enhancement solves. **All of these alternatives would still encounter the same fundamental gap** that the HTTP01 Challenge Proxy addresses: **the inability to complete HTTP01 challenges for API endpoints that are not exposed via OpenShift Ingress**.
+
+Regardless of which certificate management approach is chosen (centralized, distributed, hub-and-spoke, etc.), the underlying HTTP01 challenge mechanism for API endpoints would still fail without the traffic redirection solution provided by this enhancement. **The HTTP01 proxy is complementary to these approaches, not competing with them.**
 
 The alternatives were actually implemented if you look through the presentation [slides](https://docs.google.com/presentation/d/1mJ1pnsPiEwb-U5lHwhM2UkyRmkkLeYxj3cfE4F7dOx0/edit#slide=id.g547716335e_0_260) but the approaches are all listed below.
 
@@ -176,10 +242,11 @@ More information about the investigation can be found [here](https://docs.google
 ### Workflow Description
 
 1. Cert Manager initiates an HTTP01 challenge for the API endpoint (`api.cluster.example.com`).
-2. The HTTP01 challenge request is directed to the API VIP on port 80.
-3. The HTTP01 Challenge Proxy intercepts the traffic using `nftables` and redirects it to the proxy pod on port 8888.
-4. The proxy pod forwards the request to the OpenShift Ingress Router, which serves the challenge response from the Cert Manager challenge pod.
-5. The ACME CA validates the challenge and issues the certificate for the API endpoint.
+2. The HTTP01 challenge request is directed to the API VIP on port 80 with the path `/.well-known/acme-challenge/<token>`.
+3. **Traffic Identification**: The HTTP01 Challenge Proxy identifies this as ACME challenge traffic by examining the destination path (`/.well-known/acme-challenge/*`) rather than using SNI validation.
+4. **Selective Redirection**: Only traffic matching the ACME challenge path pattern is intercepted using `nftables` and redirected to the proxy pod on port 8888. Other HTTP requests to the API VIP on port 80 receive a **403 Forbidden** response.
+5. The proxy pod forwards the filtered request to the OpenShift Ingress Router, which serves the challenge response from the Cert Manager challenge pod.
+6. The ACME CA validates the challenge and issues the certificate for the API endpoint.
 
 ### Topology Considerations
 
