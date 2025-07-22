@@ -1,5 +1,5 @@
 ---
-title: http01-challenge-cert-manager-proxy
+title: http01_challenge_proxy
 authors:
   - "@sebrandon1"
 reviewers:
@@ -71,7 +71,7 @@ The HTTP01 Challenge Proxy will be implemented as a **core component of the Open
 **Deployment Architecture:**
 - **Core Integration**: This feature is part of the core OpenShift distribution, not an optional OLM-installable operator
 - **Operator Management**: The cluster-kube-apiserver-operator will deploy and manage the proxy DaemonSet
-- **Conditional Deployment**: The proxy is only deployed when `APIServer.spec.http01ChallengeProxy.enabled = true`
+- **Conditional Deployment**: The proxy is only deployed when `APIServer.spec.http01ChallengeProxy.mode` is set to `DefaultDeployment` or `CustomDeployment`
 - **Platform Targeting**: Limited to baremetal platforms where HTTP01 challenges are needed for API certificates
 
 **Operational Responsibilities:**
@@ -104,11 +104,20 @@ type APIServerSpec struct {
 }
 
 type HTTP01ChallengeProxySpec struct {
-    // enabled controls whether the HTTP01 challenge proxy is active.
-    // When enabled, the proxy redirects HTTP traffic from API:80 to ingress routers.
-    // +optional
-    Enabled bool `json:"enabled"`
+    // mode controls whether the HTTP01 challenge proxy is active and how it should be deployed.
+    // DefaultDeployment enables the proxy with default configuration.
+    // CustomDeployment enables the proxy with user-specified configuration.
+    // +kubebuilder:validation:Enum="";DefaultDeployment;CustomDeployment
+    // +kubebuilder:validation:Required
+    Mode string `json:"mode"`
     
+    // customDeployment contains configuration options when mode is CustomDeployment.
+    // This field is only valid when mode is CustomDeployment.
+    // +optional
+    CustomDeployment *HTTP01ChallengeProxyCustomDeploymentSpec `json:"customDeployment,omitempty"`
+}
+
+type HTTP01ChallengeProxyCustomDeploymentSpec struct {
     // internalPort specifies the internal port used by the proxy service.
     // +kubebuilder:validation:Minimum=1024
     // +kubebuilder:validation:Maximum=65535
@@ -116,6 +125,14 @@ type HTTP01ChallengeProxySpec struct {
     InternalPort int32 `json:"internalPort,omitempty"`  // default: 8888
 }
 ```
+
+**API Design Notes:**
+
+This discriminated union approach provides several benefits:
+- **Future extensibility**: Additional deployment modes can be added (e.g., "HighAvailabilityDeployment")
+- **Mode-specific configuration**: Each mode can have its own configuration options
+- **Clear API semantics**: Configuration is only allowed under specific modes of operation
+- **Required mode**: Since the parent field is optional, the mode field is required when the parent is specified
 
 **Example Configuration:**
 
@@ -127,8 +144,18 @@ metadata:
 spec:
   # existing fields...
   http01ChallengeProxy:
-    enabled: true
-    internalPort: 8888
+    mode: DefaultDeployment
+---
+apiVersion: config.openshift.io/v1
+kind: APIServer
+metadata:
+  name: cluster
+spec:
+  # existing fields...
+  http01ChallengeProxy:
+    mode: CustomDeployment
+    customDeployment:
+      internalPort: 8888
 status:
   # existing status fields...
   conditions:
@@ -138,30 +165,28 @@ status:
       reason: "Initialized"
       message: "HTTP01ChallengeProxy is ready"
 ```
-    message: "Only one HTTP01ChallengeProxy instance named 'cluster' is allowed per cluster"
-```
 
 This design ensures that:
-- Only one `HTTP01ChallengeProxy` instance can exist cluster-wide
-- The instance must be named `cluster` to enforce the singleton pattern
-- The ValidatingAdmissionPolicy prevents creation of additional instances
-- The cluster-kube-apiserver-operator manages this singleton instance
+- Only one proxy configuration can exist cluster-wide (enforced by the singleton nature of the APIServer CRD)
+- The cluster-kube-apiserver-operator manages this configuration as part of the existing APIServer resource
+
+**Note on Validation**: Unlike designs that use separate CRDs, this approach does not require a ValidatingAdmissionPolicy (VAP) to enforce singleton behavior. The APIServer CRD is inherently a cluster singleton resource (there is exactly one APIServer resource named "cluster" per cluster), which naturally prevents multiple configurations from existing.
 
 ### Implementation Details/Notes/Constraints
 
 - The **cluster-kube-apiserver-operator** will be responsible for deploying and managing the proxy as a DaemonSet on control plane nodes that may host the API VIP.
 - **Deployment Conditions**: The operator deploys the proxy DaemonSet only when:
-  - `APIServer.spec.http01ChallengeProxy.enabled = true` is set in the cluster's APIServer configuration
+  - `APIServer.spec.http01ChallengeProxy.mode` is set to `DefaultDeployment` or `CustomDeployment` in the cluster's APIServer configuration
   - The cluster is running on a baremetal or supported platform (not cloud platforms with integrated DNS01 support)
   - The operator validates that nftables/netfilter subsystem is available on target nodes
 - **Component Integration**: The operator will integrate the proxy lifecycle with existing API server management, ensuring consistent behavior and upgrade/downgrade strategies.
 - **Singleton Enforcement**: Only one proxy configuration per cluster is supported, enforced by the singleton nature of the APIServer CRD.
-- When the proxy starts, it checks which version of OCP it's running on. If it's 4.17+ it will proceed to configure MCO restart the nftables service rather than reboot the node when the file /etc/sysconfig/nftables.conf is modified. After that it creates the MC that configures the file + service.
+- **MCO Integration**: The cluster-kube-apiserver-operator handles MachineConfig creation for nftables configuration. Since this feature will only be available in OCP 4.20+, the operator can safely assume modern MCO capabilities and configure the nftables service to restart rather than reboot nodes when `/etc/sysconfig/nftables.conf` is modified.
 - The implementation relies on `nftables` for traffic redirection, which must be supported and enabled on the cluster nodes.
 - The demo deployment manifest for the proxy is available [here](https://github.com/mvazquezc/cert-mgr-http01-proxy/blob/main/manifests/deploy-in-ocp.yaml).
 - An example implementation can be found in this [repository](https://github.com/mvazquezc/cert-mgr-http01-proxy/tree/main).
-- The proxy will listen on a configurable port (default: 8888) for HTTP01 challenge traffic. The port can be set via the CR to avoid conflicts with other workloads that may require port 8888 on the host.
-- 8888 was chosen as a reasonable default because it is commonly unused, but clusters with a conflict can override this value in the CR.
+- The proxy will listen on a configurable port (default: 8888) for HTTP01 challenge traffic. The port can be set via the APIServer CR's `http01ChallengeProxy.customDeployment.internalPort` field to avoid conflicts with other workloads that may require port 8888 on the host.
+- 8888 was chosen as a reasonable default because it is commonly unused, but clusters with a conflict can override this value in the APIServer configuration.
 - The [host port registry](https://github.com/openshift/enhancements/blob/master/dev-guide/host-port-registry.md) should be updated to reflect the use of port 80 on apiServer nodes when this feature is enabled, to avoid conflicts and ensure proper documentation of port usage.
 - The priority (order) of the `nftables` entries relative to other services should be coordinated with the OpenShift networking team to ensure it follows established precedent and does not interfere with other networking rules.
 
@@ -177,17 +202,19 @@ This design ensures that:
 
 ### Design Details
 
+**Scope**: This proxy **only** affects external HTTP traffic (port 80) directed to the API VIP that resolves `api.cluster.example.com`. Internal cluster communication, service discovery, and HTTPS traffic (port 443) are completely unaffected.
+
 - **Operator Integration**: The cluster-kube-apiserver-operator will manage the complete lifecycle of the HTTP01 challenge proxy, including deployment, configuration, upgrades, and removal.
 - **Proxy Deployment**: The operator will deploy the proxy feature as a DaemonSet on control plane nodes. The daemonset will implement nftable rules via pods that run to completion.
-- **Traffic Redirection**: This will use `nftables` rules to redirect incoming traffic on `API:80` to `PROXY:8888`.
-- **Security**: The proxy implements selective traffic filtering, only handling HTTP requests with paths matching `/.well-known/acme-challenge/*` destined for the API VIP. 
+- **Traffic Redirection**: This will use `nftables` rules to redirect incoming external HTTP traffic on `API:80` to `PROXY:8888`.
+- **Security**: The proxy implements selective traffic filtering, only handling external HTTP requests with paths matching `/.well-known/acme-challenge/*` destined for the API VIP. 
   - **ACME Traffic**: Requests to `<API_VIP>/.well-known/acme-challenge/*` are redirected to the ingress routers for certificate validation.
     - **Valid ACME Data**: Properly formatted challenge requests are forwarded to cert-manager challenge pods for validation.
     - **Invalid ACME Data**: Malformed challenge requests to the correct path are still forwarded to cert-manager, which handles the validation failure (same behavior as without the proxy).
-  - **Non-ACME Traffic**: HTTP requests to the API VIP on port 80 with other paths receive a **403 Forbidden** response with the message "Only /.well-known/acme-challenge/* is allowed".
+  - **Non-ACME Traffic**: HTTP requests to the API VIP on port 80 with other paths receive a **400 Bad Request** response with the message "Only /.well-known/acme-challenge/* is allowed".
   - **HTTPS Traffic**: All HTTPS traffic (port 443) to the API endpoint continues to function normally and is unaffected by the proxy.
 - **Monitoring**: Logs and metrics will be exposed to help administrators monitor the proxy's behavior and troubleshoot issues.
-- **Configuration Management**: The operator will watch the `HTTP01ChallengeProxy` CR and reconcile the proxy state accordingly.
+- **Configuration Management**: The operator will watch the APIServer CR for `http01ChallengeProxy` configuration changes and reconcile the proxy state accordingly.
 
 ### Drawbacks
 
@@ -227,6 +254,8 @@ More information about the investigation can be found [here](https://docs.google
    - **Detection**: Configure alerts for expiring certificates. Warning alerts should be triggered when certificates are close to expiry, and critical alerts when certificates have expired. This allows administrators to take action before cluster API access is impacted.
 
 2. **Traffic Interference**: The proxy could inadvertently interfere with other traffic. Mitigation: Carefully scope the proxy's functionality to only handle HTTP01 challenge traffic.
+
+**General Mitigation**: For both risks above, administrators can disable the HTTP01 challenge proxy entirely by removing the `http01ChallengeProxy` configuration from the APIServer CR or setting the `mode` to an empty string. This will disable the proxy functionality and revert to standard API endpoint behavior, though HTTP01 challenges for the API endpoint will no longer be possible.
 
 ### Implementation History
 
@@ -338,7 +367,7 @@ If the proxy DaemonSet enters a `CrashLoopBackOff` state, HTTP01 challenges for 
 
 - **How to disable**: 
   - Remove or scale down the proxy DaemonSet.
-  - Remove or update the associated CR (if using a CRD).
+  - Update the APIServer CR to set `http01ChallengeProxy.mode` to an empty string or remove the `http01ChallengeProxy` section entirely.
   - Remove any MachineConfig or configuration that enables the proxy.
 - **Consequences**:
   - HTTP01 challenges for the API endpoint will not be possible.
@@ -347,14 +376,18 @@ If the proxy DaemonSet enters a `CrashLoopBackOff` state, HTTP01 challenges for 
 
 ### Impact on Existing, Running Workloads
 
+**Important**: The proxy only affects external API access via the public FQDN (`api.cluster.example.com`) on port 80. Internal cluster communication (e.g., operator pods, system components, pod-to-API server communication via `kubernetes.default.svc.cluster.local` or internal service IPs) is completely unaffected.
+
 - Existing workloads and API traffic will continue to function as long as the API certificate is valid.
-- If the API certificate expires and is not renewed, clients may fail to connect to the API server due to certificate errors.
-- No direct impact on running pods or services, unless they rely on the API endpoint with a valid certificate.
+- If the external API certificate expires and is not renewed, external clients may fail to connect to the API server due to certificate errors.
+- No direct impact on running pods or services, as they typically use internal DNS endpoints and service discovery.
+- Internal cluster operations (operators, controllers, etc.) continue to function normally as they do not use the external API endpoint.
 
 ### Impact on Newly Created Workloads
 
-- New certificate requests for the API endpoint will fail.
-- New clusters or workloads that require a valid API certificate for bootstrap or integration may fail to initialize.
+- New certificate requests for the external API endpoint (`api.cluster.example.com`) will fail.
+- External tools or workloads that specifically require a valid external API certificate for integration may fail to initialize.
+- Internal cluster operations and pod scheduling continue normally as they use internal service discovery.
 
 ### Graceful Failure and Recovery
 
