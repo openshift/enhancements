@@ -8,10 +8,13 @@ reviewers:
   - "@bfournie"
   - "@rwsu"
   - "@pawanpinjarkar"
+  - "@yuqi-zhang"
+  - "@mrunalp"
+  - "@sdodson"
 approvers:
   - "@zaneb"
 api-approvers:
-  - TBD
+  - "@joelspeed"
 creation-date: 2025-07-07
 last-updated: 2025-07-07
 tracking-link: 
