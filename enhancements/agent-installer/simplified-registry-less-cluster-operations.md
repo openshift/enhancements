@@ -68,8 +68,6 @@ hosting an external registry made it impractical.
 * Offer a simplified installation experience for disconnected environments by
   leveraging existing tools like the Agent-Based Installer, Assisted Installer
   and OpenShift Appliance
-* Allow the user to optionally install/upgrade a predefined subset of OLM
-  operators
 
 ### Non-Goals
 
@@ -81,10 +79,10 @@ From a very high-level perspective, this proposal consists of building and
 releasing an extended RHCOS live ISO that includes a full OCP release payload
 (with a selected subset of OLM operators) and all the necessary
 scripts/services to support the various operations. In general a local registry
-service will be running on every node, serving the OCP release payload included
-in the ISO. Also, a new custom resource - managed by the Machine Config
-Operator (MCO) - will be introduced to control and manage the internal release
-payload added to the system.
+service will be running on every control plane node, serving the OCP release
+payload included in the ISO. Also, a new custom resource - managed by the 
+Machine Config Operator (MCO) - will be introduced to control and manage the
+internal release payload added to the system.
 
 Since each cluster operation has its own requirements and characteristics, the
 following paragraphs will provide more specific details for each different
@@ -116,20 +114,20 @@ ISO (bootstrap phase).
 In addition to the usual ABI services configured to orchestrate the
 installation, a local registry service will be created on each node, and the
 content of the release payload from the mounted ISO will be used as its
-backend source. At this stage this a required step, since the allocated live
-root filesystem will not be usually sufficient to contain also a complete OCP
-release payload.
+backend source.
 During this early phase, the main responsibility of the local registry will
 be to serve any image pull request originating from the local services running
-on the same node - and in particular, on the rendezvous node, to support the
-execution of the initial static pods for the temporary bootstrap control plane.
+on the same node.
 
 #### Installation phase (after the first reboot)
 
 During the installation of each control plane node, the contents of the OCP
-release payload will also need to be copied from the ISO to the node's disk -
-after the OS disk writing step - so that it remains available not only after
-the first reboot, but also once the installation is complete. [Assisted Service](https://github.com/openshift/assisted-service/)
+release payload will be copied from the ISO to the node's disk (in the format
+of the registry's 'filesystem' backend) after the OS disk writing step - so
+that it remains available not only after the first reboot, but also once the
+installation is complete. Also the registry container image itself will be
+copied in the node additional image store for podman.
+[Assisted Service](https://github.com/openshift/assisted-service/)
 and [Assisted Installer](https://github.com/openshift/assisted-installer)
 will be enhanced accordingly to take care of this step, and to ensure it
 will be properly monitored during the installation process.
@@ -175,7 +173,7 @@ necessary to run the registry on a host network port accessible from outside
 the cluster. In addition to that, the registry will be secured via a
 pull-secret. Users will be required to add this port to the api-int load
 balancer (when it is external to the cluster) and open firewalls to allow
-this port to be accessible from all the nodes.
+this port to be accessible from all the nodes, as well as the registry port.
 
 ### Workflow Description
 
@@ -245,10 +243,10 @@ control planes nodes. In particular, it will be used for:
 This is an example of how the CR will look like:
 
 ```
-apiVersion: releases.openshift.io/v1
+apiVersion: releases.openshift.io/v1alpha1
 kind: InternalReleaseImage
 metadata:
-  name: openshift-releases
+  name: cluster
 spec:
   releases:
     - "quay.io/openshift-release-dev/ocp-release:4.18.0-x86_64"
