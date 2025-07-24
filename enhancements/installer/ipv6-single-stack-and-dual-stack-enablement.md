@@ -37,7 +37,7 @@ in AWS and GCP.
 
 ### AWS
 
-TODO
+Assignee: tthvo, sadasu
 
 ### Azure
 
