@@ -44,7 +44,7 @@ included in the RHCOS stream, which is the canonical source
 for images. By including marketplace images in the RHCOS stream,
  we will realize multiple benefits:
 
-* Improved user experience for paid marektplace users. 
+* Improved user experience for paid marketplace users. 
 As marketplace images are not included in the coreos
 stream, users must manually enter the image details
 to the install config.
@@ -57,7 +57,7 @@ in the case of ARO, only supported) method for distributing
 production-grade images. Including these images in the stream
 would allow the installer to skip uploading images and creating image
 galleries. Furthermore, we have seen faster boot times in VMs using
-marketplace images. Installs easily completel 15 to 20 minutes more quickly
+marketplace images. Installs easily complete 15 to 20 minutes more quickly
 when using marketplace images.
 * ARO Hosted Control Planes (HCP) will utilize marketplace images and would like a canonical
 source in the cluster
@@ -72,8 +72,6 @@ so I can use them in my application: e.g. ARO HCP discovering the RHCOS marketpl
 from the release image.
 * As an `openshift-install` user, I want to specify a boolean value for marketplace images in
 the install config so that I can utilize marketplace images without looking up specific version numbers.
-* As an `openshift-install` user, I want Azure installs to utilize marketplace images (by default) so
-that I can have better install performance.
 * As an OpenShift user, I would like the machine-config operator to be able to manage boot images
 for my VMs when I use marketplace images. 
 
@@ -407,13 +405,20 @@ could be addressed in the future if needed.
 ** Test failure: we plan on introducing tests to inform when there is version skew (see below), so these could be used as well 
 
 * Could the RHCOS or an upstream team take on publishing SCOS to an Azure community gallery and including it in the scos stream?
-It seems like this be added as part of the standard stream--not an extension like marektplace images--and as a result it would need
+It seems like this be added as part of the standard stream--not an extension like marketplace images--and as a result it would need
 to be handled by the team responsible for bumping SCOS images. The Installer team would be willing to take on some of this toil, if needed.
+**Answered: Maybe** We will defer this (see graduation criteria below). FCOS is making progress in 
+https://github.com/coreos/fedora-coreos-tracker/issues/148.
 
 * Should Azure GovCloud, and therefore other Azure clouds get treatment in the RHCOS stream? The marketplace is separate for different clouds
 and ARO publishes unpaid marketplace images in Azure Government cloud. My opinion is that we should depend on consistent publishing across
 clouds to reduce cardinality within the stream; that is, rather than having top-level fields for `AzureCloud` and `AzureGovernment`, we should
-ensure that images are published with the same details in both clouds.
+ensure that images are published with the same details in both clouds. **Answered: No** There is no. distinction in the publication of images to
+MAG, so we do not need this distinction.
+
+* Now that the RHCOS stream has moved to versioning releases based on the RHEL version, can we standardize the way the image versions are listed
+in the paid marketplace and ARO? For example, the most recent rhcos release in the installer is [. ](https://github.com/openshift/installer/blob/fc9c0c69f117ac423d2e83fd7c3c94ae63924934/data/data/coreos/rhcos.json#L11C23-L11C37), compared to `418.94.202501221327-0` for 4.18. Ideally, both ARO and paid marketplace images would use the exact
+release as the version, trimming the suffix of the patch version as needed, according to Azure requirements.
 
 
 ## Test Plan
