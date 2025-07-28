@@ -16,7 +16,7 @@ approvers: # A single approver is preferred, the role of the approver is to rais
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
   - "None"
 creation-date: 2024-07-12
-last-updated: 2025-07-21
+last-updated: 2025-28-25
 tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
   - "https://issues.redhat.com/browse/OCPSTRAT-1862"
 see-also:
@@ -144,15 +144,23 @@ type AzureMarketplace struct {
 	// NoPurchasePlan is the standard, unpaid RHCOS image.
 	NoPurchasePlan *AzureMarketplaceImages `json:"no-purchase-plan,omitempty"`
 
-  // OCP is the paid marketplace image for OpenShift Container Platform.
-  OCP *AzureMarketplaceImages `json:"ocp,omitempty"`
+	// OCP is the paid marketplace image for OpenShift Container Platform.
+	OCP *AzureMarketplaceImages `json:"ocp,omitempty"`
 
-  // OPP is the paid marketplace image for OpenShift Platform Plus.
-  OPP *AzureMarketplaceImages `json:"opp,omitempty"`
+	// OPP is the paid marketplace image for OpenShift Platform Plus.
+	OPP *AzureMarketplaceImages `json:"opp,omitempty"`
 
-  // OKE is the paid marketplace image for OpenShift Kubernetes Engine.
-  OKE *AzureMarketplaceImages `json:"oke,omitempty"`
+	// OKE is the paid marketplace image for OpenShift Kubernetes Engine.
+	OKE *AzureMarketplaceImages `json:"oke,omitempty"`
 
+	// OCPEMEA is the paid marketplace image for OpenShift Container Platform in EMEA regions.
+	OCPEMEA *AzureMarketplaceImages `json:"ocp-emea,omitempty"`
+
+	// OPPEMEA is the paid marketplace image for OpenShift Platform Plus in EMEA regions.
+	OPPEMEA *AzureMarketplaceImages `json:"opp-emea,omitempty"`
+
+	// OKEEMEA is the paid marketplace image for OpenShift Kubernetes Engine in EMEA regions.
+	OKEEMEA *AzureMarketplaceImages `json:"oke-emea,omitempty"`
 }
 
 // AzureMarketplaceImages contains both the HyperV- Gen1 & Gen2
@@ -181,11 +189,11 @@ func (i *AzureMarketplaceImage) URN() string {
 This Go API results in a json representation, for x86:
 
 ```json
-./openshift-install coreos print-stream-json | jq '.architectures.x86_64."rhel-coreos-extensions"'
+% ./openshift-install coreos print-stream-json | jq '.architectures.x86_64."rhel-coreos-extensions"'
 {
   "azure-disk": {
-    "release": "418.94.202410090804-0",
-    "url": "https://rhcos.blob.core.windows.net/imagebucket/rhcos-418.94.202410090804-0-azure.x86_64.vhd"
+    "release": "9.6.20250523-0",
+    "url": "https://rhcos.blob.core.windows.net/imagebucket/rhcos-9.6.20250523-0-azure.x86_64.vhd"
   },
   "marketplace": {
     "azure": {
@@ -193,15 +201,15 @@ This Go API results in a json representation, for x86:
         "hyperVGen1": {
           "publisher": "azureopenshift",
           "offer": "aro4",
-          "sku": "aro_418",
-          "version": "418.94.20250122",
+          "sku": "aro_419",
+          "version": "419.6.20250523",
           "purchasePlan": false
         },
         "hyperVGen2": {
           "publisher": "azureopenshift",
           "offer": "aro4",
-          "sku": "418-v2",
-          "version": "418.94.20250122",
+          "sku": "419-v2",
+          "version": "419.6.20250523",
           "purchasePlan": false
         }
       },
@@ -210,30 +218,30 @@ This Go API results in a json representation, for x86:
           "publisher": "redhat",
           "offer": "rh-ocp-worker",
           "sku": "rh-ocp-worker-gen1",
-          "version": "413.92.2023101700",
+          "version": "4.18.2025031114",
           "purchasePlan": true
         },
         "hyperVGen2": {
           "publisher": "redhat",
           "offer": "rh-ocp-worker",
           "sku": "rh-ocp-worker",
-          "version": "413.92.2023101700",
+          "version": "4.18.2025031114",
           "purchasePlan": true
         }
       },
       "opp": {
         "hyperVGen1": {
           "publisher": "redhat",
-          "offer": "rh-ocp-worker",
-          "sku": "rh-ocp-worker-gen1",
-          "version": "413.92.2023101700",
+          "offer": "rh-opp-worker",
+          "sku": "rh-opp-worker-gen1",
+          "version": "4.18.2025031114",
           "purchasePlan": true
         },
         "hyperVGen2": {
           "publisher": "redhat",
-          "offer": "rh-ocp-worker",
-          "sku": "rh-ocp-worker",
-          "version": "413.92.2023101700",
+          "offer": "rh-opp-worker",
+          "sku": "rh-opp-worker",
+          "version": "4.18.2025031114",
           "purchasePlan": true
         }
       },
@@ -242,14 +250,62 @@ This Go API results in a json representation, for x86:
           "publisher": "redhat",
           "offer": "rh-oke-worker",
           "sku": "rh-oke-worker-gen1",
-          "version": "413.92.2023101700",
+          "version": "4.18.2025031114",
           "purchasePlan": true
         },
         "hyperVGen2": {
           "publisher": "redhat",
           "offer": "rh-oke-worker",
           "sku": "rh-oke-worker",
-          "version": "413.92.2023101700",
+          "version": "4.18.2025031114",
+          "purchasePlan": true
+        }
+      },
+      "ocp-emea": {
+        "hyperVGen1": {
+          "publisher": "redhat-limited",
+          "offer": "rh-ocp-worker",
+          "sku": "rh-ocp-worker-gen1",
+          "version": "4.18.2025031114",
+          "purchasePlan": true
+        },
+        "hyperVGen2": {
+          "publisher": "redhat-limited",
+          "offer": "rh-ocp-worker",
+          "sku": "rh-ocp-worker",
+          "version": "4.18.2025031114",
+          "purchasePlan": true
+        }
+      },
+      "opp-emea": {
+        "hyperVGen1": {
+          "publisher": "redhat-limited",
+          "offer": "rh-opp-worker",
+          "sku": "rh-opp-worker-gen1",
+          "version": "4.18.2025031114",
+          "purchasePlan": true
+        },
+        "hyperVGen2": {
+          "publisher": "redhat-limited",
+          "offer": "rh-opp-worker",
+          "sku": "rh-opp-worker",
+          "version": "4.18.2025031114",
+          "purchasePlan": true
+        }
+      },
+      "oke-emea": {
+        "hyperVGen1": {
+          "publisher": "redhat-limited",
+          "offer": "rh-oke-worker",
+          "sku": "rh-oke-worker-gen1",
+          "version": "4.18.2025031114",
+          "purchasePlan": true
+        },
+        "hyperVGen2": {
+          "publisher": "redhat-limited",
+          "offer": "rh-oke-worker",
+          "sku": "rh-oke-worker",
+          "version": "4.18.2025031114",
           "purchasePlan": true
         }
       }
