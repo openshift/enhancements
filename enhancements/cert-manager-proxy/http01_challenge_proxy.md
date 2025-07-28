@@ -273,7 +273,7 @@ More information about the investigation can be found [here](https://docs.google
 1. Cert Manager initiates an HTTP01 challenge for the API endpoint (`api.cluster.example.com`).
 2. The HTTP01 challenge request is directed to the API VIP on port 80 with the path `/.well-known/acme-challenge/<token>`.
 3. **Traffic Identification**: The HTTP01 Challenge Proxy identifies this as ACME challenge traffic by examining the destination path (`/.well-known/acme-challenge/*`) rather than using SNI validation.
-4. **Selective Redirection**: Only traffic matching the ACME challenge path pattern is intercepted using `nftables` and redirected to the proxy pod on port 8888. Other HTTP requests to the API VIP on port 80 receive a **403 Forbidden** response.
+4. **Selective Redirection**: Only traffic matching the ACME challenge path pattern is intercepted using `nftables` and redirected to the proxy pod on port 8888. Other HTTP requests to the API VIP on port 80 receive a **400 Bad Request** response.
 5. The proxy pod forwards the filtered request to the OpenShift Ingress Router, which serves the challenge response from the Cert Manager challenge pod.
 6. The ACME CA validates the challenge and issues the certificate for the API endpoint.
 
@@ -341,7 +341,7 @@ Any changes to the proxy's behavior will be documented to ensure compatibility w
 If the proxy DaemonSet enters a `CrashLoopBackOff` state, HTTP01 challenges for the API endpoint will fail, and certificate renewal will not complete. This may result in the API certificate expiring, which could impact cluster operations.
 
 **Recovery steps:**
-- Cluster administrators can disable or remove the proxy by deleting the DaemonSet or updating the relevant CR/manifest.
+- Cluster administrators can disable the proxy by updating the APIServer CR to remove the `http01ChallengeProxy` configuration or set the `mode` to an empty string. Deleting the DaemonSet directly will not work as the cluster operator will recreate it.
 - If the API certificate has expired, recovery may require connecting to the cluster's API server while ignoring certificate validation errors (e.g., using `--insecure-skip-tls-verify` with `oc` or `kubectl`).
 - After resolving the issue (e.g., fixing the DaemonSet, node configuration, or proxy image), re-deploy the proxy to restore HTTP01 challenge functionality.
 - The proxy should surface clear status and error messages to help identify and resolve CrashLoopBackOff or degraded states.
