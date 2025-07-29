@@ -75,13 +75,13 @@ Furthermore, to assess the viability of the metrics collection profile feature
 the monitoring team performed a detailed analysis of its impact in an OpenShift
 cluster. The analysis consisted of a test where an OpenShift cluster would run
 two replicas of the OpenShift Prometheus instance but each replica would be
-configured to a different metrics collection profile (`full`, `minimal`). Then
+configured to a different metrics collection profile (`Full`, `Minimal`). Then
 we would trigger a workload using
 [kube-burner](https://github.com/cloud-bulldozer/kube-burner) and at the end of
 2 hours, we evaluated the results. We concluded that in terms of resource usage,
 given the results obtained we can confidently state that the feature is quite
 valuable given the reduction of CPU by ~21% and memory by ~33% when comparing
-the `minimal` to the `full` profile. More details can be consulted in this
+the `Minimal` to the `Full` profile. More details can be consulted in this
 [document](https://docs.google.com/document/d/1MA-HTJQ_X7y_bwpJS2IPbGmC4qDyIMp25jisr34X2F4/edit?usp=sharing).
 
 Moreover, through Telemetry, we collect for each cluster the top 3 Prometheus
@@ -94,7 +94,7 @@ kube-state-metrics, kubelet and the network daemon.
 
 - As a user, I want to lower the amount of resources consumed by Prometheus in a
   supported way, so I can configure the clusters metrics collection profiles to
-  `minimal`.
+  `Minimal`.
 - As a developer, I want a supported way to collect a subset of the metrics
   exported by my operator and operands, while still collecting necessary metrics
   for alerts, visualization of key indicators and Telemetry.
@@ -126,7 +126,7 @@ kube-state-metrics, kubelet and the network daemon.
 - Dynamically adjusting metrics scraped at runtime based on heuristics.
 - Allowing users to explicitly set a list or a regex of metrics that they would
 want to be included in a given profile.
-- Support the addition of profiles other than `full` and `minimal`.
+- Support the addition of profiles other than `Full` and `Minimal`.
 
 ## Proposal
 
@@ -187,11 +187,17 @@ for such profiles will decide how it reconciles under such conditions.
 
 The goal is to support 2 profiles:
 
-- `full` (same as today)
-- `minimal` (only collect metrics necessary for recording rules, alerts,
+- `Full` (same as today)
+- `Minimal` (only collect metrics necessary for recording rules, alerts,
   dashboards, HPA, VPA and telemetry)
 
-When the cluster admin enables the `minimal` profile, the Prometheus
+Note that the profile names are PascalCased in this KEP, but at this time,
+only camelCase is supported in CMO. However, since Kubernetes enums are
+conventionally supposed to be in PascalCase, we will use that convention
+in this KEP, and will add support for PascalCase as well in CMO, in the near
+future.
+
+When the cluster admin enables the `Minimal` profile, the Prometheus
 resource would be configured accordingly:
 
 ```yaml
@@ -305,13 +311,17 @@ NA
 
 ```go
 type PrometheusK8sConfig struct {
-	// Defines the metrics collection profile that Prometheus uses to collect
-	// metrics from the platform components. Supported values are `full` or
-	// `minimal`. In the `full` profile (default), Prometheus collects all
-	// metrics that are exposed by the platform components. In the `minimal`
-	// profile, Prometheus only collects metrics necessary for the default
-	// platform alerts, recording rules, telemetry and console dashboards.
-	CollectionProfile CollectionProfile `json:"collectionProfile,omitempty"`
+    // Defines the metrics collection profile that Prometheus uses to collect
+    // metrics from the platform components. Supported values are `Full` or
+    // `Minimal`. In the `Full` profile (default), Prometheus collects all
+    // metrics that are exposed by the platform components (same behavior as
+    // before) . In the `Minimal` profile, Prometheus only collects metrics
+    // necessary for the default platform alerts, recording rules, telemetry
+    // and console dashboards. When unset, the default value is `Full`.
+    // Note that while PascalCase and camelCase values are supported, the
+    // former is preferred for consistency with the Kubernetes API. There are
+    // no plans to drop camelCase support, as it may break existing workloads.
+    CollectionProfile CollectionProfile `json:"collectionProfile,omitempty"`
 }
 ```
 
@@ -320,13 +330,13 @@ type PrometheusK8sConfig struct {
 Each OpenShift team that wants to adopt this feature will be responsible for
 providing the different monitors. This work is not trivial. Dependencies between
 operators and their metrics exist. This makes it difficult for developers to
-determine whether a given metric can be excluded from the `minimal` profile or
+determine whether a given metric can be excluded from the `Minimal` profile or
 not. To aid teams with this effort the monitoring team will provide:
 - a CLI tool that offers a suite of operation to make it easier for developers
   to utilize all aspects of this feature into their component's workflow.
 - an origin/CI test that validates for all Alerts and PrometheusRules that the
   metrics used by them are present in the `keep` expression of the
-  monitor for the `minimal` profile.
+  monitor for the `Minimal` profile.
 
 ### Risks and Mitigations
 
@@ -373,13 +383,15 @@ not. To aid teams with this effort the monitoring team will provide:
 
 - Unit tests in CMO to validate that the correct monitors are being selected.
 - E2E tests in CMO to validate that everything works correctly.
-- For the `minimal` profile, origin/CI test to validate that every metric used
+- For the `Minimal` profile, origin/CI test to validate that every metric used
 in a resource (Alerts/PrometheusRules/Dashboards) exists in the `keep`
 expression of a minimal monitors.
+- E2E test that ensures that for every monitor that is labelled as `Full`
+collection profile, there also exists one for `Minimal`, and vice versa.
 
 ## Graduation Criteria
 
-- Released as TechPreview: the default being `full`, it
+- Released as TechPreview: the default being `Full`, it
 shouldn't impact operations.
 
 - Plan to GA: this would officially support the "minimal"
@@ -409,7 +421,7 @@ entail moving all existing ServiceMonitors in that profile to either accomodate
 themselves in other profiles, or simply not exist anymore, which will need to be
 done for all teams. Either of these measures will require teams to rollback
 drastically on behaviours they built around in the first place. As it is right
-now, we do not plan on deprecating the exposed `full` or `minimal` profiles at
+now, we do not plan on deprecating the exposed `Full` or `Minimal` profiles at
 all.
 
 ## Upgrade / Downgrade Strategy
@@ -519,7 +531,7 @@ N/A
 
 ## Support Procedures
 
-- The `full` collection profile is meant to be synonymous with the exhibited
+- The `Full` collection profile is meant to be synonymous with the exhibited
 behavior before the introduction of this patch, as such, users can switch to it
 if other profiles are not working as expected.
 - The aforementioned utilities (for eg., CPV) can be used to help diagnose the
