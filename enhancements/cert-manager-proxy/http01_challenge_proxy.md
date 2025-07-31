@@ -30,7 +30,7 @@ For baremetal platforms only.  Provide a way for cert-manager to complete http01
 
 Cert manager can be used to issue certificates for the OpenShift Container Platform (OCP) endpoints (e.g., console, downloads, oauth) using an external ACME Certificate Authority (CA). These endpoints are exposed via the OpenShift Ingress (`*.apps.cluster.example.com`), and this is a supported and functional configuration today.
 
-However, cluster administrators often want to use Cert Manager to issue custom certificates for the API endpoint (`api.cluster.example.com`). Unlike other endpoints, this API endpoint is not exposed via the OpenShift Ingress. Depending on the OCP topology (e.g., SNO, MNO, Compact), it is exposed directly on the node or via a keepalive VIP. This lack of management by the OpenShift Ingress introduces challenges in obtaining certificates using an external ACME CA.
+However, cluster administrators often want to use Cert Manager to issue custom certificates for the API endpoint (`api.cluster.example.com`). Unlike other endpoints, this API endpoint is not exposed via the OpenShift Ingress. Depending on the OCP topology (e.g., SNO, MNO, Compact), it is exposed directly on the node or via a keepalive VIP. This lack of management by the OpenShift Ingress introduces challenges in obtaining certificates using an external ACME CA. While this challenge exists on all platforms, cloud providers typically offer DNS01 integrations that provide alternative certificate acquisition methods, making this solution primarily beneficial for baremetal environments.
 
 The gap arises due to how the ACME HTTP01 challenge works. The following scenarios illustrate the challenges:
 
@@ -100,29 +100,37 @@ type APIServerSpec struct {
     // that redirects traffic from the API endpoint on port 80 to ingress routers.
     // This enables cert-manager to perform HTTP01 ACME challenges for API endpoint certificates.
     // +optional
-    HTTP01ChallengeProxy *HTTP01ChallengeProxySpec `json:"http01ChallengeProxy,omitempty"`
+    HTTP01ChallengeProxy *HTTP01ChallengeProxySpec `json:"http01ChallengeProxy,omitempty,omitzero"`
 }
 
+// +union
+// +kubebuilder:validation:XValidation:rule="self.mode == 'CustomDeployment' ? has(self.customDeployment) : !has(self.customDeployment)",message="customDeployment is required when mode is CustomDeployment and forbidden otherwise"
 type HTTP01ChallengeProxySpec struct {
     // mode controls whether the HTTP01 challenge proxy is active and how it should be deployed.
     // DefaultDeployment enables the proxy with default configuration.
     // CustomDeployment enables the proxy with user-specified configuration.
-    // +kubebuilder:validation:Enum="";DefaultDeployment;CustomDeployment
-    // +kubebuilder:validation:Required
-    Mode string `json:"mode"`
+    // +kubebuilder:validation:Enum=DefaultDeployment;CustomDeployment
+    // +required
+    // +unionDiscriminator
+    Mode string `json:"mode,omitempty"`
     
     // customDeployment contains configuration options when mode is CustomDeployment.
     // This field is only valid when mode is CustomDeployment.
     // +optional
-    CustomDeployment *HTTP01ChallengeProxyCustomDeploymentSpec `json:"customDeployment,omitempty"`
+    // +unionMember
+    CustomDeployment *HTTP01ChallengeProxyCustomDeploymentSpec `json:"customDeployment,omitempty,omitzero"`
 }
 
+// +kubebuilder:validation:MinProperties=1
 type HTTP01ChallengeProxyCustomDeploymentSpec struct {
     // internalPort specifies the internal port used by the proxy service.
+    // Valid values are 1024-65535. Defaults to 8888.
+    // This port is used to avoid conflicts with other workloads that may require port 8888 on the host.
     // +kubebuilder:validation:Minimum=1024
     // +kubebuilder:validation:Maximum=65535
+    // +kubebuilder:default=8888
     // +optional
-    InternalPort int32 `json:"internalPort,omitempty"`  // default: 8888
+    InternalPort int32 `json:"internalPort,omitempty,omitzero"`
 }
 ```
 
@@ -321,7 +329,7 @@ This enhancement does not deprecate any existing features.
 ## Upgrade / Downgrade Strategy
 
 - Updated versions of the proxy can be applied to the cluster similar to initial deployment.
-- The proxy DaemonSet must use a `Recreate` update strategy to ensure that only one instance of the proxy runs per node at any time, as the proxy listens on a fixed port (`8888`) in the host network. This prevents port collisions during upgrades.
+- The proxy DaemonSet must use a `Recreate` update strategy to ensure that only one instance of the proxy runs per node at any time, as the proxy listens on a fixed port (`8888`). This prevents port collisions during upgrades.
 - Rolling upgrades are not supported due to the singleton nature of the proxy per node; the `Recreate` policy ensures the old pod is terminated before the new one starts.
 - If an upgrade fails midway, administrators should roll back to the previous working DaemonSet image or manifest. The cluster will not have a running proxy until the DaemonSet is restored, so HTTP01 challenges will fail during this window.
 - The proxy code should maintain backwards compatibility for nftables rules and configuration to minimize upgrade risks.
