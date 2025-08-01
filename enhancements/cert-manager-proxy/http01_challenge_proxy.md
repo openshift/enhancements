@@ -197,6 +197,7 @@ This design ensures that:
 - 8888 was chosen as a reasonable default because it is commonly unused, but clusters with a conflict can override this value in the APIServer configuration.
 - The [host port registry](https://github.com/openshift/enhancements/blob/master/dev-guide/host-port-registry.md) should be updated to reflect the use of port 80 on apiServer nodes when this feature is enabled, to avoid conflicts and ensure proper documentation of port usage.
 - The priority (order) of the `nftables` entries relative to other services should be coordinated with the OpenShift networking team to ensure it follows established precedent and does not interfere with other networking rules.
+- **Host Network Requirement**: The proxy DaemonSet must use `hostNetwork: true` because nftables rules can only redirect traffic between addresses within the same network namespace. Since the API VIP resides on the host network interface, the proxy listener must also be in the host network namespace for the traffic redirection to function. Running the proxy in a CNI network would make it unreachable from the nftables rules that redirect API VIP traffic.
 
 #### nftables Presence and Management
 
