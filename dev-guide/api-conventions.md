@@ -97,29 +97,25 @@ on how to write good comments on optional fields.
 
 #### Pointers
 
-In configuration APIs specifically, we advise to avoid making fields pointers unless there is an absolute need to do so.
-An absolute need being the need to distinguish between the zero value and a nil value.
+In custom resource based APIs specifically, we advise to avoid making fields pointers unless there is an absolute need to do so.
+An absolute need being the need to distinguish between the zero value and an unset value.
 
-Using pointers makes writing code to interact with the API harder and more error prone, and it also harms the
-discoverability of the API.
+Using pointers makes writing code to interact with the API harder and more error prone.
 
-When we use references, the marshalled version of a resource will include unset fields with their zero value.
-This means, that any end user fetching the resource from the API can observe that a particular field exists and
-"discover" a potentially new feature or option that they were not previously aware of.
-This has the effect of helping our users to understand how they might be able to configure their cluster, without
-having to search for features or review API schemas within the product docs.
+For APIs backed by aggregated API servers, pointers must be used for all optional fields, else validation code cannot determine whether the field was unset, or was set to the zero value.
 
 ##### Pointers to structs
 
-An exception to this rule is when using a pointer to a struct in combination with an API validation that requires the field to be unset.
+The JSON tag `omitempty` is not compatible with struct references.
+Meaning any struct will always, when empty, be marshalled to `{}`.
+This means that any struct field must be a pointer to allow it to be omitted when empty.
 
-The JSON tag `omitempty` is not compatible with struct references. Meaning any struct will always, when empty, be marshalled to `{}`. If the struct **must** genuinely be omitted, it must be a pointer.
+However, as of Go 1.24, using the `omitzero` tag will allow structs to be properly omitted.
 
-When used in combination with a validation such as `minProperties` on the parent, or a required field within the struct, the struct itself must be
-omitted to avoid validations being applied to the empty struct and returning
-false positives.
+From Go 1.24 onwards, we only need structs to be pointers when there is an explicit need to distinguish between unset and the empty struct.
 
-For a concrete example, view this [thread](https://github.com/openshift/enhancements/pull/1411/files#r1212790070).
+It is generally bad practice to want to distinguish between unset and the empty struct.
+Each struct should have either at least 1 required field, or a `MinProperties` validation to prevent its zero value from being valid.
 
 ### Only one phrasing for each idea
 
@@ -199,7 +195,6 @@ For example:
 // and is a required convention.
 // At least one value must be provided within the example and the type should be set
 // appropriately.
-// +kubebuilder:validation:Required
 // + ---
 // + Note that this comment line will not end up in the generated API schema as it is
 // + preceded by a `+`. The `---` also prevents anything after it from being added to
@@ -209,12 +204,13 @@ type Example struct {
   // Type allows the user to determine how to interpret the example given.
   // It must be set to one of the following values: Documentation, Convention, or Mixed.
   // +kubebuilder:validation:Enum:=Documentation;Convention;Mixed
-  // +kubebuilder:validation:Required
-  Type string `json:"type"`
+  // +required
+  Type string `json:"type,omitempty"`
 
   // Documentation allows the user to define documentation for the example.
   // When this value is provided, the type must be set to either Documentation or Mixed.
   // The content of the documentation is free form text but must be no longer than 512 characters.
+  // +kubebuilder:validation:MinLength:=1
   // +kubebuilder:validation:MaxLength:=512
   // +optional
   Documentation string `json:"documentation,omitempty"`
@@ -224,7 +220,7 @@ type Example struct {
   // this policy should be strictly observed or weakly observed.
   // When this value is provided, the type must be set to either Convention or Mixed.
   // +optional
-  Convention ConventionSpec `json:"convention,omitempty"`
+  Convention ConventionSpec `json:"convention,omitempty,omitzero"`
 
   // Author allows the user to denote an author for the example convention.
   // The author is not required. When omitted, this means the user has no opinion and the value is
@@ -232,6 +228,8 @@ type Example struct {
   // The current platform default is OpenShift Engineering.
   // The Author field is free form text.
   // +optional
+  // +kubebuilder:validation:MinLength:=1
+  // +kubebuilder:validation:MaxLength:=1024
   Author string `json:"author,omitempty"`
 }
 ```
@@ -632,12 +630,10 @@ With this example, we have described through the enumerated values the action th
 Should the API need to evolve in the future, for example to add a particular method of Authentication that should be
 used, we can do so by adding a new value (e.g. `PublicKey`) to the enumeration and avoid adding a new field to the API.
 
-### Optional fields should not be pointers (in configuration APIs)
+### Optional fields should not be pointers (in custom resource based APIs)
 
-In [configuration APIs](#configuration-vs-workload-apis), we do not follow the upstream guidance of making optional
-fields pointers.
-Pointers are difficult to work with and are more error prone than references, and they also harm the discoverability
-of the API.
+In custom resource based APIs, we do not follow the upstream guidance of making optional fields pointers.
+Pointers are difficult to work with and are more error prone than references.
 
 This topic is expanded in the [Pointers](#pointers) subsection of the
 [Configuration vs Workload APIs](#configuration-vs-workload-apis) above.
