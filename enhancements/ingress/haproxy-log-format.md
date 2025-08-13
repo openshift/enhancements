@@ -1,5 +1,5 @@
 ---
-title: logging-api-extension
+title: haproxy-log-format
 authors:
   - "@rohara"
 reviewers:
@@ -52,7 +52,7 @@ troubleshooting.
 1. Provide an option to customize HTTPS log format.
 2. Provide an option to customize TCP log format.
 
-### Non-goals
+### Non-Goals
 
 Since all access logs are collected at a single endpoint, it is beyond
 the scope of this proposal to allow different log formats to be
