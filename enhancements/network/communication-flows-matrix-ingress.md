@@ -66,8 +66,10 @@ communication ingress flows matrix.
 - A communication matrix describing the expected flows of incoming traffic will 
   be included in every OpenShift release documentation.
 
-- A new `oc` command will be added to generate a current snapshot of known 
-  listening ports in a running cluster, `oc adm communication-matrix generate`.
+- A new `oc` Krew plugin named commatrix provides the ability to generate a current 
+  snapshot of known listening ports and observed ingress traffic in a running cluster.
+  It is run using the `oc commatrix generate` command, which produces a communication matrix 
+  file in the specified format and location.
 
 - A new option will be added to OpenShift web console to generate an up-to-date
   communication matrix.
@@ -81,7 +83,7 @@ communication ingress flows matrix.
   matrix describing the expected flows of incoming traffic.
 
 - The admin uses the OpenShift command-line interface (CLI) to generate an up-to-date 
-  communication matrix using the following command `oc adm communication-matrix generate`.
+  communication matrix using the Krew plugin `oc commatrix generate`.
 
 - Optionally, the admin uses the OpenShift web console to generate an up-to-date
   communication matrix.
@@ -115,7 +117,7 @@ OpenShift cluster. It supports both standard clusters and single-node deployment
 A network flow matrix, produced by the new module, has been published in the 
 [official OpenShift 4.16 documentation][commatrix-ocp-docs].
 
-In the following OpenShift releases the published matrix will be splitted by
+In the following OpenShift releases the published matrix is split by
 platforms:
 - Standard AWS/GCP clusters
 - Standard baremetal clusters
@@ -188,20 +190,28 @@ Additional information can be added to the communication matrix to describe the 
 of the ports, for example traffic flows from master-to-master or from node-to-master
 (an API change is required, could be indicated with annotations on the `Service`).
 
-Periodic tests will be added to `openshift-tests` to validate an up-to-date 
+Periodic tests are added to `openshift-tests` to validate an up-to-date 
 generated communication matrix matches the communication matrix documented
 in OpenShift release documents.
 
-Another test will be added to validate the ports in a generated communication 
+Another test validates the ports in a generated communication 
 matrix match a snapshot of the node's listening ports (created with the Linux
 `ss` utility).
 
-The communication matrix module will be used to create and apply firewall rules, 
-run E2E `openshift-tests` and upgrade the OpenShift version to validate the rules 
-are acceptable by the current and next OCP release.
+A new test will be added to `openshift-tests` (origin test) that implements 
+the following workflow:
+1. **Pre-step**: Generate the communication matrix for the current cluster in nft format
+2. **Pre-step**: Apply the generated firewall rules to the cluster nodes
+3. **Test execution**: Run E2E tests to validate cluster functionality with restrictive firewall rules
+4. **Upgrade validation**: Perform OpenShift version upgrade to ensure the firewall rules 
+   remain compatible across releases
 
-A user will be able to run `openshift-tests` or a new `oc` command, 
-`oc adm communication-matrix validate`, to validate the `EndpointSlices` 
+This comprehensive test ensures that the communication matrix accurately captures all 
+required network flows and that clusters can operate normally with restrictive firewall 
+policies based on the matrix output.
+
+A user can run `openshift-tests` or the Krew plugin command 
+`oc commatrix generate --host-open-ports`, to validate the `EndpointSlices` 
 in the cluster match a current snapshot of the node's listening ports.
 
 ### Risks and Mitigations
@@ -244,21 +254,18 @@ N/A
 
 - Unit tests coverage
 
-- E2E tests will be added to `openshift-tests`
-  - Validate an up-to-date generated communication matrix matches the 
-    one documented in OpenShift release documents ([WIP PR](https://github.com/openshift/origin/pull/28946))
+- E2E tests are added to `openshift-tests`
+  - Validate an up-to-date generated communication matrix matches the
+    one documented in OpenShift release documents ([implemented](https://github.com/openshift/origin/pull/29633))
   - Validate the ports in a generated communication matrix match a snapshot
     of the node's listening ports (created with the Linux `ss` utility) ([WIP PR](https://github.com/openshift/origin/pull/28706))
 
 - Release-informing/blocking jobs will be added
-  - Use the communication matrix to create and apply firewall rules, and 
-    run E2E `openshift-tests` ([implemented](https://github.com/openshift-kni/commatrix/blob/main/test/e2e/commatrix_suite_test.go#L100))
-  - Use the communication matrix to create and apply firewall rules, and upgrade
-    OpenShift version
+  - Comprehensive firewall rules validation test as described in the Implementation Details section ([implemented](https://github.com/openshift-kni/commatrix/blob/main/test/e2e/commatrix_suite_test.go#L100))
 
 - CI
-  - An informing job running the communication matrix E2E tests will be set for a 
-    period of time to validate stability before integrating to `openshift-tests`
+  - An informing job running the communication matrix E2E tests is set for a 
+    period of time to validate stability before integrating to `openshift-tests` ([implemented](https://prow.ci.openshift.org/?type=periodic&job=*network-flow-matrix*))
 
 ## Graduation Criteria
 
