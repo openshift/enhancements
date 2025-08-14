@@ -4,6 +4,7 @@ authors:
   - bnemec
 reviewers:
   - mko # On-Prem Networking
+  - everettraven # API
 approvers:
   - knobunc
 api-approvers:
@@ -68,7 +69,7 @@ deployer will be wholly responsible for providing loadbalancer and DNS services
 to the cluster.
 
 Note that api and ingress are already required external records, so in reality
-the only addition here is api-int.
+the only additional requirement here is api-int.
 
 ### Workflow Description
 
@@ -110,7 +111,7 @@ platform:
   baremetal:
     loadBalancer:
       type: UserManaged
-    dnsRecordsEnabled: false
+    internalDNSRecords: Disabled
 ```
 
 ### Risks and Mitigations
@@ -165,7 +166,7 @@ Other options were considered, but rejected for the following reasons:
 
 ## Open Questions [optional]
 
-What does tech preview look like for this?
+NA
 
 ## Test Plan
 
@@ -175,7 +176,9 @@ shouldn't be difficult.
 
 ## Graduation Criteria
 
-TBD
+We have a specific customer waiting for this feature who has agreed to test
+it in tech preview. Graduation will be predicated on the feature addressing
+their use case.
 
 ### Dev Preview -> Tech Preview
 
@@ -183,7 +186,8 @@ NA
 
 ### Tech Preview -> GA
 
-NA
+Once the customer has verified that this addresses their use case it should be
+ready for GA.
 
 ### Removing a deprecated feature
 
@@ -201,6 +205,8 @@ There will also be no version skew.
 ## Operational Aspects of API Extensions
 
 Because they can only be set at deploy-time I don't expect a lot of impact here.
+When debugging problems we'll need to look at the Infrastructure record to see
+whether internal DNS records are in use.
 
 ## Support Procedures
 
