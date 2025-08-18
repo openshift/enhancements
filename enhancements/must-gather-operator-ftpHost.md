@@ -1,21 +1,23 @@
 ---
 title: must-gather-operator-ftphost
 authors:
-  - TBD
+  - "@shivprakahsmuley"
 reviewers:
-  - TBD
+  - "@TrilokGeer"
+  - "@Prashanth684"
 approvers:
-  - TBD
+  - "@TrilokGeer"
+  - "@Prashanth684"
 api-approvers:
-  - TBD
-creation-date: 2024-01-01
-last-updated: 2024-01-01
+  - "@TrilokGeer"
+  - "@Prashanth684"
+creation-date: 2025-08-18
+last-updated: 2025-08-18
 tracking-link:
-  - TBD
-status: provisional
+  - https://issues.redhat.com/browse/MG-53
+status: implementable
 see-also:
-replaces:
-superseded-by:
+
 ---
 
 # Must Gather Operator Enhancement: FTPHost in MustGatherSpec
