@@ -19,27 +19,51 @@ tracking-link:
 
 ## Summary
 
-This enhancement extends the existing Zero Trust Workload Identity Manager controller to automatically create OIDC routes that enable external access to SPIRE OIDC Discovery Provider endpoints through OpenShift Routes. When a `SpireOIDCDiscoveryProvider` is deployed, the enhanced controller will automatically create routes to provide secure, externally accessible OIDC endpoints for workload identity verification and JWT token validation in multi-cluster and hybrid cloud environments.
+This enhancement proposes exposing SPIRE OIDC Discovery Provider endpoints through OpenShift Routes under the domain `*.apps.` for the selected default installation.
 
 ## Motivation
 
-The current Zero Trust Workload Identity Manager provides OIDC Discovery Provider functionality through internal cluster services. However, in distributed and multi-cluster environments, external services and workloads running outside the OpenShift cluster need access to OIDC endpoints.
+The SpireOIDCDiscoveryProvider serves as a critical bridge between SPIFFE identities and OIDC standards, allowing external systems to validate and trust SPIRE-issued JWTs. By exposing well-known endpoints (/.well-known/openid-configuration and /keys), it provides the OIDC discovery document and corresponding public keys required for verifying JWT-SVIDs.
+
+In OpenShift environments, administrators need a straightforward and reliable way to make these endpoints accessible. They may choose to leverage the default OpenShift wildcard DNS entry (*.apps.), which points to the ingress routers, or alternatively configure a custom DNS entry that aligns with organizational requirements. Providing flexibility in how the SpireOIDCDiscoveryProvider endpoints are exposed ensures smoother integration with external identity consumers and supports varied deployment scenarios.
 
 ### User Stories
 
-- As a OCP user using Zero Trust Workload Identity Manager, I want OIDC discovery routes to be created and managed by the operator when I enable the `managedRoute` flag so that I can access and verify the jwt tokens from the oidc discovery provider application through an endpoint.
+- As an OpenShift cluster administrator, I want to enable a managed Route for the SPIRE OIDC Discovery Provider by setting `spec.managedRoute: true`, so that the discovery endpoints are exposed on the cluster’s default `*.apps.<cluster-domain>` without additional YAML or manual DNS steps.
+
+- As an OpenShift cluster administrator, I want to optionally specify a custom host, so that I can expose the OIDC issuer on an organization-owned domain (e.g., `oidc.example.com`) that aligns with corporate DNS and certificate policies
+
+- As an OpenShift cluster administrator, I want to disable the managed Route by setting `spec.managedRoute: false`, so that I can expose the endpoints through self-managed OpenShift routes or ingress.
+
+- As an Openshift security engineer, I want to attach labels/annotations to the managed `Route`, so that I can integrate with tools for auditability.
+
+- As an SRE, I want clear status conditions on the CR and events, so that I can quickly diagnose exposure, DNS, or certificate issues.
+
+- As an OpenShift cluster administrator, I want RBAC guardrails and explicit errors if the operator lacks permission to manage Routes, so that I can understand required privileges and safely delegate responsibilities.
+
+- As an OpenShift cluster administrator, I want the managed Route to default to Service CA certificates so that the endpoints are automatically secured and trusted in-cluster without manual certificate management.
+
+- As an Openshift security engineer, I want the managed Route to support re-encrypt termination so that TLS is enforced end-to-end with cluster-managed certificates, providing stronger security than edge while avoiding the operational burden of passthrough.
 
 
 ### Goals
-   - Create default OpenShift Routes for OIDC discovery endpoints when a `SpireOIDCDiscoveryProvider` resource is deployed
-   - Routes are created with consistent naming and labeling conventions
-   - Implement reencrypt TLS termination to maintain end-to-end encryption
-   - Integrate with OpenShift's Service CA operator for automatic certificate provisioning and renewal
+- Provide a managed Route option for the SpireOIDCDiscoveryProvider that automatically exposes OIDC discovery endpoints on the cluster’s default `*.apps.domain`.
+- Allow administrators to disable the managed Route, supporting self-managed exposure of the endpoints through OpenShift Routes, ingress, or service mesh gateways.
+- Support attaching labels and annotations to the managed Route for better auditing and monitoring.
+- Default the managed Route to use Service CA–issued certificates, ensuring automatic TLS and certificate rotation.
+- Default re-encrypt termination for the managed Route, providing end-to-end TLS with cluster-managed certificates as a stronger security option compared to edge termination, while avoiding the complexity of passthrough.
+- Provide clear status conditions and events so that SREs can quickly diagnose DNS, TLS, or exposure issues.
+- Validation check to reject updates to Route termination type or configurations that override usage of ServiceCA operator managed certificates.
+- Allow the use of custom PKI with the default managed Route for TLS connections between clients and the ingress router.
 
 ### Non-Goals
-   - Implement custom ingress controllers or load balancers
-   - Support non-OpenShift route implementations (e.g., Kubernetes Ingress, Istio Gateway)
-   - Provide alternative external access mechanisms beyond OpenShift Routes
+- Manage custom PKI without default managed Route.
+- Deletion of default managed Route automatically when the option is disabled.
+- Support managed Route for applications that are not using default Openshift `*.apps.<cluster-domain>`
+- Reconciliation of updates to DNS changes for SpireOIDCDiscoveryProvider endpoints.
+- Support edge and passthrough termination types for default managed Route.
+- Support usage of SVIDs for SpireOIDCDiscoveryProvider endpoints.
+- Custom PKI integration for the default managed Route of the SpireOIDCDiscoveryProvider endpoints to replace Service CA–issued certificates when using re-encrypt termination.
 
 
 ## Proposal
@@ -150,11 +174,27 @@ As part of this change, the `spiffe-helper` container will be removed from the `
 The route will be configured to trust certificates issued by the Service CA:
 
 ```yaml
-# Route TLS configuration with Service CA trust
+# Route TLS configuration with Service CA trust (default)
 tls:
   termination: reencrypt
   insecureEdgeTerminationPolicy: Redirect
+  # Users can modify this section to add custom certificates:
+  # certificate: |
+  #   -----BEGIN CERTIFICATE-----
+  #   <custom certificate content>
+  #   -----END CERTIFICATE-----
+  # key: |
+  #   -----BEGIN PRIVATE KEY-----
+  #   <custom private key content>
+  #   -----END PRIVATE KEY-----
 ```
+
+
+Users can add their own tls credentials by directly editing the managed Route's `spec.tls` field:
+
+1. **Default Behavior**: The controller creates routes with Service CA integration for automatic certificate management
+2. **Controller Behavior**: The controller will not overwrite user-provided custom certificates in the route's TLS configuration
+3. **Certificate Management**: When custom certificates are used, users are responsible for certificate renewal and lifecycle management
 
 ### Workflow Description
 
@@ -212,6 +252,8 @@ metadata:
   name: cluster
 spec:
   trustDomain: cluster.local
+  managedRoute: "true"  # operator-managed Route flag to disable set it to "false".
+  jwtIssuer: <custom-issuer>  # Custom JWT issuer domain
 ```
 
 When this resource is created, the controller will automatically:
@@ -219,19 +261,6 @@ When this resource is created, the controller will automatically:
 - Configure automatic certificate management using OpenShift's service serving certificate controller
 - Set up secure TLS termination (reencrypt)
 - Redirect insecure requests to HTTPS
-
-#### Production Configuration
-
-```yaml
-apiVersion: operator.openshift.io/v1alpha1
-kind: SpireOIDCDiscoveryProvider
-metadata:
-  name: cluster
-spec:
-  trustDomain: cluster.local
-  managedRoute: "false"  # Disable operator-managed Route; external access can be configured manually if needed
-  jwtIssuer: <custom-issuer>  # Custom JWT issuer domain
-```
 
 #### Accessing the OIDC Discovery Endpoint
 
@@ -331,7 +360,6 @@ oc get route spire-oidc-discovery-provider -o jsonpath='{.spec.host}'
 
 ### Risks and Mitigations
 
-
 ## Documentation Requirements
 
 ### User Documentation
@@ -356,11 +384,19 @@ oc get route spire-oidc-discovery-provider -o jsonpath='{.spec.host}'
 
 This enhancement introduces a new optional field in the existing `SpireOIDCDiscoveryProvider` API to control managed route creation:
 
-- `spec.enableManagedRoute` (string): Enables or disables automatic creation and lifecycle management of the external OIDC discovery Route.
-  - Allowed values: "true" or "false"
+- `spec.managedRoute` (string): Enables or disables automatic creation and management of the external OIDC discovery Route.
+  - Allowed values: "true" or "false"  
   - Default: "true"
   - When set to "true", the operator manages the Route and related Service CA certificates.
   - When set to "false", the operator does not manage a Route; cluster admins may configure external access manually if desired.
+
+```go
+// managedRoute is for enabling routes for oidc-discovery-provider
+// +kubebuilder:default:="true"
+// +kubebuilder:validation:Enum:="true";"false"
+// +kubebuilder:validation:Optional
+ManagedRoute string `json:"managedRoute,omitempty"`
+```
 
 ### Topology Considerations
 
@@ -381,6 +417,7 @@ This is the primary target environment for this enhancement. Standard OpenShift 
 - Route names follow a predictable pattern: `spire-oidc-discovery-provider`
 - TLS termination is set to `reencrypt` for security
 - Routes are tied to the lifecycle of the `SpireOIDCDiscoveryProvider` resource
+- Controller will not overwrite user-provided custom TLS certificates in managed routes
 
 ### Drawbacks
 
