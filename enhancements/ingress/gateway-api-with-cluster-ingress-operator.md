@@ -802,6 +802,58 @@ The [Advanced 4 Tier Model](https://gateway-api.sigs.k8s.io/concepts/security-mo
 is not implementable using the default ClusterRoles. However, as mentioned above, users can create a custom
 `Gateway Operator` role and bind it to a specific namespace to implement the Application Admin persona.
 
+#### Conflicting Subscriptions
+
+Gateway API support is provided by OSSM, which is installed via OLM. Because Gateway API support is enabled after
+cluster install, it's possible for users to have already installed OSSM or another conflicting resource. If an
+incompatible version of OSSM is installed, or if a known conflicting resource is present, the Ingress Operator should
+alert users of that conflict. Known conflicts are OSSM 2, the Sail Operator, and incompatible versions of OSSM 3.
+
+##### Incompatible OSSM 3 versions
+
+The Ingress Operator relies on a particular Istio control plane version for Gateway API support. The OSSM operator
+supports multiple Istio versions, and contains annotations that indicate the container images to use for Istio control
+plane parts. The annotations are versioned. For example, if the Istio v1.24.3 control plane can be deployed, the OSSM
+operator will have the following annotations:
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  annotations:
+    ...
+    images.v1_24_3.cni: <image-ref>
+    images.v1_24_3.istiod: <image-ref>
+    images.v1_24_3.must-gather: <image-ref>
+    images.v1_24_3.proxy: <image-ref>
+    images.v1_24_3.ztunnel: <image-ref>
+    ...
+```
+
+If the Ingress Operator detects that OSSM 3 is already installed by another source, it will check the available Istio
+control plane versions. If a compatible version is deployable, a status condition on the Ingress Operator will indicate
+that the installed OSSM 3 operator is not managed by the Ingress Operator, but a compatible control plane version is
+available. If the expected Istio version is not deployable, a status condition on the Ingress Operator will indicate
+that a conflicting OSSM 3 subscription is present and that Istio cannot be deployed, and the Ingress Operator's degraded
+condition will be set to true.
+
+##### Sail Operator
+
+The Sail Operator is the upstream version of the OSSM 3 operator, and as such, controls many of the same cluster
+resources as OSSM 3, such as the CRDs `istios.sailoperator.io`, `envoyfilters.networking.istio.io`,
+`gateways.networking.istio.io`, etc. Because both operators declare the CRDs for those resources in their CSVs, the OLM
+operator will not install OSSM 3 if the Sail Operator is already present. If the Ingress Operator detects that the Sail
+Operator is present, a status condition on the Ingress Operator will indicate that the Sail Operator must be removed
+before Ingress Operator managed Gateway API support can be enabled, and the Ingress Operator's degraded status condition
+will be set to true until the Sail Operator is removed.
+
+##### OSSM 2
+
+While OSSM 2 and OSSM 3 can technically coexist on the same cluster, in order to alert to the possibility of Istio
+control planes contesting control of cluster ingress, a status condition on the Ingress Operator will indicate that OSSM
+2 conflicts with Ingress Operator managed Gateway API support, and the Ingress Operator's degraded status condition will
+be set to true until OSSM 2 is removed.
+
 ### Risks and Mitigations
 
 #### Automatic Deployments
