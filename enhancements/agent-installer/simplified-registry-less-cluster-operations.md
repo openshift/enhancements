@@ -338,7 +338,7 @@ An Assisted Service pre-flight validation will ensure that the port is open.
 #### Upgrade
 
 A udev rule, along with a systemd service injected by MCO will detect when an
-extended RHCOS ISO is attached, an then mount it to launch a temporary registry
+extended RHCOS ISO is attached, and then mount it to launch a temporary registry
 to serve its content.
 After the user modified the IRI resource with the new release pullspec, the new
 OCP release image payload will be copied on each node registry using skopeo.
