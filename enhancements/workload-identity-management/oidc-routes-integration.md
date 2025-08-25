@@ -115,6 +115,12 @@ The existing SPIRE OIDC Discovery Provider controller will be enhanced to:
 3. **Route Lifecycle Management**: Monitor and manage route status throughout the lifecycle
 4. **Certificate Trust Management**: Configure route to trust service certificates issued by Service CA
 5. **Default Secure Configuration**: Apply secure defaults for TLS termination and certificate management
+6. **Custom Host Support**: Allow administrators to specify custom hostnames for the managed Route via `spec.jwtIssuer` field
+7. **Labels and Annotations Management**: Support user-defined labels and annotations on managed Routes through CR specification
+8. **Status Conditions and Events**: Provide comprehensive status reporting and event generation for troubleshooting
+9. **RBAC Validation**: Validate operator permissions for Route management and provide clear error messages
+10. **Route Configuration Validation**: Reject invalid Route termination types and configurations that conflict with Service CA usage
+11. **Managed Route Lifecycle**: Handle Route creation, updates, and cleanup based on `managedRoute` flag state
 
 #### Route Creation Implementation
 
@@ -168,6 +174,61 @@ This enables OpenShift's Service CA operator to automatically:
 - Establish trust with the cluster's Certificate Authority
 
 As part of this change, the `spiffe-helper` container will be removed from the `spire-oidc-discovery-provider` deployment, because the Service CA operator will provide the serving certificate directly to the OIDC discovery provider pod via the generated secret.
+
+
+#### Status Conditions and Events Implementation
+
+The controller will provide comprehensive status reporting for troubleshooting:
+
+1. **Status Conditions**:
+   - `SpireOIDCManagedRouteGeneration`: Condition holds the value regarding the oidc routes status and reasons.
+   - `status`: Reports the condition status as true or false.
+   - `SpireOIDCManagedRouteCreationSucceeded`: signifies that the routes creation has been succeded.
+   - `SpireOIDCRouteCreationDisabled`: signifies that the managed routes creation has been disabled.
+   - `SpireOIDCManagedRouteCreationFailed`: signifies that managed routes creation has failed. putting the error message in the `message` field.
+
+2. **Event Generation**:
+   - Route creation success/failure events
+   - Certificate provisioning events
+   - TLS configuration events
+   - Validation error events
+   - RBAC permission error events
+
+
+
+#### Route Configuration Validation
+
+The controller will implement validation to ensure secure and compatible configurations:
+
+1. **Termination Type Validation**: Reject Route configurations with unsupported TLS termination types:
+   - Allow only `reencrypt` termination for managed Routes
+   - Reject `edge` and `passthrough` termination types with validation errors
+   - Provide clear error messages explaining security requirements
+
+2. **Certificate Configuration Validation**: 
+   - Prevent configurations that conflict with Service CA integration
+   - Allow custom certificates only when properly configured with reencrypt termination
+
+
+#### Managed Route Lifecycle Management
+
+The controller will handle Route lifecycle based on the `managedRoute` flag:
+
+1. **Route Creation**: Create Routes automatically when `managedRoute` is `true` (default)
+
+2. **Route Disabling**: When `managedRoute` is set to `false`:
+   - Stop managing the existing Route (if any)
+   - Do NOT automatically delete the existing Route (per non-goals)
+   - Update status conditions to indicate Route is no longer managed
+
+3. **Route Re-enabling**: When `managedRoute` is changed from `false` to `true`:
+   - Check if a Route already exists from previous management
+   - Adopt existing compatible Routes or create new ones
+   - Resume full Route lifecycle management
+
+4. **Resource Cleanup**: Routes are only deleted when:
+   - The parent SpireOIDCDiscoveryProvider resource is deleted (via owner references)
+   - NOT when `managedRoute` is disabled (preserves existing configurations)
 
 #### Certificate Trust Chain Configuration
 
@@ -418,6 +479,18 @@ This is the primary target environment for this enhancement. Standard OpenShift 
 - TLS termination is set to `reencrypt` for security
 - Routes are tied to the lifecycle of the `SpireOIDCDiscoveryProvider` resource
 - Controller will not overwrite user-provided custom TLS certificates in managed routes
+- Custom hostnames are supported through the existing `spec.jwtIssuer` field with hostname extraction
+- External DNS configuration is required for custom hostnames (outside operator scope)
+- User-defined labels and annotations are supported via `spec.routeLabels` and `spec.routeAnnotations`
+- Controller-managed labels take precedence over user labels for conflicts
+- Only `reencrypt` TLS termination is supported; `edge` and `passthrough` are rejected with validation errors
+- RBAC permissions are validated before Route operations with specific error reporting
+- Status conditions provide detailed troubleshooting information: `RouteAvailable`, `CertificateReady`, `DNSReady`, `TLSConfigured`
+- Events are generated for Route operations, certificate provisioning, and error conditions
+- When `managedRoute` is disabled, existing Routes are NOT automatically deleted (preserves user configurations)
+- Route adoption occurs when `managedRoute` is re-enabled and compatible Routes exist
+- Validation prevents configuration changes that would break Service CA integration
+- Graceful degradation when RBAC permissions are insufficient
 
 ### Drawbacks
 
