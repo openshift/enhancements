@@ -9,8 +9,8 @@ approvers:
   - "@tgeer"
 api-approvers:
   - "@tgeer"
-creation-date: 2025-01-15
-last-updated: 2025-01-15
+creation-date: 2025-08-08
+last-updated: 2025-08-25
 tracking-link:
   - https://issues.redhat.com/browse/OCPSTRAT-1691
 ---
@@ -19,7 +19,7 @@ tracking-link:
 
 ## Summary
 
-This enhancement proposes exposing SPIRE OIDC Discovery Provider endpoints through OpenShift Routes under the domain `*.apps.` for the selected default installation.
+This enhancement proposes exposing SPIRE OIDC Discovery Provider endpoints through OpenShift Routes under the domain `*.apps.<cluster-domain>` for the selected default installation.
 
 ## Motivation
 
@@ -47,7 +47,7 @@ In OpenShift environments, administrators need a straightforward and reliable wa
 
 
 ### Goals
-- Provide a managed Route option for the SpireOIDCDiscoveryProvider that automatically exposes OIDC discovery endpoints on the cluster’s default `*.apps.domain`.
+- Provide a managed Route option for the SpireOIDCDiscoveryProvider that automatically exposes OIDC discovery endpoints on the cluster’s default `*.apps.<cluster-domain>`.
 - Allow administrators to disable the managed Route, supporting self-managed exposure of the endpoints through OpenShift Routes, ingress, or service mesh gateways.
 - Support attaching labels and annotations to the managed Route for better auditing and monitoring.
 - Default the managed Route to use Service CA–issued certificates, ensuring automatic TLS and certificate rotation.
@@ -96,166 +96,36 @@ spec:
   # ... other existing fields remain unchanged
 ```
 
-The enhanced controller will automatically:
-- Create an OpenShift Route for external access
-- Configure automatic certificate management via Service CA operator
-- Set up secure TLS termination with reencrypt mode
-- Update the service with Service CA annotations for certificate provisioning
 
 ### Implementation Details
 
-The implementation includes the following components:
+The implementation enhances the existing SPIRE OIDC Discovery Provider controller to automatically create and manage OpenShift Routes with integrated certificate management through the Service CA operator.
 
-#### Controller Enhancements
+#### Route Creation and Certificate Management
 
-The existing SPIRE OIDC Discovery Provider controller will be enhanced to:
+When `managedRoute` is enabled (default), the controller automatically creates OpenShift Routes with re-encrypt TLS termination and integrates with the Service CA operator for comprehensive certificate management. The controller annotates the `spire-oidc-discovery-provider` service with `service.beta.openshift.io/serving-cert-secret-name: oidc-serving-cert` to enable automatic certificate generation, provisioning, and lifecycle management including renewal and trust establishment with the cluster's Certificate Authority.
 
-1. **Automatic Route Creation**:  Create OpenShift Route resources when a `SpireOIDCDiscoveryProvider` is deployed
-2. **Service CA Integration**: Add service annotations to enable automatic certificate provisioning via Service CA operator
-3. **Route Lifecycle Management**: Monitor and manage route status throughout the lifecycle
-4. **Certificate Trust Management**: Configure route to trust service certificates issued by Service CA
-5. **Default Secure Configuration**: Apply secure defaults for TLS termination and certificate management
-6. **Custom Host Support**: Allow administrators to specify custom hostnames for the managed Route via `spec.jwtIssuer` field
-7. **Labels and Annotations Management**: Support user-defined labels and annotations on managed Routes through CR specification
-8. **Status Conditions and Events**: Provide comprehensive status reporting and event generation for troubleshooting
-9. **RBAC Validation**: Validate operator permissions for Route management and provide clear error messages
-10. **Route Configuration Validation**: Reject invalid Route termination types and configurations that conflict with Service CA usage
-11. **Managed Route Lifecycle**: Handle Route creation, updates, and cleanup based on `managedRoute` flag state
+As part of this implementation, the `spiffe-helper` container will be removed from the `spire-oidc-discovery-provider` deployment to optimize attestation flow and eliminate dependency on SPIRE server-generated certificates for endpoints. The `spire-oidc-discovery-provider` will use Service CA-managed certificates while workload attestation continues through the SPIRE agent's workload API socket when requesting JWKS bundles.
 
-#### Route Creation Implementation
+#### TLS Security and Validation
 
-The controller will implement route creation with this pattern:
+Re-encrypt termination is the only supported termination type to ensure end-to-end TLS encryption from external clients to the backend service. This approach maintains complete encryption throughout the request path with no unencrypted traffic within the cluster, providing dual-layer certificate validation at the router. The controller implements strict validation, reconciling routes with edge or passthrough termination to prevent security-compromising configurations.
 
-```go
-// Route creation function
-func generateOIDCDiscoveryProviderRoute(cr *operatorv1alpha1.SpireOIDCDiscoveryProvider) *routev1.Route {
-    return &routev1.Route{
-        ObjectMeta: metav1.ObjectMeta{
-            Name:      "spire-oidc-discovery-provider",
-            Namespace: cr.Namespace,
-            Labels: map[string]string{
-                "app.kubernetes.io/name":       "spiffe-oidc-discovery-provider",
-                "app.kubernetes.io/instance":   "spire",
-                "app.kubernetes.io/part-of":    "zero-trust-workload-identity-manager",
-                "app.kubernetes.io/managed-by": "zero-trust-workload-identity-manager",
-            },
-        },
-        Spec: routev1.RouteSpec{
-            To: routev1.RouteTargetReference{
-                Kind: "Service",
-                Name: "spire-spiffe-oidc-discovery-provider",
-            },
-            Port: &routev1.RoutePort{
-                TargetPort: intstr.FromString("https"),
-            },
-            TLS: &routev1.TLSConfig{
-                Termination:                   routev1.TLSTerminationReencrypt,
-                InsecureEdgeTerminationPolicy: routev1.InsecureEdgeTerminationPolicyRedirect,
-            },
-        },
-    }
-}
-```
+From an operational perspective, re-encrypt termination integrates seamlessly with OpenShift's Service CA operator for automatic certificate lifecycle management, eliminating manual certificate management burden while providing transparent updates without service disruption. This leverages OpenShift's built-in certificate infrastructure rather than requiring external PKI management.
 
-#### Service CA Integration
+#### Route Lifecycle and Status Management
 
-The controller will add automatic certificate provisioning by annotating the OIDC discovery provider service:
+The controller manages Route lifecycle based on the `managedRoute` flag with owner references for automatic garbage collection. When enabled, Routes are created automatically with secure defaults. When disabled, the controller stops managing Routes but preserves existing configurations (per non-goals). Re-enabling management adopts compatible existing Routes or creates new ones.
 
-```yaml
-# Service annotation for automatic certificate provisioning via Service CA
-annotations:
-  service.beta.openshift.io/serving-cert-secret-name: oidc-serving-cert
-```
+Status conditions provide comprehensive troubleshooting: `SpireOIDCManagedRouteGeneration` holds overall route status and reasons, `SpireOIDCManagedRouteCreationSucceeded` indicates successful creation, and `SpireOIDCRouteCreationDisabled` signifies disabled management. Custom hostnames are supported through the existing `spec.jwtIssuer` field, requiring external DNS configuration by administrators.
 
-This enables OpenShift's Service CA operator to automatically:
-- Generate and provision TLS certificates for the service
-- Create the `oidc-serving-cert` secret containing the certificate and private key
-- Manage certificate lifecycle including renewal
-- Establish trust with the cluster's Certificate Authority
+#### RBAC Validation and Labels/Annotations Support
 
-As part of this change, the `spiffe-helper` container will be removed from the `spire-oidc-discovery-provider` deployment, because the Service CA operator will provide the serving certificate directly to the OIDC discovery provider pod via the generated secret.
+The controller validates required RBAC permissions before attempting Route operations, checking for `routes.route.openshift.io` (create, update, get, list, watch, delete) and `services` (get, update, patch) permissions. When permissions are missing, the controller provides specific error messages identifying missing permissions and suggested RBAC commands for administrators, while setting status conditions to indicate permission errors and continuing to manage other aspects of the SpireOIDCDiscoveryProvider.
 
+User-defined labels and annotations are supported through `SpireOIDCDiscoveryProvider` API fields, with controller-managed labels taking precedence over user labels for conflicts.
 
-#### Status Conditions and Events Implementation
-
-The controller will provide comprehensive status reporting for troubleshooting:
-
-1. **Status Conditions**:
-   - `SpireOIDCManagedRouteGeneration`: Condition holds the value regarding the oidc routes status and reasons.
-   - `status`: Reports the condition status as true or false.
-   - `SpireOIDCManagedRouteCreationSucceeded`: signifies that the routes creation has been succeded.
-   - `SpireOIDCRouteCreationDisabled`: signifies that the managed routes creation has been disabled.
-   - `SpireOIDCManagedRouteCreationFailed`: signifies that managed routes creation has failed. putting the error message in the `message` field.
-
-2. **Event Generation**:
-   - Route creation success/failure events
-   - Certificate provisioning events
-   - TLS configuration events
-   - Validation error events
-   - RBAC permission error events
-
-
-
-#### Route Configuration Validation
-
-The controller will implement validation to ensure secure and compatible configurations:
-
-1. **Termination Type Validation**: Reject Route configurations with unsupported TLS termination types:
-   - Allow only `reencrypt` termination for managed Routes
-   - Reject `edge` and `passthrough` termination types with validation errors
-   - Provide clear error messages explaining security requirements
-
-2. **Certificate Configuration Validation**: 
-   - Prevent configurations that conflict with Service CA integration
-   - Allow custom certificates only when properly configured with reencrypt termination
-
-
-#### Managed Route Lifecycle Management
-
-The controller will handle Route lifecycle based on the `managedRoute` flag:
-
-1. **Route Creation**: Create Routes automatically when `managedRoute` is `true` (default)
-
-2. **Route Disabling**: When `managedRoute` is set to `false`:
-   - Stop managing the existing Route (if any)
-   - Do NOT automatically delete the existing Route (per non-goals)
-   - Update status conditions to indicate Route is no longer managed
-
-3. **Route Re-enabling**: When `managedRoute` is changed from `false` to `true`:
-   - Check if a Route already exists from previous management
-   - Adopt existing compatible Routes or create new ones
-   - Resume full Route lifecycle management
-
-4. **Resource Cleanup**: Routes are only deleted when:
-   - The parent SpireOIDCDiscoveryProvider resource is deleted (via owner references)
-   - NOT when `managedRoute` is disabled (preserves existing configurations)
-
-#### Certificate Trust Chain Configuration
-
-The route will be configured to trust certificates issued by the Service CA:
-
-```yaml
-# Route TLS configuration with Service CA trust (default)
-tls:
-  termination: reencrypt
-  insecureEdgeTerminationPolicy: Redirect
-  # Users can modify this section to add custom certificates:
-  # certificate: |
-  #   -----BEGIN CERTIFICATE-----
-  #   <custom certificate content>
-  #   -----END CERTIFICATE-----
-  # key: |
-  #   -----BEGIN PRIVATE KEY-----
-  #   <custom private key content>
-  #   -----END PRIVATE KEY-----
-```
-
-
-Users can add their own tls credentials by directly editing the managed Route's `spec.tls` field:
-
-1. **Default Behavior**: The controller creates routes with Service CA integration for automatic certificate management
-2. **Controller Behavior**: The controller will not overwrite user-provided custom certificates in the route's TLS configuration
-3. **Certificate Management**: When custom certificates are used, users are responsible for certificate renewal and lifecycle management
+Users can customize TLS credentials by directly editing the managed Route's `spec.tls` field. The controller will not overwrite user-provided custom certificates, though users become responsible for certificate renewal and lifecycle management when overriding Service CA automation. Default routes use Service CA integration with automatic certificate management and re-encrypt termination for optimal security.
 
 ### Workflow Description
 
@@ -332,7 +202,6 @@ https://<route-hostname>/.well-known/openid_configuration
 
 Where `<route-hostname>` is derived as follows:
 - If `spec.jwtIssuer` is set, the route hostname will match the issuer host.
-- If `spec.jwtIssuer` is not set, the route hostname defaults to `oidc-discovery.<trustDomain>`.
 
 #### What Gets Created Automatically
 
@@ -472,25 +341,16 @@ This is the primary target environment for this enhancement. Standard OpenShift 
 
 ### Implementation Details/Notes/Constraints
 
-- Routes are created automatically when a `SpireOIDCDiscoveryProvider` resource is created
-- A configuration option `spec.managedRoute` controls whether the operator manages the external Route (default: "true")
-- Certificate management is handled entirely by the Service CA operator
-- Route names follow a predictable pattern: `spire-oidc-discovery-provider`
-- TLS termination is set to `reencrypt` for security
-- Routes are tied to the lifecycle of the `SpireOIDCDiscoveryProvider` resource
-- Controller will not overwrite user-provided custom TLS certificates in managed routes
-- Custom hostnames are supported through the existing `spec.jwtIssuer` field with hostname extraction
-- External DNS configuration is required for custom hostnames (outside operator scope)
-- User-defined labels and annotations are supported via `spec.routeLabels` and `spec.routeAnnotations`
-- Controller-managed labels take precedence over user labels for conflicts
-- Only `reencrypt` TLS termination is supported; `edge` and `passthrough` are rejected with validation errors
-- RBAC permissions are validated before Route operations with specific error reporting
-- Status conditions provide detailed troubleshooting information: `RouteAvailable`, `CertificateReady`, `DNSReady`, `TLSConfigured`
-- Events are generated for Route operations, certificate provisioning, and error conditions
-- When `managedRoute` is disabled, existing Routes are NOT automatically deleted (preserves user configurations)
-- Route adoption occurs when `managedRoute` is re-enabled and compatible Routes exist
-- Validation prevents configuration changes that would break Service CA integration
-- Graceful degradation when RBAC permissions are insufficient
+- Routes are created automatically with predictable names: `spire-oidc-discovery-provider`
+- Configuration controlled via `spec.managedRoute` (default: "true") 
+- Service CA operator handles all certificate management automatically
+- Only `reencrypt` TLS termination supported for end-to-end security
+- Custom hostnames supported through existing `spec.jwtIssuer` field (requires external DNS)
+- Routes preserved when `managedRoute` disabled (per non-goals)
+- Owner references ensure garbage collection with parent resource cleanup
+- User-defined labels and annotations supported via `spec.routeLabels` and `spec.routeAnnotations`
+- RBAC permissions validated with specific error reporting and graceful degradation
+- Status conditions provide comprehensive troubleshooting information
 
 ### Drawbacks
 
