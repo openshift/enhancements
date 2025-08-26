@@ -231,14 +231,13 @@ The various workflows are briefly summarized below:
 
 #### InternalReleaseImage custom resource
 
-The `InternalReleaseImage` is a new singleton custom resource, controlled by
-MCO, used to keep track and manage the OCP release images stored into the
-control planes nodes. In particular, it will be used for:
+The `InternalReleaseImage` is a new singleton custom resource, named `cluster`,
+controlled by MCO, used to keep track and manage the OCP release images stored
+into the control planes nodes. In particular, it will be used for:
 
 * Triggering a new release image copy task - as a preliminary upgrade step
 * Delete from disk a release image version not anymore in use - as an optional
   post-upgrade step
-* Enabled/disable the registry services
 
 This is an example of how the CR will look like:
 
@@ -251,12 +250,10 @@ spec:
   releases:
     - "quay.io/openshift-release-dev/ocp-release:4.18.0-x86_64"
     - "quay.io/openshift-release-dev/ocp-release:4.19.0-x86_64"
-  enabled: true
 status:
   releases:
     - "quay.io/openshift-release-dev/ocp-release:4.18.0-x86_64"
     - "quay.io/openshift-release-dev/ocp-release:4.19.0-x86_64"
-  enabled: true
   conditions:
     - type: "Available"
       status: "True"
@@ -274,12 +271,21 @@ status:
 * The `spec.releases` will be used to configure the desired release contents.
   Adding (or removing) an entry from the list will trigger an update on all the
   control plane nodes.
-* The `spec.enabled` will be used to turn on / off the feature. In particular,
-  when turned off, all the registry services running on the control plane nodes
-  will be stopped.
 * The `status.releases` field will report the currently managed releases
 * The `status.conditions` field will be used to keep track of the activity
   performed on the various nodes.
+
+#### Removal of InternalReleaseImage
+
+The deletion of the IRI `cluster` resource will be handled by a finalizer,
+and it will stop all the registry services running on the control plane nodes.
+In addition, all the currently stored release payloads will be deleted from thee
+nodes disk, and all the previously resources created will be removed as well
+(such as the IDMS ones) to complete the cleanup.
+
+After removing the IRI resource in a disconnected environment, the user will
+have to setup his/her own registry with the required mirrored content to allow
+further cluster operations, such as upgrade and node extensions.
 
 ### Topology Considerations
 
