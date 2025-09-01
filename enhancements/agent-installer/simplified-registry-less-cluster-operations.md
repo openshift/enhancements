@@ -254,8 +254,7 @@ status:
   releases:
     - "quay.io/openshift-release-dev/ocp-release:4.18.0-x86_64"
     - "quay.io/openshift-release-dev/ocp-release:4.19.0-x86_64"
-  currentRelease:
-    - "quay.io/openshift-release-dev/ocp-release:4.18.0-x86_64"
+  currentRelease: "quay.io/openshift-release-dev/ocp-release:4.18.0-x86_64"
   conditions:
     - type: "Available"
       status: "True"
