@@ -254,6 +254,8 @@ status:
   releases:
     - "quay.io/openshift-release-dev/ocp-release:4.18.0-x86_64"
     - "quay.io/openshift-release-dev/ocp-release:4.19.0-x86_64"
+  currentRelease:
+    - "quay.io/openshift-release-dev/ocp-release:4.18.0-x86_64"
   conditions:
     - type: "Available"
       status: "True"
@@ -270,22 +272,12 @@ status:
 
 * The `spec.releases` will be used to configure the desired release contents.
   Adding (or removing) an entry from the list will trigger an update on all the
-  control plane nodes.
+  control plane nodes
 * The `status.releases` field will report the currently managed releases
+* The `status.currentRelease` field will report the current release in use by
+  the cluster that is managed by IRI
 * The `status.conditions` field will be used to keep track of the activity
-  performed on the various nodes.
-
-#### Removal of InternalReleaseImage
-
-The deletion of the IRI `cluster` resource will be handled by a finalizer,
-and it will stop all the registry services running on the control plane nodes.
-In addition, all the currently stored release payloads will be deleted from thee
-nodes disk, and all the previously resources created will be removed as well
-(such as the IDMS ones) to complete the cleanup.
-
-After removing the IRI resource in a disconnected environment, the user will
-have to setup his/her own registry with the required mirrored content to allow
-further cluster operations, such as upgrade and node extensions.
+  performed on the various nodes
 
 ### Topology Considerations
 
@@ -304,6 +296,43 @@ N/A
 N/A
 
 ### Implementation Details/Notes/Constraints
+
+#### InternalReleaseImage custom resource
+
+A new `InternalReleaseImageController` sub-controller of the
+_machine-config-controller_ will be created to watch and manage the
+`InternalImageRelease` resource. The controller will take care of
+updating the resource status.
+
+A new `InternalReleaseImageManager` manager will be added to
+_machine-config-daemon_ to handle per-node specific operations.
+
+##### Removal of a release from the the InternalReleaseImage resource
+
+The user could remove a release payload not anymore in use by editing the
+`spec.releases` field of the `InternalReleaseImage` resource to delete the
+desired release entry value.
+
+A ValidatingAdmissionPolicy will be added to prevent the user to remove
+a release entry that is currently being used by the cluster (as reported by
+the `status.currentRelease` field).
+
+##### Removal of InternalReleaseImage resource
+
+The deletion of the IRI `cluster` resource will be handled by a finalizer,
+and it will stop all the registry services running on the control plane nodes.
+In addition, all the currently stored release payloads will be deleted from the
+nodes disk, and all the previously resources created will be removed as well
+(such as the IDMS ones) to complete the cleanup.
+
+It will not possible to delete the resource if the current release is managed
+by the IRI itself. To opt-out from the feature, the user will have to setup
+his/her own registry with the required mirrored content and perform a cluster
+upgrade using it.
+Once successfully completed, the `InternalReleaseImageController` will 
+blank out the `spec.currentRelease` field to indicate that none of the its
+managed release payloads are currently being used for the cluster. At this
+point it would be possible for the user to remove the IRI resource.
 
 #### Extended RHCOS ISO build
 
