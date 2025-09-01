@@ -248,8 +248,8 @@ metadata:
   name: cluster
 spec:
   releases:
-    - "quay.io/openshift-release-dev/ocp-release:4.18.0-x86_64"
-    - "quay.io/openshift-release-dev/ocp-release:4.19.0-x86_64"
+    - name: quay.io/openshift-release-dev/ocp-release:4.18.0-x86_64
+    - name: quay.io/openshift-release-dev/ocp-release:4.19.0-x86_64
 status:
   releases:
     - "quay.io/openshift-release-dev/ocp-release:4.18.0-x86_64"
@@ -270,9 +270,9 @@ status:
   ...
 ```
 
-* The `spec.releases` will be used to configure the desired release contents.
-  Adding (or removing) an entry from the list will trigger an update on all the
-  control plane nodes
+* The `spec.releases` contains a list of release objects, and it will be used
+  to configure the desired release contents. Adding (or removing) an entry from
+  the list will trigger an update on all the control plane nodes.
 * The `status.releases` field will report the currently managed releases
 * The `status.currentRelease` field will report the current release in use by
   the cluster that is managed by IRI
