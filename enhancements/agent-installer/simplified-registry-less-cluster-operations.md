@@ -254,7 +254,6 @@ status:
   releases:
     - "quay.io/openshift-release-dev/ocp-release:4.18.0-x86_64"
     - "quay.io/openshift-release-dev/ocp-release:4.19.0-x86_64"
-  currentRelease: "quay.io/openshift-release-dev/ocp-release:4.18.0-x86_64"
   conditions:
     - type: "Available"
       status: "True"
@@ -273,8 +272,6 @@ status:
   to configure the desired release contents. Adding (or removing) an entry from
   the list will trigger an update on all the control plane nodes.
 * The `status.releases` field will report the currently managed releases
-* The `status.currentRelease` field will report the current release in use by
-  the cluster that is managed by IRI
 * The `status.conditions` field will be used to keep track of the activity
   performed on the various nodes
 
@@ -313,8 +310,9 @@ The user could remove a release payload not anymore in use by editing the
 desired release entry value.
 
 A ValidatingAdmissionPolicy will be added to prevent the user to remove
-a release entry that is currently being used by the cluster (as reported by
-the `status.currentRelease` field).
+a release entry that is currently being used by the cluster. The policy will
+perform a check against the `ClusterVersion` `version` object to allow (or not)
+the update request.
 
 ##### Removal of InternalReleaseImage resource
 
@@ -324,14 +322,15 @@ In addition, all the currently stored release payloads will be deleted from the
 nodes disk, and all the previously resources created will be removed as well
 (such as the IDMS ones) to complete the cleanup.
 
-It will not possible to delete the resource if the current release is managed
-by the IRI itself. To opt-out from the feature, the user will have to setup
-his/her own registry with the required mirrored content and perform a cluster
-upgrade using it.
-Once successfully completed, the `InternalReleaseImageController` will 
-blank out the `spec.currentRelease` field to indicate that none of the its
-managed release payloads are currently being used for the cluster. At this
-point it would be possible for the user to remove the IRI resource.
+It won't be allowed to delete the resource if the current release is still
+managed by the IRI resource. Also in this case, a ValidatingAdmissionPolicy
+performing a check against the `ClusterVersion` `version` object will be used
+(to verify that none of the IRI releases is currently being used by the
+cluster).
+This means that a user, to opt-out from the feature, will have to previouslu
+setup his/her own registry with the required mirrored content and then perform
+a cluster upgrade. Once successfully completed, it'd be possible to remove the
+IRI resource.
 
 #### Extended RHCOS ISO build
 
