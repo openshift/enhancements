@@ -191,7 +191,7 @@ This enhancement is applicable to single-node deployments and MicroShift environ
 * Adds another user-visible configuration option to the API.
 * Requires users to understand the implications of disabling upload.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 * **Post-processing Flag**: Could have implemented a flag to delete uploaded data after upload, but the requirement is to prevent upload entirely.
 
@@ -243,6 +243,10 @@ This enhancement is applicable to single-node deployments and MicroShift environ
 * Customer validation in staging environments
 * User-facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 * Performance impact assessment completed
+
+### Removing a deprecated feature
+
+- None
 
 ## Upgrade / Downgrade Strategy
 
