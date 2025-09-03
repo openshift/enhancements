@@ -318,19 +318,6 @@ spec:
   # caseID and caseManagementAccountSecretRef are optional when upload is disabled
 ```
 
-### Minimal Upload Disabled Configuration
-
-```yaml
-apiVersion: managed.openshift.io/v1alpha1
-kind: MustGather
-metadata:
-  name: mustgather-upload-disabled-minimal
-spec:
-  serviceAccountRef:
-    name: must-gather-admin
-  disableUpload: true
-```
-
 ## Implementation History
 
 * v0: Draft proposal created based on MG-67 requirements
