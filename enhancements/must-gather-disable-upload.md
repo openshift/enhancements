@@ -90,7 +90,7 @@ When `spec.disableUpload` is set to `false` (default), the operator continues to
 
 ```go
 // MustGatherSpec defines the desired state of MustGather
-// +kubebuilder:validation:XValidation:rule="!(has(self.disableUpload) && self.disableUpload) ? (has(self.caseID) && self.caseID != ” && has(self.caseManagementAccountSecretRef) && self.caseManagementAccountSecretRef.name != ”) : true",message="caseID and caseManagementAccountSecretRef are required when disableUpload is false or unset"
+// +kubebuilder:validation:XValidation:rule="!(has(self.disableUpload) && self.disableUpload) ? (has(self.caseID) && self.caseID != '' && has(self.caseManagementAccountSecretRef) && self.caseManagementAccountSecretRef.name != '') : true",message="caseID and caseManagementAccountSecretRef are required when disableUpload is false or unset"
 type MustGatherSpec struct {
     // The is of the case this must gather will be uploaded to
     // Required when disableUpload is false, optional when disableUpload is true
@@ -115,23 +115,42 @@ type MustGatherSpec struct {
 
 ```yaml
 spec:
-  type: object
+	description: MustGatherSpec defines the desired state of MustGather
   properties:
     disableUpload:
-      type: boolean
-      default: false
-      description: "A flag to control whether the must-gather bundle should be uploaded to SFTP server. If set to true, the bundle will be collected but not uploaded."
+			default: false
+			description: |-
+				A flag to control whether the must-gather bundle should be uploaded to SFTP server.
+				If set to true, the bundle will be collected but not uploaded.
+			type: boolean
     caseID:
-      type: string
-      description: "The is of the case this must gather will be uploaded to. Required when disableUpload is false, optional when disableUpload is true"
+			description: |-
+				The is of the case this must gather will be uploaded to
+				Required when disableUpload is false, optional when disableUpload is true
+			type: string
     caseManagementAccountSecretRef:
-      type: object
-      description: "the secret container a username and password field to be used to authenticate with red hat case management systems. Required when disableUpload is false, optional when disableUpload is true"
-  x-kubernetes-validations:
-  - message: caseID and caseManagementAccountSecretRef are required when disableUpload is false or unset
-    rule: '!(has(self.disableUpload) && self.disableUpload) ? (has(self.caseID)
-      && self.caseID != ” && has(self.caseManagementAccountSecretRef) &&
-      self.caseManagementAccountSecretRef.name != ”) : true'
+			description: |-
+				the secret container a username and password field to be used to authenticate with red hat case management systems
+				Required when disableUpload is false, optional when disableUpload is true
+			properties:
+				name:
+					default: ""
+					description: |-
+						Name of the referent.
+						This field is effectively required, but due to backwards compatibility is
+						allowed to be empty. Instances of this type with an empty value here are
+						almost certainly wrong.
+						More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+					type: string
+			type: object
+			x-kubernetes-map-type: atomic
+	type: object
+	x-kubernetes-validations:
+	- message: caseID and caseManagementAccountSecretRef are required when
+			disableUpload is false or unset
+		rule: '!(has(self.disableUpload) && self.disableUpload) ? (has(self.caseID)
+			&& self.caseID != '''' && has(self.caseManagementAccountSecretRef)
+			&& self.caseManagementAccountSecretRef.name != '''') : true'
 ```
 
 ### Topology Considerations
