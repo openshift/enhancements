@@ -50,7 +50,7 @@ Default: `false` (upload enabled by default for backward compatibility)
 ### Goals
 
 * Add `spec.disableUpload` with boolean validation and a safe default.
-* Ensure the upload container respects the disableUpload flag and skips upload when disabled.
+* Ensure the upload container respects the `disableUpload` flag and skips upload when disabled.
 * Make `caseID` and `caseManagementAccountSecretRef` optional when upload is disabled.
 * Maintain full backward compatibility.
 * Provide clear examples and documentation for both use cases.
@@ -58,7 +58,6 @@ Default: `false` (upload enabled by default for backward compatibility)
 ### Non-Goals
 
 * Introduce alternative upload mechanisms (e.g., different protocols or destinations).
-* Implement data obfuscation or filtering capabilities.
 * Add compression or encryption features for local storage.
 
 ## Proposal
@@ -179,7 +178,14 @@ This enhancement is applicable to single-node deployments and MicroShift environ
 
 ## Open Questions
 
-None at this time.
+1. **Upload Container Strategy**: Should we omit the upload container entirely when `disableUpload: true`, or include it with early exit logic?
+   - **Option A**: Skip upload container creation when upload is disabled (cleaner, fewer resources)
+   - **Option B**: Always create upload container but exit early if upload is disabled (consistent job structure)
+   - **Decision**: Recommend Option B for consistency and easier debugging/monitoring
+2. **Validation Fallback**: For clusters < Kubernetes 1.25 (without CEL support), should we implement controller-level validation as fallback?
+   - **Impact**: Ensures consistent behavior across all supported Kubernetes versions
+   - **Complexity**: Requires dual validation paths
+   - **Decision Needed**: Is this necessary given OpenShift's Kubernetes version requirements?
 
 ## Test Plan
 
@@ -243,7 +249,6 @@ This enhancement modifies the MustGather CRD by adding an optional field with bo
 **Failure modes**:
 * CEL validation failures for missing required fields when upload is enabled are caught at admission time with clear error messages
 * Upload container failures are handled the same way regardless of upload status
-* Invalid CEL expressions would prevent CRD installation (caught during development/testing)
 
 ## Support Procedures
 
