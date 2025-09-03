@@ -90,6 +90,7 @@ When `spec.disableUpload` is set to `false` (default), the operator continues to
 
 ```go
 // MustGatherSpec defines the desired state of MustGather
+// +kubebuilder:validation:XValidation:rule="!(has(self.disableUpload) && self.disableUpload) ? (has(self.caseID) && self.caseID != ” && has(self.caseManagementAccountSecretRef) && self.caseManagementAccountSecretRef.name != ”) : true",message="caseID and caseManagementAccountSecretRef are required when disableUpload is false or unset"
 type MustGatherSpec struct {
     // The is of the case this must gather will be uploaded to
     // Required when disableUpload is false, optional when disableUpload is true
@@ -113,16 +114,24 @@ type MustGatherSpec struct {
 #### CRD OpenAPI Schema
 
 ```yaml
-disableUpload:
-  type: boolean
-  default: false
-  description: "A flag to control whether the must-gather bundle should be uploaded to SFTP server. If set to true, the bundle will be collected but not uploaded."
-caseID:
-  type: string
-  description: "The is of the case this must gather will be uploaded to. Required when disableUpload is false, optional when disableUpload is true"
-caseManagementAccountSecretRef:
+spec:
   type: object
-  description: "the secret container a username and password field to be used to authenticate with red hat case management systems. Required when disableUpload is false, optional when disableUpload is true"
+  properties:
+    disableUpload:
+      type: boolean
+      default: false
+      description: "A flag to control whether the must-gather bundle should be uploaded to SFTP server. If set to true, the bundle will be collected but not uploaded."
+    caseID:
+      type: string
+      description: "The is of the case this must gather will be uploaded to. Required when disableUpload is false, optional when disableUpload is true"
+    caseManagementAccountSecretRef:
+      type: object
+      description: "the secret container a username and password field to be used to authenticate with red hat case management systems. Required when disableUpload is false, optional when disableUpload is true"
+  x-kubernetes-validations:
+  - message: caseID and caseManagementAccountSecretRef are required when disableUpload is false or unset
+    rule: '!(has(self.disableUpload) && self.disableUpload) ? (has(self.caseID)
+      && self.caseID != ” && has(self.caseManagementAccountSecretRef) &&
+      self.caseManagementAccountSecretRef.name != ”) : true'
 ```
 
 ### Topology Considerations
@@ -141,8 +150,9 @@ This enhancement is applicable to single-node deployments and MicroShift environ
 
 ### Implementation Details/Notes/Constraints
 
-* **API**: Add `DisableUpload` to `MustGatherSpec` with kubebuilder default marker.
-* **Controller**: Update validation logic to make `caseID` and `caseManagementAccountSecretRef` mandatory when `disableUpload` is false or unset.
+* **Prerequisites**: Requires Kubernetes 1.25+ for CEL validation support (enabled by default)
+* **API**: Add `DisableUpload` to `MustGatherSpec` with kubebuilder default marker and CEL validation rules.
+* **Validation**: Use kubebuilder CEL validation (`+kubebuilder:validation:XValidation`) to enforce that `caseID` and `caseManagementAccountSecretRef` are mandatory when `disableUpload` is false or unset.
 * **Template**: Update upload container to pass `disable_upload` environment variable from `spec.disableUpload`.
 * **Secret Management**: Skip secret copying to operator namespace when upload is disabled.
 * **Defaulting**: Respect defaulting when field is unset to maintain backward compatibility.
@@ -175,8 +185,10 @@ None at this time.
 ### Unit Tests
 
 * API defaulting validation (`disableUpload` defaults to false)
-* Controller validation logic for optional fields when `disableUpload` is true
-* Controller validation logic for required fields when `disableUpload` is false
+* CEL validation rules for conditional field requirements:
+  - Fields are optional when `disableUpload` is true
+  - Fields are required when `disableUpload` is false or unset
+  - Validation error messages are clear and helpful
 * Job template generation includes `disable_upload` environment variable when set
 * Upload container environment variable handling for disabled upload scenarios
 
@@ -184,16 +196,18 @@ None at this time.
 
 * Happy path with `disableUpload` set to true - job completes without upload
 * Default path (unset or `false`) - normal upload behavior
-* Validation test - missing `caseID` or `caseManagementAccountSecretRef` when `disableUpload` is `false` or unset should fail
-* Validation test - missing `caseID` or `caseManagementAccountSecretRef` or both when `disableUpload` is `true` should succeed
+* CEL validation tests:
+  - Missing `caseID` or `caseManagementAccountSecretRef` when `disableUpload` is `false` or unset should fail at admission time
+  - Missing `caseID` or `caseManagementAccountSecretRef` or both when `disableUpload` is `true` should succeed
+  - Empty string values for required fields when upload is enabled should fail
 * Secret management test - no secret copying when upload is disabled
 
 ## Graduation Criteria
 
 ### Dev Preview -> Tech Preview
 
-* Field added with default validation
-* Unit tests implemented
+* Field added with default validation and CEL validation rules
+* Unit tests implemented for API validation and controller logic
 * Basic documentation available
 * Ability to utilize the enhancement end to end
 
@@ -218,15 +232,17 @@ None at this time.
 
 ## Operational Aspects of API Extensions
 
-This enhancement modifies the MustGather CRD by adding an optional field with boolean validation and a default value and updating two fields from required to optional.
+This enhancement modifies the MustGather CRD by adding an optional field with boolean validation, a default value, and CEL validation rules for conditional field requirements.
 
 **Impact on existing SLIs**:
 * No impact on API throughput or availability
+* Minimal impact on admission latency due to CEL validation (microseconds)
 * No impact on cluster performance as this is a configuration field only used during must-gather operations
 
 **Failure modes**:
-* Validation failures for missing required fields when upload is enabled result in clear error messages
+* CEL validation failures for missing required fields when upload is enabled are caught at admission time with clear error messages
 * Upload container failures are handled the same way regardless of upload status
+* Invalid CEL expressions would prevent CRD installation (caught during development/testing)
 
 ## Support Procedures
 
@@ -293,6 +309,6 @@ spec:
 ## Implementation History
 
 * v0: Draft proposal created based on MG-67 requirements
-* v1: API added with boolean field and default; unit tests; controller validation logic implemented
-* v2: E2E tests and examples; CRDs regenerated; documentation updated
+* v1: API added with boolean field, default, and CEL validation rules; unit tests implemented
+* v2: E2E tests and examples; CRDs regenerated with CEL validation; documentation updated
 * v3: Ready for tech preview after validation and testing
