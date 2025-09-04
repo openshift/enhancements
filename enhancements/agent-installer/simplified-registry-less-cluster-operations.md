@@ -276,9 +276,50 @@ status:
 * The `spec.releases` contains a list of release objects, and it will be used
   to configure the desired release contents. Adding (or removing) an entry from
   the list will trigger an update on all the control plane nodes.
-* The `status.releases` field will report the currently managed releases
+* The `status.releases` field will report the currently managed releases (this
+  is an aggregated value, for individual node status see below)
 * The `status.conditions` field will be used to keep track of the activity
   performed on the various nodes
+
+##### MachineConfigNode InternalReleaseImage status
+
+The `MachineConfigNode` CRD will be extended to report the per-node status, so
+that it will be possible to track the current status/errors of each individual
+node. The IRI resource will monitor all the MCN resources to update its status.
+
+Following a proposal example for the extended status field:
+
+```
+kind: MachineConfigNode
+metadata:
+  name: master-0-machineconfignode
+...
+status:
+  ...
+  releases:
+    - image: quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:b6f3a6e7cab0bb6e2590f6e6612a3edec75e3b28d32a4e55325bdeeb7d836662
+      conditions:
+        - type: Available
+          status: "True"
+          lastTransitionTime: "2025-07-12T14:02:00Z"
+          reason: "ReleasesCopied"
+          message: "The release payload has been successfully copied."
+          ...
+    - image: quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:6bd997996a5197c50e91564ab6ee74aae6b6ad38135ae3cbff320293fff074cc
+      conditions:
+        - type: Available
+          status: "False"
+          lastTransitionTime: "2025-08-12T17:01:13Z"
+          reason: "Error"
+          message: "Not enough storage space."
+```
+
+* The `status.releases` field will be used to track the status of the release
+  payloads stored in the related node. To avoid any ambiguity, the release
+  image will be referenced always by digest
+* The `status.conditions` field will be used to keep track of the activity
+  performed for the specific release payload, and in particular to report any
+  error
 
 ### Topology Considerations
 
@@ -347,8 +388,10 @@ registry’s filesystem storage plugin.
 
 The [distribution/distribution](https://github.com/distribution/distribution)
 registry will be used to run the registry services on each control plane
-node. The binary will be built and included in the [openshift/image-registry](https://github.com/openshift/image-registry)
-repo image, so that it will be available within an OCP release image payload.
+node. The binary will be built and included in the same source as
+[openshift/image-registry](https://github.com/openshift/image-registry) repo,
+so that it will be available within an OCP release image payload and CVEs will
+be handled without any additional overhead.
 
 #### Installation - bootstrap phase
 
