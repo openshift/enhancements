@@ -376,6 +376,17 @@ to serve its content.
 After the user modified the IRI resource with the new release pullspec, the new
 OCP release image payload will be copied on each node registry using skopeo.
 
+#### Storage requirements
+
+The control plane nodes disks must have sufficient space to store the requested
+release payloads. The recommendation is to allocate at least ~60Gb per release.
+Thus, to fully support also the upgrade, a total of additional ~120GB will be
+required.
+Assisted Service will apply a pre-flight validation to ensure that the
+control plane nodes will meet the new storage requirement. Additionally, it
+should be properly documented in the pre-requistes section.
+
+
 ### Risks and Mitigations
 
 * Exposing the internal registry on a node port will allow it to be reached
