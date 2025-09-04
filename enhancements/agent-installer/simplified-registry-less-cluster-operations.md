@@ -276,6 +276,10 @@ status:
 * The `spec.releases` contains a list of release objects, and it will be used
   to configure the desired release contents. Adding (or removing) an entry from
   the list will trigger an update on all the control plane nodes.
+* The `spec.releases.name` format is a pullspec by tag. This is a convenient
+  format for the end user, since it is readable and commonly used for reference
+  a specific releasy payload. Optionally, the user could also specify a pullspec
+  by digest (internally the digest will always be used to avoid any ambiguity)
 * The `status.releases` field will report the currently managed releases (this
   is an aggregated value, for individual node status see below)
 * The `status.conditions` field will be used to keep track of the activity
