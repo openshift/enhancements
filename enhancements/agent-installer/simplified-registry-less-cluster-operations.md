@@ -60,6 +60,8 @@ hosting an external registry made it impractical.
   optionally a selected set of OLM operators)
 * As an OpenShift administrator, I want to add a node to an existing cluster in
   a disconnected environment without setting up an external registry
+* As an OpenShift administrator, after having deployed a cluster, I want to
+  start using my own external registries for future upgrades
 
 ### Goals
 
@@ -68,6 +70,9 @@ hosting an external registry made it impractical.
 * Offer a simplified installation experience for disconnected environments by
   leveraging existing tools like the Agent-Based Installer, Assisted Installer
   and OpenShift Appliance
+* Support a mechanism to allow the user, after having successfully installed
+  the cluster, to opt-out from the feature and start using his/her own external
+  registry for the cluster upgrade operations
 
 ### Non-Goals
 
@@ -139,8 +144,8 @@ environment will not be available anymore).
 To allow pulling images from the cluster, an ImageDigestMirrorSet
 (IDMS) policy will be added to the cluster manifests - using the `api-int` 
 DNS entry - so that the set of registries running within
-the control plane nodes will become the nominal pullspec of the current release
-payload itself.
+the control plane nodes will transparently serve the release payload images
+locally mirrored.
 
 Finally, a new `InternalReleaseImage` custom resource, managed by MCO, will
 also be added as a cluster manifest to keep track and manage the currently
