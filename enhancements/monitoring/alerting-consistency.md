@@ -127,6 +127,29 @@ these alerts if they are not actionable.
     These runbooks are reviewed jointly by the OpenShift developers and the
     managed OpenShift SREs and currently live in the [openshift/runbooks][2]
     repository.
+* Different alerting rules MAY have the same alert name when they correspond
+  the same issue.
+  * For instance, the Cluster Monitoring Operator ships 2 alerting rules with
+    the `NodeFilesystemFilesFillingUp` name: one with the `severity: warning`
+    level and the other with the `severity: critical` label.
+
+#### PromQL good practices
+
+When the alerting expression evaluates Gauge metrics, it is recommended to use
+the `last_over_time()` function to avoid alert resets in case of failed
+scrapes.
+
+Instead of
+
+```
+my_component_health == 0
+```
+
+Prefer
+
+```
+last_over_time(my_component_health[5m]) == 0
+```
 
 ### Critical Alerts
 
