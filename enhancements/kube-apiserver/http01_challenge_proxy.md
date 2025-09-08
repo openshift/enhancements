@@ -361,13 +361,13 @@ If the proxy DaemonSet enters a `CrashLoopBackOff` state, HTTP01 challenges for 
   - Cert Manager HTTP01 challenges for the API endpoint (`api.cluster.example.com`) fail to complete.
   - Certificates for the API endpoint are not issued or renewed.
   - The proxy DaemonSet pods are in `CrashLoopBackOff` or `Error` state.
-  - Events in the `openshift-cert-manager` or relevant namespace indicate pod failures.
+  - Events in the `openshift-config` or relevant namespace indicate pod failures.
   - The operator managing the proxy (if any) reports a degraded or error status.
   - Logs from the proxy pod show errors related to `nftables` or port binding.
   - The API server logs may show failed ACME challenge requests or timeouts.
 
 - **Metrics/Alerts**:
-  - Custom metrics (if implemented) such as `cert_manager_proxy_up` or `cert_manager_proxy_errors_total` may indicate proxy health.
+  - Custom metrics (if implemented) such as `apiserver_http01_challenge_proxy_up` or `apiserver_http01_challenge_proxy_errors_total` may indicate proxy health.
   - Alerts can be configured for DaemonSet unavailability or excessive restarts.
 
 ### Disabling the API Extension
