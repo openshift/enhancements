@@ -27,7 +27,7 @@ superseded-by: []
 ## Summary
 
 This feature adds support for collecting logs using the Red Hat Logging Operator and forwarding them
-to an S3 configured endpoint.  The enhancement to ClusterLogForwarder include API changes to: allow 
+to an S3 configured endpoint.  The enhancements to ClusterLogForwarder include API changes to: allow 
 administrators to utilize "assume role" authentication functionality that is provided by the underlying platform,
 and rely upon "sane" defaults for organizing the bucket
 
@@ -36,7 +36,7 @@ and rely upon "sane" defaults for organizing the bucket
 The primary motivation for this proposal is to satisfy functionality requests from Red Hat managed services teams
 which are providing managed clusters for customers. They have requirements to be able to collect, forward, and store logs
 from both the hosted control plane and the management clusters utilizing credentials from multiple organizations in a 
-cost effeciate manor.
+cost efficient manor.
 
 ### User Stories
 
@@ -118,7 +118,7 @@ outputs:
       maxRetryDuration:    # (optional) duration
 ```
 
-**Note 1:** A combination of static and dynamic values consisting of field paths followed by "\|\|" followed by another field path or a static value (e.g `foo.{.bar.baz\|\|.qux.quux.corge\|\|.grault\|\|"nil"}-waldo.fred{.plugh\|\|"none"}`)
+**Note 1:** A combination of static and dynamic values consisting of field paths followed by "||" followed by another field path or a static value (e.g `foo.{.bar.baz||.qux.quux.corge||.grault||"nil"}-waldo.fred{.plugh||"none"}`)
 **Note 2:** The collector will encode events as [JSON](https://www.rfc-editor.org/rfc/rfc8259)
 
 #### ViaQ DataModel API
@@ -127,13 +127,13 @@ The collector will write logs to the s3 bucket defaulting the key prefix that is
 
 | log type| log source | key prefix |
 | --- | --- | --- | 
-| Application | container |`<cluster_id>_<log_type>_<log_source>_<namespace_name>_<pod_name>_<container_name>`|
-| Infrastructure | container|`<cluster_id>_<log_type>_<log_source>_<namespace_name>_<pod_name>_<container_name>`|
-| Infrastructure | node (Journal)|`<cluster_id>_<host_name>_<log_type>_<log_source>`|
-| Audit | auditd|`<cluster_id>_<host_name>_<log_type>_<log_source>`|
-| Audit | kubeAPI|`<cluster_id>_<host_name>_<log_type>_<log_source>`|
-| Audit | openshiftAPI|`<cluster_id>_<host_name>_<log_type>_<log_source>`|
-| Audit | ovn|`<cluster_id>_<host_name>_<log_type>_<log_source>`|
+| Application | container |`<cluster_id>/<yyyy-mm-dd>/<log_type>/<log_source>/<namespace_name>/<pod_name>/<container_name>/`|
+| Infrastructure | container|`<cluster_id>/<yyyy-mm-dd>/<log_type>/<log_source>/<namespace_name>/<pod_name>/<container_name>/`|
+| Infrastructure | node (Journal)|`<cluster_id>/<yyyy-mm-dd>/<log_type>/<log_source>/<host_name>/`|
+| Audit | auditd|`<cluster_id>/<yyyy-mm-dd>/<log_type>/<log_source>/<host_name>/`|
+| Audit | kubeAPI|`<cluster_id>/<yyyy-mm-dd>/<log_type>/<log_source>/`|
+| Audit | openshiftAPI|`<cluster_id>/<yyyy-mm-dd>/<log_type>/<log_source>/`|
+| Audit | ovn|`<cluster_id>/<yyyy-mm-dd>/<log_type>/<log_source>/`|
 
 ### Topology Considerations
 
