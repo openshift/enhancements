@@ -30,7 +30,7 @@ tracking-link:
 
 ## Summary
 
-Introduce an optional field in the `MustGather` custom resource to allow users to specify a PersistentVolumeClaim (PVC) as the destination for gathered artifacts. When set, the must-gather operator will mount the referenced PVC into the gather pod so that all content written to `/must-gather` is persisted to the PVC instead of ephemeral storage.
+Introduce a required field in the `MustGather` custom resource that specifies a PersistentVolumeClaim (PVC) as the destination for gathered artifacts. The must-gather operator mounts the referenced PVC into the gather pod so that all content written to `/must-gather` is persisted to the PVC.
 
 ## Motivation
 
@@ -50,7 +50,7 @@ Introduce an optional field in the `MustGather` custom resource to allow users t
 
 ### Goals
 
-- Add an optional, backwards-compatible field to the `MustGather` CRD to accept PVC details.
+- Require PVC-backed storage for all must-gather runs by adding a required `storage.persistentVolume` field to the `MustGather` CRD.
 - Ensure the gather container writes directly into the PVC by mounting it at `/must-gather`.
 
 ### Non-Goals
@@ -60,10 +60,9 @@ Introduce an optional field in the `MustGather` custom resource to allow users t
 
 ## Proposal
 
-- Introduce a `spec.storage` section in the `MustGather` CRD with a required `type` field and an optional `persistentVolume` configuration.
-- When `type` is `Ephemeral`, the gather pod uses an ephemeral volume (emptyDir) to back `/must-gather`.
-- When `type` is `PersistentVolume`, the controller mounts the referenced PVC at `/must-gather` and optionally uses `subPath` to organize runs.
-- Backwards compatibility: when `spec.storage` is omitted, behavior remains as today (ephemeral storage).
+- Introduce a `spec.storage` section in the `MustGather` CRD with a required `type` field (only `PersistentVolume` is supported) and a required `persistentVolume` configuration.
+- The controller mounts the referenced PVC at `/must-gather` and optionally uses `subPath` to organize runs.
+- Ephemeral storage is no longer supported.
 
 ### Workflow Description
 
@@ -103,16 +102,20 @@ Proposed schema:
 ```yaml
 spec:
   type: object
+  required:
+    - storage
   properties:
     storage:
       type: object
+      required:
+        - type
+        - persistentVolume
       properties:
         type:
           type: string
           enum:
             - PersistentVolume
-            - Ephemeral
-          description: "Select Ephemeral or PersistentVolume for artifact storage"
+          description: "Select PersistentVolume for artifact storage"
         persistentVolume:
           type: object
           properties:
@@ -129,18 +132,11 @@ spec:
             subPath:
               type: string
               description: "Optional subPath within the PVC to place artifacts"
-          required:
-            - claim
-      required:
-        - type
-      x-kubernetes-validations:
-        - rule: "has(self.type) && self.type == 'PersistentVolume' ? has(self.persistentVolume) : !has(self.persistentVolume)"
-          message: "persistentVolume is required when type is PersistentVolume, and forbidden otherwise"
 ```
 
 Behavioral notes:
 
-- If `spec.storage.type` is `PersistentVolume`, the operator mounts that PVC at `/must-gather` in the gather container.
+- The operator mounts the configured PVC at `/must-gather` in the gather container.
 - The PVC must reside in the same namespace as the `MustGather` resource.
 
 ### Implementation Details/Notes/Constraints
@@ -153,15 +149,11 @@ Behavioral notes:
 
 #### Controller and Job template changes
 
-The must-gather operator currently renders a Kubernetes Job from a Go template (see job template for reference: [controllers/mustgather/template.go](https://github.com/openshift/must-gather-operator/blob/master/controllers/mustgather/template.go)). This enhancement requires the controller to alter the Job's volumes and volumeMounts based on `spec.storage.type`:
+The must-gather operator currently renders a Kubernetes Job from a Go template (see job template for reference: [controllers/mustgather/template.go](https://github.com/openshift/must-gather-operator/blob/master/controllers/mustgather/template.go)). This enhancement requires the controller to alter the Job's volumes and volumeMounts based on `spec.storage`:
 
-- When `type: Ephemeral`:
-  - Keep existing behavior: an `emptyDir` (or current ephemeral volume) backs the `/must-gather` mount.
-
-- When `type: PersistentVolume`:
-  - Replace the volume that backs the output path with a `persistentVolumeClaim` source using `persistentVolume.claim.name`.
-  - Ensure the gather container's `volumeMounts` mounts that volume at `/must-gather`.
-  - If `persistentVolume.subPath` is provided, set `subPath` on the `volumeMount`.
+- Replace the volume that backs the output path with a `persistentVolumeClaim` source using `persistentVolume.claim.name`.
+- Ensure the gather container's `volumeMounts` mounts that volume at `/must-gather`.
+- If `persistentVolume.subPath` is provided, set `subPath` on the `volumeMount`.
 
 Illustrative YAML fragment of the Job spec when PVC is configured:
 
@@ -199,7 +191,7 @@ Unchanged. Must-gather images continue writing under `/must-gather`; directory s
 
 ### Test Plan
 
-- Unit tests for CRD defaulting/validation of `spec.storage.pvc`.
+- Unit tests for CRD defaulting/validation of `spec.storage.persistentVolume`.
 - E2E tests:
   - Happy path: Pre-created PVC (RWO), must-gather completes, artifacts present on the PVC.
   - With `subPath`: Artifacts appear under the provided subpath.
@@ -208,13 +200,13 @@ Unchanged. Must-gather images continue writing under `/must-gather`; directory s
 
 ### Graduation Criteria
 
-- Dev/Tech Preview: Field is documented as optional; basic E2E coverage.
+- Dev/Tech Preview: Field is required; basic E2E coverage.
 - GA: Robust status conditions, documentation, and SRE operational runbooks updated.
 
 ### Upgrade / Downgrade Strategy
 
-- Backwards compatible. The new field is optional and no behavior changes occur unless specified.
-- Existing `MustGather` resources continue to function unchanged.
+- Not backwards compatible. The `spec.storage.persistentVolume` field is required and ephemeral storage is removed.
+- Existing `MustGather` resources must be updated to include `storage.persistentVolume`.
 
 
 ## Implementation History
@@ -235,27 +227,24 @@ Unchanged. Must-gather images continue writing under `/must-gather`; directory s
 Spec fields overview:
 
 ```go
-// +kubebuilder:validation:Enum=PersistentVolume;Ephemeral
+// +kubebuilder:validation:Enum=PersistentVolume
 type StorageType string
 
 const (
 	StorageTypePersistentVolume StorageType = "PersistentVolume"
-	StorageTypeEphemeral        StorageType = "Ephemeral"
 )
 
 type MustGatherSpec struct {
 	Images  []string `json:"images,omitempty"`
-	Storage Storage  `json:"storage,omitempty"`
+	Storage Storage  `json:"storage"`
 }
 
 type Storage struct {
 	// +required
 	Type StorageType `json:"type"`
-	// +optional
-	PersistentVolume *PersistentVolumeConfig `json:"persistentVolume,omitempty"`
+	// +required
+	PersistentVolume PersistentVolumeConfig `json:"persistentVolume"`
 }
-
-// +kubebuilder:validation:XValidation:rule="has(self.type) && self.type == 'PersistentVolume' ? has(self.persistentVolume) : !has(self.persistentVolume)",message="persistentVolume is required when type is PersistentVolume, and forbidden otherwise"
 
 type PersistentVolumeConfig struct {
 	// +required
