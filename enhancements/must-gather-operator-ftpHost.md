@@ -35,7 +35,6 @@ see-also:
 
 Add an optional field `ftpHost` to `MustGather.spec` that allows directing must-gather artifacts to a designated FTP/SFTP endpoint during the upload phase. This provides a supported, secure, and validated path for environments that require alternate upload targets beyond the default Red Hat case management destination.
 
-Supported values: `access.redhat.com`, `access.stage.redhat.com`
 Default: `access.redhat.com` (used when ftpHost is unset)
 
 ## Motivation
@@ -48,7 +47,7 @@ Default: `access.redhat.com` (used when ftpHost is unset)
 
 ### Goals
 
-* Add `spec.ftpHost` with enum validation and a safe default.
+* Add `spec.ftpHost` with a safe default.
 * Ensure the upload container honors ftpHost and existing proxy settings.
 * Maintain full backward compatibility.
 
@@ -81,10 +80,8 @@ type MustGatherSpec struct {
     // ...existing fields...
     
     // ftpHost is an optional FTP/SFTP host used to upload the bundle.
-    // Supported values: access.redhat.com, access.stage.redhat.com.
     // If unset, defaults to access.redhat.com.
     // +kubebuilder:validation:Optional
-    // +kubebuilder:validation:Enum=access.redhat.com;access.stage.redhat.com
     // +kubebuilder:default:=access.redhat.com
     FTPHost string `json:"ftpHost,omitempty"`
 }
@@ -95,9 +92,8 @@ type MustGatherSpec struct {
 ```yaml
 ftpHost:
   type: string
-  enum: [access.redhat.com, access.stage.redhat.com]
   default: access.redhat.com
-  description: "FTP/SFTP host used to upload the bundle. Supported values: access.redhat.com, access.stage.redhat.com. If unset, defaults to access.redhat.com."
+  description: "FTP/SFTP host used to upload the bundle. If unset, defaults to access.redhat.com."
 ```
 
 ### Topology Considerations
@@ -114,7 +110,7 @@ This change is fully relevant for standalone clusters where must-gather operatio
 
 ### Implementation Details/Notes/Constraints
 
-* **API**: Add `FTPHost` to `MustGatherSpec` with kubebuilder markers (enum+default).
+* **API**: Add `FTPHost` to `MustGatherSpec` with kubebuilder markers (default).
 * **Controller**: Update upload container to pass `FTP_HOST` environment variable (or argument) from `spec.ftpHost`.
 * **Defaulting**: Respect defaulting when field is unset to maintain backward compatibility.
 * **CRD Generation**: Regenerate deepcopy, OpenAPI, CRDs, and bundle files.
@@ -122,15 +118,15 @@ This change is fully relevant for standalone clusters where must-gather operatio
 ### Risks and Mitigations
 
 * **Security (data exfiltration)**: Uploading to external endpoints introduces risk.
-  * *Mitigation*: RBAC controls, documentation, and keeping the enum constrained to known Red Hat hosts.
+  * *Mitigation*: RBAC controls, documentation, and guidance to use trusted endpoints.
 * **Reliability**: Proxies or firewalls may block FTP/SFTP.
   * *Mitigation*: Proxy env variables and observable errors/conditions remain in place.
 
-### Drawbacks
+## Drawbacks
 
 * Adds another user‑visible configuration option to the API.
 * Slight complexity increase in upload command.
-* Limited to predefined FTP hosts, which may not satisfy all future requirements.
+* Risk of misconfiguration when arbitrary endpoints are used; guidance and observability mitigate this.
 
 ## Alternatives 
 
@@ -140,7 +136,7 @@ This change is fully relevant for standalone clusters where must-gather operatio
 
 ### Unit Tests
 
-* API defaulting and enum validation
+* API defaulting
 * Job template generation includes FTP host when set; defaults when omitted
 * Proxy configuration fallback/precedence works alongside ftpHost
 
@@ -148,14 +144,13 @@ This change is fully relevant for standalone clusters where must-gather operatio
 
 * Happy path using `access.stage.redhat.com` in staging/dev environments
 * Default path (unset → `access.redhat.com`)
-* Invalid value rejected by validation
 * Upload success/failure with different FTP hosts
 
 ## Graduation Criteria
 
 ### Dev Preview -> Tech Preview
 
-* Field added with enum+default validation
+* Field added with defaulting
 * Unit tests implemented
 * Basic documentation available
 * Ability to utilize the enhancement end to end
@@ -180,14 +175,14 @@ This change is fully relevant for standalone clusters where must-gather operatio
 
 ## Operational Aspects of API Extensions
 
-This enhancement modifies the MustGather CRD by adding an optional field with enum validation and a default value.
+This enhancement modifies the MustGather CRD by adding an optional field with a default value.
 
 **Impact on existing SLIs**:
 * No impact on API throughput or availability
 * No impact on cluster performance as this is a configuration field only used during must-gather operations
 
 **Failure modes**:
-* Invalid FTP host values are rejected at admission time
+* Invalid or unreachable FTP host results in runtime upload errors surfaced via job logs and conditions
 * Credential issues result in observable upload failures with clear error messages
 
 ## Support Procedures
@@ -247,7 +242,7 @@ spec:
 ## Implementation History
 
 * v0: Draft proposal created
-* v1: API added with enum+default; unit tests; docs; CRDs regenerated
+* v1: API added with defaulting; unit tests; docs; CRDs regenerated
 * v2: E2E tests and observability; promotion to tech preview
 * v3: GA after stabilization
 
