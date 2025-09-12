@@ -137,9 +137,9 @@ and [Assisted Installer](https://github.com/openshift/assisted-installer)
 will be enhanced accordingly to take care of this step, and to ensure it
 will be properly monitored during the installation process.
 
-A new registry service will be injected via MCO to support providing the
-release content stored on disk after the reboot (since the previous ephemeral
-environment will not be available anymore).
+A new systemd service will be injected via MCO to run the registry container
+for providing the release content stored on disk after the reboot (since the
+previous ephemeral environment will not be available anymore).
 
 To allow pulling images from the cluster, an ImageDigestMirrorSet
 (IDMS) policy will be added to the cluster manifests - using the `api-int` 
@@ -407,7 +407,7 @@ used by podman in `/etc/containers/storage.conf`.
 An initial service (added by the Appliance builder in the ISO ignition) will
 startup the registry at the very beginning of the boot phase. 
 The `/etc/containers/registries.conf` will be modified to ensure that the
-images will be pulled from the local registry, using `localhost` as the
+images will be pulled from the local registry, using `api-int` as the
 registry host.
 
 #### Installation - install phase
