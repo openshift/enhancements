@@ -242,7 +242,7 @@ All of the apiserver(s) in OpenShift (i.e. kube-apiserver, openshift-apiserver, 
   - backs up the keys in the control plane etcd as Kube Secrets in a central `openshift-config-managed` namespace for each apiserver operator to be able to infer cluster state independetly
 2. State controller
   - generates the encryption config that apiserver(s) can consume and enact upon for actual encryption of resources
-  - implements a distributed state machine to transition only takes place when all API servers have converged to the same revision
+  - implements a distributed state machine. Transition only takes place when all API servers have converged to the same revision
 3. Prune controller
   - prunes inactive keys present in the cluster
   - ensures that at any given time N keys are present (today `N=10` and hardcoded i.e. non-configurable)
