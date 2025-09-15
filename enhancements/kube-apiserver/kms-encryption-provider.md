@@ -102,7 +102,7 @@ In the future, we will also be able to think about ways to qualify new plugins t
 
 ### API Extensions
 
-During the tech-preview support of the KMS feature, it will be placed behind the `KMSEncryptionProvider` feature-gate.
+While in tech-preview, the KMS feature will be placed behind the `KMSEncryptionProvider` feature-gate.
 
 OpenShift would need to align closer with KMS evolution upstream with respect to the different Kubernetes Encryption Providers available today. 
 
