@@ -249,7 +249,7 @@ All of the apiserver(s) in OpenShift (i.e. kube-apiserver, openshift-apiserver, 
 4. Migration controller
   - mark that all the resources as migrated once they have been rewritten in etcd with desired encryption state
 5. Condition controller
-  - decides whether the other controllers should start acting upon depending upon the current &/ desired encryption mode
+  - decides whether the other controllers should start acting depending upon the current &/ desired encryption mode
   - provide for status conditions that an operator can write to their respective status field(s) eg. EncryptionInProgress, EncryptionCompleted, etc.  
 For more details about the design of the existing encryption controller(s), refer to the related enhancement: https://github.com/openshift/enhancements/blob/master/enhancements/kube-apiserver/encrypting-data-at-datastore-layer.md which explains all the transition state and key management/rotation procedures.
 
