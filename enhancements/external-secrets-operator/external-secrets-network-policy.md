@@ -81,9 +81,9 @@ The proposal is to create and manage `NetworkPolicy` objects for both the operat
 
     * **For the `external-secrets-bitwarden-sever` pod (`app: external-secrets`):**
 
-        * **Allow Egress to API Server:** Permit egress to the API server on port 6443/TCP so it can inject CA data into other resources. 
+        * **Allow Egress to API Server:** Permit egress to the API server on port 6443/TCP so it can store the secrets fetched from external `Bitwarden Secrets Manager` into a Kubernetes Secret resource. 
         * **Allow Ingress from Core Controller:** Permit ingress from the `external-secrets` controller pod for communication with the Bitwarden server.
-        * Note: The Bitwarden server is an optional integration. It is only created if explicitly enabled by user configuration.*
+        * Note: The Bitwarden server is an optional integration. It is only created if explicitly enabled by user configuration.* User has to additionally create a allow NetworkPolicy to interact with the external `Bitwarden Secret Manager`.
 
 
       
@@ -128,7 +128,7 @@ The implementation will involve extending the existing APIs and creating `Networ
            - protocol: TCP
              port: 6443 # Required: Kubernetes API server
          ingress:
-         # Optional: expose metrics (8443 and/or 8080)
+         # Optional: expose metrics (8443 and 8080 based on user configuration)
          - ports:
            - protocol: TCP
              port: 8443
@@ -176,7 +176,7 @@ The policies for the operand namespace will be structured similarly, with a deny
               port: 6443
     ```
 
-3. **Allow `external-secrets-webhook` Controller Traffic:** This policy allows the API Server Access for Outbound communication to Kubernetes API server (port 6443) for resource reconciliation and Webhook Admission Control Inbound traffic from API server to webhook (port 10250) for resource validation and mutation.
+3. **Allow `external-secrets-webhook` Controller Traffic:** This policy allows the API Server Access for Outbound communication to Kubernetes API server (port 6443) for resource reconciliation and Webhook Admission Control Inbound traffic from API server to webhook (port 10250) for resource validation.
 
     ```yaml
     apiVersion: networking.k8s.io/v1
@@ -221,7 +221,7 @@ The policies for the operand namespace will be structured similarly, with a deny
               port: 6443
     ```
 
-5. **Allow `external-secrets-bitwarden-server` Traffic: This policy permits the Bitwarden server to communicate with the Kubernetes API server (port 6443/TCP) for secret synchronization and certificate validation, and to receive inbound traffic from the core controller for integration workflows.
+5. **Allow `external-secrets-bitwarden-server` Traffic:** This policy permits the Bitwarden server to communicate with the Kubernetes API server (port 6443/TCP) for secret synchronization, and to receive inbound traffic from the core controller for integration workflows.
 
     ```yaml
     apiVersion: networking.k8s.io/v1
@@ -247,7 +247,7 @@ The policies for the operand namespace will be structured similarly, with a deny
             - protocol: TCP
               port: 6443
     ```  
-6. **User-Configurable Policies:** Users must configure additional policies via the API for external-secrets controller egress (to communicate with external providers). Example user configuration:
+6. **User-Configurable Policies:** Users must configure additional policies via the `ExternalSecrets` custom resource to set `external-secrets` controller egress allow policy to communicate with external providers. Example user configuration:
 
     ```yaml
     apiVersion: operator.openshift.io/v1alpha1
