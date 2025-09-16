@@ -9,7 +9,7 @@ approvers:
 api-approvers:
   - "@tgeer" ## approver for cert-manager component
 creation-date: 2024-01-22
-last-updated: 2025-09-05
+last-updated: 2025-09-11
 tracking-link:
   - https://issues.redhat.com/browse/CM-234
 see-also:
@@ -61,6 +61,8 @@ manager, requiring integration with OSSM so that certificate requests are signed
   is active and should be able to update the certificate endpoint to `istio-csr` agent endpoint.
 - As an OpenShift user, I want to have an option to dynamically enable monitoring for the `istio-csr` project and
   to use the OpenShift monitoring solution when required.
+- As an OpenShift user, I want to limit istio-csr functionality to specific namespaces for better security and control.
+- As an OpenShift user, I want to limit the istiod requests to specific clusters by configuring the cluster name.
 
 ### Goals
 
@@ -217,16 +219,21 @@ type IstioCSRSpec struct {
 	// +optional
 	ControllerConfig *ControllerConfig `json:"controllerConfig,omitempty"`
 
-	// cleanupOnDeletion indicates that the operator should remove all resources
+	// cleanupOnDeletion indicates whether the operator should remove all resources
 	// created for the istio-csr agent installation, including the cert-manager `Certificate`
 	// resource created for obtaining a certificate for istiod using the configured issuer.
 	// This field is immutable once set.
+	// PurgeAll: Removes all resources created `istio-csr` agent installation.
+	// PurgeNone: Disables reconciliation of the resource created for `istio-csr`.
+	// The istio-csr agent resources will remain in their current state and will not be managed by the operator.
+	// PurgeExceptCertificates: Disables reconciliation of the resource created for `istio-csr` and removes
+	// all resources created for `istio-csr` agent installation except `Certificate` resource created for istiod.
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="cleanupOnDeletion is immutable once set"
-	// +kubebuilder:validation:Enum:="true";"false"
-	// +kubebuilder:default:="false"
+	// +kubebuilder:validation:Enum:=PurgeAll;PurgeNone;PurgeExceptCertificates
+	// +kubebuilder:default:=PurgeNone
 	// +kubebuilder:validation:Optional
 	// +optional
-	CleanupOnDeletion string `json:"cleanupOnDeletion,omitempty"`
+	CleanupOnDeletion PurgePolicy `json:"cleanupOnDeletion,omitempty"`
 }
 
 // IstioCSRConfig configures the istio-csr agent's behavior.
@@ -298,7 +305,7 @@ type IstioCSRConfig struct {
 	// ref: https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/
 	// +listType=atomic
 	// +kubebuilder:validation:MinItems:=0
-	// +kubebuilder:validation:MaxItems:=10
+	// +kubebuilder:validation:MaxItems:=50
 	// +kubebuilder:validation:Optional
 	// +optional
 	Tolerations []corev1.Toleration `json:"tolerations,omitempty"`
@@ -308,7 +315,7 @@ type IstioCSRConfig struct {
 	// ref: https://kubernetes.io/docs/concepts/configuration/assign-pod-node/
 	// +mapType=atomic
 	// +kubebuilder:validation:MinProperties:=0
-	// +kubebuilder:validation:MaxProperties:=10
+	// +kubebuilder:validation:MaxProperties:=50
 	// +kubebuilder:validation:Optional
 	// +optional
 	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
@@ -352,6 +359,7 @@ type IstiodTLSConfig struct {
 	// the SPIFFE URI. trustDomain must not exceed 63 characters.
 	// +kubebuilder:validation:MinLength:=1
 	// +kubebuilder:validation:MaxLength:=63
+	// +kubebuilder:validation:XValidation:rule="!format.dns1123Subdomain().validate(self).hasValue()",message="a lowercase RFC 1123 subdomain must consist of lowercase alphanumeric characters, hyphens ('-'), and periods ('.'). Each block, separated by periods, must start and end with an alphanumeric character. Hyphens are not allowed at the start or end of a block, and consecutive periods are not permitted."
 	// +kubebuilder:validation:Required
 	// +required
 	TrustDomain string `json:"trustDomain"`
@@ -360,6 +368,8 @@ type IstiodTLSConfig struct {
 	// This field can have a maximum of 25 entries.
 	// +kubebuilder:validation:MinItems:=0
 	// +kubebuilder:validation:MaxItems:=25
+	// +kubebuilder:validation:items:MinLength:=1
+	// +kubebuilder:validation:items:MaxLength:=253
 	// +listType=set
 	// +kubebuilder:validation:Optional
 	// +optional
@@ -411,6 +421,7 @@ type ServerConfig struct {
 	// +kubebuilder:default:="Kubernetes"
 	// +kubebuilder:validation:MinLength:=0
 	// +kubebuilder:validation:MaxLength:=253
+	// +kubebuilder:validation:XValidation:rule="!format.dns1123Subdomain().validate(self).hasValue()",message="a lowercase RFC 1123 subdomain must consist of lowercase alphanumeric characters, hyphens ('-'), and periods ('.'). Each block, separated by periods, must start and end with an alphanumeric character. Hyphens are not allowed at the start or end of a block, and consecutive periods are not permitted."
 	// +kubebuilder:validation:Optional
 	// +optional
 	ClusterID string `json:"clusterID,omitempty"`
@@ -429,12 +440,13 @@ type ServerConfig struct {
 type IstioConfig struct {
 	// revisions are the Istio revisions that are currently installed in the cluster.
 	// Changing this field will modify the DNS names that will be requested for the
-	// istiod certificate. This field is immutable once set and can have a maximum of 10 entries.
+	// istiod certificate. This field can have a maximum of 10 entries.
 	// +listType=set
 	// +kubebuilder:default:={"default"}
-	// +kubebuilder:validation:XValidation:rule="self.all(x, x in oldSelf) && oldSelf.all(x, x in self)",message="revisions is immutable once set"
 	// +kubebuilder:validation:MinItems=0
 	// +kubebuilder:validation:MaxItems=10
+	// +kubebuilder:validation:items:MinLength:=1
+	// +kubebuilder:validation:items:MaxLength:=63
 	// +kubebuilder:validation:Optional
 	// +optional
 	Revisions []string `json:"revisions,omitempty"`
@@ -548,14 +560,17 @@ based on user feedback.
   helps in filtering the namespaces. Please refer `Risks and Mitigations` section for other details.
 - `spec.istioCSRConfig.certManager.istioCACertificate` - In the TP release, operator was extracting the CA certificate
   from the configured self-signed issuer and was making it available in the container using volumes. But for issuer types
-  like vault, venafi, the CA certificate used is not available in issuer. `istioCACertificate` allows configuring the configmap
+  like vault, venafi, the CA certificate used is not available in the issuer. `istioCACertificate` allows configuring the configmap
   which contains the CA certificate used for signing the istiod server certificates, and it will be made available to `istio-csr`
   using volumes, after basic validations like certificate is indeed CA and the CA attribute in certificates `Basic Constraints`
   section it set to true and was used for signing the istiod server certificate. When `istioCACertificate` is not provided
   operator instead of looking in the configured `Issuer/ClusterIssuer` will instead look in the secret containing the
   certificates obtained from cert-manager for istiod server. The `Certificate` object having the specifics of the istiod
-  server certificate is managed by operator. Please refer `Risks and Mitigations` section for other details.
-  Use case reference: https://issues.redhat.com/browse/CM-564
+  server certificate is managed by operator. The operator will not directly mount the configured ConfigMap, but instead
+  will create a copy of its own and manage it by watching the both the ConfigMaps. This is required because, whenever the
+  ConfigMaps are updated, the changes get automatically propagated to the pod. And by operator having a copy of its own, can
+  validate any changes on the ConfigMap before making it available to the `istio-csr` agent. Please refer `Risks and Mitigations`
+  section for other details. Use case reference: https://issues.redhat.com/browse/CM-564
 - `spec.istioCSRConfig.server.clusterID` - The `clusterID` field is used to configure the Istiod cluster ID. This ensures
   that only certificate signing requests (CSRs) from the matching Istio control plane are allowed.
 
@@ -568,9 +583,11 @@ no defined standard. And can be updated in future based on user feedback.
   where `isito-csr` should create the config containing the istiod CA certificate. An upper limit of `4096` is fixed allowing
   to configure up to 10 namespaces considering the limitations on the label selectors and when equality operators are used.
 - `spec.istioCSRConfig.tolerations` and `spec.istioCSRConfig.nodeSelector` fields are allowed to max of `10` entries.
-- `spec.istioCSRConfig.istio.revisions` field has upper bound limit of `10`.
+- `spec.istioCSRConfig.istio.revisions` field has upper bound limit of `10` and each revision name can be of maximum `63` characters.
 - `spec.controllerConfig.labels` field allows to configure a maximum of `20` labels to be attached to all the resources created
   by the operator to deploy `istio-csr` agent.
+- `spec.istioCSRConfig.istiodTLSConfig.certificateDNSNames` field allows to configure a maximum of `25` DNS names in the SAN section
+  of the Certificate, and each DNS Name can have a maximum of `253` characters.
 
 #### Operator uninstallation or `istiocsrs.operator.openshift.io` instance deletion.
 
@@ -927,6 +944,9 @@ signature algorithm, certificate key size or certificate validity to be too long
   - Fetching certificates for new members of mesh would fail, as the endpoint would not be available.
   - The configmap `istio-ca-root-cert` would not be updated whenever the CA has been updated and would degrade
     functionalities of multiple services part of the mesh.
+- Operator creates a copy of ConfigMap assigned to `spec.istioCSRConfig.certManager.istioCACertificate` to validate the content before
+  making it available to the `istio-csr` agent, since ConfigMap changes gets automatically propagated to the pods. But if the user
+  modifies both the created and operator copy, this goes unnoticed and could cause istiod to be in degraded state.
 
 ### Drawbacks
 
