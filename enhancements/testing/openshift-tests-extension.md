@@ -70,12 +70,13 @@ status: implementable
 
 ## Summary
 
-Today all conformance tests for OpenShift are in the monolithic [openshift-tests]
-(https://www.github.com/openshift/origin) binary. These tests run on all the possible
-flavors of OpenShift (more than 50) and contribute signal to tools like the
-Release Controller and Component Readiness. However, the high barrier to entry in
-openshift-tests means that teams are either not writing tests, or are using their
-own homegrown solutions that ran in only very narrow configurations.
+Today all conformance tests for OpenShift are in the monolithic
+[openshift-tests](https://www.github.com/openshift/origin) binary. These tests
+run on all the possible flavors of OpenShift (more than 50) and contribute
+signal to tools like the Release Controller and Component Readiness. However,
+the high barrier to entry in openshift-tests means that teams are either not
+writing tests, or are using their own homegrown solutions that ran in only very
+narrow configurations.
 
 This enhancement proposes a framework to allow allows external repositories to
 contribute tests to openshift-tests' suites with extension binaries, keeping tests
@@ -552,9 +553,10 @@ The invocation will not be provided a kubeconfig and must output tests based sol
 on environment information. If no environment arguments are provided, all tests must be
 listed.
 
-Listings are formatted as JSONL with one test description per line. A full listing contains
-zero or more test description objects. The following example shows an abbreviated JSONL listing
-for three tests.
+Listings are formatted as [JSONL](https://jsonlines.org/) with one test
+description per line. A full listing contains zero or more test description
+objects. The following example shows an abbreviated JSONL listing for three
+tests.
 
 ```python
 {"name": "T1", }
