@@ -125,7 +125,7 @@ spec:
 
 CCAPIO marks itself Degraded if any CRDCompatibilityRequirement it creates during this process becomes not Progressing, and:
 * not Admitted - transport config map is invalid
-* not Compatible - admitted CRD is incompatible with CCAPIO requirements
+* not Compatible - current CRD is incompatible with CCAPIO requirements
 
 HCP uses an as-yet-undefined mechanism to inform CCAPIO of the set of CRDs which are no longer managed by CCAPIO.
 For CRDs in this list, CCAPIO creates a CRDCompatibilityRequirement but does not load or update the CRD.
