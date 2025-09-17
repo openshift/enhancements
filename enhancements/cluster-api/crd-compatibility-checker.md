@@ -26,7 +26,7 @@ This enhancement proposes a tool to implement lifecycle management of Cluster AP
 
 ## Summary
 
-The CRD Compatibility Checker provides a mechanism for OpenShift to allow non-payload workloads to manage CRDs that are also used by OpenShift payload components, while ensuring compatibility between different versions.
+The CRD Compatibility Checker provides a mechanism for OpenShift to allow non-payload workloads to manage CRDs that are also used by OpenShift payload components, while ensuring api compatibility between different versions.
 This addresses scenarios where OpenShift payload components (like cluster-capi-operator) and non-payload workloads (like Hosted Control Planes or Advanced Cluster Management) need to use the same CRDs but may require different versions.
 
 The tool provides admission webhooks to enforce compatibility policies.
