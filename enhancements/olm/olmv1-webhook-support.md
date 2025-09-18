@@ -111,14 +111,23 @@ will carry the appropriate Openshift-ServiceCA annotations for the generation an
 webhook service(s). In addition, any Deployment resources that host the business logic for the webhook(s) will be 
 configured with the correct volumes and volume mounts to consume the generated TLS certificate.
 
+Note that in the upstream version of OLM, the certificate provider/manager is [cert-manager](https://cert-manager.io/).
+
 ### Risks and Mitigations
 
 Because we are transpiling a ClusterServiceVersion into a set of coherent resources, there is a security implication that
 well crafted bundles _could_ potentially be malicious in nature and could be used to subvert to host cluster. These
 risks are mitigated by:
-- Allowing cluster admins to configure the scope of RBAC they are comfortable with for a particular bundle
 - Allowing cluster admins to control who gets write access to ClusterExtensions/ClusterCatalogs
 - Allowing cluster admins to select the ClusterCatalogs from which content can be sourced
+
+Currently, admins may also configure the scope of RBAC they are comfortable with for a particular bundle. However, 
+this artifice will be deprecated in favor making OLM cluster admin while we replace OLM v1's Helm-based core with
+[Boxcutter](https://github.com/package-operator/boxcutter/). With Boxcutter, OLM will introduce a new API called
+ClusterExtensionRevision, which will bring transparency to around manifests being applied to the cluster by an 
+installation or update, as well as (in the future) enable policy engines to hold lifecycle operations until an admin
+can manually verify those manifest, or even automatically accept/reject the change.
+
 
 Webhooks come with services, which could be a potential avenue for data leaks or security issues. All
 communications between webhook components is secured via TLS certificates generated and rotated automatically by
@@ -136,10 +145,10 @@ for webhooks:
 
 ### Drawbacks
 
-None that I could think of.
-
-## Open Questions [optional]
-
+The boundaries around admission webhook rules are still pretty wide. For instance, an operator may 
+introduce a faulty admission webhook around, e.g., Pod resources that could really hamstring the cluster. However, 
+by not allowing admission webhooks around all resources, OLM resources, and admission registration resources, we 
+make it possible to quickly fix the issues: delete offending cluster extension, admission webhook, etc.
 
 ## Test Plan
 
@@ -209,10 +218,11 @@ Possible downgrade issue scenario:
 
 At this point, there are two scenarios:
 1. OLM resolves to a bundle with webhook resources -> the ClusterExtension reaches a terminal failed state and does NOT make any further changes to the cluster. This means that the resources installed before downgrade still persist and will be unmanged.
-2. OLM resolves to a bundle without webhook resources -> OLM will effectively rollback the installation to the resolved version.
+2. OLM resolves to a bundle without webhook resources -> the ClusterExtension will reach a terminal failed state with the same repercussions as 1. unless the user sets `spec.source.catalog.upgradeConstraintPolicy` to `SelfCertified`. In which case, OLM will rollback to the resolved version.
 
-Note: I'm writing this as the current state as of 2025.06.02. I'm raising this issue with the team as I feel we should make a decision regarding rollbacks and, specifically,
-auto-rollbacks after a cluster downgrade. This issue should be clarified before this enhancement goes gets merged/goes GA.
+We plan to mitigate 1. with the introduction of [Boxcutter](https://github.com/package-operator/boxcutter/) to manage the lifecycle of the applications. With Boxcutter, we will also 
+introduce revisions. This means that upon downgrade, a new revision will fail to be created but OLM will still manage those resources installed before the downgrade under the banner
+of the deployed revision.
 
 ## Version Skew Strategy
 
@@ -352,11 +362,9 @@ Note: The use of `namespaceSelector` is discouraged for multi-tenancy use cases.
 1. OpenShift API Server Team
 2. OLM Team
 3. Networking Team
-4. Service CA Team
-5. Node Team
-6. Logging / Monitoring Teams
-7. Layered Product Team
-
+4. Node Team
+5. Logging / Monitoring Teams
+6. Layered Product Team
 
 ## Support Procedures
 
