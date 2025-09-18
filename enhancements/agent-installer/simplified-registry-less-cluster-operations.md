@@ -76,7 +76,8 @@ hosting an external registry made it impractical.
 
 ### Non-Goals
 
-* Allow the user to install/upgrade any OLM operators
+* Allow the user to install/upgrade any OLM operators. The selection will be
+  restricted to a specific subset.
 
 ## Proposal
 
