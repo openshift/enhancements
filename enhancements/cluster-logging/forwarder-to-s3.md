@@ -91,32 +91,33 @@ and updates the collector deployment
 apiVersion: "observability.openshift.io/v1"
 kind: ClusterLogForwarder
 spec:
-outputs:
-- name:
-  type: s3                 # add s3 to the enum
-  tls: {}
-  s3:
-    url:                   # (optional) string is an alternate to the well-known AWS endpoints
-    region:                # (optional) string that is different from the configured service default
-    bucket:                # string for the S3 bucket absent leading 's3://' or trailing '/'
-    keyPrefix:             # (optional) templated string (see note 1)
-    authentication:
-      type:                # enum: awsAccessKey, iamRole
-      awsAccessKey:
-        assumeRole:        # (optional)
-        roleARN:           # secret reference
-        externalID:        # (optional) secret reference
-      iamRole:
-        roleARN:           # secret reference
-        token:             # bearer token
-        assumeRole:        # (optional)
-          roleARN:         # secret reference
-          externalID:      # (optional)string
-      delivery:            # (optional) atLeastOnce, atMostOnce
-      maxWrite:            # (optional) quantity (e.g. 500k)
-      compression:         # (optional) none, gzip,zstd,snappy,zlib
-      minRetryDuration:    # (optional) duration
-      maxRetryDuration:    # (optional) duration
+  outputs:
+  - name:
+    type: s3                 # add s3 to the enum
+    s3:
+      url:                   # (optional) string is an alternate to the well-known AWS endpoints
+      region:                # (optional) string that is different from the configured service default
+      bucket:                # string for the S3 bucket absent leading 's3://' or trailing '/' and
+                             #   truncated to 63 characters to meet length restrictions
+      keyPrefix:             # (optional) templated string (see note 1)
+      authentication:
+        type:                # enum: awsAccessKey, iamRole
+        awsAccessKey:
+          assumeRole:        # (optional)
+          roleARN:           # secret reference
+          externalID:        # (optional) secret reference
+        iamRole:
+          roleARN:           # secret reference
+          token:             # bearer token
+          assumeRole:        # (optional)
+            roleARN:         # secret reference
+            externalID:      # (optional)string
+      tuning:
+        deliveryMode:        # (optional) enum: atLeastOnce, atMostOnce
+        maxWrite:            # (optional) quantity (e.g. 500k)
+        compression:         # (optional) none, gzip,zstd,snappy,zlib
+        minRetryDuration:    # (optional) duration
+        maxRetryDuration:    # (optional) duration
 ```
 
 **Note 1:** A combination of date formatters, static or dynamic values consisting of field paths followed by "||" followed by another field path or a static value (e.g `foo.{"%Y-%m-%d"}/{.bar.baz||.qux.quux.corge||.grault||"nil"}-waldo.fred{.plugh||"none"}`)
@@ -134,10 +135,6 @@ specifiers to format the `.timestamp` field value:
 | %M |34|Minute number (00–59), zero-padded to 2 digits.|
 | %S |60|Second number (00–60), zero-padded to 2 digits.|
 
-**Note 2:** The collector will encode events as [JSON](https://www.rfc-editor.org/rfc/rfc8259)
-
-#### ViaQ DataModel API
-
 The collector will write logs to the s3 bucket defaulting the key prefix that is constructed using attributes of the log entries when not defined by the **ClusterLogForwarder** spec as follows:
 
 | log type| log source | key prefix |
@@ -149,6 +146,8 @@ The collector will write logs to the s3 bucket defaulting the key prefix that is
 | Audit | kubeAPI|`<cluster_id>/<yyyy-mm-dd>/<log_type>/<log_source>/`|
 | Audit | openshiftAPI|`<cluster_id>/<yyyy-mm-dd>/<log_type>/<log_source>/`|
 | Audit | ovn|`<cluster_id>/<yyyy-mm-dd>/<log_type>/<log_source>/`|
+
+**Note 2:** The collector will encode events as [JSON](https://www.rfc-editor.org/rfc/rfc8259)
 
 ### Topology Considerations
 
