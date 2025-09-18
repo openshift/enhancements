@@ -1110,7 +1110,7 @@ TBD.
 Major milestones in the life cycle of a proposal should be tracked in
 Implementation History.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 TBD.
 
