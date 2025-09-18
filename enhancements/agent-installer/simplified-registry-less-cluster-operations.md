@@ -107,7 +107,8 @@ installation. The Appliance builder will be enhanced with a new
 The extend ISO builder will be integrated within the official Red Hat build and
 release pipeline, so that a new extended RHCOS ISO could be published following
 the same OpenShift release cadence, and made it available via the 
-[Red Hat Customer Portal](https://access.redhat.com).
+[Red Hat Customer Portal](https://access.redhat.com), specifically through the
+[Red Hat Hybrid Cloud Console](https://console.redhat.com/).
 
 ### Installation
 
@@ -187,7 +188,8 @@ The various workflows are briefly summarized below:
 
 #### Installation
 
-1. The user downloads the extended RHCOS ISO from the Red Hat Customer Portal.
+1. The user downloads the extended RHCOS ISO from the Red Hat Hybrid Cloud
+   Console.
 2. The user moves the extended RHCOS ISO into the disconnected environment.
 3. The user boots all the nodes that will be part of the cluster using the
    downloaded ISO.
@@ -244,6 +246,7 @@ into the control planes nodes. In particular, it will be used for:
 * Triggering a new release image copy task - as a preliminary upgrade step
 * Delete from disk a release image version not anymore in use - as an optional
   post-upgrade step
+* Opt-out from the feature (by deleting the resource)
 
 This is an example of how the CR will look like:
 
@@ -378,7 +381,7 @@ managed by the IRI resource. Also in this case, a ValidatingAdmissionPolicy
 performing a check against the `ClusterVersion` `version` object will be used
 (to verify that none of the IRI releases is currently being used by the
 cluster).
-This means that a user, to opt-out from the feature, will have to previouslu
+This means that a user, to opt-out from the feature, will have to previously
 setup his/her own registry with the required mirrored content and then perform
 a cluster upgrade. Once successfully completed, it'd be possible to remove the
 IRI resource.
