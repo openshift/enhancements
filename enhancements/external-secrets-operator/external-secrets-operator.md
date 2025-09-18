@@ -10,7 +10,7 @@ approvers:
 api-approvers:
   - “@tgeer”
 creation-date: 2025-05-15
-last-updated: 2025-09-08
+last-updated: 2025-09-18
 tracking-link: 
   - https://issues.redhat.com/browse/OCPSTRAT-1539
   - https://issues.redhat.com/browse/OCPSTRAT-1637
@@ -51,16 +51,20 @@ as native Secret resources — without requiring applications to directly access
 
 ### User Stories
 
-- As an OpenShift cluster administrator, I want to install and manage external-secrets project though a day-2 OLM operator, so that
-  external-secrets is installed and automatically managed with desired configurations.
-- As an OpenShift cluster administrator, I want to choose the optional plugins where possible and should be able to disable when not
-  needed, so that I can use the plugins only when needed.
-- As an OpenShift cluster administrator, I want to add additional labels on the resources created by the operator, so that I can
+- As an OpenShift administrator, I want to install and manage external-secrets project though a day-2 OLM operator.
+- As an OpenShift administrator, I should be able to configure external-secrets specifics, so that only required features can be enabled.
+- As an OpenShift administrator, I should be able to uninstall external-secrets when not required as a day2 operation.
+- As an OpenShift administrator, I should be able to enable or disable optional features of external-secrets and should be able to choose
+  whether resources created for the feature must be cleaned up.
+- As an OpenShift administrator, I want to add additional labels on the resources created by the operator, so that I can
   categorize and monitor the created resources.
-- As an SRE, I want clear status conditions to be present in the custom resource with the timestamps and messages to understand the state
-  and take necessary actions when in failed state.
-- As an OpenShift cluster administrator, I want to view the status of all the operands managed by the operator at one place, and should
-  be able to provide common configurations too.
+- As an OpenShift administrator, I should be able to provide common configurations applicable to all operands managed by the operator
+  at one place.
+- As an OpenShift administrator, I want to view the status of all the operands managed by the operator at one place.
+- As an OpenShift security engineer, I want to be able to identify all artefacts created by external-secrets, for better auditability.
+- As an OpensShift SRE, I should be able to get detailed information as part of different status conditions and messages to identify
+  the reasons of failures and carry out corrective actions successfully.
+- As an OpenShift SRE, I should be able to collect metrics of operator and external-secrets for monitoring.
 
 ### Goals
 
@@ -74,7 +78,7 @@ as native Secret resources — without requiring applications to directly access
 
 - This enhancement will not diverge the `external-secrets` from upstream code, any missing functionality must go through the upstream process.
 - Removing `externalsecretsconfigs.operator.openshift.io` CR object will not remove external-secrets deployment. But will only stop the reconciliation of
-  Kubernetes resources created for operand installation. (Note: This will be a limitation for GA and will be re-evaluated in future releases).
+  Kubernetes resources created for operand installation. (Note: This is a limitation in 1.0.0 release and will be re-evaluated in future releases).
 - Upgrading from a TechPreview version is not supported.
 - Multi-tenancy is not supported, that is multiple instances of `external-secrets` cannot be installed.
 
@@ -201,13 +205,11 @@ type ExternalSecretsManagerList struct {
 // +kubebuilder:printcolumn:name="AGE",type="date",JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:metadata:labels={"app.kubernetes.io/name=externalsecretsmanager", "app.kubernetes.io/part-of=external-secrets-operator"}
 
-// ExternalSecretsManager describes configuration and information about the deployments managed by
-// the external-secrets-operator. The name must be `cluster` as this is a singleton object allowing
-// only one instance of ExternalSecretsManager per cluster.
+// ExternalSecretsManager describes configuration and information about the deployments managed by the external-secrets-operator.
+// The name must be `cluster` as this is a singleton object allowing only one instance of ExternalSecretsManager per cluster.
 //
-// It is mainly for configuring the global options and enabling optional features, which
-// serves as a common/centralized config for managing multiple controllers of the operator. The object
-// is automatically created during the operator installation.
+// It is mainly for configuring the global options and enabling optional features, which serves as a common/centralized config for managing multiple controllers of the operator.
+// The object is automatically created during the operator installation.
 //
 // +kubebuilder:validation:XValidation:rule="self.metadata.name == 'cluster'",message="ExternalSecretsManager is a singleton, .metadata.name must be 'cluster'"
 // +operator-sdk:csv:customresourcedefinitions:displayName="ExternalSecretsManager"
@@ -221,19 +223,21 @@ type ExternalSecretsManager struct {
 	// spec is the specification of the desired behavior
 	Spec ExternalSecretsManagerSpec `json:"spec,omitempty"`
 
-	// status is the most recently observed status of controllers used by
-	// External Secrets Operator.
+	// status is the most recently observed status of controllers used by External Secrets Operator.
 	Status ExternalSecretsManagerStatus `json:"status,omitempty"`
 }
 
 // ExternalSecretsManagerSpec is the specification of the desired behavior of the ExternalSecretsManager.
 type ExternalSecretsManagerSpec struct {
-	// globalConfig is for configuring the behavior of deployments that are managed
-	// by external secrets-operator.
+	// globalConfig is for configuring the behavior of deployments that are managed by external secrets-operator.
 	// +kubebuilder:validation:Optional
 	GlobalConfig *GlobalConfig `json:"globalConfig,omitempty"`
 
 	// optionalFeatures is for enabling the optional operator features.
+	// +patchMergeKey=name
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=name
 	// +kubebuilder:validation:Optional
 	OptionalFeatures []Feature `json:"optionalFeatures,omitempty"`
 }
@@ -241,6 +245,7 @@ type ExternalSecretsManagerSpec struct {
 // GlobalConfig is for configuring the external-secrets-operator behavior.
 type GlobalConfig struct {
 	// labels to apply to all resources created by the operator.
+	// This field can have a maximum of 20 entries.
 	// +mapType=granular
 	// +kubebuilder:validation:MinProperties:=0
 	// +kubebuilder:validation:MaxProperties:=20
@@ -252,15 +257,16 @@ type GlobalConfig struct {
 
 // Feature is for enabling the optional features.
 type Feature struct {
-	// name of the optional feature.
+	// name of the optional feature. There are no optional features currently supported.
+	// +kubebuilder:validation:Enum:=""
 	// +kubebuilder:validation:Required
 	Name string `json:"name"`
 
 	// mode indicates the feature state.
+	// Use Enabled or Disabled to indicate the preference.
 	// Enabled: Enables the optional feature and creates resources if required.
 	// Disabled: Disables the optional feature, but will not remove any resources created.
-	// DisabledAndCleanup: Disables the optional feature, and removes any resources created.
-	// +kubebuilder:validation:Enum:=Enabled;Disabled;DisabledAndCleanup
+	// +kubebuilder:validation:Enum:=Enabled;Disabled
 	// +kubebuilder:validation:Required
 	Mode Mode `json:"mode"`
 }
@@ -338,12 +344,10 @@ type ExternalSecretsConfigList struct {
 // +kubebuilder:printcolumn:name="AGE",type="date",JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:metadata:labels={"app.kubernetes.io/name=externalsecretsconfig", "app.kubernetes.io/part-of=external-secrets-operator"}
 
-// ExternalSecretsConfig describes configuration and information about the managed external-secrets
-// deployment. The name must be `cluster` as ExternalSecretsConfig is a singleton,
-// allowing only one instance per cluster.
+// ExternalSecretsConfig describes configuration and information about the managed external-secrets deployment.
+// The name must be `cluster` as ExternalSecretsConfig is a singleton, allowing only one instance per cluster.
 //
-// When an ExternalSecretsConfig is created, the controller installs the
-// external-secrets and keeps it in the desired state.
+// When an ExternalSecretsConfig is created, the controller installs the external-secrets and keeps it in the desired state.
 //
 // +kubebuilder:validation:XValidation:rule="self.metadata.name == 'cluster'",message="ExternalSecretsConfig is a singleton, .metadata.name must be 'cluster'"
 // +operator-sdk:csv:customresourcedefinitions:displayName="ExternalSecretsConfig"
@@ -367,8 +371,7 @@ type ExternalSecretsConfigSpec struct {
 	// +kubebuilder:validation:Optional
 	ApplicationConfig ApplicationConfig `json:"appConfig,omitempty"`
 
-	// controllerConfig is for specifying the configurations for the controller to use while installing
-	// the `external-secrets` operand.
+	// controllerConfig is for specifying the configurations for the controller to use while installing the `external-secrets` operand.
 	// +kubebuilder:validation:Optional
 	ControllerConfig ControllerConfig `json:"controllerConfig,omitempty"`
 }
@@ -394,8 +397,7 @@ type ApplicationConfig struct {
 	// +kubebuilder:validation:Optional
 	OperatingNamespace string `json:"operatingNamespace,omitempty"`
 
-	// bitwardenSecretManagerProvider is for enabling the bitwarden secrets manager provider and
-	// for setting up the additional service required for connecting with the bitwarden server.
+	// bitwardenSecretManagerProvider is for enabling the bitwarden secrets manager provider and for setting up the additional service required for connecting with the bitwarden server.
 	// +kubebuilder:validation:Optional
 	BitwardenSecretManagerProvider *BitwardenSecretManagerProvider `json:"bitwardenSecretManagerProvider,omitempty"`
 
@@ -403,8 +405,7 @@ type ApplicationConfig struct {
 	// +kubebuilder:validation:Optional
 	WebhookConfig *WebhookConfig `json:"webhookConfig,omitempty"`
 
-	// CertManagerConfig is for configuring cert-manager specifics, which will be used for generating
-	// certificates for webhook and bitwarden-sdk-server components.
+	// CertManagerConfig is for configuring cert-manager specifics, which will be used for generating certificates for webhook and bitwarden-sdk-server components.
 	// +kubebuilder:validation:Optional
 	CertManagerConfig *CertManagerConfig `json:"certManagerConfig,omitempty"`
 
@@ -412,8 +413,7 @@ type ApplicationConfig struct {
 	CommonConfigs `json:",inline,omitempty"`
 }
 
-// ControllerConfig is for specifying the configurations for the controller to use while installing
-// the `external-secrets` operand.
+// ControllerConfig is for specifying the configurations for the controller to use while installing the `external-secrets` operand.
 // +kubebuilder:validation:XValidation:rule="!has(oldSelf.namespace) && !has(self.namespace) || has(oldSelf.namespace) && has(self.namespace)",message="namespace can only be configured during creation"
 type ControllerConfig struct {
 	// namespace is for configuring the namespace to install the external-secret operand.
@@ -426,6 +426,7 @@ type ControllerConfig struct {
 	Namespace string `json:"namespace,omitempty"`
 
 	// labels to apply to all resources created for the external-secrets operand deployment.
+	// This field can have a maximum of 20 entries.
 	// +mapType=granular
 	// +kubebuilder:validation:MinProperties:=0
 	// +kubebuilder:validation:MaxProperties:=20
@@ -436,31 +437,24 @@ type ControllerConfig struct {
 // BitwardenSecretManagerProvider is for enabling the bitwarden secrets manager provider and
 // for setting up the additional service required for connecting with the bitwarden server.
 type BitwardenSecretManagerProvider struct {
-	// mode indicates bitwarden secrets manager provider state, which can be indicated
-	// by setting Enabled, Disabled or DisabledAndCleanup.
-	// Enabled: Enables the Bitwarden provider plugin.
-	// The operator will ensure the plugin is deployed and its state is synchronized.
-	// Disabled: Disables reconciliation of the Bitwarden provider plugin.
-	// The plugin and its resources will remain in their current state and will not be managed by the operator.
-	// DisabledAndCleanup: Disables reconciliation and triggers the deletion of all associated resources
-	// of the Bitwarden provider plugin.
-	// +kubebuilder:validation:Enum:=Enabled;Disabled;DisabledAndCleanup
+	// mode indicates bitwarden secrets manager provider state, which can be indicated by setting Enabled or Disabled.
+	// Enabled: Enables the Bitwarden provider plugin. The operator will ensure the plugin is deployed and its state is synchronized.
+	// Disabled: Disables reconciliation of the Bitwarden provider plugin. The plugin and its resources will remain in their current state and will not be managed by the operator.
+	// +kubebuilder:validation:Enum:=Enabled;Disabled
 	// +kubebuilder:default:=Disabled
 	// +kubebuilder:validation:Optional
 	Mode Mode `json:"mode,omitempty"`
 
 	// SecretRef is the Kubernetes secret containing the TLS key pair to be used for the bitwarden server.
-	// The issuer in CertManagerConfig will be utilized to generate the required certificate if the secret
-	// reference is not provided and CertManagerConfig is configured. The key names in secret for certificate
-	// must be `tls.crt`, for private key must be `tls.key` and for CA certificate key name must be `ca.crt`.
+	// The issuer in CertManagerConfig will be utilized to generate the required certificate if the secret reference is not provided and CertManagerConfig is configured.
+	// The key names in secret for certificate must be `tls.crt`, for private key must be `tls.key` and for CA certificate key name must be `ca.crt`.
 	// +kubebuilder:validation:Optional
 	SecretRef *SecretReference `json:"secretRef,omitempty"`
 }
 
 // WebhookConfig is for configuring external-secrets webhook specifics.
 type WebhookConfig struct {
-	// CertificateCheckInterval is for configuring the polling interval to check the certificate
-	// validity.
+	// CertificateCheckInterval is for configuring the polling interval to check the certificate validity.
 	// +kubebuilder:default:="5m"
 	// +kubebuilder:validation:Optional
 	CertificateCheckInterval *metav1.Duration `json:"certificateCheckInterval,omitempty"`
@@ -470,38 +464,29 @@ type WebhookConfig struct {
 // +kubebuilder:validation:XValidation:rule="self.mode != 'Enabled' || has(self.issuerRef)",message="issuerRef must be provided when mode is set to Enabled."
 // +kubebuilder:validation:XValidation:rule="has(self.injectAnnotations) && self.injectAnnotations != 'false' ? self.mode != 'Disabled' : true",message="injectAnnotations can only be set when mode is set to Enabled."
 type CertManagerConfig struct {
-	// mode indicates whether to use cert-manager for certificate management,
-	// instead of built-in cert-controller. This field is immutable once set.
+	// mode indicates whether to use cert-manager for certificate management, instead of built-in cert-controller.
 	// Enabled: Makes use of cert-manager for obtaining the certificates for webhook server and other components.
-	// Disabled: Makes use of in-built cert-controller for obtaining the certificates for webhook server, which
-	// is the default behavior.
+	// Disabled: Makes use of in-built cert-controller for obtaining the certificates for webhook server, which is the default behavior.
+	// This field is immutable once set.
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="mode is immutable once set"
 	// +kubebuilder:validation:Enum:=Enabled;Disabled
 	// +kubebuilder:default:=Disabled
 	// +kubebuilder:validation:Required
 	Mode Mode `json:"mode,omitempty"`
 
-	// CleanupStrategy specifies which resources of built-in cert-controller to remove.
-	// This field is only relevant when `mode` is `Disabled`.
-	// +kubebuilder:validation:Enum:=PurgeAll;PurgeNone;PurgeExceptSecrets
-	// +kubebuilder:default:=PurgeNone
-	// +kubebuilder:validation:Optional
-	CleanupStrategy PurgePolicy `json:"cleanupStrategy,omitempty"`
-
-	// injectAnnotations is for adding the `cert-manager.io/inject-ca-from` annotation to the
-	// webhooks and CRDs to automatically setup webhook to use the cert-manager CA. This requires
-	// CA Injector to be enabled in cert-manager. Use `true` or `false` to indicate the preference.
+	// injectAnnotations is for adding the `cert-manager.io/inject-ca-from` annotation to the webhooks and CRDs to automatically setup webhook to use the cert-manager CA. This requires CA Injector to be enabled in cert-manager.
+	// Use `true` or `false` to indicate the preference.
 	// +kubebuilder:validation:Enum:="true";"false"
 	// +kubebuilder:default:="false"
 	// +kubebuilder:validation:Optional
 	InjectAnnotations string `json:"injectAnnotations,omitempty"`
 
-	// issuerRef contains details of the referenced object used for obtaining certificates. When
-	// `issuerRef.Kind` is `Issuer`, it must exist in the `.spec.controllerConfig.namespace`.
+	// issuerRef contains details of the referenced object used for obtaining certificates.
+	// When `issuerRef.Kind` is `Issuer`, it must exist in the `.spec.controllerConfig.namespace`.
 	// This field is immutable once set.
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="issuerRef is immutable once set"
-	// +kubebuilder:validation:XValidation:rule="self.kind.lowerAscii() == 'issuer' || self.kind.lowerAscii() == 'clusterissuer'",message="kind must be either 'Issuer' or 'ClusterIssuer'"
-	// +kubebuilder:validation:XValidation:rule="self.group.lowerAscii() == 'cert-manager.io'",message="group must be 'cert-manager.io'"
+	// +kubebuilder:validation:XValidation:rule="!has(self.kind) || self.kind.lowerAscii() == 'issuer' || self.kind.lowerAscii() == 'clusterissuer'",message="kind must be either 'Issuer' or 'ClusterIssuer'"
+	// +kubebuilder:validation:XValidation:rule="!has(self.group) || self.group.lowerAscii() == 'cert-manager.io'",message="group must be 'cert-manager.io'"
 	// +kubebuilder:validation:Optional
 	IssuerRef ObjectReference `json:"issuerRef,omitempty"`
 
@@ -521,8 +506,7 @@ type CertManagerConfig struct {
 ```go
 package v1alpha1
 
-// ConditionalStatus holds information of the current state of the external-secrets deployment
-// indicated through defined conditions.
+// ConditionalStatus holds information of the current state of the external-secrets deployment indicated through defined conditions.
 type ConditionalStatus struct {
 	// conditions holds information of the current state of deployment.
 	// +patchMergeKey=type
@@ -539,11 +523,13 @@ type ObjectReference struct {
 	// +kubebuilder:validation:MaxLength:=253
 	// +kubebuilder:validation:Required
 	Name string `json:"name"`
+
 	// Kind of the resource being referred to.
 	// +kubebuilder:validation:MinLength:=1
 	// +kubebuilder:validation:MaxLength:=253
 	// +kubebuilder:validation:Optional
 	Kind string `json:"kind,omitempty"`
+
 	// Group of the resource being referred to.
 	// +kubebuilder:validation:MinLength:=1
 	// +kubebuilder:validation:MaxLength:=253
@@ -551,8 +537,7 @@ type ObjectReference struct {
 	Group string `json:"group,omitempty"`
 }
 
-// SecretReference is a reference to the secret with the given name, which should exist
-// in the same namespace where it will be utilized.
+// SecretReference is a reference to the secret with the given name, which should exist in the same namespace where it will be utilized.
 type SecretReference struct {
 	// Name of the secret resource being referred to.
 	// +kubebuilder:validation:MinLength:=1
@@ -561,8 +546,7 @@ type SecretReference struct {
 	Name string `json:"name"`
 }
 
-// CommonConfigs are the common configurations available for all the operands managed
-// by the operator.
+// CommonConfigs are the common configurations available for all the operands managed by the operator.
 type CommonConfigs struct {
 	// logLevel supports value range as per [Kubernetes logging guidelines](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-instrumentation/logging.md#what-method-to-use).
 	// +kubebuilder:default:=1
@@ -584,6 +568,7 @@ type CommonConfigs struct {
 
 	// tolerations is for setting the pod tolerations.
 	// ref: https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/
+	// This field can have a maximum of 50 entries.
 	// +listType=atomic
 	// +kubebuilder:validation:MinItems:=0
 	// +kubebuilder:validation:MaxItems:=50
@@ -592,34 +577,36 @@ type CommonConfigs struct {
 
 	// nodeSelector is for defining the scheduling criteria using node labels.
 	// ref: https://kubernetes.io/docs/concepts/configuration/assign-pod-node/
+	// This field can have a maximum of 50 entries.
 	// +mapType=atomic
 	// +kubebuilder:validation:MinProperties:=0
 	// +kubebuilder:validation:MaxProperties:=50
 	// +kubebuilder:validation:Optional
 	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
 
-	// proxy is for setting the proxy configurations which will be made available
-	// in operand containers managed by the operator as environment variables.
+	// proxy is for setting the proxy configurations which will be made available in operand containers managed by the operator as environment variables.
 	// +kubebuilder:validation:Optional
 	Proxy *ProxyConfig `json:"proxy,omitempty"`
 }
 
-// ProxyConfig is for setting the proxy configurations which will be made available
-// in operand containers managed by the operator as environment variables.
+// ProxyConfig is for setting the proxy configurations which will be made available in operand containers managed by the operator as environment variables.
 type ProxyConfig struct {
 	// httpProxy is the URL of the proxy for HTTP requests.
+	// This field can have a maximum of 2048 characters.
 	// +kubebuilder:validation:MinLength:=0
 	// +kubebuilder:validation:MaxLength:=2048
 	// +kubebuilder:validation:Optional
 	HTTPProxy string `json:"httpProxy,omitempty"`
 
 	// httpsProxy is the URL of the proxy for HTTPS requests.
+	// This field can have a maximum of 2048 characters.
 	// +kubebuilder:validation:MinLength:=0
 	// +kubebuilder:validation:MaxLength:=2048
 	// +kubebuilder:validation:Optional
 	HTTPSProxy string `json:"httpsProxy,omitempty"`
 
 	// noProxy is a comma-separated list of hostnames and/or CIDRs and/or IPs for which the proxy should not be used.
+	// This field can have a maximum of 4096 characters.
 	// +kubebuilder:validation:MinLength:=0
 	// +kubebuilder:validation:MaxLength:=4096
 	// +kubebuilder:validation:Optional
@@ -636,8 +623,7 @@ const (
 	// Disabled indicates the optional configuration is disabled.
 	Disabled Mode = "Disabled"
 
-	// DisabledAndCleanup indicates the optional configuration is disabled and
-	// created resources are automatically removed.
+	// DisabledAndCleanup indicates the optional configuration is disabled and created resources are automatically removed.
 	DisabledAndCleanup Mode = "DisabledAndCleanup"
 )
 
@@ -651,7 +637,7 @@ const (
 	// PurgeNone indicates to purge none of the created resources.
 	PurgeNone PurgePolicy = "PurgeNone"
 
-	// PurgeExceptSecrets indicated to purge all the created resources except the Secret resource.
+	// PurgeExceptSecrets indicates to purge all the created resources except the Secret resource.
 	PurgeExceptSecrets PurgePolicy = "PurgeExceptSecrets"
 )
 ```
@@ -691,71 +677,32 @@ The `spec` of `externalsecretsconfigs.operator.openshift.io` API in TP version h
 which were for specifying the configurations to set up and install the `external-secrets` application. The `externalSecretsConfig` field has
 been renamed to `appConfig`, with no change to the `controllerConfig` field.
 
-New configurations for providing proxy settings have been made available. If a cluster-wide proxy is configured on the OpenShift cluster,
-OLM automatically updates the operator deployments with HTTP_PROXY, HTTPS_PROXY, and NO_PROXY environment variables. These variables will
-then be propagated to all the operand deployments by the operator. Users can also set proxy configurations specific to
-`external-secrets` in `externalsecretsconfigs.operator.openshift.io`, or they can set common configurations for all operands managed by
-the operator in `externalsecretsmanager.operator.openshift.io`.
-
 Validations for fields in the `externalsecretsconfigs.operator.openshift.io` API have been updated with minimum and maximum limits to
 restrict configurable values, preventing users from setting arbitrarily large data that could cause system instability. For the fields
 below, the lower and upper bounds have been set based on what is considered reasonable, as there is no defined standard. These can be
 updated in the future based on user feedback.
-- `spec.appConfig.tolerations` and `spec.appConfig.nodeSelector` fields are allowed to have a max of `10` entries.
+- `spec.appConfig.tolerations` and `spec.appConfig.nodeSelector` fields are allowed to have a max of `50` entries.
 - `spec.controllerConfig.labels` field allows to configure a maximum of `20` labels to be attached to all the resources created by
   the operator to deploy `external-secrets` operand.
 - `spec.appConfig.proxy.httpProxy` and `spec.appConfig.proxy.httpsProxy` have an upper limit of `2048`. And similarly
   `spec.appConfig.proxy.noProxy` has an upper limit of `4096`.
 
-#### Resources cleanup when optional features enabled/disabled.
+##### Enabling egress proxy
 
-- `external-secrets` has a dedicated controller for creating and managing the certificates required for its webhook component. It also
-  has a provision to use the cert-manager solution for the webhook certificates. The built-in cert-controller also injects the
-  CA certificate into the CRDs required by the API server to validate the webhook server
+New configurations for configuring egress proxy have been made available. If a cluster-wide proxy is configured on the OpenShift cluster,
+OLM automatically updates the operator deployments with `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` environment variables. These variables will
+then be propagated to all the operand deployments by the operator. Users can also set proxy configurations specific to
+`external-secrets` in `externalsecretsconfigs.operator.openshift.io`, or they can set common configurations for all operands managed by
+the operator in `externalsecretsmanager.operator.openshift.io`.
 
-  When cert-manager configurations are added in `externalsecretsconfigs.operator.openshift.io` after `external-secrets` installation,
-  the deployment created for the built-in certificate controller must be removed. This prevents conflicts where both cert-manager and
-  the `cert-controller` attempt to inject their own CA certificates into CRDs.
+For proxying HTTPS connections, CA certificates are required for validating the HTTPS proxy server. Operator will create a `ConfigMap` in
+its own and in operand's namespace with a label `config.openshift.io/inject-trusted-cabundle="true"` to leverage OpensShift offered
+cluster-wide CA certificates bundle, which will contain the `Red Hat Enterprise Linux CoreOS` trust bundle and as well the user defined
+trust bundle which will be made available in operator and operand pods through a volume mount. The CA certificate trust bundle must be made
+available at `/etc/pki/tls/certs` as [suggested](https://cs.opensource.google/go/go/+/refs/tags/go1.24.4:src/crypto/x509/root_linux.go;l=22) in golang.
 
-  Since `cert-manager` specific configurations cannot be disabled once enabled, the following resources created for the `cert-controller`
-  are no longer required and can be removed:
-  - ClusterRole
-  - ClusterRoleBinding
-  - Deployment
-  - Secret
-  - ServiceAccount
-
-  The current validation process for cert-manager configurations makes it easier and safer to delete the aforementioned resources,
-  specifically because:
-  - `cert-manager` specific configurations cannot be toggled.
-  - The reconciliation flow ensures that the provided cert-manager configuration (e.g., the issuerRef) is valid and that the referenced
-    objects exist. Only after this validation are the cert-controller-specific resources removed, ensuring a safe transition for
-    certificate management.
-
-  A parameter is added to `CertManagerConfig` in `externalsecretsconfigs.operator.openshift.io` called `CleanupStrategy` which can be
-  by used to indicate the behavior when `CertManagerConfig` is enabled.
-  - `PurgeAll`: PurgeAll indicates to purge all the resources created for built-in cert-controller.
-  - `PurgeNone`: PurgeNone indicates to purge none of the resources created for built-in cert-controller.
-  - `PurgeExceptSecrets`: PurgeExceptSecrets indicates to purge all the resources created for built-in cert-controller
-    except the Secret resource holding the certificate keypair generated for webhook component.
-
-- Enabling the `bitwarden secret manager` plugin is optional, and user can enable or disable it in `externalsecretsconfigs.operator.openshift.io`.
-  Currently, when the feature is disabled, the following resources created for the plugin are not removed, requiring manual cleanup.
-  - Certificates
-  - Deployment
-  - Service
-  - ServiceAccount
-
-  User can indicate one of the below action to be taken when the bitwarden provider plugin needs to be disabled
-  - `Enabled`: Enables the Bitwarden provider plugin. The operator will ensure the plugin is deployed and its state is synchronized.
-  - `Disabled`: Disables reconciliation of the Bitwarden provider plugin. The plugin and its resources will remain in their current
-    state and will not be managed by the operator.
-  - `DisabledAndCleanup`: Disables reconciliation and triggers the deletion of all associated resources of the Bitwarden provider plugin.
-
-  Cleanup will not cause any functionality degradation for services dependent on the secrets fetched from `bitwarden secret manager`, unless
-  the secret value has been modified. The applications dependent on the fetched secrets can continue to consume it. The Kubernetes Secret
-  resources containing the fetched values, or custom resources like SecretStore and ExternalSecrets, will not be deleted; users must
-  manually clean those up.
+The `ConfigMap` and the `VolumeMount` configurations for the operator can be part of the OLM bundle manifests and for operand, operator
+must create and watch the `ConfigMap` in operand's namespace.
 
 ### Risks and Mitigations
 
@@ -854,10 +801,7 @@ oc get CustomResourceDefinitions,Certificates,ClusterRoles,ClusterRoleBindings,D
 
 ## Alternatives (Not Implemented)
 
-For the optional features like enabling Bitwarden provider plugin and cert-manager configurations, transition approach was discussed
-as an alternate solution, where user first disables and then indicates to clean up the resources created for the features. But we can
-assume user intent and proceed with the action based on the provided configuration. The concise naming convention implies the user's
-understanding of the behavior, eliminating the need to get further confirmation.
+None
 
 ## Infrastructure Needed [optional]
 
