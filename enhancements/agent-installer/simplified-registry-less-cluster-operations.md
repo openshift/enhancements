@@ -81,20 +81,18 @@ hosting an external registry made it impractical.
 
 ## Proposal
 
-From a very high-level perspective, this proposal consists of building and
-releasing an extended RHCOS live ISO that includes a full OCP release payload
-(with a selected subset of OLM operators) and all the necessary
-scripts/services to support the various operations. In general a local registry
-service will be running on every control plane node, serving the OCP release
-payload included in the ISO. Also, a new custom resource - managed by the 
-Machine Config Operator (MCO) - will be introduced to control and manage the
-internal release payload added to the system.
+From a broad perspective, this proposal consists of building and releasing an
+extended RHCOS live ISO that includes a full OCP release payload (with a
+selected subset of OLM operators) and all the necessary scripts/services to
+support the various operations. In general a local registry service will be
+running on every control plane node, serving the OCP release payload included
+in the ISO. Also, a new custom resource - managed by the Machine Config
+Operator (MCO) - will be introduced to control and manage the internal release
+payload added to the system.
 
-Since each cluster operation has its own requirements and characteristics, the
-following paragraphs will provide more specific details for each different
-scenario.
+### High-level proposal scenarios
 
-### Extended RHCOS ISO build and release
+#### Extended RHCOS ISO build and release
 
 The foundation of the current proposal lies in the user's possibility to
 download a customized self-sufficient RHCOS live ISO, containing all the
@@ -110,9 +108,9 @@ the same OpenShift release cadence, and made it available via the
 [Red Hat Customer Portal](https://access.redhat.com), specifically through the
 [Red Hat Hybrid Cloud Console](https://console.redhat.com/).
 
-### Installation
+#### Installation
 
-#### Bootstrap phase
+##### Bootstrap phase
 
 Based on the same [Agent-based Installer](https://github.com/openshift/enhancements/blob/master/enhancements/agent-installer/automated-workflow-for-agent-based-installer.md)(ABI)
 approach, the installation will be kicked off into an ephemeral environment
@@ -126,7 +124,7 @@ During this early phase, the main responsibility of the local registry will
 be to serve any image pull request originating from the local services running
 on the same node.
 
-#### Installation phase (after the first reboot)
+##### Installation phase (after the first reboot)
 
 During the installation of each control plane node, the contents of the OCP
 release payload will be copied from the ISO to the node's disk (in the format
@@ -153,7 +151,7 @@ Finally, a new `InternalReleaseImage` custom resource, managed by MCO, will
 also be added as a cluster manifest to keep track and manage the currently
 stored internal release image.
 
-### Upgrade
+#### Upgrade
 
 Upgrading an existing lower version cluster will be performed via the same
 extended ISO used for managing the installation. As soon as the user will
@@ -169,7 +167,7 @@ At the end of the upgrade the user may decide to delete the previous release
 entry from the IRI resource. In such case the MCD on each control plane node
 will take care of removing the older release payload from the local registry.
 
-### Adding a new node
+#### Adding a new node
 
 A node could be added to a target existing cluster using the `oc adm
 node-image` [command](https://github.com/openshift/enhancements/blob/master/enhancements/oc/day2-add-nodes.md)
