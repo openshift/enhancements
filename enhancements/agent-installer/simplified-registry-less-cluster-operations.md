@@ -101,7 +101,11 @@ environment.
 This ISO will be prepared and built using the [OpenShift Appliance Builder](https://github.com/openshift/appliance),
 a command line utility for building a disk image to orchestrate an OpenShift
 installation. The Appliance builder will be enhanced with a new 
-`build live-iso` command capable to generate an ISO artifact. 
+`build live-iso` command capable to generate an ISO artifact.
+Since the extended ISO will contain not only a specific set OCP release images
+- but also additional images related to OLM operators (and other support images),
+the Appliance builder will generate a signed release bundle image listing
+all the included images.
 The extend ISO builder will be integrated within the official Red Hat build and
 release pipeline, so that a new extended RHCOS ISO could be published following
 the same OpenShift release cadence, and made it available via the 
@@ -149,20 +153,21 @@ locally mirrored.
 
 Finally, a new `InternalReleaseImage` custom resource, managed by MCO, will
 also be added as a cluster manifest to keep track and manage the currently
-stored internal release image.
+stored internal release bundle.
 
 #### Upgrade
 
 Upgrading an existing lower version cluster will be performed via the same
 extended ISO used for managing the installation. As soon as the user will
 attach the extended ISO to one of the control planes a temporary registry
-will be created to serve its content.
-At this point the user could edit the existing IRI resource to add the new
-release to trigger the copy process (from the temporary registry
-to each local control plane node registry), managed by the Machine Config
-Daemon (MCD). Once the copy has been completed on all the control plane nodes,
-the user could start the usual offline upgrade process via the `oc adm upgrade
---allow-explicit-upgrade --to-image=<release-image>`.
+will be created to serve its content, and the IRI resource will report in
+its status the newly discovered release bundle identifier.
+At this point the user could edit the existing IRI spec to add the new
+release bundle identifier to trigger the copy process (from the temporary
+registry to each local control plane node registry), managed by the Machine
+Config Daemon (MCD). Once the copy has been completed on all the control plane
+nodes, the user could start the usual offline upgrade process via the `oc adm
+upgrade --allow-explicit-upgrade --to-image=<release-image>`.
 At the end of the upgrade the user may decide to delete the previous release
 entry from the IRI resource. In such case the MCD on each control plane node
 will take care of removing the older release payload from the local registry.
@@ -182,7 +187,8 @@ this port to be accessible from all the nodes, as well as the registry port.
 
 ### Workflow Description
 
-The various workflows are briefly summarized below:
+The various workflows are briefly summarized below, from the user point of
+view:
 
 #### Installation
 
@@ -206,23 +212,26 @@ The various workflows are briefly summarized below:
 2. The user moves the extended RHCOS ISO into the disconnected environment.
 3. The user attaches the extended RHCOS ISO to one of the control plane nodes
    of the target cluster.
-4. The user edits the IRI resource by adding the release image pullspec to the
-   `spec.releases` field.
-5. The user waits until the copy process of the new release image is completed
+4. The IRI resource will report in its `status.availableRelease` field the
+   current release bundle identifier detected from the attached RHCOS ISO.
+5. The user edits the IRI resource by adding the release bundle identifier to
+   the `spec.releases` field.
+6. The user waits until the copy process of the new release image is completed
    for all the control plane nodes. The progress and status of the task could
    be monitored via the IRI `status` field.
-6. Once completed, the user upgrades the cluster via the `oc adm upgrade
-   --allow-explicit-upgrade --to-image=<release-image>`
+7. Once completed, the IRI status will report also the specific release
+   pullspec, so that the user could upgrade the cluster via the `oc adm upgrade
+   --allow-explicit-upgrade --to-image=<release-pullspec>`
 
 #### Post-upgrade optional steps
 
-1. The user edits the IRI resource by removing the release image pullspec not
-   in use anymore.
-2. The specified release image is removed from all the control plane nodes. The
-   progress and status of the task could be monitored via the IRI `status`
-   field.
+1. The user edits the IRI resource by removing the release bundle identifier
+   not in use anymore.
+2. All the images related to the specified release bundle will be removed
+   from all the control plane nodes. The progress and status of the task
+   could be monitored via the IRI `status` field.
 
-### Node expansion
+#### Node expansion
 
 1. The user runs the `oc adm node-image create` command from within the
    disconnected environment (with optionally some additional node
@@ -246,7 +255,7 @@ into the control planes nodes. In particular, it will be used for:
   post-upgrade step
 * Opt-out from the feature (by deleting the resource)
 
-This is an example of how the CR will look like:
+This is an example of how the CR will look like (for an upgrade):
 
 ```
 apiVersion: releases.openshift.io/v1alpha1
@@ -255,12 +264,16 @@ metadata:
   name: cluster
 spec:
   releases:
-    - name: quay.io/openshift-release-dev/ocp-release:4.18.0-x86_64
-    - name: quay.io/openshift-release-dev/ocp-release:4.19.0-x86_64
+    - name: ocp-release-bundle-4.18.0-x86_64      
+    - name: ocp-release-bundle-4.19.0-x86_64   # Added by the user
 status:
+  availableReleases: 
+    - name: ocp-release-bundle-4.19.0-x86_64
   releases:
-    - "quay.io/openshift-release-dev/ocp-release:4.18.0-x86_64"
-    - "quay.io/openshift-release-dev/ocp-release:4.19.0-x86_64"
+    - name: ocp-release-bundle-4.18.0-x86_64
+      image: quay.io/openshift-release-dev/ocp-release@sha256:5bca02661d61955b62889e7e2e648905b7202d5788f5ba5ab69055a73dffdb5c
+    - name: ocp-release-bundle-4.19.0-x86_64
+      image: quay.io/openshift-release-dev/ocp-release@sha256:3482dbdce3a6fb2239684d217bba6fc87453eff3bdb72f5237be4beb22a2160b
   conditions:
     - type: "Available"
       status: "True"
@@ -271,19 +284,23 @@ status:
       status: "True"
       lastTransitionTime: "2025-07-12T13:13:00Z"
       reason: "AddingRelease"
-      message: "Adding new release image quay.io/openshift-release-dev/ocp-release:4.19.0-x86_64 on master-0."
+      message: "Adding new release image quay.io/openshift-release-dev/ocp-release@sha256:3482dbdce3a6fb2239684d217bba6fc87453eff3bdb72f5237be4beb22a2160b on master-0."
   ...
 ```
 
 * The `spec.releases` contains a list of release objects, and it will be used
   to configure the desired release contents. Adding (or removing) an entry from
-  the list will trigger an update on all the control plane nodes.
-* The `spec.releases.name` format is a pullspec by tag. This is a convenient
-  format for the end user, since it is readable and commonly used for reference
-  a specific releasy payload. Optionally, the user could also specify a pullspec
-  by digest (internally the digest will always be used to avoid any ambiguity)
-* The `status.releases` field will report the currently managed releases (this
-  is an aggregated value, for individual node status see below)
+  the list will trigger an update on all the control plane nodes
+* The `spec.releases.name` format is a string specifying the release bundle
+  identifier. It must match the value reported in the 
+  `status.availableReleases` field
+* The `status.availableReleases` will report the name of the currently detected
+  releases from the attached ISO (and not yet installed in the system). This
+  value could be used by the user to amend the IRI resource to add a new
+  release bundle
+* The `status.releases.name` field will report the currently managed releases
+* The `status.releases.image` is the OCP release image pullspec by digest for
+  the related release bundle
 * The `status.conditions` field will be used to keep track of the activity
   performed on the various nodes
 
@@ -302,28 +319,36 @@ metadata:
 ...
 status:
   ...
-  releases:
-    - image: quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:b6f3a6e7cab0bb6e2590f6e6612a3edec75e3b28d32a4e55325bdeeb7d836662
-      conditions:
-        - type: Available
-          status: "True"
-          lastTransitionTime: "2025-07-12T14:02:00Z"
-          reason: "ReleasesCopied"
-          message: "The release payload has been successfully copied."
-          ...
-    - image: quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:6bd997996a5197c50e91564ab6ee74aae6b6ad38135ae3cbff320293fff074cc
-      conditions:
-        - type: Available
-          status: "False"
-          lastTransitionTime: "2025-08-12T17:01:13Z"
-          reason: "Error"
-          message: "Not enough storage space."
+  internalReleaseImage:
+    availableReleases: 
+      - name: ocp-release-bundle-4.19.0-x86_64
+    releases:
+      - name: ocp-release-bundle-4.18.0-x86_64
+        image: quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:5bca02661d61955b62889e7e2e648905b7202d5788f5ba5ab69055a73dffdb5c
+        conditions:
+          - type: Available
+            status: "True"
+            lastTransitionTime: "2025-07-12T14:02:00Z"
+            reason: "ReleasesCopied"
+            message: "The release payload has been successfully copied."
+            ...
+      - name: ocp-release-bundle-4.19.0-x86_64
+        image: quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:3482dbdce3a6fb2239684d217bba6fc87453eff3bdb72f5237be4beb22a2160b
+        conditions:
+          - type: Available
+            status: "False"
+            lastTransitionTime: "2025-08-12T17:01:13Z"
+            reason: "Error"
+            message: "Not enough storage space."
 ```
 
-* The `status.releases` field will be used to track the status of the release
-  payloads stored in the related node. To avoid any ambiguity, the release
-  image will be referenced always by digest
-* The `status.conditions` field will be used to keep track of the activity
+* The `internalReleaseImage.status.releases` field will be used to track the status of the release
+  payloads stored in the related node
+* The `internalReleaseImage.status.releases.name` will report the release bundle identifier string
+* The `internalReleaseImage.status.releases.image` will report the OCP release image pullspec by digest
+* The `internalReleaseImage.status.availableReleases` will report the release bundle identifier for
+  the ISO detected on the current node  
+* The `internalReleaseImage.status.conditions` field will be used to keep track of the activity
   performed for the specific release payload, and in particular to report any
   error
 
@@ -351,9 +376,19 @@ A new `InternalReleaseImageController` sub-controller of the
 _machine-config-controller_ will be created to watch and manage the
 `InternalImageRelease` resource. The controller will take care of
 updating the resource status.
+In general, the IRI controller will watch all the available
+MachineConfigNodes status to verify if a given action (adding/removing a
+release bundle) has been fully completed, and to detect the presence
+of a new mounted ISO.
 
 A new `InternalReleaseImageManager` manager will be added to
 _machine-config-daemon_ to handle per-node specific operations.
+Every manager will report its own status to the related MachineConfigNode
+resource.
+Every manager will be responsible for watching the IRI resource, to detect
+when adding/removing a release bundle is required.
+Also, if a release bundle ISO is mounted on the related node, it will have
+to report the ISO label string into its status.
 
 ##### Removal of a release from the the InternalReleaseImage resource
 
@@ -389,6 +424,10 @@ IRI resource.
 The release image and operators images will be stored inside the extended RHCOS
 ISO in the storage format used by the [distribution/distribution](https://github.com/distribution/distribution)
 registry’s filesystem storage plugin.
+The Appliance builder will generate a new `release-bundle` (signed) image
+containing a `bundle.json` listing all the included images digests (for the
+release payload, OLM operators and any other additional support image).
+The ISO must have have a label in the format `ocp-release-bundle-<VER>-<ARCH>`.
 
 #### Distribution/distribution registry OCP integration
 
@@ -417,18 +456,20 @@ registry host.
 ![alt install phase](simplified-operations-install.png)
 
 A systemd service injected by MCO will ensure the registry will be available
-after the reboot. 
-The registry will have to run on a host network port on each node to ensure
-it's accessible from the outside, specifically port 22625 (to be [registered](https://github.com/openshift/enhancements/blob/master/dev-guide/host-port-registry.md)). 
+after the reboot. The registry will have to run on a host network port on each
+node to ensure it's accessible from the outside, specifically port 22625 (to be
+[registered](https://github.com/openshift/enhancements/blob/master/dev-guide/host-port-registry.md)). 
 An Assisted Service pre-flight validation will ensure that the port is open.
 
 #### Upgrade
 
 A udev rule, along with a systemd service injected by MCO will detect when an
 extended RHCOS ISO is attached, and then mount it to launch a temporary registry
-to serve its content.
-After the user modified the IRI resource with the new release pullspec, the new
-OCP release image payload will be copied on each node registry using skopeo.
+to serve its content, by looking for devices labelled as `ocp-release-bundle-*`.
+This label will be reported as the bundle identifier in the MCN status (and then
+in the IRI status). After the user modified the IRI resource with the new release
+bundle identifier, the new OCP release image payload will be copied on each node
+registry using skopeo.
 
 #### Storage requirements
 
