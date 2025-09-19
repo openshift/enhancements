@@ -109,9 +109,9 @@ spec:
         iamRole:
           roleARN:           # secret reference
           token:             # bearer token
-          assumeRole:        # (optional)
-            roleARN:         # secret reference
-            externalID:      # (optional)string
+        assumeRole:          # (optional)
+          roleARN:           # secret reference
+          externalID:        # (optional)string
       tuning:
         deliveryMode:        # (optional) enum: atLeastOnce, atMostOnce
         maxWrite:            # (optional) quantity (e.g. 500k)
