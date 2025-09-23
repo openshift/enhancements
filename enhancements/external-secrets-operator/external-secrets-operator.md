@@ -696,13 +696,32 @@ then be propagated to all the operand deployments by the operator. Users can als
 the operator in `externalsecretsmanager.operator.openshift.io`.
 
 For proxying HTTPS connections, CA certificates are required for validating the HTTPS proxy server. Operator will create a `ConfigMap` in
-its own and in operand's namespace with a label `config.openshift.io/inject-trusted-cabundle="true"` to leverage OpensShift offered
-cluster-wide CA certificates bundle, which will contain the `Red Hat Enterprise Linux CoreOS` trust bundle and as well the user defined
-trust bundle which will be made available in operator and operand pods through a volume mount. The CA certificate trust bundle must be made
-available at `/etc/pki/tls/certs` as [suggested](https://cs.opensource.google/go/go/+/refs/tags/go1.24.4:src/crypto/x509/root_linux.go;l=22) in golang.
+operand's namespace with a label `config.openshift.io/inject-trusted-cabundle="true"` to leverage OpensShift offered cluster-wide CA
+certificates bundle, which will contain the `Red Hat Enterprise Linux CoreOS` trust bundle and as well the user defined
+trust bundle which will be made available in the operand pods through a volume mount. The CA certificate trust bundle must be made available
+at `/etc/pki/tls/certs` as [suggested](https://cs.opensource.google/go/go/+/refs/tags/go1.24.4:src/crypto/x509/root_linux.go;l=22) in golang.
 
-The `ConfigMap` and the `VolumeMount` configurations for the operator can be part of the OLM bundle manifests and for operand, operator
-must create and watch the `ConfigMap` in operand's namespace.
+The `ConfigMap` and the `VolumeMount` configurations for the operator must be part of the OLM bundle manifests and for operand, operator
+must create and watch(not reconcile the content) the `ConfigMap` in operand's namespace.
+
+Kustomize's resource generation functionality must be made use of for including the ConfigMap in the operator bundle, like below
+```go
+resources:
+- manager.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+images:
+- name: controller
+  newName: openshift.io/external-secrets-operator
+  newTag: latest
+generatorOptions:
+  disableNameSuffixHash: true
+configMapGenerator:
+- name: trusted-cabundle
+  options:
+    labels:
+      config.openshift.io/inject-trusted-cabundle: "true"
+```
 
 ### Risks and Mitigations
 
