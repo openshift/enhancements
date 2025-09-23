@@ -1,13 +1,12 @@
 ---
-title: aws-ingress-nlb-security-group
+title: service-aws-nlb-security-group
 authors:
   - "@mtulio"
 reviewers:
-  - "@rvanderp3"     # SPLAT review
-  - "@patrickdillon" # Installer API updates
-  - "@JoelSpeed"     # OCP API and CCM-AWS
-  - "@elmiko"        # CCM-AWS
-  - "@Miciah"        # Cluster Ingress Operator
+  - "@rvanderp3"
+  - "@JoelSpeed"
+  - "@elmiko"
+  - "@Miciah"
   - # TBD ROSA Classic
   - # TBD ROSA HCP
 approvers:
@@ -20,7 +19,7 @@ tracking-link:
   - https://issues.redhat.com/browse/OCPSTRAT-1553
   - https://issues.redhat.com/browse/SPLAT-2137
 see-also:
-  - "/enhancements/enhancements/installer/aws-load-balancer-type.md"
+  - "/enhancements/enhancements/cloud-integration/aws/service-aws-nlb-security-group.md"
 replaces:
   - None
 superseded-by:
@@ -52,19 +51,19 @@ Using a Network Load Balancer is a recommended network-based Load Balancer by AW
 
 - As an OpenShift administrator, I want to deploy a cluster on AWS (self-managed, ROSA Classic, and ROSA HCP) using a Network Load Balancer with Security Groups for the default router service, so that I can comply with AWS best practices and address "security findings"[1].
 
-- As a Developer, I want to create the Default Ingress Controller on OpenShift on AWS using a NLB with a Security Group.
+- As an Administrator, I want to create the Default Ingress Controller on OpenShift on AWS using a NLB with a Security Group by default, so that I can keep the security best practices of assigning a dedicated security group for the AWS resource with low-privileged approach.
 
-- As a Developer, I want to deploy a Service type-LoadBalancer with a NLB and security groups.
+- As a Developer, I want to deploy a Service type-LoadBalancer NLB with security groups managed by controller (CCM), so that the ingress rules can be automatically updated according to the Service ports, and all resources removed without user intervention following best practice and keeping similar resource management as Classic Load Balancer (CLB).
 
-- As an OpenShift Engineer of CIO, I want the CCM to manage the Security Group when creating a resource `Service` type-LoadBalancer NLB, so that it:
+- As an OpenShift developer of Cluster Ingress Operator (CIO), I want to the CCM to manage the life cycle of Security Group resource when creating a `Service` type-LoadBalancer NLB, so that it:
   - a) decreases the amount of provider-specific changes on CIO;
   - b) decreases the amount of maintained code/projects by the team (e.g., ALBC);
   - c) enhances new configurations to the Ingress Controller when using NLB;
-  - d) decreases the amount of images in the core payload;
+  - d) does not increase the amount of images in the core payload;
 
 - As an OpenShift Engineer, I want to make Security Groups managed by CCM by default on OpenShift deployments when creating a Service type-LoadBalancer NLB, providing a mechanism to automatically use Security Groups for the Default router in new deployments, or when it is recreated, ensuring best practices adoption on OpenShift products.
 
-[1] TODO: "Security Findings" need to be expanded to collect exact examples. This comes from the customer's comment: https://issues.redhat.com/browse/RFE-5440?focusedId=25761057&page=com.atlassian.jira.plugin.system.issuetabpanels:comment-tabpanel#comment-25761057s
+[1] "We recommend that you associate a security group with your Network Load Balancer when you create it." https://docs.aws.amazon.com/elasticloadbalancing/latest/network/load-balancer-security-groups.html#security-group-considerations
 
 
 ### Goals
@@ -84,11 +83,11 @@ Proposed Phases:
 - OpenShift Cluster Cloud Controller Manager Operator (CCCMO) must enforce cloud-provider configuration on AWS CCM to manage Security Group when Service type-LoadBalancer NLB.
 - Ensure the configuration is added for all variants: self-managed, ROSA HCP and Classic.
 
-**Phase 3: CCM support BYO SG Annotation when Service type-LoadBalanacer NLB**
+**Phase 3: CCM support BYO SG (Bring Your Own Security Group) Annotation when Service type-LoadBalanacer NLB**
 
 - Introduce Annotations to CCM to allow BYO SG to Service type-LoadBalancer NLB to opt-out the global `Managed` security group configuration.
     - The annotation must follow the same standard as ALBC. Must be optional.
-    - An annotation to allow managing backend rules must be added to prevent manual changes by the user. Must be opt-out by default
+    - (TBD if it is required) An annotation to allow managing backend rules must be added to prevent manual changes by the user. Must be opt-out by default
 
 ### Non-Goals
 
@@ -96,55 +95,54 @@ Proposed Phases:
 - Use NLB as the default router deployment - Service type-LoadBalancer.
 - Synchronize all NLB features from ALBC to CCM.
 - Change the existing CCM flow when deploying NLB without the new configuration.
-- Change the default OpenShift IPI install flow when deploying the default router using IPI (users still need to explicitly set the `lbType` configuration to `nlb` to automatically consume this feature).
+- Change the default OpenShift IPI install flow when deploying the default router using IPI (users still need to explicitly set the `platform.aws.lbType` configuration to `nlb` to automatically consume this feature).
 - Change any ROSA code base, both HCP or Classic, to support this feature.
 
 ## Proposal
 
 **Phase 1: CCM Support of Security Group through opt-in in cloud-config**
 
-Introduce a cloud-config global configuration to CCM allowing the CCM to provision managed Security Groups by default every time a new Service type-LoadBalancer is created.
+Introduce a cloud-config global configuration to CCM, scoped to the load balancer type NLB, allowing the controller to provision and attach a managed Security Group to load balancer by default every time a new Service type-LoadBalancer NLB is created.
 
-The CCM, the controller which manages the `Service` resource, will have a global configuration on cloud-config to signalize the controller to manage the Security Group by default when creating a Service type-LoadBalancer NLB -  annotation `service.beta.kubernetes.io/aws-load-balancer-type` set to `nlb`. This change paves the path to default the controller to managed security groups, following the same path AWS LBC defaults to since version v2.6.0
+The CCM, the controller which manages the `Service` resource, will have a global configuration on cloud-config to signalize the controller to manage the Security Group by default when creating a Service type-LoadBalancer NLB -  annotation `service.beta.kubernetes.io/aws-load-balancer-type` set to `nlb`. This change paves the path to default the controller to managed security groups, following the same path AWS LBC defaults to since version v2.6.0.
 
-The controller must create and manage the lifecycle of the Security Group when the Load Balancer is created, update the SG ingress rules according to the NLB Listeners configurations, and the Egress Rules according to the Target Group configurations.
+The controller must create and manage the entire lifecycle of the Security Group resource when the load balancer is created, update the SG ingress rules according to the NLB Listeners configurations, and the Egress Rules according to the Target Group configurations.
 
 The SG must be deleted when the resource `Service` is removed.
 
-Users will be able to deploy OpenShift on AWS with the default Ingress using Network Load Balancers with Security Groups when enabled (opt-in) in the `install-config.yaml`.
+Users will be able to deploy security group by default to the load balancer of the default Ingress' Service on OpenShift on AWS when the install-config `platform.aws.lbType` is set to `nlb`.
 
-Goals:
+Change summary:
 - Cloud Controller Manager (CCM) - Service type-LoadBalancer controller:
-  - Enable global configuration (cloud-config) to default managed Security Group when a Service type-LoadBalancer NLB is created - annotation `service.beta.kubernetes.io/aws-load-balancer-type: nlb`.
+  - Introduce a global configuration (cloud-config) to default to managed Security Group when a Service type-LoadBalancer NLB is created - annotation `service.beta.kubernetes.io/aws-load-balancer-type: nlb`.
   - When the configuration is present in the NLB flow, the CCM will:
-    - Create a new Security Group instance for the NLB. The name should follow a convention like `k8s-elb-a<generated-name-from-service-uid>`.
-    - Create Ingress and Egress rules in the Security Group based on the NLB Listeners' and Target Groups' ports. Egress rules should be restricted to the necessary ports for backend communication (traffic and health check ports).
+    - Create a Security Group instance for the NLB. The name should follow the ALBC convention, like `k8s-<sanitizedServiceNamespace>-<sanitizedServiceName>-<uuid>`.
+    - Create Ingress rules in the Security Group based on the NLB Listeners' and Target Groups' ports.
     - Delete the Security Group when the corresponding service is deleted.
   - Enhance existing tests for the Load Balancer component in the CCM to include scenarios with the new annotation.
 
 
 **Phase 2: Default OpenShift to use SG when creating Service type-LoadBalancer NLB**
 
-Update CCCMO to update the cloud-config to enforce SG on OpenShift.
-
-TBD
-
+Update CCCMO to update the cloud-config to enforce Security Group configuration of Service type-loadBalancer by default on OpenShift.
 Goals:
+
+- OpenShift/cloud-provider-AWS (CCM):
+  - Synchronize with upstream feature to OpenShift code base
+  - Ensure upstream tests are inherited to the OpenShift core test framework
 - Cluster Cloud Controller Manager Operator (CCCMO):
   - Enforce default configuration to manage security groups on NLB
 - Validate TP on OpenShift offerings: self-managed, ROSA Classic, ROSA Managed
 
 **Phase 3: CCM support BYO SG Annotation when Service type-LoadBalanacer NLB**
 
-CCM must support BYO SG annotation to override the global configuration, with annotation naming convention following the same as ALBC.
-
-TBD
-
+CCM must support BYO SG annotation to override the global managed  SG configuration. The annotation naming convention must follow the ALBC standard.
 Goals:
-- CCM - Service type-LoadBalancer controller:
+
+- kubernetes/CCM (upstream) - Service type-LoadBalancer controller:
   - Enable (or introduce) annotation BYO SG on NLB provisioning (parity with ALBC)
     - [service.beta.kubernetes.io/aws-load-balancer-security-groups][an-sg]
-    - [service.beta.kubernetes.io/aws-load-balancer-manage-backend-security-group-rules][an-be]
+    - (TBD) [service.beta.kubernetes.io/aws-load-balancer-manage-backend-security-group-rules][an-be]
   - Enable backend rules management annotation when BYO SG on NLB provisioning (parity with ALBC)
 - Validate TP on OpenShift offerings: self-managed, ROSA Classic, ROSA Managed
 
@@ -179,15 +177,12 @@ platform:
     - CIO will create the Service type-LoadBalancer instance for the default router, with the annotations to use NLB. (existing flow)
 - 5.  Cloud Controller Manager (CCM):
     - Synchronize resource `Service` type-LoadBalancer with the annotation `service.beta.kubernetes.io/aws-load-balancer-type: nlb`. The CCM will:
-        - Create a new AWS Security Group for the NLB. The name should follow a convention like `k8s-elb-a<generated-name-from-service-uid>`.
-        - Configure Ingress rules in the Security Group to allow traffic on the ports defined in the Service's `spec.ports`. The source for these rules will be determined by the `service.beta.kubernetes.io/load-balancer-source-ranges` annotation on the Service (if present, otherwise default to allowing from all IPs).
-        - Configure Egress rules in the Security Group to allow traffic to the backend pods on the `targetPort` specified in the Service's `spec.ports` and the health check port. Initially, this should be restricted to the cluster's VPC CIDR or the specific CIDRs of the worker nodes.
+        - Create an AWS Security Group for the NLB. The name should follow a ALBC naming convention aforementioned.
+        - Configure Ingress rules in the Security Group to allow traffic on the ports defined in the Service's `spec.ports`.
         - When creating the NLB using the AWS ELBv2 API, the CCM will include the ID of the newly created Security Group in the `SecurityGroups` parameter of the `CreateLoadBalancerInput`.
-        - When the Service annotation is added after the Service is created, the CCM will need to (?)
+
         - When the Service is deleted, the CCM will also delete the associated Security Group, ensuring proper cleanup.
-    - Manages the Security Group lifecycle (controllers may exist in CLB).
-    - (TBD what happens on updates, examples):
-        - If the global config is disabled in day-2, then the Service is deleted, the SG will leak. Do we need to allow that considering we can't detach SGs from NLBs?
+    - Manages the Security Group life cycle (updates delete) - similar existing CLB flow.
 
 **OpenShift Managed**
 
@@ -201,11 +196,30 @@ ROSA Classic and ROSA HCP must inherit CCCMO and CCM defaults to SG.
 
 #### Phase 3 - BYO SG
 
-TBD
+Brownfield on standalone Services:
+
+- CCM:
+  - User manually create a security group to the VPC that the cluster is installed
+  - User creates or update a Service with BYOSG annotation with Security Group IDs.
+  - CCM:
+    - validates if existing load balancer has managed security group attached:
+        - when yes: updates the NLB with user-provided SG, then delete the managed SG
+        - else: fail as NLB was created without SG support
+
+Greenfield:
+
+  - Not supported. The flow of BYOSG on install time is not covered by this Enhancement.
+  - Overview of workflow to support BYOSG on self-managed:
+      - Installer:
+          - User must select the BYO VPC method
+          - User specify the Security Group ID manually created to the install configuration
+      - CIO:
+          - Consumes the user-provided SGs and create the respective BYOSG annotation to the router Services
+      - CCM:
+          - CCM must skip managed SG and attach user-provided security group when creating a load balancer NLB
+
 
 ### API Extensions
-
-> WIP/TBReviewed
 
 #### AWS Cloud Controller Manager (CCM)
 
@@ -264,47 +278,41 @@ func setOpenShiftDefaults(cfg *awsconfig.CloudConfig) {
 
 <!-- Is the change relevant for standalone clusters? -->
 
-> TODO/TBD: All changes are proposed initially and exclusively for Standalone clusters.
+All changes are proposed initially and exclusively for Standalone clusters.
 
 #### Single-node Deployments or MicroShift
 
-> TODO/TBD
+> TODO: The following statements must be validated, and if we'll need to test on those deployment types.
+
+N/A. SNO or MicroShift created on AWS must inherit this feature when feature gate is enabled, there is not restriction or specific configuration for this deployment.
 
 
 ### Implementation Details/Notes/Constraints
-
-> WIP/TBReviewed
 
 - The initial implementation will focus on creating a single Security Group per NLB.
 - Egress rules management in CCM needs careful consideration to avoid overly permissive rules. The initial implementation should restrict egress to the necessary ports and protocols for communication with the backend pods (traffic ports and health check ports) within the cluster's VPC.
 
 TODO review the following items:
 
-- The Security Group naming convention should be consistent and informative, including the cluster ID, namespace, and service name to aid in identification and management in the AWS console. (TODO: need review, perhaps we just create the same name as LB?)
-- Proper IAM permissions for the CCM's service account will be required to allow it to create, describe, and delete Security Groups in AWS. This needs to be documented as a prerequisite. (TODO review: maybe we don't need this as IAM permissions would be already granted for CLB [review it])
+- The Security Group naming convention should be consistent and informative, following the same naming convention of AWS Load Balancer Controller (LBC).
+- Proper IAM permissions for the CCM's service account will be required to allow it to create, describe, and delete Security Groups in AWS. This needs to be documented as a prerequisite.
 
 
 ### Risks and Mitigations
 
-> WIP/TBReviewed
-
 - **Increased complexity in CCM**: Adding security group management to CCM increases its complexity. Mitigation: Focus on a minimal and well-tested implementation, drawing inspiration from the existing CLB security group management logic in CCM.
 - **Potential for inconsistencies with ALBC**: If users later decide to migrate to ALBC, there might be inconsistencies in how security groups are managed. Mitigation: Clearly document the limitations of this approach and the benefits of using ALBC for more advanced scenarios or a broader range of features.
 - **Maintenance burden**: Maintaining this feature in CCM might become challenging if the upstream cloud-provider-aws project evolves significantly in its load balancer management. Mitigation: Upstream the changes to benefit from community maintenance and align with the long-term strategy for load balancer controllers in OpenShift.
-- **IAM Permissions(?)**: Incorrectly configured IAM permissions for the CCM could lead to failures in creating or managing security groups. Mitigation: Provide clear documentation on the necessary IAM permissions and potentially include checks in the CCM to verify these permissions.
+- **IAM Permissions**: Incorrectly configured IAM permissions for the CCM could lead to failures in creating or managing security groups. Mitigation: Provide clear documentation on the necessary IAM permissions and potentially include checks in the CCM to verify these permissions.
 
 
 ### Drawbacks
-
-> WIP/TBReviewed
 
 - The short-term solution requires engineering effort to implement and stabilize the changes in CCM and other components.
 - The extent of changes in CCM may require significant engineering effort from Red Hat to maintain this functionality. To mitigate it, this feature proposes minimum changes without disrupting the existing flow.
 - This approach duplicates some functionality that already exists in the AWS Load Balancer Controller.
 
 ## Alternatives (Not Implemented)
-
-> TODO/TBD
 
 ### **Defaulting to AWS Load Balancer Controller (ALBC) for the Default Router**:
 
@@ -318,13 +326,16 @@ Here is an overall effort:
 - Red Hat may need to continue supporting CCM indefinitely for customers unwilling to migrate, meaning this would not be a one-release migration. It would likely require supporting all configurations (CLB with CCM, NLB with CCM, NLB with ALBC) as well as the migration process in perpetuity.
 - The above points only scratch the surface of special cases, such as custom security groups, custom DNS configurations, or potential regressions when transitioning from CCM to ALBC.
 
-### **Day-2 operations to switch the default router to use ALBC/LBC**:
+### **Day-2 operations to switch the default router to use Service managed by ALBC/LBC**:
 
 This would require users to manually deploy and configure ALBC after cluster installation, which does not meet the requirement for an opt-in during initial cluster deployment.
 
+### ***Making ALBC a module to Cloud Controller Manager**
+
+AWS Load Balancer Controller, a dedicated project apart of CCM, provides many features to Service type-loadBalancer NLB, competing with Cloud Controller Manager. A deep research to find ways to make ALBC a module of CCM, would provide a many advantages to CCM and decrease the feature gap between ALBCM. If this is feasible, we believe this alternative would take many effort in short-term, but a huge benefit for the product maitainance in long-term.
+
 ## Open Questions [optional]
 
-> WIP
 
 - Q: Is it required to create a KEP to the CCM changes?
 
@@ -344,8 +355,6 @@ This would require users to manually deploy and configure ALBC after cluster ins
 
 ## Test Plan
 
-> WIP/TBReviewed
-
 **cloud-provider-aws (CCM):**:
 
 - e2e service Load Balancer type NLB with Security Groups (SG) needs to be implemented in the CCM component (upstream)
@@ -353,16 +362,13 @@ This would require users to manually deploy and configure ALBC after cluster ins
 
     - The creation of an NLB with a newly created and associated Security Group.
     - The correct configuration of Ingress rules in the Security Group based on the service ports and loadBalancerSourceRanges.
-    - The configuration of Egress rules, ensuring they are appropriately restricted.
     - The deletion of the Security Group when the service is deleted.
 
 ## Graduation Criteria
 
-> TODO/TBD
-
 ### Dev Preview -> Tech Preview
 
-N/A. This feature will be introduced as Tech Preview (TBReviewed).
+N/A. This feature will be introduced as Tech Preview .
 
 ### Tech Preview -> GA
 
@@ -370,33 +376,25 @@ The E2E tests should be consistently passing, and a PR will be created to enable
 
 ### Removing a deprecated feature
 
-> TODO/TBD: depends on the options.
-
-- Announce deprecation and support policy of the existing lbType configuration (if accepted)
-- Deprecate the field
+N/A
 
 ## Upgrade / Downgrade Strategy
 
 No upgrade or downgrade concerns are anticipated because all changes are backward-compatible and opt-in. Existing configurations will remain unaffected unless the feature is explicitly enabled.
 
-There is no plan to migrate existing routers with NLB to use Security Groups, as NLBs must be recreated to attach a Security Group. Instead, Day-2 operations must be manually performed, and objects patched if the user wants to consume this feature. For example, users can enable this feature by manually patching the IngressController and associated Service objects to include the required annotations. Note that this may require recreating the NLB, which could result in temporary downtime.
+There is no plan to migrate existing routers with NLB to use Security Groups, as NLBs must be recreated to attach a Security Group. Instead, Day-2 operations must be manually performed, and objects patched if the user wants to consume this feature. For example, users must need to delete the existing router service to enforce the CIO to create a new service with managed security group, when the feature is delivered to the version running the cluster. NOTE: this will recreate the NLB, which will result in a downtime.
 
-In the case of a downgrade to a CCM version that does not support the new <TBD> cloud-config, the configuration will be ignored, and the Security Group will not be managed by the CCM. Users must manually manage Security Groups in such scenarios.
+In the case of a downgrade to a CCM version that does not support the new configuration on cloud-config, it will be ignored, and the controller (CCM) will not manage Security Groups to the Service type-loadBalancer NLB.
 
 ## Version Skew Strategy
 
-> TODO/TBD
-
 ## Operational Aspects of API Extensions
 
-- Monitoring of the CCM for errors related to Security Group creation, rule application, and deletion. Metrics around the number of managed security groups could also be useful.
-- Logging in the CCM to track the status of Security Group operations, including creation, updates, and deletions. Include relevant AWS API call details in the logs for debugging.
-- Potential for rate limiting on AWS API calls for Security Group management. Implement appropriate backoff and retry mechanisms in the CCM.
-- Alerting on failures to create or manage security groups.
+- Monitoring of the CCM pod logs for errors related to Security Group creation, rule application, and deletion. Check any errors related to the Service events, include relevant AWS API call details in the logs for debugging.
+- Logging in the AWS Console to track the status of the Load Balancer, and the Security Group attached to it. 
 
 ## Support Procedures
 
-> TODO/TBD: depends on the options.
 
 Document troubleshooting steps for issues related to NLB Security Group management, including:
 
@@ -408,18 +406,4 @@ Document troubleshooting steps for issues related to NLB Security Group manageme
 
 ## Infrastructure Needed [optional]
 
-> TODO/TBD: depends on the options.
-
-(Double check: probably those permissions is already granted as CLB support manages SG, keeping it here just to review later)
-
-Additional AWS permissions will be required for the CCM's IAM role to create, modify, and delete Security Groups:
-
-- ec2:CreateSecurityGroup
-- ec2:DescribeSecurityGroups
-- ec2:DeleteSecurityGroup
-- ec2:AuthorizeSecurityGroupIngress
-- ec2:AuthorizeSecurityGroupEgress
-- ec2:RevokeSecurityGroupIngress
-- and ec2:RevokeSecurityGroupEgress
-
-This needs to be clearly documented as a prerequisite for enabling this feature.
+N/A.
