@@ -34,8 +34,7 @@ specifying and deploying a NetworkNodePolicy CRD.
 
 ### User Stories
 
-As a MicroShift admin, I want to configure VFs on PFs in a declarative manner,
-as God intended.
+As a MicroShift admin, I want to configure VFs on PFs in a declarative manner.
 
 As a MicroShift admin, I don't want to configure VFs manually on OS level, I
 want to use higher level tools.
