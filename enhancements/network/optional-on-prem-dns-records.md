@@ -15,6 +15,7 @@ tracking-link:
   - https://issues.redhat.com/browse/OPNET-678
 see-also:
   - "/enhancements/network/external-lb-vips.md"
+  - "https://github.com/openshift/api/pull/2460"
 replaces:
   - NA
 superseded-by:
@@ -83,6 +84,7 @@ A new field will be added to control whether DNS records are deployed.
 
 [Existing API](https://github.com/openshift/api/blob/674ad74beffcbdf6aa7a577bf23a269c24f92fe8/config/v1/types_infrastructure.go#L964)
 [Existing Validations](https://github.com/openshift/installer/blob/97030df02861425054b980db72d31d36de1fcb20/pkg/types/validation/installconfig.go#L953)
+[Proposed API change](https://github.com/openshift/api/pull/2460)
 
 ### Topology Considerations
 
@@ -93,6 +95,7 @@ No Hypershift impacts
 #### Standalone Clusters
 
 Yes, this is expected to be used primarily with standalone clusters.
+Specifically for on-prem platforms such as Baremetal, VSphere, and OpenStack.
 
 #### Single-node Deployments or MicroShift
 
@@ -179,6 +182,9 @@ shouldn't be difficult.
 We have a specific customer waiting for this feature who has agreed to test
 it in tech preview. Graduation will be predicated on the feature addressing
 their use case.
+
+Initially the feature will ship behind a feature gate, which will be lifted
+when it graduates from tech preview to GA.
 
 ### Dev Preview -> Tech Preview
 
