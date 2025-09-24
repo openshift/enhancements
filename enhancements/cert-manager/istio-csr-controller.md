@@ -9,7 +9,7 @@ approvers:
 api-approvers:
   - "@tgeer" ## approver for cert-manager component
 creation-date: 2024-01-22
-last-updated: 2025-09-18
+last-updated: 2025-09-24
 tracking-link:
   - https://issues.redhat.com/browse/CM-234
 see-also:
@@ -333,6 +333,7 @@ type CertManagerConfig struct {
 // IstiodTLSConfig is for configuring istiod certificate specifics.
 // +kubebuilder:validation:XValidation:rule="!has(oldSelf.privateKeyAlgorithm) && !has(self.privateKeyAlgorithm) || has(oldSelf.privateKeyAlgorithm) && has(self.privateKeyAlgorithm)",message="privateKeyAlgorithm may only be configured during creation"
 // +kubebuilder:validation:XValidation:rule="!has(oldSelf.privateKeySize) && !has(self.privateKeySize) || has(oldSelf.privateKeySize) && has(self.privateKeySize)",message="privateKeySize may only be configured during creation"
+// +kubebuilder:validation:XValidation:rule="(!has(self.privateKeyAlgorithm) || self.privateKeyAlgorithm == 'RSA') ? (self.privateKeySize in [2048,4096,8192]) : (self.privateKeySize in [256,384])",message="privateKeySize must match with configured privateKeyAlgorithm"
 type IstiodTLSConfig struct {
 	// commonName is the common name to be set in the cert-manager.io Certificate created for istiod.
 	// The commonName will be of the form istiod.<istio_namespace>.svc when not set.
@@ -348,7 +349,7 @@ type IstiodTLSConfig struct {
 	// This field can have a maximum of 63 characters.
 	// +kubebuilder:validation:MinLength:=1
 	// +kubebuilder:validation:MaxLength:=63
-	// +kubebuilder:validation:XValidation:rule="!format.dns1123Subdomain().validate(self).hasValue()",message="a lowercase RFC 1123 subdomain must consist of lowercase alphanumeric characters, hyphens ('-'), and periods ('.'). Each block, separated by periods, must start and end with an alphanumeric character. Hyphens are not allowed at the start or end of a block, and consecutive periods are not permitted."
+	// +kubebuilder:validation:XValidation:rule="!format.dns1123Subdomain().validate(self).hasValue()",message="trustDomain must consist of lowercase alphanumeric characters, hyphens ('-'), and periods ('.'). Each block, separated by periods, must start and end with an alphanumeric character. Hyphens are not allowed at the start or end of a block, and consecutive periods are not permitted."
 	// +kubebuilder:validation:Required
 	// +required
 	TrustDomain string `json:"trustDomain"`
@@ -406,10 +407,10 @@ type IstiodTLSConfig struct {
 // for obtaining the certificates.
 type ServerConfig struct {
 	// clusterID is the Istio cluster ID used to verify incoming CSRs.
+	// This field can have a maximum of 253 characters.
 	// +kubebuilder:default:="Kubernetes"
 	// +kubebuilder:validation:MinLength:=0
 	// +kubebuilder:validation:MaxLength:=253
-	// +kubebuilder:validation:XValidation:rule="!format.dns1123Subdomain().validate(self).hasValue()",message="a lowercase RFC 1123 subdomain must consist of lowercase alphanumeric characters, hyphens ('-'), and periods ('.'). Each block, separated by periods, must start and end with an alphanumeric character. Hyphens are not allowed at the start or end of a block, and consecutive periods are not permitted."
 	// +kubebuilder:validation:Optional
 	// +optional
 	ClusterID string `json:"clusterID,omitempty"`
@@ -440,10 +441,11 @@ type IstioConfig struct {
 	Revisions []string `json:"revisions,omitempty"`
 
 	// namespace of the Istio control plane.
-	// This field can have a maximum of 253 characters.
+	// This field can have a maximum of 63 characters.
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="namespace is immutable once set"
 	// +kubebuilder:validation:MinLength:=1
-	// +kubebuilder:validation:MaxLength:=253
+	// +kubebuilder:validation:MaxLength:=63
+	// +kubebuilder:validation:XValidation:rule=`!format.dns1123Label().validate(self).hasValue()`,message="namespace must consist of only lowercase alphanumeric characters and hyphens, and must start with an alphabetic character and end with an alphanumeric character."
 	// +kubebuilder:validation:Required
 	// +required
 	Namespace string `json:"namespace"`
@@ -497,15 +499,15 @@ type ConfigMapReference struct {
 	// name of the ConfigMap.
 	// +kubebuilder:validation:MinLength:=1
 	// +kubebuilder:validation:MaxLength:=253
-	// +kubebuilder:validation:Pattern:=^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+	// +kubebuilder:validation:XValidation:rule="!format.dns1123Subdomain().validate(self).hasValue()",message="name must consist of lowercase alphanumeric characters, hyphens ('-'), and periods ('.'). Each block, separated by periods, must start and end with an alphanumeric character. Hyphens are not allowed at the start or end of a block, and consecutive periods are not permitted."
 	// +kubebuilder:validation:Required
 	// +required
 	Name string `json:"name"`
 
 	// namespace in which the ConfigMap exists. If empty, ConfigMap will be looked up in IstioCSR created namespace.
-	// +kubebuilder:validation:MinLength:=1
+	// +kubebuilder:validation:MinLength:=0
 	// +kubebuilder:validation:MaxLength:=63
-	// +kubebuilder:validation:Pattern:=^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+	// +kubebuilder:validation:XValidation:rule=`size(self) == 0 || !format.dns1123Label().validate(self).hasValue()`,message="namespace must consist of only lowercase alphanumeric characters and hyphens, and must start with an alphabetic character and end with an alphanumeric character."
 	// +kubebuilder:validation:Optional
 	// +optional
 	Namespace string `json:"namespace,omitempty"`
@@ -576,6 +578,8 @@ no defined standard. And can be updated in future based on user feedback.
   by the operator to deploy `istio-csr` agent.
 - `spec.istioCSRConfig.istiodTLSConfig.certificateDNSNames` field allows to configure a maximum of `25` DNS names in the SAN section
   of the Certificate, and each DNS Name can have a maximum of `253` characters.
+- `spec.istioCSRConfig.certManager.istioCACertificate.key` is for setting the key name to be looked up in the referenced ConfigMap
+  containing the CA certificates. An upper limit of `253` characters is fixed.
 
 #### Manifests for installing `istio-csr` agent.
 
