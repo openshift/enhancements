@@ -366,12 +366,17 @@ type ExternalSecretsConfig struct {
 }
 
 // ExternalSecretsConfigSpec is for configuring the external-secrets operand behavior.
+// +kubebuilder:validation:XValidation:rule="!has(self.plugins) || !has(self.plugins.bitwardenSecretManagerProvider) || !has(self.plugins.bitwardenSecretManagerProvider.mode) || self.plugins.bitwardenSecretManagerProvider.mode != 'Enabled' || has(self.plugins.bitwardenSecretManagerProvider.secretRef) || (has(self.controllerConfig) && has(self.controllerConfig.certProvider) && has(self.controllerConfig.certProvider.certManager) && has(self.controllerConfig.certProvider.certManager.mode) && self.controllerConfig.certProvider.certManager.mode == 'Enabled')",message="secretRef or certManager must be configured when bitwardenSecretManagerProvider plugin is enabled"
 type ExternalSecretsConfigSpec struct {
-	// appConfig is for specifying the configurations for the external-secrets operand.
+	// appConfig is for specifying the configurations for the `external-secrets` operand.
 	// +kubebuilder:validation:Optional
 	ApplicationConfig ApplicationConfig `json:"appConfig,omitempty"`
 
-	// controllerConfig is for specifying the configurations for the controller to use while installing the `external-secrets` operand.
+	// plugins is for configuring the optional provider plugins.
+	// +kubebuilder:validation:Optional
+	Plugins PluginsConfig `json:"plugins,omitempty"`
+
+	// controllerConfig is for specifying the configurations for the controller to use while installing the `external-secrets` operand and the plugins.
 	// +kubebuilder:validation:Optional
 	ControllerConfig ControllerConfig `json:"controllerConfig,omitempty"`
 }
@@ -391,39 +396,25 @@ type ExternalSecretsConfigStatus struct {
 // ApplicationConfig is for specifying the configurations for the external-secrets operand.
 type ApplicationConfig struct {
 	// operatingNamespace is for restricting the external-secrets operations to the provided namespace.
-	// And when enabled `ClusterSecretStore` and `ClusterExternalSecret` are implicitly disabled.
+	// When configured `ClusterSecretStore` and `ClusterExternalSecret` are implicitly disabled.
 	// +kubebuilder:validation:MinLength:=1
 	// +kubebuilder:validation:MaxLength:=63
 	// +kubebuilder:validation:Optional
 	OperatingNamespace string `json:"operatingNamespace,omitempty"`
 
-	// bitwardenSecretManagerProvider is for enabling the bitwarden secrets manager provider and for setting up the additional service required for connecting with the bitwarden server.
-	// +kubebuilder:validation:Optional
-	BitwardenSecretManagerProvider *BitwardenSecretManagerProvider `json:"bitwardenSecretManagerProvider,omitempty"`
-
 	// webhookConfig is for configuring external-secrets webhook specifics.
 	// +kubebuilder:validation:Optional
 	WebhookConfig *WebhookConfig `json:"webhookConfig,omitempty"`
-
-	// CertManagerConfig is for configuring cert-manager specifics, which will be used for generating certificates for webhook and bitwarden-sdk-server components.
-	// +kubebuilder:validation:Optional
-	CertManagerConfig *CertManagerConfig `json:"certManagerConfig,omitempty"`
 
 	// +kubebuilder:validation:Optional
 	CommonConfigs `json:",inline,omitempty"`
 }
 
-// ControllerConfig is for specifying the configurations for the controller to use while installing the `external-secrets` operand.
-// +kubebuilder:validation:XValidation:rule="!has(oldSelf.namespace) && !has(self.namespace) || has(oldSelf.namespace) && has(self.namespace)",message="namespace can only be configured during creation"
+// ControllerConfig is for specifying the configurations for the controller to use while installing the `external-secrets` operand and the plugins.
 type ControllerConfig struct {
-	// namespace is for configuring the namespace to install the external-secret operand.
-	// This field is immutable once set.
-	// +kubebuilder:default:="external-secrets"
-	// +kubebuilder:validation:MinLength:=1
-	// +kubebuilder:validation:MaxLength:=63
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="namespace is immutable once set"
+	// certProvider is for defining the configuration for certificate providers used to manage TLS certificates for webhook and plugins.
 	// +kubebuilder:validation:Optional
-	Namespace string `json:"namespace,omitempty"`
+	CertProvider *CertProvidersConfig `json:"certProvider,omitempty"`
 
 	// labels to apply to all resources created for the external-secrets operand deployment.
 	// This field can have a maximum of 20 entries.
@@ -432,10 +423,18 @@ type ControllerConfig struct {
 	// +kubebuilder:validation:MaxProperties:=20
 	// +kubebuilder:validation:Optional
 	Labels map[string]string `json:"labels,omitempty"`
+
+	// periodicReconcileInterval specifies the time interval in seconds for periodic reconciliation by the operator.
+	// This controls how often the operator checks resources created for external-secrets operand to ensure they remain in desired state.
+	// Interval can have value between 120-18000 seconds (2 minutes to 5 hours). Defaults to 300 seconds (5 minutes) if not specified.
+	// +kubebuilder:default:=300
+	// +kubebuilder:validation:Minimum:=120
+	// +kubebuilder:validation:Maximum:=18000
+	// +kubebuilder:validation:Optional
+	PeriodicReconcileInterval uint32 `json:"periodicReconcileInterval,omitempty"`
 }
 
-// BitwardenSecretManagerProvider is for enabling the bitwarden secrets manager provider and
-// for setting up the additional service required for connecting with the bitwarden server.
+// BitwardenSecretManagerProvider is for enabling the bitwarden secrets manager provider and for setting up the additional service required for connecting with the bitwarden server.
 type BitwardenSecretManagerProvider struct {
 	// mode indicates bitwarden secrets manager provider state, which can be indicated by setting Enabled or Disabled.
 	// Enabled: Enables the Bitwarden provider plugin. The operator will ensure the plugin is deployed and its state is synchronized.
@@ -482,7 +481,7 @@ type CertManagerConfig struct {
 	InjectAnnotations string `json:"injectAnnotations,omitempty"`
 
 	// issuerRef contains details of the referenced object used for obtaining certificates.
-	// When `issuerRef.Kind` is `Issuer`, it must exist in the `.spec.controllerConfig.namespace`.
+	// When `issuerRef.Kind` is `Issuer`, it must exist in the `external-secrets` namespace.
 	// This field is immutable once set.
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="issuerRef is immutable once set"
 	// +kubebuilder:validation:XValidation:rule="!has(self.kind) || self.kind.lowerAscii() == 'issuer' || self.kind.lowerAscii() == 'clusterissuer'",message="kind must be either 'Issuer' or 'ClusterIssuer'"
@@ -495,11 +494,24 @@ type CertManagerConfig struct {
 	// +kubebuilder:validation:Optional
 	CertificateDuration *metav1.Duration `json:"certificateDuration,omitempty"`
 
-	// certificateRenewBefore is the ahead time to renew the webhook certificate
-	// before expiry.
+	// certificateRenewBefore is the ahead time to renew the webhook certificate before expiry.
 	// +kubebuilder:default:="30m"
 	// +kubebuilder:validation:Optional
 	CertificateRenewBefore *metav1.Duration `json:"certificateRenewBefore,omitempty"`
+}
+
+// PluginsConfig is for configuring the optional plugins.
+type PluginsConfig struct {
+	// bitwardenSecretManagerProvider is for enabling the bitwarden secrets manager provider plugin for connecting with the bitwarden secrets manager.
+	// +kubebuilder:validation:Optional
+	BitwardenSecretManagerProvider *BitwardenSecretManagerProvider `json:"bitwardenSecretManagerProvider,omitempty"`
+}
+
+// CertProvidersConfig defines the configuration for certificate providers used to manage TLS certificates for webhook and plugins.
+type CertProvidersConfig struct {
+	// certManager is for configuring cert-manager provider specifics.
+	// +kubebuilder:validation:Optional
+	CertManager *CertManagerConfig `json:"certManager,omitempty"`
 }
 ```
 
@@ -686,6 +698,14 @@ updated in the future based on user feedback.
   the operator to deploy `external-secrets` operand.
 - `spec.appConfig.proxy.httpProxy` and `spec.appConfig.proxy.httpsProxy` have an upper limit of `2048`. And similarly
   `spec.appConfig.proxy.noProxy` has an upper limit of `4096`.
+- `spec.controllerConfig.periodicReconcileInterval` fields has a default value `300s` set for periodic reconciliation by the operator,
+  and has lower and upper bound values of `120s` and `18000s` set.
+
+##### Configuring periodic reconciliation interval
+
+The operator performs periodic reconciliation to handle missed watch events and cache sync delays that could lead to configuration
+skew, which is also [suggested](https://github.com/kubernetes-sigs/controller-runtime/blob/main/pkg/cache/cache.go#L150-L184) in controller-runtime.
+The reconciliation interval is configurable with a default value of `300s`(5 minutes).
 
 ##### Enabling egress proxy
 
