@@ -70,9 +70,6 @@ Installer technologies.
   
 * Simplify the installation process to reduce complexity, especially for users
 who prefer graphical interfaces.
-  
-* Allow for the selection and pre-configuration of essential operators as part
-of the installation workflow.
 
 ### Non-Goals
 
