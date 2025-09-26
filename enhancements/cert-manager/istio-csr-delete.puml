@@ -12,7 +12,7 @@ participant "cert-manager-operator" as Operator
 User -> API : Delete istiocsr CR
 API -> Operator : Reconcile istiocsr delete event
 note over Operator
-deletes all resources created
+stop managing the resources created
 for istio-csr agent installation.
 endnote
 

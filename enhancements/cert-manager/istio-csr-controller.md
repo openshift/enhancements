@@ -59,7 +59,7 @@ features can be enabled.
 - As an OpenShift administrator, I should be able to choose to keep secrets and related controller should clean up all resources created
   for the istio-csr agent deployment.
 - As an OpenShift security engineer, I want to be able to identify all artefacts created by istio-csr agent, for better auditability.
-- As an OpensShift SRE, I should be able to get details information as part of different status conditions and messages to identify the
+- As an OpenShift SRE, I should be able to get details information as part of different status conditions and messages to identify the
   reasons of failures and carry out corrective actions successfully.
 - As an OpenShift service mesh administrator, I should be able to use istio-csr endpoint to automate certificate requests via istiod on
   the pre-installed service mesh clusters.
@@ -142,6 +142,10 @@ CR, which is enforced in the CRD using CEL validations.
 - `.spec.istioCSRConfig.istio.revisions`
 - `.spec.istioCSRConfig.istio.namespace`
 
+When an OpenShift user deletes `istiocsr.operator.openshift.io` CR object, `istio-csr-controller` will stop managing all
+the resources created for installing `istio-csr` agent and user will have to manually clean up the resources. Please refer
+`Operational Aspects of API Extensions` section for command to list all the resources.
+
 `istiocsr.operator.openshift.io` CR status sub-resource will be used for updating the status of the `istio-csr` agent
 installation, any error encountered while creating the required resources or the reconciling the state.
 
@@ -159,7 +163,8 @@ for better version management.
 
 - Uninstallation of `istio-csr` agent
   - An OpenShift user deletes the `istiocsr.operator.openshift.io` CR.
-  - `istio-csr-controller` will remove all the resources created for installing `istio-csr` agent.
+  - `istio-csr-controller` will not uninstall `istio-csr` agent, but will only stop reconciling the kubernetes resources
+    created for installing the agent. Please refer `Non-Goals` section for more details.
 
 ![alt text](./istio-csr-delete.png).
 
