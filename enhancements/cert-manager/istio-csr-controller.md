@@ -81,9 +81,12 @@ features can be enabled.
 - Removing `istiocsr.operator.openshift.io` CR object will not remove `istio-csr` agent deployment. But will only stop the reconciliation
   of the Kubernetes resources created for the operand installation. (Note: This is a limitation for GA release and will be
   re-evaluated in future releases).
-- As an OpenShift security engineer, I want an automatic deletion of istio-ca-root-cert configmap from a selected namespace.
-- As an OpenShift administrator, I want the namespaces chosen for istio-ca-root-cert configmap injection to validated against
+- As an OpenShift security engineer, I want an automatic cleanup of `istio-ca-root-cert` configmap from the selected namespaces which
+  were previously part of the mesh.
+- As an OpenShift administrator, I want the namespaces chosen for istio-ca-root-cert configmap injection to be validated against
   service mesh configuration to avoid drift in the namespace selection.
+- As an OpenShift security engineer, I want to harden RBAC permissions of `istio-csr` agent to restrict ConfigMap creation permission
+  to only selected namespaces.
 
 ## Proposal
 
@@ -193,7 +196,7 @@ type IstioCSRList struct {
 // IstioCSR describes the configuration and information about the managed istio-csr agent.
 // The name must be `default` to make IstioCSR a singleton that is, to allow only one instance of IstioCSR per namespace.
 //
-// When an IstioCSR is created, istio-csr agent is deployed in the IstioCSR created namespace.
+// When an IstioCSR is created, istio-csr agent is deployed in the IstioCSR-created namespace.
 //
 // +kubebuilder:validation:XValidation:rule="self.metadata.name == 'default'",message="istiocsr is a singleton, .metadata.name must be 'default'"
 // +operator-sdk:csv:customresourcedefinitions:displayName="IstioCSR"
@@ -372,7 +375,6 @@ type IstiodTLSConfig struct {
 	CertificateDuration *metav1.Duration `json:"certificateDuration,omitempty"`
 
 	// certificateRenewBefore is the time before expiry to renew the istio-csr and istiod certificates.
-	// before expiry.
 	// +kubebuilder:default:="30m"
 	// +kubebuilder:validation:Optional
 	// +optional
@@ -924,6 +926,13 @@ signature algorithm, certificate key size or certificate validity to be too long
 - When the `spec.istioCSRConfig.istioDataPlaneNamespaceSelector` is updated or added later after `istiocsr.operator.openshift.io` creation,
   and in this scenario where namespaces matched by the earlier selector are excluded, the `istio-ca-root-cert` ConfigMaps in these
   excluded requires manual cleanup.
+  Below command can be made use of to list all the ConfigMaps not part of `spec.istioCSRConfig.istioDataPlaneNamespaceSelector` matching
+  namespaces. In the example, `spec.istioCSRConfig.istioDataPlaneNamespaceSelector` is having `maistra.io/member-of=istio-system` value.
+  ```shell
+  printf "%-25s %10s\n" "ConfigMap" "Namespace"; for ns in $(oc get namespaces -l "maistra.io/member-of!=istio-system" \
+  -o=jsonpath='{.items[*].metadata.name}'); do oc get configmaps -l "istio.io/config=true" \
+  -n $ns --no-headers -o jsonpath='{.items[*].metadata.name}{"\t"}{.items[*].metadata.namespace}{"\n"}'; done
+  ```
 - If the `spec.istioCSRConfig.istioDataPlaneNamespaceSelector` is updated or added after `istiocsr.operator.openshift.io` creation, and
   the revised selector no longer includes namespaces that were previously targeted, then the `istio-ca-root-cert` ConfigMaps within
   those excluded namespaces will require manual cleanup.
@@ -935,6 +944,9 @@ signature algorithm, certificate key size or certificate validity to be too long
 - Operator creates a copy of ConfigMap assigned to `spec.istioCSRConfig.certManager.istioCACertificate` to validate the content before
   making it available to the `istio-csr` agent, since ConfigMap changes gets automatically propagated to the pods. But if the user
   modifies both the created and operator copy, this goes unnoticed and could cause istiod to be in degraded state.
+- The secret zero problem is inherent, i.e. the certificate key pairs issued by cert-manager is stored in Kubernetes
+  native `Secret` object which would need to be secured with additional encryption and fine-grained permissions. The `Secret`
+  object containing the `istiod` certificate key pair can be misused to request certificates from the `istio-csr` agent.
 
 ### Drawbacks
 
