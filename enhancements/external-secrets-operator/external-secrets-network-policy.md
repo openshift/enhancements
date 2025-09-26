@@ -9,7 +9,7 @@ approvers:
 api-approvers:
   - “@tgeer”
 creation-date: 2025-09-12
-last-updated:  2025-09-12
+last-updated:  2025-09-25
 tracking-link: 
   - https://issues.redhat.com/browse/ESO-165
   - https://issues.redhat.com/browse/ESO-70
@@ -25,7 +25,7 @@ superseded-by:
 
 ## Summary
 
-This document proposes the implementation of specific, fine-grained Kubernetes NetworkPolicy objects for the external-secrets operator and its operands.The operator and the operand can be deployed in any namespace (commonly `external-secrets-operator` , `external-secrets` but user-configurable) Currently, the operator and its components run without network restrictions, posing a potential security risk. To address this, the operator’s NetworkPolicy will be shipped as part of the OLM bundle, while the operands’ NetworkPolicy will be created and managed dynamically by the operator. By defining explicit ingress and egress rules, we can enforce the principle of least privilege, securing the external-secrets namespaces and ensuring that its components only communicate with necessary services like the Kubernetes API server.
+This document proposes the implementation of specific, fine-grained Kubernetes NetworkPolicy objects for the external-secrets operator and its operands.The operator can be deployed in any namespace (commonly `external-secrets-operator` but user-configurable) and the operand namespace would be `external-secrets`. Currently, the operator and its components run without network restrictions, posing a potential security risk. To address this, the operator’s NetworkPolicy will be shipped as part of the OLM bundle, while the operands’ NetworkPolicy will be created and managed dynamically by the operator. By defining explicit ingress and egress rules, we can enforce the principle of least privilege, securing the external-secrets namespaces and ensuring that its components only communicate with necessary services like the Kubernetes API server.
 
 ## Motivation
 
@@ -129,13 +129,16 @@ The implementation will involve extending the existing APIs and creating `Networ
              port: 6443 # Required: Kubernetes API server
          ingress:
          # Optional: expose metrics (8443 and 8080 based on user configuration)
-         - ports:
-           - protocol: TCP
-             port: 8443
-         - ports:
-           - protocol: TCP
-             port: 8080
-       ```
+          - from:
+            - namespaceSelector:
+                matchLabels:
+                  name: openshift-monitoring
+          - ports:
+            - protocol: TCP
+              port: 8443
+            - protocol: TCP
+              port: 8080
+     ```
 
 #### Operand Namespace (`external-secrets`) Policies
 
@@ -288,49 +291,22 @@ This enhancement introduces new fields to the existing `ExternalSecrets` custom 
         // +kubebuilder:validation:Required
         // +required
         Name string `json:"name"`
-
-
+		
 		// +kubebuilder:validation:Enum:=CoreController;BitwardenSDKServer
 		// +kubebuilder:validation:Required
 		ComponentName ComponentName `json:"componentName"`
-
-    
-        // ingress is a list of ingress rules to be applied to the selected pods.
-        // Traffic is allowed to a pod if there are no NetworkPolicies selecting the pod
-        // (and cluster policy otherwise allows the traffic), OR if the traffic source is
-        // the pod's local node, OR if the traffic matches at least one ingress rule
-        // across all of the NetworkPolicy objects whose podSelector matches the pod. If
-        // this field is empty then this NetworkPolicy does not allow any traffic (and serves
-        // solely to ensure that the pods it selects are isolated by default)
-        // +optional
-        // +listType=atomic
-        Ingress []networkingv1.NetworkPolicyIngressRule `json:"ingress,omitempty" protobuf:"bytes,2,rep,name=ingress"`
-    
+		
         // egress is a list of egress rules to be applied to the selected pods. Outgoing traffic
         // is allowed if there are no NetworkPolicies selecting the pod (and cluster policy
         // otherwise allows the traffic), OR if the traffic matches at least one egress rule
         // across all of the NetworkPolicy objects whose podSelector matches the pod. If
         // this field is empty then this NetworkPolicy limits all outgoing traffic (and serves
         // solely to ensure that the pods it selects are isolated by default).
-        // This field is beta-level in 1.8
+		// The operator will automatically handle ingress rules based on the current running ports.
         // +optional
         // +listType=atomic
         Egress []networkingv1.NetworkPolicyEgressRule `json:"egress,omitempty" protobuf:"bytes,3,rep,name=egress"`
-    
-        // policyTypes is a list of rule types that the NetworkPolicy relates to.
-        // Valid options are ["Ingress"], ["Egress"], or ["Ingress", "Egress"].
-        // If this field is not specified, it will default based on the existence of ingress or egress rules;
-        // policies that contain an egress section are assumed to affect egress, and all policies
-        // (whether or not they contain an ingress section) are assumed to affect ingress.
-        // If you want to write an egress-only policy, you must explicitly specify policyTypes [ "Egress" ].
-        // Likewise, if you want to write a policy that specifies that no egress is allowed,
-        // you must specify a policyTypes value that include "Egress" (since such a policy would not include
-        // an egress section and would otherwise default to just [ "Ingress" ]).
-        // This field is beta-level in 1.8
-        // +optional
-        // +listType=atomic
-        PolicyTypes []networkingv1.PolicyType `json:"policyTypes,omitempty" protobuf:"bytes,4,rep,name=policyTypes,casttype=PolicyType"`
-    }
+	}
 
     type ExternalSecretsSpec struct {
 
