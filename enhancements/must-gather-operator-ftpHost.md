@@ -1,5 +1,5 @@
 ---
-title: must-gather-operator-ftphost
+title: must-gather-operator-ftpHost
 authors:
   - "@shivprakahsmuley"
 reviewers:
@@ -122,13 +122,13 @@ This change is fully relevant for standalone clusters where must-gather operatio
 * **Reliability**: Proxies or firewalls may block FTP/SFTP.
   * *Mitigation*: Proxy env variables and observable errors/conditions remain in place.
 
-## Drawbacks
+### Drawbacks
 
 * Adds another user‑visible configuration option to the API.
 * Slight complexity increase in upload command.
 * Risk of misconfiguration when arbitrary endpoints are used; guidance and observability mitigate this.
 
-## Alternatives 
+## Alternatives (Not Implemented)
 
 ## Open Questions
 
@@ -160,6 +160,8 @@ This change is fully relevant for standalone clusters where must-gather operatio
 * E2E tests implemented
 * Customer validation in staging environments
 * User-facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/)
+
+### Removing a deprecated feature
 
 ## Upgrade / Downgrade Strategy
 
