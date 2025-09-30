@@ -174,14 +174,31 @@ device plugin is more lightweight, but also tedious. Running a stripped down
 version of the operator (without the metrics exporter and webhook) is also a
 possible alternative.
 
+The [webhook](https://docs.redhat.com/en/documentation/openshift_container_platform/4.19/html/networking_operators/sr-iov-operator#about-sr-iov-operator-admission-control-webhook_configuring-sriov-operator), along with the [resources injector](https://docs.redhat.com/en/documentation/openshift_container_platform/4.19/html/networking_operators/sr-iov-operator#about-network-resource-injector_configuring-sriov-operator) provide the following validation and mutation functionality:
+- Validation of the SriovNetworkNodePolicy CR when it is created or updated.
+- Mutation of the SriovNetworkNodePolicy CR by setting the default value for the
+  priority and deviceType fields when the CR is created or updated. 
+- Mutation of resource requests and limits in a pod specification to add an
+  SR-IOV resource name according to an SR-IOV network attachment definition
+  annotation.
+- Mutation of a pod specification with a Downward API volume to expose pod
+  annotations, labels, and huge pages requests and limits.
+
+Losing the webhook (and resources injector) would mean losing this
+functionality, leaving more responsibility to the user.
+
 ## Alternatives (Not Implemented)
 
-See "Drawbacks".
+A good alternative to using the operator would be using the SR-IOV network
+device plugin and CNI directly. This would be easier on the resources, and a
+customer is already using this approach successfully. On the other hand, this is
+also more complicated for the customer, and could be more difficult to support.
+In the future, this could be a better solution, if we find the operator to be
+too resource hungry.
 
 ## Open Questions [optional]
 
-1. The CPU/memory usage is high and needs to be addressed, either by running
-   multiple containers in a pod, or by not running some of them. See above.
+1. The CPU/memory usage is high and needs to be addressed, see above.
 
 ## Test Plan
 
