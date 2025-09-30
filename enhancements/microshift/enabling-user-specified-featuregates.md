@@ -3,25 +3,25 @@ title: enabling-user-specified-featuregates
 authors:
   - copejon
 reviewers:  
-  - pacevedom # MicroShift core team for configuration changes
-  - TBD # OpenShift platform team for alignment with OpenShift defaults
+  - "@pacevedom, MicroShift Team Lead"
+  - "@pmtk, MicroShift Team Engineer"
 approvers:
-  - TBD # MicroShift principal engineer
+  - "@jerpeter1" # MicroShift principal engineer
 api-approvers:
   - None # Configuration file changes only, no API modifications
 creation-date: 2025-09-24 # You'll need to fill in today's date
-last-updated: 2025-09-24
+last-updated: 2025-09-29
 tracking-link:
-  -  # Link to USHIFT-6080 or the main epic ticket
+  -  https://issues.redhat.com/browse/USHIFT-6177
 see-also:
   - ""
 ---
 
-# Enabling User-Specified FeatureGates in MicroShift
+# Enabling User Specified FeatureGates
 
 ## Summary
 
-MicroShift currently inherits feature gates from its OpenShift components but lacks a controlled mechanism for users to experiment with additional feature gates or override defaults. This enhancement proposes adding configuration support for Kubernetes and OpenShift feature gates through the MicroShift configuration file. This capability will enable users to experiment with alpha and beta OpenShift and Kubernetes features like CPUManager's `prefer-align-cpus-by-uncorecache` in a supported and deterministic way, addressing edge computing use cases where users want to evaluate advanced resource management capabilities.
+MicroShift disables all feature gates from OpenShift by default while hardcoding only a few relevant ones, and lacks a controlled mechanism for users to experiment with additional feature gates or override defaults. This enhancement proposes adding configuration support for Kubernetes and OpenShift feature gates through the MicroShift configuration file. This capability will enable users to experiment with alpha and beta OpenShift and Kubernetes features like CPUManager's `prefer-align-cpus-by-uncorecache` in a supported and deterministic way, addressing edge computing use cases where users want to evaluate advanced resource management capabilities.
 
 ## Motivation
 
@@ -38,8 +38,8 @@ MicroShift users in edge computing environments want to experiment with upcoming
 
 ### Non-Goals
 
-* Modify OpenShift's feature gate defaults
-* Vetting feature gates for compatibility with MicroShift
+* Modify MicroShift's existing feature gate defaults
+* Vetting custom feature gates for compatibility with MicroShift
 * Validating custom feature gate settings for correctness, e.g. spelling, case, and punctuation
 * Automatic enablement of experimental features without explicit user configuration
 * Providing upgrade support to customized clusters
@@ -51,7 +51,7 @@ This enhancement proposes adding feature gate configuration support to MicroShif
 The implementation includes:
 
 1. **FeatureGate Configuration Schema**: Extend MicroShift's configuration file to include `featureGates` section inspired by OpenShift's FeatureGate CRD spec fields (`featureSet` and `customNoUpgrade`)
-2. **Predefined Feature Sets**: Support for OpenShift's predefined feature sets like `TechPreviewNoUpgrade`
+2. **Predefined Feature Sets**: Support for OpenShift's predefined feature sets like `TechPreviewNoUpgrade` and `DevPreviewNoUpgrade`
 3. **Custom Feature Gates**: Support for individual feature gate enablement/disablement via `customNoUpgrade` configuration
 
 This approach ensures that users can experiment with the same feature gate capabilities as OpenShift while maintaining MicroShift's file-based configuration pattern. Default feature gate values will continue to be inherited from OpenShift to ensure consistency across the platform.
@@ -63,7 +63,7 @@ This approach ensures that users can experiment with the same feature gate capab
 #### User Configuration Workflow
 1. MicroShift Administrator identifies a need for specific feature gates (e.g., `CPUManagerPolicyAlphaOptions`)
 2. Administrator chooses between two configuration approaches:
-   - **Predefined Feature Set**: Configure `featureGates.featureSet: TechPreviewNoUpgrade` for a curated set of preview features
+   - **Predefined Feature Set**: Configure `featureGates.featureSet: TechPreviewNoUpgrade` or `DevPreviewNoUpgrade` for a curated set of preview features
    - **Custom Feature Gates**: Configure `featureGates.featureSet: CustomNoUpgrade` and specify individual features in `featureGates.customNoUpgrade.enabled/disabled` lists
 3. Administrator updates `/etc/microshift/config.yaml` with the chosen configuration
 4. Administrator restarts MicroShift service
@@ -173,7 +173,7 @@ Enabling alpha and beta features through user configuration means support teams 
 Edge deployments often have limited remote access for troubleshooting. If users enable experimental feature gates that cause instability, recovering these devices may require physical access or complex recovery procedures.
 
 **Upgrade Limitations and Irreversible Changes**
-Enabling `TechPreviewNoUpgrade` feature set cannot be undone and prevents both minor version updates and major upgrades. Once enabled, the cluster permanently loses the ability to perform standard updates. Similarly, `CustomNoUpgrade` configurations prevent upgrades/updates until reset to default settings. These feature sets are explicitly not recommended for production clusters due to their irreversible nature and update limitations, which conflicts with the typical edge deployment requirement for reliable, long-term operation and maintenance.
+Enabling `TechPreviewNoUpgrade`, `DevPreviewNoUpgrade`, or `CustomNoUpgrade` feature sets cannot be undone and prevents both minor version updates and major upgrades. Once enabled, the cluster permanently loses the ability to perform standard updates. These feature sets are explicitly not recommended for production clusters due to their irreversible nature and update limitations, which conflicts with the typical edge deployment requirement for reliable, long-term operation and maintenance.
 
 ## Alternatives (Not Implemented)
 
@@ -184,7 +184,7 @@ No significant alternatives were considered for this enhancement. The configurat
 1. **How does OpenShift handle upgrades when custom feature gates are configured?**
 
    This requires clarification of OpenShift's actual implementation behavior:
-   - Does OpenShift actively **block/prevent** upgrades when TechPreviewNoUpgrade/CustomNoUpgrade is configured?
+   - Does OpenShift actively **block/prevent** upgrades when TechPreviewNoUpgrade/DevPreviewNoUpgrade/CustomNoUpgrade is configured?
    - Or does OpenShift **allow** upgrades to proceed but the resulting cluster becomes unsupported?
 
    Understanding OpenShift's approach will inform whether MicroShift should implement active blocking logic (pre-upgrade checks that fail) or simply document that upgrades with custom feature gates are unsupported while allowing them to proceed technically.
@@ -200,7 +200,7 @@ The testing strategy focuses on verifying the passthrough functionality - that c
 ### Unit Tests
 
 **Configuration Parsing:**
-- Validate parsing of `featureSet` values (TechPreviewNoUpgrade, CustomNoUpgrade, Default)
+- Validate parsing of `featureSet` values (TechPreviewNoUpgrade, DevPreviewNoUpgrade, CustomNoUpgrade, Default)
 - Test parsing of `customNoUpgrade.enabled` and `customNoUpgrade.disabled` lists
 - Verify configuration schema validation and error handling for malformed configurations
 - Test default behavior when feature gates section is not configured
@@ -216,7 +216,7 @@ The testing strategy focuses on verifying the passthrough functionality - that c
 
 **Passthrough Verification:**
 - Test that custom feature gates specified in MicroShift configuration appear in component configurations after service restart
-- Verify TechPreviewNoUpgrade preset results in correct feature gates being passed to all components
+- Verify TechPreviewNoUpgrade and DevPreviewNoUpgrade presets result in correct feature gates being passed to all components
 - Test CustomNoUpgrade configuration with specific enabled/disabled lists are correctly applied to component configurations
 - Validate that configuration changes only take effect after MicroShift service restart
 
@@ -259,9 +259,9 @@ N/A
 Upgrades and downgrades proceed normally using standard MicroShift procedures with no additional considerations for feature gate handling.
 
 **Custom Feature Gate Configurations:**
-Upgrades and downgrades are not supported when custom feature gates are configured (TechPreviewNoUpgrade or CustomNoUpgrade). Users must remove all custom feature gate configurations and return to default settings before attempting any version changes.
+Upgrades and downgrades are not supported when custom feature gates are configured (TechPreviewNoUpgrade, DevPreviewNoUpgrade, or CustomNoUpgrade). Once custom feature gates are enabled, this configuration cannot be reverted - it is a permanent, one-way operation that permanently disables upgrade capability.
 
-This limitation aligns with OpenShift's approach where TechPreviewNoUpgrade and CustomNoUpgrade feature sets explicitly prevent cluster upgrades to avoid compatibility issues with experimental features.
+This limitation aligns with OpenShift's approach where TechPreviewNoUpgrade, DevPreviewNoUpgrade, and CustomNoUpgrade feature sets are irreversible and explicitly prevent cluster upgrades to avoid compatibility issues with experimental features.
 
 ## Version Skew Strategy
 
@@ -271,7 +271,7 @@ This enhancement introduces upgrade limitations when custom feature gates are co
 When no custom feature gates are configured, standard MicroShift version skew handling applies with no additional considerations.
 
 ### Custom Feature Gate Limitations
-When custom feature gates are configured (TechPreviewNoUpgrade or CustomNoUpgrade), upgrades and downgrades between minor versions are not expected to work. Users must remove custom feature gate configurations before attempting minor version changes.
+When custom feature gates are configured (TechPreviewNoUpgrade, DevPreviewNoUpgrade, or CustomNoUpgrade), upgrades and downgrades between minor versions are not expected to work. Users must remove custom feature gate configurations before attempting minor version changes.
 
 ### Component Version Alignment
 All Kubernetes components (kubelet, kube-apiserver, kube-controller-manager, kube-scheduler) are packaged together within each MicroShift release, eliminating internal component version skew concerns. Feature gate configuration is applied during startup with no runtime coordination required between components.
