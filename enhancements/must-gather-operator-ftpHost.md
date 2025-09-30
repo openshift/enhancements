@@ -20,7 +20,7 @@ see-also:
 
 ---
 
-# Must Gather Operator Enhancement: FTPHost in MustGatherSpec
+# Must Gather Operator Enhancement: Extensible Upload Targets
 
 ## Release Signoff Checklist
 
@@ -33,42 +33,39 @@ see-also:
 
 ## Summary
 
-Add an optional field `ftpHost` to `MustGather.spec` that allows directing must-gather artifacts to a designated FTP/SFTP endpoint during the upload phase. This provides a supported, secure, and validated path for environments that require alternate upload targets beyond the default Red Hat case management destination.
-
-Default: `access.redhat.com` (used when ftpHost is unset)
+This enhancement introduces a flexible `uploadTarget` field to the `MustGather.spec`. This new structure uses a discriminated union to allow specifying different upload destinations, starting with SFTP for Red Hat support case uploads. This provides a scalable and type-safe way to direct must-gather artifacts. If `uploadTarget` is unset, uploading is disabled.
 
 ## Motivation
 
 ### User Stories
 
-* As a cluster admin, I can set `spec.ftpHost: access.stage.redhat.com` to stage bundles to pre‑production.
-* As a support engineer, I can ensure bundles always upload to the default `access.redhat.com` without specifying anything in the CR.
-* As a CI/QA engineer, I want to direct must-gather uploads to a non-production staging environment to avoid polluting production case management data.
+* As a cluster admin, I can configure must-gather to upload artifacts to a designated SFTP server for support cases.
+* As a cluster admin, I want a clear and extensible API to configure different upload targets as new requirements emerge.
+* As an OpenShift security engineer, I can audit a single, well-defined API field (`uploadTarget`) to enforce policies on data exfiltration.
 
 ### Goals
 
-* Add `spec.ftpHost` with a safe default.
-* Ensure the upload container honors ftpHost and existing proxy settings.
-* Maintain full backward compatibility.
+* Replace the monolithic upload configuration with a flexible, discriminated union structure.
+* Define an `SFTP` upload type for sending artifacts to a secure FTP server, including Red Hat support.
+* Ensure the API is easily extensible for future upload types (e.g., S3, HTTP) without requiring breaking changes.
+* Provide clear validation to ensure that only one upload target is configured at a time and that its configuration is valid.
 
 ### Non-Goals
 
-* Introduce non-FTP providers (e.g., S3, HTTP PUT).
-
+* To implement upload types other than SFTP in the initial version.
 
 ## Proposal
 
-When `spec.ftpHost` is set, the upload process targets the indicated endpoint (over SFTP/FTP as implemented by the upload script). When omitted, the operator continues to use the existing Red Hat case upload pathway. Proxy handling remains unchanged.
+This enhancement refactors the `MustGather.spec` by introducing a new `uploadTarget` field. This field uses a `unionDiscriminator` on a `type` field to enable extensible upload configurations. The existing top-level fields for upload configuration (`caseID`, `caseManagementAccountSecretRef`, and `ftpHost`) are removed and their functionality is moved into the new `uploadTarget.sftp` struct. This is a breaking change designed to create a more scalable and maintainable API.
 
 ### Workflow Description
 
-**cluster administrator** is a human user responsible for configuring must-gather collection.
-
-1. The cluster administrator creates a MustGather custom resource with an optional `ftpHost` field.
-2. If `ftpHost` is specified (e.g., `access.stage.redhat.com`), the must-gather operator configures the upload job to target that endpoint.
-3. If `ftpHost` is omitted, the operator defaults to `access.redhat.com` for backward compatibility.
-4. The upload container uses the specified FTP host along with existing proxy and credential configurations.
-
+1. The cluster administrator creates a `MustGather` custom resource.
+2. To enable uploading, the administrator defines the `spec.uploadTarget` field.
+3. They set `uploadTarget.type` to `SFTP` and provide the necessary configuration under `uploadTarget.sftp`, including the `caseID`, a reference to a secret with credentials, and an optional host override.
+4. The must-gather operator validates the `uploadTarget` configuration.
+5. The operator configures the must-gather job to use the specified SFTP details for uploading the artifact.
+6. If `uploadTarget` is not specified, the must-gather collection runs, but the upload phase is skipped.
 
 ### API Extensions
 
@@ -77,23 +74,53 @@ When `spec.ftpHost` is set, the upload process targets the indicated endpoint (o
 ```go
 // MustGatherSpec defines the desired state of MustGather
 type MustGatherSpec struct {
-    // ...existing fields...
+    // ... existing non-upload fields ...
     
-    // ftpHost is an optional FTP/SFTP host used to upload the bundle.
-    // If unset, defaults to access.redhat.com.
-    // +kubebuilder:validation:Optional
-    // +kubebuilder:default:=access.redhat.com
-    FTPHost string `json:"ftpHost,omitempty"`
+    // serviceAccountRef is the service account to be used for running must-gather.
+    ServiceAccountRef corev1.LocalObjectReference `json:"serviceAccountRef"`
+
+    // uploadTarget sets the target config for uploading the collected must-gather tar.
+    // Uploading is disabled if this field is unset.
+    // +optional
+    UploadTarget *UploadTarget `json:"uploadTarget,omitempty"`
 }
-```
 
-#### CRD OpenAPI Schema
+// UploadType is a specific method for uploading to a target.
+// +kubebuilder:validation:Enum=SFTP
+type UploadType string
 
-```yaml
-ftpHost:
-  type: string
-  default: access.redhat.com
-  description: "FTP/SFTP host used to upload the bundle. If unset, defaults to access.redhat.com."
+// UploadTarget defines the configuration for uploading the must-gather tar.
+// +kubebuilder:validation:XValidation:rule="has(self.type) && self.type == 'SFTP' ? has(self.sftp) : !has(self.sftp)",message="sftp upload target config is required when upload type is SFTP, and forbidden otherwise"
+// +union
+type UploadTarget struct {
+    // type defines the method used for uploading to a specific target.
+    // +unionDiscriminator
+    // +required
+    Type UploadType `json:"type"`
+
+    // sftp defines the target details for uploading to a valid SFTP server.
+    // +unionMember
+    // +optional
+    SFTP *SFTPUploadTargetConfig `json:"sftp,omitempty"`
+}
+
+// SFTPUploadTargetConfig defines the configuration for SFTP uploads.
+type SFTPUploadTargetConfig struct {
+    // caseID specifies the Red Hat case number for support uploads.
+    // +kubebuilder:validation:MaxLength=128
+    // +kubebuilder:validation:MinLength=1
+    // +required
+    CaseID string `json:"caseID"`
+
+    // host specifies the SFTP server hostname.
+    // +kubebuilder:default:="access.redhat.com"
+    // +optional
+    Host string `json:"host,omitempty"`
+
+    // caseManagementAccountSecretRef references a secret containing the upload credentials.
+    // +required
+    CaseManagementAccountSecretRef corev1.LocalObjectReference `json:"caseManagementAccountSecretRef"`
+}
 ```
 
 ### Topology Considerations
@@ -103,148 +130,149 @@ ftpHost:
 
 #### Standalone Clusters
 
-This change is fully relevant for standalone clusters where must-gather operations are performed directly within the cluster.
+This change is fully relevant for standalone clusters where must-gather operations are performed directly.
 
 #### Single-node Deployments or MicroShift
 
 
 ### Implementation Details/Notes/Constraints
 
-* **API**: Add `FTPHost` to `MustGatherSpec` with kubebuilder markers (default).
-* **Controller**: Update upload container to pass `FTP_HOST` environment variable (or argument) from `spec.ftpHost`.
-* **Defaulting**: Respect defaulting when field is unset to maintain backward compatibility.
-* **CRD Generation**: Regenerate deepcopy, OpenAPI, CRDs, and bundle files.
+*   **API**: Introduce `UploadTarget` in `mustgather_types.go` with `union` markers and CEL validation. The previous top-level upload fields are removed.
+*   **Controller**: The controller logic will be updated to parse the `uploadTarget` field. If present, it will configure the upload job based on the specified type and its configuration. If absent, no upload will be configured.
+*   **Breaking Change**: This is a breaking API change. The top-level fields `caseID`, `caseManagementAccountSecretRef`, and `ftpHost` have been removed. Users must update their `MustGather` custom resources to use the new `uploadTarget` structure.
+*   **CRD Generation**: All generated files (deepcopy, OpenAPI, CRDs) must be updated.
 
 ### Risks and Mitigations
 
-* **Security (data exfiltration)**: Uploading to external endpoints introduces risk.
-  * *Mitigation*: RBAC controls, documentation, and guidance to use trusted endpoints.
-* **Reliability**: Proxies or firewalls may block FTP/SFTP.
-  * *Mitigation*: Proxy env variables and observable errors/conditions remain in place.
+*   **API Complexity**: The new API is more complex than a single string field, but this is a necessary trade-off for extensibility and type safety.
+    *   **Mitigation**: Clear documentation and examples will be provided. CEL validation will prevent invalid configurations.
+*   **Migration**: Users will need to update their `MustGather` resources to the new format.
+    *   **Mitigation**: The backward compatibility logic will prevent disruption, and clear deprecation warnings will guide users.
 
 ### Drawbacks
 
-* Adds another user‑visible configuration option to the API.
-* Slight complexity increase in upload command.
-* Risk of misconfiguration when arbitrary endpoints are used; guidance and observability mitigate this.
+*   The introduction of a nested structure makes the API slightly more verbose for the simple case of uploading to the default Red Hat support server.
 
 ## Alternatives (Not Implemented)
 
-## Open Questions
+A simpler approach of keeping a flat structure with optional fields for each provider was considered. However, this lacks the type safety and explicit intent provided by a discriminated union, and it becomes cumbersome as more target types are added.
 
 ## Test Plan
 
 ### Unit Tests
 
-* API defaulting
-* Job template generation includes FTP host when set; defaults when omitted
-* Proxy configuration fallback/precedence works alongside ftpHost
+*   Validation of `UploadTarget` struct: ensure CEL rules correctly reject invalid combinations.
+*   Controller logic for parsing `uploadTarget` and configuring the upload job.
+*   Backward compatibility logic for handling deprecated fields.
 
 ### E2E Tests
 
-* Happy path using `access.stage.redhat.com` in staging/dev environments
-* Default path (unset → `access.redhat.com`)
-* Upload success/failure with different FTP hosts
+*   Create a `MustGather` resource with a valid `uploadTarget` of type `SFTP` and verify the upload succeeds.
+*   Test with a custom SFTP host.
+*   Verify that uploading is disabled when `uploadTarget` is unset.
+*   Test the backward compatibility path by creating a `MustGather` resource using only the deprecated fields.
 
 ## Graduation Criteria
 
 ### Dev Preview -> Tech Preview
 
-* Field added with defaulting
-* Unit tests implemented
-* Basic documentation available
-* Ability to utilize the enhancement end to end
+*   Ability to utilize the enhancement end to end for SFTP uploads.
+*   End-user documentation and API stability.
+*   Sufficient test coverage, including unit and e2e tests.
+*   Gather feedback from users on the new API structure.
 
 ### Tech Preview -> GA
 
-* E2E tests implemented
-* Customer validation in staging environments
-* User-facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/)
+*   More testing, including upgrade and scale scenarios.
+*   Sufficient time for user feedback and adoption.
+
 
 ### Removing a deprecated feature
 
+The deprecated fields `caseID`, `caseManagementAccountSecretRef`, and `ftpHost` are removed.
+
 ## Upgrade / Downgrade Strategy
 
-* **Backward compatible**: Field is optional with a safe default
-* **Upgrade**: Older operators ignore the unknown field; no disruption to current flows
-* **Downgrade**: If downgrading to an operator version that doesn't support ftpHost, the field is ignored and uploads continue to the default endpoint
+*   **Upgrade**: This is a breaking change. Before upgrading the operator, all `MustGather` custom resources must be migrated to the new `uploadTarget` API structure. The upgrade process for the operator should be blocked until all resources are compliant, or the operator should handle existing resources gracefully (e.g., by reporting an error condition). A migration tool or script may be provided to assist users.
+*   **Downgrade**: Downgrading to an operator version that expects the old fields will fail for any `MustGather` resource created with the new `uploadTarget` structure. Manual conversion of the resources back to the old format would be required before a downgrade.
 
 ## Version Skew Strategy
 
-* Ensure operator CSV/CRD includes the new field before shipping the controller that uses it
-* If controller is older than CRD, it safely ignores the field
-* No coordination required between control plane and kubelet components
+The `MustGather` CRD and the must-gather-operator are the only components affected. The operator's controller is designed to handle the specific version of the CRD it is shipped with. Version skew issues are not expected as long as the CRD and the operator are upgraded together, which is standard practice.
 
 ## Operational Aspects of API Extensions
 
-This enhancement modifies the MustGather CRD by adding an optional field with a default value.
+This enhancement modifies the `MustGather` CRD by introducing a new `uploadTarget` struct.
 
-**Impact on existing SLIs**:
-* No impact on API throughput or availability
-* No impact on cluster performance as this is a configuration field only used during must-gather operations
-
-**Failure modes**:
-* Invalid or unreachable FTP host results in runtime upload errors surfaced via job logs and conditions
-* Credential issues result in observable upload failures with clear error messages
+*   **SLIs**: This change has no impact on existing SLIs such as API throughput or availability. It is a configuration change for an on-demand job and does not affect the core performance of the cluster.
+*   **Failure Modes**:
+    *   Invalid `uploadTarget` configuration (e.g., wrong type or missing required fields) will be rejected by the API server via CEL validation.
+    *   Runtime failures (e.g., unreachable SFTP host, invalid credentials) will result in a failed must-gather job, with errors reported in the job's logs and in the `MustGather` resource's conditions.
+*   **Escalation**: Failures in the must-gather upload process will be escalated to the team responsible for the must-gather-operator.
 
 ## Support Procedures
 
 ### Detecting Issues
 
-* **Symptoms**: Upload failures, timeout errors in must-gather job logs
-* **Logs**: Check must-gather operator logs and must-gather job upload container logs for FTP-related errors
-
+*   **Symptoms**: Must-gather job fails during the upload phase; no data appears at the configured destination.
+*   **Logs**: Check the logs of the must-gather operator pod and the upload container within the must-gather job pod for connectivity errors, authentication failures, or other SFTP-related issues.
 
 ### Troubleshooting
 
-* Verify FTP host is reachable from cluster network
-* Check proxy configuration if upload fails
-* Validate credentials in the referenced secret
-* Ensure firewall rules allow FTP/SFTP traffic to the specified host
+*   Verify that the SFTP host is reachable from the cluster network.
+*   Check cluster-wide proxy settings if applicable.
+*   Ensure the secret referenced in `caseManagementAccountSecretRef` contains valid credentials.
+*   Confirm that any firewalls between the cluster and the SFTP host allow the required traffic.
 
 ### Disabling the Feature
 
-* Remove or omit the `ftpHost` field from MustGather resources to use default behavior
-* No cluster-wide disable mechanism needed as this is a per-resource configuration
+To disable uploading, simply remove the `uploadTarget` field from the `MustGather` resource. The must-gather collection will still run, but the upload step will be skipped.
 
 ## Examples
 
-### Default Configuration (ftpHost omitted)
+### SFTP Upload to Red Hat Support
+
+This example configures an upload to the default Red Hat support SFTP server.
 
 ```yaml
 apiVersion: managed.openshift.io/v1alpha1
 kind: MustGather
 metadata:
-  name: example-mustgather-default
+  name: example-mustgather-sftp
 spec:
-  caseID: "01234567"
-  caseManagementAccountSecretRef:
-    name: case-management-creds
   serviceAccountRef:
     name: must-gather-admin
-  # ftpHost omitted → defaults to access.redhat.com
+  uploadTarget:
+    type: SFTP
+    sftp:
+      caseID: "01234567"
+      caseManagementAccountSecretRef:
+        name: case-management-creds
 ```
 
-### Staging Configuration
+### SFTP Upload to a Staging Environment
+
+This example uses the `host` field to target a different SFTP server.
 
 ```yaml
 apiVersion: managed.openshift.io/v1alpha1
 kind: MustGather
 metadata:
-  name: example-mustgather-stage
+  name: example-mustgather-sftp-staging
 spec:
-  caseID: "01234567"
-  caseManagementAccountSecretRef:
-    name: case-management-creds
   serviceAccountRef:
     name: must-gather-admin
-  ftpHost: access.stage.redhat.com
+  uploadTarget:
+    type: SFTP
+    sftp:
+      caseID: "01234567"
+      caseManagementAccountSecretRef:
+        name: case-management-creds
+      host: access.stage.redhat.com
 ```
 
 ## Implementation History
 
-* v0: Draft proposal created
-* v1: API added with defaulting; unit tests; docs; CRDs regenerated
-* v2: E2E tests and observability; promotion to tech preview
-* v3: GA after stabilization
+*   v0: Initial proposal with a simple `ftpHost` string.
+*   v1: Redesigned API to use an extensible `uploadTarget` field with a discriminated union for type safety and future scalability.
 
