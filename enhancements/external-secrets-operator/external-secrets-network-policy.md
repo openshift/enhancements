@@ -271,7 +271,7 @@ The policies for the operand namespace will be structured similarly, with a deny
 This enhancement introduces new fields to the existing `ExternalSecrets` custom resources to support network policy configuration.
 
 ```go
-   // ComponentName represents the different cert-manager components that can have network policies applied.
+   // ComponentName represents the different external-secrets components that can have network policies applied.
     type ComponentName string
     
     const (
