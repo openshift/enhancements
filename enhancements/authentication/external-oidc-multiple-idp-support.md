@@ -4,7 +4,7 @@ authors:
   - everettraven
 reviewers: # Include a comment about what domain expertise a reviewer is expected to bring and what area of the enhancement you expect them to focus on. For example: - "@networkguru, for networking aspects, please look at IP bootstrapping aspect"
   - liouk # Original author of the ExternalOIDC feature for OpenShift
-  - TBD # Someone from Console team to cover Console nuances?
+  - jhadvig # Console SME
 approvers: # A single approver is preferred, the role of the approver is to raise important questions, help ensure the enhancement receives reviews from all applicable areas/SMEs, and determine when consensus is achieved such that the EP can move forward to implementation.  Having multiple approvers makes it difficult to determine who is responsible for the actual approval.
   - sjenning
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
@@ -25,21 +25,21 @@ superseded-by:
 
 ## Summary
 
-Allow users to configure more than one OIDC identity provider when using the BYO External OIDC feature.
+Allow users to configure more than one active OIDC identity provider when using the BYO External OIDC feature.
 
 ## Motivation
 
 ### User Stories
 
-- As a cluster administrator, I would like to enable multiple different identity providers so that subsets of my cluster users can use different login methods.
+- As a cluster administrator, I would like to enable multiple different active identity providers so that subsets of my cluster users can use different login methods.
 
 ### Goals
 
-- Add support for configuring more than on external OIDC provider.
+- Add support for configuring more than one active external OIDC provider.
 
 ### Non-Goals
 
-- Anything outside of the above outlined goal.
+- Enabling "user profiles" that would allow a user to switch between "profiles" logged in using a different IdP.
 
 ## Proposal
 
@@ -57,8 +57,6 @@ An OpenShift/HyperShift customer is using two external identity providers, Keycl
 A Cluster Administrator would like to make it possible for all employees in the various organizations to authenticate with the cluster using the identity provider their organizations use for day-to-day
 operations / org specific systems.
 
-To configure the UID of a cluster user identity using a specific claim value on OpenShift, a Cluster Administrator updates the `authentications.config.openshift.io/cluster` resource
-to populate the claim mapping like so:
 To configure the OpenShift Kubernetes API server to use both of these external identity providers, a Cluster Administrator updates the `authentications.config.openshift.io/cluster` resource
 like so:
 ```yaml
@@ -194,6 +192,14 @@ For example:
 
 **Why 64?** This is what the upstream Structured Authentication Configuration limit is: https://github.com/kubernetes/kubernetes/blob/cffecaac55698b4f364b0be2ba92f5fd69431cb6/staging/src/k8s.io/apiserver/pkg/apis/apiserver/validation/validation.go#L51-L58
 
+Beyond this change, there will be additional validations introduced to ensure that:
+
+- `name` values are unique
+- `issuer.issuerURL` values are unique
+- `issuer.discoveryURL` values, once implemented, are unique. This field is in the process of being added as part of the work outlined in https://github.com/openshift/enhancements/blob/master/enhancements/authentication/AuthConfig-missing-fields.md
+
+Adding these new validations should not be breaking in nature as users have never been able to specify more than a singular entry.
+
 ### Topology Considerations
 
 #### Hypershift / Hosted Control Planes
@@ -214,23 +220,53 @@ get configured. The more that are configured, the larger the space taken up when
 are fields where CEL expressions can be specified and are compiled at admission time. Adding many complex CEL
 expressions across multiple IdP entries may have an impact in the speed in which the admission request is processed.
 
+Similarly, more IdP configurations to loop through to validate a token the KAS has received may consume additional CPU cycles.
+
 **MicroShift**: As far as I am aware, MicroShift does not have a configurable authentication layer and relies on KubeConfigs only. No impact.
 
 ### Implementation Details/Notes/Constraints
 
 Because the existing `authentications.config.openshift.io` CRD is already `v1` _and_ the existing `ExternalOIDC` feature-gate
-is enabled by default on HyperShift, a new feature-gate will be added to properly go through the `TechPreviewNoUpgrade` --> `Default`
-feature promotion cycle.
+is enabled by default on HyperShift, a new feature-gate will be added to properly go through the feature promotion cycle.
 
 This new feature-gate will be named `ExternalOIDCMultipleIdPs`.
 
-The majority of implementation work will be focused on properly updating the validations for the `spec.oidcProviders` field and children fields
+The majority of API-related work will be focused on properly updating the validations for the `spec.oidcProviders` field and children fields
 to account for things like uniqueness constraints that are enforced by the Kubernetes API server in https://github.com/kubernetes/kubernetes/blob/cffecaac55698b4f364b0be2ba92f5fd69431cb6/staging/src/k8s.io/apiserver/pkg/apis/apiserver/validation/validation.go#L47
 
-In theory, existing implementation logic should not need to know of the feature-gate as they should already be designed with
-handling a list of objects in mind.
+OpenShift components that we anticipate will "just work":
+- cluster-authentication-operator
+- cluster-kube-apiserver-operator
 
-Any necessary updates to implementations across OpenShift/HyperShift components will be gated using the new feature gate.
+HyperShift components that we anticipate will "just work":
+- control-plane-operator
+
+The above components have their implementation logic written such that they should not need any business logic updates to handle
+more than one entry in the list of OIDC providers.
+
+#### Console
+
+On the other hand, the Console and console-operator have been written with the expectation of a singular OIDC provider being present.
+
+For example, an instance of the Console can only be configured with a singular issuer URL, client ID, and client secret as seen by:
+https://github.com/openshift/console/blob/main/cmd/bridge/config/auth/authoptions.go#L28-L45
+
+This restriction results in the console-operator also doing things like only returning the first client configuration
+instance it sees for itself in the set of configured providers:
+https://github.com/openshift/console-operator/blob/ca22e61b677ad21da5060fab7d447292c4d01afe/pkg/console/subresource/authentication/cluster.go#L26
+
+In order to fully support the use of multiple OIDC providers we will need to make the appropriate updates to both Console and console-operator 
+to appropriately account for more than one provider.
+
+As of writing this section, this includes but may not be limited to:
+- Overhauling the `oidcSetupController` in https://github.com/openshift/console-operator/blob/main/pkg/console/controllers/oidcsetup/oidcsetup.go to support multiple OIDC client configurations.
+- Updating the console to support configuration of multiple OIDC client configurations
+- Adding new UI views to allow users to select which identity provider they would like to authenticate to the cluster with. When external OIDC providers are not configured, this is typically
+handled by the IntegratedOAuth server so we may be able to re-use an existing template here.
+
+TODO: Document decisions related to what changes are planned to be made to Console to support this effort.
+
+All changes to these components should be done behind the new feature gate to ensure we are not accidentally introducing regressions.
 
 ### Risks and Mitigations
 
@@ -239,6 +275,11 @@ degradation as we validate that they are valid CEL expressions before handing th
 
 Mitigation: We already limit the size of the CEL expression that can be specified to a reasonable length to prevent excessive compile times based on complexity.
 We could ratchet this further, but the likelihood of getting to this bad of a state is unlikely.
+
+Risk: Many IdPs may result in authentication against the Kubernetes API server taking longer to complete due to it needing to iterate through the
+list of configured OIDC providers.
+
+Mitigation: Limit to 64 providers. This was sufficient for upstream Kubernetes and should be sufficient for us as well. 
 
 ### Drawbacks
 
@@ -255,7 +296,8 @@ There is a clear need for larger enterprises and multi-tenant style clusters to 
 
 ## Open Questions [optional]
 
-N/A
+- What changes need to happen to support the user UI workflow of selecting an OIDC provider to log in with?
+- Today, the console is configured with OAuth2 client information through command line flags. How should this evolve to support a world where Console may be a client against _multiple_ providers?
 
 ## Test Plan
 
