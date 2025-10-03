@@ -21,7 +21,7 @@ see-also:
 
 ## Summary
 
-MicroShift disables most feature gates by default while hardcoding only a few relevant ones, and lacks a controlled mechanism for users to experiment with additional feature gates or override defaults. This enhancement proposes adding configuration support for feature gates through the MicroShift configuration file. In OpenShift, users configure feature gates through the FeatureGate API, where operators independently filter featureGates for their components based on the central FeatureGate API 'cluster' instance. In contrast, MicroShift users will specify feature gates directly in the configuration file (`/etc/microshift/config.yaml`), and MicroShift will pass all user-specified featureGates to the kube-apiserver, which then propagates them to other Kubernetes components (kubelet, kube-controller-manager, kube-scheduler). This capability will enable users to experiment with alpha and beta Kubernetes features like CPUManager's `prefer-align-cpus-by-uncorecache` in a supported and deterministic way, addressing edge computing use cases where users want to evaluate advanced resource management capabilities.
+MicroShift disables most feature gates by default while hardcoding only a few relevant ones, and lacks a controlled mechanism for users to experiment with additional feature gates or override defaults. This enhancement proposes adding configuration support for feature gates through the MicroShift configuration file. In OpenShift, users configure feature gates through the FeatureGate API. In contrast, MicroShift users will specify feature gates directly in the configuration file (`/etc/microshift/config.yaml`), and MicroShift will pass all user-specified featureGates to the kube-apiserver, which then propagates them to other Kubernetes components (kubelet, kube-controller-manager, kube-scheduler). This capability will enable users to experiment with alpha and beta Kubernetes features like CPUManager's `prefer-align-cpus-by-uncorecache` in a supported and deterministic way, addressing edge computing use cases where users want to evaluate advanced resource management capabilities.
 
 ## Motivation
 
@@ -34,14 +34,12 @@ MicroShift users in edge computing environments want to experiment with upcoming
 ### Goals
 
 * Enable user configuration of feature gates through the MicroShift configuration file
-* Provide a controlled and deterministic way to experiment with alpha and beta features
 
 ### Non-Goals
 
 * Modify MicroShift's existing feature gate defaults
-* Vetting custom feature gates for compatibility with MicroShift
-* Validating custom feature gate settings for correctness, e.g. spelling, case, and punctuation
-* Automatic enablement of experimental features without explicit user configuration
+* Vet custom feature gates for compatibility with MicroShift
+* Validate custom feature gate settings for correctness, e.g. spelling, case, and punctuation
 * Providing upgrade support to customized clusters
 
 ## Proposal
@@ -74,7 +72,7 @@ This approach ensures that users can experiment with feature gate capabilities w
 
 ### API Extensions
 
-This enhancement extends MicroShift's configuration file schema only. No new CRDs, admission webhooks, conversion webhooks, aggregated API servers, or finalizers are introduced. Unlike OpenShift where users interact with the FeatureGate API to configure feature gates, MicroShift users will configure feature gates directly in the `/etc/microshift/config.yaml` file. The configuration file structure will be extended to include a `featureGates` section with a structure inspired by the OpenShift FeatureGate CRD specification, maintaining MicroShift's file-based configuration approach.
+This enhancement extends MicroShift's configuration file schema only. No new CRDs, admission webhooks, conversion webhooks, aggregated API servers, or finalizers are introduced. Unlike OpenShift where users interact with the FeatureGate API to configure feature gates, MicroShift users will configure feature gates directly in the `/etc/microshift/config.yaml` file.
 
 ### Topology Considerations
 
@@ -134,13 +132,12 @@ This configuration will be parsed during MicroShift startup and the feature gate
 
 Each OpenShift release image provides one manifest per FeatureSet profile. This enables the existing MicroShift rebase automation to keep current with OpenShift feature-set lists. The pertinent manifests for MicroShift are:
 
-- `0000_50_cluster-config-api_featureGate-SelfManagedHA-Default.yaml`
 - `0000_50_cluster-config-api_featureGate-SelfManagedHA-DevPreviewNoUpgrade.yaml`
 - `0000_50_cluster-config-api_featureGate-SelfManagedHA-TechPreviewNoUpgrade.yaml`
 
 #### Component Integration
 
-In OpenShift, users configure feature gates by creating FeatureGate API objects and operators independently filter featureGates for their respective components. MicroShift adopts a different model aligned with its file-based configuration approach: users specify feature gates in `/etc/microshift/config.yaml`, and MicroShift passes all user-specified featureGates to the kube-apiserver, which then handles the propagation to other components. This approach ensures all components receive the necessary feature gate settings without requiring MicroShift to implement complex filtering logic.
+In OpenShift, users configure feature gates by creating FeatureGate API objects and operators independently filter featureGates for their respective components. MicroShift adopts a different model aligned with its file-based configuration approach: users specify feature gates in `/etc/microshift/config.yaml`, and MicroShift passes all user-specified featureGates to the kube-apiserver.
 
 The propagation flow works as follows:
 1. **MicroShift → kube-apiserver**: MicroShift passes all configured feature gates to the kube-apiserver
@@ -155,43 +152,37 @@ Each component will then internally process these settings according to its capa
 
 **OpenShift Approach:**
 - Users configure feature gates through the FeatureGate API by creating/modifying FeatureGate instances
-- The FeatureGate API instance named 'cluster' serves as the single source of truth for all featureGates across the cluster
-- Each operator independently reads the 'cluster' FeatureGate instance and filters the featureGates relevant to its managed components
-- Operators determine which featureGates to pass to their components and handle component restarts when featureGate values change
+- The FeatureGate API instance named 'cluster' serves as the default source of truth for all featureGates across the cluster
+- The kube-apiserver detects a CRUD event on the FeatureGate API, parses all FeatureGate API instances, and communicates the FeatureGate values to cluster components
+- Operators like the Machine Config Operator also detect the CRUD event and will restart the the operand component if necessary
 - This provides fine-grained control but requires complex operator logic for filtering and lifecycle management
 
 **MicroShift Approach:**
 - Users configure feature gates through the configuration file (`/etc/microshift/config.yaml`) rather than through an API
-- Configuration file-based featureGate specification without a central API object
-// TODO this is unclear on openshift. i saw that the MCO watches the FeatureGate API and will restart kubelets, but I don't know if this applies to all components. It's probably not worth mentioning here though since it doesn't really change the design
-- Single-point propagation through kube-apiserver to all other Kubernetes components
+- If the new config is custom feature gates, MicroShift passes this to the kube-apiserver via the kube-apiserver config file
+- If the new config is for a feature set, MicroShift extracts the feature gates from the respective feature set manifest (embedded) and passes them to the kube-apiserver via the kube-apiserver config file
 - Simpler implementation leveraging kube-apiserver's native propagation mechanisms
 - Component restart handled through MicroShift service restart rather than individual operator reconciliation
 
 #### Validation and Error Handling
 
 - **Configuration Parsing**: MicroShift will validate the structural correctness of the configuration (YAML syntax, required fields)
-- **API Server Validation**: The kube-apiserver does not validate the feature gates it receives from MicroShift before propagating them
+- **API Server Validation**: The kube-apiserver does not validate the feature gates it receives from MicroShift before propagating them. This behavior is the same on OpenShift
 - **Component-level Validation**: Each Kubernetes component will validate the feature gates it recognizes
 - **Error Reporting**: Components will log errors or warnings for invalid feature gate configurations
 - **Startup Failures**: May occur when featureGate settings conflict (i.e. a featureGate is both enabled and disabled)
 
 ### Risks and Mitigations
 
-**Risk: Experimenting with Unstable Alpha Features**
-Users experimenting with alpha-stage feature gates may encounter instability or data loss in their MicroShift deployments.
+**Risk: Experimenting with Features**
+Users experimenting feature gates may encounter instability or data loss in their MicroShift deployments.
 
 *Mitigation:* Emphasize that experimentation should be conducted in non-production environments. Feature gate validation will be handled by the Kubernetes components themselves.
 
 **Risk: Configuration Errors**
 Invalid feature gate configurations in the MicroShift configuration file could prevent MicroShift components from starting.
 
-*Mitigation:* Kubernetes components inherently ignore unrecognized feature gate names, so typos or incorrect names will not cause failures. Only invalid values for recognized gates can cause issues. Components provide clear error messages for such cases, and documentation will guide troubleshooting.
-
-**Risk: Security Implications**
-Some feature gates may expose new attack vectors or security vulnerabilities.
-
-*Mitigation:* Security review will follow standard MicroShift processes. Feature gates that fundamentally conflict with MicroShift's security model will be documented as unsupported.
+*Mitigation:* Kubernetes components inherently ignore unrecognized feature gate names, so typos or mispellings may not cause failures. Only invalid values for recognized gates can cause issues. Components provide clear error messages for such cases, and documentation will guide troubleshooting. Recommended that users run `microshift-cleanup-script`, delete the custom feature gates from `/etc/microshift/config.yaml` and restart the MicroShift service.
 
 ### Drawbacks
 
@@ -209,7 +200,7 @@ Enabling `TechPreviewNoUpgrade`, `DevPreviewNoUpgrade`, or `CustomNoUpgrade` fea
 
 ## Alternatives (Not Implemented)
 
-No significant alternatives were considered for this enhancement. The configuration file approach aligns with MicroShift's existing patterns and provides the required user-configurable feature gates with automated OpenShift alignment.
+Utilizing the FeatureGate API on MicroShift is rejected as an alternative approach because it requires additional operators to manage both the API and the kubernetes components. At best, this would increase the complexity of cluster component lifecycle management and increase cluster overhead. This approach would also be a departure from the current model for user-defined configuration.
 
 ## Open Questions [optional]
 
@@ -225,6 +216,8 @@ No significant alternatives were considered for this enhancement. The configurat
 
    Unlike OpenShift which has extensive CI testing across feature combinations, MicroShift may have limited resources for testing all feature gate combinations across version upgrades. The approach for ensuring compatibility and providing user guidance needs definition.
 
+   **Answer:** OpenShift does not validate feature gate compatibility and designates any customization of feature gate flags as unsupported. MicroShift will adopt this philosphy as well.
+
 ## Test Plan
 
 The testing strategy focuses on verifying the propagation functionality - that custom feature gate configurations are correctly parsed from the MicroShift configuration file and passed to the kube-apiserver, which then handles propagation to other Kubernetes components. Testing validates the parsing and delivery mechanism rather than feature gate functionality itself.
@@ -232,13 +225,13 @@ The testing strategy focuses on verifying the propagation functionality - that c
 ### Unit Tests
 
 **Configuration Parsing:**
-- Validate parsing of `featureSet` values (TechPreviewNoUpgrade, DevPreviewNoUpgrade, CustomNoUpgrade, Default)
+- Validate parsing of `featureSet` values (TechPreviewNoUpgrade, DevPreviewNoUpgrade, CustomNoUpgrade)
 - Test parsing of `customNoUpgrade.enabled` and `customNoUpgrade.disabled` lists
 - Verify configuration schema validation and error handling for malformed configurations
 - Test default behavior when feature gates section is not configured
 
 **API Server Configuration:**
-- Verify feature gates are properly formatted in the kube-apiserver configuration
+- Verify feature gate pass-through retains string formating in the kube-apiserver configuration
 
 ### Robot Framework Integration Tests
 
@@ -247,14 +240,14 @@ The testing strategy focuses on verifying the propagation functionality - that c
 - Verify TechPreviewNoUpgrade and DevPreviewNoUpgrade presets results in their feature gates being passed to kube-apiserver
 
 **Configuration Error Handling:**
-- Verify error reporting from embedded components in MicroShift logs  
-- Test handling of conflicting settings (same feature gate in both enabled and disabled lists) at the kube-apiserver level
+- Verify error reporting from embedded components in MicroShift logs
+- Test handling of conflicting settings (same feature gate in both enabled and disabled lists) by MicroShift
 - Verify that configuration file parsing errors are clearly reported to users
 
 ### Testing Scope Limitations
 
 **Component Behavior Verification:**
-This enhancement does not test whether feature gates actually modify Kubernetes component behavior - that is the responsibility of upstream Kubernetes testing. Testing is limited to verifying that MicroShift correctly passes feature gates to the kube-apiserver and that the kube-apiserver's native propagation mechanism distributes them to other components correctly.
+This enhancement does not test whether feature gates actually modify Kubernetes component behavior - that is the responsibility of upstream Kubernetes testing. Testing is limited to verifying that MicroShift correctly passes feature gates to the kube-apiserver.
 
 **Upgrade Testing:**
 Since upgrades are not supported when custom feature gates are configured, no additional upgrade testing is required for this enhancement. Default upgrade behavior without custom feature gates is already covered by existing MicroShift test suites.
@@ -293,23 +286,20 @@ Similar to OpenShift, the TechPreviewNoUpgrade, DevPreviewNoUpgrade, and CustomN
 
 This enhancement introduces upgrade limitations when custom feature gates are configured to prevent compatibility issues across version boundaries.
 
+Feature Sets defined by OpenShift are included in the OCP release image. Rebase automation will be extended to pull in these manifests and they will be embedded into the MicroShift binary at build time.
+
 ### Default Configuration
 When no custom feature gates are configured, standard MicroShift version skew handling applies with no additional considerations.
 
 ### Custom Feature Gate Limitations
 When custom feature gates are configured (TechPreviewNoUpgrade, DevPreviewNoUpgrade, or CustomNoUpgrade), upgrades and downgrades between minor versions are not expected to work. Users must remove custom feature gate configurations before attempting minor version changes.
 
-### Component Version Alignment
-All Kubernetes components (kubelet, kube-apiserver, kube-controller-manager, kube-scheduler) are packaged together within each MicroShift release, eliminating internal component version skew concerns. Feature gate configuration is read from the MicroShift configuration file and passed to the kube-apiserver during startup, which then handles propagation to other components using Kubernetes' native mechanisms.
-
 ### Feature Gate Consistency Across Components
-The kube-apiserver's native propagation mechanism ensures consistent feature gate distribution to all Kubernetes components. While individual components may recognize different subsets of feature gates based on their capabilities, the kube-apiserver ensures all components receive the same feature gate configuration from the MicroShift configuration file. This enhancement relies on the kube-apiserver's propagation logic and does not implement additional validation for feature gate compatibility between components.
+Feature gate skew can occur between embedded components. On OpenShift, this is a non-issue. On MicroShift, it is a known issue that one component's default may be to disable a feature, while another comonpent enables it. This problem is tracked by [USHIFT-2813](https://issues.redhat.com/browse/USHIFT-2813). Solving this issue is outside the scope of this proposal.
 
 ## Operational Aspects of API Extensions
 
-// TODO the configuration schema is being modified. Backwards compatibility must be maintained
-
-All operational aspects are handled through existing MicroShift configuration mechanisms and component startup procedures.
+Any changes to the MicroShift configuration schema must be backwards compatible by at least y-2 minor versions.
 
 ## Support Procedures
 
@@ -321,47 +311,14 @@ All operational aspects are handled through existing MicroShift configuration me
 - **Error patterns**: Component startup failures with feature gate validation errors
 - **Detection**: Service status shows failed state, component logs show unknown feature gate names
 
-**Component-Specific Failures:**
-- **kube-apiserver errors**: Look for API server startup errors in `journalctl -u microshift.service` - these are critical as the apiserver handles propagation
+### Reverting Custom Feature Gate Configurations To Default
 
-### Disabling Feature Gate Configuration
-
-**Remove Custom Feature Gates:**
-1. Edit `/etc/microshift/config.yaml`
-2. Remove or comment out the `featureGates` section
-3. Restart MicroShift service: `sudo systemctl restart microshift`
-
-**Reset to Default Configuration:**
-```yaml
-# Remove entire featureGates section or set to:
-featureGates:
-  featureSet: Default
-```
-
-**Consequences of Disabling:**
-- **Cluster health**: No impact on core MicroShift functionality
-- **Existing workloads**: Workloads using experimental features may lose functionality
-- **New workloads**: Will use default feature gate behavior only
-
-### Edge Environment Troubleshooting
-
-**Remote Diagnostics:**
-- Feature gate configuration issues are logged in standard MicroShift service logs
-- Use `microshift get nodes` to verify basic cluster functionality
-- Check component status through `microshift get pods -A` for system pod health
+**Reverting the cluster to it's default feature-gates is unsupported and not recommended.**
 
 **Recovery Procedures:**
 - Configuration changes only require MicroShift service restart, not full system reboot
 - Invalid configurations prevent service startup but do not affect system stability
 - Greenboot integration ensures automatic rollback if feature gates prevent successful startup
-
-### Graceful Failure and Recovery
-
-**Configuration Changes:**
-- Invalid feature gate configurations fail fast during service startup
-- No partial application of settings - either all feature gates apply or none do
-- Recovery is immediate upon fixing configuration and restarting service
-- No data consistency risks from feature gate configuration changes
 
 ## Infrastructure Needed [optional]
 
