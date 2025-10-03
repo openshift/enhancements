@@ -21,7 +21,7 @@ tracking-link:
 ---
 
 
-# Support Log Gather a.k.a. must-gather Operator
+# Support Log Gather f.k.a. must-gather Operator
 
 ## Summary
 
@@ -94,62 +94,105 @@ The operator does not introduce a new API group and lives in the `operator.opens
 // 
 // MustGather is the Schema for the mustgathers API
 type MustGather struct {
-	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
+    metav1.TypeMeta   `json:",inline"`
+    metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   MustGatherSpec   `json:"spec,omitempty"`
-	Status MustGatherStatus `json:"status,omitempty"`
+    Spec   MustGatherSpec   `json:"spec,omitempty"`
+    Status MustGatherStatus `json:"status,omitempty"`
 }
 
 //+kubebuilder:object:root=true
 
 // MustGatherList contains a list of MustGather
 type MustGatherList struct {
-	metav1.TypeMeta `json:",inline"`
-	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []MustGather `json:"items"`
+    metav1.TypeMeta `json:",inline"`
+    metav1.ListMeta `json:"metadata,omitempty"`
+    Items           []MustGather `json:"items"`
 }
 
 // MustGatherSpec defines the desired state of MustGather
 type MustGatherSpec struct {
-	// The is of the case this must gather will be uploaded to
-	// +kubebuilder:validation:Required
-	CaseID string `json:"caseID"`
+    // the service account to use to run the must gather job pod, defaults to default
+    // +optional
+    ServiceAccountRef corev1.LocalObjectReference `json:"serviceAccountRef,omitempty"`
 
-	// the secret container a username and password field to be used to authenticate with red hat case management systems
-	// +kubebuilder:validation:Required
-	CaseManagementAccountSecretRef corev1.LocalObjectReference `json:"caseManagementAccountSecretRef"`
+    // additionalConfig contains extra parameters used to customize the gather process,
+    // currently enabling audit logs is the only supported field.
+    // +optional
+    AdditionalConfig *AdditionalConfig `json:"additionalConfig,omitempty"`
 
-	// the service account to use to run the must gather job pod, defaults to default
-	// +kubebuilder:validation:Optional
-	/* +kubebuilder:default:="{Name:default}" */
-	ServiceAccountRef corev1.LocalObjectReference `json:"serviceAccountRef,omitempty"`
+    // This represents the proxy configuration to be used. If left empty it will default to the cluster-level proxy configuration.
+    // +optional
+    ProxyConfig ProxySpec `json:"proxyConfig,omitempty"`
 
-	// A flag to specify if audit logs must be collected
-	// See documentation for further information.
-	// +kubebuilder:default:=false
-	Audit bool `json:"audit,omitempty"`
+    // A time limit for gather command to complete a floating point number with a suffix:
+    // "s" for seconds, "m" for minutes, "h" for hours, or "d" for days.
+    // Will default to no time limit.
+    // +optional
+    // +kubebuilder:validation:Format=duration
+    MustGatherTimeout metav1.Duration `json:"mustGatherTimeout,omitempty"`
 
-	// This represents the proxy configuration to be used. If left empty it will default to the cluster-level proxy configuration.
-	// +kubebuilder:validation:Optional
-	ProxyConfig ProxySpec `json:"proxyConfig,omitempty"`
+    // A flag to specify if resources (secret, job, pods) should be retained when the MustGather completes.
+    // If set to true, resources will be retained. If false or not set, resources will be deleted (default behavior).
+    // +optional
+    // +kubebuilder:default:=false
+    RetainResourcesOnCompletion bool `json:"retainResourcesOnCompletion,omitempty"`
 
-	// A time limit for gather command to complete a floating point number with a suffix:
-	// "s" for seconds, "m" for minutes, "h" for hours, or "d" for days.
-	// Will default to no time limit.
-	// +kubebuilder:validation:Optional
-	// +kubebuilder:validation:Format=duration
-	MustGatherTimeout metav1.Duration `json:"mustGatherTimeout,omitempty"`
+    // uploadTarget sets the target config for uploading the collected must-gather tar.
+    // Uploading is disabled if this field is unset.
+    // +optional
+    UploadTarget *UploadTarget `json:"uploadTarget,omitempty"`
+}
 
-	// A flag to specify if the upload user provided in the caseManagementAccountSecret is a RH internal user.
-	// See documentation for further information.
-	// +kubebuilder:default:=false
-	InternalUser bool `json:"internalUser,omitempty"`
+// AdditionalConfig sets extra parameters for the gather process.
+type AdditionalConfig struct {
+    // A flag to specify if audit logs must be collected
+    // See documentation for further information.
+    // +kubebuilder:default:=false
+    Audit bool `json:"audit,omitempty"`
+} 
 
-	// A flag to specify if resources (secret, job, pods) should be retained when the MustGather completes.
-	// If set to true, resources will be retained. If false or not set, resources will be deleted (default behavior).
-	// +kubebuilder:default:=false
-	RetainResourcesOnCompletion bool `json:"retainResourcesOnCompletion,omitempty"`
+// UploadType is a specific method for uploading to a target.
+// +kubebuilder:validation:Enum=SFTP
+type UploadType string
+
+// UploadTarget defines the configuration for uploading the must-gather tar.
+// +kubebuilder:validation:XValidation:rule="has(self.type) && self.type == 'SFTP' ? has(self.sftp) : !has(self.sftp)",message="sftp upload target config is required when upload type is SFTP, and forbidden otherwise"
+// +union
+type UploadTarget struct {
+    // type defines the method used for uploading to a specific target.
+    // +unionDiscriminator
+    // +required
+    Type UploadType `json:"type"`
+
+    // sftp defines the target details for uploading to a valid SFTP server.
+    // +unionMember
+    // +optional
+    SFTP *SFTPUploadTargetConfig `json:"sftp,omitempty"`
+}
+
+// SFTPUploadTargetConfig defines the configuration for SFTP uploads.
+type SFTPUploadTargetConfig struct {
+    // caseID specifies the Red Hat case number for support uploads.
+    // +kubebuilder:validation:MaxLength=128
+    // +kubebuilder:validation:MinLength=1
+    // +required
+    CaseID string `json:"caseID"`
+
+    // host specifies the SFTP server hostname.
+    // +kubebuilder:default:="sftp.access.redhat.com"
+    // +optional
+    Host string `json:"host,omitempty"`
+
+    // caseManagementAccountSecretRef references a secret containing the upload credentials.
+    // +required
+    CaseManagementAccountSecretRef corev1.LocalObjectReference `json:"caseManagementAccountSecretRef"`
+
+    // A flag to specify if the upload user provided in the caseManagementAccountSecret is a RH internal user.
+    // See documentation for further information.
+    // +optional
+    // +kubebuilder:default:=false
+    InternalUser bool `json:"internalUser,omitempty"`
 }
 
 // +k8s:openapi-gen=true
