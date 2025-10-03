@@ -113,7 +113,8 @@ type SFTPUploadTargetConfig struct {
     CaseID string `json:"caseID"`
 
     // host specifies the SFTP server hostname.
-    // +kubebuilder:default:="access.redhat.com"
+    // The host name of the SFTP server
+    // +kubebuilder:default:="sftp.access.redhat.com"
     // +optional
     Host string `json:"host,omitempty"`
 
@@ -268,7 +269,7 @@ spec:
       caseID: "01234567"
       caseManagementAccountSecretRef:
         name: case-management-creds
-      host: access.stage.redhat.com
+      host: sftp.access.stage.redhat.com
 ```
 
 ## Implementation History
