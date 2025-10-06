@@ -36,7 +36,7 @@ In a multi-tenant or security-conscious environment, it is crucial to enforce ne
 - As an administrator, I want to ensure that `external-secrets` components are secure and cannot communicate with unrelated workloads, so I can trust them in a production environment.
 - As a security engineer, I need to verify that all `external-secrets` pods have a default-deny policy and only allow traffic that is explicitly required for their function.
 - As a `external-secrets` user, I need assurance that applying security policies will not break core functionalities like secret management or webhook validation.
-- As an administrator, I want to configure and manage egress rules for external-secrets operands via the operator API or CRDs, so I can control which external services they are allowed to access.
+- As an administrator, I want to configure and manage egress rules for `external-secrets` operands via the operator API or CRDs, so I can control which external services they are allowed to access.
 
 ### Goals
 
@@ -255,7 +255,7 @@ The policies for the operand namespace will be structured similarly, with a deny
 
     ```yaml
     apiVersion: operator.openshift.io/v1alpha1
-    kind: ExternalSecrets
+    kind: ExternalSecretsConfig
     metadata:
       name: cluster
     spec:
@@ -269,7 +269,7 @@ The policies for the operand namespace will be structured similarly, with a deny
     ```  
 ### API Extensions
 
-This enhancement introduces new fields to the existing `ExternalSecrets` custom resources to support network policy configuration.
+This enhancement introduces new fields to the existing `ExternalSecretsConfig` custom resources to support network policy configuration.
 
 ```go
    // ComponentName represents the different external-secrets components that can have network policies applied.
@@ -309,7 +309,7 @@ This enhancement introduces new fields to the existing `ExternalSecrets` custom 
         Egress []networkingv1.NetworkPolicyEgressRule `json:"egress,omitempty" protobuf:"bytes,3,rep,name=egress"`
 	}
 
-    type ExternalSecretsSpec struct {
+    type ExternalSecretsConfigSpec struct {
 
         // NetworkPolicies specifies the list of network policy configurations
         // to be applied to external-secrets pods.
