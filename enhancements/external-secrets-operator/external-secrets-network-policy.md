@@ -36,6 +36,7 @@ In a multi-tenant or security-conscious environment, it is crucial to enforce ne
 - As an administrator, I want to ensure that `external-secrets` components are secure and cannot communicate with unrelated workloads, so I can trust them in a production environment.
 - As a security engineer, I need to verify that all `external-secrets` pods have a default-deny policy and only allow traffic that is explicitly required for their function.
 - As a `external-secrets` user, I need assurance that applying security policies will not break core functionalities like secret management or webhook validation.
+- As an administrator, I want to configure and manage egress rules for external-secrets operands via the operator API or CRDs, so I can control which external services they are allowed to access.
 
 ### Goals
 
@@ -250,7 +251,7 @@ The policies for the operand namespace will be structured similarly, with a deny
             - protocol: TCP
               port: 6443
     ```  
-6. **User-Configurable Policies:** Users must configure additional policies via the `ExternalSecrets` custom resource to set `external-secrets` controller egress allow policy to communicate with external providers. Example user configuration:
+6. **User-Configurable Policies:** Users must configure additional policies via the `ExternalSecretsConfig` custom resource to set `external-secrets` controller egress allow policy to communicate with external providers. Example user configuration:
 
     ```yaml
     apiVersion: operator.openshift.io/v1alpha1
