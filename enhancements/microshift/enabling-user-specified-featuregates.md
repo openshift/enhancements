@@ -44,31 +44,63 @@ MicroShift users in edge computing environments want to experiment with upcoming
 
 ## Proposal
 
-This enhancement proposes adding feature gate configuration support to MicroShift by extending `/etc/microshift/config.yaml` with a configuration schema inspired by OpenShift's FeatureGate custom resource specification. In OpenShift, users configure feature gates through the FeatureGate API, and operators independently filter featureGates before applying them to their components. MicroShift takes a different approach aligned with its file-based configuration philosophy: users specify feature gates directly in the configuration file, and MicroShift passes all user-specified featureGates to the kube-apiserver, which then handles propagation to other Kubernetes components.
+This enhancement proposes adding feature gate configuration support to MicroShift by extending `/etc/microshift/config.yaml` with a configuration inspired by OpenShift's FeatureGate custom resource specification. In OpenShift, users configure feature gates through the FeatureGate API, which is then propogated to sub-components (e.g. kube-apiserver, kubelet). In some cases, sub-component operators are also involved in the propagation of feature gate configurations and service restarts, such as the MCO configuring and restarting kubelets.
+
+MicroShift does not deploy these operators and must a different approach which is aligned with its file-based configuration philosophy: users specify feature gates directly in the configuration file, and MicroShift passes all user-specified featureGates to the kube-apiserver, which then handles propagation to other Kubernetes components. Service restarts are executed by the cluster admin by restarting the MicroShift process.
+
+> **Important!** The use of custom feature gates on OpenShift is irreversible and renders a cluster unable to be upgraded. This feature should only be used for testing alpha/beta features and should never be used in productions.
 
 The implementation includes:
 
-1. **FeatureGate Configuration Schema**: Extend MicroShift's configuration file to include `featureGates` section with fields inspired by OpenShift's FeatureGate CRD spec (`featureSet` and `customNoUpgrade`)
+1. **FeatureGate Configuration**: Extend MicroShift's configuration file to include `featureGates` section with fields inspired by OpenShift's FeatureGate CRD spec (`featureSet` and `customNoUpgrade`)
 2. **Predefined Feature Sets**: Support for predefined feature sets like `TechPreviewNoUpgrade` and `DevPreviewNoUpgrade`
 3. **Custom Feature Gates**: Support for individual feature gate enablement/disablement via `customNoUpgrade` configuration
-4. **API Server Propagation**: All configured featureGates will be passed to the kube-apiserver, which handles propagation to other Kubernetes components (kubelet, kube-controller-manager, kube-scheduler)
+4. **API Server Propagation**: All configured featureGates will be passed to the kube-apiserver, which handles propagation to other Kubernetes components (kubelet, kube-controller-manager, kube-scheduler). Service restarts are the responsibility of the cluster admin.
+5. **Prevent Feature Gate Config Changes**: OpenShift prevents users from reverting custom feature gates via spec validation rules. This is an not option for the MicroShift config. Instead, MicroShift will check for custom feature gates at startup. If customizations exist, MicroShift will write a sentinel file to `/var/lib/microshift/`.This file will contain the custom feature gates. When MicroShift next restarts, it will check for this file and overwrite the in-memory config's feature gate settings with those stored in the sentinel file.
 
-This approach ensures that users can experiment with feature gate capabilities while maintaining MicroShift's file-based configuration pattern instead of requiring API interactions.
+    **Note**: MicroShift will not overwrite `/etc/microshift/config.yaml`. Only the in-memory config will be affected.
+
+6. **Preventing Clusters Upgrades**: Upgrades on OpenShift are prevented at the cluster level by the cluster-version-operator, in conjunction with other OpenShift operators. However, MicroShift lacks these operators. Instead, MicroShift's install/upgrade logic will re-use the sentinel file described in #5. If the file exists, the cluster is un-upgradeable.
+
+This approach ensures that users can experiment with feature gate capabilities while maintaining MicroShift's file-based configuration pattern while still getting the same validation behavior as OpenShift.
 
 ### Workflow Description
 
 **MicroShift Administrator** is a human user responsible for configuring and managing MicroShift deployments.
 
 #### User Configuration Workflow
+
+##### First Time Configuring Feature Gates
 1. MicroShift Administrator identifies a need for specific feature gates (e.g., `CPUManagerPolicyAlphaOptions`)
 2. Administrator chooses between two configuration approaches:
    - **Predefined Feature Set**: Configure `featureGates.featureSet: TechPreviewNoUpgrade` or `DevPreviewNoUpgrade` for a curated set of preview features
    - **Custom Feature Gates**: Configure `featureGates.featureSet: CustomNoUpgrade` and specify individual features in `featureGates.customNoUpgrade.enabled/disabled` lists
 3. Administrator updates `/etc/microshift/config.yaml` with the chosen configuration
 4. Administrator restarts MicroShift service
-5. MicroShift parses the FeatureGate configuration and passes all settings to the kube-apiserver
-6. The kube-apiserver propagates the feature gates to other Kubernetes components (kubelet, kube-controller-manager, kube-scheduler)
-7. Each component processes the featureGates and enables/disables the features it supports according to the configured state
+5. MicroShift detects the custom FeatureGate configuration.
+6. MicroShift writes a sentinel file to `/var/lib/microshift/`, containing the feature gate config.
+7. The kube-apiserver propagates the feature gates to other Kubernetes components (kubelet, kube-controller-manager, kube-scheduler)
+8. Each component processes the featureGates and enables/disables the features it supports according to the configured state
+
+##### Attempt to Revert Custom Feature Gates
+1. Administrator decides to revert custom feature gates (e.g., wants to return to default settings)
+2. Administrator modifies `/etc/microshift/config.yaml` to remove or change feature gate configuration
+3. Administrator restarts MicroShift service
+4. MicroShift detects the sentinel file exists at `/var/lib/microshift/` containing previous custom feature gates
+5. MicroShift overrides the configuration file settings with those stored in the sentinel file
+6. MicroShift logs a warning that custom feature gates cannot be reverted once applied
+7. The cluster continues to run with the original custom feature gates despite the configuration change attempt
+
+##### Attempt to Upgrade Cluster with Custom Feature Gates
+1. Administrator attempts to upgrade MicroShift to a new version (e.g., via RPM upgrade)
+2. MicroShift upgrade process checks for the existence of the sentinel file at `/var/lib/microshift/`
+3. If sentinel file exists (indicating custom feature gates are configured):
+   - The upgrade process detects the cluster is marked as non-upgradeable
+   - Upgrade is blocked with an error message indicating custom feature gates prevent upgrades
+4. Upgrade fails to proceed, preserving the current MicroShift version
+5. Administrator must either:
+   - Continue using the current version with custom feature gates
+   - Wipe MicroShift's state (`$ sudo microshift-cleanup-data --all`) and restart MicroShift service (`$ sudo systemctl restart microshift`)
 
 ### API Extensions
 
@@ -126,7 +158,7 @@ featureGates:
 - When using `customNoUpgrade`, the `featureSet` must be set to `CustomNoUpgrade`
 - The `customNoUpgrade` field is only valid when `featureSet: CustomNoUpgrade`
 
-This configuration will be parsed during MicroShift startup and the feature gate settings will be passed to the appropriate Kubernetes components via their command-line arguments or configuration files.
+See [Validation and Error Handling](#validation-and-error-handling) config validation details
 
 #### FeatureSet Definitions
 
@@ -152,7 +184,7 @@ Each component will then internally process these settings according to its capa
 
 **OpenShift Approach:**
 - Users configure feature gates through the FeatureGate API by creating/modifying FeatureGate instances
-- The FeatureGate API instance named 'cluster' serves as the default source of truth for all featureGates across the cluster
+- The FeatureGate API instance named 'cluster' serves as the source of truth for all featureGates across the cluster
 - The kube-apiserver detects a CRUD event on the FeatureGate API, parses all FeatureGate API instances, and communicates the FeatureGate values to cluster components
 - Operators like the Machine Config Operator also detect the CRUD event and will restart the the operand component if necessary
 - This provides fine-grained control but requires complex operator logic for filtering and lifecycle management
@@ -166,11 +198,14 @@ Each component will then internally process these settings according to its capa
 
 #### Validation and Error Handling
 
-- **Configuration Parsing**: MicroShift will validate the structural correctness of the configuration (YAML syntax, required fields)
+- **Configuration Parsing**: MicroShift will replicate OpenShift's schema rules as start-time validation checks:
+  - **Conflicting Feature Gate Settings**: A feature gate appears in both `.customNoUpgrade.enabled` and `.customNoUpgrade.disabled`
+  - **Conflicting Feature Set Settings**: Feature gates are defined under `.customNoUpgrade.[enabled|disabled]` but `.featureSet:` is not `customNoUpgrade`.
 - **API Server Validation**: The kube-apiserver does not validate the feature gates it receives from MicroShift before propagating them. This behavior is the same on OpenShift
-- **Component-level Validation**: Each Kubernetes component will validate the feature gates it recognizes
-- **Error Reporting**: Components will log errors or warnings for invalid feature gate configurations
+- **Component-level Validation**: Unrecognized featuer-gate values are ignored by components. The component will only log them as a warning
 - **Startup Failures**: May occur when featureGate settings conflict (i.e. a featureGate is both enabled and disabled)
+- **Upgrade Failure**: RPM install pre-checks detect feature customizations have already been made because of sentinel file written to `/var/lib/microshift/`, and the upgrade fails
+- **Custom Features cannot be Reverted or Changed**: MicroShift logs an error that user customizations have changed, then overwrites the changes with the user's original feature gates. This prevents the cluster from becoming unstable. This is also how OpenShift handles this scenario
 
 ### Risks and Mitigations
 
@@ -182,12 +217,12 @@ Users experimenting feature gates may encounter instability or data loss in thei
 **Risk: Configuration Errors**
 Invalid feature gate configurations in the MicroShift configuration file could prevent MicroShift components from starting.
 
-*Mitigation:* Kubernetes components inherently ignore unrecognized feature gate names, so typos or mispellings may not cause failures. Only invalid values for recognized gates can cause issues. Components provide clear error messages for such cases, and documentation will guide troubleshooting. Recommended that users run `microshift-cleanup-script`, delete the custom feature gates from `/etc/microshift/config.yaml` and restart the MicroShift service.
+*Mitigation:* Kubernetes components inherently ignore unrecognized feature gate names, so typos or mispellings may not cause failures. Components provide clear warning messages for such cases, and documentation will guide troubleshooting. Recommended that users run `microshift-cleanup-script`, correct the invalid config values in `/etc/microshift/config.yaml`, then restart the service.
 
 ### Drawbacks
 
 **Increased Configuration Complexity**
-Adding feature gate configuration increases the complexity of MicroShift's configuration surface area. Users must understand both the feature gates themselves and their potential interactions, which could lead to misconfigurations in edge deployments where troubleshooting access is limited.
+Adding feature gate configuration increases the complexity of MicroShift's configuration surface area. Users must understand both the feature gates themselves and their potential interactions, which could lead to misconfigurations in edge deployments where troubleshooting access is limited. Again, users must be aware that custom feature gates are for experimentation only, are unsupported, irreversible, and make a cluster un-upgradeable.
 
 **Support Complexity**
 Enabling alpha and beta features through user configuration means support teams may encounter issues related to experimental functionality that behaves differently across Kubernetes versions or has incomplete implementations.
@@ -196,7 +231,7 @@ Enabling alpha and beta features through user configuration means support teams 
 Edge deployments often have limited remote access for troubleshooting. If users enable experimental feature gates that cause instability, recovering these devices may require physical access or complex recovery procedures.
 
 **Upgrade Limitations and Irreversible Changes**
-Enabling `TechPreviewNoUpgrade`, `DevPreviewNoUpgrade`, or `CustomNoUpgrade` feature sets cannot be undone and prevents both minor version updates and major upgrades. Once enabled, the cluster permanently loses the ability to perform standard updates. These feature sets are explicitly not recommended for production clusters due to their irreversible nature and update limitations, which conflicts with the typical edge deployment requirement for reliable, long-term operation and maintenance.
+Once enabled, `TechPreviewNoUpgrade`, `DevPreviewNoUpgrade`, or `CustomNoUpgrade` feature sets CANNOT be undone and the cluster CANNOT be upgraded. These feature sets are NOT RECOMMENDED FOR PRODUCTION CLUSTERS.
 
 ## Alternatives (Not Implemented)
 
@@ -210,7 +245,7 @@ Utilizing the FeatureGate API on MicroShift is rejected as an alternative approa
    - Does OpenShift actively **block/prevent** upgrades when TechPreviewNoUpgrade/DevPreviewNoUpgrade/CustomNoUpgrade is configured?
    - Or does OpenShift **allow** upgrades to proceed but the resulting cluster becomes unsupported?
 
-   Understanding OpenShift's approach will inform whether MicroShift should implement active blocking logic (pre-upgrade checks that fail) or simply document that upgrades with custom feature gates are unsupported while allowing them to proceed technically.
+  OpenShift actively prevents upgrades of clusters with customized features. OpenShift operators work together to communicate if any component has a had a custom feature gate applied. If so, the cluster-version-operator marks the cluster as un-upgradeable.
 
 2. **How should feature gate compatibility be validated across MicroShift versions?**
 
@@ -228,7 +263,6 @@ The testing strategy focuses on verifying the propagation functionality - that c
 - Validate parsing of `featureSet` values (TechPreviewNoUpgrade, DevPreviewNoUpgrade, CustomNoUpgrade)
 - Test parsing of `customNoUpgrade.enabled` and `customNoUpgrade.disabled` lists
 - Verify configuration schema validation and error handling for malformed configurations
-- Test default behavior when feature gates section is not configured
 
 **API Server Configuration:**
 - Verify feature gate pass-through retains string formating in the kube-apiserver configuration
@@ -249,8 +283,16 @@ The testing strategy focuses on verifying the propagation functionality - that c
 **Component Behavior Verification:**
 This enhancement does not test whether feature gates actually modify Kubernetes component behavior - that is the responsibility of upstream Kubernetes testing. Testing is limited to verifying that MicroShift correctly passes feature gates to the kube-apiserver.
 
-**Upgrade Testing:**
-Since upgrades are not supported when custom feature gates are configured, no additional upgrade testing is required for this enhancement. Default upgrade behavior without custom feature gates is already covered by existing MicroShift test suites.
+**Upgrade Prevention Testing:**
+A test scenario will verify that MicroShift properly blocks upgrades when custom feature gates are configured:
+- Validate that clusters with TechPreviewNoUpgrade, DevPreviewNoUpgrade, or CustomNoUpgrade cannot be upgraded
+- Test that upgrade failures provide clear error messages indicating custom feature gates prevent upgrades
+
+**Custom Feature Gate Immutability Testing:**
+A test scenario verifies that custom feature gate configurations cannot be modified or reverted once applied:
+- Verify that customized feature gates result in the creation of the sentinel file and that it's contents are correct
+- Test that MicroShift correctly overwrites configuration changes with stored sentinel values
+- Verify proper logging of warnings when users attempt to revert or change custom feature gates
 
 ## Graduation Criteria
 
@@ -313,13 +355,8 @@ Any changes to the MicroShift configuration schema must be backwards compatible 
 
 ### Reverting Custom Feature Gate Configurations To Default
 
-**Reverting the cluster to it's default feature-gates is unsupported and not recommended.**
-
 **Recovery Procedures:**
-- Configuration changes only require MicroShift service restart, not full system reboot
-- Invalid configurations prevent service startup but do not affect system stability
-- Greenboot integration ensures automatic rollback if feature gates prevent successful startup
+- To restore MicroShift to a stable and supported state, users must run `$ sudo microshift-cleanup-data --all`, set `.featureGates: {}`, and restart MicroShift
 
-## Infrastructure Needed [optional]
-
-No additional infrastructure is needed for this enhancement. The feature uses existing MicroShift configuration mechanisms and testing infrastructure.
+### Upgrade / Rollback
+- Upgrades are actively blocked when custom feature gates are configured. See [Attempt to Upgrade Cluster with Custom Feature Gates](#attempt-to-upgrade-cluster-with-custom-feature-gates).
