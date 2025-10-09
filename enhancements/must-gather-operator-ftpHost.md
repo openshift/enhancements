@@ -227,7 +227,9 @@ This enhancement modifies the `MustGather` CRD by introducing a new `uploadTarge
 
 ### Disabling the Feature
 
-To disable uploading, simply remove the `uploadTarget` field from the `MustGather` resource. The must-gather collection will still run, but the upload step will be skipped.
+To disable uploading, simply remove the `uploadTarget` field from the `MustGather` resource. The must-gather collection will still run, but the upload step will be skipped. If `uploadTarget` is not present, the collected gather bundle will be kept at:
+1. a PVC, if the PVC is configured
+2. an `emptyDir` volume inside the must-gather job pod, if a PVC is not configured. In this case, the user has to monitor the job logs to know if the collection is complete and then have to copy the bundle to their local filesystem and upload it.
 
 ## Examples
 
