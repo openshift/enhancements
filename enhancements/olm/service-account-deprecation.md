@@ -3,7 +3,8 @@ title: serviceaccount-field-deprecation
 authors:
   - "@rashmigottipati"
 reviewers:
-  - TBD
+  - "@trgeiger"
+  - "@grokspawn"
 approvers:
   - TBD
 creation-date: 2025-10-08
@@ -62,24 +63,63 @@ Update the `ClusterExtension` API to mark `.spec.serviceAccount` as:
 
 - **Optional**
 - **Deprecated** via struct tags and documentation
+- Marked as deprecated in the CRD schema using OpenAPI extensions:
+  - x-kubernetes-deprecated: true
+  - Include appropriate description to warn users the field is ignored
 
 Also, update CRD validation schema accordingly. 
 - This will be done via OpenAPI `x-kubernetes-deprecated: true` annotation in the CRD.
 
 **Example:**
 
+```go
+// Before (current)
+type ClusterExtensionSpec struct {
+    ...
+    ServiceAccount ClusterExtensionServiceAccount `json:"serviceAccount"`
+    ...
+}
+```
+
+```go
+// After (deprecated and optional)
+type ClusterExtensionSpec struct {
+    ...
+    // Deprecated: This field is ignored and will be removed in a future release.
+    // +optional
+    // +kubebuilder:validation:XValidation:message="serviceAccount is deprecated and ignored"
+    ServiceAccount *ClusterExtensionServiceAccount `json:"serviceAccount,omitempty"`
+    ...
+}
+```
+
+**YAML Example:**
+
 ```yaml
+# Before (serviceAccount was required)
 apiVersion: olm.operatorframework.io/v1alpha1
 kind: ClusterExtension
 metadata:
-  name: clusterextension-sample
+  name: argocd-extension
 spec:
-  installNamespace: default
+  installNamespace: argocd
   packageName: argocd-operator
   version: 0.6.0
-  # Optional field, deprecated and ignored
   serviceAccount:
     name: argocd-installer
+```
+
+```yaml
+# After (field is deprecated, optional, and therefore ignored and removed)
+apiVersion: olm.operatorframework.io/v1alpha1
+kind: ClusterExtension
+metadata:
+  name: argocd-extension
+spec:
+  installNamespace: argocd
+  packageName: argocd-operator
+  version: 0.6.0
+  # serviceAccount is now deprecated and has no effect
 ```
 
 ### Controller Logic Changes
