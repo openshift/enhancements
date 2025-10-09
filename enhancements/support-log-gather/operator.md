@@ -11,7 +11,7 @@ approvers:
 api-approvers:
   - "@Prashanth684"
 creation-date: 2025-08-14
-last-updated: 2025-08-14
+last-updated: 2025-10-09
 status: implementable
 see-also:
   - "/enhancements/oc/must-gather.md"
