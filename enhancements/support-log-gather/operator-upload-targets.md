@@ -1,5 +1,5 @@
 ---
-title: must-gather-operator-ftpHost
+title: operator-upload-targets
 authors:
   - "@shivprakahsmuley"
 reviewers:
@@ -12,7 +12,7 @@ api-approvers:
   - "@TrilokGeer"
   - "@Prashanth684"
 creation-date: 2025-08-18
-last-updated: 2025-08-18
+last-updated: 2025-10-09
 tracking-link:
   - https://issues.redhat.com/browse/MG-53
 status: implementable
@@ -46,7 +46,7 @@ This enhancement introduces a flexible `uploadTarget` field to the `MustGather.s
 ### Goals
 
 * Replace the monolithic upload configuration with a flexible, discriminated union structure.
-* Define an `SFTP` upload type for sending artifacts to a secure FTP server, including Red Hat support.
+* Define an `SFTP` upload type for sending artifacts to a secure FTP server, including an option for Red Hat internal users.
 * Ensure the API is easily extensible for future upload types (e.g., S3, HTTP) without requiring breaking changes.
 * Provide clear validation to ensure that only one upload target is configured at a time and that its configuration is valid.
 
@@ -121,17 +121,26 @@ type SFTPUploadTargetConfig struct {
     // caseManagementAccountSecretRef references a secret containing the upload credentials.
     // +required
     CaseManagementAccountSecretRef corev1.LocalObjectReference `json:"caseManagementAccountSecretRef"`
+
+    // A flag to specify if the upload user provided in the caseManagementAccountSecret is a RH internal user.
+    // See documentation for further information.
+    // +kubebuilder:default:=true
+    // +optional
+    InternalUser bool `json:"internalUser,omitempty"`
 }
 ```
 
 ### Topology Considerations
+
+No specific topology considerations exist.
+The operator behaves identically on a dedicated OpenShift cluster as that on a hosted HyperShift cluster. Single node OpenShift clusters running the operator and gather pod could itself be some overhead but there is no difference in the uploadTarget behaviour.
+MicroShift is well out of scope for now as it does not ship with an OLM and the default must-gather script will not be useful there.
 
 #### Hypershift / Hosted Control Planes
 
 
 #### Standalone Clusters
 
-This change is fully relevant for standalone clusters where must-gather operations are performed directly.
 
 #### Single-node Deployments or MicroShift
 
@@ -169,6 +178,7 @@ A simpler approach of keeping a flat structure with optional fields for each pro
 ### E2E Tests
 
 *   Create a `MustGather` resource with a valid `uploadTarget` of type `SFTP` and verify the upload succeeds.
+*   Create a `MustGather` resource with the `InternalUser` flag set to true and verify the upload succeeds.
 *   Test with a custom SFTP host.
 *   Verify that uploading is disabled when `uploadTarget` is unset.
 *   Test the backward compatibility path by creating a `MustGather` resource using only the deprecated fields.
@@ -190,7 +200,7 @@ A simpler approach of keeping a flat structure with optional fields for each pro
 
 ### Removing a deprecated feature
 
-The deprecated fields `caseID`, `caseManagementAccountSecretRef`, and `ftpHost` are removed.
+The fields `caseID`, `caseManagementAccountSecretRef`, and `ftpHost` were present in community version and are being removed through this enhancement.
 
 ## Upgrade / Downgrade Strategy
 
@@ -272,6 +282,27 @@ spec:
       caseManagementAccountSecretRef:
         name: case-management-creds
       host: sftp.access.stage.redhat.com
+```
+
+### SFTP Upload for Internal Users
+
+This example configures an upload for a Red Hat internal user.
+
+```yaml
+apiVersion: managed.openshift.io/v1alpha1
+kind: MustGather
+metadata:
+  name: example-mustgather-internal-user
+spec:
+  serviceAccountRef:
+    name: must-gather-admin
+  uploadTarget:
+    type: SFTP
+    sftp:
+      caseID: "01234567"
+      caseManagementAccountSecretRef:
+        name: internal-user-creds
+      internalUser: true
 ```
 
 ## Implementation History
