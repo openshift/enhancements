@@ -292,8 +292,10 @@ status:
   to configure the desired release contents. Adding (or removing) an entry from
   the list will trigger an update on all the control plane nodes
 * The `spec.releases.name` format is a string specifying the release bundle
-  identifier. It must match the value reported in the 
-  `status.availableReleases` field
+  identifier. It must match the value discovered and reported in the 
+  `status.availableReleases` field (once the copy will be successfully
+  completed the same string will be visible as part of the `status.releases`
+  field)
 * The `status.availableReleases` will report the name of the currently detected
   releases from the attached ISO (and not yet installed in the system). This
   value could be used by the user to amend the IRI resource to add a new
@@ -406,7 +408,7 @@ the update request.
 The deletion of the IRI `cluster` resource will be handled by a finalizer,
 and it will stop all the registry services running on the control plane nodes.
 In addition, all the currently stored release payloads will be deleted from the
-nodes disk, and all the previously resources created will be removed as well
+nodes disk, and all the previously created resources will be removed as well
 (such as the IDMS ones) to complete the cleanup.
 
 It won't be allowed to delete the resource if the current release is still
@@ -414,10 +416,15 @@ managed by the IRI resource. Also in this case, a ValidatingAdmissionPolicy
 performing a check against the `ClusterVersion` `version` object will be used
 (to verify that none of the IRI releases is currently being used by the
 cluster).
+
 This means that a user, to opt-out from the feature, will have to previously
 setup his/her own registry with the required mirrored content and then perform
 a cluster upgrade. Once successfully completed, it'd be possible to remove the
-IRI resource.
+IRI resource and the unused IDMS entries.
+
+In the unlikely scenario where a user may want to re-activate the feature
+(after the deletion) then it will be required to manuall re-create the missing
+IRI and IDMS resources.
 
 #### Extended RHCOS ISO build
 
@@ -480,7 +487,6 @@ required.
 Assisted Service will apply a pre-flight validation to ensure that the
 control plane nodes will meet the new storage requirement. Additionally, it
 should be properly documented in the pre-requistes section.
-
 
 ### Risks and Mitigations
 
