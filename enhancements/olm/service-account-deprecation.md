@@ -62,8 +62,8 @@ Given the limited benefit and high complexity of this approach, we propose simpl
 
 Update the `ClusterExtension` API to mark `.spec.serviceAccount` as:
 
-- **Optional**
-- **Deprecated** via struct tags and documentation
+- Optional
+- Deprecated via struct tags and documentation
 - Marked as deprecated in the CRD schema using OpenAPI extensions:
   - x-kubernetes-deprecated: true
   - Include appropriate description to warn users the field is ignored
@@ -134,39 +134,36 @@ spec:
 This config is passed to the helm.ActionConfigGetter, ensuring that all Helm operations (install, upgrade, uninstall) use the same identity.
 
 - Log a deprecation warning if `.spec.serviceAccount` is set
-
-  - `[DEPRECATION] 'spec.serviceAccount' is specified in ClusterExtension 'foo', but is ignored and will be removed in a future release.
-`
-
-### Risks and Mitigations
-
-Deprecating and ignoring the `.spec.serviceAccount` field introduces potential risks, particularly for users who have built workflows or assumptions around impersonation-based reconciliation. Below are the primary risks, along with mitigations.
-
-#### Risk: Unexpected Behavior for Users Relying on SA
-
-Some users currently set `.spec.serviceAccount` assuming the controller will impersonate that ServiceAccount during reconciliation. Changing this behavior without notice could break their expectations around RBAC scopes and permissions, for example: restricting access to specific namespaces or resources.
-
-#### Mitigation:
-The controller will log a clear deprecation warning whenever a ClusterExtension includes the serviceAccount field, indicating it is now ignored and will be removed in a future release. Additionally, the field will be marked as deprecated in the CRD schema and documentation to make this clear during resource creation and review. Migration instructions will be provided in the release notes to assist users with updating their configurations.
-
----
-
-#### Risk: Broader Permissions Required for Controller’s ServiceAccount
-By removing per-resource impersonation and falling back to the controller’s default identity, the controller must operate with a broader set of permissions. This potentially violates the principle of least privilege, since the controller’s ServiceAccount may now need to access resources across multiple namespaces or API groups on behalf of all managed ClusterExtensions.
-
-#### Mitigation:  
-Although this centralizes privileges, the controller’s ServiceAccount is cluster-scoped and managed by cluster administrators. Its permissions can be restricted and audited through standard Kubernetes RBAC policies, providing clearer and simpler management compared to multiple impersonated identities. This approach aligns with common practices used by other Kubernetes controllers.
-
----
-
-#### Risk: Potential Breaking Change for Existing Users
-
-Some users may have been relying on the controller to impersonate the specified serviceAccount during reconciliation. Eventually removing support for this behavior may lead to unexpected changes in how permissions are applied, especially if users were using the field to restrict access.
-
-#### Mitigation:
-To ensure a smooth transition, this change will follow a deprecation process. The field will remain in the API but will be ignored by the controller. A clear warning will be logged when the field is used. After multiple releases, the field will be removed entirely from the API and CRD. This timeline gives users enough time to adapt their configurations and permissions.
+```
+[DEPRECATION] 'spec.serviceAccount' is specified in ClusterExtension 'foo', but is ignored and will be removed in a future release.
+```
 
 ## Design Details
+
+### Test Plan
+
+To validate the safe deprecation and eventual removal of the `.spec.serviceAccount` field, the following implementation and testing steps will be followed.
+
+#### Unit Tests
+  - Remove tests that exercised impersonation logic and ServiceAccount specific behavior.
+  - Add new tests to confirm:
+    - The `.spec.serviceAccount` field is ignored during reconciliation.
+    - A warning is logged when the field is set.
+    - Default behavior uses the controller’s own identity.
+
+#### E2E Tests
+- Update E2E tests to:
+  - Deploy `ClusterExtension` resources with and without the deprecated field.
+  - Verify that:
+    - Reconciliation succeeds in both cases.
+    - Deprecation warnings appear in controller logs.
+
+#### Upgrade Tests
+- Add upgrade test scenarios to validate:
+  - CRD schema updates (required -> optional -> removed) behave safely and correctly across releases.
+  - Manifests with the deprecated field do not block upgrades to 4.21 or 4.22.
+  - Manifests with the field are rejected cleanly in 4.23 (removal release).
+  - No reconciliation failures occur due to field removal when manifests are properly cleaned.
 
 ### Graduation Criteria / Deprecation Plan
 
@@ -210,6 +207,34 @@ This phased approach, over the course of three releases, provides notice and a c
 **Downgrading from 4.22 to 4.21 or 4.20:**
 - The field still exists in the API and CRD, so downgrades are safe.  
 - However, any functionality tied to impersonation will not resume unless controller logic is reverted or adjusted accordingly.
+
+### Risks and Mitigations
+
+Deprecating and ignoring the `.spec.serviceAccount` field introduces potential risks, particularly for users who have built workflows or assumptions around impersonation-based reconciliation. Below are the primary risks, along with mitigations.
+
+#### Risk: Unexpected Behavior for Users Relying on SA
+
+Some users currently set `.spec.serviceAccount` assuming the controller will impersonate that ServiceAccount during reconciliation. Changing this behavior without notice could break their expectations around RBAC scopes and permissions, for example: restricting access to specific namespaces or resources.
+
+#### Mitigation:
+The controller will log a clear deprecation warning whenever a ClusterExtension includes the serviceAccount field, indicating it is now ignored and will be removed in a future release. Additionally, the field will be marked as deprecated in the CRD schema and documentation to make this clear during resource creation and review. Migration instructions will be provided in the release notes to assist users with updating their configurations.
+
+---
+
+#### Risk: Broader Permissions Required for Controller’s ServiceAccount
+By removing per-resource impersonation and falling back to the controller’s default identity, the controller must operate with a broader set of permissions. This potentially violates the principle of least privilege, since the controller’s ServiceAccount may now need to access resources across multiple namespaces or API groups on behalf of all managed ClusterExtensions.
+
+#### Mitigation:  
+Although this centralizes privileges, the controller’s ServiceAccount is cluster-scoped and managed by cluster administrators. Its permissions can be restricted and audited through standard Kubernetes RBAC policies, providing clearer and simpler management compared to multiple impersonated identities. This approach aligns with common practices used by other Kubernetes controllers.
+
+---
+
+#### Risk: Potential Breaking Change for Existing Users
+
+Some users may have been relying on the controller to impersonate the specified serviceAccount during reconciliation. Eventually removing support for this behavior may lead to unexpected changes in how permissions are applied, especially if users were using the field to restrict access.
+
+#### Mitigation:
+To ensure a smooth transition, this change will follow a deprecation process. The field will remain in the API but will be ignored by the controller. A clear warning will be logged when the field is used. After multiple releases, the field will be removed entirely from the API and CRD. This timeline gives users enough time to adapt their configurations and permissions.
 
 ## Implementation History
 - https://github.com/operator-framework/operator-controller/pull/2242
