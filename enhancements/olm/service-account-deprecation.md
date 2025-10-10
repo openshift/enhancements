@@ -6,9 +6,10 @@ reviewers:
   - "@trgeiger"
   - "@grokspawn"
 approvers:
-  - TBD
+  - "@trgeiger"
+  - "@grokspawn"
 creation-date: 2025-10-08
-last-updated: 2025-10-08
+last-updated: 2025-10-10
 status: implementable
 ---
 
@@ -169,35 +170,46 @@ To ensure a smooth transition, this change will follow a deprecation process. Th
 
 ### Graduation Criteria / Deprecation Plan
 
-We will deprecate the .spec.serviceAccount field over the course of multiple releases:
+We will deprecate the .spec.serviceAccount field over the course of three OpenShift releases following the kubernetes' deprecation policy:
 
-Next Release:
+OpenShift 4.20 (current release): 
+- No changes. The .spec.serviceAccount field continues to be a required field and function as it currently does.
+
+OpenShift 4.21: (next release - N)
 - Mark the field as optional in the API.
 - The controller ignores the field entirely.
 - Log a warning if it is set, to alert users.
 
-Over the course of multiple releases:
-- Remove all internal references and usage of the field.
-- Remove the field from the API and CRD definition.
+OpenShift 4.22: (N+1) 
+- The field remains deprecated and ignored. The controller continues to log a warning if it is used.
 
-This phased approach gives users time to adjust and avoid disruption.
+OpenShift 4.23: (N+2) 
+- Remove all internal references and usage of the field.
+- Remove the field from the API and CRD definition. 
+**Note**: Any usage of the field in manifests will cause validation errors. 
+
+This phased approach, over the course of three releases, provides notice and a clear migration path for users to remove usage of the deprecated field safely. It gives users time to adjust and avoid disruption.
 
 ### Upgrade / Downgrade Strategy
 
-Upgrading to the release that deprecates the field:  
+**Upgrading to OpenShift 4.21 (deprecation  release):**
+- The `.spec.serviceAccount` field becomes optional and is ignored by the controller.  
+- A warning is logged if the field is set.  
 - The controller will stop using the `.spec.serviceAccount` field, but all other functionality continues to work as before.  
 - If you relied on impersonation, make sure the controller’s ServiceAccount has the necessary permissions.
 
-Upgrading to the release that removes the field:  
-- The `.spec.serviceAccount` field will no longer be present in the API or CRD.  
-- Ensure your configurations no longer include this field before upgrading.
+**Upgrading to OpenShift 4.23 (removal release):**
+- The `.spec.serviceAccount` field will no longer be present in the API or CRD.
+- Manifests including this field will be rejected during validation.  
+- Ensure your manifests no longer include this field before upgrading.
 
-Downgrading after the field has been deprecated: 
-- The field is still present in the API but ignored by the controller, so downgrades should work without issues.
+**Downgrading from 4.23 to 4.22 or earlier:**
+- Downgrades may fail or cause issues if manifests rely on a CRD that no longer includes the field.  
+- You must remove all usage of `.spec.serviceAccount` from existing resources before downgrading to a release that expects the field to exist in the schema.
 
-Downgrading after the field has been removed:
-- Older versions that expect the `.spec.serviceAccount` field may fail if it is missing from the CRD or manifests.  
-- Guidance will be provided on how to clean up or remove the field safely before downgrading.
+**Downgrading from 4.22 to 4.21 or 4.20:**
+- The field still exists in the API and CRD, so downgrades are safe.  
+- However, any functionality tied to impersonation will not resume unless controller logic is reverted or adjusted accordingly.
 
 ## Implementation History
 - https://github.com/operator-framework/operator-controller/pull/2242
