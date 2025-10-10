@@ -82,6 +82,9 @@ for this enhancement.
 * Securing the communication between the Assisted Installer UI, Assisted
 Service, and client browsers will be addressed in future updates.
 
+* Adding UI support to the current ABI flow (starting with install-config and
+then switching to UI post-boot) .
+
 ## Proposal
 
 This enhancement proposes extending the functionality of the Agent Based
