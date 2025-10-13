@@ -11,7 +11,7 @@ approvers:
 api-approvers:
   - "@Prashanth684"
 creation-date: 2025-08-14
-last-updated: 2025-10-09
+last-updated: 2025-10-14
 status: implementable
 see-also:
   - "/enhancements/oc/must-gather.md"
@@ -142,6 +142,12 @@ type MustGatherSpec struct {
     // Uploading is disabled if this field is unset.
     // +optional
     UploadTarget *UploadTarget `json:"uploadTarget,omitempty"`
+
+    // storage represents the volume where collected must-gather tar
+    // is persisted. Persistent storage is disabled if this field is unset,
+    // an ephemeral volume will be used.
+    // +optional
+    Storage *StorageConfig `json:"storage,omitempty"`
 }
 
 // AdditionalConfig sets extra parameters for the gather process.
@@ -193,6 +199,46 @@ type SFTPUploadTargetConfig struct {
     // +optional
     // +kubebuilder:default:=false
     InternalUser bool `json:"internalUser,omitempty"`
+}
+
+// StorageType is a specific method for persisting collected must-gather tar.
+// +kubebuilder:validation:Enum=PersistentVolume
+type StorageType string
+
+// StorageConfig defines the configuration for persisting must-gather tar.
+// +kubebuilder:validation:XValidation:rule="has(self.type) && self.type == 'PersistentVolume' ? has(self.persistentVolume) : !has(self.persistentVolume)",message="persistentVolume config is required when storage type is PV, and forbidden otherwise"
+// +union
+type StorageConfig struct {
+    // type defines the method used for persisting to a specific storage method.
+    // +unionDiscriminator
+    // +required
+    Type StorageType `json:"type"`
+
+    // persistentVolume specifies the PersistentVolume that will be used to store the must-gather archive.
+    // The PersistentVolume must be created in the same namespace as the MustGather CR.
+    // +unionMember
+    // +optional
+    PersistentVolume *PersistentVolumeConfig `json:"persistentVolume,omitempty"`
+}
+
+// PersistentVolumeConfig defines the configuration for Persistent Volume storage.
+type PersistentVolumeConfig struct {
+    // claim is a required field that specifies the configuration of the PersistentVolumeClaim that will be used to store the must-gather archive.
+    // The PersistentVolumeClaim must be created in the openshift-insights namespace.
+    // +required
+    Claim PersistentVolumeClaimReference `json:"claim"`
+    // subPath is path to a directory on the PersitentVolume where
+    // gathered tar will be stored.
+    // +optional
+    SubPath string `json:"subPath,omitempty"`
+}
+
+// persistentVolumeClaimReference is a reference to a PersistentVolumeClaim.
+type PersistentVolumeClaimReference struct {
+    // name is a string that follows the DNS1123 subdomain format.
+    // +kubebuilder:validation:MaxLength:=253
+    // +required
+    Name string `json:"name"`
 }
 
 // +k8s:openapi-gen=true
