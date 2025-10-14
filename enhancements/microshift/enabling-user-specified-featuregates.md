@@ -202,7 +202,7 @@ Each component will then internally process these settings according to its capa
   - **Conflicting Feature Gate Settings**: A feature gate appears in both `.customNoUpgrade.enabled` and `.customNoUpgrade.disabled`
   - **Conflicting Feature Set Settings**: Feature gates are defined under `.customNoUpgrade.[enabled|disabled]` but `.featureSet:` is not `customNoUpgrade`.
 - **API Server Validation**: The kube-apiserver does not validate the feature gates it receives from MicroShift before propagating them. This behavior is the same on OpenShift
-- **Component-level Validation**: Unrecognized featuer-gate values are ignored by components. The component will only log them as a warning
+- **Component-level Validation**: Unrecognized feature-gate values are ignored by components. The component will only log them as a warning
 - **Startup Failures**: May occur when featureGate settings conflict (i.e. a featureGate is both enabled and disabled)
 - **Upgrade Failure**: RPM install pre-checks detect feature customizations have already been made because of sentinel file written to `/var/lib/microshift/`, and the upgrade fails
 - **Custom Features cannot be Reverted or Changed**: MicroShift logs an error that user customizations have changed, then overwrites the changes with the user's original feature gates. This prevents the cluster from becoming unstable. This is also how OpenShift handles this scenario
