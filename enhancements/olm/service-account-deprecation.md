@@ -3,13 +3,16 @@ title: serviceaccount-field-deprecation
 authors:
   - "@rashmigottipati"
 reviewers:
-  - "@trgeiger"
+  - "@everettraven"
   - "@grokspawn"
+  - "@trgeiger"
+  - "@joelanford"
 approvers:
+  - "@everettraven"
   - "@trgeiger"
   - "@grokspawn"
 creation-date: 2025-10-08
-last-updated: 2025-10-10
+last-updated: 2025-10-15
 status: implementable
 ---
 
