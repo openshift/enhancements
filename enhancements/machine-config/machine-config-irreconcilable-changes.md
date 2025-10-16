@@ -36,7 +36,7 @@ fields), locking the user into an Ignition specification for the rest of the
 life of the cluster.
 
 The exhaustive list of fields the MCD supports to be changed after the cluster 
-is built can be found in the ["What can you change with machine configs?"](https://docs.redhat.com/en/documentation/openshift_container_platform/4.18/html/machine_configuration/machine-config-index#what-can-you-change-with-machine-configs) 
+is built can be found in the ["What can you change with machine configs?"](https://docs.redhat.com/en/documentation/openshift_container_platform/4.19/html/machine_configuration/machine-config-index#what-can-you-change-with-machine-configs) 
 section of the official documentation.
 
 While this is generally useful for safety, it becomes problematic for any 
