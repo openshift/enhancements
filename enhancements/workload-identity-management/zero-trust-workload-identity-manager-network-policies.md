@@ -41,8 +41,7 @@ In a multi-tenant or security-conscious environment, it is crucial to enforce ne
 
 - Implement default network policies for all ZTWIM components to secure network traffic.
 - Apply a default-deny policy for all pods in the `zero-trust-workload-identity-manager` namespace.
-- Define specific ingress and egress rules for the ZTWIM operator pod to allow essential communication.
-- Define baseline ingress and egress rules for each ZTWIM component (`spire-server`, `spire-agent`, `spiffe-csi-driver`, `spire-oidc-discovery-provider`) based on traffic analysis.
+- Define specific ingress and egress rules for the ZTWIM operator pod to allow essential communication. Define baseline ingress and egress rules for each ZTWIM component (`spire-server`, `spire-agent`, `spiffe-csi-driver`, `spire-oidc-discovery-provider`) based on traffic analysis.
 - Ensure that metrics collection for all components remains functional.
 - Ensure the API server can communicate with SPIRE webhook components for admission control.
 - Deploy network policies automatically with no user configuration required.
@@ -56,11 +55,9 @@ In a multi-tenant or security-conscious environment, it is crucial to enforce ne
 
 ## Proposal
 
-The proposal is to implement default Kubernetes NetworkPolicy objects for all `zero-trust-workload-identity-manager` components to secure network traffic. These policies will be deployed automatically with the operator and operands, requiring no user configuration. The strategy is to apply default-deny policies and then allow only the necessary traffic based on the component requirements identified through traffic analysis in SPIRE-178 research. All network policies will be managed by the operator deployment manifests and OLM bundle.
-
 ### Workflow Description
 
-1. **Default Policy Deployment:** Network policies are deployed automatically as part of the operator installation with no user configuration required.
+1. **Default Policy Deployment:** Operator's Network policies are deployed automatically as part of the operator installation with no user configuration required while operand's network policies are applied during operand's installation.
 
 2. **Default Deny:** Baseline `NetworkPolicy` objects deny all traffic for each component, ensuring that no traffic is allowed unless explicitly permitted by additional policies.
 
@@ -73,6 +70,7 @@ The proposal is to implement default Kubernetes NetworkPolicy objects for all `z
     * **Webhook Ingress:** Allow webhook traffic on port 9443/TCP for SPIRE controller manager
     * **Metrics Ingress:** Allow metrics collection on port 9402/TCP and port 8082/TCP for SPIRE controller manager from monitoring namespace
     * **API Server Egress:** Allow communication with Kubernetes API server
+    * **Federation:** Allow egress-ingress communication over federation port 8443/TCP
     * **DNS Egress:** Allow DNS resolution for SPIRE controller manager
 
 5. **SPIRE Agent Policies:** Default policies for SPIRE agent components include:
@@ -89,7 +87,7 @@ The proposal is to implement default Kubernetes NetworkPolicy objects for all `z
 
 ### Implementation Details/Notes/Constraints
 
-The implementation will involve creating default `NetworkPolicy` objects that are deployed automatically with ZTWIM components. No API extensions are required as the policies will be static and based on the traffic analysis from SPIRE-178 research. The operator will deploy operand network policies as part of the standard component deployment, while the operator's own network policies will be handled by the OLM bundle.
+The implementation will involve creating default `NetworkPolicy` objects that are deployed automatically with ZTWIM components. No API extensions are required as the policies will be static. The operator will deploy operand network policies as part of the standard component deployment, while the operator's own network policies will be handled by the OLM bundle.
 
 #### ZTWIM Component Network Policies
 
@@ -231,6 +229,29 @@ The following network policies are deployed automatically for each component. Al
        - protocol: TCP
          port: 6443
    ---
+   # SPIRE Server federation
+   apiVersion: networking.k8s.io/v1
+   kind: NetworkPolicy
+   metadata:
+     name: allow-spire-server-federation
+     namespace: zero-trust-workload-identity-manager
+   spec:
+     podSelector:
+       matchLabels:
+        app.kubernetes.io/name: spire-server
+     policyTypes:
+     - Ingress
+     - Egress
+     ingress:
+     # Allow federation traffic 
+     - ports:
+       - protocol: TCP
+         port: 8443
+     egress:
+     - ports:
+       - protocol: TCP
+         port: 8443
+   ---
    # SPIRE Server egress to DNS for controller manager
    apiVersion: networking.k8s.io/v1
    kind: NetworkPolicy
@@ -340,8 +361,6 @@ The following network policies are deployed automatically for each component. Al
          port: 8443
    ```
 
-**Note:** The SPIFFE CSI driver runs as a DaemonSet on all nodes and communicates with SPIRE agent via Unix domain sockets. Based on SPIRE-178 traffic analysis, no specific network policies are required for the CSI driver as it doesn't require network-based communication for its core functionality.
-
 ### API Extensions
 
 Not applicable. This enhancement does not introduce any API extensions as network policies are deployed with default configurations based on traffic analysis.
@@ -352,7 +371,7 @@ The proposed network policies are designed to be effective across various cluste
 
 #### Hypershift / Hosted Control Planes
 
-In a Hypershift environment, the `zero-trust-workload-identity-manager` operator and operands run in the hosted cluster within the same namespace. The policies correctly target the in-cluster API server endpoint for egress traffic. No special configuration is required.
+NA
 
 #### Standalone Clusters
 
@@ -360,12 +379,12 @@ For standard, standalone clusters, the policies will function as described, secu
 
 #### Single-node Deployments or MicroShift
 
-The network policies are fully compatible with single-node and MicroShift deployments. They will enforce the same principle of least privilege, regardless of the cluster's scale.
+NA
 
 ### Risks and Mitigations
 
 * **Risk:** Policies are too restrictive and block legitimate traffic, causing ZTWIM components to fail.
-    * **Mitigation:** The proposed policies are based on traffic analysis using network observability tools from SPIRE-178 research. All essential flows (API server access, inter-component communication, metrics) have been identified and explicitly allowed. The test plan includes end-to-end validation to confirm functionality.
+    * **Mitigation:** All essential flows (API server access, inter-component communication, metrics) have been identified and explicitly allowed. The test plan includes end-to-end validation to confirm functionality.
 * **Risk:** SPIRE Agent cannot reach SPIRE Server due to network policy restrictions.
     * **Mitigation:** The proposal includes specific ingress and egress rules for SPIRE agent-to-server communication on port 8081/TCP. Traffic analysis confirms this is the primary communication channel.
 * **Risk:** Workload API access is blocked for applications using SPIFFE identities.
@@ -373,9 +392,7 @@ The network policies are fully compatible with single-node and MicroShift deploy
 * **Risk:** Debugging becomes more difficult.
     * **Mitigation:** Failures due to network policies are observable. Connection timeouts in logs or metrics are a strong indicator. Cluster administrators can use tools like the OpenShift Network Observability Operator to visualize traffic flows and identify blocked connections.
 * **Risk:** Default policies may not cover all edge cases or future requirements.
-    * **Mitigation:** The policies are based on comprehensive traffic analysis from SPIRE-178 research and cover all identified communication patterns. Future enhancements can extend policies if new requirements are identified.
-* **Risk:** DNS resolution may fail if DNS pods are not properly labeled.
-    * **Mitigation:** The policies target the standard OpenShift DNS configuration with proper namespace and pod selectors. DNS policies are only applied to components that require external DNS resolution (SPIRE server controller manager and SPIRE agent).
+    * **Mitigation:** Future enhancements can extend policies if new requirements are identified.
 
 ### Drawbacks
 
@@ -427,7 +444,7 @@ Not applicable. This enhancement introduces network policies for the first time 
 
 ## Version Skew Strategy
 
-This enhancement only involves adding `NetworkPolicy` resources. The operand network policies are managed by the `zero-trust-workload-identity-manager` operator, while the operator's own network policies are managed by the OLM bundle. There are no version skew concerns with other components, as the operator's version will be tied to the operand policies it deploys. The Kubernetes API for `NetworkPolicy` is stable.
+NA
 
 ## Operational Aspects of API Extensions
 
@@ -435,54 +452,4 @@ Not applicable, as this enhancement does not introduce any API extensions.
 
 ## Support Procedures
 
-Support personnel debugging potential network policy issues should follow these steps:
-
-1. **Verify NetworkPolicy Objects:**
-    - Check if NetworkPolicy objects exist: `oc get networkpolicy -n zero-trust-workload-identity-manager`
-    - Compare actual policies with expected default configuration
-
-2. **Troubleshoot Connectivity Issues:**
-    - Check pod logs for connection timeout errors
-    - Use the OpenShift Network Observability Operator to visualize traffic flows
-    - Verify that default NetworkPolicy rules are correctly applied
-
-3. **Common Issues:**
-    - **SPIRE agent cannot reach SPIRE server:** Check if default policies allow agent-to-server communication on port 8081/TCP
-    - **Metrics not accessible:** Verify default policies are applied correctly and monitoring namespace has `name: openshift-monitoring` label
-    - **DNS resolution failing:** Verify DNS egress policies are correctly applied for SPIRE server controller manager and SPIRE agent
-    - **Workload API not accessible:** Verify Unix socket communication is working (not affected by network policies)
-    - **OIDC discovery not accessible:** Verify HTTPS ingress policy is correctly applied for port 8443/TCP
-
----
-
-## Appendix
-
-### Port Summary
-
-| Component | Port | Purpose | Protocol |
-|-----------|------|---------|----------|
-| Operator Controller | 8443 | Metrics | TCP |
-| SPIRE Server | 8081 | gRPC API | TCP |
-| SPIRE Server | 9402 | Metrics | TCP |
-| SPIRE Server (Controller Manager) | 9443 | Webhooks | TCP |
-| SPIRE Server (Controller Manager) | 8082 | Metrics | TCP |
-| SPIRE Agent | 9402 | Metrics | TCP |
-| OIDC Discovery Provider | 8443 | HTTPS API | TCP |
-
-### Communication Matrix
-
-| Source Component | Target Component | Port | Purpose |
-|------------------|------------------|------|---------|
-| SPIRE Agent | SPIRE Server | 8081 | Agent registration, SVID requests |
-| Operator Controller | Kubernetes API Server | 6443 | CRD operations, resource management |
-| SPIRE Server | Kubernetes API Server | 6443 | Node attestation, cluster operations |
-| SPIRE Agent | Kubernetes API Server | 6443 | Node attestation |
-| SPIRE Server (Controller Manager) | DNS | 5353 | Service discovery |
-| SPIRE Agent | DNS | 5353 | Service discovery |
-| Monitoring (openshift-monitoring) | Operator Controller | 8443 | Metrics collection |
-| Monitoring (openshift-monitoring) | SPIRE Server | 9402 | Metrics collection |
-| Monitoring (openshift-monitoring) | SPIRE Controller Manager | 8082 | Metrics collection |
-| Monitoring (openshift-monitoring) | SPIRE Agent | 9402 | Metrics collection |
-| Kubernetes API Server | SPIRE Controller Manager | 9443 | Admission webhooks |
-| External Clients | OIDC Discovery Provider | 8443 | OIDC discovery, JWT validation |
-| SPIFFE CSI Driver | SPIRE Agent | Unix Socket | Workload API (no network policy) |
+NA
