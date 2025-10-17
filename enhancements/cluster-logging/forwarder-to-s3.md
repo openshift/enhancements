@@ -13,7 +13,7 @@ approvers:
 api-approvers:
   - "@alanconway"
 creation-date: 2025-09-08
-last-updated: 2025-09-08
+last-updated: 2025-10-16
 tracking-link:
   - https://issues.redhat.com/browse/OBSDA-1099
   - https://issues.redhat.com/browse/LOG-7680
@@ -63,8 +63,7 @@ otherwise exceed the size limits of Cloudwatch
 This enhancement proposes to:
 
 * Enhance the **ClusterLogForwarder** API to add an S3 output
-  * Define a default schema for writing log records to an S3 bucket that is based
-upon the log type and source in order to be consistent with other output types
+  <!-- * Define a default schema for writing log records to an S3 bucket that is based upon the log type and source in order to be consistent with other output types -->
   * Allow the schema for writting log records to be modified by the administrator
   * Reuse the authorization mechanisms that are available with the Cloudwatch output
 * Add a generator to support generating collector configuration based upon the spec defined by the **ClusterLogForwarder** API
@@ -99,7 +98,7 @@ spec:
       region:                # (optional) string that is different from the configured service default
       bucket:                # string for the S3 bucket absent leading 's3://' or trailing '/' and
                              #   truncated to 63 characters to meet length restrictions
-      keyPrefix:             # (optional) templated string (see note 1)
+      keyPrefix:             # templated string (see note 1)
       authentication:
         type:                # enum: awsAccessKey, iamRole
         awsAccessKey:
@@ -120,6 +119,14 @@ spec:
         maxRetryDuration:    # (optional) duration
 ```
 
+**Note 1:** A combination of static or dynamic values consisting of field paths followed by "||" followed by another field path 
+or a static value (e.g `logs_{.kubernetes.namespace_name||.hostname||"unknown"}_my_workload_{.openshift.sequence_id||"none"}`). A dynamic value is encased in single curly brackets "{}" and MUST end with a static fallback value separated with "||".
+Static values can only contain alphanumeric characters along with dashes, underscores, dots and forward slashes.
+
+Prefixes are necessary for partitioning logs from other objects in the bucket.  If the prefix represents a directory, 
+it must end in "/" to act as a directory path. A trailing "/" (forward slash) is not automatically added.
+
+<!-- TODO: Enable as required
 **Note 1:** A combination of date formatters, static or dynamic values consisting of field paths followed by "||" followed by another field path or a static value (e.g `foo.{"%Y-%m-%d"}/{.bar.baz||.qux.quux.corge||.grault||"nil"}-waldo.fred{.plugh||"none"}`)
 
 Date formatters are specified using one or more of the following subset of [chrono](https://docs.rs/chrono/latest/chrono/format/strftime/index.html#specifiers)
@@ -145,7 +152,7 @@ The collector will write logs to the s3 bucket defaulting the key prefix that is
 | Audit | auditd|`<cluster_id>/<yyyy-mm-dd>/<log_type>/<log_source>/<host_name>/`|
 | Audit | kubeAPI|`<cluster_id>/<yyyy-mm-dd>/<log_type>/<log_source>/`|
 | Audit | openshiftAPI|`<cluster_id>/<yyyy-mm-dd>/<log_type>/<log_source>/`|
-| Audit | ovn|`<cluster_id>/<yyyy-mm-dd>/<log_type>/<log_source>/`|
+| Audit | ovn|`<cluster_id>/<yyyy-mm-dd>/<log_type>/<log_source>/`| -->
 
 **Note 2:** The collector will encode events as [JSON](https://www.rfc-editor.org/rfc/rfc8259)
 
