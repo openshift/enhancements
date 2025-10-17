@@ -486,10 +486,3 @@ Support personnel debugging potential network policy issues should follow these 
 | Kubernetes API Server | SPIRE Controller Manager | 9443 | Admission webhooks |
 | External Clients | OIDC Discovery Provider | 8443 | OIDC discovery, JWT validation |
 | SPIFFE CSI Driver | SPIRE Agent | Unix Socket | Workload API (no network policy) |
-
-### References
-
-- [SPIRE-178 Research Document](./SPIRE-178_Research_Identify_traffic_inflow_and_outflow_into_ZTWIM_Operator_&_Operand.pdf)
-- [Cert-Manager Network Policies Enhancement](https://github.com/PillaiManish/enhancements/blob/c84693da6ea06780da33988cd12fe984f793c169/enhancements/cert-manager/cert-manager-network-policies.md)
-- [Kubernetes NetworkPolicy Documentation](https://kubernetes.io/docs/concepts/services-networking/network-policies/)
-- [OpenShift NetworkPolicy Documentation](https://docs.openshift.com/container-platform/latest/networking/network_policy/about-network-policy.html)
