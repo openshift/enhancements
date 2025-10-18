@@ -26,12 +26,19 @@ Organizations deploying workloads across multiple OpenShift clusters need secure
 
 ### User Stories
 
-* As a platform engineer, I want to configure SPIRE federation declaratively in the SpireServer CR, so that I can manage federation through GitOps workflows.
-* As a cluster administrator, I want the operator to automatically expose federation endpoints and manage routes, so that I don't have to manually create networking resources.
-* As a security engineer, I want federation configuration to be validated at API admission time, so that misconfigurations are caught early.
-* As a multi-cluster operator, I want to federate N clusters, so that workloads across my infrastructure can communicate securely.
-* As a DevOps engineer, I want to add a new cluster to an existing federation without disrupting running workloads, so that I can scale my infrastructure dynamically.
-* As an application developer, I want my workload to authenticate with services in federated clusters transparently, so that I can focus on application logic rather than cross-cluster authentication.
+* As an OpenShift cluster administrator, I want to enable SPIRE federation by setting `spec.federation.bundleEndpoint` in the SpireServer CR, so that the operator automatically creates a Service (port 8443) and Route exposing the federation endpoint.
+
+* As an OpenShift cluster administrator, I want to specify federated trust domains in `spec.federation.federatesWith[]` with `bundleEndpointUrl` and `endpointSpiffeId`, so that the operator generates the SPIRE `server.conf` with `federation.federates_with` configuration and triggers StatefulSet rolling updates.
+
+* As an OpenShift security engineer, I want to choose between `https_spiffe` (default, SPIFFE authentication) and `https_web` (Web PKI) profiles for `spec.federation.bundleEndpoint.profile`, so that I can align federation security with organizational certificate policies and authentication requirements.
+
+* As an SRE, I want SpireServer status conditions `FederationConfigurationValid`, `FederationServiceReady`, and `FederationRouteReady` with timestamps and error messages, so that I can quickly diagnose federation configuration issues, Route exposure problems, or certificate errors through `oc get spireserver cluster -o yaml`.
+
+* As an OpenShift cluster administrator, I want the operator to handle federation configuration removal gracefully by deleting the Service and Route when `spec.federation` is removed, so that cross-cluster communication stops cleanly while intra-cluster workloads continue functioning without manual resource cleanup.
+
+* As an application developer, I want to create ClusterSPIFFEID resources with `spec.federatesWith[]` after federation is configured, so that my workloads automatically receive SVIDs capable of authenticating against federated trust domains without understanding the underlying SPIRE federation mechanics.
+
+* As an OpenShift security engineer, I want clear documentation that initial trust bundle bootstrapping requires manual efforts, so that I understand the security model and the one-time manual step required to establish federation trust.
 
 ### Goals
 
