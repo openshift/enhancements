@@ -28,17 +28,6 @@ superseded-by:
 
 # KMS Encryption Provider at Datastore Layer
 
-This is the title of the enhancement. Keep it simple and descriptive. A good
-title can help communicate what the enhancement is and should be considered as
-part of any review.
-
-The YAML `title` should be lowercased and spaces/punctuation should be
-replaced with `-`.
-
-The `Metadata` section above is intended to support the creation of tooling
-around the enhancement process.
-
-
 ## Summary
 
 Provide a user-configurable interface to support encryption of data stored in
