@@ -135,7 +135,7 @@ rotation events.
 **cluster admin** is a human user responsible for the overall configuration and
 maintainenance of a cluster.
 
-**KMS** the Key Management Service responsible automatic rotation of the Key
+**KMS** is the Key Management Service responsible automatic rotation of the Key
 Encryption Key (KEK).
 
 #### Initial Resource Encryption
@@ -146,7 +146,7 @@ Encryption Key (KEK).
 1. The cluster admiin updates the APIServer configuration resource, providing
    the necessary configuration options for the KMS of choice
 1. The cluster admin observes the `kube-apiserver` `clusteroperator` resource,
-   for progress on the configuration, as well as migration of resources
+   for progress on the configuration change, as well as migration of resources
 
 #### Key rotation
 
@@ -159,6 +159,15 @@ Encryption Key (KEK).
    migration
 
 #### Change of KMS Provider
+
+1. The cluster admin creates a KEK in a KMS different than the one currently
+   configured in the cluster
+1. The cluster admin configures the new KMS provider in the APIServer
+   configuration resource
+1. The cluster detects the encryption configuration change, and starts
+   migrating the encrypted data to use the new KMS encryption key
+1. The cluster admin observes the `kube-apiserver` `clusteroperator` resource,
+   for progress on the configuration change, as well as migration of resources
 
 ### API Extensions
 
@@ -226,7 +235,7 @@ that we can leverage functionality in the existing encryption controllers, thus
 having full feature parity between existing encryption providers and the new
 KMS encryption provider.
 
-#### Key Rotation Handling
+#### Key Rotation and Data Migration
 
 Keys can be rotated in the following ways:
 * Automatic periodic key rotation by the KMS, following user provided rotation
@@ -237,8 +246,58 @@ Keys can be rotated in the following ways:
 OpenShift must detect the change and trigger re-encryption of affected
 resources.
 
-TODO: elaborate details about the two rotation scenarios,
-how detection works, migration process, etc.
+Rotation detection is standard. KMS Plugins must return a `key_id` as part of
+the response to a Status gRPC call. This `key_id` is authoritative, so when it
+changes, we must consider the key rotated, and migrate the current encrypted
+resources to use the new key. The `keyController` will be updated to perform
+periodic checks of the `key_id` in the response to a Status call, and recreate
+the encryption key secret resource when it detects a change in `key_id`.
+TODO: Where is the currently in use `key_id` stored? The `keyController` must
+have something to compare with the Status `key_id`.
+
+Once the encryption key secret resource is recreated as a reaction to a change
+in `key_id`, the `migrationController` will detect that a migration is needed,
+and will do its job without any modifications.
+
+Key rotation is unfortunately not standardized, so every KMS plugin can
+implement rotation in a different way, as long as the `key_id` returned by the
+Status call remains authoritative. The section below enumerates the steps needed
+to perform rotation for the supported KMS plugins. For example, the AWS KMS
+plugin supports two KMS keys to be configured at the same time, allowing the
+plugin to run with two keys with different ARNs without the need for another
+plugin pod to be configured. Azure KMS plugin on the other hand, can only be
+configured with a single key, so if a user creates a new KMS key, OpenShift
+must create a whole new plugin pod, and run it in parallel with the one
+configured with the previous key. The two pods must run in parallel until
+migration to the new key is complete.
+
+TODO: how do KMS plugins determine `key_id`? It mustn't be the same as i.e.
+KeyARN, because that won't change when the key is rotated. For OpenShift to be
+able to migrate content to a rotated key, we must be able to detect a `key_id`
+change, and thus the `key_id` must not be the same after the key is rotated.
+It must somehow be calculated taking into consideration the key materials...
+
+##### Key Rotation For the AWS KMS Plugin
+
+TODO
+
+##### Key Rotation For the Azure KMS Plugin
+
+The Azure KMS plugin will not be supported in Tech-Preview.
+
+TODO: explain process or two plugin pods running until migration finishes.
+
+TODO: confirm rotation detection works as expected with the Azure plugin: it
+requires a key version as a parameter to run, and afaik while rotating a key
+doesn't cause it's `key_id` to change (only the key materials), the fact that
+the Azure KMS plugin takes in a key version is concerning, because a new
+version of the key is created when the key is rotated. This might just mean
+that the Status `key_id` will change, and then we need a new pod with just a
+version bump. My concern is that the `key_id` will not change. This would make
+the plugin incompatible with the KMS plugin interface, but still. I want to be
+sure.
+
+
 
 ### Risks and Mitigations
 
