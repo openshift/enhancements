@@ -3,16 +3,16 @@ title: serviceaccount-field-deprecation
 authors:
   - "@rashmigottipati"
 reviewers:
-  - "@everettraven"
   - "@grokspawn"
   - "@trgeiger"
   - "@joelanford"
 approvers:
+  - "@joelanford"
+api-approvers:
   - "@everettraven"
-  - "@trgeiger"
-  - "@grokspawn"
+
 creation-date: 2025-10-08
-last-updated: 2025-10-15
+last-updated: 2025-10-20
 status: implementable
 ---
 
@@ -29,8 +29,6 @@ status: implementable
 ## Summary
 
 Deprecate the `.spec.serviceAccount` field from the ClusterExtension API in the operator-controller. This field was originally introduced to enforce least privilege by requiring users to provide a ServiceAccount with the necessary RBAC permissions to manage extension content. This proposal removes that requirement and simplifies controller logic and behavior.
-
-**Note**: This deprecation is an interim step. While the intent is to eventually remove the `.spec.serviceAccount` field, we will keep it as optional and mark it as deprecated during this transition period spanning multiple releases. This approach allows users time to adapt without disruption before the field is fully removed.
 
 ## Motivation
 
