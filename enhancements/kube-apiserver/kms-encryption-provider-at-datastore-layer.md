@@ -103,69 +103,73 @@ KMS managed keys protects against such scenarios.
 
 ## Proposal
 
-To support KMS encryption in OpenShift, we will leverage the work
-that was done in [upstream Kubernetes](https://github.com/kubernetes/enhancements/tree/master/keps/sig-auth/3299-kms-v2-improvements).
+To support KMS encryption in OpenShift, we will leverage the work done in
+[upstream Kubernetes](https://github.com/kubernetes/enhancements/tree/master/keps/sig-auth/3299-kms-v2-improvements).
 However, we will need to extend and adapt the encryption workflow in OpenShift
 to support new constraints introduced by the externalization of encryption keys
 in a KMS. Because OpenShift will not own the keys from the KMS, we will also
-need to provide tools to the users to detect KMS-related failures and take
+need to provide tools to users to detect KMS-related failures and take
 action toward recovering their clusters whenever possible.
 
 We focus on supporting KMS v2 only, as KMS v1 has considerable performance
 impact in the cluster.
 
-We will extend the APIServer API to add a new `kms` encryption type alongside
-the existing `aescbc` and `aesgcm` types. Unlike `aescbc` and `aesgcm`, KMS will
-require additional input from users to configure their KMS provider, such as
-connection details, authentication credentials, and key references.
+#### API Extensions
 
-From a UX perspective, these are the only changes the KMS feature will
-introduce. It is intentionally minimal to reduce the burden on users and
-the potential for errors.
+We will extend the APIServer config to add a new `kms` encryption type alongside
+the existing `aescbc` and `aesgcm` types. Unlike `aescbc` and `aesgcm`, KMS
+will require additional input from users to configure their KMS provider, such
+as connection details, authentication credentials, and key references. From a
+UX perspective, this is the only change the KMS feature introduces—it is
+intentionally minimal to reduce user burden and potential for errors.
 
-This feature will re-use as much of the existing encryption logic as possible,
-leveraging the existing encryption and migration workflow introduced for
-AES-CBC and AES-GCM. However, because encryption keys for KMS are managed
-externally rather than by the apiserver operators, we will extend the existing
-encryption controllers to support external key rotation detection and introduce
-a new controller to manage KMS plugin pod lifecycle.
+#### Encryption Controller Extensions
 
-The existing encryption controllers will be extended to support KMS with minimal
-changes. KMS plugin health checks will be integrated into the controller
-precondition system, and encryption key management will be adapted to work with
-externally-managed keys while maintaining feature parity with existing
-encryption providers.
+This feature will reuse existing encryption and migration workflows while
+extending them to handle externally-managed keys. We will introduce a new
+controller to manage KMS plugin pod lifecycle and integrate KMS plugin health
+checks into the existing controller precondition system.
+
+#### KMS Plugin Lifecycle
+
+KMS encryption requires KMS plugin pods to bridge communication between the
+kube-apiserver and the external KMS. In OpenShift, the kube-apiserver-operator
+will manage these plugins on behalf of users, reducing operational complexity
+and ensuring consistent behavior across the platform. The operator will handle
+plugin deployment, health monitoring, and lifecycle management during key
+rotation events.
 
 ### Workflow Description
 
-Explain how the user will use the feature. Be detailed and explicit.
-Describe all of the actors, their roles, and the APIs or interfaces
-involved. Define a starting state and then list the steps that the
-user would need to go through to trigger the feature described in the
-enhancement. Optionally add a
-[mermaid](https://github.com/mermaid-js/mermaid#readme) sequence
-diagram.
+#### Roles
 
-Use sub-sections to explain variations, such as for error handling,
-failure recovery, or alternative outcomes.
+**cluster admin** is a human user responsible for the overall configuration and
+maintainenance of a cluster.
 
-For example:
+**KMS** the Key Management Service responsible automatic rotation of the Key
+Encryption Key (KEK).
 
-**cluster creator** is a human user responsible for deploying a
-cluster.
+#### Initial Resource Encryption
 
-**application administrator** is a human user responsible for
-deploying an application in a cluster.
+1. The cluster admin creates an encryption key (KEK) in their KMS of choice
+1. The cluster admin give the OpenShift apiservers access to the newly created
+   KMS KEK
+1. The cluster admiin updates the APIServer configuration resource, providing
+   the necessary configuration options for the KMS of choice
+1. The cluster admin observes the `kube-apiserver` `clusteroperator` resource,
+   for progress on the configuration, as well as migration of resources
 
-1. The cluster creator sits down at their keyboard...
-2. ...
-3. The cluster creator sees that their cluster is ready to receive
-   applications, and gives the application administrator their
-   credentials.
+#### Key rotation
 
-See
-https://github.com/openshift/enhancements/blob/master/enhancements/workload-partitioning/management-workload-partitioning.md#high-level-end-to-end-workflow
-and https://github.com/openshift/enhancements/blob/master/enhancements/agent-installer/automated-workflow-for-agent-based-installer.md for more detailed examples.
+1. The cluster admin configures automatic periodic rotation of the KEK in KMS
+1. KMS rotates the KEK
+1. OpenShift detects the KEK has been rotated, and starts migrating encrypted
+   data to use the new KEK
+1. The cluster admin eventually checks the `kube-apiserver` `clusteroperator`
+   resource, and sees that the KEK was rotated, and the status of the data
+   migration
+
+#### Change of KMS Provider
 
 ### API Extensions
 
@@ -232,6 +236,20 @@ itself. We still want the encryption key secret to exist, even if empty, so
 that we can leverage functionality in the existing encryption controllers, thus
 having full feature parity between existing encryption providers and the new
 KMS encryption provider.
+
+#### Key Rotation Handling
+
+Keys can be rotated in the following ways:
+* Automatic periodic key rotation by the KMS, following user provided rotation
+  policy in the KMS itself
+* The user creates a new KMS key, and updates the KMS section of the APIServer
+  config with the new key
+
+OpenShift must detect the change and trigger re-encryption of affected
+resources.
+
+TODO: elaborate details about the two rotation scenarios,
+how detection works, migration process, etc.
 
 ### Risks and Mitigations
 
