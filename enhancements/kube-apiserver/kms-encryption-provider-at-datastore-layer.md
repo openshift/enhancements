@@ -171,21 +171,124 @@ Encryption Key (KEK).
 
 ### API Extensions
 
-API Extensions are CRDs, admission and conversion webhooks, aggregated API servers,
-and finalizers, i.e. those mechanisms that change the OCP API surface and behaviour.
+While in tech-preview, the KMS feature will be placed behind the
+`KMSEncryptionProvider` feature-gate.
 
-- Name the API extensions this enhancement adds or modifies.
-- Does this enhancement modify the behaviour of existing resources, especially those owned
-  by other parties than the authoring team (including upstream resources), and, if yes, how?
-  Please add those other parties as reviewers to the enhancement.
+Similar to the upstream `EncryptionConfig`'s [`ProviderConfiguration`](https://github.com/kubernetes/apiserver/blob/cccad306d649184bf2a0e319ba830c53f65c445c/pkg/apis/apiserver/types_encryption.go#L89-L101),
+we will add a new `EncryptionType` to the existing `APIServer` config:
+```diff
+diff --git a/config/v1/types_apiserver.go b/config/v1/types_apiserver.go
+index d815556d2..c9098024f 100644
+--- a/config/v1/types_apiserver.go
++++ b/config/v1/types_apiserver.go
+@@ -208,6 +225,11 @@ const (
+        // aesgcm refers to a type where AES-GCM with random nonce and a 32-byte key
+        // is used to perform encryption at the datastore layer.
+        EncryptionTypeAESGCM EncryptionType = "aesgcm"
++
++       // kms refers to a type of encryption where the encryption keys are managed
++       // outside the control plane in a Key Management Service instance,
++       // encryption is still performed at the datastore layer.
++       EncryptionTypeKMS EncryptionType = "KMS"
+ )
+```
 
-  Examples:
-  - Adds a finalizer to namespaces. Namespace cannot be deleted without our controller running.
-  - Restricts the label format for objects to X.
-  - Defaults field Y on object kind Z.
+The default value today is an empty string, which implies identity, meaning no
+encryption is used in the cluster by default. Other possible local encryption
+schemes include `aescbc` and `aesgcm`, which will remain as-is. Similar to how
+local AES encryption works, the apiserver operators will observe this config
+and apply the KMS `EncryptionProvider` to the `EncryptionConfig`.
 
-Fill in the operational impact of these API Extensions in the "Operational Aspects
-of API Extensions" section.
+```diff
+@@ -191,9 +194,23 @@ type APIServerEncryption struct {
+        // +unionDiscriminator
+        // +optional
+        Type EncryptionType `json:"type,omitempty"`
++
++       // kms defines the configuration for the external KMS instance that manages the encryption keys,
++       // when KMS encryption is enabled sensitive resources will be encrypted using keys managed by an
++       // externally configured KMS instance.
++       //
++       // The Key Management Service (KMS) instance provides symmetric encryption and is responsible for
++       // managing the lifecyle of the encryption keys outside of the control plane.
++       // This allows integration with an external provider to manage the data encryption keys securely.
++       //
++       // +openshift:enable:FeatureGate=KMSEncryptionProvider
++       // +unionMember
++       // +optional
++       KMS *KMSConfig `json:"kms,omitempty"`
+```
+
+The KMS encryption type will have a dedicated configuration:
+
+```diff
+diff --git a/config/v1/types_kmsencryption.go b/config/v1/types_kmsencryption.go
+new file mode 100644
+index 000000000..8841cd749
+--- /dev/null
++++ b/config/v1/types_kmsencryption.go
+@@ -0,0 +1,49 @@
++package v1
++
++// KMSConfig defines the configuration for the KMS instance
++// that will be used with KMSEncryptionProvider encryption
++// +kubebuilder:validation:XValidation:rule="has(self.type) && self.type == 'AWS' ?  has(self.aws) : !has(self.aws)",message="aws config is required when kms provider type is AWS, and forbidden otherwise"
++// +union
++type KMSConfig struct {
++       // type defines the kind of platform for the KMS provider
++       //
++       // +unionDiscriminator
++       // +kubebuilder:validation:Required
++       Type KMSProviderType `json:"type"`
++
++       // aws defines the key config for using an AWS KMS instance
++       // for the encryption. The AWS KMS instance is managed
++       // by the user outside the purview of the control plane.
++       //
++       // +unionMember
++       // +optional
++       AWS *AWSKMSConfig `json:"aws,omitempty"`
++}
+
++// KMSProviderType is a specific supported KMS provider
++// +kubebuilder:validation:Enum=AWS
++type KMSProviderType string
++
++const (
++       // AWSKMSProvider represents a supported KMS provider for use with AWS KMS
++       AWSKMSProvider KMSProviderType = "AWS"
++)
+```
+
+This configuration will also include an enum of the various KMS supported by
+OCP. For Tech-Preview, it will only have the `AWS` type, but we will add more as we
+progress on the feature. This enum is essential to signal users which KMS providers
+are currently supported by the platform.
+
+Each KMS type will have a dedicated configuration that will be reflected on the
+plugin when installed. It will only contain fields that are relevant to end
+users.
+
+```diff
++// AWSKMSConfig defines the KMS config specific to AWS KMS provider
++type AWSKMSConfig struct {
++	// keyARN specifies the Amazon Resource Name (ARN) of the AWS KMS key used for encryption.
++	// The value must adhere to the format `arn:aws:kms:<region>:<account_id>:key/<key_id>`, where:
++	// - `<region>` is the AWS region consisting of lowercase letters and hyphens followed by a number.
++	// - `<account_id>` is a 12-digit numeric identifier for the AWS account.
++	// - `<key_id>` is a unique identifier for the KMS key, consisting of lowercase hexadecimal characters and hyphens.
++	//
++	// +kubebuilder:validation:Required
++	// +kubebuilder:validation:XValidation:rule="self.matches('^arn:aws:kms:[a-z0-9-]+:[0-9]{12}:key/[a-f0-9-]+$') && self.size() <= 128",message="keyARN must follow the format `arn:aws:kms:<region>:<account_id>:key/<key_id>`. The account ID must be a 12 digit number and the region and key ID should consist only of lowercase hexadecimal characters and hyphens (-)."
++	KeyARN string `json:"keyARN"`
++	// region specifies the AWS region where the KMS intance exists, and follows the format
++	// `<region-prefix>-<region-name>-<number>`, e.g.: `us-east-1`.
++	// Only lowercase letters and hyphens followed by numbers are allowed.
++	//
++	// +kubebuilder:validation:XValidation:rule="self.matches('^[a-z]{2}-[a-z]+-[0-9]+$') && self.size() <= 64",message="region must be a valid AWS region"
++	Region string `json:"region"`
++}
+```
 
 ### Topology Considerations
 
