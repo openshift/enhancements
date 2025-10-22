@@ -224,7 +224,7 @@ type StorageConfig struct {
 // PersistentVolumeConfig defines the configuration for Persistent Volume storage.
 type PersistentVolumeConfig struct {
     // claim is a required field that specifies the configuration of the PersistentVolumeClaim that will be used to store the must-gather archive.
-    // The PersistentVolumeClaim must be created in the openshift-insights namespace.
+    // The PersistentVolumeClaim must be created in the must gather operator namespace.
     // +required
     Claim PersistentVolumeClaimReference `json:"claim"`
     // subPath is path to a directory on the PersitentVolume where
