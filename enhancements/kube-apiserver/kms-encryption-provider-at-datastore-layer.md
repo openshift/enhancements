@@ -319,6 +319,13 @@ configuration file for MicroShift?
 
 ### Implementation Details/Notes/Constraints
 
+Enabling KMS encryption requires a KMS plugin running in the cluster so that
+the apiservers can communicate through the plugin with the external KMS
+provider.
+
+Each KMS provider has a different KMS plugin. OpenShift will manage the entire
+lifecycle of KMS plugins.
+
 #### Controller Preconditions and KMS Plugin Health
 
 Encryption controllers should only run when the KMS provider plugin is up and
@@ -400,6 +407,31 @@ version bump. My concern is that the `key_id` will not change. This would make
 the plugin incompatible with the KMS plugin interface, but still. I want to be
 sure.
 
+#### KMS Plugin Management
+
+1. apiservers share a single instance of kms plugin, this can be achieved in two variations:
+  a. kms plugin and kas-o share revisions
+  b. kms plugin revisions are independent of kas-o revisions
+2. apiservers have dedicated kms plugin instance, managed by their respective operators
+
+**Option 1.a**
+Pros:
+* shared revision means kas-o and kms plugin encryption configuration will never drift
+* we don't have to think about alternative ways to deploy the kms plugin, there's only the static pod
+Cons:
+* other apiservers encryption configuration might drift
+* ?
+**Option 1.b**
+Pros:
+* we don't have to think about alternative ways to deploy the kms plugin, there's only the static pod
+* has the potential for avoiding downtime of kas during encryption config update, since we can ensure the encryption config update isn't rolled out until kms plugins are ready
+Cons:
+* apiservers encryption configuration might drift
+**Option 2**
+Pros:
+* shared revision between all apiservers and their respective kms plugin means config will never drift
+Cons:
+* kube-apiserver is a static pod, and the rest of openshift apiservers are regular pods managed by deployments means kms plugins pods cannot be static pods in all cases
 
 
 ### Risks and Mitigations
