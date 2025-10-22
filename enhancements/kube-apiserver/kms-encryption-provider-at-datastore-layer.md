@@ -409,6 +409,12 @@ sure.
 
 #### KMS Plugin Management
 
+Requirements:
+* apiservers must have access the unix socket for the kms plugin
+* running multiple instances of the kms plugin with different encryption
+  configuration
+
+Alternatives:
 1. apiservers share a single instance of kms plugin, this can be achieved in two variations:
   a. kms plugin and kas-o share revisions
   b. kms plugin revisions are independent of kas-o revisions
