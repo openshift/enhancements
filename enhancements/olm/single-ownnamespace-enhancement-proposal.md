@@ -39,6 +39,22 @@ Future OLM v1 bundle formats will not include these legacy install mode concepts
 
 The registry+v1 bundle format (used by OLM v0) includes install mode declarations (AllNamespaces, MultiNamespace, SingleNamespace, OwnNamespace) that affect how bundles are rendered into Kubernetes manifests. OLM v1 deliberately simplified operator installation by focusing on AllNamespaces mode to avoid complexity, but there exists significant existing registry+v1 bundle content in catalogs that only declares support for Single and OwnNamespace install modes.
 
+### Install Mode Upgrade Behavior Edge Case
+
+An important edge case exists around bundle upgrades and install mode behavior consistency. Consider this scenario:
+
+1. **Initial State**: An operator bundle (v1.0) supports only `OwnNamespace` install mode
+2. **Installation**: User installs the operator without explicit `watchNamespace` configuration
+3. **Bundle Update**: Operator author releases bundle (v1.1) that adds `AllNamespaces` support alongside existing `OwnNamespace` support
+4. **Unintended Behavior**: Without proper validation, the system could automatically switch from `OwnNamespace` to `AllNamespaces` mode during upgrade, granting the operator cluster-wide permissions without user consent
+
+This behavior is problematic because:
+- **Security Implications**: Operators suddenly gain broader permissions than originally intended
+- **Predictability**: Install mode changes occur without explicit administrator action
+- **Consistency**: The same bundle configuration produces different permission scopes across versions
+
+To address this edge case, the implementation requires explicit `watchNamespace` configuration for namespace-scoped bundles (those not supporting `AllNamespaces` mode), ensuring that install mode selection is always deliberate and consistent across bundle upgrades.
+
 ### User Stories
 
 #### Story 1: Legacy Operator Migration
@@ -46,6 +62,9 @@ As a cluster administrator migrating from OLM v0 to OLM v1, I want to install op
 
 #### Story 2: Operator Author Requirements
 As an operator developer, I have existing registry+v1 bundles that only support Single or OwnNamespace install modes, and I want my customers to be able to deploy these operators in OpenShift with OLM v1 so that the bundle content can be properly rendered and installed without requiring me to modify my existing bundle format during the migration to OLM v1.
+
+#### Story 3: Install Mode Consistency Across Upgrades
+As a cluster administrator, I want to ensure that when I install an operator in a specific install mode (e.g., OwnNamespace), subsequent bundle upgrades that add new install mode capabilities (e.g., AllNamespaces) do not automatically change the install mode without my explicit consent, so that my operator's permission scope remains predictable and secure across versions.
 
 ### Goals
 
@@ -88,12 +107,12 @@ Update the OLMv1 operator-controller to support rendering registry+v1 bundles wi
 | AllNamespaces | SingleNamespace | OwnNamespace | WatchNamespace Configuration                                     |
 |---------------|-----------------|--------------|------------------------------------------------------------------|
 | -             | -               | -            | undefined/error (no supported install modes)                     |
-| -             | -               | ✓            | no configuration                                                 |
+| -             | -               | ✓            | required (must be install namespace)                             |
 | -             | ✓               | -            | required (must not be install namespace)                         |
-| -             | ✓               | ✓            | optional (default: install namespace)                            | 
-| ✓             | -               | -            | no configuration                                                 | 
-| ✓             | -               | ✓            | optional. If set, must be install namespace (default: unset)     | 
-| ✓             | ✓               | -            | optional. If set, must NOT be install namespace (default: unset) | 
+| -             | ✓               | ✓            | required (must specify target namespace)                         |
+| ✓             | -               | -            | no configuration                                                 |
+| ✓             | -               | ✓            | optional. If set, must be install namespace (default: unset)     |
+| ✓             | ✓               | -            | optional. If set, must NOT be install namespace (default: unset) |
 | ✓             | ✓               | ✓            | optional (default: unset)                                        | 
 
 Add support for namespace-scoped operation by ensuring:
@@ -119,12 +138,17 @@ Ensure parity with OLMv0 behavior by:
    - `spec.namespace`: The installation namespace where the operator pod will run
    - `spec.config.inline.watchNamespace`: The namespace the operator should watch for resources 
 
-A scenario exists where the user must specify the watch namespace. Example workflow of a bundle that will require the watch namespace to be specified: 
+For bundles that only support namespace-scoped install modes (SingleNamespace and/or OwnNamespace, but not AllNamespaces), the `watchNamespace` configuration is **required**. Example workflow:
 
-1. User creates ClusterExtension for a bundle that only supportes SingleNamespace install mode but does not specify the watchNamespace
+1. User creates ClusterExtension for a bundle that only supports SingleNamespace or OwnNamespace install mode but does not specify the watchNamespace
 2. ClusterExtension does not install. The `Installing` and `Progressing` conditions will be set to false with an error that indicates the required `watchNamespace` is not specified
-3. User updates the ClusterExtension specifying the `watchNamespace` configuration to be an exiting namespace on the cluster
+3. User updates the ClusterExtension specifying the `watchNamespace` configuration to be an existing namespace on the cluster
 4. ClusterExtension installs successfully
+
+This mandatory configuration requirement ensures that:
+- Install mode selection is always explicit for namespace-scoped operators
+- Bundle upgrades that add AllNamespaces support cannot automatically change the install mode
+- Administrators maintain control over operator permission scope across all bundle versions
 
 ```
 Note: Once a ClusterExtension is already installed, OLM will not prevent the `watchNamespace` parameter from being changed by the admin. OLM will reconcile again with the new parameter, however, whether the operator will then re-install successfully is dependent on the operator itself.  
@@ -262,13 +286,13 @@ The system determines the actual install mode based on the bundle's supported in
 |-------------------------|--------------------------|-----------------------|-----------|
 | AllNamespaces only      | Not specified            | AllNamespaces         | Default behavior, no namespace scoping |
 | AllNamespaces only      | Specified                | Error                 | Bundle doesn't support namespace-scoped installation |
-| SingleNamespace only    | Not specified            | OwnNamespace          | Default to most restrictive supported mode |
+| SingleNamespace only    | Not specified            | Error                 | watchNamespace required for namespace-scoped bundles |
 | SingleNamespace only    | Specified (≠ install ns) | SingleNamespace       | User's explicit choice, bundle supports it |
 | SingleNamespace only    | Specified (= install ns) | Error                 | SingleNamespace cannot watch its own install namespace |
-| OwnNamespace only       | Not specified            | OwnNamespace          | Use the only supported mode |
+| OwnNamespace only       | Not specified            | Error                 | watchNamespace required for namespace-scoped bundles |
 | OwnNamespace only       | Specified (= install ns) | OwnNamespace          | Explicit choice matches supported mode |
 | OwnNamespace only       | Specified (≠ install ns) | Error                 | OwnNamespace can only watch install namespace |
-| Single + Own            | Not specified            | OwnNamespace          | Default to more restrictive mode |
+| Single + Own            | Not specified            | Error                 | watchNamespace required for namespace-scoped bundles |
 | Single + Own            | Specified (= install ns) | OwnNamespace          | Namespace relationship determines mode |
 | Single + Own            | Specified (≠ install ns) | SingleNamespace       | Namespace relationship determines mode |
 | All + Single + Own      | Not specified            | AllNamespaces         | Default to least restrictive mode for compatibility |
@@ -276,11 +300,11 @@ The system determines the actual install mode based on the bundle's supported in
 | All + Single + Own      | Specified (≠ install ns) | SingleNamespace       | Namespace relationship determines mode |
 
 Default Mode Selection Rules are as follows:
-  1. No watchNamespace specified: Use the most permissive mode supported by the bundle (AllNamespaces > OwnNamespace >
-  SingleNamespace)
-  2. watchNamespace = install namespace: Use OwnNamespace mode if supported, otherwise error
-  3. watchNamespace ≠ install namespace: Use SingleNamespace mode if supported, otherwise error
-  4. Unsupported mode requested: Installation fails with clear error message indicating supported modes
+  1. **AllNamespaces-capable bundles**: When no `watchNamespace` is specified, default to `AllNamespaces` mode for maximum compatibility
+  2. **Namespace-scoped bundles**: When bundles only support `SingleNamespace`/`OwnNamespace` modes, `watchNamespace` configuration is **required** to prevent implicit install mode changes during bundle upgrades
+  3. **watchNamespace = install namespace**: Use `OwnNamespace` mode if supported, otherwise error
+  4. **watchNamespace ≠ install namespace**: Use `SingleNamespace` mode if supported, otherwise error
+  5. **Unsupported mode requested**: Installation fails with clear error message indicating supported modes
 
 The relevant generated resources will be:
 - Role/RoleBinding resources for namespace-scoped permissions in Single/OwnNamespace modes
@@ -310,6 +334,7 @@ Because we are enabling namespace-scoped operator installations, there are opera
 - **Namespace Dependency**: Clear error messages when target namespaces don't exist or aren't accessible
 - **Migration Complexity**: Comprehensive documentation and examples for transitioning between install modes
 - **Permission Escalation**: ServiceAccount validation ensures adequate permissions without over-privileging
+- **Unintended Install Mode Changes**: Requiring explicit `watchNamespace` configuration for namespace-scoped bundles prevents automatic permission scope escalation when bundle upgrades add new install mode capabilities
 
 Currently, admins control the scope of operator installations through ClusterExtension RBAC. This enhancement adds namespace-level controls while maintaining existing security boundaries.
 
@@ -327,6 +352,7 @@ Operators installed in Single/OwnNamespace modes have reduced blast radius compa
 | **Installation Failures** | Medium | Detailed preflight checks and validation; clear error reporting |
 | **Security Boundaries** | Medium | Explicit validation of namespace permissions; RBAC properly scoped |
 | **Feature Proliferation** | Low | Clear documentation that this is for legacy compatibility only |
+| **Unintended Install Mode Changes** | High | Mandatory `watchNamespace` configuration for namespace-scoped bundles prevents automatic mode switching during upgrades |
 
 ### Drawbacks
 
