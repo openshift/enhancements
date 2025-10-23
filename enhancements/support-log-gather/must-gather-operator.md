@@ -49,7 +49,7 @@ The cli utility, oc adm must-gather can collect data from the cluster and dump t
 
 1. Ability to collect information when a cluster installation had failed (day-0)
 2. Collect a must-gather dump in the event of apisever being completely off
-3. Different products or operators should be responsible for gathering for their own components from the operator (see https://github.com/advisories/GHSA-77c2-c35q-254w)
+3. Different products or operators should be responsible for gathering for their own components from the operator (see <https://github.com/advisories/GHSA-77c2-c35q-254w>)
 4. Reduce or skim the information collected by the must-gather script itself
 
 ## Proposal
@@ -67,7 +67,7 @@ The operator leverages the existing must-gather image format and `/usr/bin/gathe
 
 ### Workflow Description
 
-1. **Installation**: 
+1. **Installation**:
    - Cluster administrator installs the Must Gather Operator via OLM from OperatorHub
 
 2. **Must-Gather Collection**:
@@ -80,7 +80,6 @@ The operator leverages the existing must-gather image format and `/usr/bin/gathe
    - The upload container waits for the gather process to finish (via pgrep)
    - The upload container once ready, tars the gathered directory and uploads to Red Hat's SFTP server
    - Status is updated and propogated to the `MustGather.status` subresource
-
 
 ### API Extensions
 
@@ -243,26 +242,26 @@ type PersistentVolumeClaimReference struct {
 
 // +k8s:openapi-gen=true
 type ProxySpec struct {
-	// httpProxy is the URL of the proxy for HTTP requests.  Empty means unset and will not result in an env var.
-	// +optional
-	HTTPProxy string `json:"httpProxy,omitempty"`
+ // httpProxy is the URL of the proxy for HTTP requests.  Empty means unset and will not result in an env var.
+ // +optional
+ HTTPProxy string `json:"httpProxy,omitempty"`
 
-	// httpsProxy is the URL of the proxy for HTTPS requests.  Empty means unset and will not result in an env var.
-	// +optional
-	HTTPSProxy string `json:"httpsProxy,omitempty"`
+ // httpsProxy is the URL of the proxy for HTTPS requests.  Empty means unset and will not result in an env var.
+ // +optional
+ HTTPSProxy string `json:"httpsProxy,omitempty"`
 
-	// noProxy is the list of domains for which the proxy should not be used.  Empty means unset and will not result in an env var.
-	// +optional
-	NoProxy string `json:"noProxy,omitempty"`
+ // noProxy is the list of domains for which the proxy should not be used.  Empty means unset and will not result in an env var.
+ // +optional
+ NoProxy string `json:"noProxy,omitempty"`
 }
 
 // MustGatherStatus defines the observed state of MustGather
 type MustGatherStatus struct {
-	Status     string             `json:"status,omitempty"`
-	LastUpdate metav1.Time        `json:"lastUpdate,omitempty"`
-	Reason     string             `json:"reason,omitempty"`
-	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
-	Completed  bool               `json:"completed"`
+ Status     string             `json:"status,omitempty"`
+ LastUpdate metav1.Time        `json:"lastUpdate,omitempty"`
+ Reason     string             `json:"reason,omitempty"`
+ Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
+ Completed  bool               `json:"completed"`
 }
 
 ```
@@ -273,11 +272,10 @@ type MustGatherStatus struct {
    - Local hostPath emptyDir for output storage
    - ServiceAccount with necessary RBAC permissions that are necessary for the [gather script](https://github.com/openshift/must-gather/blob/release-4.20/collection-scripts/gather) to succeed.
 
-2. **Data Flow**: 
+2. **Data Flow**:
    - Each gather container writes to `/must-gather/<image-name>/`
    - The upload container creates a compressed tar archive before uploading via SFTP
    - PVC is removed once the pod gets recycled
-
 
 ### Implementation
 
@@ -380,33 +378,61 @@ If the MustGather CR is created in a different namespace than the operator, the 
 #### Security Considerations
 
 - **Privilege Escalation/RBAC**
-	- The operator does not provide for a ClusterRole that is intended to be bound to the ServiceAccount which will be run on the Job pods.
-	- While the ServiceAccount being provided `cluster-admin` role succeeds in running a must-gather collection, this is not recommended and will be need to be refined for lesser privileges ([eg.](https://github.com/openshift/must-gather-operator/pull/264)) before GA.
-	- Additionally, the SecurityContextConstraint privileges for the same ServiceAccount would need hardening too.
+  - The operator does not provide for a ClusterRole that is intended to be bound to the ServiceAccount which will be run on the Job pods.
+  - While the ServiceAccount being provided `cluster-admin` role succeeds in running a must-gather collection, this is not recommended and will be need to be refined for lesser privileges ([eg.](https://github.com/openshift/must-gather-operator/pull/264)) before GA.
+  - Additionally, the SecurityContextConstraint privileges for the same ServiceAccount would need hardening too.
 - **Credential Management**
-	- Red Hat Case Management API provides for short-lived and one-time use credentials, which should be preferred by users of this operator.
-	- As the secret for the credential to access Red Hat SFTP server is provided by the user, it is upto the user to cleanup/update/remove the secret. The operator only references this secret and any copies made by the operator are deleted in cleanup phase of reconciliation.
+  - Red Hat Case Management API provides for short-lived and one-time use credentials, which should be preferred by users of this operator.
+  - As the secret for the credential to access Red Hat SFTP server is provided by the user, it is upto the user to cleanup/update/remove the secret. The operator only references this secret and any copies made by the operator are deleted in cleanup phase of reconciliation.
 - **Data Validation**
-	- This can be considered before GA, but is not in current scope.
+  - This can be considered before GA, but is not in current scope.
 
 ### Topology Considerations
 
 None, as a day-2 operator dedicated OpenShift and Hosted Clusters are both treated equally although the amount of data collection by must-gather itself may vary.
 
+#### Hypershift / Hosted Control Planes
+#### Standalone Clusters
+#### Single-node Deployments or MicroShift
+
 #### Proxy clusters
 
-`mustgather.spec.proxyConfig` if set by the user in the CR, will be propagated as pod environment variables to the gather and upload containers of the Job. The configuration set in the resource is given precedence over the cluster-wide proxy settings set on the cluster through `configv1.Proxy` object. Due to the nature of SOCKS proxy protocol and the HTTP "CONNECT" verb in most proxy servers used with OpenShift, the upload process using SFTP's TCP can essentially make a CONNECT request over netcat and intercept to upload the mustgather bundle even when on a airgapped proxy setup. 
-
+`mustgather.spec.proxyConfig` if set by the user in the CR, will be propagated as pod environment variables to the gather and upload containers of the Job. The configuration set in the resource is given precedence over the cluster-wide proxy settings set on the cluster through `configv1.Proxy` object. Due to the nature of SOCKS proxy protocol and the HTTP "CONNECT" verb in most proxy servers used with OpenShift, the upload process using SFTP's TCP can essentially make a CONNECT request over netcat and intercept to upload the mustgather bundle even when on a airgapped proxy setup.
 
 ## Implementation History
 
-1. https://github.com/openshift/must-gather-operator/ was previously maintained by OSD SREs
-2. Outdated old fork https://github.com/redhat-cop/must-gather-operator that still installs on OpenShift from the Community Catalog
+1. <https://github.com/openshift/must-gather-operator/> was previously maintained by OSD SREs
+2. Outdated old fork <https://github.com/redhat-cop/must-gather-operator> that still installs on OpenShift from the Community Catalog
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 None
 
 ## Infrastructure Needed
 
-While all the APIs provided by Red Hat for Case Management are available at access.redhat.com would be used by end-users and customers of OpenShift, for CI and local testing, use of access.stage.redhat.com: staging APIs requires Red Hat VPN connectivity on the cluster. Additionally, a new CI chain for triggering collection of must-gather from a CI cluster via the operator would be desirably helpful. 
+While all the APIs provided by Red Hat for Case Management are available at access.redhat.com would be used by end-users and customers of OpenShift, for CI and local testing, use of access.stage.redhat.com: staging APIs requires Red Hat VPN connectivity on the cluster. Additionally, a new CI chain for triggering collection of must-gather from a CI cluster via the operator would be desirably helpful.
+
+<!--
+### Risks and Mitigations
+
+### Drawbacks
+
+## Test Plan
+
+## Graduation Criteria
+
+### Dev Preview -> Tech Preview
+
+### Tech Preview -> GA
+
+### Removing a deprecated feature
+
+## Upgrade / Downgrade Strategy
+
+## Version Skew Strategy
+
+## Operational Aspects of API Extensions
+
+## Support Procedures
+
+-->
