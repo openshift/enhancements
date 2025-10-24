@@ -91,38 +91,6 @@ Here are the guarantees components can get when they follow the rules we define:
 3. Prevent a user from clicking the upgrade button because components have one or more preflight criteria that are not met (e.g. nodes are at version 4.0 so the control plane can't be upgraded to 4.2 and break N-1 compat)
 4. Ensure other components are upgraded *after* your component (guarantee "happens before" in upgrades, such as kube-apiserver being updated before kube-controller-manager)
 
-### There are a set of guarantees components are expected to honor in return
-
-- An operator should not report the `Available` status condition the first time
-   until they are completely rolled out (or within some reasonable percentage if
-   the component must be installed to all nodes)
-- An operator reports `Degraded` when its current state does not match its
-   desired state over a period of time resulting in a reduced quality of service.
-   The period of time may vary by component, but a `Degraded` state represents
-   persistent observation of a condition.  As a result, a component should not
-   oscillate in and out of `Degraded` state.
-  - A service may be `Available` even if its degraded.  For example, your service
-    may desire three running pods, but one pod is crash-looping. The service is `Available`
-    but `Degraded` because it may have a lower quality of service.
-  - A component may be `Progressing` but not `Degraded` because the transition from one state to another
-    does not persist over a long enough period to report `Degraded`.
-- A service should not report `Degraded` during the course of a normal upgrade. A service may report
-   `Degraded` in response to a persistent infrastructure failure that requires
-   administrator intervention. For example, if a control plane host is unhealthy
-   and must be replaced.  An operator should report `Degraded` if unexpected
-   errors occur over a period, but the expectation is that all unexpected errors
-   are handled as operators mature.
-- An operator reports `Progressing` when it is rolling out new code,
-   propagating config changes, or otherwise moving from one steady state to
-   another. It should not report progressing when it is reconciling a previously
-   known state. If it is progressing to a new version, it should include the
-   version in the message for the condition like "Moving to v1.0.1".
-- An operator reports `Upgradeable` as `false` when it wishes to prevent an
-   upgrade for an admin-correctable condition. The component should include a
-   message that describes what must be fixed.
-- An operator reports a new version when it has rolled out the new version to
-   all of its operands.
-
 ### Status
 
 The operator should use the placeholders for `.status.versions.version` in its deployment manifest to get them replaced with the real values when the payload is built. These values should be passed onto the operator at the runtime, e.g., via environment variables or flags, to populate its `.status.versions`.
@@ -202,6 +170,26 @@ In general, ClusterOperators should contain at least three core conditions:
 	a control plane host is unhealthy and must be replaced. A component should
 	report Degraded if unexpected errors occur over a period, but the
 	expectation is that all unexpected errors are handled as operators mature.
+
+There are two optional conditions:
+
+* `Upgradeable` indicates whether the component (operator and all configured
+	operands) is safe to upgrade based on the current cluster state. When
+	Upgradeable is False, the cluster-version operator will prevent the
+	cluster from performing impacted updates unless forced.  When set on
+	ClusterVersion, the message will explain which updates (minor or patch)
+	are impacted. When set on ClusterOperator, False will block minor
+	OpenShift updates. The message field should contain a human readable
+	description of what the administrator should do to allow the cluster or
+	component to successfully update. The cluster-version operator will
+	allow updates when this condition is not False, including when it is
+	missing, True, or Unknown.
+
+* `EvaluationConditionsDetected` indicates the result of the detection
+	logic that was added to a component to evaluate the introduction of an
+	invasive change that could potentially result in highly visible alerts,
+	breakages or upgrade failures. You can concatenate multiple Reason using
+	the "::" delimiter if you need to evaluate the introduction of multiple changes.
 
 The message reported for each of these conditions is important.
 All messages should start with a capital letter (like a sentence) and be written for an end user / admin to debug the problem.
