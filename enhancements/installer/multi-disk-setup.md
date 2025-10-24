@@ -1,7 +1,7 @@
 ---
-title: multiple-disk-setup-installer
+title: multi-disk-setup
 authors:
-  - Joseph Callen 
+  - "@jcpowermac"
 reviewers:
   - "@vr4manta"
   - "@JoelSpeed"
@@ -9,23 +9,27 @@ reviewers:
   - "@yuqi-zhang"
 approvers:
   - "@patrickdillon"
-api-approvers: # If new CRDs or API fields are introduced to a shared API (e.g. machine.openshift.io)
-  - 
+api-approvers:
+  - None
 creation-date: 2025-05-16
 last-updated: 2025-05-16
 tracking-link:
-  - https://issues.redhat.com/browse/OCPSTRAT-2046 
-see-also:"/enhancements/"
-  -  
-replaces:
-  - 
-superseded-by:
-  - 
+  - https://issues.redhat.com/browse/OCPSTRAT-2046
+see-also:
+  - "/enhancements/installer/azure-data-disk.md"
 ---
 
-# Multiple Disk Setup in Installer
+# Multi-Disk Setup
 
-This enhancement outlines the design for supporting multiple disk setup within the installer. The initial changes will focus on the installer's capability to generate an ignition config that correctly creates partitions, file systems, and systemd mounts for these disks.
+## Release Signoff Checklist
+
+- [ ] Enhancement is `implementable`
+- [ ] Design details are appropriately documented from clear requirements
+- [ ] Test plan is defined
+- [ ] Graduation criteria for dev preview, tech preview, GA
+- [ ] User-facing documentation is created in [openshift/docs]
+
+This enhancement enables the installer to configure multiple disks for specialized purposes (etcd, swap, user-defined storage) by generating MachineConfig resources that create the necessary ignition configurations to partition, format, and mount these disks at cluster installation time.
 
 ## Summary
 
@@ -62,184 +66,753 @@ The core of this proposal is to introduce new structures within the machine pool
 
 ### Workflow Description
 
-1.  The **cluster creator** defines an `install-config.yaml` (or equivalent API input).
-2.  Within the machine pool definition (e.g., for control plane or worker nodes), the cluster creator specifies an array of `Disk` objects.
-3.  Each `Disk` object will specify its `Type` (`Etcd`, `Swap`, or `UserDefined`) and the necessary parameters like `PlatformDiskID` (referring to a disk available on the platform, e.g., `/dev/sdb`, `nvme1n1`) and `MountPath` for `UserDefined` disks.
-4.  The installer reads this configuration.
-5.  For each specified `Disk`:
-    * The installer generates ignition file entries to create a partition on the `PlatformDiskID`. A simple, single full-disk partition will be assumed initially.
-    * It generates entries to format the partition with a default filesystem (e.g., XFS). For `Swap` type, it will be formatted as swap.
-    * It generates systemd mount unit entries to mount the filesystem at the specified `MountPath` (for `UserDefined` and a default path for `Etcd`, e.g., `/var/lib/etcd`). For `Swap`, it generates the entry to enable the swap space.
-6.  The generated ignition config is then used to provision the machines.
-7.  Upon boot, ignition processes these configurations, partitioning, formatting, and mounting the additional disks.
+**cluster administrator** is a user responsible for installing and configuring an OpenShift cluster.
 
-### Installer Machine Pool changes
+1. The cluster administrator creates or edits the install-config.yaml
+2. For platforms that support additional disks (currently Azure), the administrator:
+   - Configures platform-specific disks (e.g., Azure `dataDisks`)
+   - Adds `diskSetup` entries to specify how each disk should be configured
+3. For each disk in `diskSetup`, the administrator specifies:
+   - `type`: The disk's purpose (etcd, swap, or user-defined)
+   - `platformDiskID`: Platform-specific identifier matching a provisioned disk
+   - `mountPath`: (user-defined only) Where to mount the filesystem
+4. The administrator runs `openshift-install create manifests`
+5. The installer:
+   - Validates the disk setup configuration
+   - Matches `platformDiskID` to actual platform disks (e.g., Azure DataDisk by nameSuffix)
+   - Resolves platform-specific device paths
+   - Generates MachineConfig resources containing ignition configurations
+6. The administrator runs `openshift-install create cluster`
+7. During cluster provisioning:
+   - Platform provisions VMs with attached disks (e.g., Azure attaches DataDisks)
+   - MachineConfig resources are applied via MCO
+   - Ignition processes the disk configurations, partitioning, formatting, and mounting disks
+8. Nodes boot with disks properly configured for their designated purposes
 
-This enhancement introduces the following new types to the machine pool API:
+#### Example Configuration (Azure)
+
+Example install-config.yaml with etcd on dedicated disk:
+
+```yaml
+apiVersion: v1
+baseDomain: example.com
+metadata:
+  name: mycluster
+platform:
+  azure:
+    region: eastus
+    resourceGroupName: my-resource-group
+controlPlane:
+  name: master
+  replicas: 3
+  platform:
+    azure:
+      type: Standard_D8s_v3
+      # First, configure Azure DataDisks
+      dataDisks:
+      - lun: 0
+        nameSuffix: etcd
+        diskSizeGB: 512
+        cachingType: ReadOnly
+        managedDisk:
+          storageAccountType: Premium_LRS
+  # Then, configure how to use those disks
+  diskSetup:
+  - type: etcd
+    etcd:
+      platformDiskID: etcd  # Matches nameSuffix above
+compute:
+- name: worker
+  replicas: 3
+  platform:
+    azure:
+      type: Standard_D4s_v3
+      dataDisks:
+      - lun: 0
+        nameSuffix: containers
+        diskSizeGB: 256
+      - lun: 1
+        nameSuffix: swapspace
+        diskSizeGB: 64
+  diskSetup:
+  - type: user-defined
+    userDefined:
+      platformDiskID: containers  # Matches nameSuffix
+      mountPath: /var/lib/containers
+  - type: swap
+    swap:
+      platformDiskID: swapspace  # Matches nameSuffix
+```
+
+**Key Points:**
+- `dataDisks` provisions the Azure managed disks
+- `diskSetup` configures how those disks are partitioned, formatted, and mounted
+- `platformDiskID` in `diskSetup` must match `nameSuffix` in `dataDisks`
+- The installer resolves Azure LUN to device path `/dev/disk/azure/scsi1/lun{LUN}`
+
+### API Extensions
+
+This enhancement adds a new `diskSetup` field to the installer's MachinePool API, which is **platform-generic** but requires platform-specific implementation for disk identification and provisioning.
+
+#### Install-Config API Changes
+
+The following types are added to support disk setup configuration:
 
 ```go
+// DiskType defines the purpose/role of an additional disk
 type DiskType string
 
 const (
-    Etcd        DiskType = "etcd"
-    Swap        DiskType = "swap"
-    UserDefined DiskType = "user-defined"
+    Etcd        DiskType = "etcd"         // Dedicated etcd storage
+    Swap        DiskType = "swap"         // Swap space
+    UserDefined DiskType = "user-defined" // Custom mount point
 )
 
+// Disk represents a disk setup configuration
 type Disk struct {
-    Type DiskType `json:"type,omitempty"`
+    // Type specifies the disk's purpose
+    // Required field.
+    Type DiskType `json:"type"`
 
+    // UserDefined configuration for user-defined disks
+    // Required when Type is "user-defined"
     UserDefined *DiskUserDefined `json:"userDefined,omitempty"`
-    Etcd        *DiskEtcd        `json:"etcd,omitempty"`
-    Swap        *DiskSwap        `json:"swap,omitempty"`
+
+    // Etcd configuration for etcd disks
+    // Required when Type is "etcd"
+    Etcd *DiskEtcd `json:"etcd,omitempty"`
+
+    // Swap configuration for swap disks
+    // Required when Type is "swap"
+    Swap *DiskSwap `json:"swap,omitempty"`
 }
 
+// DiskUserDefined defines configuration for a user-defined disk
 type DiskUserDefined struct {
-    PlatformDiskID string `json:"platformDiskID,omitempty"` // e.g., /dev/sdb, by-id/ata-*, etc.
-    MountPath      string `json:"mountPath,omitempty"`      // e.g., /var/custom-data
+    // PlatformDiskID identifies the disk on the platform
+    // Platform-specific format (e.g., Azure: "etcd", GCP: disk name, AWS: device name)
+    // Required field.
+    PlatformDiskID string `json:"platformDiskID"`
+
+    // MountPath specifies where to mount the filesystem
+    // Required field.
+    MountPath string `json:"mountPath"`
 }
 
+// DiskSwap defines configuration for a swap disk
 type DiskSwap struct {
-    PlatformDiskID string `json:"platformDiskID,omitempty"` // e.g., /dev/sdc
+    // PlatformDiskID identifies the disk on the platform
+    // Required field.
+    PlatformDiskID string `json:"platformDiskID"`
 }
 
+// DiskEtcd defines configuration for an etcd disk
 type DiskEtcd struct {
-    PlatformDiskID string `json:"platformDiskID,omitempty"` // e.g., /dev/sdd
-    // MountPath for etcd will be implicitly /var/lib/etcd or a standard, configurable default.
+    // PlatformDiskID identifies the disk on the platform
+    // Required field.
+    PlatformDiskID string `json:"platformDiskID"`
+    // Note: MountPath is implicitly /var/lib/etcd
+}
+
+// MachinePool enhanced with DiskSetup
+type MachinePool struct {
+    // ... existing fields ...
+
+    // DiskSetup specifies configurations for additional disks
+    // Optional field.
+    DiskSetup []Disk `json:"diskSetup,omitempty"`
 }
 ```
 
+#### Validation Rules
 
-* This enhancement modifies the behavior of the installer to interpret these new API fields and generate corresponding ignition configurations.
-* It does not directly modify existing resources owned by other parties but generates configuration that affects node storage layout.
+The following validation rules are enforced:
+
+1. **Type Field**:
+   - Required, must be one of: `etcd`, `swap`, `user-defined`
+
+2. **Type-specific Configuration**:
+   - When `type: etcd`, the `etcd` field is required
+   - When `type: swap`, the `swap` field is required
+   - When `type: user-defined`, the `userDefined` field is required
+
+3. **PlatformDiskID**:
+   - Required for all disk types
+   - Format is platform-specific
+   - Must reference an available disk on the platform
+
+4. **Relationship with Platform DataDisks** (Azure example):
+   - The number of `diskSetup` entries must not exceed the number of `dataDisks` configured
+   - Each `platformDiskID` must match a corresponding platform disk identifier (e.g., Azure DataDisk `nameSuffix`)
+   - Azure Stack Cloud does not support data disks or disk setup
+
+5. **Uniqueness Constraints**:
+   - Only one `etcd` type disk per machine pool
+   - Only one `swap` type disk per machine pool
+   - Multiple `user-defined` disks are allowed
+
+6. **MountPath** (user-defined only):
+   - Required for user-defined disks
+   - Must be a valid absolute path
+   - Should not conflict with system mount points
 
 
-### Installer ignition additions
+### MachineConfig Generation
 
+The installer generates **MachineConfig** resources that contain the ignition configuration for disk setup. This approach allows the disk setup to be applied via the MachineConfigOperator (MCO) during node bootstrapping.
 
-This currently is an incomplete example, would be replaced with switch/case for each platforms' implementation of additional disks.
+#### Implementation Architecture
 
 ```go
+// NodeDiskSetup generates a MachineConfig for a disk setup configuration
+func NodeDiskSetup(installConfig types.InstallConfig, role string,
+                   diskSetup types.Disk, platformDisk interface{}) (*mcfgv1.MachineConfig, error) {
 
-	if installConfig.Config.ControlPlane != nil {
-		for i, d := range installConfig.Config.ControlPlane.DiskSetup {
-			if d.Type == types.Etcd {
+    // Platform-specific disk device mapping
+    device := ""
+    switch installConfig.Platform.Name() {
+    case azuretypes.Name:
+        // Azure: map DataDisk LUN to device path
+        dataDisk := platformDisk.(azure.DataDisk)
+        device = fmt.Sprintf("/dev/disk/azure/scsi1/lun%d", *dataDisk.Lun)
 
-				// platform specific...
-				if installConfig.Config.ControlPlane.Platform.Azure != nil {
-					azurePlatform := installConfig.Config.ControlPlane.Platform.Azure
-					if d.Etcd.PlatformDiskID == azurePlatform.DataDisks[i].NameSuffix {
-						device := fmt.Sprintf("/dev/disk/azure/scsi1/lun%d", *azurePlatform.DataDisks[i].Lun)
-						AddEtcdDisk(a.Config, device)
-					}
-				}
-			}
-		}
-	}
+    case awstypes.Name:
+        // AWS: map EBS volume to device
+        // Implementation TBD
 
+    case gcptypes.Name:
+        // GCP: map persistent disk to device
+        // Implementation TBD
 
+    default:
+        return nil, errors.Errorf("platform %s does not support disk setup",
+                                  installConfig.Platform.Name())
+    }
 
-func AddEtcdDisk(config *igntypes.Config, device string) {
-	config.Storage.Disks = append(config.Storage.Disks, igntypes.Disk{
-		Device: device,
-		Partitions: []igntypes.Partition{{
-			Label:    ptr.To("etcddisk"),
-			StartMiB: ptr.To(0),
-			SizeMiB:  ptr.To(0),
-		}},
-		WipeTable: ptr.To(true),
-	})
-
-	config.Storage.Filesystems = append(config.Storage.Filesystems, igntypes.Filesystem{
-		Device:         "/dev/disk/by-partlabel/etcddisk",
-		Format:         ptr.To("xfs"),
-		Label:          ptr.To("etcdpart"),
-		MountOptions:   []igntypes.MountOption{"defaults", "prjquota"},
-		Path:           ptr.To("/var/lib/etcd"),
-		WipeFilesystem: ptr.To(true),
-	})
-	config.Systemd.Units = append(config.Systemd.Units, igntypes.Unit{
-		Name:    "var-lib-etcd.mount",
-		Enabled: ptr.To(true),
-		Contents: ptr.To(`
-[Unit]
-Requires=systemd-fsck@dev-disk-by\x2dpartlabel-var.service
-After=systemd-fsck@dev-disk-by\x2dpartlabel-var.service
-
-[Mount]
-Where=/var/lib/etcd
-What=/dev/disk/by-partlabel/etcddisk
-Type=xfs
-Options=defaults,prjquota
-
-[Install]
-RequiredBy=local-fs.target
-`),
-	})
+    // Generate MachineConfig based on disk type
+    return ForDiskSetup(role, device, diskSetup.Type, diskSetup)
 }
 
+// ForDiskSetup creates a MachineConfig with ignition configuration
+func ForDiskSetup(role, device string, diskType types.DiskType,
+                 disk types.Disk) (*mcfgv1.MachineConfig, error) {
+
+    ignitionConfig := igntypes.Config{
+        Ignition: igntypes.Ignition{
+            Version: "3.2.0",
+        },
+    }
+
+    switch diskType {
+    case types.Etcd:
+        label := "etcddisk"
+        mountPath := "/var/lib/etcd"
+        addFilesystemSetup(&ignitionConfig, device, label, mountPath, "xfs",
+                          []string{"defaults", "prjquota"})
+
+    case types.Swap:
+        addSwapSetup(&ignitionConfig, device)
+
+    case types.UserDefined:
+        label := sanitizeLabel(disk.UserDefined.MountPath)
+        addFilesystemSetup(&ignitionConfig, device, label,
+                          disk.UserDefined.MountPath, "xfs",
+                          []string{"defaults"})
+    }
+
+    // Convert ignition config to MachineConfig
+    return machineConfigFromIgnition(role, diskType, ignitionConfig)
+}
+```
+
+#### Ignition Configuration Details
+
+For **etcd** and **user-defined** disks:
+
+```go
+func addFilesystemSetup(config *igntypes.Config, device, label, mountPath, fsType string,
+                       mountOptions []string) {
+    // 1. Create partition
+    config.Storage.Disks = append(config.Storage.Disks, igntypes.Disk{
+        Device: device,
+        Partitions: []igntypes.Partition{{
+            Label:    ptr.To(label),
+            StartMiB: ptr.To(0),  // Start at beginning
+            SizeMiB:  ptr.To(0),  // Use entire disk
+        }},
+        WipeTable: ptr.To(true),
+    })
+
+    // 2. Create filesystem
+    config.Storage.Filesystems = append(config.Storage.Filesystems, igntypes.Filesystem{
+        Device:         fmt.Sprintf("/dev/disk/by-partlabel/%s", label),
+        Format:         ptr.To(fsType),
+        Label:          ptr.To(label + "part"),
+        MountOptions:   mountOptions,
+        Path:           ptr.To(mountPath),
+        WipeFilesystem: ptr.To(true),
+    })
+
+    // 3. Create systemd mount unit
+    unitName := pathToUnitName(mountPath) + ".mount"
+    config.Systemd.Units = append(config.Systemd.Units, igntypes.Unit{
+        Name:    unitName,
+        Enabled: ptr.To(true),
+        Contents: ptr.To(generateMountUnit(mountPath, label, fsType, mountOptions)),
+    })
+}
+```
+
+For **swap** disks:
+
+```go
+func addSwapSetup(config *igntypes.Config, device string) {
+    label := "swapdisk"
+
+    // 1. Create partition
+    config.Storage.Disks = append(config.Storage.Disks, igntypes.Disk{
+        Device: device,
+        Partitions: []igntypes.Partition{{
+            Label:    ptr.To(label),
+            StartMiB: ptr.To(0),
+            SizeMiB:  ptr.To(0),
+        }},
+        WipeTable: ptr.To(true),
+    })
+
+    // 2. Format as swap
+    config.Storage.Filesystems = append(config.Storage.Filesystems, igntypes.Filesystem{
+        Device:         fmt.Sprintf("/dev/disk/by-partlabel/%s", label),
+        Format:         ptr.To("swap"),
+        WipeFilesystem: ptr.To(true),
+    })
+
+    // 3. Create systemd swap unit
+    config.Systemd.Units = append(config.Systemd.Units, igntypes.Unit{
+        Name:    "dev-disk-by\\x2dpartlabel-swapdisk.swap",
+        Enabled: ptr.To(true),
+        Contents: ptr.To(`
+[Unit]
+Description=Swap on dedicated disk
+
+[Swap]
+What=/dev/disk/by-partlabel/swapdisk
+
+[Install]
+WantedBy=swap.target
+`),
+    })
+}
+```
+
+#### Platform-Specific Disk Mapping
+
+**Azure Example:**
+
+The `platformDiskID` in the `diskSetup` configuration references the `nameSuffix` of an Azure DataDisk. The installer:
+
+1. Matches `diskSetup[i].etcd.platformDiskID` with `dataDisks[i].nameSuffix`
+2. Retrieves the LUN from the corresponding DataDisk
+3. Maps to device path: `/dev/disk/azure/scsi1/lun{LUN}`
+
+```go
+// Azure-specific mapping
+for i, diskSetup := range controlPlane.DiskSetup {
+    if diskSetup.Type == types.Etcd {
+        for _, dataDisk := range controlPlane.Platform.Azure.DataDisks {
+            if diskSetup.Etcd.PlatformDiskID == dataDisk.NameSuffix {
+                device := fmt.Sprintf("/dev/disk/azure/scsi1/lun%d", *dataDisk.Lun)
+                mc, err := ForDiskSetup("master", device, types.Etcd, diskSetup)
+                // Add MachineConfig to manifests
+            }
+        }
+    }
+}
 ```
 
 ### Topology Considerations
 
+#### Hypershift / Hosted Control Planes
+
+This feature can be applied to Hypershift / Hosted Control Planes for worker nodes. The hosted control plane itself runs as pods and does not use this disk setup mechanism. Worker nodes in hosted clusters can be configured with disk setup for swap or user-defined storage needs.
+
 #### Standalone Clusters
+
+This feature applies to standalone OpenShift clusters. Disk setup can be configured for both control plane and compute nodes. Control plane nodes commonly use dedicated etcd disks for performance isolation. Compute nodes can use swap or user-defined disks for application workloads.
+
+#### Single-node Deployments or MicroShift
+
+This feature applies to single-node OpenShift deployments. The single control plane node can be configured with dedicated disks for etcd, swap, or user-defined purposes. This feature does not apply to MicroShift as it does not use the OpenShift installer.
 
 
 ### Implementation Details/Notes/Constraints
 
-* **Disk Identification:** `PlatformDiskID` will rely on user-provided identifiers that are stable and predictable by the time ignition runs (e.g., `/dev/disk/by-id/...` is preferred over `/dev/sdx` names). The installer will not perform disk discovery; it will trust the user-provided ID.
-* **Partitioning:** Initially, the proposal is to use the entire disk for a single partition. 
-* **Filesystem:** A default filesystem XFS will be used for `Etcd` and `UserDefined` disks. 
-* **Error Handling:** If a specified `PlatformDiskID` is not found by ignition, the mount will fail. The node may or may not come up healthy depending on the criticality of the mount (e.g., a failed etcd disk mount would be critical for a control plane node). This needs to be clearly documented.
-* **Idempotency:** Ignition's handling of filesystems and mounts is generally idempotent.
-* **Security:** Standard file permissions will be applied. No special SELinux labeling is planned for the initial implementation beyond what the system defaults for the given mount point.
+**Modified Files:**
+
+The implementation spans several installer components:
+- `pkg/types/types.go` - Adds `DiskSetup` field to MachinePool type
+- `pkg/types/validation/machinepools.go` - Generic disk setup validation
+- `pkg/types/azure/validation/machinepool.go` - Azure-specific validation
+- `pkg/asset/machines/machineconfig/disks.go` - MachineConfig generation for disk setup
+- `data/data/install.openshift.io_installconfigs.yaml` - CRD schema updates
+
+**Platform Support:**
+
+Currently implemented for:
+- **Azure**: Full support with DataDisk integration
+
+Planned for future implementation:
+- **AWS**: EBS volume mapping
+- **GCP**: Persistent disk mapping
+- **Bare Metal**: Direct device path specification
+
+**Disk Identification:**
+
+- `PlatformDiskID` is **platform-specific**:
+  - **Azure**: Must match `nameSuffix` from `dataDisks` configuration
+  - **Other platforms**: TBD based on platform disk naming conventions
+- The installer performs validation to ensure `platformDiskID` references exist
+- Device paths are resolved at MachineConfig generation time
+
+**Partitioning:**
+
+- Uses the entire disk for a single partition
+- Partition starts at 0 MiB and uses full disk capacity (SizeMiB: 0)
+- Partition table is wiped before creating new partition
+
+**Filesystem:**
+
+- **Etcd disks**: XFS with mount options `defaults,prjquota`
+- **User-defined disks**: XFS with mount options `defaults`
+- **Swap disks**: Formatted as swap space
+- Filesystem is wiped before formatting (WipeFilesystem: true)
+
+**MachineConfig Integration:**
+
+- Each disk setup generates a separate MachineConfig resource
+- MachineConfigs are labeled with role-specific labels for MCO targeting
+- Ignition version 3.2.0 is used
+- MachineConfigs are rendered during `create manifests` phase
+
+**Error Handling:**
+
+- If `platformDiskID` doesn't match any platform disk, validation fails at install-config validation
+- If the platform disk is not attached at boot time, the mount will fail
+- Failed mounts for critical disks (etcd) will prevent the node from becoming Ready
+- Failed mounts for non-critical disks (user-defined, swap) may allow the node to become Ready but with degraded functionality
+
+**Idempotency:**
+
+- Ignition's disk/filesystem handling is idempotent
+- Re-running ignition with the same configuration is safe
+- Partition labels prevent creating duplicate partitions
+
+**Security:**
+
+- Standard file permissions are applied by ignition
+- SELinux contexts are set based on the mount point path
+- For etcd disks at `/var/lib/etcd`, SELinux context is automatically correct
+- For user-defined paths, administrators should verify appropriate SELinux policies
+
+**Constraints:**
+
+- Disk setup requires corresponding platform disks to be configured (e.g., Azure DataDisks)
+- Number of disk setups cannot exceed number of platform disks
+- Only one etcd disk and one swap disk per machine pool
+- Azure Stack Cloud does not support disk setup
+- Disks must be available at first boot (cannot be added post-installation via this mechanism)
 
 ### Risks and Mitigations
 
-* **Risk:** User provides an incorrect `PlatformDiskID`, leading to formatting the wrong disk or installation failure.
-    * **Mitigation:** Clear documentation and examples emphasizing the use of stable disk IDs (e.g., `/dev/disk/by-id/*`). The installer could potentially perform basic validation on the format of the ID but cannot guarantee its existence on the target machine.
-* **Risk:** Conflicts with other processes or installer steps trying to use the same disk.
-    * **Mitigation:** The disks specified for these additional roles should be distinct from the primary OS disk and any disks managed by other operators (like local storage operator) unless explicitly coordinated.
-* **Risk:** Ignition generation logic becomes overly complex.
-    * **Mitigation:** Start with simple cases (single partition, default filesystem) and iterate.
-* **Security Review:** Will be required, focusing on how disk access and mount options are handled. Input from security teams will be solicited.
-* **UX Review:** Simplicity of the API and clarity of documentation are key. UX review will ensure the configuration is intuitive.
+**Risk: Incorrect PlatformDiskID Configuration**
+
+User provides an incorrect `platformDiskID` that doesn't match any configured platform disk.
+
+*Mitigation:*
+- Installer validates `platformDiskID` against configured platform disks (e.g., Azure DataDisks)
+- Validation fails at install-config time if no match is found
+- Clear error messages guide users to correct configuration
+- Documentation provides platform-specific examples
+
+**Risk: Disk Not Available at Boot**
+
+The platform disk is configured but not successfully attached to the VM at boot time.
+
+*Mitigation:*
+- Platform provisioning errors will cause cluster installation to fail
+- For critical mounts (etcd), node will fail health checks and not join cluster
+- Installer should verify platform disks are provisioned before generating MachineConfigs
+
+**Risk: Conflicts with Existing Mounts**
+
+User-defined mount paths conflict with system or other application mount points.
+
+*Mitigation:*
+- Documentation warns against using system paths
+- Validation could reject common system paths (/etc, /usr, /bin, etc.)
+- Encourage use of /var subdirectories or /mnt paths
+
+**Risk: Platform-Specific Implementation Gaps**
+
+Initial implementation is Azure-specific; other platforms need separate implementations.
+
+*Mitigation:*
+- Design is platform-generic at the API level
+- Clear platform support documentation
+- Validation rejects unsupported platforms with helpful error messages
+
+**Risk: Security and SELinux Issues**
+
+Custom mount paths may have incorrect SELinux contexts or permissions.
+
+*Mitigation:*
+- Ignition applies contexts based on mount path patterns
+- Documentation guides users on SELinux considerations
+- Recommend using standard paths under /var where possible
+- Security review of generated ignition configurations
+
+**Risk: etcd Performance**
+
+Misconfigured etcd disks (wrong storage type, caching) could degrade performance.
+
+*Mitigation:*
+- Documentation provides best practices (Premium_LRS, ReadOnly caching for Azure)
+- Example configurations demonstrate optimal settings
+- Performance team review of recommendations
 
 ### Drawbacks
 
-* Potential for user error in specifying disk IDs, which can have destructive consequences if the wrong disk is targeted (though ignition typically runs before significant data exists on new nodes).
+**Install-Time Only Configuration:**
+
+Disk setup can only be configured during cluster installation. Nodes provisioned after installation cannot add disk setup without recreating the machine pool or manual intervention.
+
+**Platform-Specific Mapping Complexity:**
+
+Each platform requires custom logic to map `platformDiskID` to actual device paths. This increases implementation and testing burden for each platform.
+
+**Limited Flexibility:**
+
+- Only supports single partition per disk
+- Fixed filesystem type (XFS for data, swap for swap)
+- Cannot specify custom partition layouts or multiple partitions
+- Cannot configure RAID
+
+These limitations keep the initial implementation simple but may require future enhancements.
+
+**Dependency on Platform Disk Configuration:**
+
+Disk setup is not standalone - it requires platform-specific disk provisioning (e.g., Azure DataDisks). Users must understand both concepts and configure them correctly together.
+
+**No Day 2 Management:**
+
+Once configured, disk setup cannot be modified or removed without node reprovisioning. This is consistent with MachineConfig immutability but limits operational flexibility.
 
 ## Alternatives (Not Implemented)
 
-* **Relying on Day-2 Operations:** Users could manually partition and mount disks after the cluster is up, or use operators like the Local Storage Operator. This proposal aims to make these common configurations available at installation time for simplicity and to ensure critical mounts (like etcd) are present from the first boot.
+**Alternative 1: Day-2 Manual Configuration**
+
+Users could manually partition and mount disks after the cluster is up using ssh access and manual disk management.
+
+*Not implemented because:*
+- Requires manual intervention on each node
+- Error-prone and not scalable
+- Critical mounts like etcd need to be present from first boot
+- Inconsistent with declarative infrastructure-as-code principles
+
+**Alternative 2: Use Existing Storage Operators**
+
+Rely on operators like Local Storage Operator or other CSI drivers to manage additional disks.
+
+*Not implemented because:*
+- These operators manage PersistentVolumes, not host mounts
+- Cannot be used for system-level mounts like etcd or swap
+- Adds complexity for simple use cases
+- Does not address installation-time requirements
+
+**Alternative 3: Extend MachineConfig Directly**
+
+Users could create custom MachineConfigs with ignition disk configurations.
+
+*Not implemented as the only option because:*
+- Requires deep knowledge of ignition and MachineConfig
+- Platform-specific device paths are not user-friendly
+- No validation of platform disk availability
+- Installer-provided abstraction is more user-friendly
+
+However, this alternative *complements* this enhancement - advanced users can still create custom MachineConfigs for complex scenarios not covered by the diskSetup API.
+
+**Alternative 4: Ignition Config Templates**
+
+Provide ignition config templates that users can customize for their disk setup needs.
+
+*Not implemented because:*
+- Requires users to understand ignition format
+- Platform-specific device mapping is complex
+- No automated validation
+- Less integrated with install-config.yaml workflow
+
+**Alternative 5: Support Multiple Partitions Per Disk**
+
+Allow users to define multiple partitions on a single disk with different mount points.
+
+*Not implemented initially because:*
+- Adds significant complexity to the API and implementation
+- Most use cases need simple single-partition disks
+- Can be added as a future enhancement if demand exists
+- Users can achieve this with custom MachineConfigs if needed
+
+**Alternative 6: Support All Filesystems**
+
+Allow users to choose from a wide variety of filesystems (ext4, btrfs, zfs, etc.).
+
+*Not implemented initially because:*
+- XFS is appropriate for most use cases
+- Reduces testing burden
+- Simplifies implementation
+- Can be extended in the future based on user feedback
 
 ## Open Questions [optional]
+
+None. The implementation has been completed and deployed.
 
 
 ## Test Plan
 
-**Note:** *Section not required until targeted at a release.*
+**Unit Tests:**
 
-* Unit tests for the ignition generation logic based on various `Disk` configurations.
-* E2E tests involving deploying clusters with:
-    * Dedicated etcd disks.
-    * Dedicated swap disks.
-    * User-defined disks with specified mount points.
-* Tests will verify that disks are correctly partitioned, formatted, and mounted, and that services like etcd utilize their dedicated storage.
-* Testing across different cloud platforms and bare metal to ensure `PlatformDiskID` handling is robust.
+- Validation logic for disk setup configuration:
+  - Test type validation (etcd, swap, user-defined)
+  - Test platformDiskID presence and matching
+  - Test uniqueness constraints (only one etcd, one swap)
+  - Test mountPath validation for user-defined disks
+  - Test platform-specific validation (Azure DataDisk matching)
+
+- MachineConfig generation:
+  - Test ignition config generation for etcd disks
+  - Test ignition config generation for swap disks
+  - Test ignition config generation for user-defined disks
+  - Test partition configuration
+  - Test filesystem configuration
+  - Test systemd mount unit generation
+  - Test device path resolution for different platforms
+
+**Integration Tests:**
+
+- Install-config validation:
+  - Create install-config.yaml with various disk setup configurations
+  - Verify validation catches all error conditions
+  - Verify valid configurations are accepted
+  - Test Azure-specific DataDisk matching validation
+
+- Manifest generation:
+  - Run `create manifests` with disk setup configured
+  - Verify MachineConfig resources are generated
+  - Verify ignition configurations are correct
+  - Verify role-specific labeling
+
+**End-to-End Tests (Azure):**
+
+- Cluster installation with etcd on dedicated disk:
+  - Configure control plane with etcd disk setup
+  - Verify cluster installs successfully
+  - Verify `/var/lib/etcd` is mounted from dedicated disk
+  - Verify etcd is using the dedicated disk
+  - Verify partition and filesystem are correct (XFS, correct mount options)
+
+- Cluster installation with swap disk:
+  - Configure compute nodes with swap disk setup
+  - Verify swap space is enabled
+  - Verify swap is using the dedicated disk
+  - Verify `swapon -s` shows the swap partition
+
+- Cluster installation with user-defined disks:
+  - Configure custom mount point (e.g., `/var/lib/containers`)
+  - Verify mount is present and accessible
+  - Verify partition and filesystem are correct
+
+- Multi-disk configuration:
+  - Configure multiple disk types on same machine pool
+  - Verify all disks are correctly configured
+  - Verify no conflicts or ordering issues
+
+- Error cases:
+  - Test with mismatched platformDiskID (validation should fail)
+  - Test with missing DataDisk configuration (validation should fail)
+  - Test with unsupported platform (validation should fail)
+
+**Platform-Specific Tests:**
+
+- Azure:
+  - Test with different Azure storage account types
+  - Test with different LUN assignments
+  - Test Azure Stack Cloud rejection
+  - Test with disk encryption
+
+- Future platforms (AWS, GCP, Bare Metal):
+  - Platform-specific device mapping tests
+  - Platform-specific validation tests
+
+**CI Jobs:**
+
+- Create periodic CI jobs for Azure with disk setup configurations
+- Monitor for disk setup-specific failures
+- Test upgrades from clusters without disk setup to ensure compatibility
 
 ## Graduation Criteria
 
-**Note:** *Section not required until targeted at a release.*
-
 ### Dev Preview -> Tech Preview
+
+- Core functionality implemented for Azure platform:
+  - Partitioning, formatting (XFS/swap), and mounting for etcd, swap, and user-defined disk types
+  - PlatformDiskID matching with Azure DataDisks
+  - MachineConfig generation with ignition configurations
+
+- Installer validation:
+  - Type validation
+  - PlatformDiskID matching
+  - Uniqueness constraints
+
+- Basic testing:
+  - Unit tests for validation and MachineConfig generation
+  - E2E test for etcd on dedicated disk
+  - E2E test for swap disk
+  - E2E test for user-defined disk
+
+- Documentation:
+  - API reference documentation
+  - Azure-specific examples
+  - Installation guide with disk setup
 
 ### Tech Preview -> GA
 
-* Core functionality implemented: partitioning, formatting (default FS), and mounting for Etcd, Swap, UserDefined disk types.
-* Ability to specify `PlatformDiskID`.
-* Basic e2e tests pass for common scenarios.
-* Potentially allow configuration of filesystem type if strong demand exists.
+- Enhanced reliability:
+  - More comprehensive testing (upgrade, downgrade, scale)
+  - Sufficient time for feedback from Tech Preview users
+  - Bug fixes based on user feedback
+
+- Expanded testing:
+  - E2E tests for all supported scenarios
+  - Platform-specific test coverage
+  - Performance testing for etcd on dedicated disks
+  - Stress testing with multiple disk configurations
+
+- Documentation improvements:
+  - Best practices guide
+  - Troubleshooting guide
+  - Performance tuning recommendations
+  - User-facing documentation in openshift-docs
+
+- Operational maturity:
+  - Clear support procedures
+  - Monitoring and alerting guidance
+  - Recovery procedures for disk failures
+
+- Optional enhancements based on feedback:
+  - Support for additional platforms (AWS, GCP)
+  - Configurable filesystem types
+  - Additional mount options
+
+**For non-optional features moving to GA, the graduation criteria must include end to end tests.**
 
 ### Removing a deprecated feature
 
@@ -247,19 +820,186 @@ Not applicable for this initial enhancement.
 
 ## Upgrade / Downgrade Strategy
 
-* **Upgrade:** This feature primarily affects ignition generation. Upgrading an installer to a version with this feature will allow new clusters or new machine pools (if applicable post-install) to use it. Existing machine pools will not be affected unless re-provisioned with a configuration that uses these new fields. No changes are required for existing clusters to keep previous behavior.
+This feature does not impact the upgrade or downgrade process for existing clusters. Disk setup is configured at cluster installation time and becomes part of the MachineConfig for the role.
+
+**Upgrade Scenarios:**
+
+- Existing clusters without disk setup can continue to operate normally after upgrading to a version that includes this feature
+- New machine pools created after upgrade can utilize the disk setup feature (if platform supports dynamic machine pool creation)
+- Existing nodes with disk setup configurations remain unchanged during cluster upgrades
+- MachineConfigs generated for disk setup are immutable and persist through upgrades
+
+**Downgrade Scenarios:**
+
+- Downgrading the installer to a version without disk setup support will not affect already-provisioned nodes
+- New installations with the downgraded installer will not support disk setup
+- Existing MachineConfigs with disk setup remain on the cluster but new nodes cannot be provisioned with disk setup using the downgraded installer
+
+**Important Considerations:**
+
+- Disk setup is an installation-time feature, not a runtime feature
+- Once nodes are provisioned with disk setup, the configuration persists regardless of installer version
+- No migration or cleanup is required during upgrades or downgrades
 
 ## Version Skew Strategy
 
-* This feature is primarily contained within the installer and the ignition config it produces. The ignition version consumed by the OS (e.g., RHCOS/FCOS) must support the storage (`files`, `filesystems`, `raid`) and `systemd` unit configurations generated. Standard ignition features will be used, minimizing skew risks with the OS.
-* No direct interaction with other control plane components that would cause version skew issues beyond the installer's interaction with the machine API (if these fields are added there).
+This feature does not introduce version skew concerns between cluster components.
+
+**Installer and OS:**
+
+- Uses Ignition v3.2.0, which is supported by RHCOS/FCOS
+- Standard ignition disk, filesystem, and systemd unit configurations
+- No custom or experimental ignition features required
+
+**MachineConfig and MCO:**
+
+- MachineConfigs are standard resources compatible with existing MCO versions
+- No changes to MCO required
+- MCO processes ignition configurations as normal
+
+**No Runtime Dependencies:**
+
+- Disk setup occurs during node bootstrapping via ignition
+- No ongoing coordination between components required
+- No version-dependent APIs or protocols
 
 ## Operational Aspects of API Extensions
 
+This enhancement does not introduce API extensions in the Kubernetes API sense (no CRDs, admission webhooks, or aggregated API servers). The changes are limited to the installer's install-config.yaml schema.
+
+The installer generates standard MachineConfig resources that contain ignition configurations. These MachineConfigs are processed by the existing MachineConfigOperator (MCO) without any modifications to the MCO.
+
+**Operational Impact:**
+
+- MachineConfigs are created during `create manifests` phase
+- No ongoing reconciliation or operators required
+- No new metrics, alerts, or monitoring needed specifically for disk setup
+- Standard MachineConfig troubleshooting procedures apply
 
 ## Support Procedures
+
+**Detecting Configuration Issues:**
+
+**At Installation Time:**
+
+If disk setup configuration is invalid, the installer will fail during validation with clear error messages:
+
+- "disk type must be one of: etcd, swap, user-defined" - Invalid disk type
+- "platformDiskID is required" - Missing platform disk identifier
+- "platformDiskID 'X' does not match any configured data disk" - No matching platform disk (Azure)
+- "only one etcd disk per machine pool is allowed" - Multiple etcd disks configured
+- "only one swap disk per machine pool is allowed" - Multiple swap disks configured
+- "mountPath is required for user-defined disks" - Missing mount path
+- "data disk support is not currently available on StackCloud" - Azure Stack Cloud limitation
+
+**At Runtime:**
+
+If a disk fails to mount during node bootstrapping:
+
+1. Check node journal logs: `journalctl -u var-lib-etcd.mount` (or appropriate unit name)
+2. Check ignition logs: `journalctl -u ignition-*`
+3. Verify disk is attached: `lsblk`
+4. Check partition labels: `ls -l /dev/disk/by-partlabel/`
+
+**Verifying Disk Setup on Running Nodes:**
+
+To verify disk setup is correctly applied:
+
+```bash
+# List all mounts
+mount | grep -E '(etcd|swap|containers)'
+
+# Check swap status
+swapon -s
+
+# Verify partition configuration
+lsblk -f
+
+# Check filesystem type and options
+findmnt /var/lib/etcd
+
+# View MachineConfig on the cluster
+oc get machineconfig | grep disk
+
+# Check MCO application status
+oc get mcp
+```
+
+**Common Issues:**
+
+**Issue: Disk Not Mounted**
+
+*Symptoms:* Mount point doesn't exist, filesystem not available
+
+*Diagnosis:*
+1. Check if platform disk was attached: `lsblk`
+2. Check systemd mount unit status: `systemctl status var-lib-etcd.mount`
+3. Check ignition logs for partition/filesystem creation
+
+*Resolution:*
+- If disk wasn't attached: Check platform configuration (e.g., Azure DataDisk)
+- If mount unit failed: Check journalctl for specific error
+- If partition missing: Node may need to be reprovisioned
+
+**Issue: Wrong PlatformDiskID**
+
+*Symptoms:* Validation fails with platformDiskID mismatch error
+
+*Diagnosis:* Review install-config.yaml, verify platformDiskID matches platform disk identifier
+
+*Resolution:*
+- For Azure: Ensure platformDiskID matches DataDisk nameSuffix
+- Correct the install-config.yaml
+- Re-run installer validation
+
+**Issue: etcd Performance Problems**
+
+*Symptoms:* High etcd latency, slow cluster operations
+
+*Diagnosis:*
+1. Verify etcd is using dedicated disk: `findmnt /var/lib/etcd`
+2. Check disk I/O: `iostat -x 1`
+3. Review Azure storage type: Should be Premium_LRS
+
+*Resolution:*
+- Ensure correct storage account type (Premium_LRS for production)
+- Verify caching type (ReadOnly recommended)
+- Check for other I/O contention on the disk
+
+**Support Escalation:**
+
+- Installer team: Installation and validation issues
+- MCO team: MachineConfig application issues
+- Etcd team: Etcd-specific performance or functionality issues
+- Platform team (Azure/AWS/GCP): Platform disk provisioning issues
 
 
 ## Infrastructure Needed [optional]
 
-* CI jobs will need to be updated or created to test configurations with multiple disks, potentially requiring CI environments that can simulate or provide multiple attachable disk devices.
+**CI Infrastructure:**
+
+- Azure CI environments must support provisioning VMs with multiple data disks
+- CI jobs need permissions to create and attach managed disks
+- Test clusters should include configurations with:
+  - Control plane nodes with etcd disks
+  - Worker nodes with swap disks
+  - Worker nodes with user-defined disks
+  - Mixed configurations
+
+**Test Resources:**
+
+- Additional Azure resources for data disks in CI subscriptions
+- Cost considerations for Premium_LRS disks in testing
+- Cleanup automation to remove test disks after job completion
+
+**Documentation Infrastructure:**
+
+- Examples repository with sample install-config.yaml files
+- Documentation for each supported platform (currently Azure)
+- Troubleshooting guides and runbooks
+
+**No Special Infrastructure Required:**
+
+- No new clusters or dedicated test environments needed beyond standard CI
+- Uses existing Azure CI infrastructure with additional disk provisioning
+- No new monitoring or observability infrastructure required
