@@ -114,7 +114,7 @@ The `type: PromQL` condition entry is an [object][json-object] with the followin
 
 * `PromQL` (required, [object][json-object]), with the following properties:
   * `PromQL` (required, [string][json-string]), with a [PromQL][] query classifying clusters.
-    This query will be evaluated on the local cluster, so it has access to data beyond the subset that is [uploaded to Telemetry][uploaded-telemetry].
+    This query will be evaluated on the local cluster, so it has no access to data beyond the subset that is [uploaded to Telemetry][uploaded-telemetry].
     The query should return a 1 in the match case (risk matches, update should not be recommended) and a 0 in the does-not-match case (risk does not match, update should be recommended).
     Queries which return no time series, or which return values besides 0 or 1, are evaluation failures, as discussed in [the query coverage section](#query-coverage).
 
