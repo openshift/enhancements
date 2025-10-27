@@ -1,19 +1,19 @@
 ---
 title: ingress-operator-resource-configuration
 authors:
-  - "@jortizpa"
+  - "@joseorpa"
 reviewers:
-  - "@Miciah"
-  - "@frobware"
-  - "@candita"
-  - "@danehans"
+  - "TBD"
+  - "TBD"
+  - "TBD"
+  - "TBD"
 approvers:
-  - "@deads2k"
+  - "TBD"
 api-approvers:
-  - "@JoelSpeed"
-  - "@deads2k"
-creation-date: 2025-01-14
-last-updated: 2025-01-14
+  - "TBD"
+  - "TBD"
+creation-date: 2025-10-28
+last-updated: 2025-10-28
 tracking-link:
   - https://issues.redhat.com/browse/RFE-1476
 see-also:
@@ -67,17 +67,6 @@ Acceptance Criteria:
 - Operator performs adequately under high load
 - Configuration survives operator restarts and upgrades
 
-#### Story 3: Compliance Requirements
-
-As a compliance officer, I need all pods in my OpenShift cluster to have both 
-resource requests and limits defined for auditing, cost allocation, and capacity 
-planning purposes.
-
-Acceptance Criteria:
-- All operator containers can have limits configured
-- Configuration is auditable via oc commands
-- Meets organizational policy requirements
-
 ### Goals
 
 - Allow configuration of resource requests and limits for ingress-operator containers
@@ -114,7 +103,7 @@ Acceptance Criteria:
 ### API Extensions
 
 Create a new v1alpha1 API version for IngressController in the 
-`operator.openshift.io` group, following the pattern established by 
+`operator.openshift.io` group, following the pattern made for example by 
 [cluster monitoring v1alpha1 configuration](https://github.com/openshift/api/blob/94481d71bb6f3ce6019717ea7900e6f88f42fa2c/config/v1alpha1/types_cluster_monitoring.go#L172-L193).
 
 #### New API Types
@@ -258,7 +247,7 @@ Particularly beneficial for single-node OpenShift (SNO) deployments where:
 
 #### API Versioning Strategy
 
-- **v1 API**: Remains stable and unchanged (storage version)
+- **v1 API**: Remains stable and unchanged (stored version)
 - **v1alpha1 API**: Served but not stored
 - **Conversion**: Automatic conversion between versions via conversion webhooks
 - **Field handling**: v1alpha1-specific fields are dropped when reading via v1 API
@@ -444,7 +433,7 @@ This section describes criteria for graduating from v1alpha1 to v1 (stable API).
 - [ ] Upgrade/downgrade tested extensively
 - [ ] API review completed and approved for promotion
 
-Timeline estimate: 6-12 months after Tech Preview release
+Timeline estimate: Next major release after Tech Preview release
 
 #### Removing a deprecated feature
 
@@ -501,7 +490,7 @@ During cluster upgrades, the API server may be updated before or after the ingre
 - API server doesn't serve v1alpha1 yet
 - Users continue using v1 API until API server updates
 
-**Maximum skew**: 1 minor version (OpenShift standard)
+**Maximum skew**: 1 minor version 
 
 ### Operational Aspects of API Extensions
 
@@ -556,7 +545,7 @@ oc get pod -n openshift-ingress-operator -o jsonpath='{.items[*].status.qosClass
 
 ## Implementation History
 
-- 2025-01-14: Enhancement proposed
+- 2025-10-28: Enhancement proposed
 - TBD: Enhancement approved
 - TBD: API implementation merged to openshift/api
 - TBD: Controller implementation merged to cluster-ingress-operator
@@ -650,7 +639,7 @@ Leverage Operator Lifecycle Manager (OLM) subscription configuration.
 
 ### Development Infrastructure
 
-- Standard OpenShift CI/CD pipeline (already exists)
+- Standard OpenShift CI/CD pipeline 
 - No special hardware or cloud resources required
 
 ### Testing Infrastructure
