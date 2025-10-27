@@ -12,8 +12,8 @@ approvers:
 api-approvers:
   - "TBD"
   - "TBD"
-creation-date: 2025-10-28
-last-updated: 2025-10-28
+creation-date: 2025-10-27
+last-updated: 2025-10-27
 tracking-link:
   - https://issues.redhat.com/browse/RFE-1476
 see-also:
@@ -545,7 +545,7 @@ oc get pod -n openshift-ingress-operator -o jsonpath='{.items[*].status.qosClass
 
 ## Implementation History
 
-- 2025-10-28: Enhancement proposed
+- 2025-10-27: Enhancement proposed
 - TBD: Enhancement approved
 - TBD: API implementation merged to openshift/api
 - TBD: Controller implementation merged to cluster-ingress-operator
