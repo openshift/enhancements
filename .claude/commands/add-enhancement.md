@@ -7,6 +7,8 @@ args:
     description: One-line title describing the enhancement
   - name: description
     description: Detailed description (what, why, who)
+  - name: jira
+    description: JIRA ticket URL for tracking
 ---
 
 You are tasked with creating a new OpenShift Enhancement Proposal based on the template at `guidelines/enhancement_template.md`.
@@ -16,6 +18,7 @@ You are tasked with creating a new OpenShift Enhancement Proposal based on the t
 - **Area**: {{area}}
 - **Name**: {{name}}
 - **Description**: {{description}}
+- **JIRA Ticket**: {{jira}}
 
 ## Instructions
 
@@ -31,6 +34,7 @@ Act as an experienced software architect to create a comprehensive enhancement p
    - Explicit Goals or Non-Goals the user wants included
    - Any specific technical constraints or requirements
    - Topology considerations (Hypershift, SNO, MicroShift relevance)
+   - Whether this proposal adds/changes CRDs, admission and conversion webhooks, aggregated API servers, or finalizers (needed for API Extensions section)
 
 3. **Generate the Enhancement File**:
    - Create the file at `enhancements/{{area}}/{{filename}}.md` where filename is the kebab-case version of the name
@@ -45,22 +49,26 @@ Act as an experienced software architect to create a comprehensive enhancement p
      - **Proposal**: High-level description of the proposed solution
      - **Workflow Description**: Detailed workflow with actors and steps
      - **Mermaid Diagram**: Add a sequence diagram when applicable to visualize the workflow
-     - **Metadata**: Fill in creation-date with today's date (2025-10-21), set other fields to TBD
+     - **API Extensions**: Only fill this section if the user confirms the proposal adds/changes CRDs, admission and conversion webhooks, aggregated API servers, or finalizers. Otherwise, add a TODO comment asking the user to complete this section if applicable.
+     - **Implementation Details/Notes/Constraints**: Provide a high-level overview of the code changes required. Follow the guidance from the template: "While it is useful to go into the details of the code changes required, it is not necessary to show how the code will be rewritten in the enhancement." Keep it as an overview; the developer should fill in the specific implementation details.
+     - **Metadata**: Fill in creation-date with today's date (2025-10-28), tracking-link with the provided JIRA ticket URL, set other fields to TBD
 
 4. **Handle Unfilled Sections**: For sections that cannot be filled based on the input:
    - Add a clear comment like `<!-- TODO: This section needs to be filled in -->`
    - Provide guidance on what should be included
 
-5. **Concise Professional Writing**:
+5. **Writing Guidelines**:
    - Write in a clear, concise, professional manner
    - Focus on the essential information
    - Use bullet points and structured formatting
    - Avoid unnecessary verbosity
+   - **Line Length**: Keep lines in the generated enhancement at a maximum of 80 characters. It is acceptable to exceed by 10-15 characters when necessary (e.g., for URLs or code examples), but not more than that.
 
 6. **Validate**:
    - Ensure the area directory exists under `enhancements/`
    - Create a valid filename from the name (lowercase, replace spaces with dashes)
    - Verify all required YAML metadata is present
+   - Verify the JIRA ticket URL is included in the tracking-link metadata field
 
 ## Output
 
