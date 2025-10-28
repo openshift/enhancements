@@ -46,7 +46,7 @@ In a multi-tenant or security-conscious environment, it is crucial to enforce ne
   - Define baseline ingress and egress rules for the `istio-csr` component (deny-all with metrics access), with user-configurable network policies via the API for additional access requirements.
   - Ensure that metrics collection for all components remains functional.
   - Ensure the API server can communicate with the `cert-manager-webhook` for admission control.
-  - Provide backward compatibility by making network policies opt-in via the `DefaultNetworkPolicy` field.
+  - Provide backward compatibility by making network policies opt-in via the `defaultNetworkPolicy` field.
 
 ### Non-Goals
 
@@ -56,12 +56,12 @@ In a multi-tenant or security-conscious environment, it is crucial to enforce ne
 
 ## Proposal
 
-The proposal is to extend the `CertManager` custom resource with new API fields to enable and configure network policies. The `cert-manager-operator` will create and manage `NetworkPolicy` objects across all managed namespaces. For cert-manager, network policies are opt-in via the `DefaultNetworkPolicy` field (default "false") for backward compatibility with user-configurable additional rules. For istio-csr, network policies are automatically managed by the operator with no user configuration required. The strategy is to first apply a default-deny policy and then allow appropriate traffic based on component requirements.
+The proposal is to extend the `CertManager` custom resource with new API fields to enable and configure network policies. The `cert-manager-operator` will create and manage `NetworkPolicy` objects across all managed namespaces. For cert-manager, network policies are opt-in via the `defaultNetworkPolicy ` field (default "false") for backward compatibility with user-configurable additional rules. For istio-csr, network policies are automatically managed by the operator with no user configuration required. The strategy is to first apply a default-deny policy and then allow appropriate traffic based on component requirements.
 
 ### Workflow Description
 
 1.  **API-Driven Configuration:** Users configure network policies through the `CertManager` custom resource specification:
-    - For cert-manager: Set `DefaultNetworkPolicy: "true"` and optionally provide custom `NetworkPolicies` rules
+    - For cert-manager: Set `defaultNetworkPolicy: "true"` and optionally provide custom `networkPolicies[]` rules
     - For istio-csr: Network policies are automatically managed by the operator with no user configuration required
 
 2.  **Default Deny:** When network policies are enabled, the operator will create baseline `NetworkPolicy` objects that deny all traffic for the respective components. This ensures that no traffic is allowed unless explicitly permitted.
@@ -71,20 +71,22 @@ The proposal is to extend the `CertManager` custom resource with new API fields 
       * **Allow Egress to API Server:** Permit outgoing traffic from the operator pod to the Kubernetes API server on port 6443/TCP.
       * **Allow Ingress for Metrics:** Permit incoming traffic to the operator pod on port 8443/TCP for Prometheus metrics scraping.
 
-4.  **Cert-Manager Operand Policies:** When `DefaultNetworkPolicy` is "true", the operator will create baseline policies for each component:
+4.  **Cert-Manager Operand Policies:** When `defaultNetworkPolicy ` is "true", the operator will create baseline policies for each component:
 
       * **Default policies include:**
-          * **API Server Egress:** For all components to communicate with the Kubernetes API server
-          * **Metrics Ingress:** For all components to expose metrics on port 9402/TCP
-          * **Webhook Ingress:** For the webhook component to receive admission requests on port 10250/TCP
+          * **Egress to API Server:** For all components to communicate with the Kubernetes API server
+          * **Egress to DNS:** For cert-manager controller to communicate with the cluster DNS service
+          * **Ingress to Metrics Endpoint:** For OpenShift Monitoring components to access metrics endpoint on port 9402/TCP
+          * **Ingress to Webhook:** For the Kubernetes API server to establish HTTPS connections to the webhook component for admission requests on port 10250/TCP
 
-      * **User-configurable egress policies:** Users can specify additional egress rules via the `NetworkPolicies` field in the `CertManager` spec. If no egress policies are provided, cert-manager components will have deny-all egress policies (which will prevent proper operation without user configuration).
+      * **User-configurable egress policies:** Users can specify additional egress rules via the `networkPolicies` field in the `CertManager` spec. If no egress policies are provided, cert-manager components will have deny-all egress policies (which will prevent proper operation without user configuration).
 
 5.  **Istio-CSR Policies:** The operator will create baseline policies for istio-csr:
 
       * **Default policies include:**
-          * **API Server Egress:** For communication with the Kubernetes API server on port 6443/TCP
-          * **Metrics Ingress:** For exposing metrics on port 9402/TCP
+          * **Egress to API Server:** For communication with the Kubernetes API server on port 6443/TCP
+          * **Ingress to gRPC Endpoint:** For incoming gRPC connections to the Istio-CSR on port 6443/TCP
+          * **Ingress to Metrics Endpoint:** For OpenShift Monitoring components to access metrics endpoint on port 9402/TCP
 
       * **Automatic policy management:** All istio-csr network policies (both ingress and egress) are automatically managed by the operator. No user configuration is required or supported for istio-csr network policies.
 
@@ -105,7 +107,9 @@ The implementation will involve extending the existing APIs and creating `Networ
       name: deny-all-traffic
       namespace: cert-manager-operator
     spec:
-      podSelector: {}
+      podSelector:
+        matchLabels:
+          name: cert-manager-operator
       policyTypes:
       - Ingress
       - Egress
@@ -135,16 +139,16 @@ The implementation will involve extending the existing APIs and creating `Networ
         from:
         - namespaceSelector:
             matchLabels:
-              name: openshift-monitoring
+              name: openshift-user-workload-monitoring
         - protocol: TCP
           port: 8443
     ```
 
 #### Cert-Manager Operand Namespace Policies
 
-When `DefaultNetworkPolicy` is set to "true", the operator will create baseline policies for cert-manager components. Users can provide additional or custom policies via the `NetworkPolicies` field in the `CertManager` spec.
+When `defaultNetworkPolicy` is set to "true", the operator will create baseline policies for cert-manager components. Users can provide additional or custom policies via the `networkPolicies` field in the `CertManager` spec.
 
-1.  **Baseline Deny-All Policy:** Applied when `DefaultNetworkPolicy` is "true".
+1.  **Baseline Deny-All Policy:** Applied when `defaultNetworkPolicy` is "true".
 
     ```yaml
     apiVersion: networking.k8s.io/v1
@@ -153,13 +157,15 @@ When `DefaultNetworkPolicy` is set to "true", the operator will create baseline 
       name: deny-all-traffic
       namespace: cert-manager
     spec:
-      podSelector: {}
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/instance: cert-manager
       policyTypes:
       - Ingress
       - Egress
     ```
 
-2.  **Default Allow Policies:** The operator creates these baseline policies when `DefaultNetworkPolicy` is "true":
+2.  **Default Allow Policies:** The operator creates these baseline policies when `defaultNetworkPolicy` is "true":
 
     ```yaml
     # API Server egress for all components
@@ -171,7 +177,7 @@ When `DefaultNetworkPolicy` is set to "true", the operator will create baseline 
     spec:
       podSelector:
         matchLabels:
-          app.kubernetes.io/name: cert-manager
+          app.kubernetes.io/instance: cert-manager
       policyTypes:
       - Egress
       egress:
@@ -179,44 +185,71 @@ When `DefaultNetworkPolicy` is set to "true", the operator will create baseline 
         - protocol: TCP
           port: 6443
     ---
-    # Metrics ingress for all components
+    # DNS egress for cert-manager controller component
     apiVersion: networking.k8s.io/v1
     kind: NetworkPolicy
     metadata:
-      name: allow-metrics-ingress
+      name: allow-dns-egress
       namespace: cert-manager
     spec:
+      egress:
+        - ports:
+          - port: 5353
+            protocol: TCP
+          - port: 5353
+            protocol: UDP
+          to:
+            - namespaceSelector:
+                matchLabels:
+                  kubernetes.io/metadata.name: openshift-dns
+              podSelector:
+                matchLabels:
+                  dns.operator.openshift.io/daemonset-dns: default
       podSelector:
         matchLabels:
-          app.kubernetes.io/name: cert-manager
+          app: cert-manager
       policyTypes:
-      - Ingress
-      ingress:
-      - ports:
-        from:
-        - namespaceSelector:
-            matchLabels:
-              name: openshift-monitoring
-        - protocol: TCP
-          port: 9402
-    ---
-    # Webhook ingress for admission control
-    apiVersion: networking.k8s.io/v1
-    kind: NetworkPolicy
-    metadata:
-      name: allow-webhook-ingress
-      namespace: cert-manager
-    spec:
-      podSelector:
-        matchLabels:
-          app: webhook
-      policyTypes:
-      - Ingress
-      ingress:
-      - ports:
-        - protocol: TCP
-          port: 10250
-    ```
+      - Egress
+
+      ---
+      # Metrics ingress for all components
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata:
+        name: allow-metrics-ingress
+        namespace: cert-manager
+      spec:
+        podSelector:
+          matchLabels:
+            app.kubernetes.io/instance: cert-manager
+        policyTypes:
+        - Ingress
+        ingress:
+        - ports:
+          from:
+          - namespaceSelector:
+              matchLabels:
+                name: openshift-user-workload-monitoring
+          - protocol: TCP
+            port: 9402
+      ---
+      # Webhook ingress for admission control
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata:
+        name: allow-webhook-ingress
+        namespace: cert-manager
+      spec:
+        podSelector:
+          matchLabels:
+            app: webhook
+        policyTypes:
+        - Ingress
+        ingress:
+        - ports:
+          - protocol: TCP
+            port: 10250
+      ```
 
 3.  **User-Configurable Policies:** Users must configure additional policies via the API for cert-manager controller egress (to communicate with external issuers). Example user configuration:
 
@@ -228,10 +261,22 @@ When `DefaultNetworkPolicy` is set to "true", the operator will create baseline 
     spec:
       defaultNetworkPolicy: "true"
       networkPolicies:
-        - name: allow-cert-manager-controller-egress
-          componentName: CoreController
-          egress:
-          - {} # Allow all egress for external issuers communication
+      - componentName: CoreController
+        egress:
+        - ports:
+          - port: 80
+            protocol: TCP
+          - port: 443
+            protocol: TCP
+        name: allow-egress-to-acme-server
+      - componentName: CoreController
+        egress:
+        - ports:
+          - port: 53
+            protocol: UDP
+          - port: 53
+            protocol: TCP
+        name: allow-egress-to-dns-service
     ```
 
 #### Istio-CSR Namespace Policies
@@ -298,29 +343,12 @@ The `istio-csr` component requires specific network policies to function correct
         from:
         - namespaceSelector:
             matchLabels:
-              name: openshift-monitoring
+              name: openshift-user-workload-monitoring
         - protocol: TCP
           port: 9402  # Metrics port
     ```
 
 3.  **Automatic Policy Management:** All istio-csr network policies are automatically managed by the operator based on the component's requirements. No user configuration is needed.
-
-    ```yaml
-    apiVersion: operator.openshift.io/v1alpha1
-    kind: IstioCSR
-    metadata:
-      name: cluster
-    spec:
-      networkPolicies:
-        - name: allow-istio-csr-grpc-service
-          componentName: IstioCSR
-          policyTypes:
-          - Ingress
-          ingress:
-          - ports:
-            - protocol: TCP
-              port: 6443  # Replace with actual configured gRPC service port
-    ```
 
 ### API Extensions
 
@@ -391,9 +419,6 @@ const (
 
     // Webhook represents the cert-manager webhook component
     Webhook ComponentName = "Webhook"
-    
-    // IstioCSR represents the cert-manager Istio CSR component
-    IstioCSR ComponentName = "IstioCSR"
 )
 
 
@@ -409,7 +434,7 @@ type NetworkPolicy struct {
     Name string `json:"name"`
 
     // ComponentName represents the different cert-manager components that can have network policies applied.
-    // +kubebuilder:validation:Enum:=CAInjector;CoreController;WebHook;IstioCSR
+    // +kubebuilder:validation:Enum:=CAInjector;CoreController;WebHook
     // +kubebuilder:validation:Required
     ComponentName ComponentName `json:"componentName"`
 
@@ -461,15 +486,15 @@ The main drawback is the added complexity of managing multiple `NetworkPolicy` o
 ## Test Plan
 
   * **Integration Tests:**
-    1.  Test with `DefaultNetworkPolicy: "false"` (default): Verify no NetworkPolicy objects are created and cert-manager functions normally.
-    2.  Test with `DefaultNetworkPolicy: "true"` but no custom `NetworkPolicies` specified: Verify baseline policies are created and cert-manager controller cannot communicate with external issuers (expected behavior).
-    3.  Test with `DefaultNetworkPolicy: "true"` and custom `NetworkPolicies` for cert-manager controller egress: Verify cert-manager can communicate with external issuers.
-    4.  Test istio-csr with no `NetworkPolicies` specified: Verify baseline policies are created and external egress is blocked while ingress (gRPC service) is automatically allowed (expected behavior).
+    1.  Test with `defaultNetworkPolicy: "false"` (default): Verify no NetworkPolicy objects are created and cert-manager functions normally.
+    2.  Test with `defaultNetworkPolicy: "true"` but no custom `networkPolicies` specified: Verify baseline policies are created and cert-manager controller cannot communicate with external issuers (expected behavior).
+    3.  Test with `defaultNetworkPolicy: "true"` and custom `networkPolicies` for cert-manager controller egress: Verify cert-manager can communicate with external issuers.
+    4.  Test istio-csr with no `networkPolicies` specified: Verify baseline policies are created and external egress is blocked while ingress (gRPC service) is automatically allowed (expected behavior).
     5.  Test istio-csr with automatic network policies: Verify istio-csr can communicate with required services with operator-managed policies.
     6.  Create a `curl` pod and confirm it **can** access the metrics endpoints (`:8443` for operator, `:9402` for operands) when policies are enabled.
     7.  Confirm the `curl` pod **cannot** access pods on non-allowed ports when policies are enabled.
   * **End-to-End (E2E) Tests:**
-    1.  Run the existing `cert-manager` E2E test suite with `DefaultNetworkPolicy: "true"`. Configure proper NetworkPolicy settings via the API and run the cert-manager E2E test suite with network policies enabled.
+    1.  Run the existing `cert-manager` E2E test suite with `defaultNetworkPolicy: "true"`. Configure proper NetworkPolicy settings via the API and run the cert-manager E2E test suite with network policies enabled.
     2.  Run the istio-csr E2E test suite with automatic operator-managed network policies enabled.
 
 ## Graduation Criteria
@@ -495,7 +520,7 @@ Not applicable.
 
 ## Upgrade / Downgrade Strategy
 
-  * **Upgrade:** On upgrade, the new API fields will be available but network policies remain disabled by default (`DefaultNetworkPolicy: "false"`). This ensures backward compatibility. Users must explicitly enable network policies and configure them appropriately.
+  * **Upgrade:** On upgrade, the new API fields will be available but network policies remain disabled by default (`defaultNetworkPolicy: "false"`). This ensures backward compatibility. Users must explicitly enable network policies and configure them appropriately.
   * **Downgrade:** If a user downgrades to a version of the operator that is not aware of the new API fields:
     - The API fields will be ignored by the older operator version
     - Any existing `NetworkPolicy` objects created by the newer operator will be orphaned
@@ -518,8 +543,7 @@ Not applicable, as this enhancement does not introduce any API extensions.
 Support personnel debugging potential network policy issues should follow these steps:
 
 1.  **Check API Configuration:**
-    - Verify `CertManager` resource: `oc get certmanager cluster -o yaml` and check `defaultNetworkPolicy` and `NetworkPolicies` fields
-    - Verify `IstioCSR` resource: `oc get istiocsr cluster -o yaml` and check `NetworkPolicies` field
+    - Verify `CertManager` resource: `oc get certmanager cluster -o yaml` and check `defaultNetworkPolicy` and `networkPolicies` fields
 
 2.  **Verify NetworkPolicy Objects:**
     - Check if NetworkPolicy objects exist: `oc get networkpolicy -n <namespace>`
