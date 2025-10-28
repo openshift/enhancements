@@ -11,7 +11,7 @@ args:
     description: JIRA ticket URL for tracking
 ---
 
-You are tasked with creating a new OpenShift Enhancement Proposal based on the template at `guidelines/enhancement_template.md`.
+You are tasked with creating a new OpenShift Enhancement Proposal based on the template at `guidelines/enhancement_template.md`. You must mirror all required headings from guidelines/enhancement_template.md exactly, even if there is nothing to be added, and in this case the section should be empty.
 
 ## Inputs Provided
 
@@ -35,6 +35,7 @@ Act as an experienced software architect to create a comprehensive enhancement p
    - Any specific technical constraints or requirements
    - Topology considerations (Hypershift, SNO, MicroShift relevance)
    - Whether this proposal adds/changes CRDs, admission and conversion webhooks, aggregated API servers, or finalizers (needed for API Extensions section)
+   - Ask clarifying questions about telemetry, security, upgrade and downgrade process, rollbacks, dependencies, in case it is not possible to assert these fields.
 
 3. **Generate the Enhancement File**:
    - Create the file at `enhancements/{{area}}/{{filename}}.md` where filename is the kebab-case version of the name
@@ -51,7 +52,7 @@ Act as an experienced software architect to create a comprehensive enhancement p
      - **Mermaid Diagram**: Add a sequence diagram when applicable to visualize the workflow
      - **API Extensions**: Only fill this section if the user confirms the proposal adds/changes CRDs, admission and conversion webhooks, aggregated API servers, or finalizers. Otherwise, add a TODO comment asking the user to complete this section if applicable.
      - **Implementation Details/Notes/Constraints**: Provide a high-level overview of the code changes required. Follow the guidance from the template: "While it is useful to go into the details of the code changes required, it is not necessary to show how the code will be rewritten in the enhancement." Keep it as an overview; the developer should fill in the specific implementation details.
-     - **Metadata**: Fill in creation-date with today's date (2025-10-28), tracking-link with the provided JIRA ticket URL, set other fields to TBD
+     - **Metadata**: Fill in creation-date with today's date, tracking-link with the provided JIRA ticket URL, set other fields to TBD
 
 4. **Handle Unfilled Sections**: For sections that cannot be filled based on the input:
    - Add a clear comment like `<!-- TODO: This section needs to be filled in -->`
