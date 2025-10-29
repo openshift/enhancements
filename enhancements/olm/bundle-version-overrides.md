@@ -25,14 +25,6 @@ superseded-by: []
 
 # Bundle Version Overrides
 
-## Release Signoff Checklist
-
-- [ ] Enhancement is `implementable`
-- [ ] Design details are appropriately documented from clear requirements
-- [ ] Test plan is defined
-- [ ] Graduation criteria for dev preview, tech preview, GA
-- [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
-
 ## Summary
 
 This enhancement introduces an optional `release` field to the registry+v1 Cluster Service Version (CSV) specification, providing a structured mechanism for future identification of release-level versioning within operator bundles. Operator Lifecycle Manager (OLM) will utilize this field when ordering multiple bundles are available for the same operator. 
@@ -156,6 +148,20 @@ This enables scenarios where:
 - Freshmaker has published multiple release builds of the same operator version
 - OLM automatically selects the highest release version
 - Operators with explicit release tracking have priority over those without
+
+### Topology Considerations
+
+#### Hypershift / Hosted Control Planes
+
+The proposed change should have no specific impact to HCP. 
+
+#### Standalone Clusters
+
+The proposed change should have no specific impact to standalone clusters. 
+
+#### Single-node Deployments or MicroShift
+
+The proposed change should have no specific impact to SNO/MicroShift clusters. 
 
 ### API Extensions
 
@@ -338,7 +344,7 @@ The test strategy focuses on ensuring both new functionality and backward compat
 
 ## Graduation Criteria
 
-### Tech Preview
+### Dev Preview -> Tech Preview
 
 - [ ] Release field is added to operator-framework API schema
 - [ ] Extraction logic successfully parses semver build metadata from Freshmaker-style bundles
@@ -359,6 +365,10 @@ The test strategy focuses on ensuring both new functionality and backward compat
 - [ ] User-facing documentation created in openshift-docs
 - [ ] Feature available by default with stable API
 - [ ] No critical issues reported during tech preview period
+
+### Removing a deprecated feature
+
+Freshmaker is only used with SQLite-based legacy catalogs, so it will never be encountered in the FBC future.
 
 ## Upgrade / Downgrade Strategy
 
