@@ -277,6 +277,8 @@ type PKISpec struct {
     Overrides []CertificateKeyConfigOverride `json:"overrides,omitempty"`
 }
 
+// +kubebuilder:validation:XValidation:rule="self.algorithm == 'RSA' ? has(self.keySize) && !has(self.curve) : true",message="keySize is required and curve must not be set when algorithm is RSA"
+// +kubebuilder:validation:XValidation:rule="self.algorithm == 'ECDSA' ? has(self.curve) && !has(self.keySize) : true",message="curve is required and keySize must not be set when algorithm is ECDSA"
 type KeyConfig struct {
     // algorithm specifies the key generation algorithm.
     // +kubebuilder:validation:Required
@@ -307,6 +309,7 @@ type CategoryKeyConfig struct {
     KeyConfig KeyConfig `json:"keyConfig"`
 }
 
+// +kubebuilder:validation:XValidation:rule="self.certificateName in ['kube-apiserver-to-kubelet-signer', 'kube-control-plane-signer', 'kube-apiserver-server-ca', 'etcd-signer', 'service-ca', 'kubelet-serving-ca', 'etcd-serving-ca', 'kube-apiserver-client-ca', 'csr-signer-ca', 'admin-kubeconfig-signer', 'kubelet-bootstrap-kubeconfig-signer']",message="certificateName must be a well-known certificate name"
 type CertificateKeyConfigOverride struct {
     // certificateName identifies a specific certificate to configure.
     // The name must match a well-known certificate name in the cluster.
@@ -527,15 +530,37 @@ Key operators to update:
 
 #### Validation
 
-The CRD includes validation to ensure:
+The CRD uses **CEL (Common Expression Language) validation rules** instead of validation webhooks. CEL validation is available in Kubernetes 1.25+ and provides better performance and operational simplicity compared to webhooks.
 
-- Mutual exclusivity: `keySize` is set only for RSA, `curve` is set only for ECDSA
-- Enum constraints: Only supported values are allowed (RSA 2048/3072/4096, ECDSA P256/P384/P521)
-- Required fields: `algorithm` is always required
-- Override name validation: Certificate names in `overrides` must match well-known names (enforced via validation)
+**CEL Validation Rules:**
 
-Additional runtime validation:
-- Operators validate that certificate lifetimes are compatible with key sizes (e.g., warn if using RSA 2048 for a 10-year certificate)
+1. **Algorithm-specific field requirements** (`KeyConfig` type):
+   - When `algorithm == "RSA"`: `keySize` must be set, `curve` must not be set
+   - When `algorithm == "ECDSA"`: `curve` must be set, `keySize` must not be set
+   - Implemented via: `+kubebuilder:validation:XValidation` markers
+
+2. **Well-known certificate name validation** (`CertificateKeyConfigOverride` type):
+   - `certificateName` must match one of the well-known certificate names
+   - List includes: `kube-apiserver-to-kubelet-signer`, `kube-control-plane-signer`, `etcd-signer`, `service-ca`, etc.
+   - Implemented via: CEL `in` operator against predefined list
+
+3. **Enum constraints** (standard kubebuilder markers):
+   - Only supported values allowed: RSA 2048/3072/4096, ECDSA P256/P384/P521
+   - Implemented via: `+kubebuilder:validation:Enum`
+
+4. **Required fields** (standard kubebuilder markers):
+   - `algorithm` is always required in `KeyConfig`
+   - Implemented via: `+kubebuilder:validation:Required`
+
+**Advantages of CEL over Validation Webhooks:**
+- No separate webhook deployment or pod management
+- No webhook TLS certificates to generate and rotate
+- Better performance (validation runs in-process at API server)
+- Simpler operations (no webhook availability concerns)
+- Available in Kubernetes 1.25+, guaranteed in OpenShift 4.21 (based on k8s 1.34)
+
+**Additional Runtime Validation:**
+- Operators validate that certificate lifetimes are compatible with key sizes (e.g., log warning if using RSA 2048 for a 10-year certificate)
 - Metrics flag certificates that don't meet configured parameters (indicating a bug or misconfiguration)
 
 #### Performance Considerations
@@ -568,9 +593,10 @@ These tradeoffs will be documented in user-facing documentation to help administ
 **Risk: Invalid configuration causes certificate generation failures**
 
 *Mitigation:*
-- Comprehensive CRD validation prevents most invalid configurations
+- Comprehensive CEL validation rules prevent most invalid configurations at admission time
+- Invalid configurations are rejected before being persisted (fail-fast)
 - Operators report detailed errors in status conditions and events
-- Fallback to platform defaults if configuration is invalid or cannot be applied
+- Fallback to platform defaults if configuration cannot be applied
 - Support procedures document how to identify and fix configuration issues
 
 **Risk: Incompatible cryptographic parameters across certificate hierarchy**
@@ -579,8 +605,9 @@ Example: Signing a certificate with a stronger key than the CA itself
 
 *Mitigation:*
 - Documentation includes best practices for certificate hierarchies
-- Validating webhook warns (but doesn't block) potentially problematic configurations
+- CEL validation ensures configuration is structurally valid (algorithm/keySize/curve consistency)
 - Metrics expose the cryptographic parameters of all certificates for audit
+- Operators log warnings for potentially problematic configurations (e.g., weak keys for long-lived certs)
 
 **Risk: Performance degradation from large RSA keys**
 
@@ -827,7 +854,7 @@ Components external to OpenShift (load balancers, monitoring systems) may connec
 
 **SLIs:**
 - Resource exists and is readable: `GET /apis/config.openshift.io/v1alpha1/pkis/cluster` returns 200
-- Validation webhook availability: PKI resource creation/updates succeed with valid configuration
+- CEL validation functions correctly: PKI resource creation/updates succeed with valid configuration and are rejected with invalid configuration
 - Operators can watch and read PKI resource: Operators successfully retrieve PKI configuration
 
 **Impact on Existing SLIs:**
@@ -845,8 +872,9 @@ However, there are some considerations:
    - For a cluster with ~50 certificates rotating hourly, this adds ~100 seconds total
    - Impact: Negligible on user-facing workloads (rotation is background process)
 
-2. **API Admission Latency**: Validating webhook adds minimal latency (<10ms)
+2. **API Admission Latency**: CEL validation adds minimal latency (<1ms)
    - Only impacts PKI resource create/update operations (rare)
+   - CEL validation runs in-process at API server (faster than webhook calls)
    - Does not impact other resource types
 
 3. **Operator Resource Consumption**: Watching the PKI resource adds minimal overhead
@@ -856,10 +884,10 @@ However, there are some considerations:
 **Failure Modes:**
 
 1. **Invalid Configuration**:
-   - *Symptom*: PKI resource creation/update is rejected by webhook
+   - *Symptom*: PKI resource creation/update is rejected by CEL validation
    - *Impact*: Configuration change is blocked, existing certificates continue to rotate with current config
-   - *Mitigation*: Validation errors clearly identify the problem
-   - *Detection*: Client (oc, console) receives error message
+   - *Mitigation*: CEL validation errors clearly identify the problem with specific field and rule
+   - *Detection*: Client (oc, console) receives error message with CEL validation failure details
 
 2. **Operator Cannot Read PKI Resource**:
    - *Symptom*: Operator logs show errors watching or reading PKI resource
