@@ -109,9 +109,10 @@ platform:
 # New PKI configuration section
 pki:
   signerCertificates:
-    algorithm: RSA
-    rsa:
-      keySize: 4096
+    key:
+      algorithm: RSA
+      rsa:
+        keySize: 4096
 ```
 
 2. The openshift-installer generates the cluster, creating signer certificates using the specified cryptographic parameters (4096-bit RSA keys).
@@ -137,38 +138,43 @@ metadata:
   name: cluster
 spec:
   # Global default for all certificates
-  defaultKeyConfig:
-    algorithm: RSA
-    rsa:
-      keySize: 2048
+  defaults:
+    key:
+      algorithm: RSA
+      rsa:
+        keySize: 2048
 
   # Category-level configuration
   categories:
   - category: SignerCertificate
-    keyConfig:
-      algorithm: RSA
-      rsa:
-        keySize: 4096
+    certificate:
+      key:
+        algorithm: RSA
+        rsa:
+          keySize: 4096
 
   - category: ServingCertificate
-    keyConfig:
-      algorithm: ECDSA
-      ecdsa:
-        curve: P384
+    certificate:
+      key:
+        algorithm: ECDSA
+        ecdsa:
+          curve: P384
 
   - category: ClientCertificate
-    keyConfig:
-      algorithm: ECDSA
-      ecdsa:
-        curve: P256
+    certificate:
+      key:
+        algorithm: ECDSA
+        ecdsa:
+          curve: P256
 
   # Specific certificate overrides (optional - for fine-grained control)
   overrides:
   - certificateName: etcd-signer
-    keyConfig:
-      algorithm: RSA
-      rsa:
-        keySize: 4096
+    certificate:
+      key:
+        algorithm: RSA
+        rsa:
+          keySize: 4096
 ```
 
 3. On the next rotation cycle (either natural expiry or forced rotation), operators generate new certificates using the configured parameters.
@@ -258,29 +264,39 @@ type PKI struct {
 }
 
 type PKISpec struct {
-    // defaultKeyConfig specifies the default cryptographic parameters
+    // defaults specifies the default certificate configuration
     // for all certificates unless overridden by category or specific
     // certificate configuration.
     // If not specified, uses platform defaults (typically RSA 2048).
     // +optional
-    DefaultKeyConfig *KeyConfig `json:"defaultKeyConfig,omitempty"`
+    Defaults *CertificateConfig `json:"defaults,omitempty"`
 
-    // categories allows configuration of cryptographic parameters
+    // categories allows configuration of certificate parameters
     // for categories of certificates (SignerCertificate, ServingCertificate, ClientCertificate)
-    // Category configuration takes precedence over defaultKeyConfig.
+    // Category configuration takes precedence over defaults.
     // +optional
     // +listType=map
     // +listMapKey=category
-    Categories []CategoryKeyConfig `json:"categories,omitempty"`
+    Categories []CategoryCertificateConfig `json:"categories,omitempty"`
 
-    // overrides allows configuration of cryptographic parameters
+    // overrides allows configuration of certificate parameters
     // for specific named certificates.
     // Override configuration takes precedence over both category
     // and default configuration.
     // +optional
     // +listType=map
     // +listMapKey=certificateName
-    Overrides []CertificateKeyConfigOverride `json:"overrides,omitempty"`
+    Overrides []CertificateOverride `json:"overrides,omitempty"`
+}
+
+// CertificateConfig specifies configuration parameters for certificates.
+type CertificateConfig struct {
+    // key specifies the cryptographic parameters for the certificate's key pair.
+    // +kubebuilder:validation:Required
+    Key KeyConfig `json:"key"`
+
+    // Future extensibility: fields like Lifetime, Rotation, Extensions
+    // can be added here without restructuring the API.
 }
 
 // KeyConfig specifies cryptographic parameters for key generation.
@@ -323,19 +339,19 @@ type ECDSAKeyConfig struct {
     Curve ECDSACurve `json:"curve"`
 }
 
-type CategoryKeyConfig struct {
+type CategoryCertificateConfig struct {
     // category identifies the certificate category
     // +kubebuilder:validation:Required
     // +kubebuilder:validation:Enum=SignerCertificate;ServingCertificate;ClientCertificate
     Category CertificateCategory `json:"category"`
 
-    // keyConfig specifies the cryptographic parameters for this category
+    // certificate specifies the configuration for this category
     // +kubebuilder:validation:Required
-    KeyConfig KeyConfig `json:"keyConfig"`
+    Certificate CertificateConfig `json:"certificate"`
 }
 
 // +kubebuilder:validation:XValidation:rule="self.certificateName in ['kube-apiserver-to-kubelet-signer', 'kube-control-plane-signer', 'kube-apiserver-server-ca', 'etcd-signer', 'service-ca', 'kubelet-serving-ca', 'etcd-serving-ca', 'kube-apiserver-client-ca', 'csr-signer-ca', 'admin-kubeconfig-signer', 'kubelet-bootstrap-kubeconfig-signer']",message="certificateName must be a well-known certificate name"
-type CertificateKeyConfigOverride struct {
+type CertificateOverride struct {
     // certificateName identifies a specific certificate to configure.
     // The name must match a well-known certificate name in the cluster.
     // Examples: "etcd-signer", "kube-apiserver-to-kubelet-signer",
@@ -344,9 +360,9 @@ type CertificateKeyConfigOverride struct {
     // +kubebuilder:validation:MinLength=1
     CertificateName string `json:"certificateName"`
 
-    // keyConfig specifies the cryptographic parameters for this certificate
+    // certificate specifies the configuration for this certificate
     // +kubebuilder:validation:Required
-    KeyConfig KeyConfig `json:"keyConfig"`
+    Certificate CertificateConfig `json:"certificate"`
 }
 
 type KeyAlgorithm string
@@ -444,16 +460,18 @@ This enhancement is fully applicable and relevant for standalone clusters. All i
 apiVersion: v1alpha1
 kind: MicroShiftConfig
 pki:
-  defaultKeyConfig:
-    algorithm: ECDSA
-    ecdsa:
-      curve: P256
+  defaults:
+    key:
+      algorithm: ECDSA
+      ecdsa:
+        curve: P256
   categories:
   - category: SignerCertificate
-    keyConfig:
-      algorithm: RSA
-      rsa:
-        keySize: 4096
+    certificate:
+      key:
+        algorithm: RSA
+        rsa:
+          keySize: 4096
 ```
 
 - MicroShift's lighter weight makes ECDSA particularly attractive for resource-constrained environments
@@ -506,7 +524,7 @@ When generating a certificate, the cryptographic parameters are determined by th
 
 1. **Specific Certificate Override**: If `overrides` contains an entry matching the certificate name, use those parameters
 2. **Category Configuration**: If `categories` contains an entry matching the certificate's category, use those parameters
-3. **Default Configuration**: If `defaultKeyConfig` is specified, use those parameters
+3. **Default Configuration**: If `defaults` is specified, use those parameters
 4. **Platform Defaults**: Use hardcoded platform defaults (typically RSA 2048)
 
 #### Day-1 (Installer) Integration
@@ -521,9 +539,10 @@ metadata:
 # ... other configuration ...
 pki:
   signerCertificates:
-    algorithm: RSA
-    rsa:
-      keySize: 4096
+    key:
+      algorithm: RSA
+      rsa:
+        keySize: 4096
 ```
 
 Rationale for limiting Day-1 configuration:
@@ -579,7 +598,8 @@ The CRD uses **CEL (Common Expression Language) validation rules** instead of va
    - Applied to `RSAKeyConfig.keySize` and `ECDSAKeyConfig.curve` fields
 
 4. **Required fields** (standard kubebuilder markers):
-   - `algorithm` is always required in `KeyConfig` (union discriminator)
+   - `key` is required in `CertificateConfig`
+   - `algorithm` is required in `KeyConfig` (union discriminator)
    - `keySize` is required in `RSAKeyConfig`
    - `curve` is required in `ECDSAKeyConfig`
    - Implemented via: `+kubebuilder:validation:Required`
@@ -594,6 +614,21 @@ The CRD uses **CEL (Common Expression Language) validation rules** instead of va
 **Additional Runtime Validation:**
 - Operators validate that certificate lifetimes are compatible with key sizes (e.g., log warning if using RSA 2048 for a 10-year certificate)
 - Metrics flag certificates that don't meet configured parameters (indicating a bug or misconfiguration)
+
+#### API Extensibility
+
+The API is designed for future extensibility through the `CertificateConfig` type:
+
+**Current fields:**
+- `key` - Cryptographic parameters for key generation
+
+**Future additions** (examples, not committed for v1alpha1):
+- `lifetime` - Certificate validity period override
+- `rotation` - Rotation policy configuration
+- `extensions` - Custom X.509 extensions
+- `signatureAlgorithm` - Signature algorithm override (if different from key algorithm)
+
+New certificate-level configuration can be added to `CertificateConfig` without restructuring the API hierarchy. This maintains backward compatibility while allowing the API to evolve with new requirements.
 
 #### Performance Considerations
 
