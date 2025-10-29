@@ -15,13 +15,13 @@ api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggreg
 creation-date: 2025-10-17
 last-updated: yyyy-mm-dd
 tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
-  - "https://issues.redhat.com/browse/OCPSTRAT-108"
-  - "https://issues.redhat.com/browse/OCPSTRAT-1638"
+  - "https://issues.redhat.com/browse/OCPSTRAT-108"  # TP feature
+  - "https://issues.redhat.com/browse/OCPSTRAT-1638" # GA feature
 see-also:
   - "enhancements/kube-apiserver/encrypting-data-at-datastore-layer.md"
   - "enhancements/etcd/storage-migration-for-etcd-encryption.md"
 replaces:
-  - ""
+  - "https://github.com/openshift/enhancements/pull/1682"
 superseded-by:
   - ""
 ---
@@ -31,7 +31,7 @@ superseded-by:
 ## Summary
 
 Provide a user-configurable interface to support encryption of data stored in
-etcd using a supported Key Management Service (KMS).
+etcd using a supported [Key Management Service (KMS)](https://kubernetes.io/docs/tasks/administer-cluster/kms-provider/).
 
 ## Motivation
 
@@ -40,7 +40,8 @@ It protects against etcd data leaks in the event of an etcd backup compromise.
 However, aescbc and aesgcm, which are supported encryption technologies today
 available in OpenShift do not protect against online host compromise i.e. in
 such cases, attackers can decrypt encrypted data from etcd using local keys,
-KMS managed keys protects against such scenarios.
+KMS managed keys protects against such scenarios since the keys are stored and
+managed externally.
 
 ### User Stories
 
@@ -55,7 +56,8 @@ KMS managed keys protects against such scenarios.
   Status
 * As a cluster admin, I want to be able to switch to a different KMS plugin,
   i.e. from AWS to a pre-installed Vault, by performing a single configuration
-  change without needing to perform any other manual intervention
+  change without needing to perform any other manual intervention or manually
+  migrating data
     * TODO: confirm this requirement
 * As a cluster admin, I want to configure my chosen KMS to automatically rotate
   encryption keys and have OpenShift to automatically become aware of these new
@@ -67,18 +69,18 @@ KMS managed keys protects against such scenarios.
 ### Goals
 
 * Users have an easy to use interface to configure KMS encryption
-* Users will configure OpenShift clusters to use a specific KMS key, created by
-  them
-* Encryption keys managed by the KMS, and are not stored in the cluster
+* Users will configure OpenShift clusters to use one of the supported KMS
+  providers
+* Encryption keys managed by the KMS (i.e. KEKs), and are not stored in the
+  cluster
 * Encryption keys are rotated by the KMS, and the configuration is managed by
   the user
 * OpenShift clusters automatically detect KMS key rotation and react
   appropriately
 * Users can disable encryption after enabling it
-* Configuring KMS encryption should not meaningfully degrade the performance of
-  the cluster
+* Overall cluster performance should be similar to other encryption mechanisms
 * OpenShift will manage KMS plugins' lifecycle on behalf of the users
-* Provide users with the tools to monitor the state of KMS plugins and KMS
+* Provide users with the means to monitor the state of KMS plugins and KMS
   itself
 
 ### Non-Goals
@@ -89,6 +91,13 @@ KMS managed keys protects against such scenarios.
   via KMS plugins, i.e. Hashicorp Vault or Thales)
 * Full data recovery in cases where the KMS key is lost
 * Support for users to specify which resources they want to encrypt
+* Immediate encryption: OpenShift's encryption works in an eventual model, i.e
+  it takes OpenShift several minutes to encrypt all the configured resources in
+  the cluster after encryption is initially enable. This means that even if
+  cluster admins enable encryption immediately after cluster creation, OpenShift
+  may still store unencrypted secrets in etcd. However, OpenShift will eventually
+  migrate all secrets (and other to-be-encrypted resources) to use encryption,
+  so they will all _eventually_ be encrypted in etcd
 
 ## Proposal
 
@@ -96,9 +105,9 @@ To support KMS encryption in OpenShift, we will leverage the work done in
 [upstream Kubernetes](https://github.com/kubernetes/enhancements/tree/master/keps/sig-auth/3299-kms-v2-improvements).
 However, we will need to extend and adapt the encryption workflow in OpenShift
 to support new constraints introduced by the externalization of encryption keys
-in a KMS. Because OpenShift will not own the keys from the KMS, we will also
-need to provide tools to users to detect KMS-related failures and take
-action toward recovering their clusters whenever possible.
+in a KMS. Because OpenShift will not own the keys from the KMS, we will detect
+the KMS-related failures and surface them to the cluster admins for any
+necessary actions.
 
 We focus on supporting KMS v2 only, as KMS v1 has considerable performance
 impact in the cluster.
@@ -112,14 +121,14 @@ as connection details, authentication credentials, and key references. From a
 UX perspective, this is the only change the KMS feature introduces—it is
 intentionally minimal to reduce user burden and potential for errors.
 
-#### Encryption Controller Extensions
+##### Encryption Controller Extensions
 
 This feature will reuse existing encryption and migration workflows while
 extending them to handle externally-managed keys. We will introduce a new
 controller to manage KMS plugin pod lifecycle and integrate KMS plugin health
 checks into the existing controller precondition system.
 
-#### KMS Plugin Lifecycle
+##### KMS Plugin Lifecycle
 
 KMS encryption requires KMS plugin pods to bridge communication between the
 kube-apiserver and the external KMS. In OpenShift, the kube-apiserver-operator
@@ -135,18 +144,38 @@ rotation events.
 **cluster admin** is a human user responsible for the overall configuration and
 maintainenance of a cluster.
 
-**KMS** is the Key Management Service responsible automatic rotation of the Key
-Encryption Key (KEK).
+**KMS** is the cloud Key Management Service responsible for managing the full
+lifecycle of the Key Encryption Key (KEK), including automatic rotation.
 
 #### Initial Resource Encryption
 
-1. The cluster admin creates an encryption key (KEK) in their KMS of choice
+1. The cluster admin creates an encryption key (KEK) in their cloud KMS of choice
 1. The cluster admin give the OpenShift apiservers access to the newly created
-   KMS KEK
+   cloud KMS KEK
 1. The cluster admiin updates the APIServer configuration resource, providing
-   the necessary configuration options for the KMS of choice
-1. The cluster admin observes the `kube-apiserver` `clusteroperator` resource,
-   for progress on the configuration change, as well as migration of resources
+   the necessary [encryption configuration options](encryption-cfg-opts) for
+   the cloud KMS of choice
+1. The cluster admin observes the `clusteroperator/kube-apiserver` resource
+   for progress on the configuration change and encryption of existing resources
+
+[encryption-cfg-opts]: https://github.com/openshift/api/blob/master/config/v1/types_kmsencryption.go#L7-L22
+
+#### KMS Plugin Management
+
+1. The cluster admin configures encryption in the cluster
+1. The KMS plugin controller generates a unix socket name, unique for this
+   encryption configuration
+1. The KMS plugin controller generates a pod manifest for the configured cloud
+   KMS, setting the `key_id`, the unix socket name generated in the previous,
+   and any other configurations required by the KMS plugin in question
+1. The KMS plugin controller watches the `key_id` from the KMS plugin Status
+   gRPC endpoint, and when it detects it has changed, it configures the KMS
+   plugin to use the new key _in addition to the current key_
+   * TODO: should the KMS plugin controller also watch the encryption key secret
+     for changes?
+1. The KMS plugin controller watches the migration status of encrypted
+   resources, and once migration finishes, it configures the KMS plugin to only
+   use the new key, removing the previous one from the plugin configuration
 
 #### Key rotation
 
@@ -157,6 +186,16 @@ Encryption Key (KEK).
 1. The cluster admin eventually checks the `kube-apiserver` `clusteroperator`
    resource, and sees that the KEK was rotated, and the status of the data
    migration
+
+1. TODO: how will `keyController` learn the unix socket name? it needs to be
+   able to call the kms plugin's Status gRPC endpont, and it needs the unix
+   socket to do that
+1. `stateController` generates the `EncryptionConfig`, using the unix socket
+   path generated by the KMS plugin controller, and any other configurations
+   required
+1. `keyController` watches the `key_id` from the KMS plugin Status gRPC call,
+   as well as the APIServer config for changes, and when either of these
+   change, it creates a new encryption key secret
 
 #### Change of KMS Provider
 
@@ -319,6 +358,11 @@ configuration file for MicroShift?
 
 ### Implementation Details/Notes/Constraints
 
+This feature may bring slight degradation of performance due to the reliance of
+an external system. However,  overall performance should be similar to other
+encryption mechanisms. During migrations, performance depends on the number of
+resources that will be migrated.
+
 Enabling KMS encryption requires a KMS plugin running in the cluster so that
 the apiservers can communicate through the plugin with the external KMS
 provider.
@@ -348,48 +392,68 @@ KMS encryption provider.
 #### Key Rotation and Data Migration
 
 Keys can be rotated in the following ways:
-* Automatic periodic key rotation by the KMS, following user provided rotation
-  policy in the KMS itself
-* The user creates a new KMS key, and updates the KMS section of the APIServer
-  config with the new key
+* Key materials rotation: automatic periodic key rotation by the KMS, following
+  user provided rotation policy in the KMS itself; or manual key rotation in the
+  cloud KMS; does not result in a new key resource in the cloud KMS
+* Key rotation: the user creates a new KMS key resource (while keeping the
+  previous one), and updates the encryption section of the APIServer config to
+  point to the new key
 
-OpenShift must detect the change and trigger re-encryption of affected
-resources.
+Regardless of whether the key itself is rotated (causing a change in `key_id`)
+or the key materials is rotated (not causing a change in `key_id`), OpenShift
+must detect the change and trigger re-encryption of resources.
 
-Rotation detection is standard. KMS Plugins must return a `key_id` as part of
-the response to a Status gRPC call. This `key_id` is authoritative, so when it
-changes, we must consider the key rotated, and migrate the current encrypted
-resources to use the new key. The `keyController` will be updated to perform
-periodic checks of the `key_id` in the response to a Status call, and recreate
-the encryption key secret resource when it detects a change in `key_id`.
-TODO: Where is the currently in use `key_id` stored? The `keyController` must
-have something to compare with the Status `key_id`.
+**Key rotation**
+KMS Plugins must return a `key_id` as part of the response to a Status gRPC call.
+This `key_id` is authoritative, so when it changes, we must consider the key
+rotated, and migrate all encrypted resources to use the new key. The
+`keyController` will be updated to perform periodic checks of the `key_id` in
+the response to a Status call, and recreate the encryption key secret resource
+when it detects a change in `key_id`.
+The `key_id` will be stored in the encryption secret resource managed by the
+`keyController`. Currently, this resource is used to store key materials for
+AES-CBC and AES-GCM keys, so we'll simply reuse this logic, but without storing
+key materials when the KMS provider is selected.
 
 Once the encryption key secret resource is recreated as a reaction to a change
 in `key_id`, the `migrationController` will detect that a migration is needed,
 and will do its job without any modifications.
 
-Key rotation is unfortunately not standardized, so every KMS plugin can
-implement rotation in a different way, as long as the `key_id` returned by the
-Status call remains authoritative. The section below enumerates the steps needed
-to perform rotation for the supported KMS plugins. For example, the AWS KMS
-plugin supports two KMS keys to be configured at the same time, allowing the
-plugin to run with two keys with different ARNs without the need for another
-plugin pod to be configured. Azure KMS plugin on the other hand, can only be
-configured with a single key, so if a user creates a new KMS key, OpenShift
-must create a whole new plugin pod, and run it in parallel with the one
-configured with the previous key. The two pods must run in parallel until
-migration to the new key is complete.
+There is no standardized way to configure a KMS plugin to rotate a key.
+For example, the AWS KMS plugin supports two KMS keys to be configured for the
+same process, allowing the plugin to run with two keys with different ARNs
+without the need for another plugin pod to be configured. Azure KMS plugin on
+the other hand, can only be configured with a single key, so if a user creates
+a new KMS key, OpenShift must create a whole new plugin pod, and run it in
+parallel with the one configured with the previous key. These two pods must run
+in parallel until all resources are migrated to the new encryption key.
 
-TODO: how do KMS plugins determine `key_id`? It mustn't be the same as i.e.
-KeyARN, because that won't change when the key is rotated. For OpenShift to be
-able to migrate content to a rotated key, we must be able to detect a `key_id`
-change, and thus the `key_id` must not be the same after the key is rotated.
-It must somehow be calculated taking into consideration the key materials...
+**Key material rotation**
+
+Rotation of key materials is commonly implemented by cloud providers through
+automatic creation of versions of the same key.
+Unfortunately, at the time of writing there is no starndard way for KMS plugins
+to communicate a change in key materials to clients.
+
+For example, the AWS KMS plugin does nothing to indicate a change in key version.
+In other words, the `key_id` remains unchanged. The Azure KMS plugin on the other
+hand, defines the `key_id` as a hash of the key name and key version, so a change
+in key materials always results in a change in `key_id`.
+However, the Azure KMS plugin also requires a restart when a new version of a
+key is created, which in turn requires two parallel versions of the kms plugin
+to run in tandem until all data is migrated from the old key to the new.
 
 ##### Key Rotation For the AWS KMS Plugin
 
-TODO
+During Tech-Preview, the AWS KMS plugin will be the only plugin supported.
+
+Rotating a KMS key is always a user-invoked operation. It requires users
+to edit the APIserver configuration, setting a new key.
+Openshift already automates the necessary [step-by-step changes](https://kubernetes.io/docs/tasks/administer-cluster/encrypt-data/#rotating-a-decryption-key)
+to kubernetes' `EncryptionConfig`, including migrating resources encrypted by
+the old key to use the new key.
+
+When rotating the key, the AWS KMS plugin pods must be updated to run
 
 ##### Key Rotation For the Azure KMS Plugin
 
@@ -441,6 +505,25 @@ Cons:
 
 
 ### Risks and Mitigations
+
+#### Loss of encryption key
+
+TODO
+
+* Ensure cloud KMS key is configured with grace period after key deletion
+* In-memory caches of the unencrypted DEK seed
+* Monitoring and alerts in place to detect when the KMS key has been deleted
+  and not followed by a `key_id` change
+  * deleted keys cannot be used for encryption, only decryption. we can use
+    use this (along with an unchanged `key_id`) to detect when a key was deleted
+
+#### Temporary Cloud KMS Outages
+
+TODO
+
+* In-memory caches of the unencrypted DEK seed
+
+----
 
 What are the risks of this proposal and how do we mitigate. Think broadly. For
 example, consider both security and how this will impact the larger OKD
