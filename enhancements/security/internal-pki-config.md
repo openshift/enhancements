@@ -110,7 +110,8 @@ platform:
 pki:
   signerCertificates:
     algorithm: RSA
-    keySize: 4096
+    rsa:
+      keySize: 4096
 ```
 
 2. The openshift-installer generates the cluster, creating signer certificates using the specified cryptographic parameters (4096-bit RSA keys).
@@ -138,31 +139,36 @@ spec:
   # Global default for all certificates
   defaultKeyConfig:
     algorithm: RSA
-    keySize: 2048
+    rsa:
+      keySize: 2048
 
   # Category-level configuration
   categories:
   - category: SignerCertificate
     keyConfig:
       algorithm: RSA
-      keySize: 4096
+      rsa:
+        keySize: 4096
 
   - category: ServingCertificate
     keyConfig:
       algorithm: ECDSA
-      curve: P384
+      ecdsa:
+        curve: P384
 
   - category: ClientCertificate
     keyConfig:
       algorithm: ECDSA
-      curve: P256
+      ecdsa:
+        curve: P256
 
   # Specific certificate overrides (optional - for fine-grained control)
   overrides:
   - certificateName: etcd-signer
     keyConfig:
       algorithm: RSA
-      keySize: 4096
+      rsa:
+        keySize: 4096
 ```
 
 3. On the next rotation cycle (either natural expiry or forced rotation), operators generate new certificates using the configured parameters.
@@ -277,25 +283,44 @@ type PKISpec struct {
     Overrides []CertificateKeyConfigOverride `json:"overrides,omitempty"`
 }
 
-// +kubebuilder:validation:XValidation:rule="self.algorithm == 'RSA' ? has(self.keySize) && !has(self.curve) : true",message="keySize is required and curve must not be set when algorithm is RSA"
-// +kubebuilder:validation:XValidation:rule="self.algorithm == 'ECDSA' ? has(self.curve) && !has(self.keySize) : true",message="curve is required and keySize must not be set when algorithm is ECDSA"
+// KeyConfig specifies cryptographic parameters for key generation.
+//
+// +kubebuilder:validation:XValidation:rule="(self.algorithm == 'RSA' && has(self.rsa) && !has(self.ecdsa)) || (self.algorithm == 'ECDSA' && has(self.ecdsa) && !has(self.rsa))",message="algorithm must match the configuration: use rsa field for RSA, ecdsa field for ECDSA"
+// +union
 type KeyConfig struct {
     // algorithm specifies the key generation algorithm.
     // +kubebuilder:validation:Required
     // +kubebuilder:validation:Enum=RSA;ECDSA
+    // +unionDiscriminator
     Algorithm KeyAlgorithm `json:"algorithm"`
 
-    // keySize specifies the size of RSA keys in bits.
-    // Required when algorithm is RSA, must be empty otherwise.
+    // rsa specifies RSA key parameters.
+    // Required when algorithm is RSA, must be nil otherwise.
     // +optional
-    // +kubebuilder:validation:Enum=2048;3072;4096
-    KeySize *int32 `json:"keySize,omitempty"`
+    // +unionMember
+    RSA *RSAKeyConfig `json:"rsa,omitempty"`
 
-    // curve specifies the elliptic curve for ECDSA keys.
-    // Required when algorithm is ECDSA, must be empty otherwise.
+    // ecdsa specifies ECDSA key parameters.
+    // Required when algorithm is ECDSA, must be nil otherwise.
     // +optional
+    // +unionMember
+    ECDSA *ECDSAKeyConfig `json:"ecdsa,omitempty"`
+}
+
+// RSAKeyConfig specifies parameters for RSA key generation.
+type RSAKeyConfig struct {
+    // keySize specifies the size of RSA keys in bits.
+    // +kubebuilder:validation:Required
+    // +kubebuilder:validation:Enum=2048;3072;4096
+    KeySize int32 `json:"keySize"`
+}
+
+// ECDSAKeyConfig specifies parameters for ECDSA key generation.
+type ECDSAKeyConfig struct {
+    // curve specifies the elliptic curve for ECDSA keys.
+    // +kubebuilder:validation:Required
     // +kubebuilder:validation:Enum=P256;P384;P521
-    Curve *ECDSACurve `json:"curve,omitempty"`
+    Curve ECDSACurve `json:"curve"`
 }
 
 type CategoryKeyConfig struct {
@@ -421,12 +446,14 @@ kind: MicroShiftConfig
 pki:
   defaultKeyConfig:
     algorithm: ECDSA
-    curve: P256
+    ecdsa:
+      curve: P256
   categories:
   - category: SignerCertificate
     keyConfig:
       algorithm: RSA
-      keySize: 4096
+      rsa:
+        keySize: 4096
 ```
 
 - MicroShift's lighter weight makes ECDSA particularly attractive for resource-constrained environments
@@ -495,7 +522,8 @@ metadata:
 pki:
   signerCertificates:
     algorithm: RSA
-    keySize: 4096
+    rsa:
+      keySize: 4096
 ```
 
 Rationale for limiting Day-1 configuration:
@@ -534,10 +562,11 @@ The CRD uses **CEL (Common Expression Language) validation rules** instead of va
 
 **CEL Validation Rules:**
 
-1. **Algorithm-specific field requirements** (`KeyConfig` type):
-   - When `algorithm == "RSA"`: `keySize` must be set, `curve` must not be set
-   - When `algorithm == "ECDSA"`: `curve` must be set, `keySize` must not be set
-   - Implemented via: `+kubebuilder:validation:XValidation` markers
+1. **Union enforcement** (`KeyConfig` type):
+   - When `algorithm == "RSA"`: `rsa` field must be set, `ecdsa` field must not be set
+   - When `algorithm == "ECDSA"`: `ecdsa` field must be set, `rsa` field must not be set
+   - Implemented via: `+union`, `+unionDiscriminator`, `+unionMember` markers plus CEL validation
+   - CEL rule: `(self.algorithm == 'RSA' && has(self.rsa) && !has(self.ecdsa)) || (self.algorithm == 'ECDSA' && has(self.ecdsa) && !has(self.rsa))`
 
 2. **Well-known certificate name validation** (`CertificateKeyConfigOverride` type):
    - `certificateName` must match one of the well-known certificate names
@@ -547,9 +576,12 @@ The CRD uses **CEL (Common Expression Language) validation rules** instead of va
 3. **Enum constraints** (standard kubebuilder markers):
    - Only supported values allowed: RSA 2048/3072/4096, ECDSA P256/P384/P521
    - Implemented via: `+kubebuilder:validation:Enum`
+   - Applied to `RSAKeyConfig.keySize` and `ECDSAKeyConfig.curve` fields
 
 4. **Required fields** (standard kubebuilder markers):
-   - `algorithm` is always required in `KeyConfig`
+   - `algorithm` is always required in `KeyConfig` (union discriminator)
+   - `keySize` is required in `RSAKeyConfig`
+   - `curve` is required in `ECDSAKeyConfig`
    - Implemented via: `+kubebuilder:validation:Required`
 
 **Advantages of CEL over Validation Webhooks:**
