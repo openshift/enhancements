@@ -232,6 +232,12 @@ adds configuration options through API resources, should any of those
 behaviors also be exposed to MicroShift admins through the
 configuration file for MicroShift?
 
+#### OpenShift Kubernetes Engine
+
+How does this proposal affect OpenShift Kubernetes Engine (OKE)?  Does it depend
+on features that are excluded from the OKE product offering?  See [the
+comparison of OKE and OCP in the product documentation](https://docs.redhat.com/en/documentation/openshift_container_platform/latest/html/overview/oke-about#about_oke_similarities_and_differences).
+
 ### Implementation Details/Notes/Constraints
 
 What are some important details that didn't come across above in the
