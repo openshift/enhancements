@@ -391,18 +391,31 @@ KMS encryption provider.
 
 #### Key Rotation and Data Migration
 
-Keys can be rotated in the following ways:
-* Key materials rotation: automatic periodic key rotation by the KMS, following
-  user provided rotation policy in the KMS itself; or manual key rotation in the
-  cloud KMS; does not result in a new key resource in the cloud KMS
-* Key rotation: the user creates a new KMS key resource (while keeping the
-  previous one), and updates the encryption section of the APIServer config to
-  point to the new key
+Data migration must happen in the following scenarios:
 
-Regardless of whether the key itself is rotated (causing a change in `key_id`)
-or the key materials is rotated (not causing a change in `key_id`), OpenShift
-must detect the change and trigger re-encryption of resources.
+* The cluster admin enables encryption in the cluster for the first time
+* The cluster admin updates the `KMSConfig` in APIServer config
+* The cloud KMS automatically rotates the KEK
+* The cluster admin manually rotates the KEK
 
+KMS Key rotation does not change the identity of the key in the cloud KMS, it
+only changes the key materials, and in most cloud KMS providers it results in a
+new version of the same key. Despite that, KMS plugins are required to return a
+different `key_id` when the KMS key (KEK) is rotated.
+
+Note that the AWS KMS plugin does not change the `key_id` when the KEK is
+rotated. This is an [as of now unreported] bug in the AWS KMS plugin. However,
+it should not cause any problems to end-users, since AWS does not expire old
+versions of a key. TODO: explain what we mean by "expire".
+
+The encryption controllers in library-go already handle migration of encrypted
+resources. The `keyController`, response for creating and rotating keys, need
+to change so that the encryption key secret it manages becomes a reflection of
+what the `key_id` returned by the KMS plugin Status gRPC call.
+TODO: elaborate on the above.
+
+
+TODO: merge below and above blocks
 **Key rotation**
 KMS Plugins must return a `key_id` as part of the response to a Status gRPC call.
 This `key_id` is authoritative, so when it changes, we must consider the key
@@ -428,20 +441,6 @@ a new KMS key, OpenShift must create a whole new plugin pod, and run it in
 parallel with the one configured with the previous key. These two pods must run
 in parallel until all resources are migrated to the new encryption key.
 
-**Key material rotation**
-
-Rotation of key materials is commonly implemented by cloud providers through
-automatic creation of versions of the same key.
-Unfortunately, at the time of writing there is no starndard way for KMS plugins
-to communicate a change in key materials to clients.
-
-For example, the AWS KMS plugin does nothing to indicate a change in key version.
-In other words, the `key_id` remains unchanged. The Azure KMS plugin on the other
-hand, defines the `key_id` as a hash of the key name and key version, so a change
-in key materials always results in a change in `key_id`.
-However, the Azure KMS plugin also requires a restart when a new version of a
-key is created, which in turn requires two parallel versions of the kms plugin
-to run in tandem until all data is migrated from the old key to the new.
 
 ##### Key Rotation For the AWS KMS Plugin
 
