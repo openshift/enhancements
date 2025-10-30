@@ -77,12 +77,14 @@ Currently, OpenShift provides no mechanism to configure these parameters for int
 
 ## Proposal
 
-This proposal introduces a new `PKI` cluster-scoped singleton configuration resource in the `config.openshift.io/v1alpha1` API group, along with a `ConfigurablePKI` feature gate to control the rollout. The configuration allows administrators to specify cryptographic parameters for internal certificates organized by category and name.
+This proposal introduces a new `PKI` cluster-scoped singleton configuration resource in the `config.openshift.io/v1` API group, along with a `ConfigurablePKI` feature gate to control the rollout. The configuration allows administrators to specify cryptographic parameters for internal certificates organized by category and name.
+
+**Note:** During development, the API will start as `v1alpha1` with TechPreviewNoUpgrade feature gate enablement. The API will be promoted to `v1` and the feature gate will be enabled by default before the OpenShift 4.21 release, shipping as GA.
 
 At a high level, the changes include:
 
-1. **New API Resource**: `PKI` configuration resource in `config.openshift.io/v1alpha1` (cluster-scoped singleton)
-2. **Feature Gate**: `ConfigurablePKI` to enable the functionality
+1. **New API Resource**: `PKI` configuration resource in `config.openshift.io/v1` (cluster-scoped singleton, developed as v1alpha1 initially)
+2. **Feature Gate**: `ConfigurablePKI` to enable the functionality (TechPreviewNoUpgrade during development, enabled by default at GA)
 3. **Installer Integration**: Limited Day-1 configuration support for signer certificate cryptographic parameters
 4. **Operator Updates**: Modifications to certificate-generating operators to watch and consume the PKI configuration independently
 5. **Certificate Rotation**: Integration with existing rotation mechanisms to apply new parameters
@@ -132,7 +134,7 @@ oc edit pki cluster
 2. The administrator modifies the PKI resource:
 
 ```yaml
-apiVersion: config.openshift.io/v1alpha1
+apiVersion: config.openshift.io/v1
 kind: PKI
 metadata:
   name: cluster
@@ -212,37 +214,37 @@ This enhancement adds a new Custom Resource Definition (CRD) to the OpenShift AP
 
 #### Compatibility Level
 
-The PKI API starts at **Compatibility Level 4** (TechPreviewNoUpgrade):
+The PKI API will be developed initially at **Compatibility Level 4** (TechPreviewNoUpgrade) and graduate to **Compatibility Level 1** (GA) before the OpenShift 4.21 release.
 
-- **Level 4 characteristics:**
-  - No compatibility guarantees
+- **Development phase (v1alpha1, Level 4):**
+  - No compatibility guarantees during development
   - API can change at any point for any reason
   - Breaking changes are allowed without migration path
   - Suitable for iterative development and testing
-  - Not recommended for production workloads requiring long-term support
+  - Gated by ConfigurablePKI feature gate with TechPreviewNoUpgrade enablement
 
-- **Graduation path:**
-  - Level 4 (TechPreviewNoUpgrade) → initial implementation
-  - Level 2 (TechPreview) → after initial feedback and stabilization
-  - Level 1 (GA/Stable) → after one or more releases in TechPreview
+- **Release phase (v1, Level 1):**
+  - Shipped as GA in OpenShift 4.21
+  - Breaking changes no longer allowed
+  - API stable within major release for 12 months or 3 minor releases
+  - Full backward compatibility guarantees
 
-- **Version progression:**
-  - v1alpha1 at Level 4: current proposal
-  - v1beta1 at Level 2: potential future state
-  - v1 at Level 1: eventual GA state
+- **Graduation timeline:**
+  - v1alpha1 at Level 4: Early development (feature gate: TechPreviewNoUpgrade)
+  - v1 at Level 1: OpenShift 4.21 release (feature gate: enabled by default)
+  - No intermediate v1beta1 or TechPreview release planned
 
-The compatibility level is enforced through the `+openshift:compatibility-gen:level=4` annotation and will be validated by the API review process.
+The compatibility level is enforced through the `+openshift:compatibility-gen:level` annotation and will be validated by the API review process. The annotation will change from `level=4` to `level=1` when the API is promoted to v1.
 
 #### PKI Resource
 
-The `PKI` resource is a cluster-scoped singleton named `cluster` in the `config.openshift.io/v1alpha1` API group.
+The `PKI` resource is a cluster-scoped singleton named `cluster` in the `config.openshift.io/v1` API group (initially developed as v1alpha1 during the development phase).
 
 ```go
 // PKI configures cryptographic parameters for certificates generated
 // internally by OpenShift components.
 //
-// Compatibility level 4: No compatibility is provided, the API can change at any point for any reason.
-// These capabilities should not be used by applications needing long term support.
+// Compatibility level 1: Stable within a major release for a minimum of 12 months or 3 minor releases (whichever is longer).
 //
 // +genclient
 // +genclient:nonNamespaced
@@ -250,7 +252,7 @@ The `PKI` resource is a cluster-scoped singleton named `cluster` in the `config.
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:path=pkis,scope=Cluster
-// +openshift:compatibility-gen:level=4
+// +openshift:compatibility-gen:level=1
 type PKI struct {
     metav1.TypeMeta   `json:",inline"`
     metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -396,11 +398,10 @@ type PKIStatus struct {
 
 // PKIList is a collection of PKI resources.
 //
-// Compatibility level 4: No compatibility is provided, the API can change at any point for any reason.
-// These capabilities should not be used by applications needing long term support.
+// Compatibility level 1: Stable within a major release for a minimum of 12 months or 3 minor releases (whichever is longer).
 //
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-// +openshift:compatibility-gen:level=4
+// +openshift:compatibility-gen:level=1
 type PKIList struct {
     metav1.TypeMeta `json:",inline"`
     metav1.ListMeta `json:"metadata,omitempty"`
@@ -804,17 +805,24 @@ Automatically regenerate all certificates when PKI configuration changes.
 
 ## Graduation Criteria
 
-### Dev Preview -> Tech Preview
+This feature will be released as **GA in OpenShift 4.21**. The graduation criteria must be met before the 4.21 release.
+
+### Development Phase (v1alpha1)
+
+During early development with v1alpha1 and TechPreviewNoUpgrade feature gate:
 
 - Feature complete as described in this enhancement
-- ConfigurablePKI feature gate available
+- ConfigurablePKI feature gate available with TechPreviewNoUpgrade enablement
 - Installer integration for signer certificate configuration
 - At least kube-apiserver-operator, etcd-operator, and service-ca-operator support PKI configuration
 - Comprehensive unit and integration test coverage
 - Metrics for certificate generation events
 - Basic documentation in openshift-docs
+- Early feedback gathered from development testing
 
-### Tech Preview -> GA
+### GA Release (v1) - OpenShift 4.21
+
+Before the 4.21 release, all of the following criteria must be met:
 
 - All certificate-generating operators support PKI configuration
 - Thorough e2e test coverage including upgrade scenarios
@@ -844,7 +852,7 @@ Automatically regenerate all certificates when PKI configuration changes.
 - Feature gate enabled by default
 - Hypershift integration tested and documented
 - MicroShift integration complete
-- At least one full release cycle in Tech Preview with customer feedback
+- Internal testing and feedback incorporated from development cycle
 
 ### Removing a deprecated feature
 
