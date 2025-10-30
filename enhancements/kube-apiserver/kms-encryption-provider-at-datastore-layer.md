@@ -477,9 +477,34 @@ Requirements:
 * apiservers must have access the unix socket for the kms plugin
 * running multiple instances of the kms plugin with different encryption
   configuration
+* kms plugins must have access to cloud kms
+
+KMS plugins will be deployed as sidecar containers running along with each of
+OpenShift's apiservers.
+
+Library-go will contain the shared sidecar container specification, which all
+apiservers will base their plugin sidecar containers from.
+
+Due to differences in deployment type, KMS plugin sidecar container for
+kube-apiserver will differ from those for the openshift and oauth apiservers.
+
+| API Server          | Deployment Type | hostNetwork                    | IMDS Access                               |
+|---------------------|-----------------|--------------------------------|-------------------------------------------|
+| kube-apiserver      | Static Pod      | ✅ true                        | ✅ Direct access to EC2 instance IAM role |
+| openshift-apiserver | Deployment      | ❌ Not set (defaults to false) | ❌ No direct IMDS access                  |
+| oauth-apiserver     | Deployment      | ❌ Not set (defaults to false) | ❌ No direct IMDS access                  |
+
+When `hostNetwork: true`, the control-plane IAM role must have permission to
+encrypt/decrypt objects in the cloud KMS. TODO: explain how this will be done.
+
+When `hostNetwork: false`, each apiserver IAM role must have permission to
+encrypt/decrypt objects in the cloud KMS. TODO: explain how this will be done.
+
+
+TODO: move the below to alternatives section
 
 Alternatives:
-1. apiservers share a single instance of kms plugin, this can be achieved in two variations:
+1. apiservers share a single instance of kms plugin, achievable through two variations:
   a. kms plugin and kas-o share revisions
   b. kms plugin revisions are independent of kas-o revisions
 2. apiservers have dedicated kms plugin instance, managed by their respective operators
