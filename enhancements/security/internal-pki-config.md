@@ -846,6 +846,10 @@ Automatically regenerate all certificates when PKI configuration changes.
 - MicroShift integration complete
 - At least one full release cycle in Tech Preview with customer feedback
 
+### Removing a deprecated feature
+
+This enhancement does not deprecate or remove any existing features. It adds new functionality for configuring cryptographic parameters while maintaining all existing defaults and behaviors.
+
 ## Upgrade / Downgrade Strategy
 
 **Upgrade:**
