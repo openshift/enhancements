@@ -21,16 +21,17 @@ tracking-link:
 ## Summary
 
 The following enhancement proposes integrating the OpenShift SR-IOV network
-operator into MicroShift in order to enable users to configure VFs in a more
-convenient manner.
+operator into MicroShift in order to enable users to configure Virtual Functions
+in a more convenient manner.
 
 ## Motivation
 
-Currently, SR-IOV can be used with MicroShift by manually configuring VFs
-(Virtual Functions) on a PF (Physical Function) on OS level and using multus to
-map the VFs to pods. This approach is tedious and non-idiomatic. By using the
-SR-IOV network operator, users can configure VFs in a declarative way by
-specifying and deploying a NetworkNodePolicy CRD.
+Currently, SR-IOV can be used with MicroShift by manually configuring
+[VFs](https://docs.kernel.org/PCI/pci-iov-howto.html) (Virtual Functions) on a
+[PF](https://docs.kernel.org/PCI/pci-iov-howto.html) (Physical Function) on OS
+level and using multus to map the VFs to pods. This approach is tedious and
+non-idiomatic. By using the SR-IOV network operator, users can configure VFs in
+a declarative way by specifying and deploying a NetworkNodePolicy CRD.
 
 ### User Stories
 
@@ -55,9 +56,9 @@ want to use higher level tools.
 
 - Provide SR-IOV network operator for MicroShift as an optional RPM containing
   required manifests that will be applied upon MicroShift starting. 
-- Manifests will be based on existing manifests for OpenShift SR-IOV operator.
-  Possible changes may include optimizations in regards to CPU/memory usage (to
-  be discussed).
+- Manifests will be derived from the existing manifests for OpenShift SR-IOV
+  operator. Possible changes may include optimizations in regards to CPU/memory
+  usage.
 
 ### Workflow Description
 
@@ -104,67 +105,29 @@ See "Proposal".
 
 The operator, when deployed, creates 6 pods, with the following memory/CPU limits:
 
-```
-network-resources-injector
-Requests:
-  cpu:     10m
-  memory:  50Mi
-
-network-webhook
-Requests:
-  cpu:     10m
-  memory:  50Mi
-
-sriov-device-plugin
-Requests:
-  cpu:     10m
-  memory:  50Mi
-
-sriov-network-config-daemon
-Requests:
-  cpu:     100m
-  memory:  100Mi
-
-sriov-metrics-exporter
-Requests:
-  cpu:        100m
-  memory:     100Mi
-Requests:
-  cpu:     10m
-  memory:  20Mi
-
-sriov-network-operator
-Requests:
-  cpu:     100m
-  memory:  100Mi
-```
+| Pod Name                     | CPU Requests  | Memory Requests  |
+|------------------------------|---------------|------------------|
+| sriov-device-plugin          | 10m           | 50Mi             |
+| sriov-network-config-daemon  | 100m          | 100Mi            |
+| sriov-network-operator       | 100m          | 100Mi            |
+| network-resources-injector   | 10m           | 50Mi             |
+| network-webhook              | 10m           | 50Mi             |
+| sriov-metrics-exporter       | 10m + 100m    | 20Mi + 100Mi     |
 
 This is significant, and will need to be addressed in the implementation.
 Possible solution could be merging some of the pods. Some of the pods (e.g. the
-metrics exporter) are optional and could be left out. To be further discussed. 
+metrics exporter) are optional and could be left out.
 
 When running without the webhook and metrics exporter, the deployment consists
 of only 3 pods:
 
-```
-sriov-device-plugin
-    Requests:
-      cpu:     10m
-      memory:  50Mi
 
-sriov-network-config-daemon
-    Requests:
-      cpu:     100m
-      memory:  100Mi
+| Pod Name                     | CPU Requests  | Memory Requests  |
+|------------------------------|---------------|------------------|
+| sriov-device-plugin          | 10m           | 50Mi             |
+| sriov-network-config-daemon  | 100m          | 100Mi            |
+| sriov-network-operator       | 100m          | 100Mi            |
 
-sriov-network-operator
-    Requests:
-      cpu:     100m
-      memory:  100Mi
-```
-
-Further discussion is required to determine whether this is acceptable, or needs
-to be lowered even more by other means.
 
 ### Drawbacks
 
@@ -192,13 +155,15 @@ functionality, leaving more responsibility to the user.
 A good alternative to using the operator would be using the SR-IOV network
 device plugin and CNI directly. This would be easier on the resources, and a
 customer is already using this approach successfully. On the other hand, this is
-also more complicated for the customer, and could be more difficult to support.
-In the future, this could be a better solution, if we find the operator to be
-too resource hungry.
+also more complicated for users, and could be more difficult to support. In the
+future, this could be a better solution, if we find the operator to be too
+resource hungry.
 
 ## Open Questions [optional]
 
-1. The CPU/memory usage is high and needs to be addressed, see above.
+1. The CPU/memory usage is high when running a full deployment (with metrics
+   exporter and resources injector). For now, we can leave them out in order to
+   save resources. If users require them later, it will need to be addressed.
 
 ## Test Plan
 
