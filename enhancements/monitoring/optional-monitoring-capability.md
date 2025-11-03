@@ -479,12 +479,16 @@ for optional monitoring resources is not necessary**.
 [from the CLI]: https://github.com/openshift/hypershift/blob/main/cmd/cluster/core/create.go#L111-L112
 [PromQL cluster condition type]: enhancements/update/targeted-update-edge-blocking.md#cluster-condition-type-registry
 
-Note that the capability may be accompanied by switching to the
+> Note that the capability may be accompanied by switching to the
 `telemetry` collection profile, which is responsible for narrowing
 down Prometheus' service discovery to only telemetry-related targets
 through dedicated `ServiceMonitor`s (as well as `PrometheusRule`s,
-so as to not evaluate rules that don't exist anymore). See [MON-4311]
-for more info.
+to not evaluate rules that don't exist anymore). See [MON-4311]
+for more info. Furthermore, `telemeter-client` may be dropped in
+light of the fact that telemetry data can be forwarded through
+remote write to the `metrics/v1/receive` endpoint directly. Users
+will still continue to update the set of allowed rules, to ensure
+existing validation processes are still enforced from the server-side.
 
 [MON-4311]: https://issues.redhat.com/browse/MON-4311
 
@@ -515,6 +519,24 @@ Consider including folks that also work outside your immediate sub-project.
   narrowed down when the collection profile is set to `telemetry`),
   we decided to not disable the monitoring plugin when the
   `OptionalMonitoring` capability is disabled.
+* Enabling the capability requires "teaching" other components about it. These components may fall into a range of categories:
+  * Operators
+    * [Insights Operator](https://github.com/openshift/insights-operator/blob/cd1b8582f62385d67eabc823547a44dce4a3d938/pkg/gatherers/clusterconfig/recent_metrics.go#L63)
+    * [Cluster Management Metrics Operator](https://github.com/project-koku/koku-metrics-operator/blob/1b11260ee000ae07ae57e8c0f3eb4896b8c70dab/api/v1beta1/defaults.go#L22)
+    * [Cluster Kube Controller Manager Operator](https://github.com/openshift/cluster-kube-controller-manager-operator/blob/5e9fe6765b8a4b363d8e355e8b68fbe2ed9c3fda/pkg/operator/gcwatchercontroller/gcwatcher_controller.go#L154-L192)
+    * [Cluster etcd Operator](https://github.com/openshift/cluster-etcd-operator/blob/main/pkg/operator/metriccontroller/client.go#L46)
+    * [Cluster Version Operator](https://github.com/openshift/cluster-version-operator/blob/420e6d07d80f501cbed3d5ce6f6596323d4fdce5/pkg/clusterconditions/clusterconditions.go#L123)
+      * [Cincinnati Graph Data](https://github.com/openshift/cincinnati-graph-data/blob/bab100b5a88ad22039da9c795e8a7c9a10ba1a63/blocked-edges/4.19.9-NoCloudConfConfigMap.yaml)
+    * [Cluster Logging Operator](https://github.com/openshift/cluster-logging-operator/blob/28c8b02e041fbe8c978ddf20cb06400f97f07b8e/test/e2e/flowcontrol/utils.go#L68)
+    * [Grafana Tempo Operator](https://github.com/openshift/grafana-tempo-operator/blob/main/internal/manifests/queryfrontend/query_frontend.go#L413)
+    * [Console Operator](https://github.com/openshift/console/blob/main/pkg/server/server.go#L423-L442)
+  * Tools (some of these may be outdated)
+    * [Cluster Health Analyzer](https://github.com/openshift/cluster-health-analyzer/blob/9b6518688ab76a219e838bf5de103661ba7ec74f/manifests/mcp/02_deployment.yaml#L29)
+    * [Incluster Anomaly Detection](https://github.com/openshift/incluster-anomaly-detection/blob/main/src/common/config.py)
+    * [Predictive VPA Recommenders](https://github.com/openshift/predictive-vpa-recommenders/blob/3d209317a76560d315acdf654a6c6e9e330eb271/recommender_config.yaml#L3)
+    * [oc](https://github.com/openshift/oc/blob/9ae657dff111d36d75300c4823b7aae4b504c7e4/pkg/cli/admin/inspectalerts/inspectalerts.go#L107)
+  * AI-ingested documentation (which may not be valid once the capability is in effect)
+    * [Lightspeed RAG Content](https://github.com/search?q=repo%3Aopenshift%2Flightspeed-rag-content%20thanos&type=code), etc.
 
 [implicitly enabled]: https://github.com/openshift/cluster-version-operator/blob/main/lib/manifest/manifest.go#L46
 [OTA-823]: https://issues.redhat.com/browse/OTA-823
@@ -538,6 +560,12 @@ burden?  Is it likely to be superceded by something else in the near future?
   about it, in order to handle their monitoring assets accordingly,
   which may lead to a fragmented UX if not done consistently across
   the board.
+* Telemetry will loose the `ALERTS` signal. All components querying
+  that signal (for e.g., the [Insights operator] will need to be
+  updated to not rely on it anymore, once the capability is in
+  effect.
+
+[Insights operator]: https://github.com/openshift/insights-operator/blob/cd1b8582f62385d67eabc823547a44dce4a3d938/pkg/gatherers/clusterconfig/recent_metrics.go#L81
 
 ## Alternatives (Not Implemented)
 
@@ -564,12 +592,83 @@ to implement the design.  For instance,
   information.  Can we do this?
 -->
 
-> 1. Opt `Console` capability dashboards housed under CMO into
+1. Opt `Console` capability dashboards housed under CMO into
 `OptionalMonitoring` as well?
-> - No, since exporters are not disabled, and the targets are left
-untouched, so we can continue supporting all dashboards even under
-optional monitoring (unless the collection profile is set to
-`telemetry`). Note that this is in-line with the [Console team's expectations].
+    > No, since exporters are not disabled, and the targets are left
+    untouched, so we can continue supporting all dashboards even under
+    optional monitoring (unless the collection profile is set to
+    `telemetry`). Note that this is in-line with the [Console team's expectations].
+
+2. Do we want to make the plugin reliant on the monitoring capability?
+Doing so would make sense to not degrade the UI by dropping it when
+the capability is in effect, but on the other hand, dashboards that
+would otherwise be supported in optional monitoring won't be shown
+anymore.
+    > It might be a good idea to loop in the UI team and have the
+    plugin drop the "degraded" UI elements only (AM pages)
+    once it detects the capability has been enabled? See below for
+    a non-exhaustive list of affected areas.
+    <details>
+    <summary>Console areas affected by disabling the monitoring plugin</summary>
+
+     - Overview
+        ![Overview](./assets/optional-monitoring-capability-overview-page.png)
+     - Pods
+        ![Pods](./assets/optional-monitoring-capability-pod-page.png)
+     - Deployments
+        ![Deployments](./assets/optional-monitoring-capability-deployment-page.png)
+     - Alertmanager
+        ![Alertmanager](./assets/optional-monitoring-capability-cluster-settings-am-page.png)
+     - Metrics
+        ![Metrics](./assets/optional-monitoring-capability-metrics-page.png)
+     - Developer Perspective
+       - Topology
+        ![Topology](./assets/optional-monitoring-capability-devconsole-topology-page.png)
+       - Dashboards
+        ![Monitoring Dashboards](./assets/optional-monitoring-capability-devconsole-observer-page.png)
+     - [More](https://github.com/openshift/cluster-monitoring-operator/blob/main/manifests/0000_90_cluster-monitoring-operator_01-dashboards.yaml) [Dashboards](https://github.com/openshift/cluster-monitoring-operator/blob/main/manifests/0000_90_cluster-monitoring-operator_02-dashboards.yaml)
+
+    </details>
+   
+3. Should we make the "telemetry" collection profile (a) internal-only,
+and (b) enabled for optional monitoring?
+    > Since optional monitoring is indeed focused on telemetry operations
+    only, it makes sense to enable the "telemetry" collection profile
+    when the capability is disabled. This allows us to actually regulate
+    the metrics ingestion from exporters that would otherwise push data
+    into Prometheus that is not telemetry-related.
+
+4. Should we downscale Prometheus to a single replica when the
+capability is disabled?
+    > Yes, since the monitoring footprint is reduced significantly
+    when the capability is disabled, moving away from an HA setup
+    to a single replica setup makes sense from a resource consumption
+    perspective. All components across OpenShift that rely on Thanos
+    will need to be "taught" to query the single Prometheus replica
+    directly instead of going through Thanos Querier.
+
+5. When users opt-out of telemetry while the capability is disabled,
+what should be the behavior?
+    > Since telemetry is orthogonal to the capability itself, opting
+    out of telemetry should lead to disabling all telemetry-related
+    components (e.g., exporters, telemetry-specific `PrometheusRules`
+    and `ServiceMonitors`), while keeping the optional monitoring
+    components disabled as well. This essentially leads to a
+    monitoring-less cluster. Note that `metrics-server` is an
+    exception, and will remain enabled to ensure that the autoscaling
+    pipelines are not affected.
+
+6. Should the capability be named `OptionalMonitoring` or just `Monitoring`?
+    > `OptionalMonitoring` makes it clear that the monitoring stack
+    is optional, and can be disabled to reduce the monitoring footprint.
+    Naming it just `Monitoring` may lead to confusion, as it may
+    imply that the monitoring stack is always deployed. Broadly,
+    this could also curb our ability to name future capabilities.
+    I believe this makes sense for `Console` since it uses its
+    capability to mark all Console-related resources OpenShift-wide,
+    however, we will use `Monitoring` to mark all telemetry-only-related
+    resources, and we may want to do the same for X-only-related
+    resources in the future.
 
 [Console team's expectations]: https://redhat-internal.slack.com/archives/C6A3NV5J9/p1753979917745059?thread_ts=1753965750.365569&cid=C6A3NV5J9
 
