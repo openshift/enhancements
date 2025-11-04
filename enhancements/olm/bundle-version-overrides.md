@@ -13,7 +13,7 @@ api-approvers:
 creation-date: 2025-10-24
 last-updated: 2025-10-27
 tracking-link:
-  - TBD
+  - "https://issues.redhat.com/browse/OCPSTRAT-2232"
 see-also:
   - "/https://docs.google.com/document/d/1tX0fXYuflTpTal6z0TbNkrQ7SAkYIKxQj4cPjlFAh4Q/"
   - "https://docs.google.com/document/d/14LNdxplPKB8mbfKLVvkHHsvboh4FEJOp0thzPNGgnzA/"
@@ -235,6 +235,90 @@ The `opm` command and operator-registry library are updated to:
 
 The enhancement includes a new FBC catalog template `substitutesFor` that helps operator authors trivially adopt the release field approach and avoid common error scenarios when implementing Freshmaker-style bundle substitution workflows.
 
+### Implementation Phases
+
+This enhancement will be implemented in three distinct phases across different components:
+
+#### Phase 1: API and Operator Registry (operator-framework/api and operator-framework/operator-registry)
+
+**Scope:**
+- Add the optional `release` field to the CSV specification in operator-framework/api
+- Implement release field extraction logic in operator-registry
+- Update `opm` tooling to parse and render release information
+- Add the `substitutesFor` catalog template
+
+**Deliverables:**
+- [ ] API schema update with `release` field in Package struct
+- [ ] Hierarchical extraction logic (CSV annotation → build metadata)
+- [ ] Semver prerelease validation for release values
+- [ ] Fatal error handling for invalid build metadata with `olm.substitutesFor`
+- [ ] `opm render` support for release field output
+- [ ] Catalog template for `substitutesFor` workflows
+- [ ] Unit and integration tests for all extraction and validation logic
+
+**Dependencies:** None - this is the foundational phase
+
+**Status:** In Progress - See PRs:
+- https://github.com/operator-framework/api/pull/454
+- https://github.com/operator-framework/operator-registry/pull/1792
+
+#### Phase 2: OLMv1 (operator-framework/operator-controller)
+
+**Scope:**
+- Implement bundle selection prioritization based on release field
+- Add feature gate to control release-based ordering
+- Update resolution logic to compare release values using semver comparison
+
+**Deliverables:**
+- [ ] Feature gate `ReleaseVersionPriority` (disabled by default)
+- [ ] Bundle selection logic that prioritizes higher release values
+- [ ] Comparison implementation using semver's `PRVersion.Compare`
+- [ ] Priority rules: version comparison → release comparison → with release > without release
+- [ ] E2E tests demonstrating release-based selection
+- [ ] Documentation for enabling the feature gate
+
+**Dependencies:** Phase 1 (API and operator-registry changes)
+
+**Feature Gate:** `ReleaseVersionPriority`
+- Default: Disabled
+- Purpose: Controls whether bundle selection considers release field for prioritization
+- Graduation: Tech Preview → GA based on testing and feedback
+
+**Status:** Pending
+
+#### Phase 3: OLMv0 Integration
+
+**Scope:**
+- Ensure OLMv0 components gracefully handle bundles with release fields
+- Maintain backward compatibility (no feature gate - passive support only)
+- Validate that existing bundle processing workflows continue unchanged
+
+**Deliverables:**
+- [ ] Verification that OLMv0 catalog-operator ignores release field without errors
+- [ ] Confirmation that CSVs with release annotations are processed normally
+- [ ] Regression testing for Freshmaker-style bundles in OLMv0
+- [ ] Documentation noting OLMv0 will not actively use release for prioritization
+
+**Dependencies:** Phase 1 (API and operator-registry changes)
+
+**Note:** OLMv0 does not support feature gates. The release field is purely additive and optional, so OLMv0 will safely ignore it. Bundle selection in OLMv0 will continue to use existing mechanisms without considering the release field.
+
+**Status:** Pending
+
+#### Cross-Phase Considerations
+
+**Testing Strategy:**
+- Phase 1 tests focus on parsing, extraction, and validation
+- Phase 2 tests focus on selection logic and prioritization behavior
+- Phase 3 tests focus on backward compatibility and regression prevention
+- All phases include integration tests with real bundle scenarios
+
+**Rollout Strategy:**
+- Phase 1 can be deployed independently (tools update)
+- Phase 2 rolls out with feature gate disabled by default
+- Phase 3 validates alongside Phase 1/2 deployments
+- Progressive enablement: Phase 2 feature gate enabled after sufficient testing
+
 ### Risks and Mitigations
 
 **Risk:** Changes to the operator-framework API schema could break existing tools or scripts that parse bundle metadata.
@@ -346,25 +430,56 @@ The test strategy focuses on ensuring both new functionality and backward compat
 
 ### Dev Preview -> Tech Preview
 
-- [ ] Release field is added to operator-framework API schema
+**Phase 1 (API/Registry):**
+- [ ] Release field added to operator-framework API schema
 - [ ] Extraction logic successfully parses semver build metadata from Freshmaker-style bundles
 - [ ] `opm` tools can render bundles with both explicit and extracted release fields
-- [ ] Unit tests demonstrate correct behavior for various release value formats
-- [ ] Integration tests pass with bundles using `olm.substitutesFor` annotations
-- [ ] Bundle selection prioritizes releases correctly in test environments
-- [ ] Documentation updated to reflect the new optional field and usage patterns
+- [ ] Validation enforces semver prerelease syntax for release values
+- [ ] Fatal errors for invalid `olm.substitutesFor` build metadata
+- [ ] Unit and integration tests pass
+- [ ] `substitutesFor` catalog template available
+
+**Phase 2 (OLMv1):**
+- [ ] `ReleaseVersionPriority` feature gate implemented in operator-controller
+- [ ] Bundle selection correctly prioritizes by release when feature gate enabled
+- [ ] E2E tests demonstrate release-based ordering
+- [ ] Feature gate documentation published
+
+**Phase 3 (OLMv0):**
+- [ ] OLMv0 compatibility verified (graceful handling of release field)
+- [ ] Regression tests pass for legacy bundles
+- [ ] No breaking changes to existing OLMv0 workflows
+
+**Documentation:**
+- [ ] API changes documented
+- [ ] Feature gate usage guide published
+- [ ] Migration guidance for operator authors
+- [ ] OLMv0 vs OLMv1 behavior differences documented
 
 ### Tech Preview -> GA
 
-- [ ] All tests passing including end-to-end scenarios with real operator bundles
-- [ ] No regressions in existing bundle processing workflows
-- [ ] Bundle selection in OLM correctly prioritizes higher release versions
-- [ ] Freshmaker integration validated with multiple operator bundles
-- [ ] Downstream consumers (Console, UI components) updated to handle and display release field
-- [ ] Sufficient time for feedback from operators, maintainers, and catalog publishers
-- [ ] User-facing documentation created in openshift-docs
-- [ ] Feature available by default with stable API
+**Phase 1 (API/Registry):**
+- [ ] All tests passing across multiple operator bundles in production catalogs
+- [ ] No regressions in bundle rendering or validation
+- [ ] Freshmaker integration validated with production workloads
+- [ ] Performance impact assessed (negligible overhead confirmed)
+
+**Phase 2 (OLMv1):**
+- [ ] Feature gate `ReleaseVersionPriority` enabled by default
+- [ ] Bundle selection in OLMv1 correctly prioritizes higher release versions
 - [ ] No critical issues reported during tech preview period
+- [ ] User feedback incorporated
+- [ ] Dashboard/Console updated to display release information
+
+**Phase 3 (OLMv0):**
+- [ ] Long-term compatibility verified in production environments
+- [ ] No unexpected issues with mixed OLMv0/v1 deployments
+
+**Cross-Phase:**
+- [ ] Sufficient time for feedback from operators, maintainers, and catalog publishers (minimum 2 releases)
+- [ ] User-facing documentation created in openshift-docs
+- [ ] Support procedures documented
+- [ ] Feature available by default with stable API
 
 ### Removing a deprecated feature
 
