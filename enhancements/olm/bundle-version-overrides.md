@@ -27,53 +27,45 @@ superseded-by: []
 
 ## Summary
 
-This enhancement introduces an optional `release` field to the registry+v1 Cluster Service Version (CSV) specification, providing a structured mechanism for future identification of release-level versioning within operator bundles. Operator Lifecycle Manager (OLM) will utilize this field when ordering multiple bundles are available for the same operator. 
+This enhancement adds an optional `release` field to the CSV specification, enabling structured release-level versioning within operator bundles. OLM will use this field when ordering multiple bundles for the same operator. 
 
 ## Motivation
 
-Currently, FBC lacks a standardized mechanism to recognize the case where an operator is re-packaged rather than altered. Previous SQLite approaches exist using Freshmaker and imperative upgrade graph rebuild.  Implicit with this is the practice of encoding release version information using semver build metadata appended to version strings (e.g., `7.10.2-opr-2+0.1676475747.p`), which conflates the operator's semantic version with its build/release metadata. This is a violation of [the semver spec](https://www.semver.org) and not an appropriate approach given FBC's emphasis on semver as a primary ordering mechanism.  This new approach makes it possible to programmatically distinguish between operator version and release version information, enabling repackaging pathways independent of traditional upversioned republication approaches.
+FBC lacks a standardized mechanism for operator repackaging. Current approaches encode release information in semver build metadata (e.g., `7.10.2-opr-2+0.1676475747.p`), conflating operator version with build/release metadata. This violates [the semver spec](https://www.semver.org) and undermines FBC's reliance on semver ordering. This enhancement enables programmatic distinction between operator version and release version, supporting repackaging workflows without version changes.
 
 ### User Stories
 
-* As a cluster administrator, I want OLM to prioritize bundles with higher release versions when multiple same-version bundles are available, so that I always receive the most recent release of an operator for my environment.
-
-* As an operator author, I want to able to repackage my operator without functional change separately from the semantic version, so that I can clearly communicate both the operator version and build/release information without mixing them in a single representation.
-
-* As a cluster administrator, I want to see clean, readable version information when inspecting operator bundles and CSV resources, so that I can quickly understand what version of an operator is installed and what the corresponding release version is without implicit processing.
-
-* As an OLM maintainer, I want a structured way to track release version information in bundle metadata, so that upgrade path resolution and bundle replacement logic can reliably determine whether a bundle should substitute for another based on release information.
-
-* As a legacy bundle publisher using Freshmaker-style workflows, I want my existing `olm.substitutesFor` annotations with semver build metadata to be automatically interpreted, so that I can adopt this enhancement without modifying my existing publishing processes.
+* As a cluster administrator, I want OLM to prioritize bundles with higher release versions when multiple same-version bundles are available.
+* As an operator author, I want to repackage operators without changing semantic version, clearly separating operator version from build/release information.
+* As an OLM maintainer, I want structured release version tracking in bundle metadata for reliable upgrade path resolution.
+* As a legacy bundle publisher, I want existing `olm.substitutesFor` annotations with semver build metadata automatically interpreted without modifying publishing processes.
 
 ### Goals
 
-* Add an optional `release` field to the CSV specification (omitted if unused to preserve line formats)
-* Maintain backward compatibility with existing bundles that encode release information in semver build metadata (i.e. Freshmaker)
-* Implement reusable comparators which leverage version and release version in a consistent, comprehensive manner
-* Provide catalog template for easy adoption of the release field approach
-# Define and enforce a naming scheme associated with the use of the release version to eliminate common errors and preemption relationships
-* (Future) Enable OLM to prioritize bundles with higher release versions over those with lower or unspecified release versions during bundle selection
+* Add optional `release` field to CSV specification
+* Maintain backward compatibility with Freshmaker-style semver build metadata
+* Implement consistent version/release comparators
+* Provide catalog template for release field adoption
+* (Future) Enable OLM to prioritize bundles by release version
 
 ### Non-Goals
 
-* Changing the core OLM bundle selection or upgrade resolution algorithms beyond adding release version comparison
-* Deprecating or removing the ability to encode release version in semver build metadata (both approaches should coexist)
-* Requiring changes to existing bundles or breaking compatibility with current bundle formats
-* Modifying existing SQLite catalog schema or catalog source APIs (this is focused on FBC)
-* Defining specific version numbering schemes or release version formats
-* Modifying how FBC catalog sources or operator-registry databases are structured at the storage level
-* Making the release field mandatory (it remains optional for backward compatibility)
+* Changing core OLM algorithms beyond adding release comparison
+* Deprecating semver build metadata approach (both coexist)
+* Breaking compatibility with existing bundles
+* Modifying SQLite catalog schema or APIs
+* Making release field mandatory
 
 ## Proposal
 
 ### Workflow Description
 
-When building an operator bundle, an operator author can now optionally specify a `release` field in addition to the `version` field in the CSV. This release field represents the bundle's release-level version, which is distinct from the semantic version.
+Operator authors can optionally specify a `release` field alongside the `version` field in the CSV, representing release-level versioning distinct from semantic version.
 
-**Determining Priority:** When OLM needs to select a bundle from multiple available versions, it will prioritize based on release version:
-1. The semantic `version` field remains the primary selection criteria in the absence of release information, but where different;
-2. Bundles with higher `release` values are ordered before bundles with lower `release` values
-3. Bundles with `release` values are ordered before bundles without `release` values
+**Priority Ordering:** When OLM selects between multiple bundles:
+1. Semantic `version` field remains primary
+2. Higher `release` values ordered before lower values
+3. Bundles with `release` values ordered before those without
 
 **Explicit Release Specification:**
 
@@ -104,13 +96,9 @@ properties:
 ...
 ```
 
-**Backward Compatibility with Freshmaker-style Substitution:**
+**Backward Compatibility:**
 
-For backward compatibility, when a bundle contains the `olm.substitutesFor` annotation and the version string includes semver build metadata (e.g., `7.10.2-opr-2+0.1676475747.p`), the release information is automatically extracted from the build metadata and populated in the release field.
-
-**Current State (Before):**
-
-A Freshmaker-style bundle with version `7.10.2-opr-2+0.1676475747.p` is processed:
+Bundles with `olm.substitutesFor` annotation and semver build metadata (e.g., `7.10.2-opr-2+0.1676475747.p`) automatically extract release information from build metadata.
 ```yaml
 apiVersion: operators.coreos.com/v1alpha1
 kind: ClusterServiceVersion
@@ -134,20 +122,14 @@ value:
   release: 0.1676475747.p
 ```
 
-The parsing logic respects the legacy ability to encode release version implicitly in semver build metadata by detecting the presence of the `olm.substitutesFor` annotation in the bundle and extracting the build metadata (everything after the `+` in the semver string) as the release version.
+Build metadata (everything after `+`) is extracted as release version when `olm.substitutesFor` annotation is present.
 
 **Bundle Ordering Priority (Future):**
 
-When multiple bundles are available for the same package and version, OLM will use the following priority rules:
-
-1. Compare versions, and if equal
-1. Compare `release` values if both are present (bundles with higher release values win)
-2. Prefer bundles with explicit `release` values over bundles without them (when `substitutesFor` is involved)
-
-This enables scenarios where:
-- Freshmaker has published multiple release builds of the same operator version
-- OLM automatically selects the highest release version
-- Operators with explicit release tracking have priority over those without
+Priority rules for multiple bundles:
+1. Compare versions first
+2. If equal, compare `release` values (higher wins)
+3. Prefer bundles with `release` over those without
 
 ### Topology Considerations
 
@@ -165,9 +147,7 @@ The proposed change should have no specific impact to SNO/MicroShift clusters.
 
 ### API Extensions
 
-This enhancement modifies the FBC (File-Based Catalog) package schema in operator-registry by adding an optional `release` field to the package value structure in the declcfg format. This is a pure additive change that does not modify the behavior of existing OLM components beyond adding release-based prioritization.
-
-No CRDs, webhooks, or finalizers are added or modified by this enhancement. The change is confined to the metadata schema for how operator bundles are represented in FBC catalogs and operator-registry databases.
+Adds optional `release` field to FBC package schema in operator-registry declcfg format. Pure additive change—no CRDs, webhooks, or finalizers modified. Change confined to bundle metadata schema in FBC catalogs and operator-registry databases.
 
 ### Implementation Details/Notes/Constraints
 
@@ -185,78 +165,66 @@ type Package struct {
 
 **Extraction Logic:**
 
-The implementation follows a hierarchical extraction strategy (as implemented in [operator-registry PR #1792](https://github.com/operator-framework/operator-registry/pull/1792)):
+Hierarchical extraction strategy ([operator-registry PR #1792](https://github.com/operator-framework/operator-registry/pull/1792)):
 
-1. **Primary: Extract from CSV if present** - If the bundle's CSV contains an explicit release annotation (`metadata.annotations['operators.operatorframework.io/release']`), use that value
-2. **Fallback: Parse from version build metadata** - If no explicit release annotation exists, check if the version string contains semver build metadata (the portion after `+`)
-3. **Extract and validate** - Parse the build metadata using semver prerelease syntax validation to ensure it can be represented as a valid semver prerelease field
-4. **Fatal error condition** - If the bundle contains an `olm.substitutesFor` annotation but the build metadata cannot be parsed as a valid release value, the processing fails with a clear error message
+1. Primary: Extract from CSV `spec.release` field
+2. Fallback: Parse from version build metadata (portion after `+`)
+3. Validate using semver prerelease syntax
+4. Fatal error if `olm.substitutesFor` present but build metadata invalid
 
-When processing bundles with semver build metadata:
-- Extract the build metadata portion (everything after the `+`)
-- Validate it can be represented as a semver prerelease field
-- Populate the `release` field with the extracted and validated value
-- Clean the `version` field by removing the build metadata
+Build metadata processing: extract, validate, populate `release` field, clean `version` field.
 
 **Priority Comparison:**
 
-The implementation uses semver's comparison methods for release values, as release values are validated to conform to semver prerelease syntax. This ensures consistent and predictable comparison behavior:
-- Empty or unset release values are treated as lowest priority
-- Non-empty release values are compared using semver's `PRVersion.Compare` method
-- This provides proper ordering for numeric release schemes (e.g., `"0"`, `"1"`, `"2"`), timestamp-based releases (e.g., `"0.20250124"`), or alphanumeric identifiers
-- Semver's validation rules ensure release values are well-formed and comparable
+Reusable comparison methods consider both version and release fields. Release values validated as semver prerelease syntax. Empty values = lowest priority. Supports numeric, timestamp-based, or alphanumeric schemes.
 
 **Bundle Metadata:**
 
-The CSV supports specifying the release field through the `operators.operatorframework.io/release` annotation. Operator authors can use this annotation in their CSV manifests:
+CSV supports `spec.release` field:
 
 ```yaml
 apiVersion: operators.coreos.com/v1alpha1
 kind: ClusterServiceVersion
 metadata:
   name: example-operator.v1.0.0
-  annotations:
-    operators.operatorframework.io.release: "2025.01.24.000000"
 spec:
   version: 1.0.0
+  release: 2025.01.24.000000
 ```
 
 **operator-registry Tools:**
 
-The `opm` command and operator-registry library are updated to:
-* Parse and extract release information from bundles using the hierarchical extraction strategy
-* Validate release values using semver prerelease syntax rules
-* Render release fields in FBC catalog output
-* Support both explicit CSV annotations and build metadata extraction
-* Maintain backward compatibility with bundles lacking release information
-* Add catalog template support for repackaging workflows
-
-**Catalog Templates:**
-
-The enhancement includes a new FBC catalog template `substitutesFor` that helps operator authors trivially adopt the release field approach and avoid common error scenarios when implementing Freshmaker-style bundle substitution workflows.
+`opm` command and operator-registry library updated to:
+* Parse and extract release using hierarchical strategy
+* Validate release values using semver prerelease syntax
+* Render release fields in FBC output
+* Support explicit spec.release and build metadata extraction
+* Maintain backward compatibility
+* Add `substitutesFor` catalog template for repackaging workflows
 
 ### Implementation Phases
 
-This enhancement will be implemented in three distinct phases across different components:
+Three-phase implementation:
 
 #### Phase 1: API and Operator Registry (operator-framework/api and operator-framework/operator-registry)
 
 **Scope:**
-- Add the optional `release` field to the CSV specification in operator-framework/api
-- Implement release field extraction logic in operator-registry
-- Update `opm` tooling to parse and render release information
-- Add the `substitutesFor` catalog template
+- Add optional `release` field to CSV specification
+- Implement release field extraction in operator-registry
+- Update `opm` tooling for parsing and rendering
+- Add `substitutesFor` catalog template
 
 **Deliverables:**
 - [ ] API schema update with `release` field in Package struct
-- [ ] Hierarchical extraction logic (CSV annotation → build metadata)
-- [ ] Semver prerelease validation for release values
+- [ ] Hierarchical extraction logic (spec.release → build metadata)
+- [ ] Semver prerelease validation
 - [ ] Fatal error handling for invalid build metadata with `olm.substitutesFor`
-- [ ] `opm render` support for release field output
+- [ ] Reusable bundle version comparison library methods (version + release)
+- [ ] `opm render` support for release field
 - [ ] Catalog template for `substitutesFor` workflows
-- [ ] Unit and integration tests for all extraction and validation logic
+- [ ] Unit and integration tests
 
-**Dependencies:** None - this is the foundational phase
+**Dependencies:** None
 
 **Status:** In Progress - See PRs:
 - https://github.com/operator-framework/api/pull/454
@@ -265,221 +233,194 @@ This enhancement will be implemented in three distinct phases across different c
 #### Phase 2: OLMv1 (operator-framework/operator-controller)
 
 **Scope:**
-- Implement bundle selection prioritization based on release field
-- Add feature gate to control release-based ordering
-- Update resolution logic to compare release values using semver comparison
+- Implement bundle selection prioritization by release
+- Add feature gate for release-based ordering
+- Leverage reusable bundle version comparison methods from Phase 1
 
 **Deliverables:**
 - [ ] Feature gate `ReleaseVersionPriority` (disabled by default)
-- [ ] Bundle selection logic that prioritizes higher release values
-- [ ] Comparison implementation using semver's `PRVersion.Compare`
-- [ ] Priority rules: version comparison → release comparison → with release > without release
-- [ ] E2E tests demonstrating release-based selection
-- [ ] Documentation for enabling the feature gate
+- [ ] Bundle selection logic prioritizing higher release values
+- [ ] E2E tests
+- [ ] Feature gate documentation
 
-**Dependencies:** Phase 1 (API and operator-registry changes)
+**Dependencies:** Phase 1
 
-**Feature Gate:** `ReleaseVersionPriority`
-- Default: Disabled
-- Purpose: Controls whether bundle selection considers release field for prioritization
-- Graduation: Tech Preview → GA based on testing and feedback
+**Feature Gate:** `ReleaseVersionPriority` (default: disabled)
 
 **Status:** Pending
 
 #### Phase 3: OLMv0 Integration
 
 **Scope:**
-- Ensure OLMv0 components gracefully handle bundles with release fields
-- Maintain backward compatibility (no feature gate - passive support only)
-- Validate that existing bundle processing workflows continue unchanged
+- Ensure OLMv0 gracefully handles bundles with release fields
+- Maintain backward compatibility (passive support only, no feature gate)
+- Validate existing workflows unchanged
 
 **Deliverables:**
-- [ ] Verification that OLMv0 catalog-operator ignores release field without errors
-- [ ] Confirmation that CSVs with release annotations are processed normally
-- [ ] Regression testing for Freshmaker-style bundles in OLMv0
-- [ ] Documentation noting OLMv0 will not actively use release for prioritization
+- [ ] Verify OLMv0 catalog-operator ignores release field without errors
+- [ ] Confirm CSVs with release processed normally
+- [ ] Regression testing for Freshmaker-style bundles
+- [ ] Documentation noting OLMv0 won't use release for prioritization
 
-**Dependencies:** Phase 1 (API and operator-registry changes)
+**Dependencies:** Phase 1
 
-**Note:** OLMv0 does not support feature gates. The release field is purely additive and optional, so OLMv0 will safely ignore it. Bundle selection in OLMv0 will continue to use existing mechanisms without considering the release field.
+**Note:** Release field purely additive; OLMv0 safely ignores it. No feature gate support in OLMv0.
 
 **Status:** Pending
 
 #### Cross-Phase Considerations
 
 **Testing Strategy:**
-- Phase 1 tests focus on parsing, extraction, and validation
-- Phase 2 tests focus on selection logic and prioritization behavior
-- Phase 3 tests focus on backward compatibility and regression prevention
-- All phases include integration tests with real bundle scenarios
+- Phase 1: parsing, extraction, validation
+- Phase 2: selection logic and prioritization
+- Phase 3: backward compatibility and regression
+- All phases: integration tests with real bundles
 
 **Rollout Strategy:**
-- Phase 1 can be deployed independently (tools update)
-- Phase 2 rolls out with feature gate disabled by default
-- Phase 3 validates alongside Phase 1/2 deployments
-- Progressive enablement: Phase 2 feature gate enabled after sufficient testing
+- Phase 1: independent deployment (tools update)
+- Phase 2: feature gate disabled by default
+- Phase 3: validates alongside Phase 1/2
+- Progressive enablement after sufficient testing
 
 ### Risks and Mitigations
 
-**Risk:** Changes to the operator-framework API schema could break existing tools or scripts that parse bundle metadata.
+**Risk:** API schema changes break existing tools parsing bundle metadata.
+**Mitigation:** Release field optional and additive—full backward compatibility. Existing tooling unaffected.
 
-**Mitigation:** The release field is optional and additive, ensuring full backward compatibility. Existing tooling that doesn't read the release field will continue to work unchanged. Only new tooling needs to be aware of the field. All extraction logic is non-breaking and only adds information.
+**Risk:** Inconsistent behavior between explicit release vs semver build metadata.
+**Mitigation:** Automatic extraction from Freshmaker-style bundles ensures consistent representation. Hierarchical extraction (spec.release → build metadata) provides predictable behavior.
 
-**Risk:** Inconsistent behavior between bundles that explicitly set release vs those that use semver build metadata.
+**Risk:** Fatal errors processing `olm.substitutesFor` bundles with invalid build metadata.
+**Mitigation:** Semver prerelease validation with clear error messages prevents silent failures.
 
-**Mitigation:** The implementation standardizes on the release field by automatically extracting build metadata from legacy Freshmaker-style bundles. This ensures consistent representation regardless of how the information was originally encoded, while allowing both approaches to coexist. The hierarchical extraction strategy (CSV annotation first, then build metadata) ensures predictable behavior.
+**Risk:** Inconsistent version display across tools/UIs.
+**Mitigation:** Extraction and rendering centralized in operator-registry. `opm render` normalizes representation.
 
-**Risk:** Fatal errors when processing bundles with `olm.substitutesFor` annotations that have invalid build metadata.
+**Risk:** String comparison doesn't match expectations for numeric releases.
+**Mitigation:** Documentation provides guidance on consistent formats.
 
-**Mitigation:** The implementation validates that build metadata conforms to semver prerelease syntax. If validation fails for bundles that explicitly require release information (via `olm.substitutesFor`), the processing fails with a clear, actionable error message. This prevents silent failures and ensures bundle integrity.
+**Security Review:** No security implications—pure metadata schema change.
 
-**Risk:** Tools or UI components might display inconsistent version information if they read from old vs new fields.
-
-**Mitigation:** All extraction and rendering logic is centralized in operator-registry tools, ensuring consistent behavior across the ecosystem. The `opm render` command and related tools will always normalize the representation.
-
-**Risk:** String-based comparison of release values might not match operator expectations for numeric releases.
-
-**Mitigation:** Documentation will provide guidance on using consistent release value formats. Operators can adopt conventions that work well with string comparison.
-
-**Security Review:** No security implications. This is a pure metadata schema change that does not affect the runtime behavior of operators or access control.
-
-**UX Review:** This improvement enhances UX by providing cleaner, more readable version strings without build metadata clutter, and enabling more predictable bundle selection in environments with multiple release builds.
+**UX Review:** Improves readability by separating version from build metadata; enables predictable bundle selection.
 
 ### Drawbacks
 
-* Adds another field to maintain in the API schema, though it's optional and backward compatible
-* Requires coordination with documentation and downstream tooling to leverage the new field
-* Creates a period where some bundles have explicit release fields and others continue to use semver build metadata (though the implementation bridges this gap automatically)
-* String-based comparison may not match all release numbering schemes intuitively without careful formatting (but we feel this is a minimal edge case not borne out by catalog examination)
+* Adds optional field to API schema
+* Requires documentation and tooling coordination
+* Mixed bundle formats during transition (automatic extraction bridges gap)
+* String comparison may not intuitively match all numbering schemes
 
-However, the benefits of cleaner separation of concerns, better programmatic access, improved human readability, and support for Freshmaker workflows significantly outweigh these relatively minor drawbacks. The optional nature of the field ensures no disruption to existing workflows.
+Benefits (cleaner separation, programmatic access, readability, Freshmaker support) outweigh drawbacks. Optional field ensures no workflow disruption.
 
 ## Alternatives (Not Implemented)
 
 ### Continue Using Semver Build Metadata Exclusively
-
-**Alternative:** Keep the current approach of encoding release version in semver build metadata without adding an explicit field.
-
-**Why Not:** This makes it difficult to programmatically extract release information, creates inconsistent version strings that are harder to read, doesn't provide a clear API for accessing this information, and doesn't enable reliable priority-based bundle selection.
+**Why Not:** Difficult to extract programmatically, inconsistent version strings, no clear API, unreliable priority-based selection.
 
 ### Use a Separate Metadata Field in Bundle Images
-
-**Alternative:** Add release version as a separate annotation or metadata field in the bundle image rather than in the CSV schema.
-
-**Why Not:** This would require changes to bundle image formats and tooling, making it a much larger scope change with more moving parts and compatibility concerns. It would also not be automatically reflected in catalog databases.
+**Why Not:** Larger scope, bundle image format changes, not reflected in catalog databases.
 
 ### Split Version into Major/Minor/Patch/Release Fields
-
-**Alternative:** Redesign the version schema to have separate semantic version components (major, minor, patch) and release fields explicitly.
-
-**Why Not:** This would be a breaking change to the CSV schema and require migration of all existing bundles, which is far beyond the scope of this enhancement.
+**Why Not:** Breaking change requiring migration of all existing bundles.
 
 ### Make Release Field Mandatory
-
-**Alternative:** Require all bundles to specify a release field.
-
-**Why Not:** This would break backward compatibility and require updating all existing bundles in the ecosystem, creating significant disruption. The optional nature and backwards-compatibility path ensure smooth adoption.
+**Why Not:** Breaks backward compatibility, requires updating all existing bundles.
 
 ## Open Questions
 
-* Should we provide validation or normalization for release value formats to ensure consistent comparison? (Likely unnecessary - flexibility is valuable)
-* Should we document recommended patterns for release value formatting (e.g., date-based vs numeric)? (Yes, in the implementation phase)
-* Should operator-registry tools emit warnings when extracting release from build metadata? (Maybe for observability during migration period)
+* Validation/normalization for release formats? (Likely unnecessary—flexibility valuable)
+* Document recommended formatting patterns? (Yes, during implementation)
+* Emit warnings when extracting from build metadata? (Maybe for migration observability)
 
 ## Test Plan
 
-This enhancement includes comprehensive testing across multiple levels:
-
 **Unit Tests:**
-* Verify release field parsing from CSV annotations
-* Validate extraction logic for semver build metadata using the hierarchical strategy
-* Test semver-based comparison logic using `PRVersion.Compare` for release values
-* Verify validation of release values against semver prerelease syntax
-* Test fatal error conditions when `olm.substitutesFor` is present but build metadata cannot be parsed
-* Confirm that bundles without release fields continue to function correctly
-* Confirm that `substitutesFor` catalog template generates valid FBC
+* Release field parsing from CSV spec.release
+* Hierarchical extraction logic (spec.release → build metadata)
+* Reusable comparison methods for version + release
+* Semver prerelease validation
+* Fatal errors for invalid `olm.substitutesFor` build metadata
+* Bundles without release fields function correctly
+* `substitutesFor` catalog template generates valid FBC
 
 **Integration Tests:**
-* Process bundles with `olm.substitutesFor` annotations and verify release extraction from build metadata
-* Test bundles with explicit CSV release annotations take precedence over build metadata
-* Test `opm render` output with various release value formats
-* Verify that bundles with explicit release values are properly represented
-* Test the `substitutesFor` catalog template generation
-* Confirm that validation failures produce clear error messages
-* Confirm backward compatibility with legacy bundles lacking release information
+* Release extraction from `olm.substitutesFor` bundles
+* spec.release precedence over build metadata
+* `opm render` with various release formats
+* `substitutesFor` template generation
+* Clear validation error messages
+* Backward compatibility with legacy bundles
 
 **Priority Selection Tests (Future):**
-* Create multiple bundles with different release values and verify OLM selects the highest
-* Test scenarios where one bundle has a release and another does not
-* Validate edge cases (empty strings, special characters, very long release values)
+* OLM selects highest release value
+* Bundles with/without release fields
+* Edge cases (empty strings, special characters, long values)
 
 **Regression Tests:**
-* Ensure existing bundle processing workflows continue to function
-* Verify that catalog source queries return expected results
-* Confirm that OLM upgrade resolution behaves correctly with mixed release information
+* Existing workflows unchanged
+* Catalog source queries correct
+* OLM upgrade resolution with mixed release information
 
 **E2E Tests:**
-* Install operators using bundles with release fields
-* Test Freshmaker-style bundle substitution workflows
-* Verify that bundle selection prioritizes higher releases correctly
-* Confirm that dashboard/UI correctly displays release information when available
-
-The test strategy focuses on ensuring both new functionality and backward compatibility work correctly.
+* Install operators with release fields
+* Freshmaker-style substitution workflows
+* Bundle selection prioritization
+* Dashboard/UI display
 
 ## Graduation Criteria
 
 ### Dev Preview -> Tech Preview
 
 **Phase 1 (API/Registry):**
-- [ ] Release field added to operator-framework API schema
-- [ ] Extraction logic successfully parses semver build metadata from Freshmaker-style bundles
-- [ ] `opm` tools can render bundles with both explicit and extracted release fields
-- [ ] Validation enforces semver prerelease syntax for release values
-- [ ] Fatal errors for invalid `olm.substitutesFor` build metadata
-- [ ] Unit and integration tests pass
+- [ ] Release field in API schema
+- [ ] Extraction logic parses Freshmaker-style build metadata
+- [ ] `opm` renders explicit and extracted release fields
+- [ ] Semver prerelease validation
+- [ ] Fatal errors for invalid `olm.substitutesFor` metadata
+- [ ] Tests pass
 - [ ] `substitutesFor` catalog template available
 
 **Phase 2 (OLMv1):**
-- [ ] `ReleaseVersionPriority` feature gate implemented in operator-controller
-- [ ] Bundle selection correctly prioritizes by release when feature gate enabled
-- [ ] E2E tests demonstrate release-based ordering
-- [ ] Feature gate documentation published
+- [ ] `ReleaseVersionPriority` feature gate implemented
+- [ ] Bundle selection prioritizes by release (gate enabled)
+- [ ] E2E tests demonstrate ordering
+- [ ] Feature gate documentation
 
 **Phase 3 (OLMv0):**
-- [ ] OLMv0 compatibility verified (graceful handling of release field)
-- [ ] Regression tests pass for legacy bundles
-- [ ] No breaking changes to existing OLMv0 workflows
+- [ ] OLMv0 compatibility verified
+- [ ] Regression tests pass
+- [ ] No breaking changes
 
 **Documentation:**
-- [ ] API changes documented
-- [ ] Feature gate usage guide published
-- [ ] Migration guidance for operator authors
-- [ ] OLMv0 vs OLMv1 behavior differences documented
+- [ ] API changes
+- [ ] Feature gate usage
+- [ ] Migration guidance
+- [ ] OLMv0 vs OLMv1 differences
 
 ### Tech Preview -> GA
 
 **Phase 1 (API/Registry):**
-- [ ] All tests passing across multiple operator bundles in production catalogs
-- [ ] No regressions in bundle rendering or validation
-- [ ] Freshmaker integration validated with production workloads
-- [ ] Performance impact assessed (negligible overhead confirmed)
+- [ ] Tests pass across production catalogs
+- [ ] No rendering/validation regressions
+- [ ] Freshmaker integration validated
+- [ ] Negligible performance overhead
 
 **Phase 2 (OLMv1):**
-- [ ] Feature gate `ReleaseVersionPriority` enabled by default
-- [ ] Bundle selection in OLMv1 correctly prioritizes higher release versions
-- [ ] No critical issues reported during tech preview period
+- [ ] `ReleaseVersionPriority` enabled by default
+- [ ] Bundle selection prioritizes correctly
+- [ ] No critical issues
 - [ ] User feedback incorporated
-- [ ] Dashboard/Console updated to display release information
+- [ ] Dashboard/Console displays release
 
 **Phase 3 (OLMv0):**
-- [ ] Long-term compatibility verified in production environments
-- [ ] No unexpected issues with mixed OLMv0/v1 deployments
+- [ ] Production compatibility verified
+- [ ] No issues with mixed OLMv0/v1
 
 **Cross-Phase:**
-- [ ] Sufficient time for feedback from operators, maintainers, and catalog publishers (minimum 2 releases)
-- [ ] User-facing documentation created in openshift-docs
+- [ ] Minimum 2 releases for feedback
+- [ ] User-facing documentation in openshift-docs
 - [ ] Support procedures documented
-- [ ] Feature available by default with stable API
+- [ ] Stable API, enabled by default
 
 ### Removing a deprecated feature
 
@@ -489,70 +430,55 @@ Freshmaker is only used with SQLite-based legacy catalogs, so it will never be e
 
 ### Upgrade
 
-This enhancement is purely additive and requires no migration of existing bundles. When an upgraded version of operator-registry tools or OLM processes existing bundles:
+Purely additive—no migration required:
+* Bundles without release information work unchanged
+* Build metadata automatically extracted for Freshmaker-style workflows
+* Bundles can adopt explicit release fields
+* No user action required
+* Existing CSVs, CatalogSources, Subscriptions unchanged
 
-* Bundles without release information continue to work as before
-* Bundles with semver build metadata automatically have release information extracted and populated (for Freshmaker-style workflows)
-* Bundles can be updated to use explicit release fields going forward
-* No user action is required during upgrade
-* Existing CSVs, CatalogSources, and Subscriptions continue to function without changes
-
-**Migration Path for Operator Authors:**
-
-Existing operator authors don't need to change anything. The enhancement provides automatic extraction for Freshmaker-style bundles and optional explicit specification for new bundles.
-
-For those who want to start using explicit release values:
-1. Add `operators.operatorframework.io.release` annotation to CSV
+**Migration Path:**
+No changes required. For explicit release values:
+1. Add `spec.release` to CSV
 2. Rebuild and republish bundle
-3. No changes needed to publishing infrastructure
+3. No publishing infrastructure changes
 
 ### Downgrade
 
-When downgrading to a version of operator-registry or OLM that doesn't support the release field:
-
-* Bundles with explicit release fields will have them ignored (as optional fields)
-* The version field remains intact and functional
-* No data loss occurs, as the version field is preserved independently
+Safe—release field completely optional:
+* Explicit release fields ignored by older versions
+* Version field intact and functional
+* No data loss
 * Bundle selection falls back to existing mechanisms
 * No special handling required
 
-**Downgrade is safe** because the release field is completely optional and removing it doesn't affect the core functionality of OLM or bundle management.
-
 ## Version Skew Strategy
 
-The release field is entirely optional. Components that don't understand the field will simply ignore it. During version skew scenarios:
-
-* Older operator-registry tools will process bundles with release fields but ignore the field
-* Older OLM components will handle CSVs normally without accessing the release field
-* Newer components can leverage the release field when available
-* Bundle selection falls back to existing priority mechanisms in older components
+Release field entirely optional—unknown components ignore it.
 
 **Cross-Version Compatibility:**
+- Older OLM + Newer Bundles: Ignores release, uses existing logic
+- Newer OLM + Older Bundles: Uses existing logic
+- Newer OLM + Newer Bundles: Uses release-based prioritization
+- Mixed environments: Components handle bundles per their version
 
-- Older OLM + Newer Bundles with Release: OLM ignores release field, uses existing selection logic
-- Newer OLM + Older Bundles without Release: OLM uses existing selection logic
-- Newer OLM + Newer Bundles with Release: OLM uses release-based prioritization
-- Mixed environments: Each component handles bundles based on its own version
-
-The design ensures that the enhancement can coexist with older components during upgrades without causing failures or inconsistent behavior.
+No failures or inconsistent behavior during upgrades.
 
 ## Operational Aspects of API Extensions
 
-N/A - This enhancement does not add or modify CRDs, webhooks, finalizers, or other API extensions beyond the metadata schema changes in the operator-registry package representation.
-
-The change is confined to how bundle metadata is represented and does not affect runtime API behavior.
+N/A - No CRDs, webhooks, or finalizers added/modified. Change confined to bundle metadata schema; no runtime API impact.
 
 ## Support Procedures
 
-This enhancement does not introduce new failure modes. The optional nature of the release field means that:
+No new failure modes. Release field optional.
 
-**Detection:** Standard bundle inspection tools can validate the presence and format of the release field if desired. The `opm render` command will display release fields when present.
+**Detection:** Standard tools validate release field. `opm render` displays when present.
 
-**Impact:** Failure to parse or populate the release field does not affect bundle processing. The version field remains authoritative, and bundle selection falls back to existing mechanisms when release information is unavailable or unparseable.
+**Impact:** Parse failures don't affect bundle processing. Version field authoritative; selection falls back to existing mechanisms.
 
-**Remediation:** No remediation needed. If the release field is missing, invalid, or unparseable, bundles continue to use the version field as before. Bundle functionality is unaffected.
+**Remediation:** None needed. Missing/invalid release fields handled gracefully—bundles use version field.
 
-**Monitoring:** No new monitoring is required as this is purely a metadata enhancement. Bundle selection and installation proceed normally with or without release information.
+**Monitoring:** No new monitoring required. Bundle selection/installation proceed normally.
 
-**Documentation:** Support procedures remain unchanged. Troubleshooting bundle issues follows existing patterns regardless of the presence or absence of release fields.
+**Documentation:** Support procedures unchanged. Troubleshooting follows existing patterns.
 
