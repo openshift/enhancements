@@ -24,13 +24,14 @@ definition for a registry+v1 bundle configuration schema.
 
 The configuration layer allows users to set bundle configuration whose structure is defined by the bundle authors through
 a configuration schema. It provides a single mechanism for configuring bundles independently of the underlying
-bundle packaging format, which, while only the registry+v1 format is supported, will be expanded in the future to include
-Helm, and registry+v2 formats.
+bundle packaging format. Currently, only the registry+v1 format is supported. But, the Helm and registry+v2 formats
+will be supported in the future.
 
 As registry+v1 bundles don't provide a bundle configuration schema, this enhancement proposes that the schema be
 derived by OLM by introspecting the bundle. The enhancement also proposes a first iteration of the registry+v1 bundle
-configuration schema will that enable the installation of registry+v1 bundles with Single- and/or OwnNamespace install mode.
-The registry+v1 bundle configuration schema will be expanded in future enhancement (while maintaining backwards compatibility).
+configuration schema that will enable the installation of registry+v1 bundles with Single- and/or OwnNamespace install mode.
+The registry+v1 bundle configuration schema will be expanded in a future enhancement to add support for configuration 
+compatible with OLMv0's `Subscription` `.spec.config` while maintaining backwards compatibility.
 
 ## Motivation
 
