@@ -66,7 +66,7 @@ MicroShift does not deploy these operators and must a different approach which i
 
 The implementation includes:
 
-1. **FeatureGate Configuration**: Extend MicroShift's configuration file to include `featureGates` section with fields inspired by OpenShift's FeatureGate CRD spec (`featureSet` and `customNoUpgrade`)
+1. **FeatureGate Configuration**: Extend MicroShift's configuration file to include `apiServer.featureGates` section with fields inspired by OpenShift's FeatureGate CRD spec (`featureSet` and `customNoUpgrade`)
 2. **Predefined Feature Sets**: Support for predefined feature sets like `TechPreviewNoUpgrade` and `DevPreviewNoUpgrade`
 3. **Custom Feature Gates**: Support for individual feature gate enablement/disablement via `customNoUpgrade` configuration
 4. **API Server Propagation**: All configured featureGates will be passed to the kube-apiserver, which handles propagation to other Kubernetes components (kubelet, kube-controller-manager, kube-scheduler). Service restarts are the responsibility of the cluster admin.
@@ -82,8 +82,8 @@ The implementation includes:
 ##### First Time Configuring Feature Gates
 1. MicroShift Administrator identifies a need for specific feature gates (e.g., `CPUManagerPolicyAlphaOptions`)
 2. Administrator chooses between two configuration approaches:
-   - **Predefined Feature Set**: Configure `featureGates.featureSet: TechPreviewNoUpgrade` or `DevPreviewNoUpgrade` for a curated set of preview features
-   - **Custom Feature Gates**: Configure `featureGates.featureSet: CustomNoUpgrade` and specify individual features in `featureGates.customNoUpgrade.enabled/disabled` lists
+   - **Predefined Feature Set**: Configure `apiServer.featureGates.featureSet: TechPreviewNoUpgrade` or `DevPreviewNoUpgrade` for a curated set of preview features
+   - **Custom Feature Gates**: Configure `apiServer.featureGates.featureSet: CustomNoUpgrade` and specify individual features in `apiServer.featureGates.customNoUpgrade.enabled/disabled` lists
 3. Administrator updates `/etc/microshift/config.yaml` with the chosen configuration
 4. Administrator restarts MicroShift service
 5. MicroShift detects the custom FeatureGate configuration.
@@ -138,24 +138,26 @@ The resource consumption impact will be minimal as this enhancement only adds co
 
 #### Configuration Schema Extension
 
-The MicroShift configuration file will be extended to include a new `featureGates` section with a structure inspired by the OpenShift FeatureGate CRD specification. MicroShift users will configure feature gates in `/etc/microshift/config.yaml`:
+The MicroShift configuration file will be extended to include a new `apiServer.featureGates` section with a structure inspired by the OpenShift FeatureGate CRD specification. MicroShift users will configure feature gates in `/etc/microshift/config.yaml`:
 
 **Predefined Feature Set Configuration:**
 ```yaml
-featureGates:
-  featureSet: TechPreviewNoUpgrade
+apiServer:
+  featureGates:
+    featureSet: TechPreviewNoUpgrade
 ```
 
 **Custom Feature Gates Configuration:**
 ```yaml
-featureGates:
-  featureSet: CustomNoUpgrade
-  customNoUpgrade:
-    enabled:
-      - "CPUManagerPolicyAlphaOptions"
-      - "MemoryQoS"
-    disabled:
-      - "SomeDefaultEnabledFeature"
+apiServer:
+  featureGates:
+    featureSet: CustomNoUpgrade
+    customNoUpgrade:
+      enabled:
+        - "CPUManagerPolicyAlphaOptions"
+        - "MemoryQoS"
+      disabled:
+        - "SomeDefaultEnabledFeature"
 ```
 
 **Configuration Rules:**
@@ -204,8 +206,8 @@ Each component will then internally process these settings according to its capa
 #### Validation and Error Handling
 
 - **Configuration Parsing**: MicroShift will replicate OpenShift's schema rules as start-time validation checks:
-  - **Conflicting Feature Gate Settings**: A feature gate appears in both `.customNoUpgrade.enabled` and `.customNoUpgrade.disabled`
-  - **Conflicting Feature Set Settings**: Feature gates are defined under `.customNoUpgrade.[enabled|disabled]` but `.featureSet:` is not `customNoUpgrade`.
+  - **Conflicting Feature Gate Settings**: A feature gate appears in both `.apiServer.featureGates.customNoUpgrade.enabled` and `.apiServer.featureGates.customNoUpgrade.disabled`
+  - **Conflicting Feature Set Settings**: Feature gates are defined under `.apiServer.featureGates.customNoUpgrade.[enabled|disabled]` but `.apiServer.featureGates.featureSet:` is not `customNoUpgrade`.
 - **API Server Validation**: The kube-apiserver does not validate the feature gates it receives from MicroShift before propagating them. This behavior is the same on OpenShift
 - **Component-level Validation**: Unrecognized feature-gate values are ignored by components. The component will only log them as a warning
 - **Startup Failures**: May occur when featureGate settings conflict (i.e. a featureGate is both enabled and disabled)
@@ -366,7 +368,7 @@ Any changes to the MicroShift configuration schema must be backwards compatible 
 ### Reverting Custom Feature Gate Configurations To Default
 
 **Recovery Procedures:**
-- To restore MicroShift to a stable and supported state, users must run `$ sudo microshift-cleanup-data --all`, set `.featureGates: {}`, and restart MicroShift
+- To restore MicroShift to a stable and supported state, users must run `$ sudo microshift-cleanup-data --all`, set `.apiServer.featureGates: {}`, and restart MicroShift
 
 ### Upgrade / Rollback
 - Upgrades when custom feature gates are configured cause MicroShift to fail to start. See [Attempt to Upgrade Node with Custom Feature Gates](#attempt-to-upgrade-node-with-custom-feature-gates).
