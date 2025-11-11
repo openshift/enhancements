@@ -95,6 +95,16 @@ dns:
 ```
 By default, the `dns.hosts.status` feature is **Disabled**. If a Admin enables this feature (i.e., sets `dns.hosts.status` to `Enabled`) but does not specify a file, MicroShift will automatically default `dns.hosts.file` to "/etc/hosts".
 
+### Exposure of Sensitive Files
+There is a potential risk of exposing sensitive files in the system due to the configurability of the hosts file path. The MicroShift configuration (and thus the file watcher service) runs as root, allowing the administrator to specify any file as the source of hosts data. Users have full flexibility and control over the `dns.hosts.file` configuration knob, but this capability comes with responsibility.
+
+If the configured file contains sensitive data (e.g., private keys, password files, or other confidential information), its contents could be unintentionally synchronized into the MicroShift ConfigMap and made visible to CoreDNS pods, thus increasing the risk of accidental disclosure. 
+
+**Risk Mitigation:**  
+This risk has been considered as part of the enhancement. By design, only the root user or administrators managing the MicroShift configuration can change the file path, reducing the attack surface. However, it is essential for administrators to ensure that the configured hosts file path contains *only* host-to-IP mappings meant to be exposed to the cluster DNS. Care should be taken not to point `dns.hosts.file` to any file that contains sensitive or unrelated information.
+
+Additionally, the ConfigMap containing the hosts file is only readable by the `dns` service account in the `openshift-dns` namespace. This access is enforced through RBAC rules, which restrict the visibility of the ConfigMap and ensure that only the CoreDNS pods (running as the `dns` service account) can mount and read its contents. This provides an additional layer of protection to limit which workloads can access the hosts mappings delivered through this mechanism.
+
 ### Topology Considerations
 #### Hypershift / Hosted Control Planes
 N/A
