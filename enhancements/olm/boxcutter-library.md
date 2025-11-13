@@ -2,14 +2,14 @@
 title: boxcutter-library
 authors:
   - anik120
-reviewers:
   - perdasilva
+reviewers:
   - dtfranz
   - pedjak
 approvers:
   - joelanford
 api-approvers:
-  - None
+  - TBD
 creation-date: 2025-11-10
 last-updated: 2025-11-10
 tracking-link:
