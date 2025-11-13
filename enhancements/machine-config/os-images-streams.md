@@ -60,11 +60,12 @@ the entire cluster
 
 - **Enable per-pool OS stream selection**: Specify different OS streams at the MachineConfigPool level for multi-OS deployments (e.g., RHCOS 9 and RHCOS 10)
 - **De-risk major OS version upgrades**: Separate platform upgrades from OS upgrades, allowing phased migration
+- **Support RHCOS 9 to RHCOS 10 transition**: Enable one-directional migration path from RHEL 9 to RHEL 10 during OpenShift 4.21-5.x timeframe. This is the primary focus for Tech Preview.
+- **Day-zero RHEL 10 deployments (stretch goal)**: While the architecture supports installing new clusters directly with RHEL 10, this is a nice-to-have for Tech Preview. If implementation complexity blocks delivery, the feature can ship without day-zero RHEL 10 support, focusing solely on RHEL 9 → RHEL 10 migration for existing clusters.
 - **API-driven stream management**: Declarative, Kubernetes-native API for stream selection
 - **Automatic stream discovery**: Populate available OS streams from release payload ImageStream metadata
 - **Backward compatibility**: Existing clusters continue working; streams are opt-in via feature gate
 - **Multi-source stream configuration**: Support CLI arguments, release ImageStream, and ConfigMap sources with defined precedence
-- **Support RHCOS 9 to RHCOS 10 transition**: Enable migration path during OpenShift 4.21-5.x timeframe
 
 ### Non-Goals
 
@@ -82,6 +83,17 @@ for details.
 - **Automatic migration or upgrade paths**: The enhancement does not include
 automated migration logic or upgrade orchestration. Administrators must manually
 select streams for their pools.
+
+- **Bidirectional stream switching**: Only RHEL 9 → RHEL 10 migration is supported
+in the initial Tech Preview implementation. RHEL 10 → RHEL 9 downgrade is not
+supported and may be considered for future releases. The primary use case is
+forward migration to newer OS versions.
+
+- **Rollback from failed stream changes**: If a stream migration fails mid-update
+(e.g., node fails to boot with new OS), automated rollback to the previous stream
+is not guaranteed in Tech Preview. Manual recovery procedures may be required.
+Standard MachineConfigPool rollback mechanisms apply, but stream-specific rollback
+is out of scope for the initial release.
 
 - **Version skew enforcement**: Enforcing compatibility rules between different
 OS versions and OpenShift platform versions is not included in this enhancement.
@@ -425,9 +437,9 @@ data:
   releaseVersion: "4.21.0"
   streams.json: |
     {
-      "default": "rhel-coreos",
+      "default": "rhel9-coreos",
       "streams": {
-        "rhel-coreos": {
+        "rhel9-coreos": {
           "baseOSContainerImage": "quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:...",
           "baseOSExtensionsContainerImage": "quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:..."
         },
@@ -460,9 +472,9 @@ data:
 ```
 
 When `streams.json` is not present, the MCO automatically creates a default stream
-named `"rhel-coreos"` using the `baseOSContainerImage` and
-`baseOSExtensionsContainerImage` fields. This ensures existing clusters continue
-to function without modification.
+with a version-specific name based on the release (e.g., `"rhel9-coreos"` for OpenShift 4.x)
+using the `baseOSContainerImage` and `baseOSExtensionsContainerImage` fields. This ensures
+existing clusters continue to function without modification.
 
 ##### Stream Merging and Default Stream Selection
 
@@ -473,17 +485,18 @@ of streams from multiple sources. The merging process:
 2. **Merging**: Streams are merged into a map keyed by stream name. When multiple
 sources provide the same stream name, the later source (higher precedence) wins
 3. **Default Stream Identification**: The MCO searches for a stream with a
-hardcoded name based on the distribution:
-   - RHCOS: `"rhel-coreos"` (most common)
-   - FCOS: `"fedora-coreos"`
+version-specific hardcoded name based on the distribution and release version:
+   - RHCOS in OpenShift 4.x: `"rhel9-coreos"`
+   - RHCOS in OpenShift 5.0+: `"rhel10-coreos"`
+   - FCOS: `"fedora-coreos"` (unversioned for Fedora's rolling release model)
    - SCOS: `"stream-coreos"`
 4. **Validation**: If the default stream is not found in the merged streams, an
 error is returned
 
-**Important**: The default stream name is **hardcoded** based on the MCO's build
-target, not read from the ConfigMap's `"default"` field in `streams.json`. The
-ConfigMap's `"default"` field is used for documentation purposes but not consumed
-by the MCO's stream selection logic.
+**Important**: The default stream name is **version-specific and hardcoded** based on the
+MCO's build target and release version, not read from the ConfigMap's `"default"` field in
+`streams.json`. The ConfigMap's `"default"` field is informational only. This ensures
+explicit version selection and prevents silent OS version changes during platform upgrades.
 
 The implementation ensures:
 - Best-effort processing: if a source fails to provide streams, it's skipped with
@@ -493,6 +506,110 @@ logging
 
 Implementation is located in `pkg/controller/osimagestream/osimagestream.go` and
 `BuildOSImageStreamFromSources()`.
+
+##### Default Stream Evolution and Upgrade Behavior
+
+The default stream name changes between OpenShift releases to reflect the recommended
+OS version for new clusters, while ensuring existing clusters maintain their current OS
+version during platform upgrades.
+
+**OpenShift 4.x Releases (4.21-4.23):**
+- Default stream: `"rhel9-coreos"`
+- Available streams: `"rhel9-coreos"`, `"rhel10-coreos"` (Tech Preview)
+- New clusters install with RHCOS 9
+- Existing clusters remain on their current stream
+
+**OpenShift 5.0+ Releases:**
+- Default stream: `"rhel10-coreos"`
+- Available streams: `"rhel9-coreos"`, `"rhel10-coreos"`
+- New clusters install with RHCOS 10
+- Existing clusters upgrading from 4.x remain on their current stream (typically `"rhel9-coreos"`)
+
+**Upgrade Behavior:**
+
+When upgrading from OpenShift 4.x to 5.0:
+
+1. **MachineConfigPools with explicit `spec.osImageStream` set**: Continue using the
+specified stream unchanged. The stream reference is preserved across upgrades.
+
+2. **MachineConfigPools without `spec.osImageStream` set** (using default):
+   - The pool continues using `"rhel9-coreos"` even though the new default is `"rhel10-coreos"`
+   - The MCO tracks which stream was being used before the upgrade and maintains it
+   - This prevents **silent OS version changes** during platform upgrades
+
+3. **New MachineConfigPools created in OpenShift 5.0**: Use the new default `"rhel10-coreos"`
+
+**Migration Process:**
+
+To migrate a pool from RHCOS 9 to RHCOS 10, administrators must explicitly:
+```yaml
+spec:
+  osImageStream:
+    name: rhel10-coreos
+```
+
+This ensures all OS version migrations are **explicit administrator decisions**, not
+automatic side effects of platform upgrades. This aligns with the core goal of
+separating platform upgrades from OS version transitions.
+
+##### Backward Compatibility with Pre-Streams Clusters
+
+Clusters that existed before the streams feature was introduced (pre-4.21) do not have
+`spec.osImageStream` set on their MachineConfigPools. These clusters must be handled
+carefully to prevent unexpected OS version changes when the streams feature becomes
+available.
+
+**Legacy Behavior Mapping:**
+
+When a cluster upgrades to an OpenShift version with the streams feature enabled
+(4.21+ with OSStreams feature gate enabled):
+
+1. **MachineConfigPools without `spec.osImageStream` set** are implicitly using the
+   legacy cluster-wide OS images
+2. The MCO **persists the current stream mapping** to prevent future changes:
+   - For clusters running RHCOS 9: The MCO internally tracks that the pool is using
+     `"rhel9-coreos"`
+   - This mapping is stored (e.g., in an annotation or internal state)
+   - The pool continues using `"rhel9-coreos"` even when the cluster upgrades to
+     OpenShift 5.0 where the default is `"rhel10-coreos"`
+
+3. **The mapping is permanent** unless the administrator explicitly changes it:
+   - The pool never silently switches to a different OS version
+   - To change OS versions, the administrator must explicitly set `spec.osImageStream`
+
+**Implementation Approach:**
+
+The MCO employs a **"map unversioned to versioned once"** strategy.
+
+**Migration Path:**
+
+Administrators can explicitly set the stream to opt out of the implicit mapping:
+
+```yaml
+# Before: Pool implicitly using rhel9-coreos
+spec:
+  # osImageStream not set (legacy behavior)
+
+# After: Explicitly migrating to rhel10-coreos
+spec:
+  osImageStream:
+    name: rhel10-coreos
+```
+
+Once `spec.osImageStream` is set, the pool uses that stream and the implicit mapping
+no longer applies.
+
+**Rationale:**
+
+This approach ensures:
+- **No silent upgrades**: Existing clusters don't
+  accidentally change OS versions when upgrading OpenShift
+- **Explicit migrations**: OS version changes require explicit administrator action
+- **Clean semantics**: New clusters use the current default, old clusters maintain
+  their current version
+- **Predictable behavior**: Administrators know exactly which OS version their pools
+  are running
+
 
 #### OSImageStream Resource Population **(Planned - Based on PoC)**
 
@@ -520,8 +637,9 @@ development/testing
    added to images - see TBD below)*
    - Groups images by stream name based on these labels
 3. Sources are merged with conflicts resolved by priority order
-4. The default stream is identified based on the distribution:
-   - RHCOS: `"rhel-coreos"` (default)
+4. The default stream is identified based on the distribution and release version:
+   - RHCOS in OpenShift 4.x: `"rhel9-coreos"`
+   - RHCOS in OpenShift 5.0+: `"rhel10-coreos"`
    - FCOS: `"fedora-coreos"`
    - SCOS: `"stream-coreos"`
 5. The OSImageStream "cluster" resource is created with the merged stream data
@@ -583,14 +701,32 @@ the later one wins (with logging)
 - Partial stream support: streams with only OS image or only Extensions image are
 kept (though both are required for a functional stream)
 
-**TBD - Image Labels Requirement:**
+**Image Labels Requirement:**
 
 For the ImageStream-based stream extraction to work, RHEL CoreOS images must be
 built with the following labels:
 - **OS Images**: `io.coreos.oscontainerimage.osstream=<stream-name>`
-  (e.g., `"rhel-coreos"`, `"rhel10-coreos"`)
+  (e.g., `"rhel9-coreos"`, `"rhel10-coreos"`)
 - **Extensions Images**: `io.coreos.osextensionscontainerimage.osstream=<stream-name>`
-  (e.g., `"rhel-coreos"`, `"rhel10-coreos"`)
+  (e.g., `"rhel9-coreos"`, `"rhel10-coreos"`)
+
+**Label Naming Rationale:**
+
+The `io.coreos.*` namespace is used for these labels (rather than `io.openshift.*`)
+because:
+- These labels are set by the CoreOS build system and are part of the CoreOS image
+metadata schema
+- The CoreOS team already adds `com.coreos.stream` labels for internal purposes
+- The `io.coreos.oscontainerimage.osstream` label contains the **OpenShift-facing stream name**
+(e.g., `"rhel9-coreos"`) which abstracts over CoreOS's internal minor-version streams
+- This label is specifically for OpenShift's consumption, complementing CoreOS's internal
+`com.coreos.stream` label
+- Using the `io.coreos` namespace maintains consistency with other CoreOS-originated
+image metadata
+
+The stream names in these labels (`"rhel9-coreos"`, `"rhel10-coreos"`) are major-version
+granularity and designed for administrator use in OpenShift APIs, unlike CoreOS's internal
+minor-version stream names (`rhel-9.6`, `rhel-9.8`).
 
 **Current Status**: The RHEL 9 and RHEL 10 image tags are available in the
 ImageStream, but the labels have not yet been added to the images. This work is
@@ -680,7 +816,64 @@ None.
 
 ## Test Plan
 
-**TBD**
+### Testing Strategy
+
+The OS streams feature requires comprehensive testing to ensure safe RHEL 9 to RHEL 10
+transitions and validate component readiness on both OS versions.
+
+### Test Infrastructure
+
+**RHEL 10 Payload Generation:**
+
+Starting in OpenShift 4.20/4.21, separate RHEL 10 release streams will be produced to
+enable early testing:
+- Custom RHEL 10-based payloads from nightly builds (similar to F-COS/S-COS for OKD)
+- Enables testing RHEL 10 before it becomes the default in OpenShift 5.0
+- Timeline:
+  - 4.21: RHEL 10 payloads available as separate stream
+  - 4.22/4.23: Tech preview jobs begin running on RHEL 10 for component readiness
+  - 5.0: RHEL 10 becomes default for new clusters
+
+### Testing Areas
+
+**Stream Switching and Transitions:**
+- RHEL 9 → RHEL 10 migration (primary MCO focus, one-directional only)
+- Stream selection and discovery from multiple sources
+- Partial migrations (some pools on RHEL 9, others on RHEL 10)
+- Failed update scenarios (manual recovery procedures)
+
+**Backward Compatibility:**
+- Upgrade pre-streams clusters and verify implicit stream mapping
+- Pools without explicit stream maintain current OS version
+- Legacy ConfigMap format compatibility
+
+**Platform Upgrades:**
+- OpenShift version upgrades without OS version changes
+- Verify existing pools maintain their stream during platform upgrades
+- New pools created post-upgrade use appropriate defaults
+
+**OS Variants:**
+- FIPS-enabled clusters on RHEL 10
+- Real-time kernel on RHEL 10
+- Standard RHEL 10
+- Note: RHEL 8 → 9 transition revealed distinct bugs with FIPS and real-time kernel
+  variants not seen in standard testing
+
+**Image Mode OpenShift:**
+- OS image URL overrides in image mode scenarios
+- Consistent behavior between traditional and image mode deployments
+- Testing mechanism should be consistent across HCP and self-managed
+
+**Topology Coverage:**
+- Standalone clusters (multi-node)
+- Single-Node OpenShift (SNO)
+- Stream selection at install time and runtime
+
+**Component Readiness:**
+- OpenShift core components on RHEL 10 (etcd, kube-apiserver, etc.)
+- Operators, CNI plugins, CSI drivers
+- Platform integrations and cloud providers
+- Goal: Identify RHEL 10-specific issues before OpenShift 5.0 GA
 
 ## Graduation Criteria
 
@@ -764,13 +957,82 @@ planned as a temporary capability to support the RHCOS 9 → 10 transition.
 
 ### Removing deprecated OS streams
 
-Specific OS streams will be deprecated as they reach end-of-life:
-1. Announce deprecation 2+ releases before removal
-2. Provide migration guidance
-3. Remove from payload and add validation to prevent new usage
-4. Existing pools continue but cannot receive updates
+Specific OS streams will be deprecated as they reach end-of-life. The deprecation process
+includes proactive upgrade blockers to ensure clusters migrate off deprecated streams before
+they become unsupported.
 
-**Note**: The OSImageStream API itself remains supported; only specific RHCOS versions are deprecated.
+#### RHEL 9 Stream Deprecation Timeline (Example)
+
+While the multi-OS stream feature is permanent, specific OS versions like RHEL 9 will
+eventually be deprecated. The expected timeline:
+
+**OpenShift 5.0-5.1 (estimated):**
+- Both `rhel9-coreos` and `rhel10-coreos` streams fully supported
+- No warnings or blockers
+- Clusters can run either stream
+
+**OpenShift 5.2 (estimated):**
+- `rhel9-coreos` stream marked as deprecated
+- Warning conditions added to MachineConfigPools using `rhel9-coreos`:
+  ```yaml
+  status:
+    conditions:
+    - type: OSStreamDeprecated
+      status: True
+      reason: StreamEndOfLife
+      message: "Stream 'rhel9-coreos' is deprecated and will be removed in OpenShift 5.3.
+               Migrate to 'rhel10-coreos' before upgrading."
+  ```
+- Cluster-level upgrade remains possible (no blocker yet)
+- Documentation and alerts guide administrators to plan migration
+
+**OpenShift 5.3 or later (estimated):**
+- Upgrade blocker activated for clusters with pools still using `rhel9-coreos`
+- ClusterVersion resource sets `Upgradeable: False`:
+  ```yaml
+  status:
+    conditions:
+    - type: Upgradeable
+      status: False
+      reason: DeprecatedOSStreamInUse
+      message: "Cannot upgrade: MachineConfigPool 'worker' is using deprecated stream
+               'rhel9-coreos' which is not supported in OpenShift 5.3. Migrate pool to
+               'rhel10-coreos' before upgrading."
+  ```
+- Cluster cannot upgrade to 5.3+ until all pools migrate to `rhel10-coreos`
+- This provides a **forcing function** to complete OS migration
+
+**Post-5.3 (estimated):**
+- `rhel9-coreos` stream removed from release payload
+- Existing pools using the removed stream cannot receive updates
+- Validation prevents new pools from referencing removed streams
+
+#### General Deprecation Process
+
+For any OS stream deprecation:
+
+1. **Deprecation Notice** (2+ releases before blocker):
+   - Announce stream deprecation in release notes
+   - Add `OSStreamDeprecated` condition to affected MachineConfigPools
+   - Provide migration documentation and timelines
+
+2. **Upgrade Blocker** (1+ releases before removal):
+   - Add `Upgradeable: False` condition to ClusterVersion
+   - Block upgrades until all pools migrate off deprecated stream
+   - Provide clear error messages with migration instructions
+
+3. **Stream Removal** (when support ends):
+   - Remove deprecated stream from release payload
+   - Add validation to prevent new pools from referencing removed stream
+   - Existing pools using removed stream freeze at current version
+
+4. **Migration Support**:
+   - Provide automated migration tooling where possible
+   - Document manual migration procedures
+   - Support side-by-side testing (multiple pools on different streams)
+
+**Note**: The OSImageStream API itself remains supported; only specific RHCOS versions
+are deprecated. New OS versions can be added to replace deprecated ones.
 
 ## Upgrade / Downgrade Strategy
 
