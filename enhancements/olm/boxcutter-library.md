@@ -7,7 +7,7 @@ reviewers:
   - dtfranz
   - pedjak
 approvers:
-  - TBD
+  - joelanford
 api-approvers:
   - None
 creation-date: 2025-11-10
@@ -26,15 +26,65 @@ superseded-by:
 
 ## Summary
 
-The Boxcutter library is a production-proven Kubernetes package
-reconciliation engine that provides advanced lifecycle management capabilities
-for OLMv1. This enhancement proposes adopting Boxcutter from Red Hat Hybrid
-Cloud Management's Package Operator project to replace the existing Helm-based
-applier, enabling sophisticated features such as phased rollouts, detailed
-status reporting, rollback support, and anomaly detection while significantly
-reducing maintenance burden and accelerating feature delivery for the OLM team.
+This enhancement proposes replacing OLMv1's Helm-based kernel with the 
+[Boxcutter](https://github.com/package-operator/boxcutter/) library. Boxcutter a battle-tested Kubernetes package 
+reconciliation engine built by the Red Hat Hybrid Cloud Management organization as the core of their
+[Package Operator](https://github.com/package-operator/package-operator) project. Boxcutter is well aligned with OLMv1's
+goals and provides several desirable features out-of-the box that will accelerate OLMv1's roadmap, e.g. phased rollouts, 
+detailed status reporting, rollback support, and anomaly detection. As part of this refactor, the enhancement also
+proposes the introduction of the ClusterExtensionRevision API, which describes a snapshot of a package and its 
+configuration as it should be applied to the cluster.
+
 
 ## Motivation
+
+The motivation is threefold:
+
+### Roadmap Acceleration
+
+Adopting the Boxcutter library would accelerate the delivery of roadmap OLMv1 features:
+
+**Revision Support**
+A revision presents a snapshot of the application determined by its version and configuration. Boxcutter seamlessly
+manages the transition between revisions supporting upgrade and reconfiguration use-cases. The transition between
+revisions also provides the opportunity for other actors to participate in the lifecycle of the application, e.g.,
+manual approval, automatic policy checks, or even the current revision of an Operator to block its upgrade until it has
+performed some necessary pre-upgrade tasks.
+
+**Phased Rollout And Teardown of Resources**
+A revision also describes application deployment as a list of ordered phases. Each phase contains a set of manifests,
+and optional object status probes that gate the progression of the rollout to the next phase
+(e.g. wait for a CRD to registered, or for a Deployment to be available). When tearing down, the phases are executed in
+reverse order. This phased approach give authors more control and predictability over how their application is applied
+to the cluster and sufficient signal to ascertain whether it was successfully applied.
+
+**Object Status Reporting**
+Authors can define custom status probes for their application's resources and provide granular application state information.
+
+**Resource Orphaning And Adoption**
+The library allows for removal of objects from control of the library as well as adoption of already existing objects, to support migrations.
+
+**Anomaly And Interference Detection**
+The library eases debugging by outputting detailed information during reconciliation facilitating detection of other actors in
+a system updating the same resource.
+
+**Rollout History**
+Boxcutter keeps a rollout history allowing administrators to look up bundle changes and facilitates rollback to
+previously working revisions.
+
+### ClusterExtension API
+
+Boxcutter's revision based approach necessitates the introduction of a revision API that will introduce a step 
+between determining the content that should be applied to the cluster, and actually applying it. This provides
+the foundation for future use-cases, e.g. changeset calculation, manual approvals, policy-based control over
+what can/cannot be applied to the cluster, allowing the content itself to be a participant in its own lifecycle (e.g.
+a revision is paused until the current installation can perform some pre-upgrade tasks).
+
+### Collaboration with Red Hat Hybrid Cloud Management
+
+Both Package Operator and OLM have similar goals that make collaborating on a shared library desirable to avoid work
+duplication. Another advantage is that Package Operator is build outside Red Hat's usual development cycle, meaning that
+changes make it to production really quickly reducing the length of the feedback cycle.
 
 ### User Stories
 
@@ -293,16 +343,11 @@ sequenceDiagram
 
 #### Actors
 
-- **Cluster Administrator**: Creates/updates `ClusterExtension` resources to
-  install or upgrade operators
-- **ClusterExtension Controller**: Resolves bundles and generates
-  `ClusterExtensionRevision` objects
-- **ClusterExtensionRevision Controller**: Reconciles managed resources to
-  match revision spec
-- **Boxcutter RevisionEngine**: Core library implementing rollout logic and
-  probe evaluation
-- **Kubernetes API Server**: Stores all resources and processes Server-Side
-  Apply patches
+- **Cluster Administrator**: Creates/updates `ClusterExtension` resources to install or upgrade operators
+- **ClusterExtension Controller**: Resolves bundles and generates`ClusterExtensionRevision` objects
+- **ClusterExtensionRevision Controller**: Reconciles managed resources to match revision spec
+- **Boxcutter RevisionEngine**: Core library implementing rollout logic and probe evaluation
+- **Kubernetes API Server**: Stores all resources and processes Server-Side Apply patches
 
 #### Workflow: Initial Installation
 
@@ -379,16 +424,423 @@ sequenceDiagram
 9. Future updates use standard Boxcutter upgrade workflow creating revision=2,
    revision=3, etc.
 
-
 ### API Extensions
 
 This enhancement introduces the `ClusterExtensionRevision` CRD for internal state
-management. This API is NOT intended for direct user manipulation; it is
+management. This API is NOT intended for direct usage by the user; it is
 managed exclusively by OLM controllers.
 
 The `ClusterExtensionRevision` CRD does not modify the behaviour of existing
 resources owned by other teams. It only manages resources defined within
 operator bundles that are explicitly referenced by `ClusterExtension` objects.
+
+#### Spec
+
+**LifecycleState**
+Enum with the following values:
+- `Active`: revision is being actively reconciled
+- `Paused`: revision reconciliation is paused
+- `Archived`: revision is archived for historical / audit purposes
+
+**Revision**
+Positive and immutable revision sequence number. It is unique and must be set to 1 + the previous revision's
+sequence number, or 1 if it is the first revision.
+
+**Phases**
+A list of phase objects with the following spec:
+
+- `Name`: unique identifier for the phase
+- `Objects`: a list of revision objects
+
+A revision object has the following spec:
+
+- `Object`: the specific object manifest
+- `CollisionProtection`: an enum that controls boxcutters treatment in case the object already exists on the cluster:
+  - `Prevent`: only allow management of objects created by the revision
+  - `IfNoController`: allows the existing object to be adopted if it is not already owned by another controller
+  - `None`: forcibly takes ownership over the object independent of any existing owner reference
+
+#### Status
+
+**Conditions**
+
+- `Progression`: must be true if the revision is actually making a change to the cluster. The change may be anything: desired user state, 
+  desired user configuration, observed configuration, transitioning to new revision, etc. If this is false, it means the operator is not
+  trying to apply any new state. It presents with the following reasons:
+  - `ObjectCollisions`: when object collisions are detected
+  - `RollingOut`: while the revision is being rolled out or transitioning to a new revision
+  - `RolloutError`: when an error is detected during revision rollout
+  - `RolledOut`: when the revision objects have been applied to the cluster
+  - `Archived`: when the revision is archived and no longer actively being reconciled
+- `Availability`: must be true if the revision is functional and available in the cluster at the level in status. If this is false, it means
+  there is an outage. It presents with the following reasons:
+  - `ProbeFailed`: when a object status probe fails
+  - `ProbesSucceeded`: when all object status probes are successful
+  - `Archived`: when the revision is archived and no longer being actively reconciled
+- `Succeeded`: must be true is the revision has been successfully rolled out and all object status probes have been successful _once_. Signals
+  that it the revision has been installed successfully at least once. It presents with the following reasons:
+  - `RolloutSuccess`: when rollout has been successful.
+
+**Notes**
+- The `Succeeded` conditions may be removed in the future. It's value beyond initially facilitating integration with the ClusterExtension 
+reconciliation process is still being discussed
+- Revision objects are currently added inline in the phases. Before GA we aim to shard the resources across some kind of container
+  (e.g. ConfigMap) to guard against blowing etcd document size limits
+- The specific bundle reference is added as an annotation to the revision (similarly to how its currently done with the Helm release
+  Secrets). This information will likely be added to the status before GA
+
+
+#### Example:
+
+```
+apiVersion: olm.operatorframework.io/v1
+kind: ClusterExtensionRevision
+metadata:
+  annotations:
+    olm.operatorframework.io/bundle-name: dynamic-operator.1.2.0
+    olm.operatorframework.io/bundle-reference: dynamic-registry.operator-controller-e2e.svc.cluster.local:5000/bundles/registry-v1/test-operator:v1.0.0
+    olm.operatorframework.io/bundle-version: 1.2.0
+    olm.operatorframework.io/package-name: ""
+  creationTimestamp: "2025-11-13T15:13:56Z"
+  finalizers:
+  - olm.operatorframework.io/teardown
+  generation: 1
+  labels:
+    olm.operatorframework.io/owner: clusterextension-h8284vg7
+  name: clusterextension-h8284vg7-1
+  ownerReferences:
+  - apiVersion: olm.operatorframework.io/v1
+    blockOwnerDeletion: true
+    controller: true
+    kind: ClusterExtension
+    name: clusterextension-h8284vg7
+    uid: 9afe946c-8068-44f4-9084-f146b6d9d167
+  resourceVersion: "1665"
+  uid: 04af3358-6601-4952-9e05-94a85397e63a
+spec:
+  lifecycleState: Active
+  phases:
+  - name: policies
+    objects:
+    - collisionProtection: Prevent
+      object:
+        apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        metadata:
+          labels:
+            olm.operatorframework.io/owner-kind: ClusterExtension
+            olm.operatorframework.io/owner-name: clusterextension-h8284vg7
+          name: test-operator-network-policy
+          namespace: clusterextension-h8284vg7
+        spec:
+          podSelector: {}
+          policyTypes:
+          - Ingress
+  - name: rbac
+    objects:
+    - collisionProtection: Prevent
+      object:
+        apiVersion: v1
+        kind: ServiceAccount
+        metadata:
+          labels:
+            olm.operatorframework.io/owner-kind: ClusterExtension
+            olm.operatorframework.io/owner-name: clusterextension-h8284vg7
+          name: simple-bundle-manager
+          namespace: clusterextension-h8284vg7
+    - collisionProtection: Prevent
+      object:
+        apiVersion: rbac.authorization.k8s.io/v1
+        kind: ClusterRole
+        metadata:
+          labels:
+            olm.operatorframework.io/owner-kind: ClusterExtension
+            olm.operatorframework.io/owner-name: clusterextension-h8284vg7
+          name: testoperator.v1.0.0-t88i5epjh8oxp4klplhjyrsekwcp92b27w03ayr1ku5
+        rules:
+        - apiGroups:
+          - authentication.k8s.io
+          resources:
+          - tokenreviews
+          verbs:
+          - create
+        - apiGroups:
+          - authorization.k8s.io
+          resources:
+          - subjectaccessreviews
+          verbs:
+          - create
+    - collisionProtection: Prevent
+      object:
+        apiVersion: rbac.authorization.k8s.io/v1
+        kind: ClusterRoleBinding
+        metadata:
+          labels:
+            olm.operatorframework.io/owner-kind: ClusterExtension
+            olm.operatorframework.io/owner-name: clusterextension-h8284vg7
+          name: testoperator.v1.0.0-t88i5epjh8oxp4klplhjyrsekwcp92b27w03ayr1ku5
+        roleRef:
+          apiGroup: rbac.authorization.k8s.io
+          kind: ClusterRole
+          name: testoperator.v1.0.0-t88i5epjh8oxp4klplhjyrsekwcp92b27w03ayr1ku5
+        subjects:
+        - kind: ServiceAccount
+          name: simple-bundle-manager
+          namespace: clusterextension-h8284vg7
+    - collisionProtection: Prevent
+      object:
+        apiVersion: rbac.authorization.k8s.io/v1
+        kind: ClusterRole
+        metadata:
+          labels:
+            olm.operatorframework.io/owner-kind: ClusterExtension
+            olm.operatorframework.io/owner-name: clusterextension-h8284vg7
+          name: testoperator.v1.0.-1eqned1rve17v8ggw7pxcudwuwxtutac7n2t3grh27tm
+        rules:
+        - apiGroups:
+          - ""
+          resources:
+          - configmaps
+          - serviceaccounts
+          verbs:
+          - get
+          - list
+          - watch
+          - create
+          - update
+          - patch
+          - delete
+        - apiGroups:
+          - networking.k8s.io
+          resources:
+          - networkpolicies
+          verbs:
+          - get
+          - list
+          - create
+          - update
+          - delete
+        - apiGroups:
+          - coordination.k8s.io
+          resources:
+          - leases
+          verbs:
+          - get
+          - list
+          - watch
+          - create
+          - update
+          - patch
+          - delete
+        - apiGroups:
+          - ""
+          resources:
+          - events
+          verbs:
+          - create
+          - patch
+        - apiGroups:
+          - ""
+          resources:
+          - namespaces
+          verbs:
+          - get
+          - list
+          - watch
+    - collisionProtection: Prevent
+      object:
+        apiVersion: rbac.authorization.k8s.io/v1
+        kind: ClusterRoleBinding
+        metadata:
+          labels:
+            olm.operatorframework.io/owner-kind: ClusterExtension
+            olm.operatorframework.io/owner-name: clusterextension-h8284vg7
+          name: testoperator.v1.0.-1eqned1rve17v8ggw7pxcudwuwxtutac7n2t3grh27tm
+        roleRef:
+          apiGroup: rbac.authorization.k8s.io
+          kind: ClusterRole
+          name: testoperator.v1.0.-1eqned1rve17v8ggw7pxcudwuwxtutac7n2t3grh27tm
+        subjects:
+        - kind: ServiceAccount
+          name: simple-bundle-manager
+          namespace: clusterextension-h8284vg7
+  - name: crds
+    objects:
+    - collisionProtection: Prevent
+      object:
+        apiVersion: apiextensions.k8s.io/v1
+        kind: CustomResourceDefinition
+        metadata:
+          annotations:
+            controller-gen.kubebuilder.io/version: v0.16.1
+          labels:
+            olm.operatorframework.io/owner-kind: ClusterExtension
+            olm.operatorframework.io/owner-name: clusterextension-h8284vg7
+          name: olme2etests.olm.operatorframework.io
+        spec:
+          group: olm.operatorframework.io
+          names:
+            kind: OLME2ETest
+            listKind: OLME2ETestList
+            plural: olme2etests
+            singular: olme2etest
+          scope: Cluster
+          versions:
+          - name: v1
+            schema:
+              openAPIV3Schema:
+                properties:
+                  spec:
+                    properties:
+                      testField:
+                        type: string
+                    type: object
+                type: object
+            served: true
+            storage: true
+        status:
+          acceptedNames:
+            kind: ""
+            plural: ""
+          conditions: null
+          storedVersions: null
+  - name: deploy
+    objects:
+    - collisionProtection: Prevent
+      object:
+        apiVersion: v1
+        data:
+          name: test-configmap
+          version: v1.0.0
+        kind: ConfigMap
+        metadata:
+          annotations:
+            shouldNotTemplate: |
+              The namespace is {{ $labels.namespace }}. The templated $labels.namespace is NOT expected to be processed by OLM's rendering engine for registry+v1 bundles.
+          labels:
+            olm.operatorframework.io/owner-kind: ClusterExtension
+            olm.operatorframework.io/owner-name: clusterextension-h8284vg7
+          name: test-configmap
+          namespace: clusterextension-h8284vg7
+    - collisionProtection: Prevent
+      object:
+        apiVersion: v1
+        data:
+          httpd.sh: |
+            #!/bin/sh
+            echo true > /var/www/started
+            echo true > /var/www/ready
+            echo true > /var/www/live
+            exec httpd -f -h /var/www -p 80
+        kind: ConfigMap
+        metadata:
+          labels:
+            olm.operatorframework.io/owner-kind: ClusterExtension
+            olm.operatorframework.io/owner-name: clusterextension-h8284vg7
+          name: httpd-script
+          namespace: clusterextension-h8284vg7
+    - collisionProtection: Prevent
+      object:
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          labels:
+            app.kubernetes.io/component: controller
+            app.kubernetes.io/name: test-operator
+            app.kubernetes.io/version: 1.0.0
+            olm.operatorframework.io/owner-kind: ClusterExtension
+            olm.operatorframework.io/owner-name: clusterextension-h8284vg7
+          name: test-operator
+          namespace: clusterextension-h8284vg7
+        spec:
+          replicas: 1
+          revisionHistoryLimit: 1
+          selector:
+            matchLabels:
+              app: olme2etest
+          strategy: {}
+          template:
+            metadata:
+              annotations:
+                alm-examples: |-
+                  [
+                    {
+                      "apiVersion": "olme2etests.olm.operatorframework.io/v1",
+                      "kind": "OLME2ETests",
+                      "metadata": {
+                        "labels": {
+                          "app.kubernetes.io/managed-by": "kustomize",
+                          "app.kubernetes.io/name": "test"
+                        },
+                        "name": "test-sample"
+                      },
+                      "spec": null
+                    }
+                  ]
+                capabilities: Basic Install
+                createdAt: "2024-10-24T19:21:40Z"
+                olm.targetNamespaces: ""
+                operators.operatorframework.io/builder: operator-sdk-v1.34.1
+                operators.operatorframework.io/project_layout: go.kubebuilder.io/v4
+              labels:
+                app: olme2etest
+            spec:
+              containers:
+              - command:
+                - /scripts/httpd.sh
+                image: busybox:1.36
+                livenessProbe:
+                  failureThreshold: 1
+                  httpGet:
+                    path: /live
+                    port: 80
+                  periodSeconds: 2
+                name: busybox-httpd-container
+                ports:
+                - containerPort: 80
+                readinessProbe:
+                  httpGet:
+                    path: /ready
+                    port: 80
+                  initialDelaySeconds: 1
+                  periodSeconds: 1
+                resources: {}
+                startupProbe:
+                  failureThreshold: 30
+                  httpGet:
+                    path: /started
+                    port: 80
+                  periodSeconds: 10
+                volumeMounts:
+                - mountPath: /scripts
+                  name: scripts
+                  readOnly: true
+              serviceAccountName: simple-bundle-manager
+              terminationGracePeriodSeconds: 0
+              volumes:
+              - configMap:
+                  defaultMode: 493
+                  name: httpd-script
+                name: scripts
+        status: {}
+  revision: 1
+status:
+  conditions:
+  - lastTransitionTime: "2025-11-13T15:13:57Z"
+    message: Revision 1.2.0 is rolled out.
+    observedGeneration: 1
+    reason: RolledOut
+    status: "False"
+    type: Progressing
+  - lastTransitionTime: "2025-11-13T15:13:57Z"
+    message: 'Object Deployment.apps/v1 clusterextension-h8284vg7/test-operator: condition
+      "Available" == "True": missing .status.conditions and ".status.updatedReplicas"
+      == ".status.replicas": ".status.updatedReplicas" missing'
+    observedGeneration: 1
+    reason: ProbeFailure
+    status: "False"
+    type: Available
+```
 
 ### Topology Considerations
 
@@ -621,6 +1073,12 @@ adaptation to work with OLM's catalog-driven operator installation model.
 
 None at this time.
 
+## Future Work
+
+- Progression Deadline
+- Rollback strategy
+- Controlling revision lifecycle through ClusterExtension
+
 ## Test Plan
 
 <!-- TODO: This section needs to be filled in -->
@@ -658,7 +1116,11 @@ Default requires:
 
 ### Dev Preview -> Tech Preview
 
-- Ability to utilize the enhancement end to end
+- Phase objects are added inline
+- Only the basic install/upgrade flows:
+  - No high-level control of the lifecycle through ClusterExtension API surface (e.g. no pausing revisions etc.)
+  - No orphaning and adoption support
+  - No anomaly/interference detection, or only surfaced through logs if at all 
 - End user documentation for `BoxcutterRuntime` feature gate
 - Sufficient test coverage as outlined in Test Plan
 - Gather feedback from early adopters
@@ -668,6 +1130,9 @@ Default requires:
 
 ### Tech Preview -> GA
 
+- Phase resource sharding
+- Adoption / Orphaning
+- Anomaly/interference detection
 - More testing (upgrade, downgrade, scale)
 - Sufficient time for feedback (at least one release cycle)
 - Available by default (flip `BoxcutterRuntime` feature gate default to true)
