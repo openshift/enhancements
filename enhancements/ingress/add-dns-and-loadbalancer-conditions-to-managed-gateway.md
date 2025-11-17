@@ -352,7 +352,8 @@ and Gateway API `metav1.Condition` types
 
 **Resource Discovery:**
 * The controller watches the following resources to trigger reconciliation:
-  - Gateway resources in `openshift-ingress` namespace
+  - Gateway resources in `openshift-ingress` namespace that uses GatewayClasses with 
+  `openshift.io/gateway-controller/v1` as their `.spec.controllerName` 
   - DNSRecord resources with `gateway.networking.k8s.io/gateway-name` label
   - Service resources with `gateway.networking.k8s.io/gateway-name` label
   - DNS cluster configuration changes
@@ -361,7 +362,6 @@ and Gateway API `metav1.Condition` types
 **Platform Detection:**
 * Platform type is determined from the cluster Infrastructure resource
 * DNS zone configuration comes from the cluster DNS resource
-* The DNSManagementPolicy field on IngressController-like configuration determines whether DNS is managed
 
 **Condition Lifecycle:**
 * Conditions are added when a Gateway is reconciled in the `openshift-ingress` namespace
@@ -370,7 +370,7 @@ and Gateway API `metav1.Condition` types
 * Maximum of 8 total conditions are maintained per Gateway to prevent unbounded growth
 
 **Permissions:**
-* The cluster-ingress-operator service account is granted additional RBAC permissions to:
+* The cluster-ingress-operator service account is granted RBAC permissions to:
   - Get, List, Watch Gateway resources
   - Patch Gateway status subresource
   - Get, List, Watch DNSRecord and Service resources by label
