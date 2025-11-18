@@ -3,11 +3,12 @@ title: add-dns-and-loadbalancer-conditions-to-managed-gateway
 authors:
   - rikatz
 reviewers:
+  - alebedev87
   - Miciah
 approvers:
-  - TBD
+  - Miciah
 api-approvers:
-  - TBD # New conditions on Gateway status
+  - None
 creation-date: 2025-10-21
 last-updated: 2025-10-21
 tracking-link:
@@ -26,7 +27,7 @@ superseded-by:
 
 This enhancement adds four status conditions to GatewayAPI Gateway resources 
 managed by OpenShift in the `openshift-ingress` namespace: `DNSManaged`, 
-`DNSReady`, `LoadBalancerManaged`, and `LoadBalancerReady`. 
+`DNSReady`, and `LoadBalancerReady`. 
 These conditions provide visibility into DNS provisioning and cloud LoadBalancer 
 service status, similar to the existing conditions on OpenShift IngressController 
 resources. The "Managed" conditions indicate whether OpenShift should manage the 
@@ -63,9 +64,8 @@ issues or resource limits.
 
 * Add `DNSManaged` and `DNSReady` conditions to Gateway status that reflect 
 whether DNS is managed and the state of DNS record provisioning
-* Add `LoadBalancerManaged` and `LoadBalancerReady` conditions to Gateway status
-that reflect whether LoadBalancer is managed and the state of cloud LoadBalancer
-service provisioning
+* Add `LoadBalancerReady` conditions to Gateway status that reflect whether 
+LoadBalancer is managed and the state of cloud LoadBalancer service provisioning
 * Implement a two-tier condition model: "Managed" conditions indicate whether 
 OpenShift should manage the resource, "Ready" conditions indicate whether it is 
 functioning
@@ -90,15 +90,15 @@ provides visibility only)
 ## Proposal
 
 This enhancement proposes extending the Gateway status with four new condition 
-types: `DNSManaged`, `DNSReady`, `LoadBalancerManaged`, and `LoadBalancerReady`.
+types: `DNSManaged`, `DNSReady`, and `LoadBalancerReady`.
 These conditions will be managed by a new gateway-status controller in the 
 cluster-ingress-operator and will reflect the current state of DNS record 
 provisioning and cloud LoadBalancer service provisioning respectively.
 
 The conditions follow a two-tier model:
-* **Managed conditions** (`DNSManaged`, `LoadBalancerManaged`): Indicate whether
-OpenShift should be managing this aspect of the Gateway based on configuration
-(DNS zones, publishing strategy, DNSManagementPolicy, etc.)
+* **Managed conditions** (`DNSManaged`): Indicate whether OpenShift should be 
+managing this aspect of the Gateway based on configuration (DNS zones, publishing
+strategy, DNSManagementPolicy, etc.)
 * **Ready conditions** (`DNSReady`, `LoadBalancerReady`): Indicate whether the
 managed resource is actually functioning correctly
 
@@ -149,15 +149,13 @@ LoadBalancer services.
 6. Cluster Ingress Operator initiates DNS record provisioning through its own dns controller
 7. Cluster Ingress Operator dns controller successfully creates DNS records and 
 updates its status
-8. Gateway Status Controller updates Gateway condition `LoadBalancerManaged=True`
-with reason "Normal" (LoadBalancer should be managed)
-9. Gateway Status Controller updates Gateway condition `LoadBalancerReady=True`
+8. Gateway Status Controller updates Gateway condition `LoadBalancerReady=True`
 with reason "LoadBalancerProvisioned"
-10. Gateway Status Controller updates Gateway condition `DNSManaged=True` with 
+9. Gateway Status Controller updates Gateway condition `DNSManaged=True` with 
 reason "Normal" (DNS should be managed)
-11. Gateway Status Controller updates Gateway condition `DNSReady=True` with 
+10. Gateway Status Controller updates Gateway condition `DNSReady=True` with 
 reason "Normal" (DNS records provisioned successfully)
-12. Customer checks Gateway status and sees all four conditions are `True`, confirming the Gateway is fully operational
+11. Customer checks Gateway status and sees all four conditions are `True`, confirming the Gateway is fully operational
 
 #### DNS Failure Flow
 
@@ -186,17 +184,15 @@ reason "Normal"
 3. Cloud Provider API fails to provision LoadBalancer (e.g., quota exceeded,
 subnet full, invalid configuration)
 4. LoadBalancer service remains in Pending state with event describing the error
-5. Gateway Status Controller updates Gateway condition `LoadBalancerManaged=True`
-(LoadBalancer should be managed, configuration is correct)
-6. Gateway Status Controller updates Gateway condition `LoadBalancerReady=False`
+5. Gateway Status Controller updates Gateway condition `LoadBalancerReady=False`
 with reason `LoadBalancerPending` and error details from service events
-7. Cluster Administrator reviews Gateway status and identifies the cloud
+6. Cluster Administrator reviews Gateway status and identifies the cloud
 infrastructure issue from the `LoadBalancerReady` condition message
-8. Cluster Administrator resolves the issue (e.g., increases quota, adjusts VPC
+7. Cluster Administrator resolves the issue (e.g., increases quota, adjusts VPC
 configuration)
-9. Cloud Provider API successfully provisions the LoadBalancer
-10. LoadBalancer service status is updated with external IP/hostname
-11. Gateway Status Controller updates Gateway condition `LoadBalancerReady=True`
+8. Cloud Provider API successfully provisions the LoadBalancer
+9. LoadBalancer service status is updated with external IP/hostname
+10. Gateway Status Controller updates Gateway condition `LoadBalancerReady=True`
 with reason "LoadBalancerProvisioned"
 
 
@@ -235,10 +231,10 @@ sequenceDiagram
 
     alt LB Success
         Cloud-->>LBSvc: LoadBalancer provisioned (IP/hostname in status.loadBalancer.ingress)
-        GWStatus->>Gateway: Set LoadBalancerManaged=True, LoadBalancerReady=True (reason: LoadBalancerProvisioned)
+        GWStatus->>Gateway: Set LoadBalancerReady=True (reason: LoadBalancerProvisioned)
     else LB Failure
         Cloud-->>LBSvc: Provisioning failed (service events contain error)
-        GWStatus->>Gateway: Set LoadBalancerManaged=True, LoadBalancerReady=False (reason: LoadBalancerPending)
+        GWStatus->>Gateway: Set LoadBalancerReady=False (reason: LoadBalancerPending)
     end
 
     User->>Gateway: Check status
@@ -324,11 +320,6 @@ publishing strategy is not LoadBalancerService
 * Error messages include specific DNS provider errors when provisioning fails
 
 **LoadBalancer Condition Details:**
-
-*LoadBalancerManaged Condition:*
-* Set to `False` with reason `UnsupportedEndpointPublishingStrategy` when the
-publishing strategy doesn't require a managed LoadBalancer
-* Set to `True` with reason `Normal` when a LoadBalancer service should be managed by OpenShift
 
 *LoadBalancerReady Condition:*
 * Set to `False` with reason `ServiceNotFound` when the associated Service
@@ -486,6 +477,18 @@ added conditions
 This proposal just adds new conditions to Gateway, and don't impact the Gateway
 behavior. There is no API or behavior change, so no need to go through graduation criteria
 
+### Dev Preview -> Tech Preview
+
+N/A
+
+### Tech Preview -> GA
+
+N/A
+
+### Removing a deprecated feature
+
+N/A
+
 ## Upgrade / Downgrade Strategy
 
 **Upgrade Strategy:**
@@ -577,12 +580,6 @@ This enhancement involves coordination between:
 * This is expected when `DNSManaged=False` with reason `UnmanagedLoadBalancerDNS`
 * OpenShift is not managing DNS, so status is unknown
 * Check if DNS is supposed to be managed by external system
-
-*Symptom: Gateway conditions show `LoadBalancerManaged=False`*
-* Check Gateway status: `oc get gateway <name> -n openshift-ingress -o yaml`
-* Review condition reason and message:
-  - Reason `UnsupportedEndpointPublishingStrategy`: Publishing strategy doesn't require managed LoadBalancer
-* Verify publishing strategy configuration is correct for your environment
 
 *Symptom: Gateway conditions show `LoadBalancerReady=False`*
 * Check Gateway status: `oc get gateway <name> -n openshift-ingress -o yaml`
