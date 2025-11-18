@@ -68,7 +68,7 @@ Currently, OpenShift provides no mechanism to configure these parameters for int
 ### Non-Goals
 
 - Modifying certificate lifetimes or rotation schedules (this is handled by existing mechanisms)
-- Supporting external CA integration or certificate injection (this is covered by existing user-provided certificate features)
+- Supporting external CA integration or certificate injection (this is covered by existing user-provided certificate features such as cert-manager and custom CA bundles)
 - Automatic rotation of existing certificates to new cryptographic parameters (rotation happens on natural certificate expiry or forced rotation events)
 - Supporting algorithms beyond RSA and ECDSA in the initial implementation (e.g., Ed25519, RSA-PSS)
 - Configuring signature algorithms separately from key algorithms (signature algorithm is derived from key type)
@@ -87,7 +87,7 @@ At a high level, the changes include:
 2. **Feature Gate**: `ConfigurablePKI` to enable the functionality (TechPreviewNoUpgrade during development, enabled by default at GA)
 3. **Installer Integration**: Limited Day-1 configuration support for signer certificate cryptographic parameters
 4. **Operator Updates**: Modifications to certificate-generating operators to watch and consume the PKI configuration independently
-5. **Certificate Rotation**: Integration with existing rotation mechanisms to apply new parameters
+5. **Certificate Rotation**: Operators apply PKI configuration parameters during existing certificate rotation cycles (no changes to rotation mechanisms themselves)
 6. **Metrics and Observability**: Expose metrics for certificate generation events and configuration compliance
 
 Note: There is **no central PKI controller**. Each certificate-generating operator watches the PKI resource directly and applies configuration to its own certificates.
@@ -186,9 +186,6 @@ spec:
 ```promql
 # Verify certificates are being generated with correct parameters
 openshift_pki_certificate_generated_total{algorithm="ECDSA",curve="P384",category="ServingCertificate"}
-
-# Check for any generation failures
-rate(openshift_pki_certificate_generation_errors_total[5m])
 ```
 
 #### Forced Certificate Rotation with New Parameters
@@ -200,13 +197,13 @@ Use pre-existing workflow to force certificate rotation using the current PKI co
 
 1. A cluster running OpenShift 4.N is upgraded to 4.N+1 which includes this feature.
 
-2. The upgrade will create a `PKI` resource with an empty spec.
+2. The upgrade installs the PKI CRD (API definition) and creates an empty PKI resource instance with an empty spec.
 
-2. While no `PKI` resource exists (i.e. during the upgrade), or `PKI.spec` is empty (i.e. after the upgrade), all operators continue using their existing hardcoded defaults (typically RSA 2048).
+3. With an empty PKI spec, all operators continue using their existing hardcoded defaults (typically RSA 2048).
 
-3. The cluster administrator can update the `PKI` resource post-upgrade, which will apply on the next certificate rotation cycle.
+4. The cluster administrator can update the PKI resource post-upgrade to configure cryptographic parameters, which will apply on the next certificate rotation cycle.
 
-4. Existing certificates continue to function until their natural rotation.
+5. Existing certificates continue to function until their natural rotation.
 
 ### API Extensions
 
@@ -656,9 +653,102 @@ The choice of algorithm and key size has performance implications:
 
 These tradeoffs will be documented in user-facing documentation to help administrators make informed choices.
 
+#### Metrics and Observability
+
+Each certificate-generating component (operators and installer) will expose Prometheus metrics about certificate generation events and properties.
+
+**Metric Exposure Patterns:**
+
+1. **Long-running components** (operators): Expose metrics directly via existing Prometheus endpoints
+2. **Short-lived components** (installer): Write metrics to node-exporter textfile collector at `/var/lib/node_exporter/textfile_collector/openshift_pki_installer.prom`
+
+**Metrics:**
+
+1. **Certificate Information (Gauge):**
+   ```promql
+   openshift_pki_certificate_info{
+     certificate_name="kube-apiserver-to-kubelet-signer",
+     category="SignerCertificate",
+     algorithm="RSA",
+     key_size="4096",           # only present for RSA
+     curve="",                  # only present for ECDSA
+     component="kube-apiserver-operator",
+     namespace="openshift-kube-apiserver-operator"
+   } 1
+   ```
+   - **Purpose:** Info metric providing certificate inventory with all cryptographic properties
+   - **Cardinality:** ~50-100 certificates cluster-wide
+   - **Use case:** Query which certificates exist and their parameters
+
+2. **Certificate Generation Events (Counter):**
+   ```promql
+   openshift_pki_certificate_generated_total{
+     certificate_name="kube-apiserver-to-kubelet-signer",
+     category="SignerCertificate",
+     algorithm="RSA",
+     key_size="4096",
+     curve="",
+     component="kube-apiserver-operator",
+     result="success"  # or "failure"
+   } 42
+   ```
+   - **Purpose:** Track certificate generation and rotation events
+   - **Use case:** Monitor rate of certificate generation, detect rotation patterns
+
+3. **Certificate Generation Duration (Histogram):**
+   ```promql
+   openshift_pki_certificate_generation_duration_seconds{
+     certificate_name="kube-apiserver-to-kubelet-signer",
+     algorithm="RSA",
+     key_size="4096",
+     curve="",
+     component="kube-apiserver-operator"
+   }
+   ```
+   - **Purpose:** Track performance of certificate generation operations
+   - **Buckets:** [0.01, 0.1, 0.5, 1, 2, 5, 10] seconds
+   - **Use case:** Identify performance issues with RSA 4096 vs ECDSA, detect slow generation
+
+**Example Queries:**
+
+- Find all RSA certificates not using 4096-bit keys:
+  ```promql
+  openshift_pki_certificate_info{algorithm="RSA",key_size!="4096"}
+  ```
+
+- RSA 4096 generation performance (95th percentile):
+  ```promql
+  histogram_quantile(0.95,
+    rate(openshift_pki_certificate_generation_duration_seconds_bucket{algorithm="RSA",key_size="4096"}[5m])
+  )
+  ```
+
+- Certificate inventory by algorithm:
+  ```promql
+  count by (algorithm) (openshift_pki_certificate_info)
+  ```
+
+**Cardinality Estimate:**
+
+Assuming ~50 well-known certificates cluster-wide:
+- `openshift_pki_certificate_info`: ~50 time series
+- `openshift_pki_certificate_generated_total`: ~100 time series (success/failure)
+- `openshift_pki_certificate_generation_duration_seconds`: ~50 histograms × 10 buckets = 500 time series
+
+**Total estimated cardinality: ~650 time series** - manageable overhead for cluster-wide certificate monitoring.
+
 ### Risks and Mitigations
 
-**Risk: Invalid configuration causes certificate generation failures**
+**Risk: Invalid PKI configuration in install-config.yaml prevents cluster installation**
+
+*Mitigation:*
+- Installer validates PKI configuration schema before starting cluster creation
+- Clear error messages indicate which PKI parameters are invalid
+- Installation fails fast with actionable error message before any resources are created
+- Documentation provides validated examples for common configurations
+- Install-config validation can be tested with `openshift-install create manifests` without committing to full installation
+
+**Risk: Invalid configuration causes certificate generation failures (Day-2)**
 
 *Mitigation:*
 - Comprehensive CEL validation rules prevent most invalid configurations at admission time
@@ -750,28 +840,51 @@ Automatically regenerate all certificates when PKI configuration changes.
 - Normal rotation will apply changes naturally over time
 - Forced rotation annotation provides escape hatch if immediate re-keying needed
 
+### Alternative 5: Additional Certificate Metrics
+
+Include metrics for certificate expiry, not-before timestamps, generation errors, and configuration compliance.
+
+**Considered metrics:**
+- `openshift_pki_certificate_expiry_timestamp_seconds` - Certificate expiration timestamp
+- `openshift_pki_certificate_not_before_timestamp_seconds` - Certificate validity start timestamp
+- `openshift_pki_certificate_generation_errors_total` - Counter for certificate generation failures
+- `openshift_pki_certificate_config_compliant` - Whether certificate matches current PKI configuration
+
+**Not selected because:**
+
+1. **Certificate expiry and not-before metrics:**
+   - Certificate expiry monitoring will be handled in a separate enhancement
+   - Existing certificate monitoring solutions already track expiry
+   - Keeping scope focused on PKI configuration feature
+
+2. **Certificate generation errors metric:**
+   - Certificate generation code is straightforward with minimal error paths
+   - Errors are primarily programmatic or I/O-related (out of disk, permission errors)
+   - Automatic retries handle transient failures
+   - The `openshift_pki_certificate_generated_total` metric already tracks success/failure via the `result` label
+   - Detailed error categorization adds complexity without significant operational value
+
+3. **Configuration compliance metric:**
+   - No central component to implement compliance checking
+   - Each operator would need to duplicate config resolution logic (for generation AND compliance)
+   - Ambiguity about "expected" values when PKI config changes after certificate generation
+   - Certificate might be old but was compliant when generated
+   - Adds significant implementation complexity to every operator
+   - Users can query compliance via PromQL using `openshift_pki_certificate_info` metric:
+     ```promql
+     # Find RSA certificates not using 4096-bit keys
+     openshift_pki_certificate_info{algorithm="RSA",key_size!="4096"}
+     ```
+   - Compliance checking could be addressed in a future enhancement with a dedicated compliance-checker component if needed
+
 ## Open Questions
 
-> 1. Should we support configuration of signature algorithms separately from key algorithms?
->
-> *Resolution*: No, signature algorithm will be derived from key algorithm (RSA key → RSA-SHA256, ECDSA k512 based on curve). This is standard practice and reduces configuration complexity.
-
-> 2. Should we provide a way to query which certificates exist in the cluster and their current parameters?
->
-> *Resolution*: Yes, through metrics. Operators will expose metrics showing certificate names, algorithms, key sizes/curves, and expiry. A future enhancement could add a discovery API.
-
-> 3. Should we support gradual rollout of new parameters (e.g., blue-green rotation)?
->
-> *Resolution*: Not in initial implementation. Certificates naturally rotate gradually based on their expiry times. This provides inherent gradual rollout.
-
-> 4. How do we handle certificates that are generated by components we don't control (e.g., upstream Kubernetes components)?
->
-> *Resolution*: This enhancement only covers certificates generated by OpenShift operators. Upstream components' certificates remain at their defaults. Future enhancements could extend coverage.
+None at this time.
 
 ## Test Plan
 
 **Unit Tests:**
-- PKI API validation (CRD webhooks)
+- PKI API validation (CEL validation rules)
 - Configuration resolution logic (precedence rules)
 - Certificate generation with different algorithms and parameters
 - Upgrade path (empty config → defaults)
@@ -795,7 +908,6 @@ Automatically regenerate all certificates when PKI configuration changes.
 
 **Performance Tests:**
 - Measure certificate generation time for different algorithms/sizes
-- Measure impact on cluster upgrade time (certificate rotation during upgrade)
 - Validate that ECDSA provides expected performance improvements for TLS handshakes
 
 **Compatibility Tests:**
@@ -807,7 +919,7 @@ Automatically regenerate all certificates when PKI configuration changes.
 
 This feature will be released as **GA in OpenShift 4.21**. The graduation criteria must be met before the 4.21 release.
 
-### Development Phase (v1alpha1)
+### Dev Preview -> Tech Preview
 
 During early development with v1alpha1 and TechPreviewNoUpgrade feature gate:
 
@@ -820,7 +932,7 @@ During early development with v1alpha1 and TechPreviewNoUpgrade feature gate:
 - Basic documentation in openshift-docs
 - Early feedback gathered from development testing
 
-### GA Release (v1) - OpenShift 4.21
+### Tech Preview -> GA
 
 Before the 4.21 release, all of the following criteria must be met:
 
@@ -864,12 +976,13 @@ This enhancement does not deprecate or remove any existing features. It adds new
 
 When upgrading from a version without this feature to a version with it:
 
-1. The PKI CRD is created during upgrade
-2. If no PKI resource exists (first upgrade), operators use their existing hardcoded defaults
-3. Existing certificates continue to function unchanged
-4. Certificate rotation uses existing defaults until a PKI resource is created
-5. Administrators can create a PKI resource post-upgrade
-6. New parameters apply on the next rotation cycle after PKI resource is created
+1. The PKI CRD (API definition) is installed during upgrade
+2. An empty PKI resource instance (with empty spec) is automatically created
+3. With an empty spec, operators use their existing hardcoded defaults (typically RSA 2048)
+4. Existing certificates continue to function unchanged
+5. Certificate rotation uses existing defaults until the PKI resource is updated
+6. Administrators can update the PKI resource post-upgrade to configure cryptographic parameters
+7. New parameters apply on the next rotation cycle after PKI resource is updated
 
 This approach ensures zero disruption during upgrade and preserves backward compatibility.
 
@@ -888,44 +1001,28 @@ No manual intervention is required for downgrade. Certificates generated with no
 **Version Skew:**
 
 During rolling upgrades, different operator versions will coexist:
-- Old operator versions ignore the PKI resource
-- New operator versions honor the PKI resource
-- Certificates generated during upgrade use parameters based on operator version
-- This is safe because certificate rotation is gradual and asynchronous
-- Mixed algorithms (RSA and ECDSA) are explicitly supported
+- An empty PKI resource instance (with empty spec) is automatically created during upgrade
+- Old operator versions don't know about PKI configuration and use hardcoded defaults
+- New operator versions check for PKI resource, find it has an empty spec, and use hardcoded defaults
+- All operators use the same default parameters (typically RSA 2048), ensuring consistency
+- Administrator can update the PKI resource after upgrade completes to configure parameters
+- Certificate rotation is gradual and asynchronous
+- Mixed algorithms (RSA and ECDSA) are explicitly supported when intentionally configured
 
 ## Version Skew Strategy
 
-**Control Plane Skew:**
+Version skew is not a concern for this feature because:
 
-During control plane upgrades, different kube-apiserver instances may be running different versions:
-- Old kube-apiserver: Continues serving with existing certificates
-- New kube-apiserver: May rotate certificates using PKI configuration
-- Both can serve simultaneously (certificate verification doesn't change)
-- Clients validate certificates based on CA trust, not algorithm/size
+- All supported OpenShift component versions can validate and use both RSA (2048/3072/4096) and ECDSA (P-256/P-384/P-521) certificates
+- Certificate verification is based on CA trust, not on specific algorithms or key sizes
+- Components communicate using standard TLS, which transparently handles different certificate types
+- Each operator independently manages its own certificates without coordination
 
-**Operator Skew:**
-
-Different operators update at different times during upgrade:
-- Some operators support PKI configuration, others don't yet
-- Each operator handles its own certificates independently
-- No coordination required between operators
-- Cluster continues to function with mixed certificate parameters
-
-**Kubelet Skew:**
-
-Kubelets on different nodes may be at different versions:
-- All supported kubelet versions can validate RSA and ECDSA certificates
-- Certificate generation on kubelets (kubelet-serving) happens independently per node
-- Mixed algorithms across nodes is explicitly supported
-- No coordination required between kubelets
-
-**External Component Skew:**
-
-Components external to OpenShift (load balancers, monitoring systems) may connect to the cluster:
-- All modern TLS libraries support RSA 2048/3072/4096 and ECDSA P-256/P-384/P-521
-- Administrators are responsible for ensuring external components support configured algorithms
-- Documentation will note minimum TLS library versions for ECDSA support (Go 1.13+, OpenSSL 1.1.1+, etc.)
+During upgrades:
+- The empty PKI resource created during upgrade ensures all operators (old and new) use consistent defaults
+- Administrators can update PKI configuration after upgrade completes
+- Certificate rotation is gradual and asynchronous per existing mechanisms
+- Mixed certificate parameters across the cluster are explicitly supported
 
 ## Operational Aspects of API Extensions
 
@@ -1025,9 +1122,9 @@ However, there are some considerations:
    oc get events -n openshift-kube-apiserver-operator --field-selector reason=CertificateGenerationFailed
    ```
 
-2. Review certificate generation metrics:
-   ```promql
-   rate(openshift_pki_certificate_generation_errors_total[5m])
+2. Check operator logs for certificate generation errors:
+   ```bash
+   oc logs -n openshift-kube-apiserver-operator deployment/kube-apiserver-operator | grep -i "certificate.*error"
    ```
 
 3. Verify cryptographic libraries are functioning:
@@ -1090,9 +1187,11 @@ However, there are some considerations:
    # Remove or fix invalid configuration
    ```
 
-3. Force rotation of affected certificates:
+3. Wait for natural certificate rotation, or force rotation by deleting certificate secrets:
    ```bash
-   oc patch pki cluster --type merge -p '{"metadata":{"annotations":{"pki.config.openshift.io/force-rotation":"true"}}}'
+   # Each operator regenerates certificates when secrets are deleted
+   # Example for kube-apiserver serving certificate:
+   oc delete secret -n openshift-kube-apiserver kube-apiserver-serving-cert
    ```
 
 4. Monitor rotation progress:
@@ -1119,16 +1218,16 @@ However, there are some considerations:
    # Change to more compatible algorithm (e.g., ECDSA P-521 → RSA 2048)
    ```
 
-4. Force rotation of affected certificate:
+4. Force rotation of affected certificate by deleting the secret:
    ```bash
-   # Annotation triggers immediate rotation
-   oc patch pki cluster --type merge -p '{"metadata":{"annotations":{"pki.config.openshift.io/force-rotation-certificate":"kube-apiserver-serving"}}}'
+   # Delete the secret to force regeneration
+   oc delete secret -n openshift-kube-apiserver kube-apiserver-serving-cert
    ```
 
 5. Verify new certificate is generated and working:
    ```bash
    oc get secret -n openshift-kube-apiserver kube-apiserver-serving-cert -o jsonpath='{.metadata.creationTimestamp}'
-   # Should show recent timestamp
+   # Should show recent timestamp after regeneration
    ```
 
 **Scenario: Need to revert all certificates to defaults**
@@ -1138,11 +1237,12 @@ However, there are some considerations:
    oc delete pki cluster
    ```
 
-2. Wait for natural certificate rotation, or force rotation:
+2. Wait for natural certificate rotation, or force rotation by deleting certificate secrets:
    ```bash
-   # Each operator has its own forced rotation mechanism
-   # Example for kube-apiserver:
-   oc patch kubeapiserver cluster --type merge -p '{"spec":{"forceRedeploymentReason":"pki-reset-$(date +%s)"}}'
+   # Delete certificate secrets to force regeneration
+   # Example for kube-apiserver serving certificate:
+   oc delete secret -n openshift-kube-apiserver kube-apiserver-serving-cert
+   # Repeat for other certificates as needed
    ```
 
 3. Certificates will be regenerated with platform defaults
