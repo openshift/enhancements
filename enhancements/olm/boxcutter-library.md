@@ -278,10 +278,9 @@ ref: https://github.com/openshift/operator-framework-operator-controller/blob/re
   `CollisionProtection=None`
 
 **Garbage Collection**
-- Maintains the last 5 archived revisions per `ClusterExtension`
-- Automatically archives previous revisions when a new revision reaches
-  Succeeded=True status
-- Deletes oldest archived revisions when count exceeds limit
+- Maintains a history of up to 5 previous revisions in the `spec.previous` field of the latest `ClusterExtensionRevision`
+- Deletes archived revisions that fall outside this 5-revision limit
+- Active revisions are never deleted, even if they exceed the limit, ensuring rollback capability is preserved
 
 ### Key Differentiators from Helm
 
@@ -360,7 +359,7 @@ sequenceDiagram
 4. `ClusterExtension` controller uses `SimpleRevisionGenerator` to create
    `ClusterExtensionRevision` named `<extension-name>-1` with revision=1
 5. `SimpleRevisionGenerator` extracts manifests from bundle, organizes them into
-   phases using PhaseSort (CRDs/RBAC first, workloads later), and sets
+   phases using PhaseSort (infrastructure resources before workloads), and sets
    objectLabels
 6. `ClusterExtension` controller applies `ClusterExtensionRevision` with
    Server-Side Apply and reports Progressing=True
@@ -368,14 +367,14 @@ sequenceDiagram
    dynamic watches for all resource GVKs in the revision
 8. `ClusterExtensionRevision` controller invokes RevisionEngine.Reconcile() which
    iterates through phases sequentially
-9. For each object in Phase 1 (e.g., CRDs, RBAC), RevisionEngine applies via
-   Server-Side Apply with field ownership
-10. After all Phase 1 objects exist, RevisionEngine evaluates probes (CRD
-    Established=True, no probes for RBAC)
-11. Once all Phase 1 probes pass, RevisionEngine proceeds to Phase 2
-    (Deployments, StatefulSets)
-12. RevisionEngine applies Phase 2 objects and evaluates availability probes
-    (replicas ready, ObservedGeneration matches)
+9. For each object in the initial phase, RevisionEngine applies via Server-Side
+   Apply with field ownership
+10. After all objects in the current phase exist, RevisionEngine evaluates
+    applicable probes for resource readiness
+11. Once all probes for the current phase pass, RevisionEngine proceeds to the
+    next phase
+12. RevisionEngine applies objects in subsequent phases and evaluates applicable
+    availability probes for each resource type
 13. When all phases complete successfully, `ClusterExtensionRevision` controller
     sets Available=True and Succeeded=True
 14. `ClusterExtensionRevision` controller removes Progressing condition
@@ -395,7 +394,7 @@ sequenceDiagram
 5. New revision includes spec.previous referencing `<extension-name>-1` (for
    history tracking)
 6. `ClusterExtensionRevision` controller reconciles new revision following same
-   phased rollout process
+   phased rollout process, adopting any existing resources from the previous revision
 7. When new revision reaches Succeeded=True, `ClusterExtensionRevision`
    controller patches `<extension-name>-1` to set lifecycleState=Archived
 8. Archived revision controller tears down resources it uniquely owns (those
