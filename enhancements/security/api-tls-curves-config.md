@@ -48,6 +48,9 @@ Currently, administrators can specify a custom TLS profile where they can specif
 
 The current state of the OpenShift TLS stack uses a default set of curves with no way to specify them. This eases the burden on administators, however new quantum secure algorithms rely on a set of curves outside of the conventional default curves. For example, curves like [ML-KEM](https://www.ietf.org/archive/id/draft-connolly-tls-mlkem-key-agreement-05.html) provide a quantum safe mechanism for sharing secrets necessary for the TLS handshake, whereas curves like [X22519](https://datatracker.ietf.org/doc/html/rfc7748) (a commonly used conventional curve) are [weak against quantum computing](https://crypto.stackexchange.com/questions/59770/how-effective-is-quantum-computing-against-elliptic-curve-cryptography).
 
+The ability to set curves explicitely will also make it possible to align our 
+OpenShift TLS profiles to match the curves present in the [Mozilla TLS Profiles](https://wiki.mozilla.org/Security/Server_Side_TLS). 
+
 This change will require working with OpenShift component owners to use this new field, however this is outside the scope of this proposal.
 
 ### Workflow Description
