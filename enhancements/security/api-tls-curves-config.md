@@ -3,16 +3,16 @@ title: api-tls-curves-config
 authors:
   - richardsonnick
   - davidesalerno
-reviewers: # Include a comment about what domain expertise a reviewer is expected to bring and what area of the enhancement you expect them to focus on. For example: - "@networkguru, for networking aspects, please look at IP bootstrapping aspect"
-  - TBD
-approvers: # A single approver is preferred, the role of the approver is to raise important questions, help ensure the enhancement receives reviews from all applicable areas/SMEs, and determine when consensus is achieved such that the EP can move forward to implementation.  Having multiple approvers makes it difficult to determine who is responsible for the actual approval.
-  - TBD
-api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
-  - TBD
+reviewers:
+  - dsalerno # OpenShift networking stack knowledge
+approvers: 
+  - JoelSpeed
+api-approvers:
+  - JoelSpeed
 creation-date: 2025-11-19
-last-updated: yyyy-mm-dd
+last-updated: 2025-11-20
 tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
-  - TBD
+  - https://issues.redhat.com/browse/HPCASE-153
 ---
 
 # OpenShift API TLS Curves Configuration 
