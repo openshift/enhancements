@@ -394,6 +394,10 @@ Example generated `server.conf` with federation:
 1. **Maximum Federated Clusters**: Default limit of N (configurable) clusters to prevent performance issues.
 2. **Trust Bundle Bootstrapping**: Cannot be automated. Users MUST manually bootstrap trust bundles by creating `clusterFederatedTrustDomain`
 3. **Certificate Management for https_web**: Users are responsible for providing valid certificates via Secrets or configuring ACME correctly. Invalid certificates will cause federation to fail.
+4. **Route Termination Constraints**:
+    - **https_spiffe**: MUST use passthrough route. Reencrypt will fail due to: (a) client validation expecting SPIFFE ID in URI SAN which router certificates lack, (b) client trusting only SPIRE CA not OpenShift ingress operator CA, and (c) frequent SPIRE CA rotation (~20h) making destinationCACertificate maintenance impossible.
+    - **https_web with ACME**: MUST use passthrough route. Reencrypt will fail because ACME validation requires direct SNI passthrough to SPIRE server. Router TLS termination loses original SNI, causing ACME challenges to fail.
+    - **https_web with servingCert**: CAN use passthrough or reencrypt (when externalSecretRef configured). Passthrough requires certificate with external DNS name. Reencrypt allows separate backend and edge certificates.
 
 ### Risks and Mitigations
 
