@@ -32,9 +32,9 @@ Organizations deploying workloads across multiple OpenShift clusters need secure
 
 * As an OpenShift security engineer, I want to choose between `https_spiffe` (default, SPIFFE authentication) and `https_web` (Web PKI) profiles for `spec.federation.bundleEndpoint.profile`, so that I can align federation security with organizational certificate policies and authentication requirements.
 
-* As an SRE, I want SpireServer status conditions `FederationConfigurationValid`, `FederationServiceReady`, and `FederationRouteReady` with timestamps and error messages, so that I can quickly diagnose federation configuration issues, Route exposure problems, or certificate errors through `oc get spireserver cluster -o yaml`.
+* As an SRE, I want SpireServer status conditions `ConfigurationValid` and `RouteAvailable` with timestamps and error messages, so that I can quickly diagnose federation or route configuration issues.
 
-* As an OpenShift cluster administrator, I want the operator to handle federation configuration removal gracefully by deleting the Service and Route when `spec.federation` is removed, so that cross-cluster communication stops cleanly while intra-cluster workloads continue functioning without manual resource cleanup.
+* As an OpenShift cluster administrator, I want the operator to handle federation configuration removal gracefully when `spec.federation` is removed, so that cross-cluster communication stops cleanly while intra-cluster workloads continue functioning without manual resource cleanup.
 
 * As an application developer, I want to create ClusterSPIFFEID resources with `spec.federatesWith[]` after federation is configured, so that my workloads automatically receive SVIDs capable of authenticating against federated trust domains without understanding the underlying SPIRE federation mechanics.
 
@@ -54,9 +54,9 @@ Organizations deploying workloads across multiple OpenShift clusters need secure
 
 1. **Automatic trust bundle bootstrapping** - Initial trust bundle exchange cannot be fully automated without compromising security. Users must manually bootstrap trust bundles.
 2. **Federation with unlimited clusters** - We impose a configurable limit to prevent performance degradation.
-3. **Automatic ClusterFederatedTrustDomain creation** - Users must create ClusterFederatedTrustDomain resources on each cluster for each federation relationship to enable automatic bundle rotation.
+3. **Automatic ClusterFederatedTrustDomain creation** - Users must create `ClusterFederatedTrustDomain` resources on each cluster for each federation relationship to enable automatic bundle rotation and initial trust bundle exchange.
 4. **Custom CA certificate management for https_web profile** - For `https_web` profile, users must provide valid certificates via Secrets or use ACME.
-5. **Dynamic trust domain changes** - Changing trust domains in federated clusters requires recreating the federation from scratch. This is a SPIRE limitation, not an operator limitation.
+5. **Dynamic trust domain changes** - Changing trust domains in federated clusters requires recreating the federation from scratch. This is a SPIRE limitation, not an operator limitation. This is not supported as part of this enhancement proposal.
 
 ## Proposal
 
@@ -100,7 +100,7 @@ sequenceDiagram
     OpA->>OpA: Validate federation config
     OpA->>OpA: Generate ConfigMap with<br/>federation configuration
     OpA->>OpA: Create/Update Service<br/>(port 8443)
-    OpA->>OpA: Create/Update Route<br/>(passthrough TLS)
+    OpA->>OpA: Create/Update Route<br/>(passthrough/reencrypt TLS)
     OpA->>OpA: Update StatefulSet<br/>(expose port 8443)
     OpA->>SSA: Rolling restart with<br/>new configuration
     SSA-->>OpA: Federation endpoint active
@@ -110,38 +110,29 @@ sequenceDiagram
     OpB->>OpB: Validate federation config
     OpB->>OpB: Generate ConfigMap with<br/>federation configuration
     OpB->>OpB: Create/Update Service<br/>(port 8443)
-    OpB->>OpB: Create/Update Route<br/>(passthrough TLS)
+    OpB->>OpB: Create/Update Route<br/>(passthrough/reencrypt TLS)
     OpB->>OpB: Update StatefulSet<br/>(expose port 8443)
     OpB->>SSB: Rolling restart with<br/>new configuration
     SSB-->>OpB: Federation endpoint active
 
-    Note over Admin,SCMB: Phase 2: Manual Trust Bundle Bootstrapping
+    Note over Admin,SCMB: Phase 2: Manual Trust Bundle Bootstrapping and Automatic Bundle Rotation
 
-    Admin->>SSB: Extract trust bundle<br/>(spire-server bundle show)
-    SSB-->>Admin: Cluster B trust bundle
-    Admin->>SSA: Set Cluster B trust bundle<br/>(spire-server bundle set)
-    SSA-->>Admin: Bootstrap complete
-
-    Admin->>SSA: Extract trust bundle<br/>(spire-server bundle show)
-    SSA-->>Admin: Cluster A trust bundle
-    Admin->>SSB: Set Cluster A trust bundle<br/>(spire-server bundle set)
-    SSB-->>Admin: Bootstrap complete
-
-    Note over Admin,SCMB: Phase 3: Enable Automatic Bundle Rotation
-
-    Admin->>SCMA: Create ClusterFederatedTrustDomain<br/>(for Cluster B)
+    Admin->>SSB: Extract trust bundle<br/>(federation endpoint response)
+    Admin->>SSA: Extract trust bundle<br/>(federation endpoint response)
+    
+    Admin->>SCMA: Create ClusterFederatedTrustDomain with cluster B's trust bundle in trustDomainBundle field<br/>(for Cluster B)
     SCMA->>SSA: Register federation relationship
     SSA->>SSB: Fetch bundle via federation endpoint
     SSB-->>SSA: Return current bundle
-    SCMA->>SCMA: Schedule next refresh<br/>(every 5 minutes)
+    SCMA->>SCMA: Schedule next refresh<br/>(every 5 minutes - refresh_hint)
 
-    Admin->>SCMB: Create ClusterFederatedTrustDomain<br/>(for Cluster A)
+    Admin->>SCMB: Create ClusterFederatedTrustDomain with cluster A's trust bundle in trustDomainBundle field<br/>(for Cluster A)
     SCMB->>SSB: Register federation relationship
     SSB->>SSA: Fetch bundle via federation endpoint
     SSA-->>SSB: Return current bundle
-    SCMB->>SCMB: Schedule next refresh<br/>(every 5 minutes)
+    SCMB->>SCMB: Schedule next refresh<br/>(every 5 minutes - refresh_hint)
 
-    Note over Admin,SCMB: Phase 4: Deploy Federated Workloads
+    Note over Admin,SCMB: Phase 3: Deploy Federated Workloads
 
     Admin->>SCMA: Create ClusterSPIFFEID<br/>(with federatesWith)
     SCMA->>SSA: Register SPIFFE ID with<br/>federation capability
@@ -171,8 +162,6 @@ sequenceDiagram
      # ... existing fields ...
      federation:
        bundleEndpoint:
-         port: 8443
-         address: "0.0.0.0"
          profile: https_spiffe
        federatesWith:
        - trustDomain: apps.cluster-b.example.com
@@ -195,27 +184,27 @@ This enhancement adds new fields to the existing `SpireServerSpec` API:
 
 ```go
 type SpireServerSpec struct {
-    // ... existing fields ...
+  // ... existing fields ...
 
-    // Federation configures SPIRE federation endpoints and relationships
-    // +kubebuilder:validation:Optional
-    Federation *FederationConfig `json:"federation,omitempty"`
+  // Federation configures SPIRE federation endpoints and relationships
+  // +kubebuilder:validation:Optional
+  Federation *FederationConfig `json:"federation,omitempty"`
 }
 
 // FederationConfig defines federation bundle endpoint and federated trust domains
 type FederationConfig struct {
-    // BundleEndpoint configures this cluster's federation bundle endpoint
-    // +kubebuilder:validation:Required
-    BundleEndpoint BundleEndpointConfig `json:"bundleEndpoint"`
+	// BundleEndpoint configures this cluster's federation bundle endpoint
+	// +kubebuilder:validation:Required
+	BundleEndpoint BundleEndpointConfig `json:"bundleEndpoint"`
 
-    // FederatesWith lists trust domains this cluster federates with
-    // +kubebuilder:validation:Optional
-    // +kubebuilder:validation:MaxItems=50
-    FederatesWith []FederatesWithConfig `json:"federatesWith,omitempty"`
+	// FederatesWith lists trust domains this cluster federates with
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=50
+	FederatesWith []FederatesWithConfig `json:"federatesWith,omitempty"`
 
-    // managedRoute is for enabling routes for spire-server trust bundle endpoint, which can be indicated
-	// by setting `true` or `false`
-	// "true": Allows automatic exposure of trust bundle endpoint through a managed OpenShift Route (*.apps.).
+	// ManagedRoute enables or disables automatic Route creation for federation endpoint
+	// "true": Allows automatic exposure of federation endpoint through a managed OpenShift Route.
 	// "false": Allows administrators to manually configure exposure using custom OpenShift Routes or ingress, offering more control over routing behavior.
 	// +kubebuilder:default:="true"
 	// +kubebuilder:validation:Enum:="true";"false"
@@ -224,31 +213,23 @@ type FederationConfig struct {
 }
 
 // BundleEndpointConfig configures how this cluster exposes its federation bundle
+// The federation endpoint is exposed on 0.0.0.0:8443
+// +kubebuilder:validation:XValidation:rule="self.profile == 'https_web' ? has(self.httpsWeb) : true",message="httpsWeb is required when profile is https_web"
 type BundleEndpointConfig struct {
-    // Port for the federation bundle endpoint
-    // +kubebuilder:validation:Minimum=1
-    // +kubebuilder:validation:Maximum=65535
-    // +kubebuilder:default=8443
-    Port int32 `json:"port"`
+	// Profile is the bundle endpoint authentication profile
+	// +kubebuilder:validation:Enum=https_spiffe;https_web
+	// +kubebuilder:default=https_spiffe
+	Profile BundleEndpointProfile `json:"profile"`
 
-    // Address to bind the bundle endpoint to
-    // +kubebuilder:default="0.0.0.0"
-    Address string `json:"address"`
+	// RefreshHint is the hint for bundle refresh interval in seconds
+	// +kubebuilder:validation:Minimum=60
+	// +kubebuilder:validation:Maximum=3600
+	// +kubebuilder:default=300
+	RefreshHint int32 `json:"refreshHint,omitempty"`
 
-    // Profile is the bundle endpoint authentication profile
-    // +kubebuilder:validation:Enum=https_spiffe;https_web
-    // +kubebuilder:default=https_spiffe
-    Profile BundleEndpointProfile `json:"profile"`
-
-    // RefreshHint is the hint for bundle refresh interval in seconds
-    // +kubebuilder:validation:Minimum=60
-    // +kubebuilder:validation:Maximum=3600
-    // +kubebuilder:default=300
-    RefreshHint int32 `json:"refreshHint,omitempty"`
-
-    // HttpsWeb configures the https_web profile (required if profile is https_web)
-    // +kubebuilder:validation:Optional
-    HttpsWeb *HttpsWebConfig `json:"httpsWeb,omitempty"`
+	// HttpsWeb configures the https_web profile (required if profile is https_web)
+	// +kubebuilder:validation:Optional
+	HttpsWeb *HttpsWebConfig `json:"httpsWeb,omitempty"`
 }
 
 // BundleEndpointProfile represents the authentication profile for bundle endpoint
@@ -256,83 +237,96 @@ type BundleEndpointConfig struct {
 type BundleEndpointProfile string
 
 const (
-    // HttpsSpiffeProfile uses SPIFFE authentication (default, recommended)
-    HttpsSpiffeProfile BundleEndpointProfile = "https_spiffe"
-    
-    // HttpsWebProfile uses Web PKI (X.509 certificates from public CA)
-    HttpsWebProfile BundleEndpointProfile = "https_web"
+	// HttpsSpiffeProfile uses SPIFFE authentication (default)
+	HttpsSpiffeProfile BundleEndpointProfile = "https_spiffe"
+
+	// HttpsWebProfile uses Web PKI (X.509 certificates from public CA)
+	HttpsWebProfile BundleEndpointProfile = "https_web"
 )
 
 // HttpsWebConfig configures https_web profile authentication
+// +kubebuilder:validation:XValidation:rule="(has(self.acme) && !has(self.servingCert)) || (!has(self.acme) && has(self.servingCert))",message="exactly one of acme or servingCert must be set"
 type HttpsWebConfig struct {
-    // Acme configures automatic certificate management using ACME protocol
-    // Mutually exclusive with ServingCert
-    // +kubebuilder:validation:Optional
-    Acme *AcmeConfig `json:"acme,omitempty"`
+	// Acme configures automatic certificate management using ACME protocol
+	// Mutually exclusive with ServingCert
+	// +kubebuilder:validation:Optional
+	Acme *AcmeConfig `json:"acme,omitempty"`
 
-    // ServingCert configures certificate from a Kubernetes Secret
-    // Mutually exclusive with Acme
-    // +kubebuilder:validation:Optional
-    ServingCert *ServingCertConfig `json:"servingCert,omitempty"`
+	// ServingCert configures certificate from a Kubernetes Secret
+	// Mutually exclusive with Acme
+	// +kubebuilder:validation:Optional
+	ServingCert *ServingCertConfig `json:"servingCert,omitempty"`
 }
 
 // AcmeConfig configures ACME certificate provisioning
 type AcmeConfig struct {
-    // DirectoryUrl is the ACME directory URL (e.g., Let's Encrypt)
-    // +kubebuilder:validation:Required
-    // +kubebuilder:validation:Pattern=`^https://.*`
-    DirectoryUrl string `json:"directoryUrl"`
+	// DirectoryUrl is the ACME directory URL (e.g., Let's Encrypt)
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern=`^https://.*`
+	DirectoryUrl string `json:"directoryUrl"`
 
-    // DomainName is the domain name for the certificate
-    // +kubebuilder:validation:Required
-    DomainName string `json:"domainName"`
+	// DomainName is the domain name for the certificate
+	// +kubebuilder:validation:Required
+	DomainName string `json:"domainName"`
 
-    // Email for ACME account registration
-    // +kubebuilder:validation:Required
-    // +kubebuilder:validation:Pattern=`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`
-    Email string `json:"email"`
+	// Email for ACME account registration
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern=`^[a-zA-Z0-9][a-zA-Z0-9._%+-]*[a-zA-Z0-9]@[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$`
+	Email string `json:"email"`
 
-    // TosAccepted indicates acceptance of Terms of Service
-    // +kubebuilder:default:="false"
+	// TosAccepted indicates acceptance of Terms of Service
+	// +kubebuilder:default:="false"
 	// +kubebuilder:validation:Enum:="true";"false"
 	// +kubebuilder:validation:Optional
-    TosAccepted bool `json:"tosAccepted"`
+	TosAccepted string `json:"tosAccepted,omitempty"`
 }
 
 // ServingCertConfig references a Secret containing TLS certificate
 type ServingCertConfig struct {
-    // SecretName is the name of the Secret containing tls.crt and tls.key
-    // +kubebuilder:validation:Required
-    SecretName string `json:"secretName"`
+	// SecretName is the name of the Secret containing tls.crt and tls.key
+	// The secret must be in the same namespace where the operator and operands are deployed.
+	// The secret must contain tls.crt and tls.key fields.
+	// If not specified, defaults to the service CA certificate (spire-server-serving-cert).
+	// +kubebuilder:validation:Optional
+	SecretName string `json:"secretName,omitempty"`
 
-    // FileSyncInterval is how often to check for certificate updates (seconds)
-    // +kubebuilder:validation:Minimum=30
-    // +kubebuilder:validation:Maximum=3600
-    // +kubebuilder:default=300
-    FileSyncInterval int32 `json:"fileSyncInterval,omitempty"`
+	// FileSyncInterval is how often to check for certificate updates (seconds)
+	// +kubebuilder:validation:Minimum=300
+	// +kubebuilder:validation:Maximum=86400
+	// +kubebuilder:default=3600
+	FileSyncInterval int32 `json:"fileSyncInterval,omitempty"`
+
+	// ExternalSecretRef is a reference to an externally managed secret that contains
+	// the TLS certificate for the SPIRE server federation Route host. The secret must
+	// be in the same namespace where the operator and operands are deployed and must
+	// contain tls.crt and tls.key fields. The OpenShift Ingress Operator will read
+	// this secret to configure the route's TLS certificate.
+	// +kubebuilder:validation:Optional
+	ExternalSecretRef string `json:"externalSecretRef,omitempty"`
 }
 
-// FederatedTrustDomain represents a remote trust domain to federate with
+// FederatesWithConfig represents a remote trust domain to federate with
+// +kubebuilder:validation:XValidation:rule="self.bundleEndpointProfile == 'https_spiffe' ? has(self.endpointSpiffeId) && self.endpointSpiffeId != '' : true",message="endpointSpiffeId is required when bundleEndpointProfile is https_spiffe"
 type FederatesWithConfig struct {
-    // TrustDomain is the federated trust domain name
-    // +kubebuilder:validation:Required
-    // +kubebuilder:validation:Pattern=`^[a-z0-9._-]{1,255}$`
-    TrustDomain string `json:"trustDomain"`
+	// TrustDomain is the federated trust domain name
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern=`^[a-z0-9._-]{1,255}$`
+	TrustDomain string `json:"trustDomain"`
 
-    // BundleEndpointUrl is the URL of the remote federation endpoint
-    // +kubebuilder:validation:Required
-    // +kubebuilder:validation:Pattern=`^https://.*`
-    BundleEndpointUrl string `json:"bundleEndpointUrl"`
+	// BundleEndpointUrl is the URL of the remote federation endpoint
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern=`^https://.*`
+	BundleEndpointUrl string `json:"bundleEndpointUrl"`
 
-    // BundleEndpointProfile is the authentication profile of remote endpoint
-    // +kubebuilder:validation:Required
-    // +kubebuilder:validation:Enum=https_spiffe;https_web
-    BundleEndpointProfile BundleEndpointProfile `json:"bundleEndpointProfile"`
+	// BundleEndpointProfile is the authentication profile of remote endpoint
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Enum=https_spiffe;https_web
+	BundleEndpointProfile BundleEndpointProfile `json:"bundleEndpointProfile"`
 
-    // EndpointSpiffeId is required for https_spiffe profile
-    // +kubebuilder:validation:Optional
-    // +kubebuilder:validation:Pattern=`^spiffe://.*`
-    EndpointSpiffeId string `json:"endpointSpiffeId,omitempty"`
+	// EndpointSpiffeId is required for https_spiffe profile
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:Pattern=`^spiffe://.*`
+	EndpointSpiffeId string `json:"endpointSpiffeId,omitempty"`
 }
 ```
 
@@ -375,7 +369,10 @@ Example generated `server.conf` with federation:
     "bundle_endpoint": {
       "address": "0.0.0.0",
       "port": 8443,
-      "acme": null
+      "profile" : {
+        "https_spiffe": {}
+      },
+      "refresh_hint": "300s"
     },
     "federates_with": {
       "apps.cluster-b.example.com": {
@@ -394,15 +391,15 @@ Example generated `server.conf` with federation:
 
 #### Constraints and Limitations
 
-1. **Maximum Federated Clusters**: Default limit of N (configurable) clusters to prevent performance issues. Configurable via operator environment variable `MAX_FEDERATED_CLUSTERS`.
-2. **Trust Bundle Bootstrapping**: Cannot be automated. Users MUST manually bootstrap trust bundles.
+1. **Maximum Federated Clusters**: Default limit of N (configurable) clusters to prevent performance issues.
+2. **Trust Bundle Bootstrapping**: Cannot be automated. Users MUST manually bootstrap trust bundles by creating `clusterFederatedTrustDomain`
 3. **Certificate Management for https_web**: Users are responsible for providing valid certificates via Secrets or configuring ACME correctly. Invalid certificates will cause federation to fail.
 
 ### Risks and Mitigations
 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
-| **Misconfigured federation breaks cross-cluster communication** | High - workloads cannot communicate across clusters | - Comprehensive validation at API admission time<br>- Clear status conditions showing federation state<br>- Detailed documentation and examples<br>- E2E tests for common scenarios |
+| **Misconfigured federation breaks cross-cluster communication** | High - workloads cannot communicate across clusters | - Comprehensive validation at API admission time<br>- Clear status conditions showing federation configuration validation<br>- Detailed documentation and examples<br>- E2E tests for common scenarios |
 | **Manual trust bundle bootstrapping is error-prone** | High - federation won't work without correct bootstrapping | - Detailed step-by-step documentation<br>|
 | **Too many federated clusters cause performance degradation** | Medium - SPIRE server becomes slow or unstable | - Enforce maximum limit <br>- Document performance characteristics<br>- Test with maximum number of clusters |
 
@@ -418,7 +415,7 @@ The solution can incur performance overhead, increase troubleshooting complexity
 ## Open Questions
 
 1. **Should we support dynamic trust domain changes?**
-   - Current proposal: No, requires complete re-federation
+   - Current proposal: No, requires complete re-federation.
    - Question: Should we detect and provide better guidance when trust domain changes?
 
 2. **Should we support automatic failover if a federated cluster becomes unavailable?**
