@@ -563,23 +563,25 @@ the `openshift-monitoring` namespace.
 
 When a core operator exposes Prometheus metrics, it should comply with the following requirements:
 
-1. It should use HTTPS. Metrics are confidential, particularly labels which can
+1. It *SHOULD* use HTTPS. Metrics are confidential, particularly labels which can
    be identifiable and promising future state of "nothing confidential ever" is
    implausible.
-2. It should require authentication and it should support TLS client certificate
+2. It *SHOULD* require authentication and it *SHOULD* support TLS client certificate
    authentication to avoid a dependency on the Kubernetes API server (see
    [Handling kube-apiserver disruption](#handling-kube-apiserver-disruption)).
-   It may support bearer token authentication but the in-cluster Prometheus
-   should be configured with TLS client certificate only (the certificate path to
+   It *MAY* support bearer token authentication but the in-cluster Prometheus
+   *SHOULD* be configured with TLS client certificate only (the certificate path to
    use is `/etc/prometheus/secrets/metrics-client-certs/tls.crt` and the key
    path is `/etc/prometheus/secrets/metrics-client-certs/tls.key`).
-3. It should read the [API server's TLS security
+3. It *SHOULD* read the [API server's TLS security
    profile](https://github.com/openshift/api/blob/be926bb0d7511bd4e11519f794cd71df60454a31/config/v1/types_apiserver.go#L53-L59)
    to determine the allowed TLS versions and ciphers.
-4. It should support local authorization and always allow the well-known metrics
+4. It *SHOULD* support local authorization and *SHOULD* allow the well-known metrics
    scraping identity
    (`system:serviceaccount:openshift-monitoring:prometheus-k8s`) to access the
-   /metrics endpoint. It may support delegated authorization check.
+   /metrics endpoint. It *MAY* support [delegated
+   authorization](https://pkg.go.dev/k8s.io/apiserver/pkg/server/options#DelegatingAuthorizationOptions)
+   check via `SubjectAccessReview`s.
 
 The same requirements apply for operands managed by a core operator.
 
