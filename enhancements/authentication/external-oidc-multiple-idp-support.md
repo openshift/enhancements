@@ -264,9 +264,52 @@ As of writing this section, this includes but may not be limited to:
 - Adding new UI views to allow users to select which identity provider they would like to authenticate to the cluster with. When external OIDC providers are not configured, this is typically
 handled by the IntegratedOAuth server so we may be able to re-use an existing template here.
 
-TODO: Document decisions related to what changes are planned to be made to Console to support this effort.
+##### Console changes
 
-All changes to these components should be done behind the new feature gate to ensure we are not accidentally introducing regressions.
+###### Configuration Options
+
+In order to support communication with multiple identity providers, a new configuration flag, `--user-auth-oidc-providers-file`, is proposed.
+When specified, it will read the identity provider configurations from a file with a shape of:
+```yaml
+apiVersion: console.openshift.io/v1alpha1
+kind: ConsoleExternalOIDCProviders
+providers:
+  - name: "providerOne"
+    issuer:
+      url: "https://my.issuer.com"
+      caFile: "path/to/ca.crt"
+    client:
+      id: "console"
+      secretFile: "path/to/clientSecret"
+    scopes:
+      - "oidc"
+      - "email"
+    logoutRedirect: "..." # is this necessary for BYO?
+```
+
+This new configuration flag will only be able to be set when the existing `--user-auth` flag is set to `oidc`.
+It will not be able to be set alongside the existing `--user-auth-oidc-*` flags.
+
+###### Provider Selection Login UI
+
+Additionally, Console will be updated to now have a native login UI for selecting which provider a user can authenticate with.
+
+We will be working with UXD and the Console team to ensure that the new web page meets UX guidelines and requirements.
+
+Previously this logic was the responsibility of the OpenShift OAuth Server, so there is some prior art we can build off of here.
+
+##### Console Operator Changes
+
+The console operator controllers responsible for reacting to the external OIDC configuration changes in the `authentications.config.openshift.io` resource will
+be updated to read more than a single provider, generating the new configuration file for each provider it is configured as a client
+for.
+
+Once it has generated the new configuration file, it will be written to a `ConfigMap` that will be mounted to the console deployment.
+The deployment will be updated to set the `--user-auth-oidc-providers-file` flag to point to the path the `ConfigMap` is mounted.
+
+---
+
+All changes to these components will be done behind the new feature gate to ensure we are not accidentally introducing regressions.
 
 ### Risks and Mitigations
 
