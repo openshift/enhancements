@@ -284,7 +284,6 @@ providers:
     scopes:
       - "oidc"
       - "email"
-    logoutRedirect: "..." # is this necessary for BYO?
 ```
 
 This new configuration flag will only be able to be set when the existing `--user-auth` flag is set to `oidc`.
