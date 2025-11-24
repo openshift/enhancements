@@ -1,23 +1,23 @@
 ---
 title: optional-monitoring-capability
 authors:
-  - @rexagod
+  - "@rexagod"
 reviewers: # Include a comment about what domain expertise a reviewer is expected to bring and what area of the enhancement you expect them to focus on. For example: - "@networkguru, for networking aspects, please look at IP bootstrapping aspect"
-  - @simonpasquier # For monitoring aspects, please look at the overall design and the impact on existing monitoring stack
-  - @jan--f # For monitoring aspects, please look at the overall design and the impact on existing monitoring stack
-  - @wking # For CVO aspects, please look at the upgrade strategy and the overall impact and integration with CVO
-  - @everettraven # For API and enhancement process aspects, please look at the API design and the enhancement process followed
+  - "@simonpasquier" # For monitoring aspects, please look at the overall design and the impact on existing monitoring stack
+  - "@jan--f" # For monitoring aspects, please look at the overall design and the impact on existing monitoring stack
+  - "@wking" # For CVO aspects, please look at the upgrade strategy and the overall impact and integration with CVO
+  - "@everettraven" # For API and enhancement process aspects, please look at the API design and the enhancement process followed
 approvers: # A single approver is preferred, the role of the approver is to raise important questions, help ensure the enhancement receives reviews from all applicable areas/SMEs, and determine when consensus is achieved such that the EP can move forward to implementation.  Having multiple approvers makes it difficult to determine who is responsible for the actual approval.
-  - @everettraven
+  - "@everettraven"
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
-  - @simonpasquier # For CMO API aspects, please look at the API design and the impact on existing CMO API
-  - @jan--f # For CMO API aspects, please look at the API design and the impact on existing CMO API
+  - "@simonpasquier" # For CMO API aspects, please look at the API design and the impact on existing CMO API
+  - "@jan--f" # For CMO API aspects, please look at the API design and the impact on existing CMO API
 creation-date: 2025-10-26
 last-updated: 2025-10-26
 tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
-  - https://issues.redhat.com/browse/MON-4310
+  - "https://issues.redhat.com/browse/MON-4310"
 see-also:
-  - https://issues.redhat.com/browse/MON-4311 # "telemetry" collection profile epic
+  - "https://issues.redhat.com/browse/MON-4311" # "telemetry" collection profile epic
 ---
 
 <!--
