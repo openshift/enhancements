@@ -5,11 +5,12 @@ authors:
   - "@dgrisonnet"
   - "@flavianmissi"
 reviewers: # Include a comment about what domain expertise a reviewer is expected to bring and what area of the enhancement you expect them to focus on. For example: - "@networkguru, for networking aspects, please look at IP bootstrapping aspect"
+  - "@derekwaynecarr"
   - "@ibihim"
   - "@sjenning"
   - "@tkashem"
 approvers: # A single approver is preferred, the role of the approver is to raise important questions, help ensure the enhancement receives reviews from all applicable areas/SMEs, and determine when consensus is achieved such that the EP can move forward to implementation.  Having multiple approvers makes it difficult to determine who is responsible for the actual approval.
-  - "@sjenning"
+  - "@benluddy"
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
   - "@JoelSpeed"
 creation-date: 2025-10-17
@@ -149,12 +150,12 @@ lifecycle of the Key Encryption Key (KEK), including automatic rotation.
 
 #### Initial Resource Encryption
 
-1. The cluster admin creates an encryption key (KEK) in their cloud KMS of choice
+1. The cluster admin creates an encryption key (KEK) in their KMS of choice
 1. The cluster admin give the OpenShift apiservers access to the newly created
-   cloud KMS KEK
+   KMS KEK
 1. The cluster admiin updates the APIServer configuration resource, providing
    the necessary [encryption configuration options](encryption-cfg-opts) for
-   the cloud KMS of choice
+   the KMS of choice
 1. The cluster admin observes the `clusteroperator/kube-apiserver` resource
    for progress on the configuration change and encryption of existing resources
 
@@ -395,11 +396,11 @@ Data migration must happen in the following scenarios:
 
 * The cluster admin enables encryption in the cluster for the first time
 * The cluster admin updates the `KMSConfig` in APIServer config
-* The cloud KMS automatically rotates the KEK
+* The KMS automatically rotates the KEK
 * The cluster admin manually rotates the KEK
 
-KMS Key rotation does not change the identity of the key in the cloud KMS, it
-only changes the key materials, and in most cloud KMS providers it results in a
+KMS Key rotation does not change the identity of the key in the KMS, it
+only changes the key materials, and in most KMS providers it results in a
 new version of the same key. Despite that, KMS plugins are required to return a
 different `key_id` when the KMS key (KEK) is rotated.
 
@@ -472,60 +473,148 @@ sure.
 
 #### KMS Plugin Management
 
-Requirements:
-* apiservers must have access the unix socket for the kms plugin
-* running multiple instances of the kms plugin with different encryption
-  configuration
-* kms plugins must have access to cloud kms
+##### Requirements
 
-KMS plugins will be deployed as sidecar containers running along with each of
-OpenShift's apiservers.
+* API servers must have access to the Unix domain socket for the KMS plugin
+  (this can be achieve via Kubernetes Services)
+* Support running multiple instances of the KMS plugin with different
+  encryption configurations. This is required for KEK rotation
+* KMS plugins must be authorized to communicate with the KMS
+* KMS plugin lifecycle must be fully managed by OpenShift, including
+  reconciliation based on APIServer configuration changes
+* OpenShift must fully report on plugin status and health. This is expanded
+  under Recovery section (TODO: write recovery section)
 
-Library-go will contain the shared sidecar container specification, which all
-apiservers will base their plugin sidecar containers from.
+##### Implementation Approach
 
-Due to differences in deployment type, KMS plugin sidecar container for
-kube-apiserver will differ from those for the openshift and oauth apiservers.
+KMS plugins are deployed as **sidecar containers** running alongside each of
+OpenShift's API servers. Each of the 3 apiserver operators manages its own KMS
+plugin sidecar instance.
 
-| API Server          | Deployment Type | hostNetwork                    | IMDS Access                               |
-|---------------------|-----------------|--------------------------------|-------------------------------------------|
-| kube-apiserver      | Static Pod      | ✅ true                        | ✅ Direct access to EC2 instance IAM role |
-| openshift-apiserver | Deployment      | ❌ Not set (defaults to false) | ❌ No direct IMDS access                  |
-| oauth-apiserver     | Deployment      | ❌ Not set (defaults to false) | ❌ No direct IMDS access                  |
+**Deployment Architecture:**
 
-When `hostNetwork: true`, the control-plane IAM role must have permission to
-encrypt/decrypt objects in the cloud KMS. TODO: explain how this will be done.
+| API Server          | Deployment Type | hostNetwork | Volume Type | Credential Source | Managed By                              |
+|---------------------|-----------------|-------------|-------------|-------------------|-----------------------------------------|
+| kube-apiserver      | Static Pod      |    true     | hostPath    | TODO              | cluster-kube-apiserver-operator         |
+| openshift-apiserver | Deployment      |    false    | emptyDir    | TODO              | cluster-openshift-apiserver-operator    |
+| oauth-apiserver     | Deployment      |    false    | emptyDir    | TODO              | cluster-authentication-operator         |
 
-When `hostNetwork: false`, each apiserver IAM role must have permission to
-encrypt/decrypt objects in the cloud KMS. TODO: explain how this will be done.
+TODO: document vault and thales credential sources
 
+##### Shared library-go Components
 
-TODO: move the below to alternatives section
+The implementation leverages `library-go/pkg/operator/encryption/kms/` which
+provides:
 
-Alternatives:
-1. apiservers share a single instance of kms plugin, achievable through two variations:
-  a. kms plugin and kas-o share revisions
-  b. kms plugin revisions are independent of kas-o revisions
-2. apiservers have dedicated kms plugin instance, managed by their respective operators
+1. **Shared Container Specification**: `ContainerConfig` struct that
+   encapsulates KMS plugin container configuration
+2. **Volume Management**: Functions to create socket and credential volumes
+   based on deployment type
+3. **Pod Injection Logic**: `AddKMSPluginToPodSpec()` function that handles
+   sidecar injection
+4. **Socket Path Generation**: Builds Unix socket paths based on APIServer KMS
+   configuration
 
-**Option 1.a**
-Pros:
-* shared revision means kas-o and kms plugin encryption configuration will never drift
-* we don't have to think about alternative ways to deploy the kms plugin, there's only the static pod
-Cons:
-* other apiservers encryption configuration might drift
-* ?
-**Option 1.b**
-Pros:
-* we don't have to think about alternative ways to deploy the kms plugin, there's only the static pod
-* has the potential for avoiding downtime of kas during encryption config update, since we can ensure the encryption config update isn't rolled out until kms plugins are ready
-Cons:
-* apiservers encryption configuration might drift
-**Option 2**
-Pros:
-* shared revision between all apiservers and their respective kms plugin means config will never drift
-Cons:
-* kube-apiserver is a static pod, and the rest of openshift apiservers are regular pods managed by deployments means kms plugins pods cannot be static pods in all cases
+All three API server operators import and use these shared components, ensuring
+consistency across the platform.
+
+##### Configuration Detection
+
+All operators watch the cluster-scoped `config.openshift.io/v1 APIServer`
+resource. When `spec.encryption.type` is set to `"KMS"`, operators
+automatically inject the KMS plugin sidecar into their respective API server
+pods.
+
+The KMS plugin image is specified via the `KMS_PLUGIN_IMAGE` environment
+variable on each operator deployment.
+To fully automate the process of KMS plugin deployment, we will add supported
+KMS plugin images to the OpenShift release payload in GA.
+
+##### Credential Management
+
+**For kube-apiserver (Static Pod with hostNetwork: true):**
+
+The KMS plugin sidecar accesses AWS credentials through the EC2 Instance Metadata Service (IMDS). The master node's IAM role must have the following KMS permissions:
+
+```json
+{
+  "Effect": "Allow",
+  "Action": [
+    "kms:Encrypt",
+    "kms:Decrypt",
+    "kms:DescribeKey",
+    "kms:GenerateDataKey"
+  ],
+  "Resource": "<kms-key-arn>"
+}
+```
+
+Users are responsible for configuring the master node IAM role with these permissions. A helper script is provided in `library-go/pkg/operator/encryption/kms/master-node-iam-setup.sh`.
+
+**For openshift-apiserver and oauth-apiserver (Deployments with hostNetwork: false):**
+
+These API servers cannot access IMDS directly, so they use AWS credentials from Kubernetes Secrets created by the Cloud Credential Operator (CCO).
+
+CredentialsRequest resources are provided in `library-go/pkg/operator/encryption/kms/`:
+- `openshift-apiserver-kms-credentials-request.yaml`
+- `oauth-apiserver-kms-credentials-request.yaml`
+
+When CCO operates in **Mint mode**, it automatically creates IAM users and provisions the `kms-credentials` secret in each API server's namespace. The operators watch for these secrets and only inject the KMS plugin sidecar once the credentials are available.
+
+**Graceful Degradation:**
+If KMS encryption is enabled but credentials aren't ready, operators:
+1. Log a warning indicating credentials are pending
+2. Skip sidecar injection (return nil, not error)
+3. Allow the deployment to proceed without the KMS sidecar
+4. Automatically inject the sidecar on the next reconciliation when credentials become available
+
+This prevents blocking API server rollouts while waiting for CCO to provision credentials.
+
+##### Sidecar Injection Mechanism
+
+Each operator injects the KMS plugin sidecar at a specific point in its reconciliation loop:
+
+**kube-apiserver-operator:**
+- Injection point: `targetconfigcontroller.managePods()`
+- Modifies the static pod manifest before writing to the pod ConfigMap
+- Uses `hostPath` volume pointing to `/var/run/kmsplugin` on the host
+
+**openshift-apiserver-operator:**
+- Injection point: `workload.manageOpenShiftAPIServerDeployment_v311_00_to_latest()`
+- Modifies the deployment spec after setting input hashes
+- Uses `emptyDir` volume for socket isolation
+
+**authentication-operator (oauth-apiserver):**
+- Injection point: `workload.syncDeployment()`
+- Modifies the deployment spec after setting input hashes
+- Uses `emptyDir` volume for socket isolation
+
+##### Socket Communication
+
+The API server and KMS plugin communicate via a Unix domain socket:
+- **Socket path**: `/var/run/kmsplugin/socket.sock`
+- **Volume name**: `kms-plugin-socket`
+- **Protocol**: gRPC over Unix domain socket (KMS v2 API)
+
+The socket path can be customized based on the KMS configuration to support multiple concurrent KMS providers if needed.
+
+##### Reactivity and Updates
+
+All operators watch:
+1. **APIServer resource**: Triggers reconciliation when encryption type or KMS config changes
+2. **Secrets** (for Deployment-based API servers): Triggers reconciliation when credentials are created or updated
+3. **Operator environment variables**: `KMS_PLUGIN_IMAGE` changes trigger operator pod restart and subsequent sidecar updates
+
+When the `keyARN` is updated in the APIServer configuration:
+1. Operators detect the configuration change
+2. New deployment/static pod revision is created with updated KMS configuration
+3. Rolling update replaces old pods with new ones
+4. Old pods continue serving requests until new pods are ready
+5. No socket path conflicts occur due to pod-level volume isolation (emptyDir) or sequential rollout (static pods)
+
+##### Alternative Approaches Considered
+
+See the [Alternatives](#alternatives-not-implemented) section for details on shared KMS plugin deployment models that were not selected.
 
 
 ### Risks and Mitigations
@@ -534,7 +623,7 @@ Cons:
 
 TODO
 
-* Ensure cloud KMS key is configured with grace period after key deletion
+* Ensure KMS key is configured with grace period after key deletion
 * In-memory caches of the unencrypted DEK seed
 * Monitoring and alerts in place to detect when the KMS key has been deleted
   and not followed by a `key_id` change
