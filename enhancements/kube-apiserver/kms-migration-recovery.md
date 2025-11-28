@@ -13,8 +13,8 @@ approvers:
   - "@sjenning"
 api-approvers:
   - "None"
-creation-date: 2025-01-28
-last-updated: 2025-01-28
+creation-date: 2025-11-28
+last-updated: 2025-11-28
 tracking-link:
   - "https://issues.redhat.com/browse/OCPSTRAT-1638" # GA feature only
 see-also:

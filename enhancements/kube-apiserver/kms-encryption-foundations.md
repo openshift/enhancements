@@ -13,8 +13,8 @@ approvers:
   - "@benluddy"
 api-approvers:
   - "@JoelSpeed"
-creation-date: 2025-01-28
-last-updated: 2025-01-28
+creation-date: 2025-11-28
+last-updated: 2025-11-28
 tracking-link:
   - "https://issues.redhat.com/browse/OCPSTRAT-108"
 see-also:
