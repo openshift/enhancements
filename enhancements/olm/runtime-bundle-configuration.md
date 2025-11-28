@@ -139,9 +139,15 @@ issue, e.g.:
 - User provides configuration but the bundle does not support configuration
 - User does not provide required configuration fields
 - User provides configuration keys that are not existent
-- Bundle does not provide a configuration schema
+- User provides configuration but bundle does not provide a configuration schema
 
 ### registry+v1 Bundle Configuration Generation, Validation and Handling
+
+registry+v1 bundles do not carry a configuration schema and expecting the schema to exist in the FBC would mean only 
+those catalogs that have been updated to carry this information would benefit from the changes proposed by this enhancement. 
+Therefore, the decision was made to have OLM derive the configuration by observing the bundle configuration. 
+It is possible that this logic moves to the catalog layer. But, since other bundle sources are envisioned (e.g. direct bundle install), 
+for a first take, the following changes will go in the runtime:
 
 1. Update the registry+v1 manifest provisioning layer to generate a configuration schema for the bundle
 2. Update the registry+v1 manifest provisioning layer to validate user provided configuration against the generated schema returning any failures (and thereby aborting the operation)
@@ -150,7 +156,7 @@ issue, e.g.:
 ### Workflow Description
 
 The standard OLMv1 installation and upgrade workflows stay largely the same. Where it will differ is:
-- users will need to consult documentation to understand how packages/bundles can be configured.
+- users will need to consult the OpenShift documentation to understand how packages/bundles can be configured.
 - users will be able to specify inline bundle configuration on `.spec.config.inline`.
 - install/upgrade operations will be halted if the provided configuration does not meet the bundle provided configuration schema. Errors will be surfaced through the `Progressing` condition outlining the issue, e.g. `invalid bundle configuration: unknown key 'foo'`, or `invalid bundle configuration: missing required key 'bar'`.
 - users will be able to update configuration for currently installed content.
@@ -213,7 +219,10 @@ First, one must determine the version to rollback to.
 If the ClusterExtension attempted an upgrade and is in a failed state, `.status.install` should report the version
 of the installed bundle. If the current version was successfully installed in a way that violates the user intent, e.g.
 there was a non-detectable breaking change in configuration behavior between bundle versions, then, at present, one needs
-to consult the catalog and walk the upgrade graph backwards from the currently installed version.
+to consult the catalog and walk the upgrade graph backwards from the currently installed version. 
+The [opm tool](https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html/cli_tools/opm-cli) can
+be used to help facilitate this task. The undocumented `opm alpha render-graph` command can also be used to provide a 
+visual representation of the upgrade graph for a particular package and channel.
 
 Once the target version is determined, a rollback can be done by updating the desired version in the target
 ClusterExtension and using the `SelfCertified` upgrade policy in the catalog source config, e.g.:
@@ -269,14 +278,15 @@ type ClusterExtensionConfig struct {
 	ConfigType ClusterExtensionConfigType `json:"configType"`
 
 	// inline contains JSON or YAML values specified directly in the
-	// ClusterExtension.
-	//
-	// inline must be set if configType is 'Inline'.
-	// inline accepts arbitrary JSON/YAML objects.
-	// inline is validation at runtime against the schema provided by the bundle if a schema is provided.
-	//
-	// +kubebuilder:validation:Type=object
-	// +optional
+    // ClusterExtension.
+    //
+    // inline is used to specify arbitrary configuration values for the ClusterExtension.
+    // It must be set if configType is 'Inline' and must be a valid JSON/YAML object.
+    // The configuration values are validated at runtime against a JSON schema provided by the bundle.
+    //
+    // +kubebuilder:validation:Type=object
+    // +optional
+    // +unionMember
 	Inline *apiextensionsv1.JSON `json:"inline,omitempty"`
 }
 ```
@@ -326,9 +336,14 @@ The OLMv1 runtime will operate over a bundle interface that will be common to th
 different formats differently for the purposes of life-cycling. It cares only about generating the required manifests,
 and organizing them in a way that it can lifecycle the application. As such, the interface should be generic and not
 leak underlying format specific details. The bundle rendering engine should consume opaque configuration, the bundle
-interface should provide a configuration schema in JSON Schema format, and rendering will only take place if the
-configuration **strictly** adheres to the provided schema, i.e. no additional keys, required fields are set, field value
-constraints are observed, etc.
+interface should provide a configuration schema as a [JSON Schema](https://json-schema.org/) format, 
+and rendering will only take place if the configuration **strictly** adheres to the provided schema, i.e. no additional 
+keys, required fields are set, field value constraints are observed, etc. 
+
+The JSON Schema format is most widely used in its [draft-07](https://json-schema.org/draft-07) specification and boasts
+wide coverage across tools, libraries and ecosystems. The latest specification, [2020-12](https://json-schema.org/draft/2020-12), 
+is slowly growing in popularity. Therefore, additional specification may also need to be supported in the future to meet
+author needs.
 
 Taking this approach also means that the configuration schema should be treated like an API surface by the authors
 which should ensure it is not broken between minor and patch versions. Breaking changes detectable by the schema will
@@ -413,11 +428,9 @@ Below are examples for what the JSON-Schemas may look like:
   "type": "object",
   "properties": {
     "watchNamespace": {
-      "type": ["string", "null"],
-      "format": "namespaceName",
-      "not": {
-        "const": "{{ .installNamespace }}"
-      }
+      "watchNamespace": {
+      "format": "notInstallNamespace",
+      "type": ["string", null],
     }
   }
 }
@@ -431,16 +444,18 @@ Below are examples for what the JSON-Schemas may look like:
   "type": "object",
   "properties": {
     "watchNamespace": {
-      "format": "namespaceName",
-      "enum": ["{{ .installNamespace }}", null]
+      "format": "installNamespace",
+      "type": ["string", null],
     }
   }
 }
 ```
 
 Notes:
-- The value of `{{ .installNamespace }}` is replaced by the value of `.spec.namespace` in the `ClusterExtension`.
 - `namespaceName` is an internally defined format that validates namespace name inputs. It is not a standard format.
+- `installNamespace` is an internally defined format that validates that the input is a valid namespace name and matches the install namespace.
+- `notInstallNamespace` is an internally defined format that validates that the input is a valid namespace name and does not match the install namespace.
+- The custom formats are used by the jsonschema library to validate the inputs. 
 
 #### registry+v1 Bundle Renderer Changes
 
@@ -528,12 +543,13 @@ which could be undesirable. With default configuration support, we could detect 
 and stop the flow until the user explicitly adds the configuration selecting the desired behavior mode.
 
 *Mitigations*:
-Design the configuration schema for the bundle in a way that it breaks if the default behavior changes. E.g. in the
-hypothetical case above, the bundle configuration schema would have a required field `behaviorMode` that can only take
-the value `Simple`.
-
-Note: While OLMv1 only has support for registry+v1 bundles, this is a limitation we can live with. However, this
-support will be added by a future enhancement when we start to roll out Helm content support.
+Require configuration from the user even when it feels superfluous. The configuration schema would always need to be 
+designed to allow for changes without breaking the API. The lack of default configuration would make the case above
+a bit jarring for the user because they would need to specify a behavior mode even though there's only one to choose from.
+While OLMv1 only has support for registry+v1 bundles, this is a limitation we can live with. That is, there are very few, 
+if any, bundles that _only_ support OwnNamespace and that would require users to specify the watchNamespace even though,
+ logically, it could only be the install namespace.
+However, support default values will be added by a future enhancement when we start to roll out Helm content support.
 
 #### 6. Silent Switch in Default on Downgrade
 
@@ -543,7 +559,6 @@ Because the configuration won't be applied to the bundle, it will be installed w
 Which for registry+v1 bundles is `AllNamespaces` mode.
 
 *Mitigation*: This will need to be called out in documentation.
-
 
 ### Drawbacks
 
@@ -642,6 +657,13 @@ Operators installed in Single/OwnNamespace modes have reduced blast radius compa
 | **Security Boundaries**             | Medium | Explicit validation of namespace permissions; RBAC properly scoped                                                      |
 | **Feature Proliferation**           | Low    | Clear documentation that this is for legacy compatibility only                                                          |
 | **Unintended Install Mode Changes** | High   | Mandatory `watchNamespace` configuration for namespace-scoped bundles prevents automatic mode switching during upgrades |
+
+#### 7. JSON Schema 2020-12 Specification Support
+
+The latest specification of the JSON Schema format is slowly gaining popularity though it does not quite have the same
+tooling and library support as draft-07. In the future, we might want to add support for the latest specification if
+there is sufficient demand for users. This would be an additive change to the architecture that would only require
+the jsonschema library to understand the latest specification.
 
 ## Test Plan
 
