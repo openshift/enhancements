@@ -1,5 +1,5 @@
 ---
-title: Configurable PKI for OpenShift Internal Certificates
+title: internal-pki-config
 authors:
   - "@jubittajohn"
   - "@sanchezl"
@@ -11,13 +11,13 @@ reviewers:
   - "@hasbro17" # etcd team, etcd certificate configuration and rotation
   - "@dusk125"  # etcd team, etcd certificate configuration and rotation
   - "@p0lyn0mial" # authentication team, service-ca and client certificate management
-  - TBD # security team, PKI architecture and certificate lifecycle management
+#  - TBD # security team, PKI architecture and certificate lifecycle management
 approvers:
   - "@sjenning" # staff engineer with PKI and security expertise
 api-approvers:
   - "@JoelSpeed" # new API in config.openshift.io/v1alpha1
 creation-date: 2025-10-20
-last-updated: 2025-10-29
+last-updated: 2025-12-01
 tracking-link:
   - https://issues.redhat.com/browse/OCPSTRAT-2271
   - https://issues.redhat.com/browse/CNTRLPLANE-1735
