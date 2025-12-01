@@ -27,7 +27,8 @@ superseded-by: []
 
 ## Summary
 
-This enhancement adds an optional `release` field to the CSV specification, enabling structured release-level versioning within operator bundles. OLM will use this field when ordering multiple bundles for the same operator. 
+This enhancement adds an optional `release` field to the CSV specification, enabling structured release-level versioning within operator bundles. `opm` FBC tooling will leverage this field with catalog templates and heed the field in version comparisons.
+OLM will use this field when ordering multiple bundles for the same operator.
 
 ## Motivation
 
@@ -61,11 +62,19 @@ FBC lacks a standardized mechanism for operator repackaging. Current approaches 
 ### Workflow Description
 
 Operator authors can optionally specify a `release` field alongside the `version` field in the CSV, representing release-level versioning distinct from semantic version.
+This field format must
+- be fewer than 20 characters long
+- be composed of dot-separated identifiers consisting only of alphanumerics and hyphens
+This composition matches the definition of the semver [pre-release](https://semver.org/#spec-item-9) version encoding, but imposes an additional limit of 20 characters in an attempt to ensure that CSV metadata.name including the release version will continue to satisfy DNS1123 label validation.
+Release precedence shall adhere to semver [pre-release ordering](https://semver.org/#spec-item-9) when comparing release fields, but contrary to semver pre-release ordering, bundles with a release field have _higher_ precedence than bundles without a release field.
+The release field may not be combined with other approaches (see Backwards Compatibility).
+Any encoded build metadata in the version shall be retained as build metadata and shall not be interpreted as either a release field or a contribution to a release field.
+
 
 **Priority Ordering:** When OLM selects between multiple bundles:
 1. Semantic `version` field remains primary
-2. Higher `release` values ordered before lower values
-3. Bundles with `release` values ordered before those without
+2. Higher `release` field ordered before lower values
+3. Bundles with `release` field ordered before those without
 
 **Explicit Release Specification:**
 
@@ -98,7 +107,8 @@ properties:
 
 **Backward Compatibility:**
 
-Bundles with `olm.substitutesFor` annotation and semver build metadata (e.g., `7.10.2-opr-2+0.1676475747.p`) automatically extract release information from build metadata.
+Bundles without release field, but _with_ `olm.substitutesFor` annotation and semver build metadata (e.g., `7.10.2-opr-1+0.1747217191.p`) shall automatically extract release information.
+The presence of both `olm.substitutesFor` and release field in a bundle is a fatal error.
 ```yaml
 apiVersion: operators.coreos.com/v1alpha1
 kind: ClusterServiceVersion
@@ -114,12 +124,15 @@ spec:
 The same bundle now populates both fields:
 ```yaml
 schema: olm.bundle
-name: amq-broker-rhel8.v7.10.2-opr-2+0.1676475747.p
-type: olm.package
-value:
-  packageName: amq-broker-rhel8
-  version: 7.10.2-opr-2
-  release: 0.1676475747.p
+name: amq-broker-rhel8.v7.10.2-opr-1-0.1747217191.p
+...
+properties:
+  - type: olm.package
+    value:
+      packageName: amq-broker-rhel8
+      version: 7.10.2-opr-1
+      release: 0.1747217191.p
+...
 ```
 
 Build metadata (everything after `+`) is extracted as release version when `olm.substitutesFor` annotation is present.
@@ -147,7 +160,7 @@ The proposed change should have no specific impact to SNO/MicroShift clusters.
 
 ### API Extensions
 
-Adds optional `release` field to FBC package schema in operator-registry declcfg format. Pure additive change—no CRDs, webhooks, or finalizers modified. Change confined to bundle metadata schema in FBC catalogs and operator-registry databases.
+Adds optional `release` field to bundle/catalog schemas:  CSV in operator-framework/api, and `olm.bundle` in operator-framework/operator-registry. Pure additive change—no CRDs, webhooks, or finalizers modified. Change confined to bundle metadata schema in FBC catalogs and operator-registry databases.
 
 ### Implementation Details/Notes/Constraints
 
@@ -168,11 +181,7 @@ type Package struct {
 Hierarchical extraction strategy ([operator-registry PR #1792](https://github.com/operator-framework/operator-registry/pull/1792)):
 
 1. Primary: Extract from CSV `spec.release` field
-2. Fallback: Parse from version build metadata (portion after `+`)
-3. Validate using semver prerelease syntax
-4. Fatal error if `olm.substitutesFor` present but build metadata invalid
-
-Build metadata processing: extract, validate, populate `release` field, clean `version` field.
+2. Fallback: If `olm.substitutesFor` annotation present, parse from version build metadata (portion after `+`), validate, populate `release` field, clean `version` field.
 
 **Priority Comparison:**
 
@@ -255,12 +264,14 @@ Three-phase implementation:
 - Ensure OLMv0 gracefully handles bundles with release fields
 - Maintain backward compatibility (passive support only, no feature gate)
 - Validate existing workflows unchanged
+- Ensure that existing semver comparisons order bundles by version+release fields
 
 **Deliverables:**
 - [ ] Verify OLMv0 catalog-operator ignores release field without errors
 - [ ] Confirm CSVs with release processed normally
 - [ ] Regression testing for Freshmaker-style bundles
 - [ ] Documentation noting OLMv0 won't use release for prioritization
+- [ ] Verify OLMv0 orders successors according to the version+release fields when not using Skip/Replaces graph mechanics
 
 **Dependencies:** Phase 1
 
@@ -291,7 +302,7 @@ Three-phase implementation:
 **Mitigation:** Automatic extraction from Freshmaker-style bundles ensures consistent representation. Hierarchical extraction (spec.release → build metadata) provides predictable behavior.
 
 **Risk:** Fatal errors processing `olm.substitutesFor` bundles with invalid build metadata.
-**Mitigation:** Semver prerelease validation with clear error messages prevents silent failures.
+**Mitigation:** Semver prerelease validation with clear error messages prevents silent failures.  Existing default catalogs already contain compliant content. Conflicts where both approaches are attempted fail early validity checks.
 
 **Risk:** Inconsistent version display across tools/UIs.
 **Mitigation:** Extraction and rendering centralized in operator-registry. `opm render` normalizes representation.
@@ -424,7 +435,7 @@ Benefits (cleaner separation, programmatic access, readability, Freshmaker suppo
 
 ### Removing a deprecated feature
 
-Freshmaker is only used with SQLite-based legacy catalogs, so it will never be encountered in the FBC future.
+After all supported OCP versions have this feature present, then we can deprecate the backwards compatibility mode for older release versioning.
 
 ## Upgrade / Downgrade Strategy
 
@@ -463,6 +474,12 @@ Release field entirely optional—unknown components ignore it.
 - Mixed environments: Components handle bundles per their version
 
 No failures or inconsistent behavior during upgrades.
+
+**Adoption Guidelines:**
+Existing teams' adoption of the new functionality is predicated on the destination OCP versions' support for release version functionality.
+- If all destinations support release versions, then authors can simply support discrete release versions.
+- If not all destinations support release versions, and the team is not reliant on release version information in older versions of OLM (both v0 and v1), then they can support discrete release versions.
+- If not all detinations support release versions AND authors desire support for release versioning in older versions of OLM, then they should implement release versioning via build metadata, and include the `olm.substitutesFor` annotations in FBC for all target OCP versions.
 
 ## Operational Aspects of API Extensions
 
