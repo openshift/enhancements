@@ -58,7 +58,7 @@ Extend the ControllerConfig API with a new componentConfig field for per-compone
 
 ### Implementation Details/Notes/Constraints
 
-#### API Extensions
+### API Extensions
 
 ```go
 // ComponentConfig represents component-specific configuration overrides.
@@ -229,6 +229,10 @@ Not applicable.
 ## Alternatives (Not Implemented)
 
 * **Validating Webhook for Argument Semantics:** A validating admission webhook could be implemented to perform semantic validation of override values against upstream external-secrets component schemas. This would provide pre-flight validation of override keys and semantic values, enabling the early rejection of invalid configurations before deployment rollout, and offering user-friendly error messages. This could be reconsidered in future iterations if runtime validation failures (due to invalid values for supported keys) become a significant operational burden.
+
+## Version Skew Strategy
+
+NA
 
 ## Operational Aspects of API Extensions
 
