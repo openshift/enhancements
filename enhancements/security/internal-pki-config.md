@@ -349,7 +349,40 @@ type CategoryCertificateConfig struct {
     Certificate CertificateConfig `json:"certificate"`
 }
 
-// +kubebuilder:validation:XValidation:rule="self.certificateName in ['admin-kubeconfig-signer', 'kubelet-bootstrap-kubeconfig-signer', 'kube-apiserver-localhost-signer', 'kube-apiserver-service-network-signer', 'kube-apiserver-lb-signer', 'root-ca', 'kube-apiserver-to-kubelet-signer', 'kube-control-plane-signer', 'aggregator-signer', 'kubelet-signer', 'aggregator-ca', 'etcd-signer', 'etcd-metrics-signer', 'service-ca', 'csr-signer-ca', 'kube-apiserver-localhost-server', 'kube-apiserver-service-network-server', 'kube-apiserver-lb-server', 'kube-apiserver-internal-lb-server', 'machine-config-server', 'ironic-server', 'etcd-peer-server', 'etcd-server', 'etcd-metrics-server', 'admin-kubeconfig-client', 'kubelet-client', 'kube-apiserver-to-kubelet-client', 'kube-control-plane-kube-controller-manager-client', 'kube-control-plane-kube-scheduler-client', 'aggregator-client', 'apiserver-proxy-client', 'journal-gatewayd-client']",message="certificateName must be a well-known certificate name"
+// +kubebuilder:validation:XValidation:rule="self.certificateName in [
+//   'admin-kubeconfig-signer',
+//   'kubelet-bootstrap-kubeconfig-signer',
+//   'kube-apiserver-localhost-signer',
+//   'kube-apiserver-service-network-signer',
+//   'kube-apiserver-lb-signer',
+//   'root-ca',
+//   'kube-apiserver-to-kubelet-signer',
+//   'kube-control-plane-signer',
+//   'aggregator-signer',
+//   'kubelet-signer',
+//   'aggregator-ca',
+//   'etcd-signer',
+//   'etcd-metrics-signer',
+//   'service-ca',
+//   'csr-signer-ca',
+//   'kube-apiserver-localhost-server',
+//   'kube-apiserver-service-network-server',
+//   'kube-apiserver-lb-server',
+//   'kube-apiserver-internal-lb-server',
+//   'machine-config-server',
+//   'ironic-server',
+//   'etcd-peer-server',
+//   'etcd-server',
+//   'etcd-metrics-server',
+//   'admin-kubeconfig-client',
+//   'kubelet-client',
+//   'kube-apiserver-to-kubelet-client',
+//   'kube-control-plane-kube-controller-manager-client',
+//   'kube-control-plane-kube-scheduler-client',
+//   'aggregator-client',
+//   'apiserver-proxy-client',
+//   'journal-gatewayd-client',
+// ]",message="certificateName must be a well-known certificate name"
 type CertificateOverride struct {
     // certificateName identifies a specific certificate to configure.
     // The name must match a well-known certificate name in the cluster.
