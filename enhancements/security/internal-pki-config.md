@@ -349,12 +349,12 @@ type CategoryCertificateConfig struct {
     Certificate CertificateConfig `json:"certificate"`
 }
 
-// +kubebuilder:validation:XValidation:rule="self.certificateName in ['kube-apiserver-to-kubelet-signer', 'kube-control-plane-signer', 'kube-apiserver-server-ca', 'etcd-signer', 'service-ca', 'kubelet-serving-ca', 'etcd-serving-ca', 'kube-apiserver-client-ca', 'csr-signer-ca', 'admin-kubeconfig-signer', 'kubelet-bootstrap-kubeconfig-signer']",message="certificateName must be a well-known certificate name"
+// +kubebuilder:validation:XValidation:rule="self.certificateName in ['admin-kubeconfig-signer', 'kubelet-bootstrap-kubeconfig-signer', 'kube-apiserver-localhost-signer', 'kube-apiserver-service-network-signer', 'kube-apiserver-lb-signer', 'root-ca', 'kube-apiserver-to-kubelet-signer', 'kube-control-plane-signer', 'aggregator-signer', 'kubelet-signer', 'aggregator-ca', 'etcd-signer', 'etcd-metrics-signer', 'service-ca', 'csr-signer-ca', 'kube-apiserver-localhost-server', 'kube-apiserver-service-network-server', 'kube-apiserver-lb-server', 'kube-apiserver-internal-lb-server', 'machine-config-server', 'ironic-server', 'etcd-peer-server', 'etcd-server', 'etcd-metrics-server', 'admin-kubeconfig-client', 'kubelet-client', 'kube-apiserver-to-kubelet-client', 'kube-control-plane-kube-controller-manager-client', 'kube-control-plane-kube-scheduler-client', 'aggregator-client', 'apiserver-proxy-client', 'journal-gatewayd-client']",message="certificateName must be a well-known certificate name"
 type CertificateOverride struct {
     // certificateName identifies a specific certificate to configure.
     // The name must match a well-known certificate name in the cluster.
-    // Examples: "etcd-signer", "kube-apiserver-to-kubelet-signer",
-    // "kubelet-serving-ca", "service-ca"
+    // Examples: "kube-apiserver-to-kubelet-signer", "kube-apiserver-localhost-server",
+    // "admin-kubeconfig-client", "etcd-signer", "service-ca"
     // +kubebuilder:validation:Required
     // +kubebuilder:validation:MinLength=1
     CertificateName string `json:"certificateName"`
@@ -410,22 +410,63 @@ type PKIList struct {
 
 #### Well-Known Certificate Names
 
-The following well-known signer certificate names can be used in `overrides` for fine-grained configuration. All of these are in the `SignerCertificate` category:
+The following well-known certificate names can be used in `overrides` for fine-grained configuration.
 
-**Signer Certificates:**
-- `kube-apiserver-to-kubelet-signer` - Signs kubelet client certificates used for API server to kubelet communication
-- `kube-control-plane-signer` - Signs control plane component client certificates
-- `kube-apiserver-server-ca` - Signs API server serving certificates
-- `etcd-signer` - Signs etcd peer and client certificates
+##### Signer Certificates (Category: SignerCertificate)
+
+These CA certificates directly sign serving or client certificates. Note that OpenShift uses a flat PKI topology rather than a hierarchical CA model.
+
+- `admin-kubeconfig-signer` - Signs admin kubeconfig client certificates (CN: admin-kubeconfig-signer)
+- `kubelet-bootstrap-kubeconfig-signer` - Signs kubelet bootstrap kubeconfig client certificates (CN: kubelet-bootstrap-kubeconfig-signer)
+- `kube-apiserver-localhost-signer` - Signs kube-apiserver localhost serving certificates (CN: kube-apiserver-localhost-signer)
+- `kube-apiserver-service-network-signer` - Signs kube-apiserver service network serving certificates (CN: kube-apiserver-service-network-signer)
+- `kube-apiserver-lb-signer` - Signs kube-apiserver load balancer serving certificates (CN: kube-apiserver-lb-signer)
+- `root-ca` - Machine Config Server Root CA, private key discarded after installation (CN: root-ca)
+- `kube-apiserver-to-kubelet-signer` - Signs kube-apiserver to kubelet client certificates (CN: kube-apiserver-to-kubelet-signer)
+- `kube-control-plane-signer` - Signs control plane component client certificates (CN: kube-control-plane-signer)
+- `aggregator-signer` - Signs aggregator client certificates for API server extension (CN: aggregator-signer)
+- `kubelet-signer` - Signs kubelet client certificates (CN: kubelet-signer)
+- `aggregator-ca` - Deprecated aggregator CA, replaced by aggregator-signer (CN: aggregator)
+- `etcd-signer` - Signs etcd peer and client certificates (managed by cluster-etcd-operator)
+- `etcd-metrics-signer` - Signs etcd metrics serving certificates (managed by cluster-etcd-operator)
 - `service-ca` - Signs service serving certificates (managed by service-ca-operator)
-- `kubelet-serving-ca` - Signs kubelet serving certificates
-- `etcd-serving-ca` - Signs etcd serving certificates (may be same as etcd-signer in some configurations)
-- `kube-apiserver-client-ca` - Signs client certificates for API server authentication
-- `csr-signer-ca` - Signs certificate signing requests submitted via the Kubernetes CSR API
-- `admin-kubeconfig-signer` - Signs admin kubeconfig client certificates
-- `kubelet-bootstrap-kubeconfig-signer` - Signs bootstrap kubeconfig for kubelet authentication
+- `csr-signer-ca` - Signs certificate signing requests via Kubernetes CSR API (managed by cluster-kube-controller-manager-operator)
 
-This list will be documented and may be extended in future releases. Note that OpenShift's flat PKI topology means all of these signers directly sign leaf (serving or client) certificates rather than forming a hierarchical chain.
+##### Serving Certificates (Category: ServingCertificate)
+
+Serving certificates present server identity during TLS handshakes.
+
+- `kube-apiserver-localhost-server` - Localhost SNI endpoint (CN: system:kube-apiserver, O: kube-master)
+- `kube-apiserver-service-network-server` - Service network SNI endpoint (CN: system:kube-apiserver, O: kube-master)
+- `kube-apiserver-lb-server` - External load balancer SNI endpoint (CN: system:kube-apiserver, O: kube-master)
+- `kube-apiserver-internal-lb-server` - Internal load balancer SNI endpoint (CN: system:kube-apiserver, O: kube-master)
+- `machine-config-server` - Machine Config Server serving certificate (CN: system:machine-config-server)
+- `ironic-server` - Ironic TLS for bare metal installations, platform-specific (CN: ironic)
+- `etcd-peer-server` - etcd peer communication (managed by cluster-etcd-operator)
+- `etcd-server` - etcd client connections (managed by cluster-etcd-operator)
+- `etcd-metrics-server` - etcd metrics endpoint (managed by cluster-etcd-operator)
+
+##### Client Certificates (Category: ClientCertificate)
+
+Client certificates authenticate clients to servers.
+
+- `admin-kubeconfig-client` - Admin authentication to kube-apiserver (CN: system:admin, O: system:masters)
+- `kubelet-client` - Kubelet bootstrap authentication (CN: system:serviceaccount:openshift-machine-config-operator:node-bootstrapper)
+- `kube-apiserver-to-kubelet-client` - API server authentication to kubelet (CN: system:kube-apiserver, O: kube-master)
+- `kube-control-plane-kube-controller-manager-client` - Controller manager authentication (CN: system:admin, O: system:masters)
+- `kube-control-plane-kube-scheduler-client` - Scheduler authentication (CN: system:admin, O: system:masters)
+- `aggregator-client` - API server aggregation proxy (CN: system:kube-apiserver-proxy, O: kube-master)
+- `apiserver-proxy-client` - Deprecated aggregator proxy (CN: system:kube-apiserver-proxy, O: kube-master)
+- `journal-gatewayd-client` - Journal gateway on bootstrap node (CN: journal-gatewayd, O: OpenShift Bootstrap)
+
+**Note on Certificate Names:**
+
+- This list currently mainly reflects certificates generated by the OpenShift installer; additional certificates are generated by cluster operators
+- Certificate names may be extended in future releases as operators adopt the PKI configuration API
+
+**Validation:**
+
+The API uses CEL validation to ensure `certificateName` matches a well-known certificate name. The validation rule includes all installer-generated certificates listed above.
 
 ### Topology Considerations
 
