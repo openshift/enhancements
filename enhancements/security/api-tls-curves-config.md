@@ -107,7 +107,7 @@ N/A
 There is a case where the administrator could incorrectly specificy a set of ciphersuites
 that do not work with each other. For example using an RSA ciphersuite with a ECDHE curve (such as TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256 and P-256). The default behavior OpenSSL as well as go's crypto/tls (both used extensively in OpenShift) is to fail at **TLS handshake time**. . The TLS server instance will start normally, but when TLS clients attempt to handshake with the TLS server, the handshake will fail with a `handshake failure`
 
-I propose that this is the *desired* behavior of OpenShift. Administrators that utilize the custom TLS profile are foregoing the guaranteed correctly configured TLS profiles (such as Modern, Intermediate, etc.) and the system should comply accordingly. The landscape of TLS is constantly evolving and relying on the TLS implementation (Openssl, golang crypto/tls, etc) itself provides users more flexibility. Adding a validation system on top as part of the OpenShift would be cumbersome and restricts admins to use what we deem compatible rather than what the underylying TLS implementation is capable of.
+To avoid this scenario, OpenShift should implement validation to prevent known invalid combinations. A validation layer will be added to check for compatible combinations of curves and ciphersuites. If a known invalid combination is detected, the configuration will be rejected, informing the user of the incompatibility immediately rather than failing at runtime.
 
 ### Risks and Mitigations
 
@@ -125,7 +125,7 @@ N/A
 
 ## Open Questions [optional]
 
-1. I propose that we should *not* include a validation system for custom TLS configurations. See "Proposal" for more context. However, this restricts the ability to ensure that the TLS config works when a new config is set, instead relying on failed handshakes to clue the administator in on any issues. There could also be "skew" between the supported curves and ciphers of the various TLS implementations utilized within OpenShift. This could make it difficult to reason about the state of the TLS capabilities of the cluster. Any thoughts?
+N/A
 
 ## Test Plan
 
