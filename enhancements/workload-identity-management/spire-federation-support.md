@@ -281,19 +281,15 @@ type AcmeConfig struct {
 	TosAccepted string `json:"tosAccepted,omitempty"`
 }
 
-// ServingCertConfig references a Secret containing TLS certificate
+// ServingCertConfig configures TLS certificates for the federation endpoint.
+// The service CA certificate is always used for internal communication from the Route to the
+// SPIRE server pod. For external communication from clients to the Route, the certificate is
+// controlled by ExternalSecretRef.
 type ServingCertConfig struct {
-	// SecretName is the name of the Secret containing tls.crt and tls.key
-	// The secret must be in the same namespace where the operator and operands are deployed.
-	// The secret must contain tls.crt and tls.key fields.
-	// If not specified, defaults to the service CA certificate (spire-server-serving-cert).
-	// +kubebuilder:validation:Optional
-	SecretName string `json:"secretName,omitempty"`
-
 	// FileSyncInterval is how often to check for certificate updates (seconds)
-	// +kubebuilder:validation:Minimum=300
-	// +kubebuilder:validation:Maximum=86400
-	// +kubebuilder:default=3600
+	// +kubebuilder:validation:Minimum=3600
+	// +kubebuilder:validation:Maximum=7776000
+	// +kubebuilder:default=86400
 	FileSyncInterval int32 `json:"fileSyncInterval,omitempty"`
 
 	// ExternalSecretRef is a reference to an externally managed secret that contains
@@ -398,6 +394,7 @@ Example generated `server.conf` with federation:
     - **https_spiffe**: MUST use passthrough route. Reencrypt will fail due to: (a) client validation expecting SPIFFE ID in URI SAN which router certificates lack, (b) client trusting only SPIRE CA not OpenShift ingress operator CA, and (c) frequent SPIRE CA rotation (~20h) making destinationCACertificate maintenance impossible.
     - **https_web with ACME**: MUST use passthrough route. Reencrypt will fail because ACME validation requires direct SNI passthrough to SPIRE server. Router TLS termination loses original SNI, causing ACME challenges to fail.
     - **https_web with servingCert**: CAN use passthrough or reencrypt (when externalSecretRef configured). Passthrough requires certificate with external DNS name. Reencrypt allows separate backend and edge certificates.
+5. **Federation Bundle Endpoint Immutability**: Once configured, the Federation Bundle Endpoint **CANNOT** be removed or un-exposed during Day-2 operations. The API validation prevents removal of the `bundleEndpoint` configuration to ensure system stability, as this endpoint serves as the critical trust anchor for all federated peers. Users wishing to disable federation completely MUST uninstall and reinstall the system; however, peer configurations (federatesWith) remain dynamic and CAN be added or removed at any time.
 
 ### Risks and Mitigations
 
