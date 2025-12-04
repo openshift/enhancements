@@ -98,7 +98,8 @@ N/A
 
 #### Single-node Deployments or MicroShift
 
-N/A
+This change will effect the TLS profile of both single node and microshift deployments.
+
 
 
 ### Implementation Details/Notes/Constraints
