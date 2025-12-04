@@ -88,8 +88,7 @@ spec:
 
 #### Hypershift / Hosted Control Planes
 
-N/A
-
+Hypershift [does not currently consume custom TLS supported groups](https://github.com/openshift/hypershift/blob/6b0338c192c966a9c072bfc6af45202739e9e553/support/config/cipher.go#L30). However, this is planned in the future.
 
 #### Standalone Clusters
 
@@ -99,8 +98,6 @@ N/A
 #### Single-node Deployments or MicroShift
 
 This change will effect the TLS profile of both single node and microshift deployments.
-
-
 
 ### Implementation Details/Notes/Constraints
 
