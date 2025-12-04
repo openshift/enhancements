@@ -101,6 +101,9 @@ This change will effect the TLS profile of both single node and microshift deplo
 
 ### Implementation Details/Notes/Constraints
 
+#### Default curve configuration
+The [default openshift TLS profiles](https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html/security_and_compliance/tls-security-profiles#tls-profiles-understanding_tls-security-profiles) do not currently have a default set of curves. However, the default Mozilla TLS profiles (which openshift TLS profiles are based on) *do* have curves. We are planning on specifically adding these curves to openshifts profiles in the future. This is outside the scope of this api change, the api should expose the curves field first to allow components time to implement the consumption of these curves.
+
 #### Mismatching curves and ciphersuites
 There is a case where the administrator could incorrectly specificy a set of ciphersuites
 that do not work with each other. For example using an RSA ciphersuite with a ECDHE curve (such as TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256 and P-256). The default behavior OpenSSL as well as go's crypto/tls (both used extensively in OpenShift) is to fail at **TLS handshake time**. . The TLS server instance will start normally, but when TLS clients attempt to handshake with the TLS server, the handshake will fail with a `handshake failure`
