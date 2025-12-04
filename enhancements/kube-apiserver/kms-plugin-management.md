@@ -10,20 +10,21 @@ reviewers:
   - "@tkashem"
   - "@derekwaynecarr"
 approvers:
-  - "@sjenning"
+  - "@benluddy"
 api-approvers:
   - "@JoelSpeed"
-creation-date: 2025-01-28
-last-updated: 2025-01-28
+creation-date: 2025-11-28
+last-updated: 2025-11-28
 tracking-link:
   - "https://issues.redhat.com/browse/OCPSTRAT-108"  # TP feature
   - "https://issues.redhat.com/browse/OCPSTRAT-1638" # GA feature
 see-also:
   - "enhancements/kube-apiserver/kms-encryption-foundations.md"
+  - "enhancements/kube-apiserver/kms-migration-recovery.md"
   - "enhancements/kube-apiserver/encrypting-data-at-datastore-layer.md"
   - "enhancements/etcd/storage-migration-for-etcd-encryption.md"
 replaces:
-  - "https://github.com/openshift/enhancements/pull/1682"
+  - ""
 superseded-by:
   - ""
 ---
@@ -32,7 +33,7 @@ superseded-by:
 
 ## Summary
 
-Enable OpenShift to automatically manage the lifecycle of KMS (Key Management Service) plugins across multiple API servers. This enhancement provides a user-configurable interface to deploy, configure, and monitor KMS plugins as sidecar containers alongside kube-apiserver, openshift-apiserver, and oauth-apiserver pods. Support for multiple KMS providers (AWS KMS, HashiCorp Vault, Thales HSM) is included with provider-specific authentication and configuration.
+Enable OpenShift to automatically manage the lifecycle of KMS (Key Management Service) plugins across multiple API servers. This enhancement provides a user-configurable interface to deploy, configure, and monitor KMS plugins as sidecar containers alongside kube-apiserver, openshift-apiserver, and oauth-apiserver pods. Support for multiple KMS providers (AWS KMS, HashiCorp Vault, Thales) is included with provider-specific authentication and configuration.
 
 ## Motivation
 
@@ -42,26 +43,28 @@ Different KMS providers have vastly different authentication models, deployment 
 
 ### User Stories
 
-* As a cluster admin, I want to enable AWS KMS encryption by simply providing a key ARN in the APIServer config, so that OpenShift automatically deploys and manages the AWS KMS plugin for me
-* As a cluster admin using HashiCorp Vault, I want OpenShift to handle Vault authentication (AppRole for TP, certificate-based for GA) and plugin deployment, so that I don't need to manually manage credentials or plugin containers
-* As a cluster admin, I want to switch from one KMS provider to another (e.g., AWS KMS to Vault) by updating the APIServer configuration, so that OpenShift handles the plugin transition and data migration automatically
-* As a cluster admin, I want to monitor KMS plugin health through standard OpenShift operators and alerts, so that I can detect and respond to KMS-related issues
+* As a cluster admin, I want to enable KMS encryption by providing my KMS provider configuration in the APIServer config, so that OpenShift automatically deploys and manages the appropriate KMS plugin for me
+* As a cluster admin, I want OpenShift to manage KMS plugin lifecycle on my behalf, so that I don't need to do any manual work when configuring KMS etcd encryption
+* As a cluster admin, I want to easily understand the operations done by operators when managing the KMS plugin lifecycle via Conditions in the respective operator Status
+* As a cluster admin, I want OpenShift to handle KMS authentication and credential management automatically, so that I don't need to manually provision credentials or manage plugin containers
+* As a cluster admin, I want OpenShift to automatically detect when my KMS rotates encryption keys and handle the transition seamlessly, so that I don't need to manually intervene during key rotation
+* As a cluster admin, I want to monitor KMS plugin health through standard OpenShift operator conditions and alerts, so that I can detect and respond to KMS-related issues
 
 ### Goals
 
-* Automatic KMS plugin deployment as sidecar containers in API server pods
-* Support for multiple KMS providers with provider-specific configurations
-* Credential management for KMS plugin authentication (IAM, AppRole, Cert, PKCS#11)
-* Plugin health monitoring and integration with operator conditions
-* Reactivity to configuration changes (automatic plugin updates)
-* Support for Tech Preview (limited providers) and GA (full provider support) graduation
+* Fully automated KMS plugin lifecycle management, eliminating the need for manual plugin deployment, configuration, or updates
+* Support for multiple KMS providers through a unified configuration model with provider-specific extensions
+* Automatic credential provisioning and management for KMS authentication, eliminating manual credential setup
+* Automatic detection and handling of KMS key rotation, including multi-key plugin configuration during migration
+* Comprehensive monitoring of KMS plugin health, enabling proactive detection of encryption issues
 
 ### Non-Goals
 
 * Direct support for hardware security modules (HSMs) - supported via KMS plugins (Thales)
 * KMS provider deployment or management (users manage their own AWS KMS, Vault, etc.)
 * Encryption controller logic for key rotation (see [KMS Encryption Foundations](kms-encryption-foundations.md))
-* Migration and recovery procedures (deferred to [KMS Migration and Recovery](kms-migration-recovery.md) for GA)
+* Migration between different KMS providers (deferred to [KMS Migration and Recovery](kms-migration-recovery.md) for GA)
+* Recovery procedures for KMS key loss or temporary outages (deferred to [KMS Migration and Recovery](kms-migration-recovery.md) for GA)
 * Custom or user-provided KMS plugins (only officially supported providers)
 
 ## Proposal
@@ -70,11 +73,13 @@ Extend OpenShift's API server operators (kube-apiserver-operator, openshift-apis
 
 **Supported KMS Providers:**
 
-| Provider | Tech Preview | GA | Primary Use Case |
-|----------|--------------|-----|------------------|
-| **AWS KMS** | ✅ Full support | ✅ Production-ready | Cloud-native AWS deployments |
-| **HashiCorp Vault** | ⚠️ Beta (if Vault plugin available) | ✅ Production-ready | On-premises, multi-cloud, centralized KMS |
-| **Thales CipherTrust** | ❌ Not supported | ✅ Production-ready | HSM integration, regulatory compliance |
+| Provider                | Tech Preview     | GA                  | Primary Use Case                            |
+|-------------------------|------------------|---------------------|---------------------------------------------|
+| **HashiCorp Vault**     | ⚠️ Beta          | ✅ Production-ready | On-premises, multi-cloud, centralized KMS   |
+| **AWS KMS**             | ❌ Not supported | ✅ Production-ready | Clusters running on AWS infrastructure      |
+| **Thales**              | ❌ Not supported | ✅ Production-ready | HSM integration, regulatory compliance      |
+| **Azure KMS**           | ❌ Not supported | ✅ Production-ready | Clusters running on Azure infrastructure    |
+| **GCP KMS**             | ❌ Not supported | ✅ Production-ready | Clusters running on GCP infrastructure      |
 
 ### Workflow Description
 
@@ -136,7 +141,6 @@ Extend OpenShift's API server operators (kube-apiserver-operator, openshift-apis
          vault:
            vaultAddress: https://vault.example.com:8200
            keyPath: transit/keys/openshift-encryption
-           namespace: openshift  # Vault Enterprise namespace
            authMethod: AppRole
            credentialsSecret:
              name: vault-kms-credentials
@@ -240,39 +244,173 @@ MicroShift may adopt this enhancement but will likely use file-based configurati
 
 ### Implementation Details/Notes/Constraints
 
-#### KMS Plugin Deployment Architecture
+This section is divided into two parts:
+1. **Common Plugin Management Framework** - Shared infrastructure and mechanisms used by all KMS providers
+2. **Provider-Specific Implementations** - Details specific to each KMS provider (Vault, AWS, Azure, GCP, Thales)
 
-KMS plugins are deployed as **sidecar containers** in API server pods. Each operator manages its own sidecar injection:
+---
 
-| API Server | Deployment Type | hostNetwork | Socket Volume | Credential Source |
-|------------|-----------------|-------------|---------------|-------------------|
-| kube-apiserver | Static Pod | ✅ true | hostPath | IAM (IMDS) or Secret |
-| openshift-apiserver | Deployment | ❌ false | emptyDir | Secret (CCO) |
-| oauth-apiserver | Deployment | ❌ false | emptyDir | Secret (CCO) |
+## Common Plugin Management Framework
 
-#### Sidecar Injection Mechanism
+The following components and mechanisms are shared across all KMS providers.
 
-TODO: Document sidecar injection implementation per operator
+### Sidecar Deployment Architecture
 
-#### Provider-Specific Authentication
+KMS plugins are deployed as **sidecar containers** running alongside each API server. Each of the three API server operators manages its own KMS plugin sidecar instance.
 
-TODO: Document authentication mechanisms for each provider
+**Deployment Model:**
 
-#### Static Pod Limitations and Vault Auth
+| API Server          | Deployment Type | hostNetwork | Socket Volume | Operator                                 |
+|---------------------|-----------------|-------------|---------------|------------------------------------------|
+| kube-apiserver      | Static Pod      | true        | hostPath      | cluster-kube-apiserver-operator          |
+| openshift-apiserver | Deployment      | false       | emptyDir      | cluster-openshift-apiserver-operator     |
+| oauth-apiserver     | Deployment      | false       | emptyDir      | cluster-authentication-operator          |
 
-**Critical constraint**: Static pods (kube-apiserver) **cannot reference ServiceAccount objects** (Kubernetes limitation).
+**Key characteristics:**
+- **One sidecar per API server pod**: Each kube-apiserver, openshift-apiserver, and oauth-apiserver pod gets its own KMS plugin sidecar
+- **Pod-level isolation**: Socket volumes are pod-specific (hostPath for static pods, emptyDir for Deployments)
+- **Provider-agnostic injection**: Same sidecar mechanism works for all providers (Vault, AWS, Azure, GCP, Thales)
 
-This has major implications for Vault authentication:
+### Shared library-go Components
+
+The implementation leverages `library-go/pkg/operator/encryption/kms/` which provides shared code used by all three operators:
+
+1. **Container Configuration**: `ContainerConfig` struct encapsulating KMS plugin container spec
+2. **Volume Management**: Functions to create socket and credential volumes based on deployment type
+3. **Pod Injection Logic**: `AddKMSPluginToPodSpec()` function for sidecar injection
+4. **Socket Path Generation**: `GenerateUnixSocketPath()` builds paths based on KMS configuration hash
+
+All three API server operators import and use these shared components, ensuring consistency.
+
+### Configuration Detection and Reactivity
+
+All operators watch the cluster-scoped `config.openshift.io/v1/APIServer` resource.
+
+**Triggers for sidecar injection:**
+- `spec.encryption.type` is set to `"KMS"`
+- `spec.encryption.kms.type` specifies a supported provider (AWS, Vault, Azure, GCP, Thales)
+
+**Reactivity to changes:**
+1. **APIServer resource changes**: Configuration or provider updates trigger reconciliation
+2. **Secret changes** (Deployment-based API servers): Credential updates trigger reconciliation
+3. **Operator environment variables**: `KMS_PLUGIN_IMAGE` changes trigger rollout
+
+**Update flow when KMS configuration changes:**
+1. Operator detects APIServer configuration change
+2. New deployment/static pod revision created with updated configuration
+3. Rolling update replaces old pods with new ones
+4. Old pods continue serving until new pods are ready
+5. No socket conflicts (pod-level volume isolation)
+
+### Socket Communication
+
+All KMS plugins communicate with their respective API servers via Unix domain sockets using the Kubernetes KMS v2 gRPC API.
+
+**Socket details:**
+- **Base path**: `/var/run/kmsplugin/`
+- **Socket naming**: `kms-<config-hash>.sock` (unique per configuration)
+- **Volume name**: `kms-plugin-socket`
+- **Protocol**: gRPC over Unix domain socket (KMS v2 API)
+- **Permissions**: Socket owned by both API server and plugin container
+
+**Why per-config sockets?**
+- Supports multiple KMS configurations during migration (old + new plugins running simultaneously)
+- Prevents conflicts during rolling updates
+- Enables safe configuration changes without downtime
+
+### Sidecar Injection Points
+
+Each operator injects the KMS plugin sidecar at a specific point in its reconciliation loop:
+
+**cluster-kube-apiserver-operator:**
+- Injection point: `targetconfigcontroller.managePods()`
+- Modifies static pod manifest before writing to pod ConfigMap
+- Uses `hostPath` volume pointing to `/var/run/kmsplugin` on host
+
+**cluster-openshift-apiserver-operator:**
+- Injection point: `workload.manageOpenShiftAPIServerDeployment_v311_00_to_latest()`
+- Modifies deployment spec after setting input hashes
+- Uses `emptyDir` volume for socket isolation
+
+**cluster-authentication-operator (oauth-apiserver):**
+- Injection point: `workload.syncDeployment()`
+- Modifies deployment spec after setting input hashes
+- Uses `emptyDir` volume for socket isolation
+
+### Plugin Image Management
+
+KMS plugin container images are specified via environment variables on each operator:
+- `KMS_PLUGIN_IMAGE` environment variable set on operator deployment
+- For Tech Preview: Users may need to manually specify image
+- For GA: Plugin images included in OpenShift release payload (automatic)
+
+### KEK Rotation and Multi-Revision Deployment
+
+When a KMS provider rotates the Key Encryption Key (KEK), OpenShift must support both the old and new keys simultaneously during the data re-encryption period. This is achieved by running **two complete revisions of each API server deployment/static pod** - one configured with the old KEK and one with the new KEK.
+
+**Design Principle: Provider-Agnostic Approach**
+
+While some KMS plugins (notably AWS KMS) support configuring multiple keys within a single plugin process, OpenShift adopts a **uniform multi-revision approach** for all providers:
+
+- **Two full API server pods** run side-by-side during KEK rotation (each with its own KMS plugin sidecar)
+- One pod configured with old KEK, one with new KEK
+- Each pod uses a distinct Unix socket path for its plugin (based on config hash)
+- Both pods remain active until data migration completes
+- Old pod revision removed after migration finishes
+
+**Why always use two pod revisions?**
+
+1. **Provider uniformity**: Most KMS plugins (Vault, Azure, GCP, Thales) cannot handle multiple keys in one process
+2. **Consistent behavior**: Users see the same rollout pattern regardless of KMS provider
+3. **Simplified operators**: No provider-specific branching logic for single-plugin vs multi-plugin configurations
+4. **Standard Kubernetes patterns**: Leverages existing rolling update mechanisms
+5. **Easier testing**: Single code path for all providers
+
+**Rotation Workflow:**
+
+1. KMS rotates KEK externally (key materials change, `key_id` changes)
+2. Operators detect `key_id` change via plugin Status gRPC call
+3. Operators create new deployment/static pod revision with new KMS plugin configuration
+4. Both pod revisions run simultaneously (old KEK + new KEK)
+5. Encryption controllers (Enhancement A) migrate data from old KEK to new KEK
+6. Once migration completes, operators remove old pod revision
+7. Only new revision remains, ready for next rotation
+
+**Socket Path Isolation:**
+
+The per-config socket naming (`kms-<config-hash>.sock`) prevents conflicts between the two revisions:
+- Old revision: `/var/run/kmsplugin/kms-abc123.sock`
+- New revision: `/var/run/kmsplugin/kms-def456.sock`
+
+The API server's `EncryptionConfiguration` (managed by stateController in Enhancement A) references both sockets during migration, with the new key as the write key and the old key available for decryption only.
+
+---
+
+## Provider-Specific Implementations
+
+Each KMS provider has unique requirements for deployment, authentication, and configuration. This section details the provider-specific aspects.
+
+### Vault KMS Plugin (Tech Preview / GA)
+
+**Status:** Tech Preview (if Vault plugin ready), GA (production-ready)
+
+TODO: Document Vault plugin deployment and auth
+
+**Static Pod Constraint:**
+
+**Critical limitation**: Static pods (kube-apiserver) **cannot reference ServiceAccount objects** (Kubernetes limitation).
+
+This impacts Vault authentication options:
 
 **Vault Kubernetes Auth Method - NOT VIABLE:**
-- Requires ServiceAccount tokens mounted at `/var/run/secrets/kubernetes.io/serviceaccount/token`
+- Requires ServiceAccount tokens at `/var/run/secrets/kubernetes.io/serviceaccount/token`
 - Static pods cannot have ServiceAccount tokens
 - **Cannot be used for kube-apiserver**
 - **CAN be used for openshift-apiserver and oauth-apiserver** (Deployments)
 
 **Vault JWT Auth Method - NOT VIABLE:**
 - Also requires ServiceAccount tokens
-- Same static pod limitation applies
+- Same static pod limitation
 
 **Vault AppRole Auth Method - VIABLE (Tech Preview):**
 - Uses static credentials (RoleID + SecretID)
@@ -282,22 +420,123 @@ This has major implications for Vault authentication:
 
 **Vault Cert Auth Method - VIABLE (GA):**
 - Uses TLS client certificates for authentication
-- Certificates can be stored as files and mounted in static pods
+- Certificates stored as files, mounted in static pods
 - **Bootstrap flow**: AppRole → get cert from Vault PKI → use cert auth → rotate cert automatically
-- Solves security concerns of AppRole-only
+- Solves AppRole security concerns
 - **Recommended for GA**
 
-#### AWS KMS Plugin Configuration
+### AWS KMS Plugin (Tech Preview / GA)
 
-TODO: Migrate from current enhancement
+**Status:** Tech Preview (likely), GA (production-ready)
 
-#### Vault KMS Plugin Configuration
+The AWS KMS plugin enables encryption using AWS Key Management Service.
 
-TODO: Document Vault plugin deployment and auth
+**Credential Management:**
 
-#### Thales KMS Plugin Configuration
+AWS KMS plugin authentication differs based on which API server it's running in:
+
+| API Server          | Deployment Type | Credential Source | Authentication Method |
+|---------------------|-----------------|-------------------|-----------------------|
+| kube-apiserver      | Static Pod      | EC2 IMDS          | IAM Instance Profile  |
+| openshift-apiserver | Deployment      | Secret (CCO)      | IAM User Credentials  |
+| oauth-apiserver     | Deployment      | Secret (CCO)      | IAM User Credentials  |
+
+**For kube-apiserver (Static Pod with hostNetwork: true):**
+
+The KMS plugin sidecar accesses AWS credentials through the EC2 Instance Metadata Service (IMDS). The master node's IAM role must have the following KMS permissions:
+
+```json
+{
+  "Effect": "Allow",
+  "Action": [
+    "kms:Encrypt",
+    "kms:Decrypt",
+    "kms:DescribeKey",
+    "kms:GenerateDataKey"
+  ],
+  "Resource": "<kms-key-arn>"
+}
+```
+
+**User responsibility:** Cluster admins must configure the master node IAM role with these permissions before enabling KMS encryption. Documentation and helper guidance will be provided.
+
+**For openshift-apiserver and oauth-apiserver (Deployments with hostNetwork: false):**
+
+These API servers cannot access IMDS directly (no hostNetwork), so they use AWS credentials from Kubernetes Secrets created by the Cloud Credential Operator (CCO).
+
+The operators will include CredentialsRequest resources:
+- `openshift-apiserver-kms-credentials-request.yaml`
+- `oauth-apiserver-kms-credentials-request.yaml`
+
+When CCO operates in **Mint mode**, it automatically:
+1. Creates IAM users with KMS permissions
+2. Provisions `kms-credentials` secret in each API server's namespace
+3. Secret contains AWS access key ID and secret access key
+
+The operators watch for these secrets and only inject the KMS plugin sidecar once credentials are available.
+
+**Graceful Degradation:**
+
+If KMS encryption is enabled but CCO credentials aren't ready yet:
+1. Operator logs a warning indicating credentials are pending
+2. Sidecar injection is skipped (return nil, not error)
+3. API server deployment proceeds without KMS sidecar
+4. On next reconciliation (when credentials available), sidecar is automatically injected
+
+This prevents blocking API server rollouts while waiting for CCO to provision credentials.
+
+**Configuration Example:**
+
+```yaml
+apiVersion: config.openshift.io/v1
+kind: APIServer
+metadata:
+  name: cluster
+spec:
+  encryption:
+    type: KMS
+    kms:
+      type: AWS
+      aws:
+        keyARN: arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012
+        region: us-east-1
+```
+
+**Known Limitations:**
+
+- **AWS KMS key_id limitation**: AWS KMS does not change `key_id` when it rotates key materials internally. This means automatic rotation detection (via `key_id` changes) does not work for AWS-managed rotation. Users must manually update the `keyARN` in APIServer config to trigger rotation in OpenShift.
+- **Workaround for GA**: Consider polling AWS KMS API directly to detect key version changes, or clearly document that users must update config for rotation
+
+### Azure KMS Plugin (GA)
+
+**Status:** GA only (not in Tech Preview)
+
+TODO: Document Azure plugin deployment and authentication
+
+**Expected authentication approach:**
+- Managed Identity for kube-apiserver (if Azure supports workload identity)
+- CCO-provisioned credentials for openshift-apiserver and oauth-apiserver
+
+### GCP KMS Plugin (GA)
+
+**Status:** GA only (not in Tech Preview)
+
+TODO: Document GCP plugin deployment and authentication
+
+**Expected authentication approach:**
+- Workload Identity for kube-apiserver
+- CCO-provisioned service account credentials for openshift-apiserver and oauth-apiserver
+
+### Thales KMS Plugin (GA)
+
+**Status:** GA (Tech Preview uncertain)
 
 TODO: Document Thales/HSM plugin requirements
+
+**Expected considerations:**
+- PKCS#11 library integration
+- HSM device access (network HSM vs local TPM)
+- PIN management and security
 
 #### KMS Plugin Health Monitoring
 
