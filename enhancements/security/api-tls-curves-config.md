@@ -81,7 +81,7 @@ spec:
 
 ### API Extensions
 
-- Adds a `curves` field to the `spec.tlsSecurityProfile` 
+- Adds a `curves` field to the `spec.tlsSecurityProfile` (https://github.com/openshift/api/pull/2583/files#diff-2101eac4196d9b14cf061c8a6a4d40f9d8e5a77fc2690f969e7293294218afe3R267)
 - The addition of this field should not affect existing API behaviour
 
 ### Topology Considerations
