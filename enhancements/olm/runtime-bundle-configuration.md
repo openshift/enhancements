@@ -19,8 +19,9 @@ tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic 
 
 ## Summary
 
-This enhancement proposes the addition of a configuration layer to the ClusterExtension API surface and an initial
-definition for a registry+v1 bundle configuration schema.
+This enhancement proposes the addition of 
+1. A configuration layer to the ClusterExtension API surface. 
+2. An initial definition for a registry+v1 bundle configuration schema.
 
 The configuration layer allows users to set bundle configuration whose structure is defined by the bundle authors through
 a configuration schema. It provides a single mechanism for configuring bundles independently of the underlying
@@ -44,7 +45,7 @@ OLMv1 also aims to support content packaged in different formats (i.e. registry+
 any format specific concerns to be surfaced at the API level. Users care about content, and not its format. Therefore,
 a generic bundle configuration API surface is desired.
 
-In OLMv0, registry+v1 bundles can be installed in one of four "install modes" used to configure the namespace(s) the
+Once such configuration option was provided by OLMv0 for registry+v1 bundles that could be installed in one of four "install modes", used to configure the namespace(s) the
 operator should watch for their CR events:
 - AllNamespaces: the whole cluster
 - SingleNamespace: a single namespace that is _not_ the operator's namespace (i.e. the install namespace)
@@ -99,7 +100,7 @@ rendered and installed without requiring me to modify my existing bundle format 
 
 ### Goals
 
-- Introduce the notion of bundle configuration into the ClusterExtension API surface in a format agnostic way s.t. it can also be used for other bundle formats such as Helm Charts
+- Introduce the notion of bundle configuration into the ClusterExtension API surface in a format agnostic way such that it can also be used for other bundle formats such as Helm Charts
 - Enable support/rendering for registry+v1 bundles that only support SingleNamespace or OwnNamespace install modes
 - Define the registry+v1 bundle schema to support configuration of bundles with Single- and/or OwnNamespace install modes
 - Maintain backward compatibility with existing registry+v1 bundle content from OLM v0 catalogs
@@ -113,7 +114,7 @@ rendered and installed without requiring me to modify my existing bundle format 
 - Occlude secret information
 - Support for default configurations outside what can be set in a JSON-schema defined field default values
 - Support OLMv0 SubscriptionConfig-type behavior, enabling broader operator configuration compatibility, though this will come in the future
-- Support the MultiNamespace install mode: this mode can severally impact api server resource utilization and cause cluster instability. Even in OLMv0 it is documented as unwise to use and that it will likely be removed in the future (OLMv1 is the future).
+- Support the MultiNamespace install mode: this mode can severally impact api server resource utilization and cause cluster instability. Even in OLMv0 it is documented as unwise to use and that it will likely be removed in the future (OLMv1 being that future).
 
 ## Proposal
 
@@ -139,7 +140,8 @@ issue, e.g.:
 - User provides configuration but the bundle does not support configuration
 - User does not provide required configuration fields
 - User provides configuration keys that are not existent
-- User provides configuration but bundle does not provide a configuration schema
+- User provides configuration but bundle does not provide a configuration schema - note that 
+while for registry+v1 bundles this is deemed a good level of restriction to ship the configuration feature with initially, for future bundle formats this restriction may be loosed (eg OLMv1 could allow users to provide configuration for "Helm bundles" without any configuration schema). Users will likely be required to express their intent to configure such bundles explicity and have OLM install anyway, possibly via a ClusterExtension API field (eg `dangerouslyAcceptBundlesWithoutConfigSchema`). Such considerations however are for future considerations. 
 
 ### registry+v1 Bundle Configuration Generation, Validation and Handling
 
@@ -156,7 +158,7 @@ for a first take, the following changes will go in the runtime:
 ### Workflow Description
 
 The standard OLMv1 installation and upgrade workflows stay largely the same. Where it will differ is:
-- users will need to consult the OpenShift documentation to understand how packages/bundles can be configured.
+- users will need to consult the [OpenShift documentation](https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html-single/extensions/index#olmv1-deploying-a-ce-in-a-specific-namespace_managing-ce) to understand how packages/bundles can be configured. The different configuration options for bundles given their install mode support will be enumerated with examples in the Openshift documentation. All  future updates to the registry+v1 bundle configuration surface will also be enumerated in the Openshift docs, until we have a better way to surface the configuration schemas to the user for individual packages.
 - users will be able to specify inline bundle configuration on `.spec.config.inline`.
 - install/upgrade operations will be halted if the provided configuration does not meet the bundle provided configuration schema. Errors will be surfaced through the `Progressing` condition outlining the issue, e.g. `invalid bundle configuration: unknown key 'foo'`, or `invalid bundle configuration: missing required key 'bar'`.
 - users will be able to update configuration for currently installed content.
