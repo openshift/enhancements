@@ -829,7 +829,8 @@ Common troubleshooting scenarios:
 - **Permission Denied Errors**: Review ServiceAccount permissions and namespace access rights
 
 For persistent issues, administrators can:
-- Disable feature gate to fall back to AllNamespaces mode
+- If the bundle supports AllNamespaces mode: update the configuration by removing the watchNamespace config to fall back to AllNamespaces mode
+- If AllNamespaces is not supported: remove the extension and contact the bundle author as this likely indicates a problem with the content
 - Modify watchNamespace configuration to change install mode
 - Scale down operator-controller to manually intervene if needed
 
