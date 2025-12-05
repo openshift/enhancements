@@ -158,6 +158,37 @@ Having a single allowed phrasing has a few benefits:
 
 For existing APIs, progress toward these ideals needs to happen within the usual [constraints on API changes][api-changes].
 
+### Use JSON Field Names in Godoc
+
+Ensure that the godoc for a field name matches the JSON name, not the Go name,
+in Go definitions for API objects.  In particular, this means that the godoc for
+field names should use an initial lower-case letter.  For example, don't do the
+following:
+
+```go
+// Example is [...]
+type Example struct {
+	// ExampleFieldName specifies [...].
+	ExampleFieldName int32 `json:"exampleFieldName"`
+}
+```
+
+Instead, do the following:
+
+```go
+// Example is [...]
+type Example struct {
+	// exampleFieldName specifies [...].
+	ExampleFieldName int32 `json:"exampleFieldName"`
+}
+```
+
+The godoc for API objects appears in generated API documentation and `oc
+explain` output.  Following this convention has the disadvantage that the godoc
+does not match the Go definitions that developers use, but it has the advantage
+that generated API documentation and `oc explain` output show the correct field
+names that end users use, and the end-user experience is more important.
+
 ### Write User Readable Documentation in Godoc
 
 Godoc text is generated into both Swagger and OpenAPI schemas which are then used
@@ -166,39 +197,6 @@ documentation to provide users descriptions of how to use and interact with our 
 
 In general, Godoc comments should be complete sentences and as much as possible, should
 adhere to the OpenShift product docs [style guide](https://redhat-documentation.github.io/supplementary-style-guide/#style-guidelines).
-
-> [!NOTE]
-> <a name="json-field-name-gdocs"></a>
-> Use JSON Field Names in Godoc
->
-> Ensure that the godoc for a field name matches the JSON name, not the Go name,
-> in Go definitions for API objects.  In particular, this means that the godoc for
-> field names should use an initial lower-case letter.  For example, don't do the
-> following:
->
-> ```go
->// Example is [...]
->type Example struct {
->	// ExampleFieldName specifies [...].
->	ExampleFieldName int32 `json:"exampleFieldName"`
->}
->```
->
-> Instead, do the following:
->
->```go
->// Example is [...]
->type Example struct {
->	// exampleFieldName specifies [...].
->	ExampleFieldName int32 `json:"exampleFieldName"`
->}
->```
->
->The godoc for API objects appears in generated API documentation and `oc
->explain` output.  Following this convention has the disadvantage that the godoc
->does not match the Go definitions that developers use, but it has the advantage
->that generated API documentation and `oc explain` output show the correct field
->names that end users use, and the end-user experience is more important.
 
 The Godoc on any field in our API should be sufficiently explained such that an end user
 understands the following:
@@ -503,10 +501,6 @@ The annotation was introduced in OpenShift 3.X. At the time annotations were ver
 Nevertheless, after customer adoption the configuration was never migrated to a formal schema to avoid breaking changes.
 
 ## Exceptions to Kubernetes API Conventions
-
-### Use JSON Field Names in Godoc 
-
-Check the [note](#json-field-name-gdocs) for the details.
 
 ### Use Specific Types for Object References, and Omit "Ref" Suffix
 
