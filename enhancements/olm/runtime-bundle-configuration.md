@@ -158,7 +158,11 @@ for a first take, the following changes will go in the runtime:
 ### Workflow Description
 
 The standard OLMv1 installation and upgrade workflows stay largely the same. Where it will differ is:
-- users will need to consult the [OpenShift documentation](https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html-single/extensions/index#olmv1-deploying-a-ce-in-a-specific-namespace_managing-ce) to understand how packages/bundles can be configured. The different configuration options for bundles given their install mode support will be enumerated with examples in the Openshift documentation. All  future updates to the registry+v1 bundle configuration surface will also be enumerated in the Openshift docs, until we have a better way to surface the configuration schemas to the user for individual packages.
+- users will need to consult the [OpenShift documentation](https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html-single/extensions/index#olmv1-deploying-a-ce-in-a-specific-namespace_managing-ce) to understand how packages/bundles can be configured. The OpenShift documentation will include a capability matrix (derived from the table in the "registry+v1 Configuration Schema" section below) that maps bundle install mode support to configuration requirements, specifically:
+  - Whether the `watchNamespace` configuration field is required or optional for a given bundle based on its install mode capabilities
+  - Valid values and constraints for the `watchNamespace` field (e.g., must equal install namespace, must differ from install namespace, or can be any namespace)
+  - Practical examples showing how to configure bundles for different install mode scenarios
+  - The different configuration options for bundles given their install mode support will be enumerated with examples. All future updates to the registry+v1 bundle configuration surface will also be enumerated in the OpenShift docs, until there is a better way to surface the configuration schemas to users for individual packages.
 - users will be able to specify inline bundle configuration on `.spec.config.inline`.
 - install/upgrade operations will be halted if the provided configuration does not meet the bundle provided configuration schema. Errors will be surfaced through the `Progressing` condition outlining the issue, e.g. `invalid bundle configuration: unknown key 'foo'`, or `invalid bundle configuration: missing required key 'bar'`.
 - users will be able to update configuration for currently installed content.
