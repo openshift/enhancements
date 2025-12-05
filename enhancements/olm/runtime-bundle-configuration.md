@@ -291,6 +291,7 @@ type ClusterExtensionConfig struct {
     // The configuration values are validated at runtime against a JSON schema provided by the bundle.
     //
     // +kubebuilder:validation:Type=object
+    // +kubebuilder:validation:MinProperties=1
     // +optional
     // +unionMember
 	Inline *apiextensionsv1.JSON `json:"inline,omitempty"`
