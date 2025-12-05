@@ -360,6 +360,21 @@ Such issues will be treated as bugs for the content author as opposed to OLM, ex
 whose schema is controlled by the OLM team. The OLM team will ensure there are no breaking changes throughout the development
 of the registry+v1 configuration schema.
 
+**Handling Breaking Schema Changes:**
+
+If a change in the JSON Schema specification forces a breaking change in the configuration API (for future bundle formats that provide their own schemas), bundle authors have two options:
+
+1. **Continue with the current schema version**: Maintain backward compatibility by not adopting the new schema specification version that would cause breaking changes.
+
+2. **Accept breaking changes and handle appropriately**: If breaking changes are necessary, authors should handle this like any other breaking API change:
+   - Do not carry upgrade edges between breaking versions in the catalog
+   - Document the migration to the breaking version, instructing users on how to modify their configuration successfully for the new schema
+   - Consider this a major version change requiring explicit user action
+
+**Unsupported JSON Schema Specifications:**
+
+If OLM encounters a bundle that publishes a configuration schema using an unsupported JSON Schema specification, the bundle will be deemed invalid and an error will be surfaced to the user through the ClusterExtension status. If support for a specification needs to be dropped, the deprecation will follow standard OpenShift deprecation conventions and provide authors sufficient time to migrate to a more recent supported specification. In the event that a bundle is still installed using an unsupported specification version across an OLM upgrade, the same error will be surfaced to the user and upgrades and reconfigurations will not be possible until manual intervention occurs (e.g., manual migration of the configuration and bundle to a supported specification version).
+
 Any validation errors will be surfaced to the user via the `Progressing` condition with a clear message, e.g.:
 - invalid bundle configuration: unknown key 'foo'
 - invalid bundle configuration: invalid value for field 'bar' must be less than 10 but got 11
