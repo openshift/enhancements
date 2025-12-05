@@ -24,20 +24,22 @@ superseded-by:
 
 ## Summary
 
-This document proposes an enhancement to the `ExternalSecretsConfig` API by introducing a `ComponentConfig` extension. This new structure allows administrators to specify component-specific overrides for deployment lifecycle settings for external-secrets components (Controller, Webhook, CertController, BitwardenSDKServer). Specifically, a dedicated field is introduced within `ComponentConfig` to accept structured, type-safe configuration values intended to modify the component's underlying Kubernetes Deployment resource. This change offers administrators greater control over the resource management and operational parameters of individual components.
+This document proposes an enhancement to the `ExternalSecretsConfig` API by introducing a `ComponentConfig` extension and global annotations support thorugh `Annotations` field. This allows administrators to specify component-specific overrides for deployment lifecycle settings and global custom annotations for external-secrets components (Controller, Webhook, CertController, BitwardenSDKServer). This change offers administrators greater control over the resource management and operational parameters of components.
 
 ## Motivation
 
-Administrators often need to control deployment lifecycle settings without directly modifying the underlying operator-managed Deployment resources.
+Administrators often need to control deployment lifecycle settings and add custom annotations without directly modifying the underlying operator-managed Deployment resources.
 
 ### User Stories
 
-- As an administrator, I want to customize deployment lifecycle properties for `external-secrets` components to manage their resource consumption and rollback behavior.
+- As an administrator, I want to customize deployment lifecycle properties for `external-secrets` operand components to manage their resource consumption and rollback behavior.
 - As an operator user, I want to be able to set specific deployment override values independently for each component via ComponentConfig to meet unique operational requirements.
+- As a platform engineer, I want to add custom annotations to external-secrets deployments without modifying operator-managed resources.
 
 ### Goals
 
-- Provide a declarative API for specifying deployment lifecycle overrides for each component.
+- Provide a declarative API for specifying deployment lifecycle overrides for each component via `componentConfig`.
+- Provide a declarative API for adding custom annotations globally to all component Deployments and Pod templates via `controllerConfig.annotations`.
 - Support all four operand components: Controller, Webhook, CertController, and BitwardenSDKServer.
 
 ### Non-Goals
@@ -47,13 +49,24 @@ Administrators often need to control deployment lifecycle settings without direc
 
 ## Proposal
 
-Extend the ControllerConfig API with a new componentConfig field for per-component deployment lifecycle overrides.
+Extend the ControllerConfig API with:
+1. A new `annotations` field for adding custom annotations globally to Deployments and Pod templates.
+2. A new `componentConfig` field for per-component deployment lifecycle overrides.
 
 ### Workflow Description
 
+**For Global Annotations:**
+
+1. **User Configuration:** Administrator updates the `ExternalSecretsConfig` CR with the `controllerConfig.annotations` field containing custom key-value pairs.
+2. **Validation:** The operator validates that annotation keys and values conform to Kubernetes annotation constraints.
+3. **Reconciliation:** The operator merges user-specified annotations with any default annotations. User annotations take precedence in case of conflicts. Annotations are applied to both the Deployment metadata and Pod template metadata for all components.
+4. **Rollout:** Kubernetes detects the annotation changes and performs updates as needed.
+
+**For Component Configuration:**
+
 1. **User Configuration:** Administrator updates the `ExternalSecretsConfig` CR, utilizing the new `componentConfig` list to specify configuration entries for a component (Controller, Webhook, etc.).
-2. **Validation:** It verifies the `componentName` against the allowed enum values and enforces uniqueness across the list.It strictly validates the `OverrideArgs` field using the provided `XValidation` rule, ensuring every entry uses the specified format
-3. **Reconciliation:** It parses the `OverrideArgs` field to identify and extract the deployment override key and its corresponding value. It updates the component's underlying Kubernetes Deployment resource by setting the parsed override value in the appropriate `.spec` field
+2. **Validation:** It verifies the `componentName` against the allowed enum values and enforces uniqueness across the list. It strictly validates the `OverrideArgs` field using the provided `XValidation` rule, ensuring every entry uses the specified format.
+3. **Reconciliation:** It parses the `OverrideArgs` field to identify and extract the deployment override key and its corresponding value. It updates the component's underlying Kubernetes Deployment resource by setting the parsed override value in the appropriate `.spec` field.
 4. **Rollout:** Kubernetes detects the change in the Deployment's spec and performs a rolling update, applying the new setting to the component.
 
 ### Implementation Details/Notes/Constraints
@@ -86,6 +99,16 @@ type ComponentConfig struct {
 type ControllerConfig struct {
     // ... existing fields ...
 
+    // annotations allows adding custom annotations to all external-secrets component
+    // Deployments and Pod templates. These annotations are applied globally to all
+    // operand components (Controller, Webhook, CertController, BitwardenSDKServer).
+    // These annotations are merged with any default annotations set by the operator.
+    // User-specified annotations take precedence over defaults in case of conflicts.
+    //
+    // +kubebuilder:validation:Optional
+    // +optional
+    Annotations map[string]string `json:"annotations,omitempty"`
+
     // componentConfig allows specifying component-specific configuration overrides
     // for individual components (Controller, Webhook, CertController, Bitwarden).
     // +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x.componentName == y.componentName))",message="componentName must be unique across all componentConfig entries"
@@ -115,7 +138,7 @@ spec:
           - "RevisionHistoryLimit:5"
 ```
 
-**Configure the limit for a different component (Webhook):**
+**Add custom annotations (applied to all components):**
 
 ```yaml
 apiVersion: operator.openshift.io/v1alpha1
@@ -124,14 +147,11 @@ metadata:
   name: cluster
 spec:
   controllerConfig:
-    componentConfig:
-      - componentName: Webhook
-        # Sets the Deployment's revision history limit to 3
-        overrideArgs:
-          - "RevisionHistoryLimit:3"
+    annotations:
+      example.com/custom-annotation: "value"
 ```
 
-**Multiple components with different configurations:**
+**Combined: annotations (global) with component-specific overrideArgs:**
 
 ```yaml
 apiVersion: operator.openshift.io/v1alpha1
@@ -140,6 +160,10 @@ metadata:
   name: cluster
 spec:
   controllerConfig:
+    # Annotations applied to ALL components
+    annotations:
+      example.com/custom-annotation: "value"
+    # Component-specific overrides
     componentConfig:
       - componentName: ExternalSecretsCoreController
         overrideArgs:
@@ -186,13 +210,16 @@ None
     2. Test validation of argument count limits (max 50).
     3. Test parsing of deployment-level overrides (e.g., "RevisionHistoryLimit:5").
     4. Test that invalid override formats are handled gracefully.
+    5. Test annotation merging logic with defaults and user overrides.
 
 * **Integration Tests:**
     1. Deploy the operator and create an `ExternalSecretsConfig` with component configuration.
     2. Verify that "RevisionHistoryLimit:X" is correctly applied to the deployment's `spec.revisionHistoryLimit`.
-    3. Update the configuration and verify the deployment is updated accordingly.
-    4. Remove the configuration and verify defaults are restored.
-    5. Attempt to apply a configuration that fails XValidation and verify the API server rejects the resource with the appropriate error message.
+    3. Verify that specified annotations appear on both Deployment and Pod template.
+    4. Update the configuration and verify the deployment is updated accordingly.
+    5. Remove the configuration and verify defaults are restored.
+    6. Attempt to apply a configuration that fails XValidation and verify the API server rejects the resource with the appropriate error message.
+    7. Test annotation override behavior when user annotation conflicts with operator default.
 
 * **End-to-End (E2E) Tests:**
     1. Test each component type (Controller, Webhook, CertController, BitwardenSDKServer) individually.
@@ -205,6 +232,7 @@ This feature will be delivered as GA directly, as it uses stable Kubernetes APIs
 
 * All API fields are implemented with proper validation.
 * Argument merging logic is complete.
+* Annotation merging logic is complete and applies to both Deployment and Pod template.
 * All tests outlined in the Test Plan are passing.
 * Documentation includes examples for common use cases.
 
@@ -222,9 +250,9 @@ Not applicable.
 
 ## Upgrade / Downgrade Strategy
 
-* **Upgrade:** On upgrade, the new `componentConfig` field will be available. Existing installations without this configuration will continue to work with default settings. Users can optionally add component configurations after upgrade.
+* **Upgrade:** On upgrade, the new `annotations` and `componentConfig` fields will be available. Existing installations without these configurations will continue to work with default settings. Users can optionally add annotations and component configurations after upgrade.
 
-* **Downgrade:** If a user downgrades to a version that doesn't support `componentConfig`, the field will be ignored by the older operator, and deployments will revert to default configurations. Users should be aware that custom configurations will be lost on downgrade.
+* **Downgrade:** If a user downgrades to a version that doesn't support `annotations` or `componentConfig`, these fields will be ignored by the older operator. Deployments will revert to default configurations, and custom annotations will be removed. Users should be aware that custom configurations will be lost on downgrade.
 
 ## Alternatives (Not Implemented)
 
@@ -236,11 +264,11 @@ NA
 
 ## Operational Aspects of API Extensions
 
-The `componentConfig` API extension follows standard Kubernetes patterns:
+The `annotations` and `componentConfig` API extensions follow standard Kubernetes patterns:
 
-* **Failure Modes:** Invalid configurations will be rejected by the API server validation. Runtime failures (e.g., invalid arguments causing pod crashes) will be visible through standard pod status and events.
+* **Failure Modes:** Invalid configurations will be rejected by the API server validation. Invalid annotation formats will be rejected at the API level. Runtime failures (e.g., invalid arguments causing pod crashes) will be visible through standard pod status and events.
 
-* **Support Procedures:** Administrators can verify the applied configuration by inspecting the deployment specs and comparing them to the `ExternalSecretsConfig` resource.
+* **Support Procedures:** Administrators can verify the applied configuration by inspecting the deployment specs and comparing them to the `ExternalSecretsConfig` resource. Custom annotations can be verified on both Deployment and Pod template metadata.
 
 ## Support Procedures
 
@@ -248,6 +276,7 @@ Support personnel debugging configuration issues should:
 
 1. Verify the `ExternalSecretsConfig` resource: `oc get externalsecretconfigs cluster -o yaml`
 2. Compare the deployment spec to the expected configuration: `oc get deployment external-secrets -n external-secrets -o yaml`
-3. Check pod logs for argument parsing errors.
-4. Review events for the deployment: `oc get events -n external-secrets`
-5. If a pod is failing to start due to invalid arguments, check the container's termination message and logs.
+3. Verify custom annotations are applied to Deployment and Pod template: check `.metadata.annotations` and `.spec.template.metadata.annotations` in the deployment spec.
+4. Check pod logs for argument parsing errors.
+5. Review events for the deployment: `oc get events -n external-secrets`
+6. If a pod is failing to start due to invalid arguments, check the container's termination message and logs.
