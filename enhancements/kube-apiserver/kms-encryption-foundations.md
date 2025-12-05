@@ -208,6 +208,8 @@ EncryptionSecretKMSConfigHash = "encryption.apiserver.operator.openshift.io/kms-
 ```
 Stores truncated hash (16 hex characters, 8 bytes) of KMS configuration for change detection.
 
+> **Note:** The hash is truncated to 16 hex characters (8 bytes) to stay within Unix socket path length limits (typically 108 characters) while maintaining sufficient uniqueness for distinguishing different KMS configurations. This allows deterministic socket paths like `/var/run/kmsplugin/kms-a1b2c3d4e5f67890.socket`.
+
 **Encryption State Types** (library-go):
 - `KeyState` struct: Add `KMSConfigHash` field
 - Add `KMS` mode constant alongside `aescbc`, `aesgcm`, `identity`
@@ -232,16 +234,6 @@ Single-node deployments will see slightly increased CPU usage during key rotatio
 MicroShift may adopt this enhancement if KMS encryption is desired, but the configuration mechanism may differ (file-based vs API resource).
 
 ### Implementation Details/Notes/Constraints
-
-**Hash Calculation** (`pkg/operator/encryption/controllers/key_controller.go`):
-```go
-// Concatenate provider-specific fields
-combined := aws.KeyARN + ":" + aws.Region
-hash := sha256.Sum256([]byte(combined))
-kmsConfigHash := hex.EncodeToString(hash[:])[:16]
-```
-
-> **Note:** The hash is truncated to 16 hex characters (8 bytes) to stay within Unix socket path length limits (typically 108 characters) while maintaining sufficient uniqueness for distinguishing different KMS configurations. This allows deterministic socket paths like `/var/run/kmsplugin/kms-a1b2c3d4e5f67890.socket`.
 
 **Reverse Conversion** (stateController reads EncryptionConfiguration from API server pods):
 1. Extract hash from socket path: `kms-a1b2c3d4e5f67890.socket` → `a1b2c3d4e5f67890`
@@ -332,8 +324,8 @@ No special handling required.
 - Metrics: `apiserver_storage_transformation_operations_total`, `apiserver_storage_transformation_duration_seconds`
 
 **Impact:**
-- API latency: +10-50ms per operation (KMS call required, mitigated by DEK caching)
-- API throughput: <5% reduction under normal conditions
+- API latency: KMS call required, mitigated by DEK caching
+- API throughput: minor reduction under normal conditions
 
 ### Failure Modes
 
