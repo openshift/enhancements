@@ -430,8 +430,7 @@ Below are examples for what the JSON-Schemas may look like:
   "type": "object",
   "properties": {
     "watchNamespace": {
-      "watchNamespace": {
-      "format": "notInstallNamespace",
+      "format": "isNotInstallNamespace",
       "type": ["string", null],
     }
   }
@@ -446,18 +445,36 @@ Below are examples for what the JSON-Schemas may look like:
   "type": "object",
   "properties": {
     "watchNamespace": {
-      "format": "installNamespace",
+      "format": "isInstallNamespace",
       "type": ["string", null],
     }
   }
 }
 ```
 
-Notes:
-- `namespaceName` is an internally defined format that validates namespace name inputs. It is not a standard format.
-- `installNamespace` is an internally defined format that validates that the input is a valid namespace name and matches the install namespace.
-- `notInstallNamespace` is an internally defined format that validates that the input is a valid namespace name and does not match the install namespace.
-- The custom formats are used by the jsonschema library to validate the inputs. 
+**Custom JSON Schema Formats for Bundle Authors:**
+
+OLM's JSON Schema validator will support several custom formats that bundle authors can opt-in to use in their configuration schemas:
+
+- `namespaceName`: Will validate that the input is a valid Kubernetes namespace name (follows DNS-1123 subdomain format). This will be useful for any configuration field that accepts a namespace name.
+- `isInstallNamespace`: Will validate that the input is a valid namespace name and matches the ClusterExtension's install namespace (`.spec.namespace`). Bundle authors can use this format to ensure a configuration value must be the install namespace.
+- `isNotInstallNamespace`: Will validate that the input is a valid namespace name and does not match the install namespace. Bundle authors can use this format to ensure a configuration value must be different from the install namespace.
+
+These custom formats will not be part of the standard JSON Schema specification but will be provided by OLM to help bundle authors create more robust configuration schemas. Bundle authors who want to use these formats should include them in their schema's `format` field.
+
+Example usage by bundle authors:
+```json
+{
+  "type": "object",
+  "properties": {
+    "targetNamespace": {
+      "type": "string",
+      "format": "isNotInstallNamespace",
+      "description": "The namespace to watch (must be different from install namespace)"
+    }
+  }
+}
+``` 
 
 #### registry+v1 Bundle Renderer Changes
 
