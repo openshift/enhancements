@@ -138,43 +138,41 @@ Alternative: Plugin + Socket Proxy on External Infrastructure
 
 **Key Innovation: User-Controlled Deployment with OpenShift-Provided Components**
 
-OpenShift provides the socket proxy container image, and users deploy it using **recommended deployment patterns** that avoid circular dependencies with the kube-apiserver.
+OpenShift provides the socket proxy container image, and users deploy it as **static pods on control plane nodes** to avoid circular dependencies with the kube-apiserver.
 
-**Recommended Deployment Patterns:**
+**Supported Deployment Pattern: Static Pods**
 
-Both patterns avoid circular dependencies and are production-ready. Users can choose based on their requirements:
+The only supported deployment pattern is static pods on control plane nodes:
 
-1. **In-cluster Static Pods (Recommended for Performance)**
-   - Deploy plugin + socket proxy as static pods on control plane nodes
-   - Similar pattern to how etcd and kube-apiserver themselves run
-   - **Pros:**
-     - Lowest latency (same node as API server, no external network hops)
-     - No external infrastructure required
-     - Plugin lifecycle tied to node lifecycle (automatic restart)
-   - **Cons:**
-     - Requires direct node access to create static pod manifests
-     - Less flexible (tied to control plane nodes)
-   - **Example:** Plugin static pods on master nodes alongside API servers
+- Deploy plugin + socket proxy as static pods on control plane nodes
+- Similar pattern to how etcd and kube-apiserver themselves run
+- **Why static pods:**
+  - Avoids circular dependency (pods start independently of kube-apiserver)
+  - Lowest latency (same node as API server, no external network hops)
+  - No external infrastructure required
+  - Plugin lifecycle tied to node lifecycle (automatic restart on node reboot)
+  - Network policies can restrict access (in-cluster communication only)
+- **Requirements:**
+  - Direct node access to create static pod manifests in `/etc/kubernetes/manifests/`
+  - Plugin runs on every control plane node (one static pod per node)
+- **Example:** Plugin static pods on master nodes alongside API servers
 
-2. **External Infrastructure (Recommended for Operational Flexibility)**
-   - Deploy plugin + socket proxy on VMs, bare metal, or separate clusters
-   - Expose endpoint via load balancer or VPN
-   - **Pros:**
-     - Independent lifecycle (update plugin without touching cluster nodes)
-     - Can run on dedicated, hardened infrastructure
-     - Easier to manage credentials and access to external KMS
-   - **Cons:**
-     - Additional network latency for every encryption/decryption operation
-     - Requires external infrastructure and networking setup
-   - **Example:** Plugin running on dedicated VMs outside the cluster
+**Unsupported Deployment Patterns:**
 
-**Deployment Patterns to Avoid:**
+**⚠️ In-cluster Regular Workloads (Deployment/StatefulSet/DaemonSet) - NOT SUPPORTED**
+- **DO NOT** deploy plugin as Deployment, StatefulSet, or DaemonSet
+- **Why:** Creates circular dependency - kube-apiserver needs KMS plugin to start, but kube-apiserver must be running to schedule the plugin pods
+- **Risk:** Cluster cannot recover from full control plane restart
+- **Recovery requires manual intervention** (SSH to nodes, modify etcd directly, or disable encryption)
 
-3. **⚠️ In-cluster Regular Workloads (NOT RECOMMENDED)**
-   - **DO NOT** deploy plugin as Deployment, StatefulSet, or DaemonSet
-   - **Why:** Creates circular dependency - kube-apiserver needs KMS plugin to start, but kube-apiserver must be running to schedule the plugin pods
-   - **Risk:** Cluster cannot recover from full control plane restart
-   - **Example of what NOT to do:** Using a Deployment to run the plugin
+**⚠️ External Infrastructure (VMs, bare metal, separate clusters) - NOT SUPPORTED**
+- **Why not supported:**
+  - Adds network latency for every encryption/decryption operation
+  - Requires external infrastructure management (out of scope)
+  - Complicates authentication (would require mTLS or shared secrets)
+  - Network policies don't help for external endpoints
+  - Increases support complexity
+- **Note:** Users can still deploy KMS plugins externally if they choose, but OpenShift only supports and documents the static pod pattern
 
 **Circular Dependency Problem:**
 
@@ -184,7 +182,7 @@ If the KMS plugin runs as a regular in-cluster workload (Deployment/StatefulSet/
 3. kube-apiserver cannot schedule the plugin pod because kube-apiserver isn't running yet
 4. **Cluster is deadlocked** - cannot start without manual intervention
 
-**Recommended Approach:** Deploy KMS plugins **outside the cluster's control** (external infrastructure or static pods) to avoid this circular dependency.
+**Why static pods solve this:** Static pods are managed directly by the kubelet on each node, not by the kube-apiserver. They start when the node starts, before kube-apiserver is running, breaking the circular dependency.
 
 **Responsibilities:**
 
@@ -193,17 +191,17 @@ If the KMS plugin runs as a regular in-cluster workload (Deployment/StatefulSet/
 - **Socket proxy container image**: Translates HTTP/gRPC → Unix socket for standard KMS v2 plugins
 - **Operators**: Inject shim into API server pods, validate endpoint reachability
 - **Monitoring**: Metrics specifications for shim and socket proxy
-- **Documentation**: Example deployment YAMLs for common KMS providers
+- **Documentation**: Example static pod manifests for common KMS providers
 - **Lifecycle**: Manage shim and socket proxy images and updates via release payload
+- **Network policies** (GA): Restrict socket proxy access to API server namespaces only
 
 **User Deploys and Manages:**
-- KMS plugin pod(s) running standard upstream KMS v2 plugin
-- Socket proxy container (using OpenShift-provided image) deployed with plugin
-- Networking configuration (Service, Ingress, Load Balancer, etc.) to expose socket proxy endpoint
+- Static pod manifests for KMS plugin + socket proxy on control plane nodes
 - Plugin configuration (Vault address, AWS credentials, key IDs, etc.)
 - KMS provider-specific authentication (Vault tokens, AWS IAM, certificates)
-- Plugin and socket proxy updates independently
-- Additional plugin instances when changing KEKs (deploy new plugin + socket proxy, configure endpoint)
+- Kubernetes Service to expose socket proxy (in-cluster only)
+- Plugin and socket proxy updates (update static pod manifests on nodes)
+- Additional plugin instances when changing KEKs (deploy new static pods, configure new endpoint)
 
 ### Workflow Description
 
@@ -221,63 +219,7 @@ If the KMS plugin runs as a regular in-cluster workload (Deployment/StatefulSet/
 
 #### Initial KMS Configuration
 
-**Example: External Infrastructure Deployment (Recommended)**
-
-1. The cluster admin deploys their KMS plugin with socket proxy on external infrastructure:
-
-   **On external VMs/bare metal:**
-   ```bash
-   # Run plugin + socket proxy using systemd, docker-compose, or podman
-   # Example with podman:
-
-   podman run -d \
-     --name vault-kms-plugin \
-     -v /var/run/kms:/socket \
-     registry.k8s.io/kms/vault-kms-plugin:v0.4.0 \
-     --socket=/socket/kms.sock \
-     --vault-addr=https://vault.company.com
-
-   podman run -d \
-     --name kms-socket-proxy \
-     -v /var/run/kms:/socket \
-     -p 8080:8080 \
-     registry.redhat.io/openshift4/kms-socket-proxy:v4.17 \
-     --listen-addr=:8080 \
-     --socket-path=/socket/kms.sock
-   ```
-
-   **Expose via load balancer:**
-   - Configure load balancer to expose port 8080
-   - Example endpoint: `https://kms.company.com:8080`
-
-2. The cluster admin updates the APIServer configuration with the external endpoint:
-   ```yaml
-   apiVersion: config.openshift.io/v1
-   kind: APIServer
-   metadata:
-     name: cluster
-   spec:
-     encryption:
-       type: KMS
-       kms:
-         type: External
-         external:
-           endpoint: https://kms.company.com:8080
-   ```
-
-3. API server operators detect the configuration change
-4. Operators validate endpoint is reachable (health check + KMS Status call)
-5. Operators inject KMS shim sidecars into API server pods
-6. Operators configure shim to forward to `https://kms.company.com:8080`
-7. Shim creates Unix socket for API server (e.g., `/var/run/kmsplugin/kms-abc123.sock`)
-8. Encryption controllers detect new KMS configuration and begin encryption
-
-**What the user deployed**: Plugin + socket proxy on external infrastructure, load balancer
-**What OpenShift manages**: Shim sidecar in API server pods, endpoint validation
-
-**Why external deployment works well:** No circular dependency - the KMS plugin is available independently of cluster state, allowing the cluster to recover from full control plane restarts.
-
-**Example: Static Pod Deployment (Recommended)**
+**Static Pod Deployment (Only Supported Pattern)**
 
 1. The cluster admin creates static pod manifests on each control plane node:
 
@@ -373,16 +315,29 @@ If the KMS plugin runs as a regular in-cluster workload (Deployment/StatefulSet/
 
 The same workflow applies whether changing keys within the same KMS provider or migrating to a completely different provider (e.g., Vault → AWS KMS).
 
-**Example 1: Same provider, different key (Vault key A → Vault key B)**
+**Example: Same provider, different key (Vault key A → Vault key B)**
 
 1. Cluster admin creates new KEK in Vault
-2. Cluster admin deploys second Vault plugin instance configured with new key:
+2. Cluster admin creates new static pod manifests on each control plane node with new key configuration:
    ```bash
-   kubectl apply -f vault-kms-plugin-new.yaml  # Includes plugin + socket proxy + Service
+   # On each master node: /etc/kubernetes/manifests/vault-kms-plugin-new.yaml
+   # Similar to original manifest but with different key configuration
    ```
-   This creates a second endpoint (e.g., `http://vault-kms-new.kms-plugins.svc:8080`)
+3. Cluster admin creates Service for new plugin instances:
+   ```yaml
+   apiVersion: v1
+   kind: Service
+   metadata:
+     name: vault-kms-new
+     namespace: kube-system
+   spec:
+     selector:
+       app: vault-kms-plugin-new
+     ports:
+     - port: 8080
+   ```
 
-3. Cluster admin updates APIServer config to point to the new endpoint:
+4. Cluster admin updates APIServer config to point to the new endpoint:
    ```yaml
    spec:
      encryption:
@@ -390,36 +345,14 @@ The same workflow applies whether changing keys within the same KMS provider or 
        kms:
          type: External
          external:
-           endpoint: http://vault-kms-new.kms-plugins.svc:8080
+           endpoint: http://vault-kms-new.kube-system.svc:8080
    ```
 
-**Example 2: Different provider (Vault → AWS KMS)**
+**Migration flow:**
 
-1. Cluster admin creates KEK in AWS KMS
-2. Cluster admin deploys AWS KMS plugin + socket proxy:
-   ```bash
-   # Deploy AWS KMS plugin on external infrastructure
-   podman run -d --name aws-kms-plugin ...
-   podman run -d --name kms-socket-proxy ...
-   # Expose via load balancer: https://aws-kms.company.com:8080
-   ```
-
-3. Cluster admin updates APIServer config to point to AWS endpoint:
-   ```yaml
-   spec:
-     encryption:
-       type: KMS
-       kms:
-         type: External
-         external:
-           endpoint: https://aws-kms.company.com:8080
-   ```
-
-**Common migration flow (same for both examples):**
-
-4. Operators detect configuration change (endpoint URL changed)
-5. Operators create a **second shim instance** configured with the new endpoint
-6. Operators update the `EncryptionConfiguration` to reference both shim sockets:
+5. Operators detect configuration change (endpoint URL changed)
+6. Operators create a **second shim instance** configured with the new endpoint
+7. Operators update the `EncryptionConfiguration` to reference both shim sockets:
    ```yaml
    resources:
      - resources:
@@ -432,14 +365,14 @@ The same workflow applies whether changing keys within the same KMS provider or 
            name: old-key
            endpoint: unix:///var/run/kmsplugin/kms-def456.sock  # old shim (still running)
    ```
-7. Migration proceeds automatically:
+8. Migration proceeds automatically:
    - API server encrypts new data using new-key provider (first in list)
    - API server can decrypt old data using old-key provider (second in list)
    - Migration controller re-encrypts all data with new key
-8. Once migration completes, operators remove the old shim instance
-9. Old plugin deployment can be deleted by user
+9. Once migration completes, operators remove the old shim instance
+10. User deletes old plugin static pod manifests from control plane nodes
 
-**Key principle:** OpenShift doesn't distinguish between "same provider, different key" vs "different provider entirely". From OpenShift's perspective, it's simply "old endpoint" → "new endpoint". The user just updates the `endpoint` field, and OpenShift handles the migration transparently.
+**Key principle:** OpenShift doesn't distinguish between "same provider, different key" vs "different provider entirely". From OpenShift's perspective, it's simply "old endpoint" → "new endpoint". The user just updates the `endpoint` field, OpenShift handles the migration, and the user cleans up old static pod manifests when done.
 
 ### API Extensions
 
@@ -836,6 +769,57 @@ When the user updates the `endpoint` field in APIServer CR to point to a new plu
 - Brief interruption in plugin availability
 - Shim retries connection to Service
 
+#### Authentication and Network Security
+
+**Tech Preview:** No authentication between shim and socket proxy. Security relies on:
+- In-cluster network isolation (static pods in `kube-system` namespace)
+- Trust model: Only OpenShift-managed shim sidecars can reach socket proxy Services
+- Acceptable for Tech Preview to gather feedback on security requirements
+
+**GA:** Network policies enforcing access control:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kms-socket-proxy
+  namespace: kube-system
+spec:
+  podSelector:
+    matchLabels:
+      app: kms-socket-proxy  # Matches socket proxy static pods
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    # Allow only from API server namespaces
+    - namespaceSelector:
+        matchLabels:
+          name: openshift-kube-apiserver
+    - namespaceSelector:
+        matchLabels:
+          name: openshift-apiserver
+    - namespaceSelector:
+        matchLabels:
+          name: openshift-authentication
+    ports:
+    - protocol: TCP
+      port: 8080
+```
+
+**Why network policies are sufficient for static pod deployments:**
+- Socket proxy only exposed in-cluster (no external endpoints)
+- Static pods run in `kube-system` namespace (well-controlled)
+- Network policies restrict access to API server namespaces only
+- No need for mTLS complexity (cert management, rotation)
+- No need for shared secrets (distribution, rotation)
+- Simpler operational model for users
+
+**Security properties:**
+- Defense in depth: Even if an attacker compromises a pod, they cannot reach socket proxy unless in an API server namespace
+- Namespace isolation: Workload namespaces cannot access KMS plugins
+- No credentials to manage: Network policy is declarative and managed by operators
+
 #### Metrics and Monitoring
 
 **Shim Metrics:**
@@ -871,9 +855,9 @@ Operators expose both shim and socket proxy metrics via existing monitoring infr
 
 ### Risks and Mitigations
 
-#### Risk: Circular Dependency with In-Cluster Deployments
+#### Risk: Circular Dependency with Regular Workload Deployments
 
-**Risk:** Users deploy KMS plugin as regular in-cluster workload (Deployment/StatefulSet/DaemonSet), creating circular dependency with kube-apiserver.
+**Risk:** Users deploy KMS plugin as regular in-cluster workload (Deployment/StatefulSet/DaemonSet) instead of static pods, creating circular dependency with kube-apiserver.
 
 **Impact:**
 - **Critical failure scenario:** After full control plane restart, cluster cannot recover automatically
@@ -882,11 +866,10 @@ Operators expose both shim and socket proxy metrics via existing monitoring infr
 - **Result:** Cluster deadlock requiring manual intervention
 
 **Mitigation:**
-- **Strong documentation recommendation:** Deploy KMS plugins on external infrastructure (VMs, bare metal, separate clusters)
-- **Alternative:** Use static pods on control plane nodes (similar to etcd pattern)
-- **Documentation warnings:** Clearly mark Deployment/StatefulSet/DaemonSet patterns as "NOT RECOMMENDED"
-- **Example YAMLs:** Only provide external deployment and static pod examples, not Deployment examples
-- **Validation consideration (future):** Consider adding operator validation to warn when endpoint resolves to in-cluster Service with no pods running
+- **Only support static pod deployment pattern** (documented and validated)
+- **Strong documentation warnings:** Clearly mark Deployment/StatefulSet/DaemonSet patterns as "UNSUPPORTED"
+- **Example YAMLs:** Only provide static pod examples
+- **Validation consideration (future):** Consider adding operator validation to warn when endpoint resolves to in-cluster Service backed by non-static pods
 
 **Why this is a critical risk:**
 - Recovery requires manual intervention (SSH to nodes, modify etcd directly, or disable encryption)
@@ -895,18 +878,17 @@ Operators expose both shim and socket proxy metrics via existing monitoring infr
 
 #### Risk: Network Latency Impact
 
-**Risk:** Extra network hop (API server → shim → socket proxy → plugin) adds latency to every encryption operation.
+**Risk:** Network hops (API server → shim → socket proxy → plugin) add latency to every encryption operation.
 
 **Impact:**
-- Estimated +2-8ms per operation for in-cluster network (two network hops)
-- Secret creation, ConfigMap updates affected
+- Estimated +1-3ms per operation for localhost communication (static pods on same node as API server)
+- Minimal impact compared to external deployments
 
 **Mitigation:**
+- Static pod deployment ensures minimal latency (localhost communication)
 - Document expected performance impact
 - Measure latency in testing, establish SLOs
-- Recommend users deploy plugins in same namespace as control plane for minimal network distance
-- Future: Add caching layer in shim if performance becomes issue
-- Network overhead acceptable tradeoff for SELinux compliance and operator simplicity
+- Network overhead minimal and acceptable tradeoff for SELinux compliance and operator simplicity
 
 #### Risk: Shim Cannot Reach Endpoint
 
@@ -927,7 +909,7 @@ Operators expose both shim and socket proxy metrics via existing monitoring infr
 
 #### Risk: User Deployment Errors
 
-**Risk:** Users incorrectly deploy plugin + socket proxy (wrong socket path, missing Service, port mismatch, etc.)
+**Risk:** Users incorrectly deploy plugin + socket proxy as static pods (wrong socket path, missing Service, port mismatch, incorrect labels, etc.)
 
 **Impact:**
 - Endpoint validation fails
@@ -935,11 +917,12 @@ Operators expose both shim and socket proxy metrics via existing monitoring infr
 - User frustration and support burden
 
 **Mitigation:**
-- Comprehensive documentation with copy-paste example YAMLs
-- Examples for common deployment patterns (in-cluster sidecar, external, etc.)
-- Validation errors provide specific guidance (e.g., "health check failed at http://... - verify socket proxy is running")
+- Comprehensive documentation with copy-paste example static pod manifests
+- Example manifests for common KMS providers (Vault, AWS, etc.)
+- Validation errors provide specific guidance (e.g., "health check failed at http://... - verify static pod is running on all control plane nodes")
 - Socket proxy exposes health endpoint for easy testing
-- Troubleshooting guide with common mistakes
+- Troubleshooting guide with common static pod deployment mistakes
+- Document how to verify static pods are running (`ls /etc/kubernetes/manifests/`, `crictl pods`, etc.)
 
 #### Risk: Support Boundary Confusion
 
@@ -957,32 +940,16 @@ Operators expose both shim and socket proxy metrics via existing monitoring infr
 - Metrics distinguish between shim errors, socket proxy errors, and plugin errors
 - Troubleshooting guide helps users diagnose their deployment issues independently
 
-#### Risk: Endpoint URL Flexibility Creates Complexity
-
-**Risk:** Users can deploy plugins anywhere (in-cluster, external, hybrid), making troubleshooting more complex.
-
-**Impact:**
-- Support cannot assume deployment architecture
-- Network troubleshooting varies by architecture
-- More documentation needed to cover all scenarios
-
-**Mitigation:**
-- Document common deployment patterns clearly
-- Validation logic works regardless of architecture (just checks endpoint reachability)
-- Troubleshooting guide organized by symptom, not architecture
-- Trade-off justified by architectural flexibility users gain
-
 ### Drawbacks
 
-1. **Performance overhead**: Two network hops (shim → socket proxy → plugin) add latency compared to native plugins
-2. **User deployment responsibility**: Users must deploy plugin + socket proxy + networking infrastructure themselves
-3. **Deployment architecture constraints**: Users must deploy plugins on external infrastructure or as static pods to avoid circular dependencies (cannot use standard Kubernetes workloads like Deployments)
-4. **Configuration complexity**: Users must understand container deployment, networking, and infrastructure management
+1. **Performance overhead**: Network hops (shim → socket proxy → plugin) add latency compared to native plugins (though minimal for localhost communication)
+2. **User deployment responsibility**: Users must deploy plugin + socket proxy as static pods themselves
+3. **Deployment architecture constraints**: Users must deploy plugins as static pods (cannot use standard Kubernetes workloads like Deployments to avoid circular dependencies)
+4. **Static pod management complexity**: Users must SSH to each control plane node to create/update/delete static pod manifests
 5. **Support complexity**: Three-layer architecture (shim, socket proxy, plugin) creates more troubleshooting surface area
-6. **Deployment errors**: Users can misconfigure socket path, port, networking, or use unsafe deployment patterns
-7. **Socket proxy failure mode**: If socket proxy crashes, entire plugin becomes unavailable until restart
-8. **No automatic updates**: Users must manually update socket proxy image when OpenShift releases new version (though updates are backward compatible)
-9. **External infrastructure requirement**: Recommended deployment pattern requires infrastructure outside the cluster (VMs, bare metal, or separate clusters)
+6. **Deployment errors**: Users can misconfigure static pod manifests (socket path, port, labels, Service selectors)
+7. **Socket proxy failure mode**: If socket proxy crashes, entire plugin becomes unavailable until kubelet restarts it
+8. **Manual static pod updates**: Users must manually update static pod manifests on all control plane nodes when updating plugins
 
 ## Alternatives (Not Implemented)
 
@@ -1088,10 +1055,10 @@ ls: cannot access 'kms.sock': Permission denied
 
 ## Open Questions
 
-1. **Authentication between shim and external plugin:**
-   - Tech Preview: No authentication (trust in-cluster network)
-   - GA: Mutual TLS? ServiceAccount tokens? Shared secret?
-   - Decision deferred to GA planning based on Tech Preview feedback
+1. **Authentication between shim and socket proxy:**
+   - Tech Preview: No authentication (trust in-cluster network, static pod deployment only)
+   - GA: Network policies restricting socket proxy access to API server namespaces only
+   - Decision: Network policies are sufficient for static pod deployments (in-cluster only), simpler than mTLS or shared secrets
 
 2. **Shim image distribution:**
    - Tech Preview: Users may need to manually specify shim image
@@ -1151,27 +1118,29 @@ ls: cannot access 'kms.sock': Permission denied
 ### E2E Tests
 
 **Full Stack Testing:**
-- User deploys standard upstream KMS plugin using **external infrastructure** (VMs/podman)
-- User deploys OpenShift-provided socket proxy alongside plugin
-- User exposes endpoint via load balancer or external URL
-- User configures APIServer CR with external endpoint URL
+- User deploys standard upstream KMS plugin using **static pods** on control plane nodes
+- User deploys OpenShift-provided socket proxy alongside plugin (in same static pod)
+- User creates Kubernetes Service to expose socket proxy
+- User configures APIServer CR with in-cluster Service endpoint URL
 - Operators validate endpoint reachability
 - Operators inject shim into API server pods with validated endpoint
 - Verify data encrypted end-to-end
 - Trigger KEK rotation, verify migration
 - Perform KEK change (update endpoint to point to new plugin), verify:
+  - User creates new static pod manifests with new key
   - Operators create second shim instance
   - EncryptionConfiguration references both shim sockets
   - Migration completes successfully
   - Old shim instance removed after migration
-- Verify old plugin can be deleted by user after migration
-- Measure performance impact (latency, throughput with two network hops)
+- User deletes old static pod manifests after migration
+- Verify cluster survives control plane restart (static pods start before kube-apiserver)
+- Measure performance impact (latency, throughput - should be minimal for localhost communication)
 
-**Deployment Pattern Testing:**
-- **External infrastructure**: Deploy on VMs, verify cluster survives control plane restart
-- **Static pods**: Deploy as static pods on control plane nodes, verify bootstrap
-- Verify endpoint validation works regardless of deployment architecture
-- Update plugin image independently (verify plugin update without OpenShift changes)
+**Network Security Testing:**
+- Verify network policies restrict access to socket proxy
+- Test that pods in non-API-server namespaces cannot reach socket proxy
+- Test that API server pods can reach socket proxy (allowed by network policy)
+- Verify network policy is created/managed by operators
 
 ### Failure Injection Tests
 
