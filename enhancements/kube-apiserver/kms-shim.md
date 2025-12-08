@@ -136,21 +136,7 @@ Alternative: Plugin + Socket Proxy on External Infrastructure
 └──────────────────────────────────────────────────────────┘
 ```
 
-**Key Innovation 1: Intelligent Routing in Shim**
-
-The shim maintains multiple endpoint configurations and routes requests intelligently based on operation type:
-
-- **Encrypt requests**: Always sent to the **primary endpoint** (the `endpoint` field)
-- **Decrypt requests**: Try **primary endpoint** first, then fall back to **additional endpoints** (the `additionalEndpoints` field) if decryption fails
-- **Status requests**: Always sent to the **primary endpoint**
-
-**Terminology:**
-- **Primary endpoint** = `spec.encryption.kms.external.endpoint` = Used for new encryptions and status checks
-- **Additional endpoints** = `spec.encryption.kms.external.additionalEndpoints` = Used only for decryption fallback during KEK change migrations
-
-This eliminates the need for multiple shim instances during KEK changes, making KEK changes as transparent to users as KEK rotations.
-
-**Key Innovation 2: User-Controlled Deployment with OpenShift-Provided Components**
+**Key Innovation: User-Controlled Deployment with OpenShift-Provided Components**
 
 OpenShift provides the socket proxy container image, and users deploy it using **recommended deployment patterns** that avoid circular dependencies with the kube-apiserver.
 
@@ -383,16 +369,20 @@ If the KMS plugin runs as a regular in-cluster workload (Deployment/StatefulSet/
 6. keyController triggers data migration (re-encrypt with new key)
 7. **User does nothing** - same plugin instance handles both old and new key internally
 
-#### KEK Change (Switching to Different Key)
+#### KEK Change (Switching to Different Key or Provider)
 
-1. Cluster admin creates KEK in new KMS or different key in same KMS
-2. Cluster admin deploys second instance of plugin + socket proxy with new key configuration:
+The same workflow applies whether changing keys within the same KMS provider or migrating to a completely different provider (e.g., Vault → AWS KMS).
+
+**Example 1: Same provider, different key (Vault key A → Vault key B)**
+
+1. Cluster admin creates new KEK in Vault
+2. Cluster admin deploys second Vault plugin instance configured with new key:
    ```bash
    kubectl apply -f vault-kms-plugin-new.yaml  # Includes plugin + socket proxy + Service
    ```
    This creates a second endpoint (e.g., `http://vault-kms-new.kms-plugins.svc:8080`)
 
-3. Cluster admin updates APIServer config with both endpoints:
+3. Cluster admin updates APIServer config to point to the new endpoint:
    ```yaml
    spec:
      encryption:
@@ -401,21 +391,55 @@ If the KMS plugin runs as a regular in-cluster workload (Deployment/StatefulSet/
          type: External
          external:
            endpoint: http://vault-kms-new.kms-plugins.svc:8080
-           additionalEndpoints:
-           - http://vault-kms-old.kms-plugins.svc:8080
    ```
 
-4. Operators detect configuration change and update shim configuration
-5. **Same shim instance** now routes to multiple endpoints:
-   - Encrypt requests → **primary endpoint** (`endpoint` field = new key)
-   - Decrypt requests → try **primary endpoint** first, fall back to **additional endpoints** (`additionalEndpoints` = old key) if decryption fails
-6. Migration proceeds automatically:
-   - API server reads old secrets, shim routes decrypt to **additional endpoints** (old key)
-   - API server re-encrypts, shim routes encrypt to **primary endpoint** (new key)
-7. Once migration completes, cluster admin removes `additionalEndpoints` from config
-8. Shim stops routing to **additional endpoints**, old plugin deployment can be deleted
+**Example 2: Different provider (Vault → AWS KMS)**
 
-**User experience:** Similar to KEK rotation - just update config once, OpenShift handles the rest
+1. Cluster admin creates KEK in AWS KMS
+2. Cluster admin deploys AWS KMS plugin + socket proxy:
+   ```bash
+   # Deploy AWS KMS plugin on external infrastructure
+   podman run -d --name aws-kms-plugin ...
+   podman run -d --name kms-socket-proxy ...
+   # Expose via load balancer: https://aws-kms.company.com:8080
+   ```
+
+3. Cluster admin updates APIServer config to point to AWS endpoint:
+   ```yaml
+   spec:
+     encryption:
+       type: KMS
+       kms:
+         type: External
+         external:
+           endpoint: https://aws-kms.company.com:8080
+   ```
+
+**Common migration flow (same for both examples):**
+
+4. Operators detect configuration change (endpoint URL changed)
+5. Operators create a **second shim instance** configured with the new endpoint
+6. Operators update the `EncryptionConfiguration` to reference both shim sockets:
+   ```yaml
+   resources:
+     - resources:
+       - secrets
+       providers:
+       - kms:
+           name: new-key
+           endpoint: unix:///var/run/kmsplugin/kms-abc123.sock  # new shim
+       - kms:
+           name: old-key
+           endpoint: unix:///var/run/kmsplugin/kms-def456.sock  # old shim (still running)
+   ```
+7. Migration proceeds automatically:
+   - API server encrypts new data using new-key provider (first in list)
+   - API server can decrypt old data using old-key provider (second in list)
+   - Migration controller re-encrypts all data with new key
+8. Once migration completes, operators remove the old shim instance
+9. Old plugin deployment can be deleted by user
+
+**Key principle:** OpenShift doesn't distinguish between "same provider, different key" vs "different provider entirely". From OpenShift's perspective, it's simply "old endpoint" → "new endpoint". The user just updates the `endpoint` field, and OpenShift handles the migration transparently.
 
 ### API Extensions
 
@@ -469,16 +493,11 @@ type KMSConfig struct {
 // Users deploy standard upstream KMS v2 plugins with the OpenShift-provided
 // socket proxy container, and configure the socket proxy endpoint here.
 //
-// The shim routes requests intelligently based on operation type:
-// - Encrypt requests: Always sent to the primary endpoint (endpoint field)
-// - Decrypt requests: Try primary endpoint first, fall back to additionalEndpoints if decryption fails
-// - Status requests: Always sent to the primary endpoint (endpoint field)
+// Each endpoint corresponds to one KMS plugin + socket proxy deployment.
+// During KEK changes, users update this field to point to the new plugin,
+// and OpenShift manages multiple shim instances during the migration period.
 type ExternalKMSConfig struct {
-    // endpoint specifies the primary network address where the socket proxy is listening.
-    // This endpoint is used for:
-    // - All new encryption operations (Encrypt requests)
-    // - Plugin health and key rotation detection (Status requests)
-    // - Decryption attempts (tried first before falling back to additionalEndpoints)
+    // endpoint specifies the network address where the socket proxy is listening.
     //
     // The socket proxy must be deployed by the user alongside their KMS plugin.
     //
@@ -495,32 +514,6 @@ type ExternalKMSConfig struct {
     // +kubebuilder:validation:Required
     // +kubebuilder:validation:Pattern=`^https?://[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?(:[0-9]+)?(/.*)?$`
     Endpoint string `json:"endpoint"`
-
-    // additionalEndpoints specifies additional socket proxy endpoints used during
-    // KEK change operations for decryption fallback.
-    //
-    // These endpoints are ONLY used for Decrypt requests when the primary endpoint
-    // fails to decrypt data. This happens when data was encrypted with a previous
-    // KMS key that the primary endpoint doesn't have access to.
-    //
-    // The shim tries the primary endpoint first for all Decrypt requests. If
-    // decryption fails (because data was encrypted with an old key), the shim
-    // tries each endpoint in additionalEndpoints until one succeeds.
-    //
-    // Encrypt and Status requests NEVER use additionalEndpoints - they always
-    // use the primary endpoint.
-    //
-    // These should be removed after migration to the new key completes (when all
-    // data has been re-encrypted with the new key).
-    //
-    // Example use case: Migrating from one KMS key to another. User deploys
-    // a second instance of their plugin with the new key, sets that as the
-    // primary endpoint, and adds the old plugin endpoint here. Both run
-    // simultaneously until all data is re-encrypted with the new key.
-    //
-    // +optional
-    // +kubebuilder:validation:MaxItems=10
-    AdditionalEndpoints []string `json:"additionalEndpoints,omitempty"`
 }
 ```
 
@@ -538,24 +531,6 @@ spec:
       type: External
       external:
         endpoint: http://vault-kms-plugin.kms-plugins.svc:8080
-```
-
-**Example with KEK change (two endpoints during migration):**
-
-```yaml
-apiVersion: config.openshift.io/v1
-kind: APIServer
-metadata:
-  name: cluster
-spec:
-  encryption:
-    type: KMS
-    kms:
-      type: External
-      external:
-        endpoint: http://vault-kms-new.kms-plugins.svc:8080
-        additionalEndpoints:
-        - http://vault-kms-old.kms-plugins.svc:8080
 ```
 
 **Example with external deployment:**
@@ -632,81 +607,46 @@ The shim is a lightweight Go binary implementing:
 
 **Core Functionality:**
 - **Unix Socket Server**: Implements KMS v2 gRPC API, listens on Unix socket
-- **HTTP/gRPC Client**: Forwards requests to configured endpoints
-- **Intelligent Routing**: Routes requests based on operation type with fallback on failure
-- **Configuration**: Reads endpoints from environment variables or config file
+- **HTTP/gRPC Client**: Forwards requests to configured endpoint
+- **Simple Forwarding**: All requests forwarded to single configured endpoint
+- **Configuration**: Reads endpoint from environment variables or config file
 - **Health Checks**: Exposes `/healthz` endpoint for liveness/readiness probes
 
 **Code Structure:**
 ```
 pkg/kmsshim/
 ├── server.go         # Unix socket gRPC server
-├── client.go         # HTTP/gRPC client to external plugins
-├── router.go         # Intelligent routing logic (NEW)
-├── config.go         # Configuration loading (multiple endpoints)
+├── client.go         # HTTP/gRPC client to external plugin
+├── config.go         # Configuration loading (single endpoint)
 └── metrics.go        # Prometheus metrics
 ```
 
-**Key Methods with Intelligent Routing:**
+**Key Methods:**
 ```go
 type Shim struct {
-    primaryEndpoint     string      // Primary endpoint (from spec.encryption.kms.external.endpoint)
-    additionalEndpoints []string    // Additional endpoints (from spec.encryption.kms.external.additionalEndpoints)
-    clients             map[string]*KMSClient  // Endpoint → client mapping
+    endpoint string           // Endpoint URL (from spec.encryption.kms.external.endpoint)
+    client   *KMSClient       // gRPC client to socket proxy
 }
 
-// Encrypt always uses the primary endpoint
+// Encrypt forwards to the configured endpoint
 func (s *Shim) Encrypt(ctx context.Context, req *EncryptRequest) (*EncryptResponse, error) {
-    client := s.clients[s.primaryEndpoint]
-    return client.Encrypt(ctx, req)
+    return s.client.Encrypt(ctx, req)
 }
 
-// Decrypt tries primary endpoint first, falls back to additional endpoints
+// Decrypt forwards to the configured endpoint
 func (s *Shim) Decrypt(ctx context.Context, req *DecryptRequest) (*DecryptResponse, error) {
-    // Try primary endpoint first (most likely to succeed - most data encrypted with current key)
-    client := s.clients[s.primaryEndpoint]
-    resp, err := client.Decrypt(ctx, req)
-    if err == nil {
-        return resp, nil
-    }
-
-    // If primary endpoint fails, try additional endpoints
-    // This handles data encrypted with previous keys during KEK change
-    for _, endpoint := range s.additionalEndpoints {
-        client := s.clients[endpoint]
-        resp, err := client.Decrypt(ctx, req)
-        if err == nil {
-            // Successfully decrypted with an additional endpoint (old key)
-            return resp, nil
-        }
-    }
-
-    return nil, fmt.Errorf("decryption failed with all configured endpoints (primary + %d additional)", len(s.additionalEndpoints))
+    return s.client.Decrypt(ctx, req)
 }
 
-// Status always uses the primary endpoint
+// Status forwards to the configured endpoint
 func (s *Shim) Status(ctx context.Context, req *StatusRequest) (*StatusResponse, error) {
-    client := s.clients[s.primaryEndpoint]
-    return client.Status(ctx, req)
+    return s.client.Status(ctx, req)
 }
 ```
 
-**Why This Works:**
+**Design Principle:**
 
-The shim uses a **try-first-then-fallback** approach for decryption:
-
-1. **Try primary endpoint first** (most data encrypted with current key, so most likely to succeed)
-2. **Fall back to additional endpoints** if primary decryption fails (data encrypted with old keys during migration)
-3. **Return successful decryption** from whichever endpoint works
-
-This approach is simple and works because:
-- The primary endpoint handles the new key (most common case)
-- Additional endpoints only needed during KEK change (temporary)
-- Each plugin knows which keys it has access to and will succeed/fail accordingly
-- No need to maintain key_id → endpoint mapping in the shim
-- No need for multiple shim instances or complex socket path management
-
-The Kubernetes KMS v2 API includes `key_id` in both EncryptResponse and DecryptRequest, but the shim doesn't need to inspect or match it - the plugins themselves handle key identification.
+The shim is a **simple, stateless proxy**. It doesn't implement routing logic or make decisions about which endpoint to use. Each shim instance forwards to exactly one endpoint. During KEK changes, multiple shim instances run simultaneously, each with its own socket path, and the API server's `EncryptionConfiguration` defines the provider order and fallback logic.
 
 #### Socket Proxy Implementation
 
@@ -840,29 +780,35 @@ socketPath := fmt.Sprintf("/var/run/kmsplugin/kms-%s.sock", configHash)
 
 Where `configHash` is computed from:
 - KMS provider type (External)
-- Primary endpoint URL
+- Endpoint URL
 
-**Note:** Unlike native plugins, the socket path does NOT change during KEK changes because the same shim instance handles routing to multiple endpoints internally. This simplifies the EncryptionConfiguration and eliminates the need for multi-socket management.
+**During KEK changes**, the endpoint URL changes, so a new socket path is generated. This means:
+- Old shim instance continues using `/var/run/kmsplugin/kms-abc123.sock` (old endpoint)
+- New shim instance created with `/var/run/kmsplugin/kms-def456.sock` (new endpoint)
+- Both shim instances run simultaneously during migration
+- `EncryptionConfiguration` references both socket paths during migration
 
 #### Configuration Updates During KEK Change
 
-When `additionalEndpoints` is added or modified:
+When the user updates the `endpoint` field in APIServer CR to point to a new plugin:
 
-1. Operators detect configuration change in APIServer CR
-2. Operators validate new endpoints are reachable
-3. Operators update shim configuration with additional endpoints
-4. **Same shim instance** is updated in-place (no pod restart required)
-5. Shim reloads configuration, adds new endpoint clients
-6. EncryptionConfiguration remains unchanged (same socket path)
-7. Migration proceeds automatically with shim routing decrypt requests appropriately
+1. Operators detect configuration change (endpoint URL changed)
+2. Operators validate new endpoint is reachable
+3. Operators create a **new shim sidecar** configured with the new endpoint
+4. Operators update `EncryptionConfiguration` to reference both socket paths:
+   - New shim socket as first KMS provider (write key)
+   - Old shim socket as second KMS provider (read-only for old data)
+5. Migration proceeds automatically with API server using the correct provider for each operation
+6. Once migration completes, operators remove old shim sidecar
+7. `EncryptionConfiguration` updated to reference only the new shim socket
 
-**Simplified flow compared to native plugins:**
-- ✅ One shim instance (not two)
-- ✅ One socket path (not two)
-- ✅ No EncryptionConfiguration changes needed
-- ✅ Configuration update instead of pod rollout
-- ✅ User experience similar to KEK rotation
-- ✅ Users deploy second plugin instance and update APIServer CR - operators handle shim configuration
+**Flow for KEK changes:**
+- ✅ Two shim instances during migration (old + new)
+- ✅ Two socket paths (one per endpoint)
+- ✅ `EncryptionConfiguration` references both sockets with correct order
+- ✅ API server controls fallback order (not the shim)
+- ✅ Can support arbitrary provider order (kms → identity → kms, etc.)
+- ✅ Users deploy second plugin instance and update APIServer CR - operators handle shim lifecycle
 
 #### Error Handling
 
@@ -1127,17 +1073,18 @@ ls: cannot access 'kms.sock': Permission denied
 - Loses significant value proposition
 - Upstream Kubernetes already has manual approach, OpenShift should add value
 
-### Alternative 4: Multiple Shim Instances During KEK Change
+### Alternative 4: Single Shim with Intelligent Routing
 
-**Approach:** Deploy two separate shim instances during KEK change, each with its own socket and endpoint.
+**Approach:** Deploy a single shim instance that maintains multiple endpoint configurations and routes requests intelligently based on operation type (encrypt always to primary, decrypt tries primary then falls back to additional endpoints).
 
 **Why not chosen:**
-- Requires two socket paths in EncryptionConfiguration
-- Operators must manage multiple shim sidecars and coordinate removal
-- More complex than single shim with try-fallback routing
-- User experience differs between KEK rotation (one shim) and KEK change (two shims)
+- **Violates separation of concerns**: The shim doesn't know the full `EncryptionConfiguration` order, so it shouldn't make fallback decisions
+- **Cannot support arbitrary provider orders**: If the configuration is `kms-new → identity → kms-old`, the shim would incorrectly bypass `identity` and fall back directly from `kms-new` to `kms-old`
+- **API server should control fallback**: The `EncryptionConfiguration` provider order is authoritative and meaningful - the API server, not the shim, should determine fallback behavior
+- **More complex shim**: Requires routing logic, multiple client management, and state tracking
+- **Less flexible**: Cannot easily support mixed encryption configurations with multiple provider types
 
-**Note:** This was the original design before we realized a single shim instance can simply try the primary endpoint first and fall back to additional endpoints on failure, without needing to inspect or match `key_id` values.
+**Note:** This was explored as a way to simplify KEK changes, but feedback revealed that the shim binding itself to encryption configuration order is a design flaw. The multi-shim approach (now the main design) correctly keeps the shim stateless and lets the API server control provider fallback order.
 
 ## Open Questions
 
@@ -1190,14 +1137,15 @@ ls: cannot access 'kms.sock': Permission denied
 - Socket proxy deployed by test alongside mock plugin
 - End-to-end encryption/decryption through shim → socket proxy → plugin
 - KEK rotation detection forwarded correctly through the chain
-- Intelligent routing during KEK change (single shim, multiple endpoints)
-- Configuration updates applied without pod restart
+- Multiple shim instances during KEK change (two shim sidecars, two socket paths)
+- EncryptionConfiguration references both shim sockets during migration
+- Old shim removed after migration completes
 
 **Operator Integration:**
 - Operator validates endpoint before injecting shim
 - Validation failures set correct operator conditions
 - Shim configured with correct endpoint URL
-- Multiple plugin deployments (KEK change scenario with multiple endpoints)
+- Multiple shim instances during KEK change (operators manage lifecycle)
 - Endpoint validation retries on failure
 
 ### E2E Tests
@@ -1211,8 +1159,12 @@ ls: cannot access 'kms.sock': Permission denied
 - Operators inject shim into API server pods with validated endpoint
 - Verify data encrypted end-to-end
 - Trigger KEK rotation, verify migration
-- Perform KEK change with `additionalEndpoints`, verify smart routing
-- Verify old plugin removal after migration completes
+- Perform KEK change (update endpoint to point to new plugin), verify:
+  - Operators create second shim instance
+  - EncryptionConfiguration references both shim sockets
+  - Migration completes successfully
+  - Old shim instance removed after migration
+- Verify old plugin can be deleted by user after migration
 - Measure performance impact (latency, throughput with two network hops)
 
 **Deployment Pattern Testing:**
@@ -1235,7 +1187,6 @@ ls: cannot access 'kms.sock': Permission denied
 - Endpoint unreachable (connection refused, timeout)
 - Endpoint health check fails (socket proxy not responding)
 - Endpoint KMS Status call fails (plugin not responding via socket proxy)
-- Multiple endpoints configured, some unreachable (verify graceful degradation)
 
 **User Deployment Errors:**
 - Socket proxy deployed with wrong socket path (doesn't match plugin)
@@ -1254,7 +1205,7 @@ ls: cannot access 'kms.sock': Permission denied
 ### Tech Preview Acceptance Criteria
 
 **Core Architecture:**
-- ✅ Shim implementation complete (Unix socket ↔ HTTP/gRPC forwarding with intelligent routing)
+- ✅ Shim implementation complete (Unix socket ↔ HTTP/gRPC simple forwarding)
 - ✅ Socket proxy implementation complete (HTTP/gRPC ↔ Unix socket translation)
 - ✅ Operator integration (shim sidecar injection into API server pods)
 - ✅ Endpoint validation (health check + KMS Status call)
@@ -1262,8 +1213,8 @@ ls: cannot access 'kms.sock': Permission denied
 
 **Key Rotation:**
 - ✅ Basic KEK rotation working (forwarding Status calls through socket proxy)
-- ✅ Smart routing during KEK change (single shim, multiple endpoints via `additionalEndpoints`)
-- ✅ Configuration hot-reload (update endpoints without pod restart)
+- ✅ Multi-shim management during KEK change (operators create/remove shim instances)
+- ✅ EncryptionConfiguration updates to reference multiple shim sockets during migration
 
 **Documentation and Feature Gate:**
 - ✅ Documentation with complete example deployment YAMLs (plugin + socket proxy + Service)
