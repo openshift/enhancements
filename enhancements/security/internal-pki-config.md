@@ -80,7 +80,7 @@ Currently, OpenShift provides no mechanism to configure these parameters for int
 
 This proposal introduces a new `PKI` cluster-scoped singleton configuration resource in the `config.openshift.io/v1` API group, along with a `ConfigurablePKI` feature gate to control the rollout. The configuration allows administrators to specify cryptographic parameters for internal certificates organized by category and name.
 
-**Note:** During development, the API will start as `v1alpha1` with TechPreviewNoUpgrade feature gate enablement. The API will be promoted to `v1` and the feature gate will be enabled by default before the OpenShift 4.21 release, shipping as GA.
+**Note:** During development, the API will start as `v1alpha1` with TechPreviewNoUpgrade feature gate enablement. The API will be promoted to `v1` and the feature gate will be enabled by default before the target OpenShift release, shipping as GA.
 
 At a high level, the changes include:
 
@@ -212,7 +212,7 @@ This enhancement adds a new Custom Resource Definition (CRD) to the OpenShift AP
 
 #### Compatibility Level
 
-The PKI API will be developed initially at **Compatibility Level 4** (TechPreviewNoUpgrade) and graduate to **Compatibility Level 1** (GA) before the OpenShift 4.21 release.
+The PKI API will be developed initially at **Compatibility Level 4** (TechPreviewNoUpgrade) and graduate to **Compatibility Level 1** (GA) before the target OpenShift release.
 
 - **Development phase (v1alpha1, Level 4):**
   - No compatibility guarantees during development
@@ -222,14 +222,14 @@ The PKI API will be developed initially at **Compatibility Level 4** (TechPrevie
   - Gated by ConfigurablePKI feature gate with TechPreviewNoUpgrade enablement
 
 - **Release phase (v1, Level 1):**
-  - Shipped as GA in OpenShift 4.21
+  - Shipped as GA in target OpenShift release
   - Breaking changes no longer allowed
   - API stable within major release for 12 months or 3 minor releases
   - Full backward compatibility guarantees
 
 - **Graduation timeline:**
   - v1alpha1 at Level 4: Early development (feature gate: TechPreviewNoUpgrade)
-  - v1 at Level 1: OpenShift 4.21 release (feature gate: enabled by default)
+  - v1 at Level 1: Target OpenShift release (feature gate: enabled by default)
   - No intermediate v1beta1 or TechPreview release planned
 
 The compatibility level is enforced through the `+openshift:compatibility-gen:level` annotation and will be validated by the API review process. The annotation will change from `level=4` to `level=1` when the API is promoted to v1.
@@ -695,13 +695,6 @@ The CRD uses **CEL (Common Expression Language) validation rules** instead of va
    - `curve` is required in `ECDSAKeyConfig`
    - Implemented via: `+kubebuilder:validation:Required`
 
-**Advantages of CEL over Validation Webhooks:**
-- No separate webhook deployment or pod management
-- No webhook TLS certificates to generate and rotate
-- Better performance (validation runs in-process at API server)
-- Simpler operations (no webhook availability concerns)
-- Available in Kubernetes 1.25+, guaranteed in OpenShift 4.21 (based on k8s 1.34)
-
 **Additional Runtime Validation:**
 - Operators validate that certificate lifetimes are compatible with key sizes (e.g., log warning if using RSA 2048 for a 10-year certificate)
 - Metrics flag certificates that don't meet configured parameters (indicating a bug or misconfiguration)
@@ -1010,7 +1003,7 @@ None at this time.
 
 ## Graduation Criteria
 
-This feature will be released as **GA in OpenShift 4.21**. The graduation criteria must be met before the 4.21 release.
+This feature will be released as **GA in OpenShift 4.N**. The graduation criteria must be met before the 4.N release.
 
 ### Dev Preview -> Tech Preview
 
@@ -1027,7 +1020,7 @@ During early development with v1alpha1 and TechPreviewNoUpgrade feature gate:
 
 ### Tech Preview -> GA
 
-Before the 4.21 release, all of the following criteria must be met:
+Before the 4.N release, all of the following criteria must be met:
 
 - All certificate-generating operators support PKI configuration
 - Thorough e2e test coverage including upgrade scenarios
@@ -1516,26 +1509,26 @@ func (r *Reconciler) ensurePKICertificateDefinition(ctx context.Context) error {
 
 #### Migration Path
 
-**Phase 1 (OpenShift 4.21 - Current Design): Hardcoded CEL Validation**
+**Phase 1 (OpenShift 4.N - Current Design): Hardcoded CEL Validation**
 - CEL XValidation with hardcoded certificate names in CRD
 - Simple, fail-fast validation at schema level
 - No additional infrastructure needed
 - Proven approach for initial GA release
 
-**Phase 2 (Future Release - e.g., 4.23+): Fully Dynamic Registration**
+**Phase 2 (Future Release - e.g., 4.N+2): Fully Dynamic Registration**
 - Replace hardcoded CEL validation with ValidatingAdmissionPolicy
 - Introduce PKICertificateDefinition CRD and ValidatingAdmissionPolicy
 - All certificates validated through dynamic registration
 
 **Upgrade Path (Phase 1 → Phase 2):**
 
-1. **Fresh Install (4.23+):**
+1. **Fresh Install (4.N+2):**
    - Installer creates PKI resource with only category/defaults configuration (no overrides)
    - Operators create PKICertificateDefinition resources during startup to register their certificates
    - ValidatingAdmissionPolicy validates certificate overrides against registered definitions
    - No bootstrap problem: validation only applies when overrides are used
 
-2. **Upgrade from 4.21 to 4.23:**
+2. **Upgrade from 4.N to 4.N+2:**
    - Cluster has existing PKI resource (potentially with overrides using hardcoded names)
    - Upgrade installs PKICertificateDefinition CRD and ValidatingAdmissionPolicy
    - Platform operator (e.g., cluster-config-operator) creates initial PKICertificateDefinition with all original hardcoded certificate names
@@ -1571,13 +1564,13 @@ func (r *Reconciler) ensurePKICertificateDefinition(ctx context.Context) error {
 
 #### Recommendation
 
-For the **initial GA release (OpenShift 4.21)**, use the simpler CEL XValidation approach with hardcoded certificate names. This provides:
+For the **initial GA release (OpenShift 4.N)**, use the simpler CEL XValidation approach with hardcoded certificate names. This provides:
 - Immediate validation feedback
 - No additional infrastructure
 - Clear documentation in the CRD
 - Proven stability
 
-Consider the **dynamic registration approach for a future minor release** (e.g., OpenShift 4.23+) once:
+Consider the **dynamic registration approach for a future minor release** (e.g., OpenShift 4.N+2) once:
 - The core PKI API has proven stable in production
 - Third-party operators express a need for PKI integration
 - The ValidatingAdmissionPolicy API has matured further
