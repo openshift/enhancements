@@ -4,6 +4,7 @@ authors:
   - "@jubittajohn"
   - "@sanchezl"
   - "@dinhxuanvu"
+  - "@ksiddiqu"
 reviewers:
   - "@patrickdillon" # cluster infrastructure team, installer integration and Day-1 certificate generation
   - "@sadasu" # cluster infrastructure team, installer integration and Day-1 certificate generation
@@ -15,7 +16,7 @@ reviewers:
 approvers:
   - "@sjenning" # staff engineer with PKI and security expertise
 api-approvers:
-  - "@JoelSpeed" # new API in config.openshift.io/v1alpha1
+  - "@everettraven" # new API in config.openshift.io/v1alpha1
 creation-date: 2025-10-20
 last-updated: 2025-12-01
 tracking-link:
