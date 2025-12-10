@@ -341,8 +341,8 @@ type PKISpec struct {
 // CertificateConfig specifies configuration parameters for certificates.
 type CertificateConfig struct {
     // key specifies the cryptographic parameters for the certificate's key pair.
-    // +kubebuilder:validation:Required
-    Key KeyConfig `json:"key"`
+    // +optional
+    Key *KeyConfig `json:"key,omitempty"`
 
     // Future extensibility: fields like Lifetime, Rotation, Extensions
     // can be added here without restructuring the API.
