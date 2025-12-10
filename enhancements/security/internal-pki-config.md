@@ -296,7 +296,6 @@ The `PKI` resource is a cluster-scoped singleton named `cluster` in the `config.
 // +genclient:nonNamespaced
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +kubebuilder:object:root=true
-// +kubebuilder:subresource:status
 // +kubebuilder:resource:path=pkis,scope=Cluster
 // +kubebuilder:validation:XValidation:rule="self.metadata.name == 'cluster'",message="pki is a singleton, .metadata.name must be 'cluster'"
 // +openshift:compatibility-gen:level=1
@@ -306,10 +305,6 @@ type PKI struct {
 
     // spec holds user settable values for configuration
     Spec PKISpec `json:"spec"`
-
-    // status holds observed values from the cluster
-    // +optional
-    Status PKIStatus `json:"status"`
 }
 
 type PKISpec struct {
@@ -469,12 +464,6 @@ const (
     CertificateCategoryServingCertificate CertificateCategory = "ServingCertificate"
     CertificateCategoryClientCertificate  CertificateCategory = "ClientCertificate"
 )
-
-type PKIStatus struct {
-    // No status fields are currently defined. Each certificate-generating operator
-    // independently consumes the PKI configuration and reports status through
-    // its own ClusterOperator status resource.
-}
 
 // PKIList is a collection of PKI resources.
 //
