@@ -298,6 +298,7 @@ The `PKI` resource is a cluster-scoped singleton named `cluster` in the `config.
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:path=pkis,scope=Cluster
+// +kubebuilder:validation:XValidation:rule="self.metadata.name == 'cluster'",message="pki is a singleton, .metadata.name must be 'cluster'"
 // +openshift:compatibility-gen:level=1
 type PKI struct {
     metav1.TypeMeta   `json:",inline"`
