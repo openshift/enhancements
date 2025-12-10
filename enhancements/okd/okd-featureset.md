@@ -10,7 +10,7 @@ reviewers:
 approvers:
   - "@sdodson"
 api-approvers:
-  - "@deads2k"
+  - "@JoelSpeed"
 creation-date: 2025-12-02
 last-updated: 2025-12-02
 tracking-link:
@@ -51,7 +51,7 @@ The goals of this proposal are:
 * Enable the OKD feature set by default on all OKD clusters
 * Allow OKD clusters to enable features from TechPreview while supporting upgrades
 * Prevent the OKD feature set from being enabled on OpenShift Container Platform clusters
-* Ensure proper validation and immutability of the OKD feature set once enabled
+* Ensure proper validation and immutability (inability to transition to default) of the OKD feature set once enabled
 * Generate appropriate CRD manifests for all OpenShift API resources with the OKD feature set
 
 ### Non-Goals
@@ -98,10 +98,15 @@ This proposal introduces a new "OKD" feature set to the OpenShift API configurat
 #### Scenario 3: Attempting to change OKD feature set after enablement
 
 1. OKD cluster administrator has a running cluster with `featureSet: OKD`
-2. Administrator attempts to change the feature set to "Default" or any other value
+2. Administrator attempts to change the feature set to "Default" 
 3. The API validation rejects the change with error: "OKD may not be changed"
 4. The cluster continues operating with the OKD feature set
 5. The administrator must reinstall the cluster if a different feature set is required
+
+#### Scenario 4: Attempting to Change OKD to TechPreviewNoUpgrade or DevPreviewNoUpgrade
+1. OKD cluster administrator has a running cluster with `featureSet: OKD`
+2. Administrator attempts to change the feature set to either "TechPreviewNoUpgrade" or "DevPreviewNoUpgrade"
+3. The cluster successfully changes to "TechPreviewNoUpgrade" or "DevPreviewNoUpgrade"
 
 ### API Extensions
 
@@ -111,8 +116,8 @@ This enhancement modifies the existing FeatureGate API in the `config.openshift.
 
 **FeatureGate** resource modifications:
 - Adds new "OKD" value to the FeatureSet enum
-- Adds validation rule: `oldSelf == 'OKD' ? self == 'OKD' : true` to ensure immutability
-- Adds validation to prevent OKD from being enabled on OpenShift clusters
+- Adds validation rule: `oldSelf == 'OKD' ? self != '' : true` to ensure OKD cannot transition to default 
+- Adds validation to prevent OKD from being enabled on OpenShift clusters  
 
 #### CRD Manifests
 
@@ -147,17 +152,7 @@ The following CRD manifests will be generated with OKD-specific variants:
 
 And various operator-specific CRDs across multiple API groups.
 
-Fill in the operational impact of these API Extensions in the "Operational Aspects of API Extensions" section.
-
 ### Topology Considerations
-
-#### Hypershift / Hosted Control Planes
-
-The OKD feature set is not currently designed for Hypershift deployments, as Hypershift is an OpenShift-specific topology and OKD clusters are typically deployed as standalone clusters. If Hypershift support is added to OKD in the future, the OKD feature set should:
-
-- Be configurable at the HostedCluster level
-- Not affect the management cluster's feature set
-- Respect the same immutability and validation rules as standalone clusters
 
 #### Standalone Clusters
 
@@ -183,14 +178,9 @@ The OKD feature set is defined in `config/v1/types_feature.go`:
 
 ```go
 const (
-    // ... existing feature sets ...
-
-    // OKD turns on features for OKD.
-    // Turning this feature set ON is supported for OKD clusters,
-    // but NOT for OpenShift clusters.
-    // This feature set CANNOT BE UNDONE for OKD clusters and
-    // when enabled on OpenShift clusters, it PREVENTS UPGRADES.
-    OKD FeatureSet = "OKD"
+  // OKD turns on features for OKD. Turning this feature set ON is supported for OKD clusters, but NOT for OpenShift clusters.
+	// Once enabled, this feature set cannot be changed back to Default, but can be changed to other feature sets and it allows upgrades.
+	OKD FeatureSet = "OKD"
 )
 ```
 
@@ -212,29 +202,29 @@ The FeatureGate spec includes Kubernetes validation rules:
 
 ```go
 // +kubebuilder:validation:Enum=CustomNoUpgrade;DevPreviewNoUpgrade;TechPreviewNoUpgrade;OKD;""
-// +kubebuilder:validation:XValidation:rule="oldSelf == 'OKD' ? self == 'OKD' : true",message="OKD may not be changed"
+// +kubebuilder:validation:XValidation:rule="oldSelf == 'OKD' ? self != '' : true",message="OKD cannot transition to Default"
 ```
 
 This ensures:
 1. Only valid feature set values can be specified
-2. Once OKD is set, it cannot be changed to any other value
+2. Once OKD is set, it cannot be changed to default
 
 #### Platform Detection
 
 The installer and cluster operators must be able to detect whether they are running on OKD vs OpenShift to:
-- Automatically enable the OKD feature set during installation on OKD
+- Automatically enable the OKD feature set during installation on OKD clusters
 - Prevent the OKD feature set from being enabled on OpenShift
 
 This detection is typically done through:
-- Build tags during compilation (`fcos` for OKD, `ocp` for OpenShift)
+- Build tags during compilation (`scos` for OKD, `ocp` for OpenShift)
 - Cluster version metadata
 - Installation metadata persisted during cluster creation
 
 #### Feature Set Inheritance
 
-The OKD feature set should inherit all features from the Default feature set, with the addition of selected TechPreview features that are deemed appropriate for community testing. The specific set of enabled features beyond Default will be determined by:
+The OKD feature set should inherit all features from the Default feature set, with the addition of selected TechPreview features that are deemed appropriate for community adoption. The specific set of enabled features beyond Default will be determined by:
 
-1. Features that are stable enough for community testing
+1. Features that are stable enough for community adoption 
 2. Features where early feedback would be valuable
 3. Features that align with OKD's mission as a community distribution
 4. Features that do not compromise cluster stability or security
@@ -256,25 +246,15 @@ CRD manifests with the OKD feature set variant are generated using the same tool
 **Risk:** Accidental enablement of the OKD feature set on OpenShift clusters could cause support issues.
 
 **Mitigation:**
-- Implement strict API validation preventing OKD feature set on OpenShift
-- Include clear warnings in documentation
-- Prevent upgrades if OKD is somehow enabled on OpenShift
-- Ensure the installer only sets OKD feature set when building for OKD
+- Prevent OCP clusters from enabling the OKD featureset through validation in the OpenShift Kubernetes repo
 
-**Risk:** Immutability of the OKD feature set could prevent administrators from recovering from configuration issues.
+**Risk:** Inability of the OKD feature set transitioning to default could prevent administrators from recovering from configuration issues.
 
 **Mitigation:**
-- Document the immutability requirement clearly in installation guides
+- Document the inability to transition to default clearly in installation guides
 - Provide clear guidance on cluster reinstallation if feature set change is required
 - Ensure the default configuration is appropriate for most use cases
 - Consider providing an escape hatch for exceptional circumstances (future enhancement)
-
-**Risk:** Version skew between OKD and OpenShift API definitions could cause compatibility issues.
-
-**Mitigation:**
-- Keep the openshift/api repository in sync between OKD and OpenShift builds
-- Automated CI testing for both OKD and OpenShift builds from the same codebase
-- Regular integration testing of OKD with latest OpenShift API changes
 
 ### Drawbacks
 
@@ -282,7 +262,7 @@ CRD manifests with the OKD feature set variant are generated using the same tool
 
 **Maintenance burden:** Supporting an additional feature set requires maintaining additional CRD manifests and ensuring the OKD variant is tested alongside other feature sets. This is mitigated by the automated generation of manifests and existing CI infrastructure.
 
-**Immutability constraints:** The inability to change the feature set after enablement might frustrate administrators who want to switch configurations. However, this ensures consistency and prevents unexpected behavior during the cluster lifecycle.
+**Immutability constraints:** The inability to change the feature set to default after enablement might frustrate administrators who want to switch configurations. However, this ensures consistency and prevents unexpected behavior during the cluster lifecycle.
 
 **Testing complexity:** The OKD feature set adds another configuration variant that needs testing. This is addressed by leveraging existing OKD CI infrastructure and the feature gate testing framework.
 
@@ -298,18 +278,7 @@ Instead of creating a new OKD feature set, we could modify the TechPreviewNoUpgr
 - API contracts would be violated (TechPreviewNoUpgrade explicitly blocks upgrades)
 - Difficult to maintain and reason about platform-specific behavior
 
-### Alternative 2: Allow OKD Feature Set to be Mutable
-
-Allow the OKD feature set to be changed to other feature sets after initial enablement.
-
-**Rejected because:**
-- Changing feature sets can have unpredictable effects on cluster stability
-- Feature gates may enable or disable functionality that affects stored data or configurations
-- Maintaining consistency across feature set transitions would be complex
-- Other feature sets are also immutable, and we should maintain consistency
-- If users need a different feature set, cluster reinstallation is clearer and safer
-
-### Alternative 3: Use CustomNoUpgrade for OKD
+### Alternative 2: Use CustomNoUpgrade for OKD
 
 Instead of creating a dedicated OKD feature set, use the existing CustomNoUpgrade feature set for OKD clusters.
 
@@ -320,14 +289,14 @@ Instead of creating a dedicated OKD feature set, use the existing CustomNoUpgrad
 - Does not provide a default, curated experience for OKD users
 - Makes it harder to manage and communicate what features are enabled on OKD
 
-### Alternative 4: Create an OKDTechPreview Feature Set
+### Alternative 3: Create an OKDTechPreview Feature Set
 
 Create a separate OKDTechPreview feature set in addition to the OKD feature set to allow OKD users to choose between stable and experimental features.
 
 **Rejected because:**
 - Adds unnecessary complexity with multiple OKD-specific feature sets
 - The OKD feature set can already include appropriate TechPreview features
-- OKD's role as a community distribution means users expect to test new features
+- OKD's role as a community distribution means users expect to adopt new features
 - Can be reconsidered in the future if the use case becomes clearer
 
 ## Open Questions [optional]
@@ -344,7 +313,7 @@ Create a separate OKDTechPreview feature set in addition to the OKD feature set 
 
 **Unit Tests:**
 - Validation logic for the OKD feature set enum value
-- Immutability validation (rejecting changes from OKD to other values)
+- Immutability validation (rejecting changes from OKD to default)
 - Platform detection logic (OKD vs OpenShift)
 - CRD manifest generation for OKD variants
 
@@ -478,7 +447,7 @@ The OKD feature set introduces changes to the FeatureGate API and generates nume
 - CRD manifests are loaded at API server startup and do not affect runtime performance
 
 **Validation Performance:**
-- The immutability validation (`oldSelf == 'OKD' ? self == 'OKD' : true`) is a simple comparison
+- The kubebuilder validation (`oldSelf == 'OKD' ? self != '' : true`) is a simple comparison
 - Executed only when FeatureGate resources are modified (infrequent operation)
 - No measurable impact on API throughput or latency
 
@@ -513,19 +482,13 @@ The OKD feature set itself does not introduce new SLIs, but relies on existing i
 - **Detection:** API server logs show validation errors; CLI commands return error messages
 - **Recovery:** Correct the feature set value to a valid option (Default, TechPreviewNoUpgrade, CustomNoUpgrade, OKD, or empty string)
 
-**Failure Mode 2: Attempt to change OKD feature set**
-- **Symptom:** API server rejects update with error "OKD may not be changed"
-- **Impact:** Cluster administrators cannot change the feature set from OKD to another value
+**Failure Mode 2: Attempt to change OKD feature set to Default**
+- **Symptom:** API server rejects update with error "OKD cannot be transitioned to Default"
+- **Impact:** Cluster administrators cannot change the feature set from OKD to default 
 - **Detection:** API server logs show validation errors; CLI commands return error messages
-- **Recovery:** This is expected behavior; cluster must be reinstalled if a different feature set is required
+- **Recovery:** This is expected behavior; cluster must be reinstalled if a the default featureset is required
 
-**Failure Mode 3: OKD feature set enabled on OpenShift cluster**
-- **Symptom:** Cluster upgrades are blocked; warnings appear in cluster-version-operator logs
-- **Impact:** Cluster cannot upgrade; may be out of compliance with support policies
-- **Detection:** CVO logs show warnings about unsupported feature set; upgrade attempts fail
-- **Recovery:** Reinstall the cluster with the appropriate feature set for OpenShift (typically Default or empty)
-
-**Failure Mode 4: Version skew in component awareness of OKD feature set**
+**Failure Mode 3: Version skew in component awareness of OKD feature set**
 - **Symptom:** Components fail to start or report degraded status due to unknown feature set value
 - **Impact:** Specific operators or components may not function correctly
 - **Detection:** Operator logs show errors about unknown feature set; operator conditions show Degraded=True
@@ -582,12 +545,6 @@ oc adm node-logs --role=master --path=kube-apiserver/audit.log | grep -i feature
 3. Reinstall the cluster with the desired feature set
 4. Restore applications and data to the new cluster
 
-**If OKD feature set was accidentally enabled on an OpenShift cluster:**
-1. The cluster will block upgrades and may be unsupported
-2. Reinstallation is the only supported path to recovery
-3. If the cluster is newly installed, reinstall before deploying workloads
-4. If the cluster has workloads, plan a migration to a properly configured cluster
-
 ### Graceful Degradation
 
 The OKD feature set validation is enforced at the API level:
@@ -618,7 +575,7 @@ The OKD feature set validation is enforced at the API level:
 
 **Build Infrastructure:**
 - No changes needed; existing OKD build infrastructure can accommodate this change
-- The `fcos` build tag will continue to differentiate OKD from OpenShift builds
+- The `scos` build tag will continue to differentiate OKD from OpenShift builds
 
 **Documentation:**
 - Update OKD installation documentation to explain the OKD feature set
@@ -628,7 +585,9 @@ The OKD feature set validation is enforced at the API level:
 
 **Repository Infrastructure:**
 - No new repositories required
-- Changes are made to existing openshift/api repository
+- Changes are made to existing openshift/api repository and will be vendored to other repos
+- The OpenShift Kubernetes repo will need changes
+- The Cluster Config Operator repo will need changes to allow the OKD featureset to allow upgrades
 - Generated CRD manifests will be committed to the repository
 
 ## Implementation History
