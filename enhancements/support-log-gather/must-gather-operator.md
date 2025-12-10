@@ -120,10 +120,6 @@ type MustGatherSpec struct {
     // +optional
     AdditionalConfig *AdditionalConfig `json:"additionalConfig,omitempty"`
 
-    // This represents the proxy configuration to be used. If left empty it will default to the cluster-level proxy configuration.
-    // +optional
-    ProxyConfig ProxySpec `json:"proxyConfig,omitempty"`
-
     // A time limit for gather command to complete a floating point number with a suffix:
     // "s" for seconds, "m" for minutes, "h" for hours, or "d" for days.
     // Will default to no time limit.
@@ -238,21 +234,6 @@ type PersistentVolumeClaimReference struct {
     // +kubebuilder:validation:MaxLength:=253
     // +required
     Name string `json:"name"`
-}
-
-// +k8s:openapi-gen=true
-type ProxySpec struct {
- // httpProxy is the URL of the proxy for HTTP requests.  Empty means unset and will not result in an env var.
- // +optional
- HTTPProxy string `json:"httpProxy,omitempty"`
-
- // httpsProxy is the URL of the proxy for HTTPS requests.  Empty means unset and will not result in an env var.
- // +optional
- HTTPSProxy string `json:"httpsProxy,omitempty"`
-
- // noProxy is the list of domains for which the proxy should not be used.  Empty means unset and will not result in an env var.
- // +optional
- NoProxy string `json:"noProxy,omitempty"`
 }
 
 // MustGatherStatus defines the observed state of MustGather
@@ -397,7 +378,8 @@ None, as a day-2 operator dedicated OpenShift and Hosted Clusters are both treat
 
 #### Proxy clusters
 
-`mustgather.spec.proxyConfig` if set by the user in the CR, will be propagated as pod environment variables to the gather and upload containers of the Job. The configuration set in the resource is given precedence over the cluster-wide proxy settings set on the cluster through `configv1.Proxy` object. Due to the nature of SOCKS proxy protocol and the HTTP "CONNECT" verb in most proxy servers used with OpenShift, the upload process using SFTP's TCP can essentially make a CONNECT request over netcat and intercept to upload the mustgather bundle even when on a airgapped proxy setup.
+The operator inherits cluster-wide proxy settings (typically propagated from the configv1.Proxy object via the operator's environment variables) and passes them to the upload container of the Job. The upload process uses an HTTP CONNECT proxy via netcat (nc --proxy-type http) as an SSH ProxyCommand, allowing SFTP traffic to tunnel through HTTP proxies commonly used in airgapped OpenShift environments.
+
 
 ## Implementation History
 
