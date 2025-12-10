@@ -1,5 +1,5 @@
 ---
-title: tnf
+title: two-node-fencing
 authors:
   - "@mshitrit"
   - "@jaypoulz"
