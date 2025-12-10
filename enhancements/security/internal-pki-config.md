@@ -345,7 +345,8 @@ type CertificateConfig struct {
 
 // KeyConfig specifies cryptographic parameters for key generation.
 //
-// +kubebuilder:validation:XValidation:rule="(self.algorithm == 'RSA' && has(self.rsa) && !has(self.ecdsa)) || (self.algorithm == 'ECDSA' && has(self.ecdsa) && !has(self.rsa))",message="algorithm must match the configuration: use rsa field for RSA, ecdsa field for ECDSA"
+// +kubebuilder:validation:XValidation:rule="has(self.algorithm) && self.algorithm == 'RSA' ?  has(self.rsa) : !has(self.rsa)",message="rsa is required when type is RSA, and forbidden otherwise"
+// +kubebuilder:validation:XValidation:rule="has(self.algorithm) && self.algorithm == 'ECDSA' ?  has(self.ecdsa) : !has(self.ecdsa)",message="ecdsa is required when type is ECDSA, and forbidden otherwise"
 // +union
 type KeyConfig struct {
     // algorithm specifies the key generation algorithm.
