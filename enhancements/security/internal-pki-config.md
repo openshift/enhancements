@@ -1290,20 +1290,20 @@ However, there are some considerations:
    oc get pki cluster -o jsonpath='{.metadata.creationTimestamp}'
    ```
 
-### Disabling the Feature
+### Reverting to Default State
 
-1. Disable the ConfigurablePKI feature gate:
+1. Empty the PKI resource spec to revert to platform defaults:
    ```bash
-   oc patch featuregate cluster --type merge -p '{"spec":{"featureSet":"CustomNoUpgrade","customNoUpgrade":{"enabled":["OtherFeature"],"disabled":["ConfigurablePKI"]}}}'
+   oc patch pki cluster --type merge -p '{"spec":{"defaults":null,"categories":[],"overrides":[]}}'
    ```
 
-2. Operators will ignore the PKI resource and use hardcoded defaults
+2. Operators will use hardcoded platform defaults (typically RSA 2048) for new certificate generation
 
-3. **Consequences:**
-   - Existing certificates continue to function (no impact)
-   - New certificates generated during rotation use hardcoded defaults
-   - PKI configuration changes have no effect
-   - No automatic rollback of previously generated certificates
+3. **Certificates transition gradually:**
+   - Existing certificates continue to function unchanged
+   - New certificates generated during rotation use platform defaults
+   - Natural rotation applies defaults over time (varies by certificate lifetime)
+   - Force rotation by deleting certificate secrets if immediate change is needed
 
 ### Recovery Procedures
 
