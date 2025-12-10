@@ -378,8 +378,64 @@ None, as a day-2 operator dedicated OpenShift and Hosted Clusters are both treat
 
 #### Proxy clusters
 
-The operator inherits cluster-wide proxy settings (typically propagated from the configv1.Proxy object via the operator's environment variables) and passes them to the upload container of the Job. The upload process uses an HTTP CONNECT proxy via netcat (nc --proxy-type http) as an SSH ProxyCommand, allowing SFTP traffic to tunnel through HTTP proxies commonly used in airgapped OpenShift environments.
+The operator inherits cluster-wide proxy settings from the `configv1.Proxy` object via environment variables propagated by OLM and passes them to the upload container of the Job.
 
+For SFTP uploads through HTTP proxies (common in air-gapped OpenShift environments), the upload process uses an HTTP CONNECT proxy via netcat (`nc --proxy-type http`) as an SSH `ProxyCommand`. This allows SFTP traffic to tunnel through the configured HTTP proxy.
+
+To customize proxy settings, a cluster administrator can override the `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` environment variables through the OLM Subscription object.
+
+## Configuring egress proxy for Must Gather Operator
+
+If a cluster wide egress proxy is configured on the OpenShift cluster, OLM automatically update all the operators' deployments with `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY` environment variables.  
+Those variables are then propagated down to the must gather (operand) controllers by the must gather operator.
+
+### Trusted Certificate Authority
+
+#### Running operator
+
+Follow the instructions below to let Must Gather Operator trust a custom Certificate Authority (CA). The operator's OLM subscription has to be already created.
+
+1.  Create the configmap containing the CA bundle in `must-gather-operator` namespace. Run the following commands to [inject](https://docs.openshift.com/container-platform/4.12/networking/configuring-a-custom-pki.html#certificate-injection-using-operators_configuring-a-custom-pki) the CA bundle trusted by OpenShift into a configmap:
+
+    ```bash
+    oc -n must-gather-operator create configmap trusted-ca
+    oc -n must-gather-operator label cm trusted-ca config.openshift.io/inject-trusted-cabundle=true
+    ```
+
+2.  Consume the created configmap in Must Gather Operator's deployment by updating its subscription:
+
+    ```bash
+    oc -n must-gather-operator patch subscription <subscription_name> --type='merge' -p '{"spec":{"config":{"env":[{"name":"TRUSTED_CA_CONFIGMAP_NAME","value":"trusted-ca"}]}}}'
+    ```
+
+    _Note_: Alternatively, you can also patch the `must-gather-operator` deployment in the `must-gather-operator` namespace.
+    `bash
+    oc set env deployment/must-gather-operator TRUSTED_CA_CONFIGMAP_NAME=trusted-ca 
+    `
+
+3.  Wait for the operator deployment to finish the rollout and verify that CA bundle is added to the existing controller:
+
+    ```bash
+    oc get deployment -n must-gather-operator must-gather-operator -o=jsonpath={.spec.template.spec.'containers[0].volumeMounts'} | jq
+    [
+      {
+        "mountPath": "/etc/pki/tls/certs/must-gather-tls-ca-bundle.crt",
+        "name": "trusted-ca",
+        "subPath": "ca-bundle.crt"
+      }
+    ]
+
+    oc get deployment -n must-gather-operator must-gather-operator -o=jsonpath={.spec.template.spec.volumes} | jq
+    [
+      {
+        "configMap": {
+          "defaultMode": 420,
+          "name": "trusted-ca"
+        },
+        "name": "trusted-ca"
+      }
+    ]
+    ```
 
 ## Implementation History
 
