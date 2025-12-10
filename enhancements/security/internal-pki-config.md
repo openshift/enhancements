@@ -76,6 +76,54 @@ Currently, OpenShift provides no mechanism to configure these parameters for int
 - Changing certificate subject names, SANs, or other X.509 extensions (only cryptographic parameters)
 - Retrospectively changing certificates that have already been generated (only applies to new generation/rotation)
 
+### Relationship to Existing Certificate Configuration Features
+
+OpenShift provides several certificate-related configuration mechanisms. This enhancement affects OpenShift’s internal certificate generation, not user-provided certificates, trust anchors, TLS parameters, or external CA integration.
+
+#### User-Provided Certificates (Out of Scope)
+
+**APIServer.spec.servingCerts**:
+- Allows administrators to provide **custom serving certificates** for the API server
+- Certificates are **externally generated** and **injected** into OpenShift
+- This PKI enhancement does **not** affect user-provided certificates
+- Relationship: **Complementary** - administrators choose between:
+  - Using this PKI API to configure how OpenShift **generates** its internal certificates, OR
+  - Using APIServer.servingCerts to **provide** externally-generated certificates
+
+**Custom CA Bundles** (e.g., APIServer.spec.clientCA, Proxy.spec.trustedCA):
+- Allows injection of custom CA certificates for trust purposes
+- Does not configure certificate generation
+- This PKI enhancement does **not** affect custom CA bundles
+- Relationship: **Independent** - custom CA bundles control trust, this API controls generation
+
+**cert-manager and External CA Integration**:
+- Tools like cert-manager can request certificates from external CAs
+- Typically used for workload certificates, not platform infrastructure
+- This PKI enhancement does **not** affect cert-manager workflows
+- Relationship: **Independent** - different use cases (platform infrastructure vs. workload certificates)
+
+#### TLS Security Profiles (Related but Distinct)
+
+**TLSSecurityProfile**:
+- Configures **cipher suites** and **TLS protocol versions**
+- Applied to API server, ingress, and other TLS endpoints
+- Does **not** configure certificate generation parameters
+- This PKI enhancement does **not** modify TLS security profiles
+- Relationship: **Complementary** - both work together:
+  - TLSSecurityProfile: Controls **how TLS connections are negotiated** (protocol version, ciphers)
+  - PKI API: Controls **how certificates are generated** (key algorithm, key size)
+  - Example: Administrator can configure ECDSA P-384 certificates (PKI API) with TLS 1.3 and strong cipher suites (TLSSecurityProfile)
+
+#### Summary Table
+
+| Feature | Scope | What It Configures | Relationship to PKI API |
+|---------|-------|-------------------|------------------------|
+| **PKI API** (this enhancement) | Internal certificates | Key algorithm, key size, curve | N/A (this proposal) |
+| **APIServer.servingCerts** | API server serving certs | User-provided certificates | Complementary (choose one or the other) |
+| **Custom CA Bundles** | Trust anchors | Trusted CA certificates | Independent (different concern) |
+| **cert-manager** | Workload certificates | External CA integration | Independent (different use case) |
+| **TLSSecurityProfile** | TLS connections | Cipher suites, TLS versions | Complementary (both apply together) |
+
 ## Proposal
 
 This proposal introduces a new `PKI` cluster-scoped singleton configuration resource in the `config.openshift.io/v1` API group, along with a `ConfigurablePKI` feature gate to control the rollout. The configuration allows administrators to specify cryptographic parameters for internal certificates organized by category and name.
