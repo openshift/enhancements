@@ -37,40 +37,47 @@ This proposal outlines a plan to enhance the must-gather-operator to support the
 The default must-gather image provides a broad set of diagnostic data for the OpenShift platform. However, there are scenarios where users and support teams require more specialized data collection that is not included in the default image. This can include:
 
 -   Running diagnostic scripts for specific applications or layered products.
-
 -   Gathering information from third-party operators or custom infrastructure components.
-
 -   Using a pre-release or patched version of the must-gather tooling for debugging purposes without waiting for an official release.
 
 Currently, there is no secure or manageable way to use a custom must-gather image. This proposal aims to provide a secure and Kubernetes-native mechanism for this purpose, giving administrators clear control over which images are permitted to run with elevated privileges in their clusters.
 
-## Goals
+### User Stories
 
-1.  Introduce a new `MustGatherImage` CRD to act as a centrally managed allowlist for custom must-gather images.
+- As a cluster administrator, I want to define a list of approved custom must-gather images to ensure that only trusted images are used for diagnostics.
+- As a support engineer, I want to use a custom must-gather image with specialized tools to debug a specific issue without needing to modify the cluster's default must-gather image.
+- As a developer, I want to test a new version of our product's diagnostic scripts by running it as a custom must-gather image in a development cluster.
 
-2.  Modify the `MustGather` CRD to allow users to specify a custom image for the must-gather job.
+### Goals
 
-3.  Update the must-gather-operator to validate any specified custom image against the `MustGatherImage` allowlist.
+- Introduce a new `MustGatherImage` CRD to act as a centrally managed allowlist for custom must-gather images.
+- Modify the `MustGather` CRD to allow users to specify a custom image for the must-gather job.
+- Update the must-gather-operator to validate any specified custom image against the `MustGatherImage` allowlist.
+- If the custom image is valid, the operator will use it to run the must-gather job.
+- If the custom image is invalid or the allowlist does not exist, the `MustGather` resource will report a failure.
+- Ensure that if no custom image is specified, the operator continues to use the default must-gather image.
 
-4.  If the custom image is valid, the operator will use it to run the must-gather job.
+### Non-Goals
 
-5.  If the custom image is invalid or the allowlist does not exist, the `MustGather` resource will report a failure.
-
-6.  Ensure that if no custom image is specified, the operator continues to use the default must-gather image.
-
-## Non-Goals
-
-1.  This proposal does not cover the process of building, hosting, or distributing custom must-gather images.
-
-2.  It will not provide a mechanism for automatically updating or managing the lifecycle of the custom images themselves.
-
-3.  It will not alter the content or scripts within the default must-gather image.
+- This proposal does not cover the process of building, hosting, or distributing custom must-gather images.
+- It will not provide a mechanism for automatically updating or managing the lifecycle of the custom images themselves.
+- It will not alter the content or scripts within the default must-gather image.
 
 ## Proposal
 
-### 1. API Changes
+### Workflow Description
 
-#### 1.1 New `MustGatherImage` CRD
+1.  A cluster administrator defines a `MustGatherImage` resource named `cluster`, which contains a list of approved custom must-gather image URLs.
+2.  A user creates a `MustGather` resource and specifies an image from the allowlist in the `spec.mustGatherImage` field.
+3.  The must-gather-operator reconciles the `MustGather` resource.
+4.  The operator fetches the `MustGatherImage` resource named `cluster`.
+5.  It validates that the image specified in the `MustGather` resource is present in the `MustGatherImage` resource's list.
+6.  If the image is valid, the operator creates a must-gather job using the custom image.
+7.  If the image is not valid, or if the `MustGatherImage` resource does not exist, the operator updates the `MustGather` resource's status with an error and does not create the job.
+
+### API Extensions
+
+#### New `MustGatherImage` CRD
 
 A new cluster-scoped Custom Resource Definition `MustGatherImage` will be created. This resource will serve as the allowlist for all custom must-gather images that can be used in the cluster. Only privileged users (like cluster-admins) should have permission to create and modify this resource.
 
@@ -132,7 +139,7 @@ type MustGatherImageList struct {
 }
 ```
 
-#### 1.2 `MustGather` CRD Modification
+#### `MustGather` CRD Modification
 
 The `MustGatherSpec` in `must-gather-operator/api/v1alpha1/mustgather_types.go` will be updated to include an optional `mustGatherImage` field. This is in addition to other existing and proposed fields like `storage` for PVC destination and `uploadTarget` for extensible artifact uploading.
 
@@ -184,68 +191,81 @@ type MustGatherSpec struct {
 }
 ```
 
-### 2. Operator Logic Changes
+### Topology Considerations
 
-The `MustGatherReconciler` in `controllers/mustgather/mustgather_controller.go` will be updated to handle the new logic.
+This enhancement does not introduce any unique topological considerations. The must-gather-operator and the custom must-gather images are expected to run on any supported OpenShift topology.
 
-The image selection logic in the `getJobFromInstance` function will be modified as follows:
+#### Hypershift / Hosted Control Planes
 
-1.  Check if `instance.Spec.MustGatherImage` is set.
 
-2.  **If it is not set**, the logic proceeds as it does today, using the default `OPERATOR_IMAGE`.
+#### Standalone Clusters
 
-3.  **If it is set**, the controller will:
 
-    a.  Fetch the `MustGatherImage` resource with the name `cluster`.
+#### Single-node Deployments or MicroShift
 
-    b.  If the `cluster` resource is not found, the reconciliation will fail, and the `MustGather` status will be updated with an error indicating the allowlist is not configured.
 
-    c.  If the resource is found, the controller will check if the image specified in `spec.mustGatherImage` is present in the `spec.images` list.
+### Implementation Details/Notes/Constraints
 
-    d.  If the image is **not** in the list, the reconciliation will fail, and the `MustGather` status will be updated with an `InvalidImage` error.
+-   The `MustGatherImage` resource will be named `cluster` to ensure a single source of truth for the allowlist.
+-   The operator will require RBAC permissions to `get`, `list`, and `watch` the `mustgatherimages` resource at the cluster scope.
+-   The operator's logic will be updated to fetch the `MustGatherImage` resource and validate the custom image specified in the `MustGather` CR.
+-   If the `MustGatherImage` resource is not found, or if the specified image is not in the allowlist, the `MustGather` resource's status will be updated with an appropriate error condition.
 
-    e.  If the image **is** in the list, the controller will use this image string when calling `getJobTemplate` to construct the must-gather job, overriding the default image.
+### Risks and Mitigations
 
-### 3. RBAC Changes
+-   **Risk:** A misconfigured `MustGatherImage` resource could prevent all must-gather runs that use custom images.
+    -   **Mitigation:** The operator will provide clear status conditions and events on the `MustGather` resource to indicate the reason for failure. Documentation will emphasize the importance of correctly configuring the `MustGatherImage` resource.
 
-The operator's ClusterRole will need to be updated in `deploy/` to grant `get`, `list`, and `watch` permissions on the `mustgatherimages` resource at the cluster scope.
+### Drawbacks
 
-```yaml
-# deploy/02_must-gather-operator.ClusterRole.yaml
-# ... existing rules ...
-- apiGroups:
-  - operator.openshift.io
-  resources:
-  - mustgatherimages
-  verbs:
-  - get
-  - list
-  - watch
-```
+-   This enhancement introduces a new CRD that cluster administrators must manage.
+-   Users must be aware of the `MustGatherImage` resource and the allowed images when creating a `MustGather` resource with a custom image.
 
-Additionally, a new `ClusterRole` will be beneficial for administrators to manage the allowlist.
+## Test Plan
 
-```yaml
-# deploy/new_must-gather-image-admin.ClusterRole.yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: must-gather-image-admin
-rules:
-- apiGroups:
-  - operator.openshift.io
-  resources:
-  - mustgatherimages
-  verbs:
-  - get
-  - list
-  - watch
-  - create
-  - update
-  - patch
-  - delete
-```
+-   **Unit Tests:**
+    -   Test the validation logic for the `MustGatherImage` CRD.
+    -   Test the operator's logic for fetching the `MustGatherImage` resource and validating the custom image.
+-   **E2E Tests:**
+    -   Test the successful creation of a must-gather job with a custom image from the allowlist.
+    -   Test the failure of a must-gather job with a custom image that is not in the allowlist.
+    -   Test the failure of a must-gather job when the `MustGatherImage` resource does not exist and if the custom-image is specified, otherwise run must-gather job with default image.
 
-## Alternatives Considered
+## Graduation Criteria
+
+### Dev Preview -> Tech Preview
+
+-   Ability to utilize the enhancement end-to-end.
+-   End-user documentation and API stability.
+-   Sufficient test coverage.
+
+### Tech Preview -> GA
+
+-   More testing, including upgrade and scale scenarios.
+-   Sufficient time for user feedback and adoption.
+-   User-facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/).
+
+### Removing a deprecated feature
+
+Not applicable.
+
+## Upgrade / Downgrade Strategy
+
+-   This change is backward compatible. Existing `MustGather` resources that do not have the `mustGatherImage` field will continue to work as before.
+-   On downgrade, the `mustGatherImage` field will be ignored by older operators.
+
+## Version Skew Strategy
+
+This enhancement does not introduce any version skew concerns. The change is self-contained within the must-gather-operator and its CRDs.
+
+## Operational Aspects of API Extensions
+
+The `MustGatherImage` CRD is the main API extension. The operator will manage its lifecycle. Failure to find the `MustGatherImage` resource or an invalid image will be surfaced as status conditions on the `MustGather` resource.
+
+## Support Procedures
+
+If a `must-gather` run with a custom image fails, support personnel should first inspect the `MustGather` resource's status and events to check for image-related errors (e.g., `InvalidImage`, `AllowlistNotConfigured`). If the image is valid, standard `must-gather` debugging procedures apply.
+
+## Alternatives (Not Implemented)
 
 A `ConfigMap` could have been used to store the list of allowed images. However, a CRD was chosen because it provides a more robust, Kubernetes-native solution with schema validation, RBAC integration, and better discoverability. This approach aligns with the operator pattern of extending the Kubernetes API to manage application configuration and provides a clearer audit trail.
