@@ -2,11 +2,9 @@
 title: kms-encryption-foundations
 authors:
   - "@ardaguclu"
-  - "@flavianmissi"
 reviewers:
+  - "@flavianmissi"
   - "@ibihim"
-  - "@sjenning"
-  - "@tkashem"
 approvers:
   - "@benluddy"
 api-approvers:
@@ -27,13 +25,13 @@ replaces:
 
 ## Summary
 
-Extend OpenShift encryption controllers to support external Key Management Services (KMS) alongside existing local encryption modes (aescbc, aesgcm). This allows encryption keys to be stored and managed outside the cluster for enhanced security.
+Extend OpenShift encryption controllers to support external Key Management Services (KMS v2) alongside existing local encryption modes (aescbc, aesgcm). This allows encryption keys to be stored and managed outside the cluster for enhanced security.
 
 This enhancement:
 - Extends the `config.openshift.io/v1/APIServer` resource for KMS configuration
 - Extends encryption controllers in `openshift/library-go` to support KMS as a new encryption mode
 - Maintains feature parity with existing encryption modes (migration, monitoring, key rotation)
-- Supports AWS KMS and Vault in Tech Preview (Thales in future iterations)
+- Provider-agnostic implementation supporting any KMS v2-compatible plugin
 
 ## Motivation
 
@@ -41,34 +39,33 @@ OpenShift currently manages AES keys locally for encrypting data at rest in etcd
 
 ### Goals
 
-- Support KMS as a new encryption mode in existing encryption controllers
-- Seamless migration between encryption modes (aescbc ↔ KMS)
+- Support KMS v2 as a new encryption mode in existing encryption controllers
+- Seamless migration between encryption modes (aescbc ↔ KMS, KMS ↔ KMS)
 - Provider-agnostic controller implementation with minimal provider-specific code
 - Feature parity with existing modes (monitoring, migration, key rotation)
 
 ### Non-Goals
 
 - Implementing KMS plugins (provided by upstream Kubernetes/vendors)
-- KMS plugin deployment/lifecycle management (separate EP for Tech Preview)
+- KMS plugin deployment/lifecycle management
 - KMS plugin health checks (Tech Preview v2)
-- Migration between different KMS providers (separate EP for GA)
 - Recovery from KMS key loss (separate EP for GA)
 - Automatic `key_id` rotation detection (Tech Preview v2)
 
 ## Proposal
 
-Extend the existing encryption controller framework in `openshift/library-go` to support KMS encryption through hash-based change detection. The controllers calculate a hash of the KMS configuration to detect changes and trigger re-encryption, avoiding the need for external service dependencies.
+Extend the existing encryption controller framework in `openshift/library-go` to support KMS encryption using user-provided unix socket paths. Users specify the socket path where their KMS plugin listens, and encryption controllers use this path directly in the EncryptionConfiguration. For KMS-to-KMS migrations, users update to a new socket path, allowing both old and new plugins to run simultaneously during migration.
 
 **Key changes:**
 1. Add KMS mode constant to encryption state types
-2. Implement hash-based detection for KMS configuration changes
-3. Manage empty encryption key secrets (actual keys in external KMS)
+2. Track unix socket paths in encryption key secrets
+3. Manage encryption key secrets with socket path metadata (actual keys in external KMS)
 4. Reuse existing migration controller (no changes needed)
 
 **Tech Preview v2 additions:**
-- Poll KMS plugin Status endpoint for `key_id` changes in apiserver operators
-- Store hash of `key_id` in data field of encryption key secrets
-- Hash-based detection for external key rotation
+- Poll KMS plugin Status endpoint for `key_id` changes
+- Store `key_id` in data field of encryption key secrets
+- Detect external key rotation via `key_id` comparison
 
 ### Workflow Description
 
@@ -76,17 +73,17 @@ Extend the existing encryption controller framework in `openshift/library-go` to
 
 **cluster admin** is a human user responsible for configuring and maintaining the cluster.
 
-**KMS** is the external Key Management Service (AWS KMS, HashiCorp Vault, etc.) that stores and manages the Key Encryption Key (KEK).
+**KMS** is the external Key Management Service that stores and manages the Key Encryption Key (KEK).
 
-**KMS plugin** is a gRPC service implementing Kubernetes KMS v2 API, running as a sidecar to API server pods. It communicates with the external KMS to encrypt/decrypt data encryption keys (DEKs).
+**KMS plugin** is a gRPC service implementing Kubernetes KMS v2 API, running as a static pod on each control plane node. It communicates with the external KMS to encrypt/decrypt data encryption keys (DEKs).
 
 **API server operator** is the OpenShift operator (kube-apiserver-operator, openshift-apiserver-operator, or authentication-operator) managing API server deployments.
 
 #### Encryption Controllers
 
-**keyController** manages encryption key lifecycle. Creates encryption key secrets in `openshift-config-managed` namespace. For KMS mode, creates empty secrets with KMS configuration hashes.
+**keyController** manages encryption key lifecycle. Creates encryption key secrets in `openshift-config-managed` namespace. For KMS mode, creates secrets storing the unix socket path.
 
-**stateController** generates EncryptionConfiguration for API server consumption. Implements distributed state machine ensuring all API servers converge to same revision. For KMS mode, generates configuration with deterministic Unix socket paths.
+**stateController** generates EncryptionConfiguration for API server consumption. Implements distributed state machine ensuring all API servers converge to same revision. For KMS mode, generates configuration with user-provided unix socket paths.
 
 **migrationController** orchestrates resource re-encryption. Marks resources as migrated after rewriting in etcd. Works with all encryption modes including KMS.
 
@@ -96,7 +93,7 @@ Extend the existing encryption controller framework in `openshift/library-go` to
 
 #### Steps for Enabling KMS Encryption
 
-1. Cluster admin updates the APIServer resource:
+1. Cluster admin deploys KMS plugin and updates the APIServer resource with the socket endpoint:
    ```yaml
    apiVersion: config.openshift.io/v1
    kind: APIServer
@@ -104,14 +101,13 @@ Extend the existing encryption controller framework in `openshift/library-go` to
      encryption:
        type: kms
        kms:
-         aws:
-           region: us-east-1
-           keyArn: arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012
+         type: External
+         endpoint: unix:///var/run/kmsplugin/socket.sock
    ```
 
-2. keyController detects the new encryption mode and calculates hash of the KMS configuration.
+2. keyController detects the new encryption mode and reads the endpoint from KMS configuration.
 
-3. keyController creates encryption key secret:
+3. keyController creates encryption key secret storing the endpoint:
    ```yaml
    apiVersion: v1
    kind: Secret
@@ -120,13 +116,13 @@ Extend the existing encryption controller framework in `openshift/library-go` to
      namespace: openshift-config-managed
      annotations:
        encryption.apiserver.operator.openshift.io/mode: "kms"
-       encryption.apiserver.operator.openshift.io/kms-config-hash: "a1b2c3d4e5f67890"
+       encryption.apiserver.operator.openshift.io/kms-endpoint: "unix:///var/run/kmsplugin/socket.sock"
    data:
      keys: ""  # Empty in Tech Preview - KEK stored in external KMS
-              # In Tech Preview v2, will contain base64-encoded key_id hash
+              # In Tech Preview v2, will contain base64-encoded key_id
    ```
 
-4. stateController generates EncryptionConfiguration with hash embedded in socket path:
+4. stateController generates EncryptionConfiguration using the user-provided endpoint:
    ```yaml
    apiVersion: apiserver.config.k8s.io/v1
    kind: EncryptionConfiguration
@@ -134,53 +130,65 @@ Extend the existing encryption controller framework in `openshift/library-go` to
      - resources: [configmap]
        providers:
          - kms:
-             name: kms-a1b2c3d4e5f67890-configmap-1
-             endpoint: unix:///var/run/kmsplugin/kms-a1b2c3d4e5f67890.socket
+             name: configmap-1
+             endpoint: unix:///var/run/kmsplugin/socket.sock
              apiVersion: v2
    ```
-   The deterministic socket path allows KMS plugin lifecycle management to use the same path.
 
 5. migrationController detects the new secret and initiates re-encryption (no code changes - works with any mode).
 
-6. Resources are re-encrypted using KEK in external KMS via the KMS plugin.
+6. Resources are re-encrypted via the KMS plugin. The KMS plugin communicates with the external KMS to encrypt/decrypt a SEED using the KEK. The SEED, combined with a random value, generates the actual encryption keys used for resource encryption (KMS v2 protocol).
 
 7. conditionController updates status conditions: `EncryptionInProgress`, then `EncryptionCompleted`.
 
-#### Variation: Configuration Changes (Key Rotation)
+#### Variation: Endpoint Changes (KMS-to-KMS Migration)
 
-When cluster admin updates KMS configuration (e.g., new key ARN, different region):
+When cluster admin updates the KMS endpoint (e.g., switching to a different KMS plugin):
 
-1. keyController recalculates hash from updated APIServer resource.
-2. Compares new hash with hash in most recent encryption key secret annotation.
-3. If hashes differ:
-   - Creates new encryption key secret with new hash
+1. Admin deploys new KMS plugin at a different socket path and updates APIServer resource:
+   ```yaml
+   spec:
+     encryption:
+       type: kms
+       kms:
+         type: External
+         endpoint: unix:///var/run/kmsplugin/socket-new.sock  # Changed from socket.sock
+   ```
+
+2. keyController reads the new endpoint from updated APIServer resource.
+3. Compares new endpoint with endpoint in most recent encryption key secret annotation.
+4. If endpoints differ:
+   - Creates new encryption key secret with new endpoint
    - migrationController automatically triggers re-encryption
-4. If hashes match: No action.
+   - **Both old and new KMS plugins must remain running during migration**
+5. If endpoints match: No action.
 
 **Note:** Automatic weekly key rotation (used for aescbc/aesgcm) is disabled for KMS since rotation is triggered externally.
 
 #### Variation: External KMS Key Rotation (Tech Preview v2)
 
-When external KMS rotates the key internally (e.g., AWS KMS automatic rotation):
+When external KMS rotates the key internally:
 
 1. keyController polls KMS plugin Status endpoint for `key_id`.
-2. Calculates hash of `key_id` and compares with hash in secret `Data` field.
-3. If `key_id` hash differs:
-   - Creates new encryption key secret with new `key_id` hash
+2. Compares `key_id` with `key_id` stored in secret `Data` field.
+3. If `key_id` differs:
+   - Creates new encryption key secret with new `key_id`
    - migrationController automatically triggers re-encryption
-4. If `key_id` hash matches: No action.
+4. If `key_id` matches: No action.
 
-**Two hashes tracked:**
-- `kmsConfigHash` (annotation) - Detects admin configuration changes
-- `kmsKeyIDHash` (data field) - Detects external key rotation
+> **Note:** API server operators are not privileged and cannot directly communicate with KMS plugins running as static pods on control plane nodes. Tech Preview v2 will require introducing a mechanism to poll KMS plugin Status endpoints for `key_id` changes and health monitoring, and expose this information to the operators.
 
-Separate hashes handle scenarios where config changes without key rotation (updating Vault address) or key rotates without config changes (AWS automatic rotation).
+**Two change detection mechanisms:**
+- `kms-endpoint` (annotation) - Detects admin configuration changes (endpoint updates)
+- `key_id` (data field) - Detects external key rotation
+
+Separate tracking handles scenarios where endpoint changes (switching KMS plugins) or key rotates within the same KMS.
 
 #### Variation: Migration Between Encryption Modes
 
 **From aescbc to KMS:**
-1. Admin updates APIServer: `type: kms` with KMS configuration.
-2. keyController creates KMS secret (empty data, with hash).
+1. Admin deploys KMS plugin and updates APIServer: `type: kms` with endpoint.
+2. keyController creates KMS secret (empty data, with endpoint annotation).
 3. migrationController re-encrypts resources using external KMS.
 
 **From KMS to aescbc:**
@@ -199,19 +207,40 @@ Migration controller reuses existing logic - no changes required.
 ### API Extensions
 
 **APIServer Resource** (`config.openshift.io/v1`):
-- Extended with KMS configuration fields ([PR #2035](https://github.com/openshift/api/pull/2035) for AWS KMS)
-- Vault KMS fields will be added after finalization
+- Extended with KMS configuration fields ([PR #2622](https://github.com/openshift/api/pull/2622))
+
+```go
+type KMSProviderType string
+
+const (
+    ExternalKMSProvider KMSProviderType = "External"
+)
+
+type KMSConfig struct {
+    // Type defines the KMS provider type. Only "External" is supported.
+    // +kubebuilder:validation:Enum=External
+    // +kubebuilder:default=External
+    Type KMSProviderType `json:"type,omitempty"`
+
+    // Endpoint is the unix domain socket path where the KMS plugin listens.
+    // Must follow the format 'unix:///path' or 'unix:///@abstractname'
+    // +kubebuilder:validation:MinLength=1
+    // +kubebuilder:validation:MaxLength=120
+    // +kubebuilder:validation:XValidation:rule="self.matches('^unix:///(@[^/\s]+|[^@\s][^\s]*)$')",message="endpoint must follow the format 'unix:///path' or 'unix:///@abstractname'"
+    Endpoint string `json:"endpoint"`
+}
+```
+
+> **Breaking Change:** This removes the AWS-specific fields (region, keyArn, etc.) from earlier iterations of KMSConfig. This is acceptable because: (1) no controllers are consuming these fields, (2) the feature is gated behind the KMSEncryptionProvider feature gate in Tech Preview, which provides no stability guarantees.
 
 **Encryption Secret Annotations** (library-go):
 ```go
-EncryptionSecretKMSConfigHash = "encryption.apiserver.operator.openshift.io/kms-config-hash"
+EncryptionSecretKMSEndpoint = "encryption.apiserver.operator.openshift.io/kms-endpoint"
 ```
-Stores truncated hash (16 hex characters, 8 bytes) of KMS configuration for change detection.
-
-> **Note:** The hash is truncated to 16 hex characters (8 bytes) to stay within Unix socket path length limits (typically 108 characters) while maintaining sufficient uniqueness for distinguishing different KMS configurations. This allows deterministic socket paths like `/var/run/kmsplugin/kms-a1b2c3d4e5f67890.socket`.
+Stores the unix socket endpoint for the KMS plugin.
 
 **Encryption State Types** (library-go):
-- `KeyState` struct: Add `KMSConfigHash` field
+- `KeyState` struct: Add `KMSEndpoint` field
 - Add `KMS` mode constant alongside `aescbc`, `aesgcm`, `identity`
 
 ### Topology Considerations
@@ -236,9 +265,9 @@ MicroShift may adopt this enhancement if KMS encryption is desired, but the conf
 ### Implementation Details/Notes/Constraints
 
 **Reverse Conversion** (stateController reads EncryptionConfiguration from API server pods):
-1. Extract hash from socket path: `kms-a1b2c3d4e5f67890.socket` → `a1b2c3d4e5f67890`
-2. Look up secret with matching `kms-config-hash` annotation
-3. Reconstruct KeyState with original KMS configuration
+1. Extract endpoint from EncryptionConfiguration: `unix:///var/run/kmsplugin/socket.sock`
+2. Look up secret with matching `kms-endpoint` annotation
+3. Reconstruct KeyState with the endpoint
 
 ### Risks and Mitigations
 
@@ -253,13 +282,12 @@ MicroShift may adopt this enhancement if KMS encryption is desired, but the conf
 ### Drawbacks
 
 - Adds complexity to encryption controllers for KMS-specific logic
-- AWS KMS requires config changes for rotation (not automatic)
 - Dependency on KMS plugin health for controller operations (health checks in Tech Preview v2)
 
 ## Test Plan
 
 **Unit Tests:**
-- `key_controller_test.go`: KMS key creation, rotation detection, hash changes
+- `key_controller_test.go`: KMS key creation, rotation detection, endpoint changes
 - `migration_controller_test.go`: KMS migration scenarios
 - `state_controller_test.go`: KMS state changes
 
@@ -267,7 +295,7 @@ MicroShift may adopt this enhancement if KMS encryption is desired, but the conf
 - Full cluster with KMS encryption enabled
 - Trigger external KMS key rotation
 - Key rotation with real KMS plugin
-- Migration between encryption modes (aescbc → KMS, KMS → identity)
+- Migration between encryption modes (aescbc → KMS, KMS → KMS, KMS → identity)
 - Verify data re-encryption completes
 - Performance testing (time to migrate N secrets)
 
@@ -283,7 +311,6 @@ None
 - Full support for key rotation, with automated data re-encryption
 - Migration support between different KMS providers, with automated data re-encryption
 - Health check preconditions (block operations when plugin unhealthy)
-- Support for Thales KMS
 - Comprehensive integration and E2E test coverage
 - Production validation in multiple environments
 
@@ -297,7 +324,7 @@ N/A
 
 This feature is gated by TechPreviewNoUpgrade feature gate. Upgrades are not permitted in Tech Preview.
 
-In GA, encryption controllers will handle upgrades seamlessly without requiring manual intervention.
+> **Important:** KMS plugins run as independent static pods with no ordering guarantees relative to kube-apiserver startup. If kube-apiserver starts before the KMS plugin is ready, it will fail to decrypt resources encrypted with KMS and will crash-loop until the plugin becomes available. This is expected behavior - the kube-apiserver will automatically recover once the KMS plugin is running and accessible at the configured endpoint.
 
 **Downgrade:**
 
@@ -313,7 +340,7 @@ To downgrade:
 Encryption controllers run in operator pods (not nodes). Version skew concerns:
 - **kube-apiserver:** Must support KMS v2 API (Kubernetes 1.27+)
 - **library-go:** Operators must use same library-go version
-- **KMS plugin:** Controllers don't interact directly (operators do)
+- **KMS plugin:** No version skew concerns - plugins communicate with apiservers via the standardized KMS v2 API contract, ensuring compatibility regardless of plugin version
 
 No special handling required.
 
