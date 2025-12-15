@@ -188,6 +188,9 @@ kind: PKI
 metadata:
   name: cluster
 spec:
+  # Use Custom type to explicitly configure cryptographic parameters
+  type: Custom
+
   # Global default for all certificates
   defaults:
     key:
@@ -246,11 +249,11 @@ Use pre-existing workflow to force certificate rotation using the current PKI co
 
 1. A cluster running OpenShift 4.N is upgraded to 4.N+1 which includes this feature.
 
-2. The upgrade installs the PKI CRD (API definition) and creates an empty PKI resource instance with an empty spec.
+2. The upgrade installs the PKI CRD (API definition) and creates a PKI resource with `type: Unmanaged`.
 
-3. With an empty PKI spec, all operators continue using their existing hardcoded defaults (typically RSA 2048).
+3. With `type: Unmanaged`, all operators continue using their existing hardcoded defaults, ensuring zero behavior change.
 
-4. The cluster administrator can update the PKI resource post-upgrade to configure cryptographic parameters, which will apply on the next certificate rotation cycle.
+4. The cluster administrator can update the PKI resource post-upgrade to `type: Default` or `type: Custom` with configuration, which will apply on the next certificate rotation cycle.
 
 5. Existing certificates continue to function until their natural rotation.
 
@@ -307,17 +310,88 @@ type PKI struct {
     Spec PKISpec `json:"spec"`
 }
 
+// PKISpec uses a parameterized union pattern where the type field determines
+// the validity and interpretation of the defaults, categories, and overrides fields.
+//
+// +kubebuilder:validation:XValidation:rule="self.type == 'Unmanaged' ? (!has(self.defaults) && !has(self.categories) && !has(self.overrides)) : true",message="defaults, categories, and overrides must not be set when type is Unmanaged"
+// +kubebuilder:validation:XValidation:rule="self.type == 'Default' ? (!has(self.defaults) && !has(self.categories) && !has(self.overrides)) : true",message="defaults, categories, and overrides must not be set when type is Default"
+// +union
 type PKISpec struct {
+    // type determines how PKI configuration is managed.
+    //
+    // - Unmanaged: Components use their existing hardcoded certificate generation behavior, exactly as if this feature did not exist.
+    //   Each component generates certificates using whatever parameters it was using before this feature.
+    //   While most components use RSA 2048, some may use different parameters.
+    //   Use of this mode might prevent upgrading to the next major OpenShift release.
+    // + Default when upgrading from a version without this feature to ensure zero behavior change.
+    //   The defaults, categories, and overrides fields must not be set.
+    //
+    // - Default: Use OpenShift-recommended best practices for certificate generation.
+    //   The specific parameters may evolve across OpenShift releases to adopt improved cryptographic standards.
+    //   In the initial release, this matches Unmanaged behavior for each component.
+    //   In future releases, this may adopt ECDSA or larger RSA keys based on industry best practices.
+    //   Recommended for most customers who want to benefit from security improvements automatically.
+    // + Default when installing a fresh cluster.
+    //   The defaults, categories, and overrides fields must not be set.
+    //
+    // - Custom: Administrator explicitly configures cryptographic parameters.
+    // + Recommended for customers with specific compliance requirements or organizational PKI policies.
+    // 
+    // + When upgrading from a version without this feature:
+    // + - The PKI resource is created with type: Unmanaged to ensure zero behavior change.
+    // +
+    // + When installing a fresh cluster:
+    // + - If no PKI configuration is provided in install-config.yaml, type: Default is used.
+    // + - If PKI configuration is provided in install-config.yaml, type: Custom is used with the specified configuration.
+    //
+    // +kubebuilder:validation:Required
+    // +kubebuilder:validation:Enum=Unmanaged;Default;Custom
+    // +unionDiscriminator
+    Type PKIManagementType `json:"type"`
+
+    // Embed PKIProfile to provide reusable certificate parameter fields.
+    // Go API utilities can use PKIProfile to programmatically define custom profiles.
+    PKIProfile `json:",inline"`
+}
+
+type PKIManagementType string
+
+const (
+    // PKIManagementTypeUnmanaged uses hardcoded defaults (RSA 2048) for all certificates.
+    // Behavior is frozen and will never change across OpenShift releases.
+    PKIManagementTypeUnmanaged PKIManagementType = "Unmanaged"
+
+    // PKIManagementTypeDefault uses OpenShift-recommended best practices.
+    // Specific parameters may evolve across OpenShift releases.
+    PKIManagementTypeDefault PKIManagementType = "Default"
+
+    // PKIManagementTypeCustom uses administrator-specified configuration.
+    PKIManagementTypeCustom PKIManagementType = "Custom"
+)
+
+// PKIProfile is a reusable set of certificate parameters.
+// This type is embedded in PKISpec and can be used by Go API utilities
+// to programmatically define profiles for different compliance frameworks
+// or security requirements.
+type PKIProfile struct {
     // defaults specifies the default certificate configuration
     // for all certificates unless overridden by category or specific
     // certificate configuration.
     // If not specified, uses platform defaults (typically RSA 2048).
+    //
+    // Valid when type is Custom.
+    // Must not be set when type is Unmanaged or Default.
+    //
     // +optional
     Defaults *CertificateConfig `json:"defaults,omitempty"`
 
     // categories allows configuration of certificate parameters
-    // for categories of certificates (SignerCertificate, ServingCertificate, ClientCertificate)
+    // for categories of certificates (SignerCertificate, ServingCertificate, ClientCertificate).
     // Category configuration takes precedence over defaults.
+    //
+    // Valid when type is Custom.
+    // Must not be set when type is Unmanaged or Default.
+    //
     // +optional
     // +listType=map
     // +listMapKey=category
@@ -327,6 +401,10 @@ type PKISpec struct {
     // for specific named certificates.
     // Override configuration takes precedence over both category
     // and default configuration.
+    //
+    // Valid when type is Custom.
+    // Must not be set when type is Unmanaged or Default.
+    //
     // +optional
     // +listType=map
     // +listMapKey=certificateName
@@ -572,6 +650,7 @@ This enhancement is fully applicable and relevant for standalone clusters. All i
 apiVersion: v1alpha1
 kind: MicroShiftConfig
 pki:
+  type: Custom
   defaults:
     key:
       algorithm: ECDSA
@@ -1102,11 +1181,11 @@ This enhancement does not deprecate or remove any existing features. It adds new
 When upgrading from a version without this feature to a version with it:
 
 1. The PKI CRD (API definition) is installed during upgrade
-2. An empty PKI resource instance (with empty spec) is automatically created
-3. With an empty spec, operators use their existing hardcoded defaults (typically RSA 2048)
+2. A PKI resource is automatically created with `type: Unmanaged`
+3. With `type: Unmanaged`, operators use their existing hardcoded defaults, ensuring zero behavior change
 4. Existing certificates continue to function unchanged
 5. Certificate rotation uses existing defaults until the PKI resource is updated
-6. Administrators can update the PKI resource post-upgrade to configure cryptographic parameters
+6. Administrators can update the PKI resource post-upgrade to `type: Default` or `type: Custom` with configuration
 7. New parameters apply on the next rotation cycle after PKI resource is updated
 
 This approach ensures zero disruption during upgrade and preserves backward compatibility.
