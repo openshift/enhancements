@@ -384,58 +384,15 @@ For SFTP uploads through HTTP proxies (common in air-gapped OpenShift environmen
 
 To customize proxy settings, a cluster administrator can override the `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` environment variables through the OLM Subscription object.
 
-## Configuring egress proxy for Must Gather Operator
-
-If a cluster wide egress proxy is configured on the OpenShift cluster, OLM automatically update all the operators' deployments with `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY` environment variables.  
-Those variables are then propagated down to the must gather (operand) controllers by the must gather operator.
-
 ### Trusted Certificate Authority
 
-#### Running operator
+The operator supports custom Certificate Authority (CA) bundles for environments using proxy servers with TLS interception. When the `TRUSTED_CA_CONFIGMAP_NAME` environment variable is set on the operator deployment (via OLM Subscription or direct patch), the operator mounts the referenced ConfigMap containing the CA bundle at `/etc/pki/tls/certs/must-gather-tls-ca-bundle.crt`. This ConfigMap should be labeled with `config.openshift.io/inject-trusted-cabundle=true` to leverage OpenShift's [CA bundle injection](https://docs.openshift.com/container-platform/4.12/networking/configuring-a-custom-pki.html#certificate-injection-using-operators_configuring-a-custom-pki).
 
-Follow the instructions below to let Must Gather Operator trust a custom Certificate Authority (CA). The operator's OLM subscription has to be already created.
+#### Reconcile flow
 
-1.  Create the configmap containing the CA bundle in `must-gather-operator` namespace. Run the following commands to [inject](https://docs.openshift.com/container-platform/4.12/networking/configuring-a-custom-pki.html#certificate-injection-using-operators_configuring-a-custom-pki) the CA bundle trusted by OpenShift into a configmap:
+During the MustGather CR reconciliation, the operator copies the trusted CA ConfigMap from the operator namespace (`must-gather-operator`) to the operand namespace where the MustGather CR is present. This ensures that the upload container in the must-gather job can mount and use the trusted CA bundle for SFTP uploads, even when the job runs in a different namespace than the operator.
 
-    ```bash
-    oc -n must-gather-operator create configmap trusted-ca
-    oc -n must-gather-operator label cm trusted-ca config.openshift.io/inject-trusted-cabundle=true
-    ```
-
-2.  Consume the created configmap in Must Gather Operator's deployment by updating its subscription:
-
-    ```bash
-    oc -n must-gather-operator patch subscription <subscription_name> --type='merge' -p '{"spec":{"config":{"env":[{"name":"TRUSTED_CA_CONFIGMAP_NAME","value":"trusted-ca"}]}}}'
-    ```
-
-    _Note_: Alternatively, you can also patch the `must-gather-operator` deployment in the `must-gather-operator` namespace.
-    `bash
-    oc set env deployment/must-gather-operator TRUSTED_CA_CONFIGMAP_NAME=trusted-ca 
-    `
-
-3.  Wait for the operator deployment to finish the rollout and verify that CA bundle is added to the existing controller:
-
-    ```bash
-    oc get deployment -n must-gather-operator must-gather-operator -o=jsonpath={.spec.template.spec.'containers[0].volumeMounts'} | jq
-    [
-      {
-        "mountPath": "/etc/pki/tls/certs/must-gather-tls-ca-bundle.crt",
-        "name": "trusted-ca",
-        "subPath": "ca-bundle.crt"
-      }
-    ]
-
-    oc get deployment -n must-gather-operator must-gather-operator -o=jsonpath={.spec.template.spec.volumes} | jq
-    [
-      {
-        "configMap": {
-          "defaultMode": 420,
-          "name": "trusted-ca"
-        },
-        "name": "trusted-ca"
-      }
-    ]
-    ```
+The copied ConfigMap should include an `ownerReference` pointing to the MustGather CR. Since both the MustGather CR and the copied ConfigMap reside in the same namespace, Kubernetes garbage collection will automatically delete the ConfigMap when the MustGather CR is deleted. This approach ensures automatic cleanup without explicit deletion logic in the operator.
 
 ## Implementation History
 
