@@ -256,40 +256,40 @@ As `Machine` can only have a single CRD in the management cluster, they must bot
 Hypershift asserts ownership of the `Machine` CRD by adding `machines.cluster.x-k8s.io` to CCAPIO's `UnmanagedAPIs`.
 This is the only operational change required by Hypershift.
 
-CCAPIO observes the change to UnmanagedAPIs, and ensures that a CRDCompatibilityRequirement exists for every entry.
+CCAPIO observes the change to UnmanagedAPIs, and ensures that a CompatibilityRequirement exists for every entry.
 In the case of `Machine` this would be:
 
 ```yaml
-apiVersion: operator.openshift.io/v1alpha1
-kind: CRDCompatibilityRequirement
+apiVersion:	apiextensions.openshift.io/v1alpha1
+kind:	CompatibilityRequirement
 metadata:
-  name: cluster-api-machine-ccapio
+  name:	cluster-api-machine-ccapio
 spec:
-  creatorDescription: "OpenShift Cluster CAPI Operator"
   compatibilitySchema:
-    crdYAML: |
-      ...
-      <complete YAML document of Machine CRD from transport config map>
-      ...
-    # StorageOnly is the default for all CRDCompatibilityRequires created by CCAPIO
-    requireVersions: StorageOnly
-    # The v1beta1 version was added because we observed an annotation on a Deployment in OpenStack's
-    # transport configmap indicating that it is using CAPI Machine v1beta1.
-    additionalVersions:
-    - v1beta1
-    # CCAPIO always excludes status.deprecated from validation
-    excludeFields:
-    - "status.deprecated"
-  crdSchemaValidation:
-    action: Enforce
+    customResourceDefinition:
+      data: |
+        ...
+        <complete YAML document of Machine CRD from transport config map>
+        ...
+      type: YAML
+    excludedFields:
+    - path: "status.deprecated"
+    requiredVersions:
+      # The v1beta1 version was added because we observed an annotation on a Deployment in OpenStack's
+      # transport configmap indicating that it is using CAPI Machine v1beta1.
+      additionalVersions:
+      - v1beta1
+      defaultSelection: StorageOnly # Valid options are StorageOnly and AllServed.
+  customResourceDefinitionSchemaValidation:
+    action: Deny
   objectSchemaValidation:
-    action: Enforce
+    action: Deny
     namespaceSelector:
       matchLabels:
         "kubernetes.io/metadata.name": "openshift-cluster-api"
 ```
 
-CCAPIO marks itself Degraded if CRDCompatibilityRequirement it owns becomes not Progressing, and:
+CCAPIO marks itself Degraded if CompatibilityRequirement it owns becomes not Progressing, and:
 * not Admitted - transport config map is invalid
 * not Compatible - current CRD is incompatible with CCAPIO requirements
 
@@ -306,127 +306,148 @@ OCP 4.Y+1 is the upgraded version.
 
 Some time during the OCP 4.Y lifecycle we add an additional set of transport config maps to 4.Y.z which contain the CRDs required by 4.Y+1.
 CCAPIO scans these, but does not load them.
-For each CRD it creates a new CRDCompatibilityRequirement.
+For each CRD it creates a new CompatibilityRequirement.
 e.g. for the `Machine` CRD it would create:
 
 ```yaml
-apiVersion: operator.openshift.io/v1alpha1
-kind: CRDCompatibilityRequirement
+apiVersion:	apiextensions.openshift.io/v1alpha1
+kind:	CompatibilityRequirement
 metadata:
-  name: cluster-api-cluster-ccapio-4.Y+1
+  name:	cluster-api-machine-ccapio
 spec:
-  creatorDescription: "OpenShift Cluster CAPI Operator for OCP 4.Y+1"
   compatibilitySchema:
-    crdYAML: |
-      ...
-      <complete YAML document of future Cluster CRD from transport config map>
-      ...
-    requireVersions: StorageOnly
-    additionalVersions:
-    - v1beta1
-    excludeFields:
-    - "status.deprecated"
-  crdSchemaValidation:
+    customResourceDefinition:
+      data: |
+        ...
+        <complete YAML document of Machine CRD from transport config map>
+        ...
+      type: YAML
+    excludedFields:
+    - path: "status.deprecated"
+    requiredVersions:
+      # The v1beta1 version was added because we observed an annotation on a Deployment in OpenStack's
+      # transport configmap indicating that it is using CAPI Machine v1beta1.
+      additionalVersions:
+      - v1beta1
+      defaultSelection: StorageOnly
+  customResourceDefinitionSchemaValidation:
     action: Warn
 ```
 
 The differences from the previous example are:
 * The requirement identifies itself as being related to a different version.
-* `crdSchemaValidation.action` is `Warn` instead of `Enforce`, so this requirement will not prevent updates to the current CRD.
+* `customResourceDefinitionSchemaValidation.action` is `Warn` instead of `Deny`, so this requirement will not prevent updates to the current CRD.
 * There is no `objectSchemaValidation`.
 
-CCAPIO will mark itself as not upgradeable if any CRDCompatibilityRequirement created for an upgrade transport config map reports its `Compatible` condition as `False`.
+CCAPIO will mark itself as not upgradeable if any CompatibilityRequirement created for an upgrade transport config map reports its `Compatible` condition as `False`.
 
 ### API Extensions
 
-The following is an outline of the CRDCompatibilityRequirement CRD:
+The following is an outline of the CompatibilityRequirement CRD:
 
 ```yaml
-apiVersion: operator.openshift.io/v1alpha1
-kind: CRDCompatibilityRequirement
+apiVersion:	apiextensions.openshift.io/v1alpha1
+kind:	CompatibilityRequirement
 metadata:
-  ...
+  name:	cluster-api-machine-ccapio
 spec:
-  # Fields to be implemented initially
-  creatorDescription: |
-    <human readable description of who created this requirement. displayed in errors and warnings the validation webhooks>
-
-  # compatibilitySchema defines the schema used by crdSchemaValidation and objectSchemaValidation
+  #compatibilitySchema defines the schema used by customResourceDefinitionSchemaValidation and objectSchemaValidation.
   compatibilitySchema:
-    crdYAML: |
-      ...
-      <complete YAML document of Machine CRD from transport config map>
-      ...
-    # requireVersions specifies which versions we will automatically extract from the yaml and require
-    requireVersions: <StorageOnly or All>
-    # additionalVersions is a set of versions to require in addition to those discovered by requireVersions
-    # overlap with requireVersions is explicitly permitted
-    additionalVersions:
-    - v1beta1
-    # excludeFields is a set of fields in the yaml which will not be validated by either
-    # crdSchemaValidation or objectSchemaValidation
-    excludeFields:
-    - "status.deprecated"
-
-  # If defined, crdSchemaValidation will ensure that updates to the installed
-  # CRD are compatible with this compatibility requirement
-  crdSchemaValidation:
-    # Enforce: violations are not admitted
-    # Warn: violations are admitted with an API warning
-    action: <Enforce or Warn>
-
-  # If defined, objectSchemaValidation with ensure that matching objects conform
-  # to compatiblitySchema. This will be implemented in a second phase. The
-  # initial API will not contain this field.
+    # customResourceDefinition contains the complete definition of the CRD for schema and object validation purposes.
+    customResourceDefinition:
+      data: |
+        ...
+        <complete YAML document of Machine CRD from transport config map>
+        ...
+      type: YAML
+    # excludedFields is a set of fields in the schema which will not be validated
+    # by customResourceDefinitionSchemaValidation or objectSchemaValidation.
+    excludedFields:
+    - path: "status.deprecated"
+      # versions are the API versions the field is excluded from.
+      # When not specified, the field is excluded from all versions.
+      # versions: []
+    # requiredVersions specifies a subset of the CRD's API versions which will be
+    # asserted for compatibility.
+    requiredVersions:
+      # additionalVersions specifies a set api versions to require in addition to
+      # the default selection. It is explicitly permitted to specify a version in
+      # additionalVersions which was also selected by the default selection. The
+      # selections will be merged and deduplicated.
+      additionalVersions:
+      # - v1
+      # defaultSelection specifies a method for automatically selecting a set of
+      # versions to require.
+      # Valid options are StorageOnly and AllServed.
+      defaultSelection: StorageOnly
+  # customResourceDefinitionSchemaValidation ensures that updates to the
+  # installed CRD are compatible with this compatibility requirement. If not
+  # specified, admission of the target CRD will not be validated.
+  # This field is optional.
+  customResourceDefinitionSchemaValidation:
+    action: Deny # Valid options are Deny and Warn
+  # objectSchemaValidation ensures that matching resources conform to
+  # compatibilitySchema.
   objectSchemaValidation:
-    # Enforce: violations are not admitted
-    # Warn: violations are admitted with an API warning
-    action: <Enforce or Warn>
-
-    # namespaceSelector, objectSelector, and matchConditions will be copied to
-    # the corresponding ValidatingWebhookConfiguration. Their definitions and
-    # semantics are therefore identical to those in
+    action: Deny # Valid options are Deny and Warn
+    # matchConditions defines the matchConditions field of the resulting
     # ValidatingWebhookConfiguration.
+    matchConditions:
+    - expression: <cel expression for evaluation>
+      name: identifier-for-the-match-condition
+    # namespaceSelector defines a label selector for namespaces.
     namespaceSelector:
+      matchExpressions:
+      - key: "kubernetes.io/metadata.name"
+        operator: In # One of In, NotIn, Exists or DoesNotExist
+        values:
+        - openshift-cluster-api
       matchLabels:
         "kubernetes.io/metadata.name": "openshift-cluster-api"
+    # objectSelector defines a label selector for objects.
     objectSelector:
-      ...
-    matchConditions:
-      ...
-
+      matchExpressions:
+      - key: some-label # label key for the selector
+        operator: In # One of In, NotIn, Exists or DoesNotExist
+        values:
+        - on-an-object
+      matchLabels:
+        some-label: on-an-object
 status:
-  # crdName is the name of the target CRD, automatically extracted from
-  # spec.compatibiltySchema.crdYAML.
-  # An update to spec.compatibilitySchema.crdYAML which would cause this value
-  # to change once it has been set will be rejected.
-  crdName: "machines.cluster-api.x-k8s.io"
-
-  # Conditions are detailed further below
-  conditions:
-    ...
-
-  # observedCRD is set only if the target CRD was observed.
+  # conditions is a list of conditions and their status.
+  # Known condition types are Progressing, Admitted, and Compatible.
+  conditions: []
+  # crdName is the name of the target CRD. The target CRD is not required to
+  # exist, as we may legitimately place requirements on it before it is
+  # created.  The observed CRD is given in status.observedCRD, which will be
+  # empty if no CRD is observed.
+  crdName: machines.cluster-api.x-k8s.io
+  # observedCRD documents the uid and generation of the CRD object when the
+  # current status was written.
   observedCRD:
-    uid: <uid of the observed target CRD>
-    generation: <generation of the observed target CRD>
+    generation: <generation>
+    uid: <uuid>
 ```
 
 #### Conditions
 
-CRDCompatibilityRequirement defines 3 conditions:
+CompatibilityRequirement defines 3 conditions:
 
 * `Progressing` -
-False if the spec has been completely reconciled.
-True indicates that reconciliation is still in progress and the current status does not represent a stable state.
-Progressing False with an error reason indicates that the object cannot be reconciled.
+	CompatibilityRequirementProgressing is false if the spec has been
+	completely reconciled against the condition's observed generation.
+	True indicates that reconciliation is still in progress and the current status does not represent
+	a stable state. Progressing false with an error reason indicates that the object cannot be reconciled.
 
 * `Admitted` -
-True if the requirement has been configured in the validating webhook, otherwise False.
+	CompatibilityRequirementAdmitted is true if the requirement has been configured in the validating webhook,
+	otherwise false.
+
 
 * `Compatible` -
-True if the observed CRD is compatible with the requirement, otherwise False.
-Note that Compatible may be False when adding a new requirement which the existing CRD does not meet.
+	CompatibilityRequirementCompatible is true if the observed CRD is compatible with the requirement,
+	otherwise false. Note that Compatible may be false when adding a new requirement which the existing
+	CRD does not meet.
 
 The above conditions are always set on every reconcile, and include `observedGeneration`.
 
@@ -451,24 +472,26 @@ These conditions may have the following Reasons:
 
 #### Validating webhooks
 
-##### ClusterResourceDefinition
+##### CustomResourceDefinition
 
-Create, Update, and Delete operations on CRDs will either be denied or emit a warning depending on the setting of `crdSchemaValidation.action`.
+Create, Update, and Delete operations on CRDs will either be denied or emit a warning depending on the setting of `customResourceDefinitionSchemaValidation.action`.
 
-Create and Update will deny/warn if the created or updated CRD would not be compatible with any CRDCompatibilityRequirement which references it in `status.crd`.
+Create and Update will deny/warn if the created or updated CRD would not be compatible with any CompatibilityRequirement which references it in `status.crdName`.
 
-Delete will deny/warn if any CRDCompatibilityRequirement references it in `status.crd`.
+Delete will deny/warn if any CompatibilityRequirement references it in `status.crdName`.
 
 ##### Dynamically created by `objectSchemaValidation`
 
 [!NOTE]
 Implementation of `objectSchemaValidation` will be deferred to a second phase to be implemented after the CRD validation webhook is fully implemented and integrated.
 
-If a CRDCompatibilityRequirement defines `objectSchemaValidation` we will dynamically create a new `ValidatingWebhookConfiguration` to implement it.
-This webhook will ensure that matching objects conform to the CRD given in `compatibilityCRD`, which may be different to the current CRD version.
+If a CompatibilityRequirement defines `objectSchemaValidation` we will dynamically create a new `ValidatingWebhookConfiguration` to implement it.
+This webhook will ensure that matching objects conform to the CRD given in `compatibilitySchema`, which may be different to the current CRD version.
 It will either warn or deny admission based on the setting of `objectSchemaValidation.action`.
+E.g. the `ValidatingWebhookConfiguration` will warn or deny a Machine object in the namespace `openshift-cluster-api`, if it has fields set that exist
+in the CustomResourceDefinition, but not in the schema configured in the CompatibilityRequirement.
 
-This webhook will have the same lifecycle as the CRDCompatibilityRequirement which created it.
+This webhook will have the same lifecycle as the CompatibilityRequirement which created it.
 
 The webhook will only be called for objects matching the selectors in `objectSchemaValidation`.
 
@@ -508,6 +531,7 @@ N/A
   CRD updates are infrequent enough that this is unlikely to be a concern.
   For object schema validation there is potential for impact during certain phases of cluster activity.
   We will optimize performance beyond the initial implementation only if it proves necessary.
+  The kube-apiserver metric `apiserver_admission_webhook_admission_duration_seconds` can be considered to measure the performance.
   
 - **Risk**:
   Complex coordination between multiple actors with conflicting requirements
@@ -606,7 +630,7 @@ This is a new feature gate proposed by this enhancement.
 This should be enabled at least 1 release prior to `ClusterAPIMachineManagement<platform>`.
 
 When enabled, cluster-capi-operator will:
-* Create a `CRDCompatibilityRequirement` for every CRD discovered in the 'future' transport config map if that CRD is also marked 'unmanaged'.
+* Create a `CompatibilityRequirement` for every CRD discovered in the 'future' transport config map if that CRD is also marked 'unmanaged'.
 This requirement will `Warn`.
 * Mark itself not upgradeable if any of these are marked `Compatible=False`.
 
@@ -615,7 +639,7 @@ This requirement will `Warn`.
 This is the existing feature gate which enables CAPI for a particular platform.
 
 If it is enabled, cluster-capi-operator will:
-* Create a `CRDCompatibilityRequirement` for every CRD in the 'active' transport config map if that CRD is also marked 'unmanaged'.
+* Create a `CompatibilityRequirement` for every CRD in the 'active' transport config map if that CRD is also marked 'unmanaged'.
 This requirement will `Enforce`.
 
 Upgrading to first version of OCP to include this feature:
@@ -640,7 +664,7 @@ The system must handle version skew during upgrades:
 - Fails all Create, Update, and Delete operations on CRDs if the webhook is not running.
 - Fails all Create, Update, and Delete operations on CAPI objects in the `openshift-cluster-api` namespace if the webhook is not running.
 - Runs an informer cache of CRD objects, so potentially large memory usage.
-- Expected use cases involve a static number of `CRDCompatibilityRequirement` objects in the order of 10s.
+- Expected use cases involve a static number of `CompatibilityRequirement` objects in the order of 10s.
 - Failure of the component will prevent:
   - Changes to CRD objects (unlikely to impact workloads).
   - Changes to CAPI objects, preventing cluster scale-up, scale-down, and reconfiguration.
