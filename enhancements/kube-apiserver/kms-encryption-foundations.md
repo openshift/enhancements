@@ -51,6 +51,7 @@ OpenShift currently manages AES keys locally for encrypting data at rest in etcd
 - KMS plugin health checks (Tech Preview v2)
 - Recovery from KMS key loss (separate EP for GA)
 - Automatic `key_id` rotation detection (Tech Preview v2)
+- API Servers communicate with KMS v2 Plugins via abstract unix sockets (i.e. unix:///@foo) (require `hostNetwork=true` which openshift-apiserver and oauth-apiserver do not have)
 
 ## Proposal
 
@@ -216,18 +217,28 @@ const (
     ExternalKMSProvider KMSProviderType = "External"
 )
 
+// KMSConfig defines the configuration for the KMS instance
+// that will be used with KMSEncryptionProvider encryption
 type KMSConfig struct {
-    // Type defines the KMS provider type. Only "External" is supported.
-    // +kubebuilder:validation:Enum=External
-    // +kubebuilder:default=External
-    Type KMSProviderType `json:"type,omitempty"`
+// managementModel defines how KMS plugins are managed.
+// Valid values are "External".
+// When set to External, encryption keys are managed by a user-deployed
+// KMS plugin that communicates via UNIX domain socket using KMS V2 API.
+//
+// +kubebuilder:validation:Enum=External
+// +kubebuilder:default=External
+// +optional
+ManagementModel ManagementModel `json:"managementModel,omitempty"`
 
-    // Endpoint is the unix domain socket path where the KMS plugin listens.
-    // Must follow the format 'unix:///path' or 'unix:///@abstractname'
-    // +kubebuilder:validation:MinLength=1
-    // +kubebuilder:validation:MaxLength=120
-    // +kubebuilder:validation:XValidation:rule="self.matches('^unix:///(@[^/\s]+|[^@\s][^\s]*)$')",message="endpoint must follow the format 'unix:///path' or 'unix:///@abstractname'"
-    Endpoint string `json:"endpoint"`
+// endpoint specifies the UNIX domain socket endpoint for communicating with the external KMS plugin.
+// The endpoint must follow the format "unix:///path".
+// Abstract Linux sockets (i.e. "unix:///@abstractname") are not supported.
+//
+// +kubebuilder:validation:MaxLength=120
+// +kubebuilder:validation:MinLength=9
+// +kubebuilder:validation:XValidation:rule="self.matches('^unix:///[^@ ][^ ]*$')",message="endpoint must follow the format 'unix:///path'"
+// +required
+Endpoint string `json:"endpoint,omitempty"`
 }
 ```
 
