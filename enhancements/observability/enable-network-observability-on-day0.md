@@ -162,8 +162,10 @@ When you bring up the OpenShift web console, you should see that NOO is installe
 
 The Technology Preview (TP) release will have a feature gate named `EnableNetworkObservability` that needs to be enabled.  To enable this on day 0, enter:
 
-`$ openshift-install create install-config`
-`$ openshift-install create manifests`
+```
+$ openshift-install create install-config
+$ openshift-install create manifests`
+```
 
 Now create the file **99-feature-gate.yml** in the **manifests** directory with the following:
 
