@@ -256,7 +256,7 @@ Since there are so many different customer scenarios and cluster profiles, the T
 - Optimize FlowCollector configuration
 - User facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
-At GA, the feature gate for this feature will be enabled by default.  This means to disable Network Observability, you will need to opt-out by including the `installNetworkObservability: false` line in the install-config.yaml file.  After a couple of OpenShift releases, the feature gate will be removed.
+At GA, the feature gate for this feature will be enabled by default.  This means to not enable Network Observability, you will need to opt-out by including the `installNetworkObservability: false` line in the install-config.yaml file.  After a couple of OpenShift releases, the feature gate will be removed.
 
 ## Upgrade / Downgrade Strategy
 
