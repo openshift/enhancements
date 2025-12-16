@@ -92,6 +92,10 @@ kube-state-metrics, kubelet and the network daemon.
 
 ### User Stories
 
+- As a user, I want to aggressively save on compute and space, and as such, only
+  want the bare-minimum set of metrics churn in my cluster, even if that breaks
+  any of the builtin frontend features that rely on internal metrics, unlike the
+  `minimal` collection profile.
 - As a user, I want to lower the amount of resources consumed by Prometheus in a
   supported way, so I can configure the clusters metrics collection profiles to
   `Minimal`.
@@ -109,6 +113,9 @@ kube-state-metrics, kubelet and the network daemon.
   all the profile metrics are present in the cluster, and which of the profile
   monitors are affected if not. Also, I want additional information to narrow
   down where these metrics are exactly being used.
+- As a developer of a component, I want to make it telemetry-aware, and reduce
+  the overall metrics exposition data from it when the user opts into telemetry
+  collection (by setting the current collection profile to `Telemetry`).
 
 ### Goals
 
@@ -185,11 +192,14 @@ all.
 Once set up, the implementation within the operator that defines its behavior
 for such profiles will decide how it reconciles under such conditions.
 
-The goal is to support 2 profiles:
+The goal is to support 3 profiles:
 
 - `Full` (same as today)
 - `Minimal` (only collect metrics necessary for recording rules, alerts,
   dashboards, HPA, VPA and telemetry)
+- `Telemetry` (only collect metrics that are required for [telemetry])
+
+[telemetry]: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/support/remote-health-monitoring-with-connected-clusters
 
 Note that the profile names are PascalCased in this KEP, but at this time,
 only camelCase is supported in CMO. However, since Kubernetes enums are
@@ -215,63 +225,58 @@ spec:
       - "full"
 ```
  
-An OpenShift team that wants to support the metrics collection profiles feature
-would need to provide 2 monitors for each profile (in this example 1
-ServiceMonitor per profile).
+An OpenShift team that wants to completely support the metrics collection
+profiles feature would need to provide 3 monitors for each profile (in this
+example 1 ServiceMonitor per profile).
 
 ```yaml
 ---
+# full: no metricRelabelings, all metrics are collected.
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   labels:
-    k8s-app: telemeter-client
     monitoring.openshift.io/collection-profile: full
-  name: telemeter-client
-  namespace: openshift-monitoring
-spec:
-  endpoints:
-  - bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
-    interval: 30s
-    port: https
-    scheme: https
-    tlsConfig:
-      <...>
-  jobLabel: k8s-app
-  selector:
-    matchLabels:
-      k8s-app: telemeter-client
+  name: <component>
 ---
+# minimal: keeps telemetry metrics + additional metrics needed for alerts/dashboards.
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   labels:
-    k8s-app: telemeter-client
     monitoring.openshift.io/collection-profile: minimal
-  name: telemeter-client-minimal
-  namespace: openshift-monitoring
+  name: <component>-minimal
 spec:
   endpoints:
-  - bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
-    interval: 30s
-    port: https
-    scheme: https
-    tlsConfig:
-      <...>
-  jobLabel: k8s-app
-  selector:
-    matchLabels:
-      k8s-app: telemeter-client
-  metricRelabelings:
-  - sourceLabels: [__name__]
-    action: keep
-    regex: "federate_samples|federate_filtered_samples"
- ```
+  - metricRelabelings:
+    - sourceLabels: [__name__]
+      action: keep
+      regex: "telemetry_metric_a|telemetry_metric_b|minimal_only_metric_c|minimal_only_metric_d"
+---
+# telemetry: keeps only the metrics required for telemetry (subset of minimal).
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  labels:
+    monitoring.openshift.io/collection-profile: telemetry
+  name: <component>-telemetry
+spec:
+  endpoints:
+  - metricRelabelings:
+    - sourceLabels: [__name__]
+      action: keep
+      regex: "telemetry_metric_a|telemetry_metric_b"
+```
 
-Note: 
-- the `metricRelabelings` section keeps only two metrics, while the rest are
-dropped.
-- the metrics in the `keep` section were obtained with the help of a script that
+Note:
+- The `metricRelabelings` section keeps only a subset of the available metrics,
+  while the rest are dropped.
+- The `minimal` profile's allow-list is always a superset of (greater than or
+  equal to) the `telemetry` profile's allow-list, as both of these are
+  contractually supposed to expose telemetry metrics.
+- While the aforementioned pattern is what the monitoring team recommends, it
+  is possible for each profile to define its own independent allow-list.
+- The metrics in the `keep` section were obtained with the help of a script that
   parsed all Alerts, PrometheusRules and Console dashboards to determine what
   metrics were actually being used.
 
@@ -312,14 +317,15 @@ NA
 ```go
 type PrometheusK8sConfig struct {
     // Defines the metrics collection profile that Prometheus uses to collect
-    // metrics from the platform components. Supported values are `Full` or
-    // `Minimal`. In the `Full` profile (default), Prometheus collects all
-    // metrics that are exposed by the platform components (same behavior as
-    // before) . In the `Minimal` profile, Prometheus only collects metrics
-    // necessary for the default platform alerts, recording rules, telemetry
-    // and console dashboards. When unset, the default value is `Full`.
-    // Note that while PascalCase and camelCase values are supported, the
-    // former is preferred for consistency with the Kubernetes API. There are
+    // metrics from the platform components. Supported values are `Full`,
+    // `Minimal` and `Telemetry`. In the `Full` profile (default), Prometheus
+    // collects all metrics that are exposed by the platform components (same
+    // behavior as before) . In the `Minimal` profile, Prometheus only collects
+    // metrics necessary for the default platform alerts, recording rules,
+    // telemetry and console dashboards. When unset, the default value is `Full`.
+    // In the `Telemetry` profile, only metrics necessary for telemetry are
+    // collected. Note that while PascalCase and camelCase values are supported,
+    // the former is preferred for consistency with the Kubernetes API. There are
     // no plans to drop camelCase support, as it may break existing workloads.
     CollectionProfile CollectionProfile `json:"collectionProfile,omitempty"`
 }
@@ -383,14 +389,23 @@ not. To aid teams with this effort the monitoring team will provide:
 
 - Unit tests in CMO to validate that the correct monitors are being selected.
 - E2E tests in CMO to validate that everything works correctly.
-- For the `Minimal` profile, origin/CI test to validate that every metric used
-in a resource (Alerts/PrometheusRules/Dashboards) exists in the `keep`
-expression of a minimal monitors.
-- E2E test that ensures that for every monitor that is labelled as `Full`
-collection profile, there also exists one for `Minimal`, and vice versa, using
-[rexagod/cpv], a CLI tool that can be used to validate the implementation of
-metrics collection profiles in OpenShift components.
+- For the `Telemetry` profile, similar testing should be done as [exists for the `Minimal` profile](https://github.com/openshift/origin/pull/28889/changes#diff-00da964b40cc78eccb31c5bd15423de5364fa3dfa65c08a09e089c651cb28281).
 
+#### Suggestions from KEP review ([#1791])
+
+- For the `Minimal` profile, origin/CI test to validate that every metric used
+  in a resource (Alerts/PrometheusRules/Dashboards) exists in the `keep`
+  expression of a minimal monitors.
+  - Introduce profile-based recording rules that target such expressions (so
+    it's easier for us to track them as well)?
+- E2E test that ensures that for every monitor that is labelled as `Full`
+  collection profile, there also exists one for `Minimal`, and vice versa, using
+  [rexagod/cpv], a CLI tool that can be used to validate the implementation of
+  metrics collection profiles in OpenShift components.
+  - Emphasis on keeping a historical "record" in place, so any profile being
+    dropped or added is identified.
+
+[#1791]:https://github.com/openshift/enhancements/pull/1791
 [rexagod/cpv]: https://github.com/rexagod/cpv#status
 
 ## Graduation Criteria
@@ -403,6 +418,11 @@ profile out-of-the-box and removes the earlier-imposed
 TechPreview gate. PTAL at the section below for more details.
 
 - GA'd in 4.19: https://github.com/openshift/api/pull/2286
+
+- Profile addition: The `Telemetry` collection profile is currently being
+  developed at [CMO#2694].
+
+[CMO#2694]: https://github.com/openshift/cluster-monitoring-operator/pull/2694.
 
 ### Dev Preview -> Tech Preview
 
@@ -446,6 +466,7 @@ all.
 - https://github.com/openshift/cluster-monitoring-operator/pull/2030
 - https://github.com/openshift/cluster-monitoring-operator/pull/2047
 - https://github.com/openshift/origin/pull/28889
+- https://github.com/openshift/cluster-monitoring-operator/pull/2694
 
 ## Alternatives (Not Implemented)
 
@@ -507,6 +528,8 @@ and implementation status. Possible implementation status:
 - implementation in progress
 - implemented
 
+#### `Minimal` collection profile
+
 | Team            | Component          | Implementation Status      |
 |-----------------|--------------------|----------------------------|
 | Monitoring Team | kubelet            | Implemented                |
@@ -514,6 +537,26 @@ and implementation status. Possible implementation status:
 | Monitoring Team | kube-state-metrics | Implemented                |
 | Monitoring Team | node-exporter      | Implemented                |
 | Monitoring Team | prometheus-adapter | Implemented                |
+
+#### `Telemetry` collection profile
+
+| Team            | Component                    | Implementation Status      |
+|-----------------|------------------------------|----------------------------|
+| Monitoring Team | alertmanager                 | Implemented                |
+| Monitoring Team | cluster-monitoring-operator  | Implemented                |
+| Monitoring Team | control-plane                | Implemented                |
+| Monitoring Team | kube-state-metrics           | Implemented                |
+| Monitoring Team | metrics-server               | Implemented                |
+| Monitoring Team | node-exporter                | Implemented                |
+| Monitoring Team | openshift-state-metrics      | Implemented                |
+| Monitoring Team | prometheus-k8s               | Implemented                |
+| Monitoring Team | prometheus-k8s               | Implemented                |
+| Monitoring Team | prometheus-operator          | Implemented                |
+| Monitoring Team | telemeter-client             | Implemented                |
+| Monitoring Team | thanos-querier               | Implemented                |
+| Monitoring Team | control-plane                | Implemented                |
+| Monitoring Team | kube-state-metrics           | Implemented                |
+| Monitoring Team | node-exporter                | Implemented                |
 
 ### Topology Considerations
 
