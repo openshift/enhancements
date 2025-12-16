@@ -144,7 +144,7 @@ The CRD user SHOULD NOT assert compatibility requirements for parts of the API w
 For example, in the above example the CRD user SHOULD NOT add a compatibility requirement for `v1beta1`, as it does not use it directly.
 
 This also applies to deprecated fields.
-If the Compatibility CRD provided by the CRD user contains deprecated fields which are no longer used by the version of the controller being deployed, the CRD user SHOULD explicitly explicitly exclude them from compatibility requirements by listing them in `excludedFields`.
+If the Compatibility CRD provided by the CRD user contains deprecated fields which are no longer used by the version of the controller being deployed, the CRD user SHOULD explicitly exclude them from compatibility requirements by listing them in `excludedFields`.
 
 For its own operands, the Cluster CAPI Operator will add a compatibility requirement for:
 * the storage version defined in its operand CRD, which we assume is the API version directly used by the operand's controllers.
@@ -162,7 +162,7 @@ A CRD is compatible with a compatibility requirement if:
 * All fields defined in the compatibility requirement are present
 * **TODO**: ...other things
 
-### Workflow description
+### Workflow Description
 
 #### For a cluster that already has Cluster API CRDs installed
 
@@ -615,6 +615,10 @@ The test plan should include:
 - Performance validation showing acceptable webhook latency
 - Production deployment validation
 - Complete user documentation
+
+### Removing a deprecated feature
+
+None
 
 ## Upgrade / Downgrade Strategy
 
