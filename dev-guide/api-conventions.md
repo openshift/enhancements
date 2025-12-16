@@ -158,6 +158,37 @@ Having a single allowed phrasing has a few benefits:
 
 For existing APIs, progress toward these ideals needs to happen within the usual [constraints on API changes][api-changes].
 
+### Use JSON Field Names in Godoc
+
+Ensure that the godoc for a field name matches the JSON name, not the Go name,
+in Go definitions for API objects.  In particular, this means that the godoc for
+field names should use an initial lower-case letter.  For example, don't do the
+following:
+
+```go
+// Example is [...]
+type Example struct {
+	// ExampleFieldName specifies [...].
+	ExampleFieldName int32 `json:"exampleFieldName"`
+}
+```
+
+Instead, do the following:
+
+```go
+// Example is [...]
+type Example struct {
+	// exampleFieldName specifies [...].
+	ExampleFieldName int32 `json:"exampleFieldName"`
+}
+```
+
+The godoc for API objects appears in generated API documentation and `oc
+explain` output.  Following this convention has the disadvantage that the godoc
+does not match the Go definitions that developers use, but it has the advantage
+that generated API documentation and `oc explain` output show the correct field
+names that end users use, and the end-user experience is more important.
+
 ### Write User Readable Documentation in Godoc
 
 Godoc text is generated into both Swagger and OpenAPI schemas which are then used
@@ -201,13 +232,13 @@ For example:
 // + the swagger docs.
 // + This can be used to add notes for developers that aren't intended for end users.
 type Example struct {
-  // Type allows the user to determine how to interpret the example given.
+  // type allows the user to determine how to interpret the example given.
   // It must be set to one of the following values: Documentation, Convention, or Mixed.
   // +kubebuilder:validation:Enum:=Documentation;Convention;Mixed
   // +required
   Type string `json:"type,omitempty"`
 
-  // Documentation allows the user to define documentation for the example.
+  // documentation allows the user to define documentation for the example.
   // When this value is provided, the type must be set to either Documentation or Mixed.
   // The content of the documentation is free form text but must be no longer than 512 characters.
   // +kubebuilder:validation:MinLength:=1
@@ -215,14 +246,14 @@ type Example struct {
   // +optional
   Documentation string `json:"documentation,omitempty"`
 
-  // Convention allows the user to define the configuration for this API convention.
+  // convention allows the user to define the configuration for this API convention.
   // For example, it allows them to set the priority over other conventions and whether
   // this policy should be strictly observed or weakly observed.
   // When this value is provided, the type must be set to either Convention or Mixed.
   // +optional
   Convention ConventionSpec `json:"convention,omitempty,omitzero"`
 
-  // Author allows the user to denote an author for the example convention.
+  // author allows the user to denote an author for the example convention.
   // The author is not required. When omitted, this means the user has no opinion and the value is
   // left to the platform to choose a good default, which is subject to change over time.
   // The current platform default is OpenShift Engineering.
@@ -246,29 +277,32 @@ DESCRIPTION:
 
 FIELDS:
   author <string>
-    Author allows the user to denote an author for the example convention. The author is not required. When omitted,
+    author allows the user to denote an author for the example convention. The author is not required. When omitted,
     this means the user has no opinion and the value is left to the platform to choose a reasonable default, which is
     subject to change over time. The current platform default is OpenShift Engineering. The Author field is free form
     text.
 
   convention <Object>
-    Convention allows the user to define the configuration for this API convention. For example, it allows them to set
+    convention allows the user to define the configuration for this API convention. For example, it allows them to set
     the priority over other conventions and whether this policy should be strictly observed or weakly observed. When
     this value is provided, the type must be set to either Convention or Mixed.
 
   documentation <string>
-    Documentation allows the user to define documentation for the example. When this value is provided, the type must
+    documentation allows the user to define documentation for the example. When this value is provided, the type must
     be set to either Documentation or Mixed. The content of the documentation is free form text but must be no
     longer than 512 characters.
 
   type <string>
-    Type allows the user to determine how to interpret the example given. It must be set to one of the following
+    type allows the user to determine how to interpret the example given. It must be set to one of the following
     values: Documentation, Convention, or Mixed.
 ```
 
 By providing quality documentation within the API itself, a number of generated API references
 benefit from the additional context provided which in turn makes it easier for end users to understand
 and use our products.
+
+> [!TIP]
+> Use [Kube API Linter](https://github.com/kubernetes-sigs/kube-api-linter) to enforce conventions on your API types.
 
 ### Discriminated Unions
 
@@ -300,7 +334,7 @@ Below is an example based on the idea of platform types.
 // It has a +union tag which informs consumers that this is expected to be a union type.
 // +union
 type MyPlatformConfig struct {
-  // PlatformType is the unions discriminator.
+  // platformType is the unions discriminator.
   // Users are expected to set this value to the name of the platform.
   // The value of this field should match exactly one field in the union structure.
   // It has a +unionDiscriminator tag to inform consumers that this is the discriminator field.
@@ -315,17 +349,17 @@ type MyPlatformConfig struct {
   // +kubebuilder:validation:Required
   PlatformType string `json:"platformType"`
 
-  // AWS is the AWS configuration.
+  // aws is the AWS configuration.
   // All structures within the union must be optional and pointers.
   // +optional.
   AWS *MyAWSConfig `json:"aws,omitempty"`
 
-  // Azure is the Azure configuration.
+  // azure is the Azure configuration.
   // All structures within the union must be optional and pointers.
   // +optional.
   Azure *MyAzureConfig `json:"azure,omitempty"`
 
-  // GCP is the GCP configuration.
+  // gcp is the GCP configuration.
   // All structures within the union must be optional and pointers.
   // +optional.
   GCP *MyGCPConfig `json:"gcp,omitempty"`
@@ -468,37 +502,6 @@ Nevertheless, after customer adoption the configuration was never migrated to a 
 
 ## Exceptions to Kubernetes API Conventions
 
-### Use JSON Field Names in Godoc
-
-Ensure that the godoc for a field name matches the JSON name, not the Go name,
-in Go definitions for API objects.  In particular, this means that the godoc for
-field names should use an initial lower-case letter.  For example, don't do the
-following:
-
-```go
-// Example is [...]
-type Example struct {
-	// ExampleFieldName specifies [...].
-	ExampleFieldName int32 `json:"exampleFieldName"`
-}
-```
-
-Instead, do the following:
-
-```go
-// Example is [...]
-type Example struct {
-	// exampleFieldName specifies [...].
-	ExampleFieldName int32 `json:"exampleFieldName"`
-}
-```
-
-The godoc for API objects appears in generated API documentation and `oc
-explain` output.  Following this convention has the disadvantage that the godoc
-does not match the Go definitions that developers use, but it has the advantage
-that generated API documentation and `oc explain` output show the correct field
-names that end users use, and the end-user experience is more important.
-
 ### Use Specific Types for Object References, and Omit "Ref" Suffix
 
 Use resource-specific types for object references.  For example, avoid using the
@@ -511,10 +514,10 @@ name.  For example, don't do the following:
 ```go
 // Example is [...]
 type Example struct {
-	// FrobulatorConfigRef specifies [...].
+	// frobulatorConfigRef specifies [...].
 	FrobulatorConfigRef corev1.LocalObjectReference `json:"frobulatorConfigRef"`
 
-	// DefabulatorRef specifies [...].
+	// defabulatorRef specifies [...].
 	DefabulatorRef corev1.LocalObjectReference `json:"defabulatorRef"`
 }
 ```
@@ -553,13 +556,13 @@ do the following:
 ```go
 // DefabulatorReference references a defabulator.
 type DefabulatorReference struct {
-	// APIVersion is the API version of the referent.
+	// apiVersion is the API version of the referent.
 	APIVersion string `json:"apiVersion"`
-	// Kind of the referent.
+	// kind of the referent.
 	Kind string `json:"kind"`
-	// Namespace of the referent.
+	// namespace of the referent.
 	Namespace string `json:"namespace"`
-	// Name of the referent.
+	// name of the referent.
 	Name string `json:"name"`
 }
 ```
