@@ -424,10 +424,37 @@ whitelist], in addition to other operations. Note that these rules
 are the ones used to draw its dashboards, which is limited to
 [grafana-dashboard-microshift-telemetry] at this time.
 
+#### NVIDIA DOCA Platform Framework-managed clusters
+
+DPF deployments use a dual-cluster architecture: a management cluster (x86) that
+hosts application workloads and control plane components, and a hosted cluster
+running on ARM cores of NVIDIA BlueField DPUs dedicated to networking functions
+and infrastructure services. The hosted cluster runs on extremely
+resource-constrained hardware that must accommodate all infrastructure services
+including networking, storage offloading, and security functions. 
+
+<details>
+<summary>DPF deployment overview</summary>
+
+  ![DPF deployment overview diagram](./assets/optional-monitoring-capability-doca.png)
+
+</details>
+
+DPUs exist specifically to offload infrastructure overhead from host x86
+servers, achieving up to 70% CPU savings on the host. Running full monitoring
+stacks on the DPU ARM cores would defeat this purpose by consuming the limited
+resources meant for high-performance networking and infrastructure services.
+
+Refer to this [thread] for the original request.
+
+Refer to this [blogpost] for more details on DPF deployments.
+
 [telemetry whitelist]: https://github.com/openshift/cluster-monitoring-operator/blob/main/manifests/0000_50_cluster-monitoring-operator_04-config.yaml
 [remote-writes]: https://github.com/openshift/microshift/blob/c35ae12248d1c94e45f73d81ceba79b3c1967bcf/docs/user/howto_config.md?plain=1#L281
 [metrics-server]: https://github.com/openshift/microshift/blob/c35ae12248d1c94e45f73d81ceba79b3c1967bcf/docs/user/howto_metrics_server.md
 [grafana-dashboard-microshift-telemetry]: https://github.com/openshift/microshift/blob/c35ae12248d1c94e45f73d81ceba79b3c1967bcf/dashboards/grafana-dashboard-microshift-telemetry.configmap.yaml
+[thread]: https://redhat-internal.slack.com/archives/C0VMT03S5/p1749495223680499
+[blogpost]: https://developers.redhat.com/articles/2025/03/20/dpu-enabled-networking-openshift-and-nvidia-dpf#
 
 ### Implementation Details/Notes/Constraints
 
