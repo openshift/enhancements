@@ -40,7 +40,6 @@ Network Observability is an optional OLM operator that collects and stores traff
 * As a cluster admin, I should be able to see the networking health of my cluster after creating it.
 * As a customer support engineer, I want the customer to be aware that Network Observability exists and can provide insights into their network traffic, including the ability to troubleshoot a number of networking issues.
 
-
 ### Goals
 
 Being able to manage and observe the network in an OpenShift cluster is critical in maintaining the health and integrity of the network.  Without it, there’s no way to verify whether your changes are working as expected or whether your network is experiencing issues.
@@ -160,32 +159,7 @@ Finally, to create the cluster, enter:
 
 When you bring up the OpenShift web console, you should see that NOO is installed just like it would be, had you gone to **Ecosystem > Software Catalog** (formerly **Operators > OperatorHub** in 4.19 or earlier) to install **Network Observability** from Red Hat (not the Community version).  In **Installed Operators**, there should be a row for **Network Observability**.  And in the **Observe** menu, there should be a panel named **Network Traffic**.
 
-The Technology Preview (TP) release will have a feature gate named `EnableNetworkObservability` that needs to be enabled.  To enable this on day 0, enter:
-
-```
-$ openshift-install create install-config
-$ openshift-install create manifests`
-```
-
-Now create the file **99-feature-gate.yml** in the **manifests** directory with the following:
-
-```yaml
-apiVersion: config.openshift.io/v1
-kind: FeatureGate
-metadata:
-  name: cluster
-spec:
-  featureSet: CustomNoUpgrade
-  customNoUpgrade:
-    enabled:
-      - EnableNetworkObservability
-```
-
-`$ openshift-install create cluster`
-
-If you have a running cluster, you can update the feature gate by entering `oc edit featuregate` and make the changes shown above.
-
-At General Availability (GA), the feature gate for this feature will be enabled by default, so you no longer need to modify the FeatureGate resource.  You won't have to do anything to get Network Observability installed, assuming you are using CNO.  If you want to opt-out, just add the `installNetworkObservability: false` statement in install-config.yaml (day 0) or in the Network CR by entering `oc edit network` (day 1).
+This is the behavior for General Availability (GA).  During the Technology Preview (TP) release, the feature will only be enabled if there is an `installNetworkObservability: true` line in the Network CR.
 
 ### API Extensions
 
@@ -250,7 +224,7 @@ Performance testing will be done to optimize the use of resources and to determi
 
 ## Graduation Criteria
 
-Since there are so many different customer scenarios and cluster profiles, the Tech Preview will allow us to gauge the customer responses and make optimizations to the FlowCollector configuration.  To enable the feature gate for this feature, see the Workflow Description above.
+Since there are so many different customer scenarios and cluster profiles, the Tech Preview will allow us to gauge the customer responses and make optimizations to the FlowCollector configuration.  To enable the feature, see the Workflow Description above.
 
 ### Tech Preview -> GA
 
@@ -258,11 +232,11 @@ Since there are so many different customer scenarios and cluster profiles, the T
 - Optimize FlowCollector configuration
 - User facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
-At GA, the feature gate for this feature will be enabled by default.  This means to not enable Network Observability, you will need to opt-out by including the `installNetworkObservability: false` line in the install-config.yaml file.  After a couple of OpenShift releases, the feature gate will be removed.
+At GA, Network Observability will be enabled by default.  To not enable Network Observability, you can opt-out by including the `installNetworkObservability: false` line in the install-config.yaml file (day 0) or in the Network CR by entering `oc edit network` (day 1).
 
 ## Upgrade / Downgrade Strategy
 
-The upgrade strategy is treated like any other feature.  At GA, when you upgrade, Network Observability will be enabled by default.  This is because CNO will not see an `installNetworkObservability` line in the Network CR and treats this as true.  However, during Tech Preview, you must eneable the feature gate first.
+The upgrade strategy is treated like any other feature.  At GA, Network Observability will be enabled on upgrading.  During Tech Preview, you must still enable the feature first.
 
 On a downgrade, the enabling Network Observability feature is removed.  Network Observability will remain if it was installed and the FlowCollector will remain if the resource was created.
 
