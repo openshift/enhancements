@@ -274,6 +274,7 @@ spec:
       type: YAML
     excludedFields:
     - path: "status.deprecated"
+      - v1beta2
     requiredVersions:
       # The v1beta1 version was added because we observed an annotation on a Deployment in OpenStack's
       # transport configmap indicating that it is using CAPI Machine v1beta1.
@@ -324,6 +325,8 @@ spec:
       type: YAML
     excludedFields:
     - path: "status.deprecated"
+      versions:
+      - v1beta2
     requiredVersions:
       # The v1beta1 version was added because we observed an annotation on a Deployment in OpenStack's
       # transport configmap indicating that it is using CAPI Machine v1beta1.
