@@ -51,7 +51,7 @@ The current state of the OpenShift TLS stack uses a default set of curves with n
 The ability to set curves explicitely will also make it possible to align our 
 OpenShift TLS profiles to match the curves present in the [Mozilla TLS Profiles](https://wiki.mozilla.org/Security/Server_Side_TLS). 
 
-This change will require working with OpenShift component owners to use this new field, however this is outside the scope of this proposal.
+This change will require working with OpenShift component owners to use this new field. The scope of this feature includes ensuring that appropriate components respect the new curves field when it is set in custom profiles. Adding default curves to the non-custom profiles (Old, Intermediate, Modern) is a separately scoped action and will be addressed in future work.
 
 ### Workflow Description
 
@@ -102,7 +102,7 @@ This change will effect the TLS profile of both single node and microshift deplo
 ### Implementation Details/Notes/Constraints
 
 #### Default curve configuration
-The [default openshift TLS profiles](https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html/security_and_compliance/tls-security-profiles#tls-profiles-understanding_tls-security-profiles) do not currently have a default set of curves. However, the default Mozilla TLS profiles (which openshift TLS profiles are based on) *do* have curves. We are planning on specifically adding these curves to openshifts profiles in the future. This is outside the scope of this api change, the api should expose the curves field first to allow components time to implement the consumption of these curves.
+The [default openshift TLS profiles](https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html/security_and_compliance/tls-security-profiles#tls-profiles-understanding_tls-security-profiles) (Old, Intermediate, Modern) do not currently specify any curves, instead relying on the underlying TLS implementation to select a sensible default group. However, the default Mozilla TLS profiles (which OpenShift TLS profiles are based on) *do* specify curves. We are planning on specifically adding these curves to OpenShift's non-custom profiles in the future as a separately scoped action. This API change should expose the curves field first to allow components time to implement the consumption of these curves when set in custom profiles.
 
 #### Mismatching curves and ciphersuites
 There is a case where the administrator could incorrectly specificy a set of ciphersuites
@@ -114,7 +114,9 @@ To avoid this scenario, OpenShift should implement validation to prevent known i
 
 OpenShift components could forego utilizing the curves set in the API config. However, this is a risk
 that exists in the current TLS config flow. This change will require coordination with component owners
-to comply with the new TLS config field.
+to ensure compliance with the new TLS config field, particularly for custom profiles where administrators
+explicitly set curves. For the initial scope of this enhancement, this may only apply when a custom profile
+is used, but backing implementation for core components is considered a requirement for GA promotion.
 
 ### Drawbacks
 
@@ -140,7 +142,9 @@ Once components are onboarded to utilize these curves, the cluster will be scann
 
 ### Tech Preview -> GA
 
+- **Backing implementation for core components to respect the curves field when set in custom profiles.** This is a GA blocker.
 - Verify the general support for these curves using the [tls-scanner](github.com/openshift/tls-scanner)
+- Ensure that key OpenShift components (ingress controller, API server, etc.) properly consume and apply the configured curves from custom TLS profiles
 
 ### Removing a deprecated feature
 
