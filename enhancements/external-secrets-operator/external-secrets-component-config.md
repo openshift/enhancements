@@ -9,7 +9,7 @@ approvers:
 api-approvers:
   - "@tgeer"
 creation-date: 2025-12-1
-last-updated: 2025-12-15
+last-updated: 2025-12-24
 tracking-link:
   - https://issues.redhat.com/browse/RFE-7842
   - https://issues.redhat.com/browse/OCPSTRAT-2419
@@ -34,8 +34,8 @@ Administrators often need to control core operational parameters, lifecycle sett
 
 ### User Stories
 
-- As an OpenShift administrator, I want to configure the deployment lifecycle properties (e.g., revisionHistoryLimit) for external-secrets operand components using the `ExternalSecretsConfig` API so that I can control their rollback behavior and optimize cluster resource consumption.
-- As an OpenShift Administrator, I need to apply unique configuration overrides (e.g., revisionHistoryLimit) to individual external-secrets components (Controller, Webhook, etc.) so that I can meet the specific operational and resource requirements of each component efficiently.
+- As an OpenShift administrator, I want to configure deployment lifecycle properties (e.g., revisionHistoryLimit) for external-secrets operand components using the `ExternalSecretsConfig` API so that I can control rollback behavior and optimize cluster resource consumption.
+- As an OpenShift administrator, I want to apply configuration overrides to individual external-secrets components (Controller, Webhook, etc.) so that I can set component-specific environment variables or other operational parameters as needed.
 - As an OpenShift Administrator, I want to define custom metadata (like annotations or labels) on the external-secrets component deployments via the `ExternalSecretsConfig` API so that the deployments correctly integrate with cluster policy tools, monitoring systems (e.g., Prometheus), and internal tooling without being overwritten.
 - As an OpenShift Administrator, I need to set custom environment variables for specific components (e.g., the Controller) so that I can configure component behavior at runtime or securely integrate the operand with necessary external services.
 
@@ -43,13 +43,13 @@ Administrators often need to control core operational parameters, lifecycle sett
 
 - Provide a declarative API for specifying deployment lifecycle overrides for each component via `ExternalSecretsConfig`.
 - Provide a declarative API for adding custom annotations globally to all resources created for the `external-secrets` operand via `ExternalSecretsConfig`.
-- Provide a declarative API for specifying custom environment variables for each component via `ExternalSecretsConfig`.
+- Provide a declarative API for specifying custom environment variables uniquely for each component via `ExternalSecretsConfig`.
 - Support all four operand components: Controller, Webhook, CertController, and BitwardenSDKServer.
 
 ### Non-Goals
 
-- Exhaustive validation of individual configured values. Users should consult upstream documentation. Only basic structural validation (non-empty strings, list length limits) will be performed.
-- Resource limits, replica counts, or other deployment-level settings except for the RevisionHistoryLimit which is specifically introduced by this proposal.
+- Exhaustive validation of individual configured values (e.g., validating that an environment variable value is semantically correct). Users should consult upstream documentation. Only basic structural validation (non-empty strings, list length limits) will be performed.
+- Ability to set resource limits (CPU, memory requests/limits), replica counts, pod affinity/anti-affinity, tolerations, or node selectors. These deployment-level settings are out of scope for this proposal, except for `revisionHistoryLimit` which is specifically introduced here.
 
 ## Proposal
 
@@ -97,7 +97,7 @@ type ComponentConfig struct {
     // and cannot be overridden.
     //
     // +kubebuilder:validation:Optional
-    // +kubebuilder:validation:XValidation:rule="self.all(e, !e.name.startsWith('HOSTNAME') && !e.name.startsWith('KUBERNETES_') && !e.name.startsWith('EXTERNAL_SECRETS_'))",message="Environment variable names cannot start with 'HOSTNAME', 'KUBERNETES_', or 'EXTERNAL_SECRETS_' as these are reserved"
+    // +kubebuilder:validation:XValidation:rule="self.all(e, !['HOSTNAME', 'KUBERNETES_', 'EXTERNAL_SECRETS_'].exists(p, e.name.startsWith(p)))",message="Environment variable names with reserved prefixes 'HOSTNAME', 'KUBERNETES_', 'EXTERNAL_SECRETS_' are not allowed"
     // +optional
     OverrideEnv []corev1.EnvVar `json:"overrideEnv,omitempty"`
 }
@@ -112,9 +112,11 @@ type ControllerConfig struct {
     // are reserved and cannot be overridden.
     //
     // +kubebuilder:validation:Optional
-    // +kubebuilder:validation:XValidation:rule="self.all(key, !key.startsWith('kubernetes.io') && !key.startsWith('app.kubernetes') && !key.startsWith('openshift.io') && !key.startsWith('k8s.io'))",message="Annotation keys cannot start with 'kubernetes.io', 'app.kubernetes', 'openshift.io', or 'k8s.io' as these are reserved"
+    // +kubebuilder:validation:XValidation:rule="self.all(a, !['kubernetes.io/', 'app.kubernetes.io/', 'openshift.io/', 'k8s.io/'].exists(p, a.key.startsWith(p)))",message="annotations with reserved prefixes 'kubernetes.io/', 'app.kubernetes.io/', 'openshift.io/', 'k8s.io/' are not allowed"
+    // +listType=map
+    // +listMapKey=key
     // +optional
-    Annotations map[string]string `json:"annotations,omitempty"`
+    Annotations []Annotation `json:"annotations,omitempty"`
 	
     // componentConfigs allows specifying component-specific (Controller, Webhook, CertController, Bitwarden) configuration overrides.
     // +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x.componentName == y.componentName))",message="componentName must be unique across all componentConfig entries"
@@ -128,13 +130,27 @@ type ControllerConfig struct {
 
 type DeploymentConfig struct {
   // revisionHistoryLimit specifies the number of old ReplicaSets to retain for rollback.
-  // Minimum value of 2 is enforced to ensure rollback capability.
+  // Minimum value of 1 is enforced to ensure rollback capability.
   //
-  // +kubebuilder:validation:Minimum=2
+  // +kubebuilder:validation:Minimum=1
   // +kubebuilder:validation:Optional
   // +optional
   RevisionHistoryLimit *int32 `json:"revisionHistoryLimit,omitempty"`
 }
+
+// KVPair represents a generic key-value pair for configuration.
+type KVPair struct {
+  Key   string `json:"key,omitempty"`
+  Value string `json:"value,omitempty"`
+}
+
+// Annotation represents a custom annotation key-value pair.
+// Embeds KVPair inline for reusability.
+type Annotation struct {
+  // Embedded KVPair provides key and value fields
+  KVPair `json:",inline"`
+}
+
 
 ```
 
@@ -165,7 +181,8 @@ metadata:
 spec:
   controllerConfig:
     annotations:
-      example.com/custom-annotation: "value"
+      - key: "example.com/custom-annotation"
+        value: "my-value"
 ```
 
 **Set custom environment variables for a component:**
@@ -195,7 +212,8 @@ spec:
   controllerConfig:
     # Annotations applied to ALL components
     annotations:
-      example.com/custom-annotation: "value"
+      - key: "example.com/custom-annotation"
+        value: "my-value"
     # Component-specific overrides
     componentConfig:
       - componentName: ExternalSecretsCoreController
