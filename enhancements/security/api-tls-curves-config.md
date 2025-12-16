@@ -207,4 +207,99 @@ N/A
 
 ## Support Procedures
 
-N/A
+### Verifying Configuration
+
+**Check configured curves:**
+```bash
+# For IngressController
+oc get ingresscontroller default -n openshift-ingress-operator -o yaml | grep -A 10 tlsSecurityProfile
+
+# For APIServer
+oc get apiserver cluster -o yaml | grep -A 10 tlsSecurityProfile
+```
+
+**Test connectivity:**
+After applying a custom curve configuration, test connectivity to critical services:
+- OpenShift console access
+- API server connectivity (`oc` commands)
+- Application routes through ingress
+- Internal service-to-service communication
+
+### Troubleshooting
+
+**Symptoms of curve misconfiguration:**
+- TLS handshake failures in component logs
+- "no shared group" errors
+- "handshake failure" errors
+- Inability to connect to services that were previously working
+
+**Identifying the problem:**
+
+1. **Check component logs for TLS errors:**
+```bash
+# Ingress router logs
+oc logs -n openshift-ingress -l ingresscontroller.operator.openshift.io/deployment-ingresscontroller=default
+
+# API server logs
+oc logs -n openshift-kube-apiserver -l app=openshift-kube-apiserver
+```
+
+Look for errors containing:
+- "tls: no supported group"
+- "tls: handshake failure"
+- "no shared group"
+
+2. **Verify component is using curves:**
+Use [tls-scanner](https://github.com/openshift/tls-scanner) to confirm which components are respecting the curve configuration and which may not have implemented support yet.
+
+3. **Check for unsupported curves:**
+If components are using older TLS library versions, they may not support newer curves (e.g., post-quantum curves like ML-KEM). Review component documentation for supported curve lists.
+
+### Recovery Procedures
+
+**Quick recovery - revert to predefined profile:**
+If a custom curve configuration is causing issues, immediately revert to a predefined profile:
+
+```bash
+oc edit ingresscontroller default -n openshift-ingress-operator
+```
+
+Change from:
+```yaml
+spec:
+  tlsSecurityProfile:
+    type: Custom
+    custom:
+      curves:
+      - X25519MLKEM768
+      - X25519
+```
+
+To:
+```yaml
+spec:
+  tlsSecurityProfile:
+    type: Intermediate  # or Modern/Old depending on requirements
+```
+
+This will restore known-good curve defaults.
+
+**Gradual recovery - adjust curve list:**
+If only specific curves are causing problems:
+1. Keep the Custom profile
+2. Remove problematic curves from the list
+3. Ensure at least one widely-supported curve remains (e.g., X25519, P-256)
+4. Monitor logs and connectivity
+
+**Full rollback:**
+If needed, restore the previous configuration:
+```bash
+oc rollout undo ingresscontroller/default -n openshift-ingress-operator
+```
+
+### Prevention
+
+- **Always include fallback curves:** When configuring custom curves (especially experimental ones like PQC curves), always include widely-supported curves in the list as fallbacks
+- **Test in non-production first:** Apply custom curve configurations to development/staging clusters before production
+- **Use predefined profiles when possible:** Most users should use Old/Intermediate/Modern profiles, which are tested across all components
+- **Monitor after changes:** Watch component logs for 15-30 minutes after applying curve configuration changes
