@@ -314,6 +314,9 @@ be added to
   * configuring the Clevis trustee pin
   * enable fetching remote config after remote attestation
 
+* **OpenShift CVO**: add a capability for confidential cluster
+  * Disabled by default
+
 #### Programming Languages
 The Confidential Cluster Operator is written in Rust.
 
