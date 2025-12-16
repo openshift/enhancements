@@ -110,6 +110,47 @@ that do not work with each other. For example using an RSA ciphersuite with a EC
 
 To avoid this scenario, OpenShift should implement validation to prevent known invalid combinations. A validation layer will be added to check for compatible combinations of curves and ciphersuites. If a known invalid combination is detected, the configuration will be rejected, informing the user of the incompatibility immediately rather than failing at runtime.
 
+#### Handling unsupported curves in custom profiles
+
+Custom TLS profiles follow a "use at your own risk" model that allows administrators 
+with advanced cryptographic knowledge to configure specific parameters. This same 
+model applies to curves as it does to existing cipher suite configuration.
+
+**Configuration-time behavior:**
+TLS implementations (OpenSSL, Go crypto/tls) do not fail when configured with 
+unsupported curves or ciphers. Instead, they silently filter out unsupported 
+items and proceed with the valid ones.
+
+**Runtime behavior:**
+If no mutually supported curves (or ciphers) remain after filtering, TLS handshakes 
+will fail with errors like "handshake failure" (for cipher suites) or "no shared group" (for curves). This is the 
+expected and desired behavior—it ensures only supported cryptographic parameters are used.
+
+**Why not validate at API level:**
+Validating curve support at the API level would require maintaining a comprehensive 
+registry of:
+- All TLS implementation libraries used across OpenShift components
+- Version-specific support matrices for each library
+- Continuous updates as libraries evolve
+
+This approach is infeasible and would create a maintenance burden that outweighs 
+the benefit. Runtime failures provide clear, immediate feedback about incompatibilities.
+
+**Recommended approach:**
+- **Most users**: Use the predefined profiles (Old, Intermediate, Modern), which are 
+  tested and guaranteed to work across all OpenShift components. These profiles will 
+  be enhanced to include secure curve configurations in future work.
+- **Advanced users**: Custom profiles are available for specific requirements (e.g., 
+  early PQC adoption, compliance mandates). Administrators using custom profiles should:
+  - Understand the cryptographic implications of their configuration
+  - Test connectivity to critical services after applying changes
+  - Use the tls-scanner tool to verify actual negotiated parameters
+  - Monitor component logs for TLS handshake failures
+
+This approach is consistent with the existing [custom TLS profile documentation](https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html/security_and_compliance/tls-security-profiles), 
+which warns: "Use caution when using a Custom profile, because invalid 
+configurations can cause problems."
+
 ### Risks and Mitigations
 
 OpenShift components could forego utilizing the curves set in the API config. However, this is a risk
