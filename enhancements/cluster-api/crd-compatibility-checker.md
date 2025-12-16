@@ -461,12 +461,19 @@ These conditions may have the following Reasons:
 | `TransientError` | `True` | This indicates that reconciliation failed due to an error that can be retried. |
 | `UpToDate` | `False` | This indicates that reconciliation completed successfully. |
 
+#### Admitted
+
+| Reason | Associated Status | Description |
+|---|---|---|
+| `Admitted` | `True` | This indicates that the requirement has been configured in the validating webhook. |
+| `NotAdmitted` | `False` | This indicates that the requirement has not been configured in the validating webhook. |
+
 #### Compatible
 
 | Reason | Associated Status | Description |
 |---|---|---|
 | `RequirementsNotMet` | `False` | This indicates that a CRD exists, and it is not compatible with this requirement. |
-| `CRDDoesNotExist` | `False` | This indicates that the referenced CRD does not exist. |
+| `CRDNotFound` | `False` | This indicates that the referenced CRD does not exist. |
 | `CompatibleWithWarnings` | `True` | This indicates that the CRD exists and is compatible with this requirement, but `Message` contains one or more warning messages. |
 | `Compatible` | `True` | This indicates that the CRD exists and is compatible with this requirement. |
 
