@@ -10,7 +10,7 @@ approvers:
 api-approvers:
   - "None"
 creation-date: 2025-11-06
-last-updated: 2025-11-13
+last-updated: 2025-12-16
 tracking-link:
   - "https://issues.redhat.com/browse/STOR-2682"
 see-also:
@@ -30,7 +30,7 @@ Local Storage Operator (LSO) creates symlinks under `/mnt/local-storage` pointin
 
 ## Motivation
 
-[RHEL docs](https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/managing_storage_devices/persistent-naming-attributes_managing-storage-devices#persistent-attributes-for-identifying-file-systems-and-block-devices_persistent-naming-attributes) state that "Device names managed by udev in /dev/disk/ can change between major releases, requiring link updates." and we have a specific case that became apparent in [OCPBUGS-61988](https://issues.redhat.com/browse/OCPBUGS-61988) that we need to mitigate for RHEL 10 (OCP 4.22).
+[RHEL docs](https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/managing_storage_devices/persistent-naming-attributes_managing-storage-devices#persistent-attributes-for-identifying-file-systems-and-block-devices_persistent-naming-attributes) state that "Device names managed by udev in /dev/disk/ can change between major releases, requiring link updates." and we have a specific case that became apparent in [OCPBUGS-61988](https://issues.redhat.com/browse/OCPBUGS-61988) that we need to mitigate for RHEL 10.
 
 sg3_utils 1.48 in RHEL 10 disables a udev rule that creates `/dev/disk/by-id/scsi-0NVME_*` symlinks on RHEL 9.x. This udev rule is already problematic for customers affected by OCPBUGS-61988 but it is also problematic for others who may already be using those symlinks successfully today because upgrading to RHEL 10 will cause those `/dev/disk/by-id` symlinks to disappear. LSO needs some way to recreate symlinks for existing PV's when this happens.
 
@@ -55,43 +55,66 @@ sg3_utils 1.48 in RHEL 10 disables a udev rule that creates `/dev/disk/by-id/scs
 
 ### Workflow Description
 
-LSO's diskmaker will detect all valid by-id symlinks for each PV and add them as an annotation on the PV. It will also annotate the by-id symlink currently used by the PV, and it will annotate the corresponding by-uuid symlink if one is found.
+This enhancement introduces a new LocalVolumeDeviceLink CRD. LSO will create new LocalVolumeDeviceLink objects for each PV created by LSO's diskmaker. Diskmaker will detect all valid by-id symlinks for each PV and update `localVolumeDeviceLink.status`. This status will include the full list of valid symlink targets, the by-id symlink currently used by the PV, the preferred symlink chosen by LSO, and the corresponding UUID of the filesystem if one is found.
 
-These annotations will be updated periodically from diskmaker's existing reconcile loop, which runs on start up and on changes to the PV or the owner object (LocalVolume / LocalVolumeSet). Additionally, we want reconcile to be triggered by udev disk changes as an indication that by-id symlinks may have changed.
-
-#### Annotations
-
-Each PV will have up to three new annotations added by diskmaker:
-
-* `storage.openshift.com/current-link-target`: current by-id symlink used for the device
-* `storage.openshift.com/dev-disk-by-id-list`: list of valid by-id symlinks for the device  (as JSON array of strings)
-* `storage.openshift.com/dev-disk-by-uuid`: by-uuid symlink corresponding to the device (when available)
-  * by-uuid is not available for raw block volumes, but may still be used for filesystem volumes to ensure detected symlinks match the device with the correct on-disk identifier.
+These status fields will be updated periodically from diskmaker's existing reconcile loop, which runs on start up and on changes to the PV or the owner object (LocalVolume / LocalVolumeSet). Additionally, we want reconcile to be triggered by udev disk changes as an indication that by-id symlinks may have changed.
 
 #### Alert
 
-LSO will throw an alert if `storage.openshift.com/current-link-target` does not match the recommended symlink in `storage.openshift.com/dev-disk-by-id-list`, or if no by-id symlink is found.
+LSO will throw an alert if `localVolumeDeviceLink.status.currentLinkTarget` does not match the recommended symlink in `localVolumeDeviceLink.status.preferredLinkTarget`, or if no by-id symlink is found at all.
 
 #### Administrator response
 
-The administrator can review the annotations on the PV, and then add a `storage.openshift.com/recreate-symlink` annotation to the PV to tell diskmaker to recreate the symlink. This can be done to proactively switch to the recommended symlink, or it can be done reactively when a symlink is no longer valid (assuming there is another known valid by-id symlink).
-
-The only value for `storage.openshift.com/recreate-symlink` that diskmaker will watch for is `lso-preferred`. This value tells diskmaker to recreate the symlink using LSO's preferred symlink. All other annotation values will be ignored by diskmaker.
-
-Example for a PV named `local-pv-99de9af5`:
-```
-oc annotate pv local-pv-99de9af5 storage.openshift.com/recreate-symlink=lso-preferred
-```
+The administrator can review the device link status, and then set `localVolumeDeviceLink.spec.policy` to `RecreateSymlinkOnce` to tell diskmaker to recreate the symlink using the target from `localVolumeDeviceLink.status.preferredLinkTarget`. This can be done to proactively switch to the recommended symlink, or it can be done reactively when a symlink is no longer valid (assuming there is another known valid by-id symlink).
 
 #### Recreate Symlink
 
-Diskmaker will recreate the symlink pointing to the new by-id symlink. If successful, it will remove the `storage.openshift.com/recreate-symlink` annotation and update `storage.openshift.com/current-link-target` to reflect the new symlink used for the device.
+Diskmaker will recreate the symlink pointing to the preferred link target. If successful, it will update `localVolumeDeviceLink.status` and reset `localVolumeDeviceLink.spec.policy` back to `None`. If there is any error that prevents this, diskmaker will add a failure condition and stop attempting to change the symlink and set `localVolumeDeviceLink.spec.policy` back to `None`. The administrator can review any errors and change the policy back to `RecreateSymlinkOnce` if they want to retry the operation.
 
-If there is any error that prevents this, diskmaker will set `storage.openshift.com/recreate-symlink` to `failed` and will stop attempting to change the symlink. The administrator can review any errors and change the value back to `lso-preferred` if they want to retry.
+#### Deletion
+
+LocalVolumeDeviceLink will be deleted when its owner object is deleted (LocalVolume / LocalVolumeSet).
 
 ### API Extensions
 
-No new API changes, just the diskmaker annotations for each PV as described above.
+```
+type LocalVolumeDeviceLink struct {
+	metav1.TypeMeta `json:",inline"`
+	// has OwnerRef set to LocalVolume or LocalVolumeSet object
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Spec   LocalVolumeDeviceLinkSpec   `json:"spec,omitempty"`
+	Status LocalVolumeDeviceLinkStatus `json:"status,omitempty"`
+}
+
+// +kubebuilder:validation:Enum=None;RecreateSymlinkOnce
+type LocalVolumeDeviceLinkPolicy string
+
+const (
+	LocalVolumeDeviceLinkPolicyNone = "None" // default
+	LocalVolumeDeviceLinkPolicyRecreateSymlinkOnce = "RecreateSymlinkOnce"
+)
+
+type LocalVolumeDeviceLinkSpec struct {
+	// PVName is the name of the persistent volume linked to the device
+	PVName string `json:"pvName"`
+	// Policy of the device link
+	Policy LocalVolumeDeviceLinkPolicy `json:"policy"`
+}
+
+type LocalVolumeDeviceLinkStatus struct {
+	// CurrentLinkTarget is the current by-id symlink used for the device
+	CurrentLinkTarget string `json:"currentLinkTarget,omitempty"`
+	// PreferredLinkTarget is the preferred by-id symlink for the device
+	PreferredLinkTarget string `json:"preferredLinkTarget,omitempty"`
+	// ValidLinkTargets is the list of valid by-id symlinks for the device
+	ValidLinkTargets []string `json:"validLinkTargets,omitempty"`
+	// FilesystemUUID is the UUID of the filesystem found on the device (when available)
+	// +optional
+	FilesystemUUID string `json:"filesystemUUID,omitempty"`
+	// Conditions is a list of operator conditions
+	Conditions []operatorv1.OperatorCondition `json:"conditions,omitempty"`
+```
 
 ### Topology Considerations
 
@@ -116,7 +139,7 @@ Diskmaker will use the following selection criteria when choosing the recommende
 3. If a by-uuid symlink was previously discovered and recorded, the new by-id target must point to the same device.
 4. There is no other symlink in `/mnt/local-storage/<storageclass>` pointing to this by-id target.
 
-Diskmaker will keep the link name and only change the link target. For example, if a PV has an existing symlink `/mnt/local-storage/localblock/scsi-0NVME_MODEL_abcde` pointing to `/dev/disk/by-id/scsi-0NVME_MODEL_abcde`, but there is a by-id link `/dev/disk/by-id/scsi-2ace42e0035eabcde`, setting `storage.openshift.com/recreate-symlink=lso-preferred` will cause diskmaker to replace `/mnt/local-storage/localblock/scsi-0NVME_MODEL_abcde` with a new symlink pointing to `/dev/disk/by-id/scsi-2ace42e0035eabcde`.
+Diskmaker will keep the link name and only change the link target. For example, if a PV has an existing symlink `/mnt/local-storage/localblock/scsi-0NVME_MODEL_abcde` pointing to `/dev/disk/by-id/scsi-0NVME_MODEL_abcde`, but there is a by-id link `/dev/disk/by-id/scsi-2ace42e0035eabcde`, setting the device link policy to `RecreateSymlinkOnce` will cause diskmaker to replace `/mnt/local-storage/localblock/scsi-0NVME_MODEL_abcde` with a new symlink pointing to `/dev/disk/by-id/scsi-2ace42e0035eabcde`.
 
 ### Risks and Mitigations
 
@@ -133,15 +156,16 @@ The biggest drawback is that without relying on some on-disk metadata LSO still 
 We have some ideas to improve this in the future if there is a need, but they are out-of-scope for the initial implementation:
 
 * Fine-grained filtering mechanism to influence which by-id symlink is used
-* Other policy options for the `storage.openshift.com/recreate-symlink` annotation
-* Annotate ceph bluestore UUID (i.e. `ceph-volume raw list /dev/xyz --format=json`) or by-uuid symlink [Bug 2414811](https://bugzilla.redhat.com/show_bug.cgi?id=2414811).
+* Other policy options for the `localVolumeDeviceLink.spec.policy` field
+* Detect ceph bluestore UUID (i.e. `ceph-volume raw list /dev/xyz --format=json`) or by-uuid symlink [Bug 2414811](https://bugzilla.redhat.com/show_bug.cgi?id=2414811).
 
 ## Alternatives (Not Implemented)
 
 * The `/mnt/local-storage` disk path stored in the PV is immutable, and we want the ability to fix existing PV's, which means we must keep the same `/mnt/local-storage` link name and update only the `/dev/disk/by-id` link target.
 * We can't partition a device without breaking consumers or introducing separate API and does not help existing PV's recover.
-* If diskmaker added a label to each device, it could easily be wiped by the disk consumer. It could label a device after kubelet creates a filesystem on it and save it in PV annotations but this only helps with filesystem volumes.
+* If diskmaker added a label to each device, it could easily be wiped by the disk consumer. It could label a device after kubelet creates a filesystem on it and save it in the device link status but this only helps with filesystem volumes.
 * LSO could store udev attributes instead of symlinks but we would need to have some logic to filter useful and useless attributes, not clear if it helps rebuilding symlinks in all cases.
+* We considered implementing this using annotations on the PV, but compared to an API it limits our options for maintainability, error reporting, and future enhancements.
 
 ## Open Questions [optional]
 
@@ -155,7 +179,7 @@ We do not have easy access to many hardware configurations and much of our testi
 
 ## Graduation Criteria
 
-This is an optional OLM operator, and since it does not introduce API changes or feature flags, it will be considered GA-ready when the feature is merged.
+This is an optional OLM operator and will be considered GA-ready when the feature is merged.
 
 ### Dev Preview -> Tech Preview
 
@@ -169,7 +193,7 @@ N/A
 
 ## Version Skew Strategy
 
-LSO already sets [maxOpenShiftVersion](https://github.com/openshift/local-storage-operator/blob/397dcaa02032f52916aa3ed49e5b9ecd1b96cc01/config/manifests/stable/local-storage-operator.clusterserviceversion.yaml#L118) to N+1, meaning if the cluster is running 4.21 OCP with 4.20 LSO, upgrades to 4.22 OCP will be blocked until LSO is upgraded to 4.21. This is important because we want to deliver these changes to alert of potential symlink issues prior to upgrades to RHEL 10 (OCP 4.22).
+LSO already sets [maxOpenShiftVersion](https://github.com/openshift/local-storage-operator/blob/397dcaa02032f52916aa3ed49e5b9ecd1b96cc01/config/manifests/stable/local-storage-operator.clusterserviceversion.yaml#L118) to N+1, meaning if the cluster is running 4.21 OCP with 4.20 LSO, upgrades to 4.22 OCP will be blocked until LSO is upgraded to 4.21. This is important because we want to deliver these changes to alert of potential symlink issues prior to upgrades to RHEL 10.
 
 ## Operational Aspects of API Extensions
 
