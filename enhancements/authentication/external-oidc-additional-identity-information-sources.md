@@ -431,6 +431,9 @@ authenticator as a baseline.
 From this baseline, additional changes will be made as necessary to support the new desired functionality
 of source claim information from external sources.
 
+It will be stateless and deployed as a standalone component either as a static pod or a deployment.
+The namespace in which it is deployed is TBD, but `openshift-authentication` is an option that seems reasonable.
+
 Diagram of how this new component will work:
 ```mermaid
 flowchart LR
@@ -674,6 +677,21 @@ approach has a significantly better user experience despite having more technica
 Nothing necessarily prevents us from starting with this path and then expanding to incorporate the
 additional technical overhead currently proposed or pushing the upstream contribution before we
 commit to fully supporting this in OpenShift.
+
+### Patching openshift/kubernetes with an in-tree implementation
+
+This alternative approach uses carry-patches to add the new external claim sourcing logic
+to our fork of Kubernetes.
+
+**Reason for rejection**:
+
+Adding a carry patch of this complexity makes our Kubernetes rebase process more
+complicated.
+
+Rebasing on every Kubernetes release is a critical process for OpenShift and adding
+additional overhead and complexity to this process is not something we should take lightly.
+
+Because there is a mechanism to implement this solution out-of-tree, this approach is not preferred.
 
 ## Open Questions [optional]
 
