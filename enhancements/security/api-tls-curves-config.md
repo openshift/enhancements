@@ -186,10 +186,12 @@ This precedence model allows for centralized defaults with selective overrides w
 The [default openshift TLS profiles](https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html/security_and_compliance/tls-security-profiles#tls-profiles-understanding_tls-security-profiles) (Old, Intermediate, Modern) do not currently specify any curves, instead relying on the underlying TLS implementation to select a sensible default group. However, the default Mozilla TLS profiles (which OpenShift TLS profiles are based on) *do* specify curves. We are planning on specifically adding these curves to OpenShift's non-custom profiles in the future as a separately scoped action. This API change should expose the curves field first to allow components time to implement the consumption of these curves when set in custom profiles.
 
 #### Mismatching curves and ciphersuites
-There is a case where the administrator could incorrectly specificy a set of ciphersuites
-that do not work with each other. For example using an RSA ciphersuite with a ECDHE curve (such as TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256 and P-256). The default behavior OpenSSL as well as go's crypto/tls (both used extensively in OpenShift) is to fail at **TLS handshake time**. . The TLS server instance will start normally, but when TLS clients attempt to handshake with the TLS server, the handshake will fail with a `handshake failure`
+There is a case where the administrator could incorrectly specify a set of ciphersuites
+that do not work with the configured curves. For example, using an RSA ciphersuite with an ECDHE curve (such as TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256 with P-256). The default behavior of OpenSSL and Go crypto/tls (both used extensively in OpenShift) is to fail at **TLS handshake time**. The TLS server instance will start normally, but when TLS clients attempt to handshake with the TLS server, the handshake will fail with a `handshake failure`.
 
-To avoid this scenario, OpenShift should implement validation to prevent known invalid combinations. A validation layer will be added to check for compatible combinations of curves and ciphersuites. If a known invalid combination is detected, the configuration will be rejected, informing the user of the incompatibility immediately rather than failing at runtime.
+To avoid this scenario, OpenShift should implement validation to prevent **known incompatible cipher-curve combinations**. A validation layer will be added to check for compatible combinations of curves and ciphersuites. If a known invalid combination is detected, the configuration will be rejected, informing the user of the incompatibility immediately rather than failing at runtime.
+
+**Note**: This validation only covers known incompatible cipher-curve combinations, not validation of curve names themselves. Curve names (valid, invalid, or malformed) are accepted and passed to the underlying TLS implementation, which filters them as described in the "Handling unsupported curves in custom profiles" section below.
 
 #### Handling unsupported curves in custom profiles
 
@@ -198,14 +200,17 @@ with advanced cryptographic knowledge to configure specific parameters. This sam
 model applies to curves as it does to existing cipher suite configuration.
 
 **Configuration-time behavior:**
-TLS implementations (OpenSSL, Go crypto/tls) do not fail when configured with 
-unsupported curves or ciphers. Instead, they silently filter out unsupported 
-items and proceed with the valid ones.
+TLS implementations (OpenSSL, Go crypto/tls, HAProxy) accept arbitrary curve names and do not fail when configured with invalid, malformed, or unsupported curves. Instead, they silently filter out:
+- **Invalid curve names**: Curves that are not recognized (e.g., typos like "X225519" instead of "X25519")
+- **Malformed identifiers**: Curve strings that don't match expected naming patterns
+- **Unsupported curves**: Valid curve names that the specific TLS library version doesn't support (e.g., PQC curves in older library versions)
+
+The TLS implementation will proceed with only the valid and supported curves from the configured list.
+
+**Important**: This behavior means administrators can configure curve lists that result in **no valid curves** being available, which will cause TLS handshake failures and render components inoperable. Manually setting curves in custom TLS profiles incurs significant risk and requires careful testing. See the [Support Procedures](#support-procedures) section for troubleshooting guidance.
 
 **Runtime behavior:**
-If no mutually supported curves (or ciphers) remain after filtering, TLS handshakes 
-will fail with errors like "handshake failure" (for cipher suites) or "no shared group" (for curves). This is the 
-expected and desired behavior—it ensures only supported cryptographic parameters are used.
+If no mutually supported curves remain after filtering, TLS handshakes will fail with errors like "no shared group". This is the expected and desired behavior—it ensures only supported cryptographic parameters are used.
 
 **Why not validate at API level:**
 Validating curve support at the API level would require maintaining a comprehensive 
