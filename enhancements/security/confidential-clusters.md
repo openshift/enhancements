@@ -317,6 +317,10 @@ be added to
 * **OpenShift CVO**: add a capability for confidential cluster
   * Disabled by default
 
+* **Core Payload**: add Confidential Cluster Operator to Core Payload
+  * It needs to be available during cluster installation
+  * To be running iff the confidential-cluster CVO capability is enabled
+
 #### Programming Languages
 The Confidential Cluster Operator is written in Rust.
 
