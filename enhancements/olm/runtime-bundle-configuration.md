@@ -141,7 +141,7 @@ issue, e.g.:
 - User does not provide required configuration fields
 - User provides configuration keys that are not existent
 - User provides configuration but bundle does not provide a configuration schema - note that 
-while for registry+v1 bundles this is deemed a good level of restriction to ship the configuration feature with initially, for future bundle formats this restriction may be loosed (eg OLMv1 could allow users to provide configuration for "Helm bundles" without any configuration schema). Users will likely be required to express their intent to configure such bundles explicity and have OLM install anyway, possibly via a ClusterExtension API field (eg `dangerouslyAcceptBundlesWithoutConfigSchema`). Such considerations however are for future considerations. 
+while for registry+v1 bundles this is deemed a good level of restriction to ship the configuration feature with initially, for future bundle formats this restriction may be loosed (eg OLMv1 could allow users to provide configuration for "Helm bundles" without any configuration schema). Users will likely be required to express their intent to configure such bundles explicity and have OLM install anyway, possibly via a ClusterExtension API field within the `.spec.install` stanza (eg `dangerouslyAcceptBundlesWithoutConfigSchema`). Such considerations however are for future considerations. 
 
 ### registry+v1 Bundle Configuration Generation, Validation and Handling
 
@@ -680,34 +680,6 @@ OLMv1 will eventually add the next iteration of registry+v2. Author provided con
 In the future, we'd like an easy way to surface the bundle configuration schema to users via the console to help users
 understand the configuration affordances for the different catalog packages, and bundles.
 
-### 7. Operational risks of Single/OwnNamespace mode installations
-
-Because we are enabling namespace-scoped operator installations, there are operational implications that could impact cluster management. These risks are mitigated by:
-
-- **RBAC Misconfiguration**: Install mode validation ensures operators only receive permissions appropriate for their scope
-- **Namespace Dependency**: Clear error messages when target namespaces don't exist or aren't accessible
-- **Migration Complexity**: Comprehensive documentation and examples for transitioning between install modes
-- **Permission Escalation**: ServiceAccount validation ensures adequate permissions without over-privileging
-- **Unintended Install Mode Changes**: Requiring explicit `watchNamespace` configuration for namespace-scoped bundles prevents automatic permission scope escalation when bundle upgrades add new install mode capabilities
-
-Currently, admins control the scope of operator installations through ClusterExtension RBAC. This enhancement adds namespace-level controls while maintaining existing security boundaries.
-
-The feature is alpha and feature-gated, allowing administrators to:
-- Control adoption timeline through feature gate management
-- Test namespace-scoped installations in non-production environments
-- Gradually migrate from AllNamespaces to more targeted install modes
-
-Operators installed in Single/OwnNamespace modes have reduced blast radius compared to AllNamespaces installations, potentially improving cluster security posture.
-
-| Risk                                | Impact | Mitigation                                                                                                              |
-|-------------------------------------|--------|-------------------------------------------------------------------------------------------------------------------------|
-| **Increased Complexity**            | Medium | Feature is alpha and feature-gated; clear documentation emphasizes this is transitional                                 |
-| **RBAC Misconfiguration**           | High   | Comprehensive validation and clear error messages; documentation provides RBAC examples                                 |
-| **Installation Failures**           | Medium | Detailed preflight checks and validation; clear error reporting                                                         |
-| **Security Boundaries**             | Medium | Explicit validation of namespace permissions; RBAC properly scoped                                                      |
-| **Feature Proliferation**           | Low    | Clear documentation that this is for legacy compatibility only                                                          |
-| **Unintended Install Mode Changes** | High   | Mandatory `watchNamespace` configuration for namespace-scoped bundles prevents automatic mode switching during upgrades |
-
 #### 7. JSON Schema 2020-12 Specification Support
 
 The latest specification of the JSON Schema format is slowly gaining popularity though it does not quite have the same
@@ -780,25 +752,23 @@ reinstalled as `AllNamespaces` upon downgrade due to the configuration not being
     - Permission debugging requires understanding of install mode impact on RBAC scope
     - Security auditing must consider namespace-level vs cluster-level permission grants
 
+#### Operational risks of Single/OwnNamespace mode installations
+
+Because we are enabling namespace-scoped operator installations, there are operational implications that could impact cluster management. The following risks and mitigations are identified:
+
+- **RBAC Misconfiguration**: Install mode validation ensures operators only receive permissions appropriate for their scope
+- **Namespace Dependency**: Clear error messages when target namespaces don't exist or aren't accessible when there are bundle generated resources that need to be applied to the target namespace
+- **Permission Escalation**: ServiceAccount validation ensures adequate permissions without over-privileging
+- **Unintended Install Mode Changes After Upgrade**: Requiring explicit `watchNamespace` configuration for namespace-scoped bundles prevents automatic permission scope escalation when bundle upgrades add new install mode capabilities
+
 ### Impact on Existing SLIs
 
-With the removal of the install mode concept in OLMv1, operator packages that want to continue to use this stop-gap feature are expected to surface configuration documentation, and call out if the `watchNamespace` parameter is a part of it, along with usage examples etc. Until a broad percentage of operator packages, especially those that don't support `AllNamespaces` mode, take action to make such documentation available, a spike in bad installations is expected.
+With the removal of the install mode concept in OLMv1, operator packages that want to continue to use this stop-gap feature are expected to surface configuration documentation, and call out if the `watchNamespace` parameter is a part of it, along with usage examples etc. Until a broad percentage of operator packages, especially those that don't support `AllNamespaces` mode, take action to make such documentation available, a spike in bad installations could be expected.
 
 **Installation Success Rate:**
 
-*   **RBAC Validation Complexity:** Namespace-scoped installations require more complex RBAC validation to ensure the ServiceAccount has appropriate permissions for the target namespace. RBAC misconfigurations that work in AllNamespaces mode may fail in Single/OwnNamespace modes.
-    *   Example: ServiceAccount has cluster-wide read permissions but lacks namespace-specific write permissions, causing installation to fail.
 *   **Bundle Compatibility Validation:** Additional validation layer to confirm bundles support the requested install mode. Bundles that only support AllNamespaces will fail when Single/OwnNamespace is requested.
     *   Example: Attempting to install a bundle with `watchNamespace: "test"` when the bundle CSV only declares support for AllNamespaces install mode.
-
-**Installation Time:**
-
-*   **RBAC Generation Complexity:** Converting CSV `permission` to namespace-scoped Role/RoleBinding resources requires additional processing time. Complex operators with extensive permission requirements will see increased installation duration.
-
-**Operator Availability:**
-
-*   **ServiceAccount Permission Dependencies:** Namespace-scoped operators depend on ServiceAccount permissions that may be modified by namespace administrators, creating additional failure points not present in cluster-scoped installations.
-    *   Example: Namespace admin removes critical RoleBinding, causing operator to lose access to required resources.
 
 ### Possible Failure Modes
 
