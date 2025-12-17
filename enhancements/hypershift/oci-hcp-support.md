@@ -464,6 +464,179 @@ only available when the feature gate is enabled.
   deployment scale
 * Some OCI services may have region-specific availability
 
+### Cross-Team Dependencies
+
+This enhancement requires support and contributions from multiple
+OpenShift component teams. The following sections outline what is needed
+from each team to enable full OCI HCP functionality.
+
+#### Image Registry Team
+
+**Requirements**:
+* Support for OCI Object Storage as a backend for the internal image
+  registry
+* Integration with OCI Object Storage API for image push/pull operations
+* Support for OCI IAM authentication for object storage access
+
+**Specific Changes Needed**:
+* Extend the image registry operator to support OCI Object Storage
+  configuration
+* Implement OCI Object Storage driver following the existing S3/Azure
+  Blob patterns
+* Add validation for OCI Object Storage bucket configuration
+* Support for OCI resource principals or IAM credentials for
+  authentication
+
+**Contacts**: TBD (Image Registry team)
+
+#### Storage Team
+
+**Requirements**:
+* OCI Block Volume CSI driver integration for persistent volume support
+* OCI File Storage CSI driver integration for ReadWriteMany volumes
+  (optional but recommended)
+* Support for OCI-specific storage classes and volume parameters
+
+**Specific Changes Needed**:
+* Collaborate with Oracle on upstream OCI CSI drivers
+  (https://github.com/oracle/oci-cloud-controller-manager contains CSI
+  drivers)
+* Work with Oracle to ensure drivers meet OpenShift requirements and can
+  be included in OpenShift release payload
+* Package OCI CSI drivers in OpenShift release payload
+* Create default StorageClass configurations for OCI Block Volumes
+* Document OCI-specific volume parameters (performance tiers, volume
+  types)
+* Ensure CSI drivers work with OCI IAM authentication in HyperShift
+  context
+
+**Upstream Collaboration**: Changes needed for OpenShift integration
+should be contributed to Oracle's upstream OCI CSI driver repository.
+
+**Contacts**: TBD (Storage team)
+
+#### Ingress Team
+
+**Requirements**:
+* Support for OCI Load Balancer service for IngressController
+* Integration with OCI Network Load Balancer (NLB) for Layer 4 traffic
+* Support for OCI Flexible Load Balancer for HTTP/HTTPS traffic
+
+**Specific Changes Needed**:
+* Extend cluster-ingress-operator to support OCI Load Balancer
+  provisioning
+* Implement OCI Load Balancer annotations for Service type=LoadBalancer
+* Support for OCI-specific load balancer configurations (shapes,
+  bandwidth)
+* Handle OCI Load Balancer lifecycle (create, update, delete) in
+  HyperShift hosted clusters
+* Support for private load balancers for private endpoint access
+
+**Contacts**: TBD (Ingress team)
+
+#### Networking Team
+
+**Requirements**:
+* OCI VCN integration for cluster networking
+* Support for OCI-specific network configurations (security lists,
+  network security groups)
+* Integration with OCI Virtual Network Interface Cards (VNICs) for pod
+  networking
+
+**Specific Changes Needed**:
+* Extend cluster-network-operator for OCI VCN configuration
+* Support for OCI subnet allocation for pod networking
+* Handle OCI security list and NSG configuration for cluster
+  communication
+* Implement OCI-specific network policies if needed
+* Support for OCI VCN peering for management cluster to guest cluster
+  connectivity
+
+**Contacts**: TBD (Networking team)
+
+#### Cloud Platform Team - CAPOCI Integration
+
+**Requirements**:
+* Cluster API Provider OCI (CAPOCI) integration for inclusion in
+  OpenShift release payload
+* Collaboration with Oracle on CAPOCI enhancements for OpenShift/HyperShift
+* Support for OpenShift-specific machine configurations
+
+**Specific Changes Needed**:
+* Work with Oracle to contribute OpenShift and HyperShift integration
+  changes to upstream CAPOCI
+  (https://github.com/oracle/cluster-api-provider-oci)
+* Ensure CAPOCI supports OpenShift requirements (RHCOS images, HyperShift
+  patterns, etc.)
+* Package CAPOCI from upstream in OpenShift release payload
+* Establish collaborative relationship with Oracle CAPOCI maintainers for
+  ongoing support and feature development
+* Define SLA with Oracle for CAPOCI updates and security patches
+* Ensure CAPOCI works with HyperShift's infrastructure provisioning
+  patterns
+
+**Collaboration Model**: Red Hat and Oracle will collaborate on CAPOCI
+development. OpenShift-specific features and HyperShift integration
+changes should be contributed upstream to Oracle's CAPOCI repository
+rather than maintained in a separate fork. This partnership approach
+ensures both teams benefit from improvements and reduces maintenance
+burden.
+
+**Ownership**: Joint ownership between Red Hat (HyperShift/Cloud teams)
+and Oracle (CAPOCI maintainers). Regular sync meetings and shared
+roadmap planning recommended.
+
+**Contacts**: TBD (Cloud Provider team, HyperShift team, Oracle CAPOCI
+maintainers)
+
+#### OCI Cloud Controller Manager
+
+**Requirements**:
+* Package and maintain the OCI Cloud Controller Manager (CCM) for
+  OpenShift
+* Ensure CCM works in HyperShift hosted control plane architecture
+
+**Specific Changes Needed**:
+* Collaborate with Oracle on upstream OCI CCM
+  (https://github.com/oracle/oci-cloud-controller-manager)
+* Work with Oracle to contribute HyperShift compatibility changes
+  upstream
+* Package OCI CCM from upstream in OpenShift release payload
+* Ensure CCM adapts to HyperShift's control plane/data plane separation
+  model
+* Establish collaborative support model with Oracle
+
+**Upstream Collaboration**: HyperShift-specific changes should be
+contributed to Oracle's upstream OCI CCM repository.
+
+**Contacts**: TBD (Cloud Provider team, HyperShift team, Oracle CCM
+maintainers)
+
+#### Documentation Team
+
+**Requirements**:
+* Document OCI HCP installation and configuration procedures
+* Create user-facing documentation for OCI-specific features
+* Document differences between OCI and other cloud providers
+
+**Contacts**: TBD (Documentation team)
+
+#### CI/CD and Testing Infrastructure
+
+**Requirements**:
+* OCI cloud credentials for CI/CD testing infrastructure
+* Prow jobs for OCI E2E testing
+* OCI resources for periodic and presubmit test runs
+
+**Specific Changes Needed**:
+* Provision OCI tenancy for OpenShift CI (potentially provided by Oracle
+  as part of partnership)
+* Create Prow job configurations for OCI platform testing
+* Allocate OCI quota for test cluster provisioning
+* Set up OCI credentials management in Prow
+
+**Contacts**: TBD (Test Platform team, HyperShift team)
+
 ### Risks and Mitigations
 
 **Risk: OCI API rate limiting**
