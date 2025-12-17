@@ -310,6 +310,7 @@ spec:
   serviceAccount:
     name: argocd-installer
   config:
+    configType: Inline
     inline:
       watchNamespace: argocd-pipelines
   source:
@@ -342,15 +343,18 @@ No specific considerations needed
 The OLMv1 runtime will operate over a bundle interface that will be common to the supported bundle formats. It won't treat
 different formats differently for the purposes of life-cycling. It cares only about generating the required manifests,
 and organizing them in a way that it can lifecycle the application. As such, the interface should be generic and not
-leak underlying format specific details. The bundle rendering engine should consume opaque configuration, the bundle
-interface should provide a configuration schema as a [JSON Schema](https://json-schema.org/) format, 
-and rendering will only take place if the configuration **strictly** adheres to the provided schema, i.e. no additional 
-keys, required fields are set, field value constraints are observed, etc. 
+leak underlying format specific details. The bundle rendering engine should consume opaque configuration, and each bundle
+format will provide a configuration schema in whatever format is appropriate for that bundle type. OLMv1 will use the
+appropriate validation libraries for the schema format provided by the bundle format (e.g., JSON Schema validators for
+JSON Schema, CUE validators for CUE, Rego evaluators for Rego, etc.). Rendering will only take place if the configuration
+**strictly** adheres to the provided schema, i.e. no additional keys, required fields are set, field value constraints
+are observed, etc.
 
-The JSON Schema format is most widely used in its [draft-07](https://json-schema.org/draft-07) specification and boasts
-wide coverage across tools, libraries and ecosystems. The latest specification, [2020-12](https://json-schema.org/draft/2020-12), 
-is slowly growing in popularity. Therefore, additional specification may also need to be supported in the future to meet
-author needs.
+For bundle formats that use JSON Schema (such as registry+v1 bundles as described in this enhancement), the JSON Schema
+format is most widely used in its [draft-07](https://json-schema.org/draft-07) specification and boasts wide coverage
+across tools, libraries and ecosystems. The latest specification, [2020-12](https://json-schema.org/draft/2020-12), is
+slowly growing in popularity. Therefore, additional JSON Schema specifications may also need to be supported in the future
+to meet author needs.
 
 Taking this approach also means that the configuration schema should be treated like an API surface by the authors
 which should ensure it is not broken between minor and patch versions. Breaking changes detectable by the schema will
@@ -409,80 +413,83 @@ Given the tight scope and the small configuration surface, the validation may be
 the actual generation of a JSON-Schema. However, once this surface expands this will be the direction we'll take and
 there should be no difference in behavior beyond the possible wording and structure of error messages.
 
-Below are examples for what the JSON-Schemas may look like:
+Below are examples for what the JSON-Schemas may look like. Since OLM generates these schemas at runtime for registry+v1 bundles, it knows the install namespace from the ClusterExtension's `.spec.namespace` field and can directly embed namespace constraints in the schema using standard JSON Schema constructs:
 
-**watchNamespace field required**
+**watchNamespace field required (can be any namespace)**
 
-```
+```json
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "properties": {
     "watchNamespace": {
       "type": "string",
-      "format": "namespaceName",
+      "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
     }
   },
   "required": ["watchNamespace"]
 }
 ```
 
-**watchNamespace field optional**
+**watchNamespace field optional (can be any namespace)**
 
-```
+```json
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "properties": {
     "watchNamespace": {
-      "type": ["string", null],
-      "format": "namespaceName",
-    }
-  },
-}
-```
-
-**watchNamespace cannot be the install namespace**
-
-```
-{
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "type": "object",
-  "properties": {
-    "watchNamespace": {
-      "format": "isNotInstallNamespace",
-      "type": ["string", null],
+      "type": ["string", "null"],
+      "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
     }
   }
 }
 ```
 
-**watchNamespace is optional and can only be the install namespace**
+**watchNamespace cannot be the install namespace** (example where install namespace is "argocd")
 
-```
+```json
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "properties": {
     "watchNamespace": {
-      "format": "isInstallNamespace",
-      "type": ["string", null],
+      "type": ["string", "null"],
+      "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+      "not": {
+        "const": "argocd"
+      }
     }
   }
 }
 ```
 
-**Custom JSON Schema Formats for Bundle Authors:**
+**watchNamespace is optional and can only be the install namespace** (example where install namespace is "argocd")
 
-OLM's JSON Schema validator will support several custom formats that bundle authors can opt-in to use in their configuration schemas:
+```json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "watchNamespace": {
+      "type": ["string", "null"],
+      "enum": ["argocd", null]
+    }
+  }
+}
+```
 
-- `namespaceName`: Will validate that the input is a valid Kubernetes namespace name (follows DNS-1123 subdomain format). This will be useful for any configuration field that accepts a namespace name.
-- `isInstallNamespace`: Will validate that the input is a valid namespace name and matches the ClusterExtension's install namespace (`.spec.namespace`). Bundle authors can use this format to ensure a configuration value must be the install namespace.
-- `isNotInstallNamespace`: Will validate that the input is a valid namespace name and does not match the install namespace. Bundle authors can use this format to ensure a configuration value must be different from the install namespace.
+**Custom JSON Schema Formats for Future Bundle Formats:**
 
-These custom formats will not be part of the standard JSON Schema specification but will be provided by OLM to help bundle authors create more robust configuration schemas. Bundle authors who want to use these formats should include them in their schema's `format` field.
+For future bundle formats where bundle authors provide their own configuration schemas (such as Helm charts with values.schema.json or registry+v2 bundles), OLM may provide custom JSON Schema format validators to help bundle authors create more robust configuration schemas:
 
-Example usage by bundle authors:
+- `namespaceName`: Would validate that the input is a valid Kubernetes namespace name (follows DNS-1123 subdomain format). This would be useful for any configuration field that accepts a namespace name.
+- `isInstallNamespace`: Would validate that the input is a valid namespace name and matches the ClusterExtension's install namespace (`.spec.namespace`). Bundle authors could use this format to ensure a configuration value must be the install namespace.
+- `isNotInstallNamespace`: Would validate that the input is a valid namespace name and does not match the install namespace. Bundle authors could use this format to ensure a configuration value must be different from the install namespace.
+
+These custom formats would not be part of the standard JSON Schema specification but would be provided by OLM as helpers for bundle authors. Whether to implement these helpers will be decided when bundle formats that support author-provided schemas are implemented.
+
+Example of potential future usage by bundle authors:
 ```json
 {
   "type": "object",
@@ -494,19 +501,23 @@ Example usage by bundle authors:
     }
   }
 }
-``` 
+```
+
+**Note**: For the registry+v1 bundle format described in this enhancement, OLM generates the schema at runtime and uses standard JSON Schema constructs directly (as shown in the examples above), so these custom formats are not used. 
 
 #### registry+v1 Bundle Renderer Changes
 
-**Specific Resource Changes:**
-- **ClusterRole/ClusterRoleBinding**: `clusterPermissions` entries in the `ClusterServiceVersion` are always created as `ClusterRole` and `ClusterRoleBinding` resources regardless of install mode
-- **Role/RoleBinding**: `permissions` entries in the `ClusterServiceVersion` are created as `Role` and `RoleBinding` resources in the watch namespace. For AllNamespaces mode, these are instead created as `ClusterRole` and `ClusterRoleBinding` resources
-- **Operator Configuration**: `olm.targetNamespaces` annotation gets set in the operator deployment's pod template, instructing the operator how to configure itself for the target namespace scope
+Currently, OLM only supports AllNamespaces mode and promotes all `permissions` entries from the ClusterServiceVersion to `ClusterRole` and `ClusterRoleBinding` resources. This enhancement introduces namespace-scoped RBAC generation when `watchNamespace` is configured.
 
-For the `AllNamespaces` mode, the namespaced RBAC specified in the `ClusterServiceVersion` gets rolled up into the
-generated `ClusterRole`. For `Single/OwnNamespace` the namespaced RBAC get placed in a role in the `watchNamespace`
-and the `Deployment` pod template is updated to set the `olm.targetNamespaces` label to the `watchNamespace`. This tells
-the operator how to configure itself.
+**Changes to RBAC Resource Generation:**
+
+- **ClusterRole/ClusterRoleBinding**: `clusterPermissions` entries in the `ClusterServiceVersion` will continue to be created as `ClusterRole` and `ClusterRoleBinding` resources regardless of install mode
+
+- **Role/RoleBinding**: `permissions` entries in the `ClusterServiceVersion` will be handled differently based on configuration:
+  - **When `watchNamespace` is configured** (Single/OwnNamespace modes): Create `Role` and `RoleBinding` resources in the watch namespace (this is the new behavior introduced by this enhancement)
+  - **When `watchNamespace` is not configured** (AllNamespaces mode): Continue current behavior of promoting to `ClusterRole` and `ClusterRoleBinding` resources
+
+- **Operator Configuration**: The `olm.targetNamespaces` annotation will be set in the operator deployment's pod template to the value of `watchNamespace`, instructing the operator how to configure itself for the target namespace scope
 
 #### Install Mode Upgrade Behavior Edge Case
 
@@ -535,7 +546,7 @@ Unknown keys in configuration can have undesired effects especially between bund
 that is not part of the schema in one version but present in a subsequent version of the bundle is present, this
 could violate user intent and potentially place the cluster in an undesired state.
 
-*Mitigation*: Strict schema validation is applied. Unknown keys cannot be present in the supplied configuration.
+*Mitigation*: For registry+v1 bundles (covered by this enhancement), OLM generates the configuration schemas and will ensure they reject unknown keys by omitting or setting `additionalProperties: false`. For future bundle formats where bundle authors provide their own schemas, whether unknown keys are rejected depends on how the author defines their schema. OLM will validate configuration strictly according to the provided schema. Documentation will encourage bundle authors to use strict schemas that reject unknown properties to prevent unintended configuration drift.
 
 #### 2. Configuration Changes in Detectably Breaking Ways
 
@@ -560,7 +571,7 @@ Note: it's possible that in the future users can override this behavior if they 
 Often times, users might need to supply an application with secret/privileged information such as passwords, or
 api keys. With the current inline approach, if this information *must* be entered in as plain text (as opposed to as
 a reference to an existing secret, for instance), the privileged information would be reveled to anyone that can read
-the ClusterExtension. It could also cause replication headaches as the privileged information might already exist in a
+the ClusterExtension, or has access to etcd's data store or any backup of etcd's data store. It could also cause replication headaches as the privileged information might already exist in a
 Secret somewhere, and if the information changes, it would need to be manually updated.
 
 *Mitigations*:
@@ -597,7 +608,7 @@ bundles that were installed in `Single-` or `OwnNamespace` mode, if they also su
 Because the configuration won't be applied to the bundle, it will be installed with its default configuration.
 Which for registry+v1 bundles is `AllNamespaces` mode.
 
-*Mitigation*: This will need to be called out in documentation.
+*Mitigation*: Cluster downgrades are not a supported scenario. If a downgrade occurs (unsupported scenario), administrators should be aware that bundles previously configured with `watchNamespace` may revert to AllNamespaces mode. Administrators would need to manually verify operator permissions and behavior after any unsupported downgrade operation.
 
 ### Drawbacks
 
@@ -749,7 +760,7 @@ configuration, e.g.: a bundle that supports `AllNamespaces`, `SingleNamespace` i
 reinstalled as `AllNamespaces` upon downgrade due to the configuration not being applied.
 
 ### Version Compatibility
-- **Minimum Version**: Requires OpenShift 4.20+
+- **Minimum Version**: Requires OpenShift 4.22+
 - **Configuration Schema**: Uses existing ClusterExtension configuration schema for forward compatibility
 
 ## Operational Aspects of API Extensions
