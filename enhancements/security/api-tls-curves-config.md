@@ -101,6 +101,87 @@ This change will effect the TLS profile of both single node and microshift deplo
 
 ### Implementation Details/Notes/Constraints
 
+#### Component Configuration Consumption
+
+Different OpenShift components consume TLS configuration from different sources based on their operational context:
+
+**1. API Server Components** (kube-apiserver, openshift-apiserver, oauth-server, etc.)
+- Read TLS configuration from `apiserver.config.openshift.io/cluster`
+- Component operators watch this object and regenerate configuration when it changes
+- Example: The kube-apiserver operator reads the `tlsSecurityProfile` field and passes the curves to the kube-apiserver via command-line flags or configuration files
+
+**2. Kubelet Configuration**
+- Kubelet TLS configuration is managed through `kubeletconfig.machineconfiguration.openshift.io`
+- Administrators can set a TLS profile (including curves) at this level:
+  ```yaml
+  apiVersion: machineconfiguration.openshift.io/v1
+  kind: KubeletConfig
+  metadata:
+    name: custom-config
+  spec:
+    tlsSecurityProfile:
+      type: Custom
+      custom:
+        minTLSVersion: VersionTLS13
+        curves:
+        - X25519MLKEM768
+        - X25519
+  ```
+- The Machine Config Operator (MCO) watches `KubeletConfig` objects
+- MCO renders this configuration into kubelet configuration files on nodes via MachineConfigs
+- Kubelet reads the configuration from `/etc/kubernetes/kubelet.conf` or similar
+
+**3. Ingress Controller**
+- Ingress configuration is managed through `ingresscontroller.operator.openshift.io`
+- Administrators configure TLS profiles (including curves) on the IngressController object:
+  ```yaml
+  apiVersion: operator.openshift.io/v1
+  kind: IngressController
+  metadata:
+    name: default
+    namespace: openshift-ingress-operator
+  spec:
+    tlsSecurityProfile:
+      type: Custom
+      custom:
+        curves:
+        - X25519MLKEM768
+  ```
+- The Ingress Operator watches IngressController objects
+- The operator configures the ingress router pods with the specified TLS settings
+- Router pods (typically HAProxy or similar) apply these settings to their TLS listeners
+
+**4. General Pattern for Operators**
+
+For operators managing components that need to respect TLS configuration:
+
+1. **Watch** the appropriate configuration source:
+   - `apiserver.config.openshift.io/cluster` for control plane components
+   - Component-specific operator CRs (IngressController, KubeletConfig, etc.)
+
+2. **Extract** the `tlsSecurityProfile` including the `curves` field
+
+3. **Translate** to the component's native configuration format:
+   - For Go components: Set `tls.Config.CurvePreferences`
+   - For OpenSSL-based components: Use `SSL_CTX_set1_groups_list()` or configuration directives
+   - For HAProxy: Use `curves` directive in configuration
+
+4. **Apply** configuration by:
+   - Regenerating configuration files
+   - Restarting components (if hot-reload not supported)
+   - Or triggering configuration reload (if supported)
+
+5. **Report** status via operator conditions if configuration cannot be applied
+
+**Configuration Precedence**
+
+When multiple TLS configuration sources exist, components follow this precedence:
+1. Component-specific configuration (e.g., `IngressController.spec.tlsSecurityProfile`)
+2. Category-level configuration (e.g., `KubeletConfig.spec.tlsSecurityProfile` for node components)
+3. Cluster-wide default (e.g., `apiserver.config.openshift.io/cluster` for API server components)
+
+This precedence model allows for centralized defaults with selective overrides where needed.
+
 #### Default curve configuration
 The [default openshift TLS profiles](https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html/security_and_compliance/tls-security-profiles#tls-profiles-understanding_tls-security-profiles) (Old, Intermediate, Modern) do not currently specify any curves, instead relying on the underlying TLS implementation to select a sensible default group. However, the default Mozilla TLS profiles (which OpenShift TLS profiles are based on) *do* specify curves. We are planning on specifically adding these curves to OpenShift's non-custom profiles in the future as a separately scoped action. This API change should expose the curves field first to allow components time to implement the consumption of these curves when set in custom profiles.
 
