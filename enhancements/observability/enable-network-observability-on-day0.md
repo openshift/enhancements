@@ -40,6 +40,13 @@ Network Observability is an optional OLM operator that collects and stores traff
 * As a cluster admin, I should be able to see the networking health of my cluster after creating it.
 * As a customer support engineer, I want the customer to be aware that Network Observability exists and can provide insights into their network traffic, including the ability to troubleshoot a number of networking issues.
 
+These are the related issues for this feature enhancement.
+
+* (Feature) [OCPSTRAT-2469](https://issues.redhat.com/browse/OCPSTRAT-2469) Provide a default OpenShift install experience for Network Observability
+* (Epic) [NETOBSERV-2454](https://issues.redhat.com/browse/NETOBSERV-2454) Install Network Observability operator by default on OpenShift clusters
+* (Spike) [NETOBSERV-2236](https://issues.redhat.com/browse/NETOBSERV-2236) What it would take to enable Network Observability by default in the console
+* (PoC) [NETOBSERV-2247](https://issues.redhat.com/browse/NETOBSERV-2247) Have network observability be available and enabled on day 0
+
 ### Goals
 
 Being able to manage and observe the network in an OpenShift cluster is critical in maintaining the health and integrity of the network.  Without it, there’s no way to verify whether your changes are working as expected or whether your network is experiencing issues.
@@ -159,8 +166,6 @@ Finally, to create the cluster, enter:
 
 When you bring up the OpenShift web console, you should see that NOO is installed just like it would be, had you gone to **Ecosystem > Software Catalog** (formerly **Operators > OperatorHub** in 4.19 or earlier) to install **Network Observability** from Red Hat (not the Community version).  In **Installed Operators**, there should be a row for **Network Observability**.  And in the **Observe** menu, there should be a panel named **Network Traffic**.
 
-This is the behavior for General Availability (GA).  During the Technology Preview (TP) release, the feature will only be enabled if there is an `installNetworkObservability: true` line in the Network CR.
-
 ### API Extensions
 
 This adds the installNetworkObservability field in the Network CRD under the spec section.  See Listing 2 above.
@@ -198,7 +203,7 @@ Rather than have CNO enable Network Observability, take the existing Network Obs
 | It moves future observability components under the same section. | In install-config.yaml, it leverages the existing networking section for the installNetworkObservability field.  Where would this be defined?  Perhaps a new observability section needs to be added. |
 | none | There needs to be code somewhere that decides whether NOO should be installed or not.  This feature enhancement leverages CNO for this. |
 
-One of the central questions boils down to, “Do we want to position Network Observability as part of OpenShift Networking or part of Cluster Observability?”  This feature enhancement favors the former.
+One of the central questions boils down to, "Do we want to position Network Observability as part of OpenShift Networking or part of Cluster Observability?"  This feature enhancement favors the former.
 
 ### Alternative #2: Have COO enable Network Observability
 
@@ -224,21 +229,24 @@ Performance testing will be done to optimize the use of resources and to determi
 
 ## Graduation Criteria
 
-Since there are so many different customer scenarios and cluster profiles, the Tech Preview will allow us to gauge the customer responses and make optimizations to the FlowCollector configuration.  To enable the feature, see the Workflow Description above.
+Network Observability reached GA back in January 2023.  Because the feature is to simply enable Network Observability, which has already existed for three years, the plan is to forego the Tech Preview and provide GA requirements.
 
-### Tech Preview -> GA
+### GA Requirements
 
-- Sufficient time for customer feedback
-- Optimize FlowCollector configuration
-- User facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/)
-
-At GA, Network Observability will be enabled by default.  To not enable Network Observability, you can opt-out by including the `installNetworkObservability: false` line in the install-config.yaml file (day 0) or in the Network CR by entering `oc edit network` (day 1).
+* [NETOBSERV-2533](https://issues.redhat.com/browse/NETOBSERV-2533) Performance testing in Loki-less mode with default settings
+    - Provide guidance on CPU, memory, and storage resources
+    - Measure the impact on Prometheus in the In-Cluster Monitoring
+    - Optimize the default FlowCollector configuration
+* [NETOBSERV-2534](https://issues.redhat.com/browse/NETOBSERV-2534) Have a way to pause Network Observability functions
+* [NETOBSERV-2535](https://issues.redhat.com/browse/NETOBSERV-2535) Security audit on Network Observability code
+* [NETOBSERV-2428](https://issues.redhat.com/browse/NETOBSERV-2428) New Service deployment model
+* User facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
 ## Upgrade / Downgrade Strategy
 
-The upgrade strategy is treated like any other feature.  At GA, Network Observability will be enabled on upgrading.  During Tech Preview, you must still enable the feature first.
+On an upgrade, it will enable Network Observability if it doesn't already exist.  If it does exist, this feature will do nothing.  If you don't want Network Observability to be enabled, edit the Network CR and add the `installNetworkObservablity: false` line.
 
-On a downgrade, the enabling Network Observability feature is removed.  Network Observability will remain if it was installed and the FlowCollector will remain if the resource was created.
+On a downgrade, the enabling of Network Observability is removed.  Network Observability will remain if it was installed and the FlowCollector will remain if the resource was created.
 
 ## Version Skew Strategy
 
@@ -250,4 +258,4 @@ N/A
 
 ## Support Procedures
 
-Check the CNO logs and search for “observability\_controller.go” to determine whether Network Observability did or did not get enabled.
+Check the CNO logs and search for "observability\_controller.go" to determine whether Network Observability did or did not get enabled.
