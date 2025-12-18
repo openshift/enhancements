@@ -185,6 +185,34 @@ This precedence model allows for centralized defaults with selective overrides w
 #### Default curve configuration
 The [default openshift TLS profiles](https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html/security_and_compliance/tls-security-profiles#tls-profiles-understanding_tls-security-profiles) (Old, Intermediate, Modern) do not currently specify any curves, instead relying on the underlying TLS implementation to select a sensible default group. However, the default Mozilla TLS profiles (which OpenShift TLS profiles are based on) *do* specify curves. We are planning on specifically adding these curves to OpenShift's non-custom profiles in the future as a separately scoped action. This API change should expose the curves field first to allow components time to implement the consumption of these curves when set in custom profiles.
 
+#### Go crypto/tls Implementation Limitations
+
+Components using Go's `crypto/tls` library face specific limitations that affect curve and cipher suite configuration:
+
+**TLS 1.3 Cipher Suite Configuration**
+
+In TLS 1.3, Go's `crypto/tls` does not allow cipher suite configuration ([golang/go#29349](https://github.com/golang/go/issues/29349)). The `Config.CipherSuites` field is ignored for TLS 1.3 connections, and Go uses a hardcoded set of cipher suites. This means:
+- Components using Go cannot honor custom cipher suite configurations when TLS 1.3 is used
+- Administrators configuring `minTLSVersion: VersionTLS13` with custom cipher suites will find the cipher suite configuration is not applied by Go-based components
+- This is a known limitation of the Go standard library and cannot be worked around by OpenShift components
+
+**Curve Preferences Ordering**
+
+Starting in Go 1.24, the semantics of `CurvePreferences` are changing ([golang/go#69393](https://github.com/golang/go/issues/69393)):
+- `CurvePreferences` will no longer specify preference ordering
+- Instead, it will be a list of enabled key exchanges, with `crypto/tls` automatically determining priority and key share selection
+- This change is driven by Post-Quantum Cryptography requirements where the library needs to intelligently manage curve selection (e.g., sending both ML-KEM768X25519 and X25519 key shares)
+
+**Implications for OpenShift Components**
+
+Go-based components (which represent a significant portion of OpenShift) will have these constraints:
+- When using TLS 1.3, configured cipher suites cannot be enforced
+- Curve preference ordering may not be honored as specified by administrators
+- Components should document these limitations in their operator conditions or status messages
+- Administrators should be aware that Go-based components have reduced configurability compared to OpenSSL-based components
+
+These limitations should be considered when evaluating component compliance with TLS configuration requirements.
+
 #### Mismatching curves and ciphersuites
 There is a case where the administrator could incorrectly specify a set of ciphersuites
 that do not work with the configured curves. For example, using an RSA ciphersuite with an ECDHE curve (such as TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256 with P-256). The default behavior of OpenSSL and Go crypto/tls (both used extensively in OpenShift) is to fail at **TLS handshake time**. The TLS server instance will start normally, but when TLS clients attempt to handshake with the TLS server, the handshake will fail with a `handshake failure`.
