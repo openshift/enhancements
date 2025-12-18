@@ -61,15 +61,23 @@ These status fields will be updated periodically from diskmaker's existing recon
 
 #### Alert
 
-LSO will throw an alert if `localVolumeDeviceLink.status.currentLinkTarget` does not match the recommended symlink in `localVolumeDeviceLink.status.preferredLinkTarget`, or if no by-id symlink is found at all.
+LSO will throw an alert if:
+1) `localVolumeDeviceLink.spec.policy == None` and `localVolumeDeviceLink.status.currentLinkTarget != localVolumeDeviceLink.status.preferredLinkTarget`. This means the administrator has not yet specified a policy and the current target is different from the preferred target.
+2) `localVolumeDeviceLink.spec.policy == None` and no by-id symlink is found at all. This means there is no `/dev/disk/by-id` symlink found for the device.
 
 #### Administrator response
 
-The administrator can review the device link status, and then set `localVolumeDeviceLink.spec.policy` to `RecreateSymlinkOnce` to tell diskmaker to recreate the symlink using the target from `localVolumeDeviceLink.status.preferredLinkTarget`. This can be done to proactively switch to the recommended symlink, or it can be done reactively when a symlink is no longer valid (assuming there is another known valid by-id symlink).
+The administrator can review the device link status and make a choice:
+1) set `localVolumeDeviceLink.spec.policy` to `CurrentLinkTarget` to keep the current symlink as it is and silence the alert.
+2) set `localVolumeDeviceLink.spec.policy` to `PreferredLinkTarget` to tell diskmaker to recreate the symlink using the target from `localVolumeDeviceLink.status.preferredLinkTarget`. This can be done to proactively switch to the recommended symlink, or it can be done reactively when a symlink is no longer valid (assuming there is another known valid by-id symlink).
 
 #### Recreate Symlink
 
-Diskmaker will recreate the symlink pointing to the preferred link target. If successful, it will update `localVolumeDeviceLink.status` and reset `localVolumeDeviceLink.spec.policy` back to `None`. If there is any error that prevents this, diskmaker will add a failure condition and stop attempting to change the symlink and set `localVolumeDeviceLink.spec.policy` back to `None`. The administrator can review any errors and change the policy back to `RecreateSymlinkOnce` if they want to retry the operation.
+If `localVolumeDeviceLink.spec.policy == PreferredLinkTarget`, diskmaker will recreate the symlink pointing to the preferred link target. If successful, it will update `localVolumeDeviceLink.status`. If there is any error that prevents this, diskmaker will add a failure condition and retry as part of the reconcile loop.
+
+If the value of `localVolumeDeviceLink.status.preferredLinkTarget` changes later and `localVolumeDeviceLink.spec.policy` is still set to `PreferredLinkTarget`, diskmaker will again reconcile the symlink using the new target found in `localVolumeDeviceLink.status.preferredLinkTarget`.
+
+To stop diskmaker from attempting to change the symlink, the administrator can set `localVolumeDeviceLink.spec.policy` to `None` or `CurrentLinkTarget`.
 
 #### Deletion
 
@@ -87,12 +95,13 @@ type LocalVolumeDeviceLink struct {
 	Status LocalVolumeDeviceLinkStatus `json:"status,omitempty"`
 }
 
-// +kubebuilder:validation:Enum=None;RecreateSymlinkOnce
+// +kubebuilder:validation:Enum=None;CurrentLinkTarget;PreferredLinkTarget
 type LocalVolumeDeviceLinkPolicy string
 
 const (
 	LocalVolumeDeviceLinkPolicyNone = "None" // default
-	LocalVolumeDeviceLinkPolicyRecreateSymlinkOnce = "RecreateSymlinkOnce"
+	LocalVolumeDeviceLinkPolicyCurrentLinkTarget = "CurrentLinkTarget"
+	LocalVolumeDeviceLinkPolicyPreferredLinkTarget = "PreferredLinkTarget"
 )
 
 type LocalVolumeDeviceLinkSpec struct {
@@ -139,7 +148,7 @@ Diskmaker will use the following selection criteria when choosing the recommende
 3. If a by-uuid symlink was previously discovered and recorded, the new by-id target must point to the same device.
 4. There is no other symlink in `/mnt/local-storage/<storageclass>` pointing to this by-id target.
 
-Diskmaker will keep the link name and only change the link target. For example, if a PV has an existing symlink `/mnt/local-storage/localblock/scsi-0NVME_MODEL_abcde` pointing to `/dev/disk/by-id/scsi-0NVME_MODEL_abcde`, but there is a by-id link `/dev/disk/by-id/scsi-2ace42e0035eabcde`, setting the device link policy to `RecreateSymlinkOnce` will cause diskmaker to replace `/mnt/local-storage/localblock/scsi-0NVME_MODEL_abcde` with a new symlink pointing to `/dev/disk/by-id/scsi-2ace42e0035eabcde`.
+Diskmaker will keep the link name and only change the link target. For example, if a PV has an existing symlink `/mnt/local-storage/localblock/scsi-0NVME_MODEL_abcde` pointing to `/dev/disk/by-id/scsi-0NVME_MODEL_abcde`, but there is a by-id link `/dev/disk/by-id/scsi-2ace42e0035eabcde`, setting the device link policy to `PreferredLinkTarget` will cause diskmaker to replace `/mnt/local-storage/localblock/scsi-0NVME_MODEL_abcde` with a new symlink pointing to `/dev/disk/by-id/scsi-2ace42e0035eabcde`.
 
 ### Risks and Mitigations
 
