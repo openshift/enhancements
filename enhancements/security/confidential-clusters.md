@@ -1,13 +1,19 @@
 ---
-title: confidential-clusters-enhancement-proposal
+title: confidential-clusters
 authors:
 - "@uril"
 - "@travier"
 reviewers:
 - "@confidential-cluster-team" # for the Confidential Cluster operator
 - "@coreos-team"               # for RHCOS changes
-- "TBD" # Someone from the @mco team
-- "TBD" # Someone from the @installer team
+- "@dgoodwin"
+- "@JoelSpeed"
+- "@dougbtv"
+- "@sdodson"
+- "@cgwalters"
+- "@patrickdillon"
+- "@yuqi-zhang"
+- "@Jakob-Naucke"
 approvers:
 - "@sdodson"
 - "TBD"
@@ -283,7 +289,7 @@ nodes to attest to the cluster using new version of RHCOS.
 
 This enhancement does not introduce any change to user workflows.
 
-## API Extensions
+### API Extensions
 
 This enhancement introduces some new API extensions:
 
@@ -354,9 +360,9 @@ echosystem, interfaces are written in Go and generated with OpenShift tools.
 When the operator is built, the interfaces are converted to Rust. COPY FROM Jakob
 
 
-## Topology Considerations
+### Topology Considerations
 
-### Hypershift / Hosted Control Planes
+#### Hypershift / Hosted Control Planes
 
 Initially, this enhancement will not support a hosted control plane
 topology. However, the design can be extended to support it.
@@ -370,7 +376,7 @@ As HCP operators are not allowed to set up MachineConfigs, we will need an
 option during HCP cluster creation to set up a MachineConfig in the control
 plane and tell the Confidential Cluster Operator to use it.
 
-### Standalone Clusters
+#### Standalone Clusters
 
 Standalone Clusters running on cloud providers supporting confidential virtual
 machines are the primary target for this enhancement.
@@ -383,7 +389,7 @@ their memory would not be encrypted, but the guarantees around which operating
 system version is used on each node and its integrity would be provided to
 cluster operators.
 
-### Single-node Deployments or MicroShift
+#### Single-node Deployments or MicroShift
 
 Initially, this enhancement will not support SNO & MicroShift
 deployments. However, the design can be extended to support it.
@@ -397,9 +403,9 @@ value updates in tandem with the management tools (for example ACS).
 Confidential Clusters run on confidential VMs, so they require running on VMs
 and on special hardware.
 
-## Implementation Details/Notes/Constraints
+### Implementation Details/Notes/Constraints
 
-### Operating system integrity and confidentiality guarantees
+#### Operating system integrity and confidentiality guarantees
 
 To guarantee the integrity of the operating system, we are adding composefs, UKI
 & systemd-boot support to bootc (Bootable Containers). Unified Kernel Images
@@ -418,7 +424,7 @@ components via the TPM. The measurements are stored in PCR banks which are
 signed by hardware components and sent to a remote Trustee instance for
 validation.
 
-### Adding a new node to the cluster
+#### Adding a new node to the cluster
 
 Each node of the cluster will be started as a confidential VM. As part of the
 first boot process, in the initramfs, Ignition runs and fetches its
@@ -487,14 +493,14 @@ The remote attestation flow is demonstrated in this presentation:
 
 * <https://media.ccc.de/v/all-systems-go-2025-362-uki-composefs-and-remote-attestation-for-bootable-containers>
 
-### Second boot
+#### Second boot
 
 On second boot, the initrd opens the LUKS device. The LUKS device header stores
 the configuration needed for the Clevis Trustee Pin to perform the request to
 the Trustee servers. The response to this request is the secret needed to unlock
 the LUKS device and resume booting.
 
-### Confidential Cluster Operator
+#### Confidential Cluster Operator
 
 The confidential cluster operator provides two services:
 
@@ -512,7 +518,7 @@ LUKS root keys.
 For more details about this flow, see:
 <https://github.com/confidential-clusters/cocl-operator/blob/main/docs/design/boot-attestation.md>
 
-### Cluster installation
+#### Cluster installation
 
 As part of the cluster installation process in cloud platforms, a bootstrap node
 is created, which hosts a temporary control plane used to create the final
@@ -531,7 +537,7 @@ server instead of being passed to the bootstrap node directly.
 Once the Confidential Cluster Operator is running on the bootstrap node, the
 rest of the cluster is bootstrapped using the flow described above.
 
-### Cluster update & downgrade
+#### Cluster update & downgrade
 
 The Confidential Cluster Operator watches for changes in the desired OpenShift
 release payload. When a new update is selected, the Confidential Cluster
@@ -557,7 +563,7 @@ version of a node will not be an issue. In the future, reference values from
 older versions of the cluster will progressively be garbage collected, to
 prevent downgrade attacks.
 
-## Risks and Mitigations
+### Risks and Mitigations
 
 * **Performance Overhead**: The memory and disk encryption used for CVMs can
   introduce a slight performance overhead. This will be mitigated by providing
@@ -600,7 +606,7 @@ manually handle setting and updating reference values.
   are working on a more detailed threat model, which will be submitted in a
   later stage.
 
-## Drawbacks
+### Drawbacks
 
 It introduces a lot of complexity, notably for the first boot and for
 updates. While we will try to hide this complexity from the cluster
@@ -617,10 +623,6 @@ of the cluster and have the Operator be a different component outside of the
 cluster. This would require users to manage reference values on cluster updates
 and node creations.
 
-## Open Questions [optional]
-
-To be updated with incoming questions.
-
 ## Test Plan
 
 We will need E2E tests on all supported cloud platforms.
@@ -636,9 +638,18 @@ FCOS/RHCOS and general Image Mode / bootc testing.
 
 ## Graduation Criteria
 
-**Note:** *Section not required until targeted at a release.*
+### Dev Preview -> Tech Preview
 
-(Section not yet filled out)
+- A cluster installation as described in phase 2
+- Some documentation
+
+### Tech Preview -> GA
+
+- End to end tests
+- Documentation
+
+### Removing a deprecated feature
+N/A
 
 ## Upgrade / Downgrade Strategy
 
@@ -667,4 +678,4 @@ instance running in parallel until the boot image is updated in the cluster.
 
 ## Infrastructure Needed [optional]
 
-(Section not yet filled out)
+Confidential Virtual Machines running on top of supported hardware.
