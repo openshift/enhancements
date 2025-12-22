@@ -10,6 +10,7 @@ api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggreg
   - TBD
 creation-date: yyyy-mm-dd
 last-updated: yyyy-mm-dd
+status: provisional|implementable|implemented|deferred|rejected|withdrawn|replaced|informational
 tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
   - TBD
 see-also:
