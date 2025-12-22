@@ -314,6 +314,39 @@ be added to
   * configuring the Clevis trustee pin
   * enable fetching remote config after remote attestation
 
+#### Programming Languages
+The Confidential Cluster Operator is written in Rust.
+
+##### Why was Rust chosen
+
+There are several reasons for chosing Rust, including
+
+  * The Confidential Cluster operator is a critical element of the Confidential
+    Cluster design. Any bugs in it might have a significant impact on the
+    guarantees that it provides.
+  * It has to be exposed to let new nodes register themselves when they come up.
+    If it is unavailable, the cluster can not provision new nodes nor update
+    them to a new OpenShift version.
+  * It manages the reference values. If a bug enables unapproved reference
+    value changes then the cluster immediately loses the guarantees of
+    Confidential Computing.
+  * Thus having it in Rust will reduce the risk of critical bugs and
+    demonstrate to the customers that we are taking Confidential Clusters
+    seriously.
+
+##### Making Confidential Cluster Operator fit OpenShift
+The following steps are to be taken to make cocl-operator fit OpenShift
+  * APIs and CRDs are to be written in Go
+  * When the operator is built, the APIs/CRDs are translated to Rust
+  * The system openssl library is to be used
+
+#### Integration with Openshift tooling
+To make Confidential Cluster Operator a first citizen in the Openshift
+echosystem, interfaces are written in Go and generated with OpenShift tools.
+
+When the operator is built, the interfaces are converted to Rust. COPY FROM Jakob
+
+
 ## Topology Considerations
 
 ### Hypershift / Hosted Control Planes
