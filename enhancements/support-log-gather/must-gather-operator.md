@@ -120,10 +120,6 @@ type MustGatherSpec struct {
     // +optional
     AdditionalConfig *AdditionalConfig `json:"additionalConfig,omitempty"`
 
-    // This represents the proxy configuration to be used. If left empty it will default to the cluster-level proxy configuration.
-    // +optional
-    ProxyConfig ProxySpec `json:"proxyConfig,omitempty"`
-
     // A time limit for gather command to complete a floating point number with a suffix:
     // "s" for seconds, "m" for minutes, "h" for hours, or "d" for days.
     // Will default to no time limit.
@@ -238,21 +234,6 @@ type PersistentVolumeClaimReference struct {
     // +kubebuilder:validation:MaxLength:=253
     // +required
     Name string `json:"name"`
-}
-
-// +k8s:openapi-gen=true
-type ProxySpec struct {
- // httpProxy is the URL of the proxy for HTTP requests.  Empty means unset and will not result in an env var.
- // +optional
- HTTPProxy string `json:"httpProxy,omitempty"`
-
- // httpsProxy is the URL of the proxy for HTTPS requests.  Empty means unset and will not result in an env var.
- // +optional
- HTTPSProxy string `json:"httpsProxy,omitempty"`
-
- // noProxy is the list of domains for which the proxy should not be used.  Empty means unset and will not result in an env var.
- // +optional
- NoProxy string `json:"noProxy,omitempty"`
 }
 
 // MustGatherStatus defines the observed state of MustGather
@@ -397,7 +378,21 @@ None, as a day-2 operator dedicated OpenShift and Hosted Clusters are both treat
 
 #### Proxy clusters
 
-`mustgather.spec.proxyConfig` if set by the user in the CR, will be propagated as pod environment variables to the gather and upload containers of the Job. The configuration set in the resource is given precedence over the cluster-wide proxy settings set on the cluster through `configv1.Proxy` object. Due to the nature of SOCKS proxy protocol and the HTTP "CONNECT" verb in most proxy servers used with OpenShift, the upload process using SFTP's TCP can essentially make a CONNECT request over netcat and intercept to upload the mustgather bundle even when on a airgapped proxy setup.
+The operator inherits cluster-wide proxy settings from the `configv1.Proxy` object via environment variables propagated by OLM and passes them to the upload container of the Job.
+
+For SFTP uploads through HTTP proxies (common in air-gapped OpenShift environments), the upload process uses an HTTP CONNECT proxy via netcat (`nc --proxy-type http`) as an SSH `ProxyCommand`. This allows SFTP traffic to tunnel through the configured HTTP proxy.
+
+To customize proxy settings, a cluster administrator can override the `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` environment variables through the OLM Subscription object.
+
+### Trusted Certificate Authority
+
+The operator supports custom Certificate Authority (CA) bundles for environments using proxy servers with TLS interception. When the `TRUSTED_CA_CONFIGMAP_NAME` environment variable is set on the operator deployment (via OLM Subscription or direct patch), the operator mounts the referenced ConfigMap containing the CA bundle at `/etc/pki/tls/certs/ca-bundle.crt`. This ConfigMap should be labeled with `config.openshift.io/inject-trusted-cabundle=true` to leverage OpenShift's [CA bundle injection](https://docs.openshift.com/container-platform/4.12/networking/configuring-a-custom-pki.html#certificate-injection-using-operators_configuring-a-custom-pki).
+
+#### Reconcile flow
+
+During the MustGather CR reconciliation, the operator copies the trusted CA ConfigMap from the operator namespace (`must-gather-operator`) to the operand namespace where the MustGather CR is present. This ensures that the upload container in the must-gather job can mount and use the trusted CA bundle for SFTP uploads, even when the job runs in a different namespace than the operator.
+
+The copied ConfigMap should include an `ownerReference` pointing to the MustGather CR. Since both the MustGather CR and the copied ConfigMap reside in the same namespace, Kubernetes garbage collection will automatically delete the ConfigMap when the MustGather CR is deleted. This approach ensures automatic cleanup without explicit deletion logic in the operator.
 
 ## Implementation History
 
