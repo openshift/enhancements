@@ -1,1 +1,5 @@
 enhancements/authentication/direct-oidc-study/study-oidc-in-openshift.md
+enhancements/edge-topologies/single-node/cluster-high-availability-mode-api.md
+enhancements/edge-topologies/single-node/developer-cluster-profile.md
+enhancements/edge-topologies/single-node/production-deployment-approach.md
+enhancements/edge-topologies/single-node/single-node-openshift-with-workers.md
