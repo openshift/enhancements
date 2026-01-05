@@ -23,8 +23,8 @@ superseded-by:
 
 About the enhancement process:
 1. **Iterate.** Some sections of the enhancement do not make sense to fill out in the first pass.
-   It is ok to merge the enhancement with enough to implement a tech preview, and update ahead of
-   promoting to GA later.
+   We expect enhancements to be merged with enough detail to implement tech preview, and be updated later
+   ahead of promoting to GA.
 1. **Build consensus.** The enhancement process is a way to build consensus between multiple stakeholders
    and align on the design before implementation begins. It is the responsibility of the author to drive
    the process. This means that you must find stakeholders, request their review, and work with them to
