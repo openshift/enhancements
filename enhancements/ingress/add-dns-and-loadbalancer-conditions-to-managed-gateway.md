@@ -311,7 +311,7 @@ publishing strategy is not LoadBalancerService
 
 *DNSReady Condition:*
 * Set to `Unknown` when DNSManagementPolicy is `Unmanaged` (OpenShift doesn't manage DNS, so status is unknown)
-* Set to `False` with reason `RecordNotFound` when the associated DNSRecord resource cannot be found
+* Set to `False` with reason `RecordNotFound` one or more of the associated DNSRecord resources cannot be found
 * Set to `False` with reason `NoZones` when the DNSRecord has no zones configured
 * Set to `False` with reason `FailedZones` when one or more zones have failed to publish
 * Set to `False` with reason `UnknownZones` when zone status cannot be determined
@@ -355,12 +355,12 @@ and Gateway API `metav1.Condition` types
 
 **Condition Lifecycle:**
 * Conditions are added when a Gateway is reconciled in the `openshift-ingress` namespace
-* Conditions are updated in-place using `condutils.SetStatusCondition()` to preserve transition times
+* Conditions are updated in-place using `condutils.SetStatusCondition()` and the transition time must reflect in case they are changed.
 * Conditions are automatically garbage collected when the Gateway is deleted (part of Gateway status)
 * Maximum of 8 total conditions are maintained per Gateway to prevent unbounded growth
 
 **Permissions:**
-* The cluster-ingress-operator service account is granted RBAC permissions to:
+* The cluster-ingress-operator service account is uses existing RBAC permissions to:
   - Get, List, Watch Gateway resources
   - Patch Gateway status subresource
   - Get, List, Watch DNSRecord and Service resources by label
@@ -466,7 +466,8 @@ does not replace Openshift conditions
  * On the same test, verify the condition count is consistent with Istio and Openshift
 added conditions
 * Create Gateway out of `openshift-ingress` and verify that no Openshift condition is added
-* Create Gateway with wrong DNS Domain and verify that Openshift conditions reflect the failue
+* Create Gateway with wrong DNS Domain and verify that Openshift conditions reflect the failure
+* Create Gateway with multiple listeners, every listener must have a valid DNS entry. Each listener must get its own DNSReady condition.
 
 ## Graduation Criteria
 
@@ -535,7 +536,6 @@ This enhancement involves coordination between:
 * Negligible impact on API throughput: condition updates happen during normal reconciliation
 * No new API calls introduced; only status updates to existing Gateway resources
 * Expected number of managed Gateways in `openshift-ingress` namespace: typically 1-10 per cluster
-* Condition updates are rate-limited to prevent excessive writes
 
 **Failure Modes:**
 * If ingress operator is unavailable, conditions will not be updated, but Gateways continue to function
@@ -553,6 +553,8 @@ This enhancement involves coordination between:
 **Detecting Issues:**
 
 *Symptom: Gateway conditions show `DNSManaged=False`*
+
+Note: This is not an issue for users that opted to not have DNS  managed.
 * Check Gateway status: `oc get gateway <name> -n openshift-ingress -o yaml`
 * Review condition reason and message:
   - Reason `NoDNSZones`: Cluster DNS configuration has no zones configured
