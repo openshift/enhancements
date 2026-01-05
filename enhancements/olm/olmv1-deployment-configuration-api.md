@@ -20,7 +20,7 @@ tracking-link:
 
 ## Summary
 
-This enhancement extends OLMv1's ClusterExtension API to support operator deployment customization through a new configuration API. This provides feature parity with OLMv0's `SubscriptionConfig`, enabling users to configure resource limits, pod placement, environment variables, storage, and metadata annotations for operators installed via registry+v1 bundles.
+This enhancement extends OLMv1's ClusterExtension API to support operator deployment customization through the configuration API. This provides feature parity with OLMv0's `SubscriptionConfig`, enabling users to configure resource limits, pod placement, environment variables, storage, and metadata annotations for operators installed via registry+v1 bundles.
 
 ## Motivation
 
@@ -34,7 +34,7 @@ Without deployment configuration support, users cannot:
 - Control pod placement using affinity and anti-affinity rules
 - Add custom annotations to operator deployments and pods
 
-This gap blocks migration from OLMv0 to OLMv1 for operators that require these customizations.
+This gap blocks migration from OLMv0 to OLMv1 for operators that require or whose user-base makes frequent use of customizations.
 
 ### User Stories
 
@@ -87,10 +87,8 @@ If the deployment configuration fails JSON schema validation:
 
 ### API Extensions
 
-This enhancement modifies the ClusterExtension API by extending the inline configuration structure to accept a `deploymentConfig` field. 
+The enhancement does not introduce new APIs, CRDs, webhooks, or aggregated API servers. As the inline configuration structure in the ClusterExtension API accepts any valid JSON object, the API will not be changed. This enhancement modifies the existing configuration schema for registry+v1 bundles to accept a `deploymentConfig` field. 
 The configuration is validated using JSON schema generated from Kubernetes core v1 and apps v1 OpenAPI specifications.
-
-The enhancement does not introduce new CRDs, webhooks, or aggregated API servers. It extends the existing inline configuration validation mechanism with a new schema for `deploymentConfig`.
 
 ### Topology Considerations
 
@@ -117,9 +115,9 @@ For MicroShift, this enhancement applies to any operators that are installed via
 
 ### Implementation Details/Notes/Constraints
 
-#### API Design
+#### registry+v1 Bundle Configuration Schema Design
 
-The inline configuration will support a new `deploymentConfig` field that follows the same structure as OLMv0's `SubscriptionConfig`:
+The registry+v1 bundle configuration will support a new `deploymentConfig` field that follows the same structure as OLMv0's `SubscriptionConfig`:
 
 ```go
 // DeploymentConfig contains configuration specified for a
@@ -355,9 +353,14 @@ Keep the status quo and do not provide deployment configuration in OLMv1.
 
 **Rejected**: This is not viable as current operator products rely on this functionality in OLMv0 and require it to migrate to OLMv1.
 
-## Open Questions
+## Open Questions / Considerations
 
+### Track changes to underlying kubernetes corev1 structures?
 SubscriptionConfig uses many kubernetes corev1 structures from the standard kube lib. This means that the OLMv0 Subscription API would track changes to those structures (e.g. if a new Volume type is added to the API etc.). We need to think about whether we want the same behavior here, and if so how we’d like to implement it. E.g. we could have some process downloading and mining the openapi specs for the given kube lib version we have in go.mod, and having make verify fail when that changes. We’d want to think about how we’d handle any CEL expressions in those corev1 structures when doing the validation (and whether we want to handle them?).
+
+#### Proposed Response
+As these structures should change very rarely, we should use the latest definition of these structures and only update if there's a clear user ask. Ultimately, the goal for OLMv1 is to have Cluster Extension Authors define their own bundle configuration surface. Therefore, the extra complexity of building and maintaing a mechanism to automatically track and update these definitions is probably not warranted without clear customer demands.
+
 
 ## Test Plan
 
