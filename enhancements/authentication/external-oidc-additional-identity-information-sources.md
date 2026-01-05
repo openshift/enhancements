@@ -317,12 +317,19 @@ externalClaims:
           # expression is the CEL expression to extract
           # the claim data from the response.
           # It must return a string value.
-          expression: "has(response.value) ? response.value.map(x, x.displayName).join(',') : \"\""
+          expression: "has(response.value) ? response.value.map(x, x.displayName) : []"
       # conditions are the conditions in which this external source should be used.
       # When not specified, the source will _always_ be used.
       # conditions is a list of CEL expressions.
       conditions:
         - expression: "!has(claims.groups)" # Ex: don't attempt to source claims from this source if the groups claim is already present in the JWT
+  # tls configures the TLS settings for requests to external claim sources.
+  tls:
+    # certificateAuthority is a reference to a secret in the openshift-config
+    # namespace that contains the certificate authority to use for requests
+    # to external claim sources.
+    certificateAuthority:
+      name: "some-ca"
 ```
 
 ### Topology Considerations
@@ -431,8 +438,19 @@ authenticator as a baseline.
 From this baseline, additional changes will be made as necessary to support the new desired functionality
 of source claim information from external sources.
 
-It will be stateless and deployed as a standalone component either as a static pod or a deployment.
-The namespace in which it is deployed is TBD, but `openshift-authentication` is an option that seems reasonable.
+It will be stateless and deployed as a standalone component either as deployment in the `openshift-authentication` namespace.
+
+Requests to external sources will be made and processed concurrently with strict timeouts (timeout TBD).
+Validations will be enforced at configuration time to ensure no duplicate requests or
+claims are ever created.
+
+Request failures will result in partial availability of user identity information for identity mapping.
+For example, a failure to fetch a user's group memberships from an external source may result in the absence
+of a `groups` claim being available for use in cluster identity building.
+It is up to end-user discretion to configure identity mapping behavior to proceed with partial information
+or to fail on absence of a claim through their usage of CEL expressions.
+
+TODO: URL escaping details.
 
 Diagram of how this new component will work:
 ```mermaid
@@ -461,6 +479,16 @@ to use the webhook authenticator, and the Structured Authentication Configuratio
 If there is a mixed configuration, it will ensure that the webook authenticator is deployed and configured for the providers leveraging
 the new configuration options, the Kubernetes API server is configured to use the webhook authenticator, and the Structured Authentication
 Configuration is configured on the Kubernetes API server for the providers that are not configured to leverage the new functionality.
+
+The webhook authenticator will implement hot-reloading capabilities for the configuration file so that any changes to the configuration file
+are automatically loaded without downtime, preventing disruption of communication between the KAS and the webhook authenticator
+during configuration changes.
+
+**NOTE**: The hot-reloading behavior _only_ applies to the webhook authenticator and changes to it's configuration file. For changes that impact
+the Structured Authentication Configuration file for the KAS, there will still need to be a revisioned rollout that occurs, potentially incurring
+disruption on SNO clusters. In an ideal world, there should be minimal to no disruption on HA clusters for a valid Structured Authentication Configuration.
+In the future, work may be done to enable the KAS hot-reloading functionality for the Structured Authentication Configuration to mitigate this but that has non-trivial
+impacts to our revisioned rollout process - and is out of scope of the proposed effort.
 
 Diagram of the new behavior:
 ```mermaid
@@ -773,6 +801,14 @@ automated regression testing.
 - External claims source is unavailable
     - This failure mode may impact the ability to access the cluster when
     using token-based authentication.
+    - When external claim sources are unavailable, a metric - exposed by the webhook authenticator - signalling the unavailability of an external claim source will be incremented.
+    The exact metric structure is TBD.
+
+- External claims source request timeout
+    - This failure mode may impact or degrade the ability to access the cluster
+    when using token-based authentication.
+    - When requests to an external claim source time out, a metric - exposed by the webhook authenticator - signalling timeouts of an external claim source will be incremented.
+    The exact metric structure is TBD.
 
 TODO: More failure modes documented.
 
@@ -795,7 +831,7 @@ modes are:
 The most common ways to detect failure modes will be:
 - Previously authenticated users receiving unauthenticated errors
 - KAS logs, specifically ones related to token authentication
-- New webhook authenticator logs
+- New webhook authenticator logs and metrics
 
 ### Recovering from failures
 
