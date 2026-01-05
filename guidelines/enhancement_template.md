@@ -4,12 +4,13 @@ authors:
   - TBD
 reviewers: # Include a comment about what domain expertise a reviewer is expected to bring and what area of the enhancement you expect them to focus on. For example: - "@networkguru, for networking aspects, please look at IP bootstrapping aspect"
   - TBD
-approvers: # A single approver is preferred, the role of the approver is to raise important questions, help ensure the enhancement receives reviews from all applicable areas/SMEs, and determine when consensus is achieved such that the EP can move forward to implementation.  Having multiple approvers makes it difficult to determine who is responsible for the actual approval.
+approvers: # This should be a single approver. The role of the approver is to raise important questions, ensure the enhancement receives reviews from all applicable areas/SMEs, and determine when consensus is achieved such that the EP can move forward to implementation.  Having multiple approvers makes it difficult to determine who is responsible for the actual approval. Team leads and staff engineers often make good approvers.
   - TBD
-api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
+api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None". Once your EP is published, ask in #forum-api-review to be assigned an API approver.
   - TBD
 creation-date: yyyy-mm-dd
 last-updated: yyyy-mm-dd
+status: provisional|implementable|implemented|deferred|rejected|withdrawn|replaced|informational
 tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
   - TBD
 see-also:
@@ -19,6 +20,22 @@ replaces:
 superseded-by:
   - "/enhancements/our-past-effort.md"
 ---
+
+About the enhancement process:
+1. **Iterate.** Some sections of the enhancement do not make sense to fill out in the first pass.
+   We expect enhancements to be merged with enough detail to implement tech preview, and be updated later
+   ahead of promoting to GA.
+1. **Build consensus.** The enhancement process is a way to build consensus between multiple stakeholders
+   and align on the design before implementation begins. It is the responsibility of the author to drive
+   the process. This means that you must find stakeholders, request their review, and work with them to
+   address their concerns and get their approval. If you need help finding stakeholders, try asking in
+   #forum-ocp-arch or taking your proposal to the OCP arch call or a staff engineer.
+1. **Document decisions.** The enhancements act as our record of previous conversations and the decisions
+   that were made. It is important that these EPs are merged so that we can build a library of references
+   for future engineers/technical writers/support engineers to be able to understand the history of our
+   designs and the rationale behind them.
+   **Please find the time to make sure that these PRs are merged.** If you are struggling to reach consensus,
+   or you are not getting the reviews you need, please reach out to a staff engineer or your team lead to help you.
 
 To get started with this template:
 1. **Pick a domain.** Find the appropriate domain to discuss your enhancement.
@@ -32,10 +49,10 @@ To get started with this template:
 1. **Create a PR.** Assign it to folks with expertise in that domain to help
    sponsor the process.
 1. **Merge after reaching consensus.** Merge when there is consensus
-   that the design is complete and all reviewer questions have been
-   answered so that work can begin.  Come back and update the document
-   if important details (API field names, workflow, etc.) change
-   during code review.
+   that the design is complete enough for implementation to begin.
+   It is ok to have some details missing, these should be captured in the open questions.
+   Come back and update the document if important details (API field names, workflow, etc.)
+   change during implementation.
 1. **Keep all required headers.** If a section does not apply to an
    enhancement, explain why but do not remove the section. This part
    of the process is enforced by the linter CI job.
@@ -82,8 +99,7 @@ achieve with this new feature.
 
 Use the standard three part formula:
 
-> "As a _role_, I want to _take some action_ so that I can _accomplish a
-goal_."
+> "As a _role_, I want to _take some action_ so that I can _accomplish a goal_."
 
 Make the change feel real for users, without getting bogged down in
 implementation details.
@@ -201,6 +217,14 @@ and finalizers, i.e. those mechanisms that change the OCP API surface and behavi
   - Adds a finalizer to namespaces. Namespace cannot be deleted without our controller running.
   - Restricts the label format for objects to X.
   - Defaults field Y on object kind Z.
+
+For small API changes, you may want to model the API here as a Go type.
+For large API changes, give an idea of what the API will look like in serialized form as YAML,
+and open a PR for the actual API changes to the relevant repository. Your API approver
+should review the API both at the high level in this document, and lower level in the PR for
+the actual API changes.
+Including larger API changes in this document often creates duplication of effort where feedback
+is given twice, once here and once in the PR for the actual API changes.
 
 Fill in the operational impact of these API Extensions in the "Operational Aspects
 of API Extensions" section.
