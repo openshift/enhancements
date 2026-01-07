@@ -167,6 +167,9 @@ No unique considerations. The operator runs in the guest cluster and performs al
 #### Standalone Clusters
 
 
+#### OpenShift Kubernetes Engine
+
+
 #### Single-node Deployments or MicroShift
 
 
