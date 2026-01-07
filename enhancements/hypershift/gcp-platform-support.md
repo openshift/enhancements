@@ -23,7 +23,7 @@ see-also:
 
 ## Summary
 
-This enhancement adds Google Cloud Platform (GCP) as a supported platform for HyperShift hosted clusters. The implementation enables users to deploy OpenShift hosted control planes on GCP infrastructure, leveraging Cluster API Provider GCP (CAPG) for infrastructure management, Workload Identity Federation (WIF) for secure keyless authentication, and Private Service Connect (PSC) for private networking between management and guest clusters.
+This enhancement adds Google Cloud Platform (GCP) as a supported platform for HyperShift hosted clusters. The implementation enables users to deploy OpenShift hosted clusters on GCP infrastructure, leveraging Cluster API Provider GCP (CAPG) for infrastructure management, Workload Identity Federation (WIF) for secure keyless authentication, and Private Service Connect (PSC) for private networking between management and hosted clusters.
 
 ## Motivation
 
@@ -35,11 +35,11 @@ GCP is a major cloud provider with a significant customer base. Many organizatio
 
 - As a cluster administrator using GCP, I want to deploy HyperShift hosted clusters on GCP infrastructure so that I can reduce control plane costs and simplify cluster management in my GCP environment.
 
-- As a platform engineer, I want to use Workload Identity Federation for HyperShift clusters on GCP so that I can avoid managing long-lived service account keys and improve security posture.
+- As a platform engineer, I want to use Workload Identity Federation for HyperShift hosted clusters on GCP so that I can avoid managing long-lived service account keys and improve security posture.
 
-- As a security-conscious operator, I want to deploy private HyperShift clusters on GCP using Private Service Connect so that control plane traffic remains within private networks and is not exposed to the public internet.
+- As a security-conscious operator, I want to deploy HyperShift hosted clusters on GCP using Private Service Connect so that control plane traffic remains within private networks.
 
-- As a DevOps engineer, I want CLI commands to create and destroy GCP infrastructure for HyperShift so that I can automate cluster lifecycle management.
+- As a DevOps engineer, I want CLI commands to create and destroy GCP infrastructure for HyperShift so that I can automate hosted cluster lifecycle management.
 
 - As a cluster administrator, I want to configure GCP-specific NodePool settings (machine type, zones, disk configuration) so that I can optimize worker node specifications for my workloads.
 
@@ -48,7 +48,7 @@ GCP is a major cloud provider with a significant customer base. Many organizatio
 - Enable deployment of HyperShift hosted clusters on GCP infrastructure
 - Support GKE as a management cluster platform for running HyperShift
 - Implement secure, keyless authentication using GCP Workload Identity Federation
-- Support private cluster deployments using GCP Private Service Connect
+- Support secure, private control plane traffic using GCP Private Service Connect
 - Provide CLI commands for creating and destroying GCP infrastructure and IAM resources
 - Support GCP-specific NodePool configuration for worker nodes
 - Integrate with external-dns for GCP Cloud DNS management
@@ -73,8 +73,8 @@ Establishes the essential foundation for GCP platform integration:
 - Integrate GCP as a supported platform in the controller framework
 
 **Workload Identity Federation:**
-- Use GCP Workload Identity Federation to allow HyperShift components to assume GCP identities without long-lived keys
-- Define mapping between Kubernetes service accounts and GCP IAM roles
+- Use GCP Workload Identity Federation to allow HyperShift components to authenticate to GCP APIs without long-lived keys
+- Define mapping between Kubernetes service accounts and GCP service accounts with necessary IAM roles
 - Bootstrap and manage identity pools, providers, and trust relationships
 
 **CLI Infrastructure Commands:**
