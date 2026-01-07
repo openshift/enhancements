@@ -36,11 +36,7 @@ The design introduces two core concepts: a permission model based on references 
 
 ## Motivation
 
-The default must-gather image provides a broad set of diagnostic data for the OpenShift platform. However, there are scenarios where users and support teams require more specialized data collection that is not included in the default image. This can include:
-
--   Running diagnostic scripts for specific applications or layered products.
--   Gathering information from third-party operators or custom infrastructure components.
--   Using a pre-release or patched version of the must-gather tooling for debugging purposes without waiting for an official release.
+The default must-gather image provides a broad set of diagnostic data for the OpenShift platform. However, there are scenarios where users and support teams require more specialized data collection that is not included in the default image.
 
 Currently, there is no secure or manageable way to use a custom image. This proposal aims to provide a secure and Kubernetes-native mechanism for this purpose, giving administrators clear control over which images are permitted to run with elevated privileges in their clusters.
 
