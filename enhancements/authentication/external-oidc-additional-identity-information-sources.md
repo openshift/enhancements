@@ -450,7 +450,16 @@ of a `groups` claim being available for use in cluster identity building.
 It is up to end-user discretion to configure identity mapping behavior to proceed with partial information
 or to fail on absence of a claim through their usage of CEL expressions.
 
-TODO: URL escaping details.
+To aid in preventing the webhook from making malformed requests to external claim sources
+when using dynamic/templated URLs, CEL utilities will be added to enable path and query parameter escaping.
+
+As an example, an end-user could write a CEL expression like:
+```yaml
+...
+expression: "\"https://graph.microsoft.com/v1.0/users/\" + urlPathEscape(claims.upn) + \"/memberOf\""
+...
+```
+to perform path escaping on the value of the `upn` claim.
 
 Diagram of how this new component will work:
 ```mermaid
