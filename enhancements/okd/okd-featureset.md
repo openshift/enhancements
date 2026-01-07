@@ -83,7 +83,7 @@ This proposal introduces a new "OKD" feature set that:
 4. Generates CRD manifests for all API versions
 5. Is enabled by default on OKD cluster installations
 6. Automatically migrates existing OKD clusters from Default to OKD feature set during upgrade
-7. Can transition to TechPreviewNoUpgrade or DevPreviewNoUpgrade
+7. Can transition to TechPreviewNoUpgrade, DevPreviewNoUpgrade, or CustomNoUpgrade
 
 ### Workflow Description
 
@@ -103,8 +103,8 @@ This proposal introduces a new "OKD" feature set that:
 2. API validation rejects with error: "OKD cannot transition to Default"
 3. Cluster must be reinstalled if Default is required
 
-#### Scenario 4: Changing OKD to TechPreviewNoUpgrade or DevPreviewNoUpgrade
-1. OKD administrator changes feature set to TechPreviewNoUpgrade or DevPreviewNoUpgrade
+#### Scenario 4: Changing OKD to TechPreviewNoUpgrade, DevPreviewNoUpgrade, or CustomNoUpgrade
+1. OKD administrator changes feature set to TechPreviewNoUpgrade, DevPreviewNoUpgrade, or CustomNoUpgrade
 2. Change succeeds
 
 #### Scenario 5: Upgrading an existing OKD cluster with Default feature set
@@ -124,17 +124,24 @@ This proposal introduces a new "OKD" feature set that:
 
 #### CRD Manifests
 
-OKD-specific CRD variants will be generated for all config.openshift.io/v1 resources (CClusterVersion, APIServer, ClusterImagePolicy, Authentication, Build, ClusterOperator, Console, DNS, FeatureGate, Image, ImageContentPolicy, ImageDigestMirrorSet, ImageTagMirrorSet, Infrastructure, Ingress, Network, Node, OAuth, OperatorHub, Project, Proxy, and Scheduler) and machineconfiguration.openshift.io/v1 resources (ControllerConfig, KubeletConfig, MachineConfig, MachineConfigPool), plus various operator-specific CRDs.
+OKD-specific CRD variants will be generated for all CRDs that support feature gates. This includes resources across
+all API groups (config.openshift.io, machineconfiguration.openshift.io, operator.openshift.io, and others) that
+have featuregate-aware schemas. The generation process is automated and will create OKD variants for any CRD that
+includes feature gate support in its API definition.
 
 ### Topology Considerations
 
 #### Hypershift / Hosted Control Planes
 
-The OKD feature set applies equally to Hypershift with minimal resource impact
+Hypershift does not properly take FeatureSet into account and applies all CVO manifests from the release payload
+regardless of the configured feature set ([CNTRLPLANE-619](https://issues.redhat.com/browse/CNTRLPLANE-619),
+[OTA-1397](https://issues.redhat.com/browse/OTA-1397)). Work is ongoing to implement proper manifest selection
+logic in the CVO for Hypershift environments.
 
 #### Standalone Clusters
 
-The OKD feature set is designed for standalone OKD clusters. The feature set is enabled by default during installation and can transition to TechPreviewNoUpgrade or DevPreviewNoUpgrade.
+The OKD feature set is designed for standalone OKD clusters. The feature set is enabled by default during
+installation of an OKD cluster and can transition to TechPreviewNoUpgrade, DevPreviewNoUpgrade, or CustomNoUpgrade.
 
 #### Single-node Deployments or MicroShift
 
@@ -143,7 +150,8 @@ The OKD feature set is designed for standalone OKD clusters. The feature set is 
 
 #### OpenShift Kubernetes Engine
 
-N/A
+OKE is an OpenShift product and is not affected by this enhancement. The OKD feature set is explicitly blocked
+from being enabled on all OpenShift clusters, including OKE.
 
 ### Implementation Details/Notes/Constraints
 
@@ -202,6 +210,23 @@ based on stability, feedback value, and alignment with OKD's mission. Only featu
 (v1 or v1beta1) will be included beyond the Default feature set to ensure cluster stability and upgrade
 compatibility.
 
+#### Feature Selection Criteria
+
+For a  feature to be included in the OKD feature that's not already in the Default feature set, it must meet all
+of the following criteria:
+
+1. **Stable API guarantees**: The feature must have a stable API with v1 or v1beta1 API versions. This ensures that
+   the feature's API contract is sufficiently mature and will not undergo breaking changes.
+
+2. **Test coverage**: The feature must pass tests in the TechPreview test suite, demonstrating that the
+   feature functions correctly.
+
+3. **Business commitment**: The feature must have explicit agreement from the relevant Business Unit and Product
+   Management that the feature will be delivered and committed to for future releases. 
+
+These criteria ensure that only features with both technical maturity and organizational commitment are enabled by
+default in OKD which insures cluster stability 
+
 ### Risks and Mitigations
 
 The primary risk is unstable features causing cluster failures, which is mitigated by carefully curating
@@ -215,12 +240,11 @@ reinstallation guidance when needed.
 
 Introducing an OKD-specific feature set creates a divergence point between the community and commercial
 distributions, though this is intentional and aligns with OKD's role as a proving ground for new features.
-Supporting an additional feature set requires maintaining additional CRD manifests and ensuring the OKD variant
-is tested alongside other feature sets, which is mitigated by automated generation of manifests and existing CI
-infrastructure. The inability to transition back to Default after enablement might frustrate administrators who
-want to switch configurations, but this ensures consistency and prevents unexpected behavior during the cluster
-lifecycle. Finally, the OKD feature set adds another configuration variant that needs testing, which is
-addressed by leveraging existing OKD CI infrastructure and the feature gate testing framework.
+Supporting an additional feature set requires maintaining additional CRD manifests, which is mitigated by automated
+generation of manifests. The inability to transition back to Default after enablement might frustrate
+administrators who want to switch configurations, but this ensures consistency and prevents unexpected behavior
+during the cluster lifecycle. Existing OKD Default feature set testing will automatically become OKD feature set
+testing through the automatic migration, so there is no change to the testing framework.
 
 ## Alternatives (Not Implemented)
 
