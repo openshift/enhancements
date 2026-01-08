@@ -367,6 +367,10 @@ has explicitly opted into the new functionality via the new configuration option
 Similar to all other BYO OIDC related enhancements, this will have no impact to MicroShift as
 it does not run with multiple users and does not have a mechanism for configuring authentication in this way.
 
+#### OpenShift Kubernetes Engine
+
+No specific impacts to OpenShift Kubernetes Engine, but the changes are likely to be applicable.
+
 ### Implementation Details/Notes/Constraints
 
 #### Context: How Authentication Works in the Kubernetes API Server
