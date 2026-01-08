@@ -299,15 +299,20 @@ externalClaims:
     - method: { GET | POST }
       # url configures the endpoint that the request should be made to.
       url:
-        # type is the type of the URL configuration.
-        # When set to Static, an exact URL must be provided.
-        # When set to Expression, a CEL expression used to construct the URL must be provided.
-        type: { Static | Expression }
-        # static is required when type is Static and must be a valid HTTPS URL.
-        static: "https://some.static.url/with/paths"
-        # expression is required when type is Expression and must be a valid CEL expression
-        # that returns a URL string
-        expression: "\"https://graph.microsoft.com/v1.0/users/\" + claims.upn + \"/memberOf\""
+        # base is the base of the URL consisting only of the scheme and the hostname
+        base: "https://contoso.com"
+        # path is a list of path items to be joined, in order, to construct the path
+        # to be added to the URL when making a request.
+        # each entry is escaped before being added.
+        path:
+         - type: String
+           string: v1
+         - type: String
+           string: users
+         - type: Claim
+           claim: upn
+         - type: String
+           string: etc
       # mappings is a required list of claims that should be
       # built with the response from the request to this source.
       mappings:
@@ -449,17 +454,6 @@ For example, a failure to fetch a user's group memberships from an external sour
 of a `groups` claim being available for use in cluster identity building.
 It is up to end-user discretion to configure identity mapping behavior to proceed with partial information
 or to fail on absence of a claim through their usage of CEL expressions.
-
-To aid in preventing the webhook from making malformed requests to external claim sources
-when using dynamic/templated URLs, CEL utilities will be added to enable path and query parameter escaping.
-
-As an example, an end-user could write a CEL expression like:
-```yaml
-...
-expression: "\"https://graph.microsoft.com/v1.0/users/\" + urlPathEscape(claims.upn) + \"/memberOf\""
-...
-```
-to perform path escaping on the value of the `upn` claim.
 
 Diagram of how this new component will work:
 ```mermaid
