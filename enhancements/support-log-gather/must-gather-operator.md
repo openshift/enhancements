@@ -44,6 +44,7 @@ The cli utility, oc adm must-gather can collect data from the cluster and dump t
 4. Provide role-based access control allowing users can trigger must-gather collection by creating a MustGather CR
 5. Maintain compatibility with existing must-gather toolchain and image formats
 6. Report status of the must-gather collection into the MustGather CR
+7. Support cluster-wide egress proxy settings for SFTP uploads in air-gapped environments
 
 ### Non-Goals
 
@@ -386,7 +387,7 @@ To customize proxy settings, a cluster administrator can override the `HTTP_PROX
 
 ### Trusted Certificate Authority
 
-The operator supports custom Certificate Authority (CA) bundles for environments using proxy servers with TLS interception. When the `TRUSTED_CA_CONFIGMAP_NAME` environment variable is set on the operator deployment (via OLM Subscription or direct patch), the operator mounts the referenced ConfigMap containing the CA bundle at `/etc/pki/tls/certs/ca-bundle.crt`. This ConfigMap should be labeled with `config.openshift.io/inject-trusted-cabundle=true` to leverage OpenShift's [CA bundle injection](https://docs.openshift.com/container-platform/4.12/networking/configuring-a-custom-pki.html#certificate-injection-using-operators_configuring-a-custom-pki).
+The operator supports custom Certificate Authority (CA) bundles for environments using proxy servers with TLS interception. When the `TRUSTED_CA_CONFIGMAP_NAME` environment variable is set on the operator deployment (via OLM Subscription or direct patch), the operator mounts the referenced ConfigMap containing the CA bundle at `/etc/pki/tls/certs/ca-bundle.crt`. This ConfigMap should be labeled with `config.openshift.io/inject-trusted-cabundle=true` to leverage OpenShift's [CA bundle injection](https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html/configuring_network_settings/configuring-a-custom-pki#certificate-injection-using-operators_configuring-a-custom-pki). See [openshift/must-gather-operator#312](https://github.com/openshift/must-gather-operator/pull/312) for implementation details.
 
 #### Reconcile flow
 
