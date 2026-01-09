@@ -10,7 +10,7 @@ approvers:
 api-approvers:
   - JoelSpeed
 creation-date: 2025-05-21
-last-updated: 2025-05-21
+last-updated: 2026-01-09
 tracking-link:
   - https://issues.redhat.com/browse/OPNET-678
 see-also:
@@ -114,7 +114,7 @@ platform:
   baremetal:
     loadBalancer:
       type: UserManaged
-    internalDNSRecords: Disabled
+    dnsRecordsType: External
 ```
 
 ### Risks and Mitigations
