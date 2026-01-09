@@ -408,6 +408,45 @@ OKE-specific considerations:
 * OKE cluster networking must support connectivity to guest cluster
   worker nodes
 
+### Relationship to Standalone OpenShift Platform Types
+
+This enhancement is specifically for HyperShift hosted control planes and
+is distinct from standalone OpenShift cluster installation on OCI.
+
+**Standalone OpenShift on OCI** (IPI/UPI installation):
+* Currently uses `platform: External` in the Infrastructure resource (per
+  the [infrastructure-external-platform-type
+  enhancement](https://github.com/openshift/enhancements/blob/master/enhancements/cloud-integration/infrastructure-external-platform-type.md))
+* OCI cloud controller manager and CSI drivers are deployed via custom
+  manifests
+* OpenShift operators treat `External` platform generically without
+  OCI-specific logic
+
+**HyperShift with OCI platform support** (this enhancement):
+* Adds OCI as a specific platform type in `hypershift.openshift.io/v1beta1`
+  API
+* HostedCluster and NodePool CRDs include OCI-specific configuration fields
+  (compartmentID, VCN, region, etc.)
+* HyperShift operator orchestrates infrastructure provisioning via CAPOCI
+* Guest cluster nodes will use the OCI cloud controller manager and CSI
+  drivers
+
+**Why the difference?**
+
+The HyperShift architecture requires the management cluster to orchestrate
+infrastructure provisioning for guest clusters. This necessitates
+platform-specific configuration in the HostedCluster CRD (VCN IDs,
+compartment IDs, regions, subnets) that the HyperShift operator uses to
+create CAPOCI resources. The `External` platform type pattern pushes these
+details to external operators, which doesn't fit the HyperShift
+reconciliation model where the operator needs this information upfront.
+
+This architectural difference means:
+* Standalone OCI clusters continue using `platform: External`
+* HyperShift hosted clusters use `platform: OCI` in the HostedCluster spec
+* Both approaches leverage the same upstream OCI CCM and CSI drivers for
+  cloud integration
+
 ### Implementation Details/Notes/Constraints
 
 The implementation requires changes across several components:
@@ -435,6 +474,47 @@ The implementation requires changes across several components:
 * Deploy OCI cloud controller manager in hosted control planes
 * Configure CSI driver for OCI block storage
 * Implement integration with OCI IAM for service authentication
+
+**OCI Cloud Provider Component Deployment**:
+
+The OCI cloud controller manager (CCM) and Container Storage Interface
+(CSI) drivers are deployed in the guest cluster to provide cloud
+integration for LoadBalancer services, persistent volumes, and node
+management.
+
+**Deployment Approach**:
+* OCI CCM and CSI drivers will be deployed to guest clusters using
+  **custom manifests**, following the pattern established for standalone
+  OpenShift on OCI
+* Manifests will be sourced from Oracle's upstream repositories:
+  - OCI CCM: https://github.com/oracle/oci-cloud-controller-manager
+  - OCI CSI: https://github.com/oracle/oci-cloud-controller-manager
+    (contains CSI drivers)
+* The HyperShift control plane operator will apply these manifests during
+  hosted control plane reconciliation
+* MachineConfig resources will configure kubelet provider IDs from OCI
+  metadata (similar to standalone OCI pattern)
+
+**Rationale**:
+This approach follows the established pattern from standalone OpenShift on
+OCI (via the `oracle-quickstart/oci-openshift` reference implementation)
+and provides a proven deployment method. It is also consistent with how
+other emerging HyperShift platforms handle cloud provider integration
+before operators exist for automated deployment.
+
+**Future Enhancement**:
+In a future phase, OCI CCM and CSI driver deployment could be automated
+through a dedicated operator (similar to how CCCMO handles other cloud
+providers), but the custom manifest approach provides a viable path for
+initial implementation and aligns with Oracle's current OpenShift
+integration pattern.
+
+**Manifest Management**:
+* Custom manifests will be maintained in the HyperShift repository under
+  `control-plane-operator/controllers/hostedcontrolplane/manifests/oci/`
+* Manifests will be versioned to match OpenShift release compatibility
+* Updates to OCI CCM/CSI drivers will require updating these manifests and
+  testing against target OpenShift versions
 
 **Observability**:
 * Configure metrics collection for OCI-specific components
@@ -498,17 +578,25 @@ from each team to enable full OCI HCP functionality.
 * Support for OCI-specific storage classes and volume parameters
 
 **Specific Changes Needed**:
+* **Initial approach**: Deploy OCI CSI drivers via custom manifests in
+  the HyperShift control plane operator (following the pattern from
+  `oracle-quickstart/oci-openshift`)
 * Collaborate with Oracle on upstream OCI CSI drivers
   (https://github.com/oracle/oci-cloud-controller-manager contains CSI
   drivers)
-* Work with Oracle to ensure drivers meet OpenShift requirements and can
-  be included in OpenShift release payload
-* Package OCI CSI drivers in OpenShift release payload
+* Work with Oracle to ensure drivers meet OpenShift requirements
 * Create default StorageClass configurations for OCI Block Volumes
 * Document OCI-specific volume parameters (performance tiers, volume
   types)
-* Ensure CSI drivers work with OCI IAM authentication in HyperShift
+* Ensure CSI drivers work with manual credential mode in HyperShift
   context
+
+**Deployment Pattern**:
+Unlike some platforms where CSI drivers are packaged in the OpenShift
+release payload and deployed by the Cluster Storage Operator, OCI CSI
+drivers will initially be deployed via custom manifests. This follows the
+established pattern for standalone OpenShift on OCI and provides a viable
+path while upstream integration matures.
 
 **Upstream Collaboration**: Changes needed for OpenShift integration
 should be contributed to Oracle's upstream OCI CSI driver repository.
@@ -553,6 +641,30 @@ should be contributed to Oracle's upstream OCI CSI driver repository.
   connectivity
 
 **Contacts**: TBD (Networking team)
+
+#### Cloud Credential Operator Team
+
+**Requirements**:
+* Support for manual credential mode with OCI credentials
+* No OCI-specific actuator required for initial implementation
+
+**Specific Changes Needed**:
+* Document that OCI HCP uses manual credential mode for credential
+  management
+* OCI credentials (API keys or instance principal tokens) will be
+  provided as Secrets in the management cluster
+* No changes to Cloud Credential Operator code required - CCO will
+  operate in manual mode for OCI platforms
+
+**Rationale**: Similar to how standalone OpenShift on OCI currently
+operates, OCI credentials will be managed manually through Kubernetes
+Secrets. The Cloud Credential Operator does not currently have an
+OCI-specific actuator, and manual mode provides sufficient functionality
+for the initial implementation. Future enhancements could explore
+OCI-specific credential rotation and instance principal integration.
+
+**Contacts**: TBD (Cloud Credential Operator team - awareness only, no
+code changes required)
 
 #### Cloud Platform Team - CAPOCI Integration
 
