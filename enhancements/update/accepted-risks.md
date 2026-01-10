@@ -283,6 +283,10 @@ Yes, the changes of ClusterVersion and `oc adm upgrade` we're proposing here are
 
 This proposal is applicable to single-node but not to MicroShift which lacks a ClusterVersion and CVO, and manages updates via RPMs.
 
+#### OpenShift Kubernetes Engine
+
+The feature from this proposal does not depend on features that are excluded from the OKE product offering.
+
 ### Implementation Details/Notes/Constraints
 
 ### Risks and Mitigations
