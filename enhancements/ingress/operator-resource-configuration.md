@@ -9,7 +9,7 @@ approvers:
 api-approvers:
   - TBD
 creation-date: 2025-10-27
-last-updated: 2025-10-29
+last-updated: 2026-01-12
 tracking-link:
   - https://issues.redhat.com/browse/RFE-1476
 see-also:
@@ -30,7 +30,7 @@ QoS class by setting limits equal to requests.
 ## Motivation
 
 Currently, ingress router pods (the HAProxy deployments that handle ingress traffic) 
-are created with resource requests only (CPU: 200m, Memory: 256Mi) but no resource 
+are created with resource requests only (CPU: 100m, Memory: 256Mi) but no resource 
 limits defined. According to [RFE-1476](https://issues.redhat.com/browse/RFE-1476), 
 this presents challenges for:
 
@@ -44,8 +44,9 @@ this presents challenges for:
 4. **Cluster resource constraints**: Guaranteed QoS provides better protection against 
    resource contention and eviction.
 
-While the IngressController v1 API currently allows configuring resource requests via 
-`spec.nodePlacement.resources`, customers need the ability to also set **limits** to 
+Currently, there is no way to configure resource requirements for router pods via the 
+IngressController API. The router pods use hardcoded default values from the deployment 
+template. Customers need the ability to configure both **requests** and **limits** to 
 achieve Guaranteed QoS class. This enhancement introduces this capability via a new 
 field in the v1 API, protected behind a feature gate during the Tech Preview period.
 
@@ -105,7 +106,6 @@ Acceptance Criteria:
 
 - Configuring resources for the ingress-operator deployment itself (the controller)
 - Auto-scaling or dynamic resource adjustment based on traffic load
-- Modifying the existing v1 API `spec.nodePlacement.resources` field (remains unchanged)
 - Creating a separate v1alpha1 API version (using v1 with feature gate instead)
 - Vertical Pod Autoscaler (VPA) integration (may be future work)
 - Horizontal Pod Autoscaler (HPA) configuration (separate concern)
@@ -133,10 +133,11 @@ group, gated behind a feature gate. This approach is preferred by the networking
 for its simplicity - adding the feature directly to the stable v1 API while protecting 
 it behind a feature gate during the Tech Preview period.
 
-The new field allows configuring resource **limits** for router pods. The existing v1 API's 
-`spec.nodePlacement.resources` field currently allows setting requests, but this 
-enhancement adds a new field to also set limits, enabling router pods to achieve 
-Guaranteed QoS class.
+The new field allows configuring resource **requests** and **limits** for router pods. 
+Currently, there is no existing way to configure router pod resources via the API - 
+the router pods use hardcoded default values from the deployment template. This 
+enhancement adds a new field to configure both requests and limits, enabling router 
+pods to achieve Guaranteed QoS class.
 
 #### Feature Gate
 
@@ -201,30 +202,23 @@ import (
 type IngressControllerSpec struct {
     // ... existing v1 fields ...
 
-    // tuning defines parameters for tuning the performance of ingress controller pods.
-    // +optional
-    Tuning *IngressControllerTuning `json:"tuning,omitempty"`
-
     // resources defines resource requirements (requests and limits) for the
     // router pods (HAProxy containers). This field allows setting resource limits
     // to achieve Guaranteed QoS class for router pods.
     //
-    // When this field is set, it takes precedence over spec.nodePlacement.resources
-    // for configuring router pod resources.
-    //
     // When not specified, defaults to:
     //   router container:
-    //     requests: cpu: 200m, memory: 256Mi
+    //     requests: cpu: 100m, memory: 256Mi
     //     limits: none (Burstable QoS)
     //
     // To achieve Guaranteed QoS, set limits equal to requests:
     //   resources:
     //     routerContainer:
     //       requests:
-    //         cpu: 200m
+    //         cpu: 100m
     //         memory: 256Mi
     //       limits:
-    //         cpu: 200m
+    //         cpu: 100m
     //         memory: 256Mi
     //
     // Note: Changing these values will cause router pods to perform a rolling restart.
@@ -240,7 +234,7 @@ type RouterResourceRequirements struct {
     // router (HAProxy) container in router pods.
     //
     // If not specified, defaults to:
-    //   requests: cpu: 200m, memory: 256Mi
+    //   requests: cpu: 100m, memory: 256Mi
     //   limits: none
     //
     // +optional
@@ -285,10 +279,10 @@ spec:
   resources:
     routerContainer:
       requests:
-        cpu: 200m
+        cpu: 100m
         memory: 256Mi
       limits:
-        cpu: 200m
+        cpu: 100m
         memory: 256Mi
 ```
 
@@ -322,38 +316,6 @@ spec:
         memory: 128Mi
 ```
 
-**Example 3: Precedence - new resources field over nodePlacement.resources**
-
-```yaml
-apiVersion: operator.openshift.io/v1
-kind: IngressController
-metadata:
-  name: default
-  namespace: openshift-ingress-operator
-spec:
-  replicas: 2
-  
-  # Existing nodePlacement.resources field (will be ignored when spec.resources is set)
-  nodePlacement:
-    nodeSelector:
-      matchLabels:
-        node-role.kubernetes.io/worker: ""
-    resources:
-      requests:
-        cpu: 100m
-        memory: 128Mi
-  
-  # New resources field takes precedence over nodePlacement.resources
-  resources:
-    routerContainer:
-      requests:
-        cpu: 200m
-        memory: 256Mi
-      limits:
-        cpu: 200m
-        memory: 256Mi
-```
-
 #### API Validation
 
 The following validations will be enforced:
@@ -364,9 +326,6 @@ The following validations will be enforced:
 3. **Minimum values** (recommendations, not hard limits):
    - Router container: cpu >= 100m, memory >= 128Mi recommended for production
    - Values below recommendations will generate warning events but not block the request
-4. **Precedence validation**: When both `spec.resources` and `spec.nodePlacement.resources` 
-   are set, `spec.resources` takes precedence and a warning event is logged about the 
-   ignored `nodePlacement.resources` field
 
 ### Topology Considerations
 
@@ -412,35 +371,33 @@ handle the new `resources` field when reconciling router deployments.
 2. Check `IngressRouterResourceLimits` feature gate status
 3. When feature gate is enabled and `spec.resources` field is set:
    - Use `spec.resources` field to configure router pod container resources
-   - Ignore `spec.nodePlacement.resources` field (log warning if both are set)
 4. When feature gate is disabled or `spec.resources` field is not set:
-   - Fall back to `spec.nodePlacement.resources` behavior (current behavior)
+   - Use hardcoded defaults from deployment template (current behavior)
    - Log warning event if `spec.resources` is set but feature gate is disabled
 5. Reconcile router `Deployment` in `openshift-ingress` namespace
 6. Update container resource specifications (router, metrics, logs containers)
-7. Handle error cases gracefully (invalid values, conflicts, etc.)
+7. Handle error cases gracefully (invalid values, etc.)
 8. Generate events for configuration issues (warnings, validation failures)
 
 #### Default Behavior
 
-When the `spec.resources` field is not set:
+When the `spec.resources` field is not set or feature gate is disabled:
 
 **Current behavior (unchanged):**
-- Router pods use `spec.nodePlacement.resources` if set
-- If not set, defaults to:
-  - Router container: requests(cpu: 200m, memory: 256Mi), no limits
+- Router pods use hardcoded defaults from deployment template:
+  - Router container: requests(cpu: 100m, memory: 256Mi), no limits
   - QoS class: Burstable
 
 **With `spec.resources` field set (and feature gate enabled):**
 - Router pods use `spec.resources` configuration
 - Users can set limits to achieve Guaranteed QoS:
-  - Router container: requests(cpu: 200m, memory: 256Mi), limits(cpu: 200m, memory: 256Mi)
+  - Router container: requests(cpu: 100m, memory: 256Mi), limits(cpu: 100m, memory: 256Mi)
   - QoS class: Guaranteed
 
 **Backward compatibility:**
 - Existing IngressControllers continue working unchanged
 - New field is ignored when feature gate is disabled
-- `spec.nodePlacement.resources` behavior remains available
+- Defaults remain the same as today
 
 #### Upgrade Behavior
 
@@ -461,7 +418,7 @@ When upgrading to a version with this enhancement:
 causing ingress traffic disruptions
 
 **Mitigation**:
-- Document minimum recommended values (cpu: 200m, memory: 256Mi as baseline)
+- Document minimum recommended values (cpu: 100m, memory: 256Mi as baseline)
 - Add validation warnings (not blocking) for values below minimums
 - Include troubleshooting guide for common issues (OOM, CPU throttling)
 - Monitor router pod health metrics
@@ -472,15 +429,15 @@ causing ingress traffic disruptions
 
 **Detection**: Router pod restarts, increased error rates, degraded performance
 
-#### Risk: Incompatibility with existing tooling expecting v1 API only
+#### Risk: Existing tooling may not recognize feature-gated field
 
-**Impact**: External tools may not recognize v1alpha1 resources
+**Impact**: External tools may not recognize or handle the new `spec.resources` field
 
 **Mitigation**:
 - v1 API remains unchanged and fully functional
-- v1alpha1 is opt-in
-- Document migration path
-- Conversion webhooks ensure cross-version compatibility
+- Field is simply ignored if not understood by tools
+- No breaking changes to existing functionality
+- Standard Kubernetes resource requirements types used
 
 **Likelihood**: Low
 
@@ -513,13 +470,10 @@ brief connection disruptions during pod replacement
 
 ### Drawbacks
 
-1. **Increased API complexity**: Adds v1alpha1 version and another configuration mechanism
-2. **Maintenance burden**: Requires maintaining v1alpha1 API version and conversion logic
-3. **Overlapping configuration**: Two ways to configure resources (v1 `nodePlacement.resources` 
-   and v1alpha1 `resources`) may confuse users
-4. **Documentation overhead**: Need to document new field, precedence rules, and migration path
-5. **Testing complexity**: Must test version conversion, upgrade scenarios, and feature gate behavior
-6. **Feature gate dependency**: Adds operational complexity with feature gate management
+1. **Feature gate dependency**: Adds operational complexity with feature gate management during Tech Preview
+2. **Documentation overhead**: Need to document new field and usage patterns
+3. **Testing complexity**: Must test upgrade scenarios and feature gate behavior
+4. **Potential for misconfiguration**: Users may set inappropriate resource values affecting router stability
 
 ## Design Details
 
@@ -534,35 +488,26 @@ brief connection disruptions during pod replacement
 3. **Q**: Should this apply to all IngressControllers or only the default?
    - **A**: API supports any IngressController, including custom IngressControllers
 
-4. **Q**: What happens if both v1 and v1alpha1 resources are set?
-   - **A**: v1alpha1 takes precedence, with warning event logged. Documented in API validation section.
-
-5. **Q**: Should we eventually merge this into v1 API or keep separate?
-   - **A**: After Tech Preview proving stable, consider promoting to v1 (GA) in future release
-
 ### Test Plan
 
 #### Unit Tests
 
-- **API conversion tests**: v1 ↔ v1alpha1 conversion correctness
 - **Feature gate handling**: Behavior with gate enabled/disabled
-- **Controller reconciliation logic**: Mock router deployment updates with v1alpha1 resources
+- **Controller reconciliation logic**: Mock router deployment updates with resources field
 - **Resource requirement validation**: Edge cases and invalid inputs
-- **Default value handling**: Ensure defaults applied correctly
-- **Precedence logic**: v1alpha1 resources override v1 nodePlacement.resources
+- **Default value handling**: Ensure defaults applied correctly when field not set
 
 Coverage target: >80% for new code
 
 #### Integration Tests
 
-- **API server integration**: v1alpha1 CRD registration and serving
-- **Conversion webhook**: Automatic conversion between v1 and v1alpha1 versions
+- **API server integration**: v1 API field recognition when feature gate enabled
 - **Controller watches**: IngressController changes trigger router deployment reconciliation
 - **Feature gate integration**: Verify feature gate controls field recognition
 
 #### E2E Tests
 
-- **Create IngressController with v1alpha1 resources field**
+- **Create IngressController with resources field**
   - Verify router deployment is updated with correct resource limits
   - Verify router pods achieve Guaranteed QoS class
   - Verify router continues handling traffic normally
@@ -576,26 +521,20 @@ Coverage target: >80% for new code
   - Verify router deployment reverts to default values
   - Verify router pods revert to Burstable QoS
   
-- **Test v1 and v1alpha1 precedence**
-  - Set both v1 nodePlacement.resources and v1alpha1 resources
-  - Verify v1alpha1 takes precedence
-  - Verify warning event is generated
-  
 - **Feature gate disabled scenario**
-  - Set v1alpha1 resources field with feature gate disabled
+  - Set resources field with feature gate disabled
   - Verify field is ignored with warning
-  - Verify fallback to v1 behavior
+  - Verify fallback to default behavior
   
 - **Upgrade scenario tests**
   - Upgrade from version without feature to version with feature
   - Verify existing IngressControllers continue working unchanged
-  - Verify v1 API remains functional
-  - Enable feature gate and verify v1alpha1 works
+  - Enable feature gate and verify resources field works
   
 - **Downgrade scenario tests**
-  - Downgrade from version with v1alpha1 to version without
-  - Verify graceful degradation (v1alpha1 fields ignored)
-  - Verify router pods continue with v1 configuration
+  - Downgrade from version with feature to version without
+  - Verify graceful degradation (resources field ignored)
+  - Verify router pods continue with default configuration
 
 #### Manual Testing
 
@@ -661,12 +600,12 @@ N/A - this is a new feature
 1. Feature gate `IngressRouterResourceLimits` no longer recognized
 2. IngressController CRs with `spec.resources` field set will have it ignored
 3. The field remains in the CR but is not processed
-4. Router pods fall back to `spec.nodePlacement.resources` configuration or defaults
+4. Router pods fall back to hardcoded defaults (cpu: 100m, memory: 256Mi)
 5. No data loss - CR remains valid, field just ignored
-6. Router pods may lose Guaranteed QoS if it was only configured via `spec.resources`
+6. Router pods will revert to Burstable QoS if Guaranteed was configured via `spec.resources`
 
 **User impact**: Loss of custom router resource limits configured via the feature-gated 
-field; reverts to `nodePlacement.resources` or defaults
+field; reverts to hardcoded defaults
 
 #### Version Skew
 
@@ -707,21 +646,16 @@ During cluster upgrades, the API server may be updated before or after the ingre
    - IngressController status reflects error
    - Operator logs provide debugging information
 
-3. **API conversion failure**: 
-   - Request fails with error message
-   - User notified of conversion issue
-   - Existing resources unaffected
-
-4. **Router pod restart loop due to low resources**:
+3. **Router pod restart loop due to low resources**:
    - Kubernetes backoff prevents rapid restarts
    - Events and logs indicate resource pressure (OOMKilled, etc.)
    - Admin can update IngressController to increase resource limits
    - Traffic may be degraded during restart loop
 
-5. **Feature gate disabled but `spec.resources` field used**:
+4. **Feature gate disabled but `spec.resources` field used**:
    - `spec.resources` field is ignored
    - Warning event logged
-   - Falls back to `spec.nodePlacement.resources` behavior
+   - Falls back to hardcoded defaults
    - No traffic impact
 
 #### Support Procedures
