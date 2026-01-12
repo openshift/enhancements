@@ -305,11 +305,8 @@ externalClaims:
   # claims is a required list of additional claims
   # to be sourced from external sources
   claims:
-      # method is the HTTP method that should be used when making a request to this endpoint.
-      # Only the GET method is supported
-    - method: GET
       # url configures the endpoint that the request should be made to.
-      url:
+    - url:
         # base is the base of the URL consisting only of the scheme and the hostname
         base: "https://contoso.com"
         # pathExpression is a CEL expression that returns a string
@@ -386,11 +383,8 @@ externalClaims:
   # claims is a required list of additional claims
   # to be sourced from external sources
   claims:
-      # method is the HTTP method that should be used when making a request to this endpoint.
-      # Only the GET method is supported
-    - method: GET
       # url configures the endpoint that the request should be made to.
-      url:
+    - url:
         # base is the base of the URL consisting only of the scheme and the hostname
         base: "https://contoso.com"
         # pathExpression is a CEL expression that returns a string
