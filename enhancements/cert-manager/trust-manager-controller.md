@@ -10,8 +10,8 @@ approvers:
   - "@tgeer" ## approver for cert-manager component
 api-approvers:
   - "@tgeer" ## approver for cert-manager component
-creation-date: 2024-12-23
-last-updated: 2024-12-23
+creation-date: 2025-12-23
+last-updated: 2026-01-12
 tracking-link:
   - https://issues.redhat.com/browse/CM-830
 see-also:
@@ -88,8 +88,7 @@ provides a unified solution for certificate lifecycle management and trust distr
 - Provide OpenShift-native integration for the default CA package using CNO's trusted CA bundle injection instead of the 
   upstream Debian-based approach.
 - trust-manager operand will always be deployed in the `cert-manager` namespace.
-- Support configurable trust namespace (where trust sources are read from), with the operator creating the namespace if 
-  it doesn't exist.
+- Support configurable trust namespace (where trust sources are read from). The namespace must exist before creating  the TrustManager CR.
 - Dynamic RBAC configuration based on `secretTargets` settings to control secret write permissions.
 - Support both OpenShift and MicroShift platforms.
 - Release as TechPreview with dual feature gate mechanism (operator feature gate + OpenShift FeatureSet).
@@ -99,20 +98,19 @@ provides a unified solution for certificate lifecycle management and trust distr
 - Removing the `trustmanagers.operator.openshift.io` CR object will not 
   remove the `trust-manager` deployment or its associated resources (ServiceAccount, RBAC, Services, etc.). Deleting 
   the CR will only stop the reconciliation of the resources created for the operand installation. 
-  
-   - This limitation will be re-evaluated in future releases.
+  This limitation will be re-evaluated in future releases.
 
 - Automatic cleanup of `Bundle` resources created by users when the TrustManager CR is deleted.
 
 - Automatic deletion of the trust namespace when the TrustManager CR is deleted or updated with a new namespace.
 
-- Automatic cleanup of Configmaps created to support `DefaultCAPackage` option, when this field is toggled or TrustManager CR is deleted.
+- Automatic cleanup of Configmap created to support `DefaultCAPackage` option, when this field is toggled or TrustManager CR is deleted.
 
 - For TechPreview, the `targetNamespaces` option will not be configurable. This option controls which namespaces 
   trust-manager has RBAC permissions to write Bundle targets to. By default, trust-manager can write to all namespaces.
   
   Users can still use `namespaceSelector` in Bundle CRs to filter target namespaces, but cannot restrict the 
-  RBAC-level permissions. This option may be evaluated for GA release.
+  RBAC-level permissions. This option will be evaluated for GA release.
 
 
 
@@ -127,8 +125,9 @@ Tech Preview. The feature requires both the operator's `TrustManager` feature ga
 cluster to be configured with a TechPreview-compatible feature set (`TechPreviewNoUpgrade`, `DevPreviewNoUpgrade`, 
 or `CustomNoUpgrade`). On clusters with the default feature set, the trust-manager feature will not be available.
 
-The feature is supported on both OpenShift and MicroShift. On MicroShift, the OpenShift 
-FeatureSet gating is not enforced, and users can enable trust-manager using only the operator feature gate.
+The feature is supported on both OpenShift and MicroShift. Since MicroShift does not support 
+OpenShift FeatureSets, the FeatureSet gating is not enforced on MicroShift, and users can enable 
+trust-manager using only the operator feature gate.
 
 A new controller will be added to `cert-manager-operator` to manage and maintain the `trust-manager` deployment in the 
 desired state. `trust-manager-controller` will make use of static manifest templates for creating the resources required for successfully 
@@ -192,17 +191,16 @@ flowchart TB
         D --> ST{secretTargets.policy?}
         ST -->|Disabled| ST1[No secret write access]
         ST -->|All| ST2[Add secret write rules<br/>to ClusterRole]
-        ST -->|Specific| ST3[Add secret write rules<br/>with resourceNames]
+        ST -->|Custom| ST3[Add secret write rules<br/>with resourceNames]
         ST2 --> ST4[Add --secret-targets-enabled<br/>to Deployment args]
         ST3 --> ST4
     end
 
     subgraph DefaultCA["DefaultCAPackage Configuration"]
         D --> L{defaultCAPackage.policy<br/>Enabled?}
-        L -->|Yes| M[Create injection ConfigMap<br/>with CNO label]
-        M --> N[CNO injects<br/>trusted CA bundle]
-        N --> O[Controller formats<br/>CA bundle to JSON]
-        O --> P[Create package ConfigMap]
+        L -->|Yes| M[Read cert-manager-operator-trusted-ca-bundle<br/>from operator namespace]
+        M --> O[Controller formats<br/>CA bundle to JSON]
+        O --> P[Create trust-manager-default-ca-package<br/>in operand namespace]
         P --> Q[Mount to Deployment<br/>at /packages]
         Q --> Q1[Add --default-package-location<br/>to Deployment args]
         L -->|No| R[Skip DefaultCA setup]
@@ -229,11 +227,12 @@ flowchart TB
   - `trust-manager-controller` based on the configuration in `trustmanagers.operator.openshift.io` CR, installs `trust-manager` 
     in the `cert-manager` namespace.
   - If `defaultCAPackage.policy` is `Enabled`:
-    1. Controller creates a ConfigMap with label `config.openshift.io/inject-trusted-cabundle: true`
-    2. CNO detects this label and injects the cluster's trusted CA bundle into the ConfigMap
-    3. Controller reads and formats the CA bundle into trust-manager's expected JSON format
-    4. Controller creates a package ConfigMap and mounts it to the trust-manager deployment
-    5. trust-manager starts with `--default-package-location` pointing to the package
+    1. Controller reads the CA bundle from `cert-manager-operator-trusted-ca-bundle` ConfigMap in the operator namespace 
+       (created during operator installation via OLM bundle, with CNO injecting the trusted CA bundle)
+    2. Controller formats the CA bundle into trust-manager's expected JSON format
+    3. Controller creates `trust-manager-default-ca-package` ConfigMap in the operand namespace and mounts it 
+       to the trust-manager deployment
+    4. trust-manager starts with `--default-package-location` pointing to the package
 
 - Uninstallation of `trust-manager`
   - An OpenShift user deletes the `trustmanagers.operator.openshift.io` CR.
@@ -337,10 +336,12 @@ type TrustManagerConfig struct {
 	// trustNamespace is the namespace where trust-manager looks for trust sources
 	// (ConfigMaps and Secrets containing CA certificates).
 	// Defaults to "cert-manager" if not specified.
+	// This field is immutable once set.
 	// This field can have a maximum of 63 characters.
 	// +kubebuilder:default:="cert-manager"
 	// +kubebuilder:validation:MinLength:=1
 	// +kubebuilder:validation:MaxLength:=63
+	// +kubebuilder:validation:XValidation:rule="oldSelf == '' || self == oldSelf",message="trustNamespace is immutable once set"
 	// +kubebuilder:validation:Optional
 	// +optional
 	TrustNamespace string `json:"trustNamespace,omitempty"`
@@ -381,6 +382,7 @@ type TrustManagerConfig struct {
 	// ref: https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/
 	// +listType=atomic
 	// +kubebuilder:validation:MinItems:=0
+  // +kubebuilder:validation:MaxItems:=50
 	// +kubebuilder:validation:Optional
 	// +optional
 	Tolerations []corev1.Toleration `json:"tolerations,omitempty"`
@@ -389,6 +391,7 @@ type TrustManagerConfig struct {
 	// ref: https://kubernetes.io/docs/concepts/configuration/assign-pod-node/
 	// +mapType=atomic
 	// +kubebuilder:validation:MinProperties:=0
+  // +kubebuilder:validation:MaxProperties:=50
 	// +kubebuilder:validation:Optional
 	// +optional
 	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
@@ -397,21 +400,21 @@ type TrustManagerConfig struct {
 // SecretTargetsConfig configures whether and how trust-manager can write
 // trust bundles to Secrets.
 //
-// +kubebuilder:validation:XValidation:rule="self.policy != 'Specific' || (has(self.authorizedSecrets) && size(self.authorizedSecrets) > 0)",message="authorizedSecrets must not be empty when policy is Specific"
-// +kubebuilder:validation:XValidation:rule="self.policy == 'Specific' || !has(self.authorizedSecrets) || size(self.authorizedSecrets) == 0",message="authorizedSecrets must be empty when policy is not Specific"
+// +kubebuilder:validation:XValidation:rule="self.policy != 'Custom' || (has(self.authorizedSecrets) && size(self.authorizedSecrets) > 0)",message="authorizedSecrets must not be empty when policy is Custom"
+// +kubebuilder:validation:XValidation:rule="self.policy == 'Custom' || !has(self.authorizedSecrets) || size(self.authorizedSecrets) == 0",message="authorizedSecrets must be empty when policy is not Custom"
 type SecretTargetsConfig struct {
 	// policy controls whether and how trust-manager can write trust bundles to Secrets.
-	// Allowed values are "Disabled", "All", or "Specific".
+	// Allowed values are "Disabled", "All", or "Custom".
 	// "Disabled" means trust-manager cannot write trust bundles to Secrets (default behavior).
 	// "All" grants trust-manager permission to create and update ALL secrets across all namespaces.
-	// "Specific" grants trust-manager permission to create and update only the secrets listed in authorizedSecrets.
+	// "Custom" grants trust-manager permission to create and update only the secrets listed in authorizedSecrets.
 	// +kubebuilder:default:="Disabled"
 	// +kubebuilder:validation:Optional
 	// +optional
 	Policy SecretTargetsPolicy `json:"policy,omitempty"`
 
 	// authorizedSecrets is a list of specific secret names that trust-manager
-	// is authorized to create and update. This field is only valid when policy is "Specific".
+	// is authorized to create and update. This field is only valid when policy is "Custom".
 	// +listType=set
 	// +kubebuilder:validation:MinItems:=0
 	// +kubebuilder:validation:items:MinLength:=1
@@ -462,7 +465,7 @@ const (
 )
 
 // SecretTargetsPolicy defines the policy for writing trust bundles to Secrets.
-// +kubebuilder:validation:Enum:=Disabled;All;Specific
+// +kubebuilder:validation:Enum:=Disabled;All;Custom
 type SecretTargetsPolicy string
 
 const (
@@ -470,8 +473,8 @@ const (
 	SecretTargetsPolicyDisabled SecretTargetsPolicy = "Disabled"
 	// SecretTargetsPolicyAll grants trust-manager permission to write to ALL secrets.
 	SecretTargetsPolicyAll SecretTargetsPolicy = "All"
-	// SecretTargetsPolicySpecific grants trust-manager permission to write to specific secrets only.
-	SecretTargetsPolicySpecific SecretTargetsPolicy = "Specific"
+	// SecretTargetsPolicyCustom grants trust-manager permission to write to specific secrets only.
+	SecretTargetsPolicyCustom SecretTargetsPolicy = "Custom"
 )
 
 // DefaultCAPackagePolicy defines the policy for the default CA package feature.
@@ -576,14 +579,17 @@ The trust-manager controller is gated behind two mechanisms for the Tech Preview
 #### DefaultCAPackage Implementation
 
 The DefaultCAPackage configuration replaces the upstream Debian-based init container 
-approach.
+approach with an OpenShift-native solution using CNO's trusted CA bundle injection.
 
-1. **Injection ConfigMap**: The controller creates a ConfigMap named `trust-manager-default-ca-injection` with the 
-   label `config.openshift.io/inject-trusted-cabundle: true`. CNO monitors for this label and injects 
-   the cluster's trusted CA bundle into the `ca-bundle.crt` key.
+1. **Injection ConfigMap (OLM Bundle)**: A ConfigMap named `cert-manager-operator-trusted-ca-bundle` with the 
+   label `config.openshift.io/inject-trusted-cabundle: true` is included in the OLM bundle and applied during 
+   operator installation in the **operator namespace** (`cert-manager-operator`). CNO monitors for this label 
+   and injects the cluster's trusted CA bundle into the `ca-bundle.crt` key. This ConfigMap is created early 
+   during operator installation, giving CNO time to inject the CA bundle before any operand needs it. This 
+   ConfigMap can also be consumed by other operands as needed.
 
-2. **Package Formatting**: The controller reads the injected CA bundle and formats it into trust-manager's expected 
-   JSON format:
+2. **Package Formatting**: When `defaultCAPackage.policy` is `Enabled`, the controller reads the injected CA 
+   bundle and formats it into trust-manager's expected JSON format:
    ```json
    {
      "name": "cert-manager-package-openshift",
@@ -592,16 +598,24 @@ approach.
    }
    ```
 
-3. **Package ConfigMap**: The controller creates a second ConfigMap named `trust-manager-default-ca-package` containing 
-   the formatted JSON package.
+3. **Package ConfigMap**: The controller creates a ConfigMap named `trust-manager-default-ca-package` in the 
+   **operand namespace** (`cert-manager`) containing the formatted JSON package.
 
 4. **Volume Mount**: The package ConfigMap is mounted to the trust-manager deployment at `/packages`, and the 
    `--default-package-location=/packages/cert-manager-package-openshift.json` argument is added.
 
-5. **Automatic Updates**: When CNO updates the injected CA bundle, 
-   the controller detects the change via ConfigMap watch, reformats the package, and updates the package ConfigMap. 
+5. **Controller Watch**: The trust-manager controller watches both ConfigMaps for changes:
+   - `cert-manager-operator-trusted-ca-bundle` in the operator namespace (injection ConfigMap)
+   - `trust-manager-default-ca-package` in the operand namespace (formatted package ConfigMap)
    
-   [TODO: Testing required]: The trust-manager pod will need to be restarted to pick up the new package.
+   When CNO updates the injected CA bundle, the controller detects the change, reformats the package, and 
+   updates the package ConfigMap in the operand namespace.
+
+6. **Pod Restart on Package Update**: To ensure trust-manager pods use the updated CA package, the controller 
+   maintains a hash of the package content as an annotation on the Deployment (e.g., 
+   `operator.openshift.io/default-ca-package-hash`). When the package changes, the controller computes a new 
+   hash and updates the Deployment annotation. This change triggers a rolling restart of the trust-manager pods, 
+   ensuring they pick up the new CA bundle.
 
 #### RBAC Configuration
 
@@ -620,8 +634,10 @@ The controller creates the following RBAC resources for trust-manager:
 **Trust Namespace Handling:**
 
 The trust namespace (`spec.trustManagerConfig.trustNamespace`) can be different from the operand namespace 
-(cert-manager). When a different trust namespace is configured:
-1. The operator creates the trust namespace if it doesn't exist
+(cert-manager). The trust namespace **must exist** before creating the TrustManager CR. When a different 
+trust namespace is configured:
+1. The operator validates that the trust namespace exists; if not, it sets a Degraded condition with a 
+   message indicating the namespace does not exist
 2. The `trust-manager` Role and RoleBinding are created in the trust namespace (for secret access)
 3. The leader election Role and RoleBinding remain in the operand namespace (cert-manager)
 4. The ServiceAccount subject in all RoleBindings always references the operand namespace
@@ -631,8 +647,24 @@ The trust namespace (`spec.trustManagerConfig.trustNamespace`) can be different 
 The ClusterRole for trust-manager is dynamically configured based on the `secretTargets` configuration:
 
 - **Default (secretTargets.policy: Disabled)**: Read-only access to secrets, read-write access to configmaps
-- **secretTargets.policy: Specific**: Additional rules to create/update specific secret names listed in authorizedSecrets
+- **secretTargets.policy: Custom**: Additional rules to create/update specific secret names listed in authorizedSecrets
 - **secretTargets.policy: All**: Full create/update access to all secrets
+
+#### OLM Bundle Manifest
+
+The following ConfigMap is included in the OLM bundle and applied during operator installation. This ConfigMap 
+triggers CNO to inject the cluster's trusted CA bundle, making it available for trust-manager and other operands.
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cert-manager-operator-trusted-ca-bundle
+  namespace: cert-manager-operator
+  labels:
+    config.openshift.io/inject-trusted-cabundle: "true"
+    app.kubernetes.io/name: cert-manager-operator
+```
 
 #### Manifests for installing trust-manager
 
@@ -680,14 +712,14 @@ Below are example static manifests used for creating required resources for inst
      - apiGroups: [""]
        resources: ["events"]
        verbs: ["create", "patch"]
-    # Secret read access (when secretTargets.policy is All or Specific)
+    # Secret read access (when secretTargets.policy is All or Custom)
     - apiGroups: [""]
       resources: ["secrets"]
       verbs: ["get", "list", "watch"]
-    # Secret write access (when secretTargets.policy is All or Specific)
+    # Secret write access (when secretTargets.policy is All or Custom)
      # - apiGroups: [""]
      #   resources: ["secrets"]
-     #   resourceNames: ["specific-secret-names"]  # when policy is Specific; omit resourceNames when policy is All
+     #   resourceNames: ["specific-secret-names"]  # when policy is Custom; omit resourceNames when policy is All
      #   verbs: ["create", "update", "patch", "delete"]
    ```
 
@@ -758,7 +790,7 @@ Below are example static manifests used for creating required resources for inst
               - --webhook-host=0.0.0.0
               - --webhook-port=6443
               - --webhook-certificate-dir=/tls
-              # Added when secretTargets.policy is All or Specific
+              # Added when secretTargets.policy is All or Custom
               # - --secret-targets-enabled=true
               # Added when defaultCAPackage.policy is Enabled
               # - --default-package-location=/packages/cert-manager-package-openshift.json
@@ -838,10 +870,12 @@ Below are example static manifests used for creating required resources for inst
 
 
 - **DefaultCAPackage Dependency on CNO**: The DefaultCAPackage option depends on CNO's CA bundle 
-  injection. If CNO is not functioning correctly, the CA bundle won't be injected, and trust-manager will fail to 
-  start when `defaultCAPackage.policy` is `Enabled`.
-  - Mitigation: The controller implements a requeue mechanism that waits for CNO to inject the CA bundle before 
-    proceeding with the deployment. Status conditions clearly indicate when waiting for CNO injection.
+  injection. The `cert-manager-operator-trusted-ca-bundle` ConfigMap is created during operator installation via the 
+  OLM bundle, and CNO must inject the CA bundle into it. If CNO is not functioning correctly, the CA bundle 
+  won't be injected, and trust-manager will fail to start when `defaultCAPackage.policy` is `Enabled`.
+  - Mitigation: The controller implements a requeue mechanism that waits for CNO to populate the 
+    `cert-manager-operator-trusted-ca-bundle` ConfigMap before proceeding. Status conditions clearly indicate 
+    when waiting for the CA bundle injection.
 
 
 
@@ -883,7 +917,7 @@ None
 - Enable `trust-manager-controller` by creating the `trustmanagers.operator.openshift.io` CR with permutations of 
   configurations and validate the behavior:
   - Custom trust namespace
-  - Secret targets policy (Disabled/All/Specific)
+  - Secret targets policy (Disabled/All/Custom)
   - DefaultCAPackage policy (Enabled/Disabled)
   - FilterExpiredCertificates policy (Enabled/Disabled)
   - Common configurations: log levels and formats, resources, node selector, tolerations and affinity
@@ -935,9 +969,9 @@ trust-manager will be supported for:
 
 ### Failure Modes
 
-- **CNO Not Injecting CA Bundle**: If CNO fails to inject the CA bundle when `defaultCAPackage.policy` is `Enabled`, 
-  the TrustManager status will show a condition indicating it's waiting for CNO injection. The controller will 
-  requeue until the bundle is available.
+- **Trust Namespace Does Not Exist**: If the configured `trustNamespace` does not exist, the TrustManager status 
+  will show a Degraded condition with a message indicating the namespace does not exist. The operator will not 
+  deploy trust-manager until the namespace is created by the user.
 
 - **cert-manager Not Available**: If cert-manager is not installed or the issuer is not available, the webhook 
   certificate will fail to be issued, and trust-manager will not start. The status condition will indicate the failure.
