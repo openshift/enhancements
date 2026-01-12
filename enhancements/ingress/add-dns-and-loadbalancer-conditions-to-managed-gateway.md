@@ -514,7 +514,7 @@ using `condutils.SetStatusCondition()` and the transition time must reflect chan
 to prevent unbounded growth
 
 **Permissions:**
-* The cluster-ingress-operator service account is uses existing RBAC permissions to:
+* The cluster-ingress-operator service account uses existing RBAC permissions to:
   - Get, List, Watch Gateway resources
   - Patch Gateway status subresource
   - Get, List, Watch DNSRecord and Service resources by label
@@ -628,6 +628,7 @@ status across all DNSRecords
 * Test `ComputeGatewayAPILoadBalancerStatus` wrapper correctly converts internal conditions to Gateway API gateway-level conditions
 * Test condition computation with DNSManagementPolicy set to Managed vs Unmanaged
 * Test ObservedGeneration is correctly set on conditions
+* Test if the transition times are correctly set on conditions
 * Test matching DNSRecords to listeners by hostname
 * Test handling of listeners without hostnames (no DNS conditions should be added)
 * Test handling of multiple listeners with the same hostname (should map to same DNSRecord)
