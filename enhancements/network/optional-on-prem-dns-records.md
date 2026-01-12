@@ -104,6 +104,10 @@ SNO is not supported for on-prem IPI deployments, so no impacts there.
 I don't believe this will impact MicroShift either, but even if it did it would
 reduce resources requirements slightly.
 
+#### OpenShift Kubernetes Engine
+
+No differences for OKE.
+
 ### Implementation Details/Notes/Constraints
 
 An install-config snippet to use this new functionality would look like the
