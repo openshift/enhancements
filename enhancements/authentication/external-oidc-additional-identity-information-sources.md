@@ -251,6 +251,15 @@ status:
 ### API Extensions
 
 For review purposes, this section will focus on the user facing semantics of the API changes.
+
+This section will be broken down into:
+- The changes to the OpenShift `authentications.config.openshift` API
+- The changes to the Kubernetes Structured Authentication Configuration API to use as the webhook configuration file
+
+For the most part, the API will remain structurally the same. The core differences will be in field semantics.
+
+#### OpenShift API Changes
+
 The nuanced API review for the actual Go type changes will be done in a PR against the openshift/api
 repository (TODO).
 
@@ -272,23 +281,24 @@ externalClaims:
     # When set to ClientCredential, it will attempt to use configured
     # client-id and client-secret parameters to fetch an access token
     # to use to authenticate requests to the provided external claims sources.
-    # When set to Token, it will attempt to use a user-provided access token
+    # When set to Token, it will attempt to use a static user-provided access token
     # to authenticate requests to the provided external claims sources.
-    type: { RequestProvidedToken | ClientCredential | Token }
+    type: { RequestProvidedToken | ClientCredential | AccessToken }
     # clientCredential configures the client credentials
     # and token endpoint to use to get an access token.
     # Required when type is ClientCredential, and forbidden otherwise
     clientCredential:
       # id is required and is the client-id to use during the client credential oauth2 flow
       id: "..."
-      # secret is required and is the client-secret to use during the client credential oauth2 flow
+      # secret is a required reference to a secret in the openshift-config namespace 
+      # and is the client-secret to use during the client credential oauth2 flow
       secret: "..."
       # tokenEndpoint is required and is the URL to query for an access token using the client credential oauth2 flow
       tokenEndpoint: "https://..."
-    # token configures the access token to be used when interacting with
+    # accessToken configures the static access token to be used when interacting with
     # external claim sources.
-    # Required when type is Token, and forbidden otherwise
-    token:
+    # Required when type is AccessToken, and forbidden otherwise
+    accessToken:
       # secret is a required reference to a secret in the openshift-config namespace
       # that contains the access token to be used during requests to the external claim sources.
       secret: "..."
@@ -296,23 +306,16 @@ externalClaims:
   # to be sourced from external sources
   claims:
       # method is the HTTP method that should be used when making a request to this endpoint.
-    - method: { GET | POST }
+      # Only the GET method is supported
+    - method: GET
       # url configures the endpoint that the request should be made to.
       url:
         # base is the base of the URL consisting only of the scheme and the hostname
         base: "https://contoso.com"
-        # path is a list of path items to be joined, in order, to construct the path
+        # pathExpression is a CEL expression that returns a string
         # to be added to the URL when making a request.
-        # each entry is escaped before being added.
-        path:
-         - type: String
-           string: v1
-         - type: String
-           string: users
-         - type: Claim
-           claim: upn
-         - type: String
-           string: etc
+        # All claims values are already path escaped.
+        pathExpression: "'/v1/users/' + claims.upn + '/etc'"
       # mappings is a required list of claims that should be
       # built with the response from the request to this source.
       mappings:
@@ -321,7 +324,7 @@ externalClaims:
         - name: groups
           # expression is the CEL expression to extract
           # the claim data from the response.
-          # It must return a string value.
+          # It must return a string or string list value.
           expression: "has(response.value) ? response.value.map(x, x.displayName) : []"
       # conditions are the conditions in which this external source should be used.
       # When not specified, the source will _always_ be used.
@@ -336,6 +339,86 @@ externalClaims:
     certificateAuthority:
       name: "some-ca"
 ```
+
+#### Kubernetes AuthenticationConfiguration API Changes
+
+A new, optional, field `jwt[].externalClaimSources` will be added to the Kubernetes
+AuthenticationConfiguration API.
+
+> [!NOTE]
+> Deviations from the OpenShift API are intentional to align more closely with the
+> existing AuthenticationConfiguration API structure and input semantics.
+
+A YAML representation of the new API field and it's children:
+```yaml
+externalClaims:
+  # clientAuth is how the Kubernetes API server
+  # authenticates with the provided external claims sources.
+  # clientAuth is optional, and when not set will
+  # attempt to use anonymous authentication.
+  clientAuth:
+    # type is the type of clientAuth to use.
+    # When set to RequestProvidedToken, it will attempt
+    # to use the token in the Authorization header of the
+    # request to authenticate with the provided external claims sources.
+    # When set to ClientCredential, it will attempt to use configured
+    # client-id and client-secret parameters to fetch an access token
+    # to use to authenticate requests to the provided external claims sources.
+    # When set to Token, it will attempt to use a static user-provided access token
+    # to authenticate requests to the provided external claims sources.
+    type: { RequestProvidedToken | ClientCredential | AccessToken }
+    # clientCredential configures the client credentials
+    # and token endpoint to use to get an access token.
+    # Required when type is ClientCredential, and forbidden otherwise
+    clientCredential:
+      # id is required and is the client-id to use during the client credential oauth2 flow
+      id: "..."
+      # secret is the client-secret to use during the client credential oauth2 flow.
+      # secret is required and is the literal string value of the client-secret.
+      secret: "..."
+      # tokenEndpoint is required and is the URL to query for an access token using the client credential oauth2 flow
+      tokenEndpoint: "https://..."
+    # accessToken configures the static access token to be used when interacting with
+    # external claim sources.
+    # Required when type is AccessToken, and forbidden otherwise.
+    # It is the literal access token string.
+    accessToken: "eyJ..."
+  # claims is a required list of additional claims
+  # to be sourced from external sources
+  claims:
+      # method is the HTTP method that should be used when making a request to this endpoint.
+      # Only the GET method is supported
+    - method: GET
+      # url configures the endpoint that the request should be made to.
+      url:
+        # base is the base of the URL consisting only of the scheme and the hostname
+        base: "https://contoso.com"
+        # pathExpression is a CEL expression that returns a string
+        # to be added to the URL when making a request.
+        # All claims values are already path escaped.
+        pathExpression: "'/v1/users/' + claims.upn + '/etc'"
+      # mappings is a required list of claims that should be
+      # built with the response from the request to this source.
+      mappings:
+          # name is the name of the claim to be built.
+          # this name must be globally unique.
+        - name: groups
+          # expression is the CEL expression to extract
+          # the claim data from the response.
+          # It must return a string or string list value.
+          expression: "has(response.value) ? response.value.map(x, x.displayName) : []"
+      # conditions are the conditions in which this external source should be used.
+      # When not specified, the source will _always_ be used.
+      # conditions is a list of CEL expressions.
+      conditions:
+        - expression: "!has(claims.groups)" # Ex: don't attempt to source claims from this source if the groups claim is already present in the JWT
+  # tls configures the TLS settings for requests to external claim sources.
+  tls:
+    # certificateAuthority contains the certificate authority to use for requests
+    # to external claim sources. It is the literal string format of the PEM encoded CA certificate.
+    certificateAuthority: "--- BEGIN CERTIFICATE ---\n...\n--- END CERTIFICATE ---"
+```
+
 
 ### Topology Considerations
 
@@ -447,7 +530,7 @@ authenticator as a baseline.
 From this baseline, additional changes will be made as necessary to support the new desired functionality
 of source claim information from external sources.
 
-It will be stateless and deployed as a standalone component either as deployment in the `openshift-authentication` namespace.
+It will be stateless and deployed as a standalone component via a deployment in the `openshift-authentication` namespace.
 
 Requests to external sources will be made and processed concurrently with strict timeouts (timeout TBD).
 Validations will be enforced at configuration time to ensure no duplicate requests or
@@ -731,6 +814,20 @@ Because there is a mechanism to implement this solution out-of-tree, this approa
 ## Open Questions [optional]
 
 TBD. Please leave any questions that warrant significant discussion or that you feel are relevant open questions here.
+
+### Has this been discussed upstream? Is there buy-in?
+
+A higher-level idea related to generically sourcing identity information from a non-JWT source was
+discussed in the bi-weekly SIG Auth working group meeting on December 3rd 2025.
+
+There was not explicit buy-in that this would be accepted natively in the Kubernetes Structured Authentication
+Configuration functionality, but there was encouragement to create a webhook authenticator
+that implements the functionality to rally support behind the functionality and show a need for
+the native implementation.
+
+Because we will need to support this kind of behavior for our customers anyways, we deemed this approach
+as being the most upstream-able and being worth the risk of having to carry forever if the feature
+is rejected for native support in upstream.
 
 ## Test Plan
 
