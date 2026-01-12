@@ -10,12 +10,13 @@ approvers:
 api-approvers:
   - TBD
 creation-date: 2024-10-18
-last-updated: 2025-05-09
+last-updated: 2026-01-12
 tracking-link:
   - https://issues.redhat.com/browse/OPNET-592
 see-also:
   - "/enhancements/network/configure-ovs-alternative.md"
   - "/enhancements/network/baremetal-ipi-network-configuration.md"
+  - "https://github.com/cybertron/nmstate-mc-generator"
 replaces:
   - NA
 superseded-by:
@@ -40,9 +41,10 @@ virtualization workloads in OpenShift. We are also anticipating that many
 new virtualization customers will have limited experience with advanced
 host network configuration and want to make the experience as smooth as
 possible. While the existing machine-config interface is functional, it
-requires manual creation of base64-encoded content and machine-config
-manifests. All of this could be handled in the installer instead, which
-would be a much better interface.
+requires some level of additional processing between the NMState config
+and the resulting artifacts included in the cluster, whether that's a
+conversion via Butane or manual base64-encoding. This processing could
+be done in the installer, which would result in a much simpler interface.
 
 ### User Stories
 * As an OpenShift Virtualization user, I want full control over the
@@ -87,7 +89,7 @@ as described in the configure-ovs-alternative feature.
 
 ### API Extensions
 
-There will be no additions to the API for this feature. It is purely an
+There will be no additions to the runtime API for this feature. It is purely an
 install-config wrapper around existing functionality.
 
 ### Topology Considerations
@@ -110,6 +112,10 @@ there is no ongoing cost in terms of CPU and memory.
 I do not believe this would be especially useful for MicroShift either.
 Since those devices are usually pre-configured, there wouldn't be much
 need for deploy-time host network configuration from the installer.
+
+#### OpenShift Kubernetes Engine
+
+No differences for OKE.
 
 ### Implementation Details/Notes/Constraints
 
@@ -225,8 +231,7 @@ for this feature to the various deployment UIs that exist, even that would not
 replace install-config integration for non-UI deployers.
 
 We could also continue to use raw machine-configs as the interface for this
-feature, but frankly that's a terrible option. Users hate it and we have to
-do better.
+feature, but users have made clear that they strongly dislike it.
 
 ## Infrastructure Needed [optional]
 
