@@ -105,8 +105,8 @@ const (
 )
 
 type LocalVolumeDeviceLinkSpec struct {
-	// PVName is the name of the persistent volume linked to the device
-	PVName string `json:"pvName"`
+	// PersistentVolumeName is the name of the persistent volume linked to the device
+	PersistentVolumeName string `json:"persistentVolumeName"`
 	// Policy of the device link
 	Policy LocalVolumeDeviceLinkPolicy `json:"policy"`
 }
