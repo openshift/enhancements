@@ -183,52 +183,53 @@ oc edit pki cluster
 2. The administrator modifies the PKI resource:
 
 ```yaml
-apiVersion: config.openshift.io/v1
+apiVersion: config.openshift.io/v1alpha1
 kind: PKI
 metadata:
   name: cluster
 spec:
-  # Use Custom type to explicitly configure cryptographic parameters
-  type: Custom
+  policy:
+    # Use Custom type to explicitly configure cryptographic parameters
+    type: Custom
 
-  # Global default for all certificates
-  defaults:
-    key:
-      algorithm: RSA
-      rsa:
-        keySize: 2048
-
-  # Category-level configuration
-  categories:
-  - category: SignerCertificate
-    certificate:
+    # Global default for all certificates
+    defaults:
       key:
         algorithm: RSA
         rsa:
-          keySize: 4096
+          keySize: 2048
 
-  - category: ServingCertificate
-    certificate:
-      key:
-        algorithm: ECDSA
-        ecdsa:
-          curve: P384
+    # Category-level configuration
+    categories:
+    - category: SignerCertificate
+      certificate:
+        key:
+          algorithm: RSA
+          rsa:
+            keySize: 4096
 
-  - category: ClientCertificate
-    certificate:
-      key:
-        algorithm: ECDSA
-        ecdsa:
-          curve: P256
+    - category: ServingCertificate
+      certificate:
+        key:
+          algorithm: ECDSA
+          ecdsa:
+            curve: P384
 
-  # Specific certificate overrides (optional - for fine-grained control)
-  overrides:
-  - certificateName: etcd-signer
-    certificate:
-      key:
-        algorithm: RSA
-        rsa:
-          keySize: 4096
+    - category: ClientCertificate
+      certificate:
+        key:
+          algorithm: ECDSA
+          ecdsa:
+            curve: P256
+
+    # Specific certificate overrides (optional - for fine-grained control)
+    overrides:
+    - certificateName: etcd-signer
+      certificate:
+        key:
+          algorithm: RSA
+          rsa:
+            keySize: 4096
 ```
 
 3. On the next rotation cycle (either natural expiry or forced rotation), operators generate new certificates using the configured parameters.
@@ -249,11 +250,11 @@ Use pre-existing workflow to force certificate rotation using the current PKI co
 
 1. A cluster running OpenShift 4.N is upgraded to 4.N+1 which includes this feature.
 
-2. The upgrade installs the PKI CRD (API definition) and creates a PKI resource with `type: Unmanaged`.
+2. The upgrade installs the PKI CRD (API definition) and creates a PKI resource with `spec.policy.type: Unmanaged`.
 
-3. With `type: Unmanaged`, all operators continue using their existing hardcoded defaults, ensuring zero behavior change.
+3. With `spec.policy.type: Unmanaged`, all operators continue using their existing hardcoded defaults, ensuring zero behavior change.
 
-4. The cluster administrator can update the PKI resource post-upgrade to `type: Default` or `type: Custom` with configuration, which will apply on the next certificate rotation cycle.
+4. The cluster administrator can update the PKI resource post-upgrade to `spec.policy.type: Default` or `spec.policy.type: Custom` with configuration, which will apply on the next certificate rotation cycle.
 
 5. Existing certificates continue to function until their natural rotation.
 
@@ -293,7 +294,7 @@ The `PKI` resource is a cluster-scoped singleton named `cluster` in the `config.
 // PKI configures cryptographic parameters for certificates generated
 // internally by OpenShift components.
 //
-// Compatibility level 1: Stable within a major release for a minimum of 12 months or 3 minor releases (whichever is longer).
+// Compatibility level 4: No compatibility is provided, the API can change at any point for any reason. These capabilities should not be used by applications needing long term support.
 //
 // +genclient
 // +genclient:nonNamespaced
@@ -301,22 +302,42 @@ The `PKI` resource is a cluster-scoped singleton named `cluster` in the `config.
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:path=pkis,scope=Cluster
 // +kubebuilder:validation:XValidation:rule="self.metadata.name == 'cluster'",message="pki is a singleton, .metadata.name must be 'cluster'"
-// +openshift:compatibility-gen:level=1
+// +openshift:api-approved.openshift.io=https://github.com/openshift/api/pull/2645
+// +openshift:file-pattern=cvoRunLevel=0000_10,operatorName=config-operator,operatorOrdering=01
+// +openshift:enable:FeatureGate=ConfigurablePKI
+// +openshift:compatibility-gen:level=4
 type PKI struct {
     metav1.TypeMeta   `json:",inline"`
+
+    // metadata is the standard object's metadata.
+    // More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata
+    // +optional
     metav1.ObjectMeta `json:"metadata,omitempty"`
 
     // spec holds user settable values for configuration
-    Spec PKISpec `json:"spec"`
+    // +required
+    Spec PKISpec `json:"spec,omitzero"`
 }
 
-// PKISpec uses a parameterized union pattern where the type field determines
-// the validity and interpretation of the defaults, categories, and overrides fields.
+// PKISpec holds the specification for PKI configuration.
+type PKISpec struct {
+    // policy specifies how PKI configuration is managed for internally-generated certificates.
+    // This controls the certificate generation approach for all OpenShift components that create
+    // certificates internally, including certificate authorities, serving certificates, and client certificates.
+    //
+    // +required
+    Policy PKIManagementPolicy `json:"policy,omitzero"`
+}
+
+// PKIManagementPolicy determines whether components use hardcoded defaults (Unmanaged), follow
+// OpenShift best practices (Default), or use administrator-specified cryptographic parameters (Custom).
+// This provides flexibility for organizations with specific compliance requirements or security policies
+// while maintaining backwards compatibility for existing clusters.
 //
 // +kubebuilder:validation:XValidation:rule="self.type == 'Unmanaged' ? (!has(self.defaults) && !has(self.categories) && !has(self.overrides)) : true",message="defaults, categories, and overrides must not be set when type is Unmanaged"
 // +kubebuilder:validation:XValidation:rule="self.type == 'Default' ? (!has(self.defaults) && !has(self.categories) && !has(self.overrides)) : true",message="defaults, categories, and overrides must not be set when type is Default"
 // +union
-type PKISpec struct {
+type PKIManagementPolicy struct {
     // type determines how PKI configuration is managed.
     //
     // - Unmanaged: Components use their existing hardcoded certificate generation behavior, exactly as if this feature did not exist.
@@ -324,7 +345,6 @@ type PKISpec struct {
     //   While most components use RSA 2048, some may use different parameters.
     //   Use of this mode might prevent upgrading to the next major OpenShift release.
     // + Default when upgrading from a version without this feature to ensure zero behavior change.
-    //   The defaults, categories, and overrides fields must not be set.
     //
     // - Default: Use OpenShift-recommended best practices for certificate generation.
     //   The specific parameters may evolve across OpenShift releases to adopt improved cryptographic standards.
@@ -332,11 +352,11 @@ type PKISpec struct {
     //   In future releases, this may adopt ECDSA or larger RSA keys based on industry best practices.
     //   Recommended for most customers who want to benefit from security improvements automatically.
     // + Default when installing a fresh cluster.
-    //   The defaults, categories, and overrides fields must not be set.
     //
     // - Custom: Administrator explicitly configures cryptographic parameters.
+    //   Use the defaults, categories, and overrides fields to specify certificate generation parameters.
     // + Recommended for customers with specific compliance requirements or organizational PKI policies.
-    // 
+    //
     // + When upgrading from a version without this feature:
     // + - The PKI resource is created with type: Unmanaged to ensure zero behavior change.
     // +
@@ -344,13 +364,10 @@ type PKISpec struct {
     // + - If no PKI configuration is provided in install-config.yaml, type: Default is used.
     // + - If PKI configuration is provided in install-config.yaml, type: Custom is used with the specified configuration.
     //
-    // +kubebuilder:validation:Required
+    // +required
     // +kubebuilder:validation:Enum=Unmanaged;Default;Custom
-    // +unionDiscriminator
-    Type PKIManagementType `json:"type"`
+    Type PKIManagementType `json:"type,omitempty"`
 
-    // Embed PKIProfile to provide reusable certificate parameter fields.
-    // Go API utilities can use PKIProfile to programmatically define custom profiles.
     PKIProfile `json:",inline"`
 }
 
@@ -369,32 +386,28 @@ const (
     PKIManagementTypeCustom PKIManagementType = "Custom"
 )
 
-// PKIProfile is a reusable set of certificate parameters.
-// This type is embedded in PKISpec and can be used by Go API utilities
-// to programmatically define profiles for different compliance frameworks
-// or security requirements.
+// PKIProfile defines the certificate generation parameters that OpenShift components use
+// to create certificates. Configuration can be specified at three hierarchical levels:
+// defaults apply to all certificates, categories apply to certificate types (SignerCertificate,
+// ServingCertificate, ClientCertificate), and overrides apply to specific named certificates.
+// More specific levels take precedence over general ones.
 type PKIProfile struct {
     // defaults specifies the default certificate configuration
     // for all certificates unless overridden by category or specific
     // certificate configuration.
     // If not specified, uses platform defaults (typically RSA 2048).
     //
-    // Valid when type is Custom.
-    // Must not be set when type is Unmanaged or Default.
-    //
     // +optional
-    Defaults *CertificateConfig `json:"defaults,omitempty"`
+    Defaults CertificateConfig `json:"defaults,omitzero"`
 
     // categories allows configuration of certificate parameters
     // for categories of certificates (SignerCertificate, ServingCertificate, ClientCertificate).
     // Category configuration takes precedence over defaults.
     //
-    // Valid when type is Custom.
-    // Must not be set when type is Unmanaged or Default.
-    //
     // +optional
     // +listType=map
     // +listMapKey=category
+    // +kubebuilder:validation:MaxItems=3
     Categories []CategoryCertificateConfig `json:"categories,omitempty"`
 
     // overrides allows configuration of certificate parameters
@@ -402,20 +415,19 @@ type PKIProfile struct {
     // Override configuration takes precedence over both category
     // and default configuration.
     //
-    // Valid when type is Custom.
-    // Must not be set when type is Unmanaged or Default.
-    //
     // +optional
     // +listType=map
     // +listMapKey=certificateName
+    // +kubebuilder:validation:MaxItems=256
     Overrides []CertificateOverride `json:"overrides,omitempty"`
 }
 
 // CertificateConfig specifies configuration parameters for certificates.
+// +kubebuilder:validation:MinProperties=1
 type CertificateConfig struct {
     // key specifies the cryptographic parameters for the certificate's key pair.
     // +optional
-    Key *KeyConfig `json:"key,omitempty"`
+    Key KeyConfig `json:"key,omitempty,omitzero"`
 
     // Future extensibility: fields like Lifetime, Rotation, Extensions
     // can be added here without restructuring the API.
@@ -423,54 +435,59 @@ type CertificateConfig struct {
 
 // KeyConfig specifies cryptographic parameters for key generation.
 //
-// +kubebuilder:validation:XValidation:rule="has(self.algorithm) && self.algorithm == 'RSA' ?  has(self.rsa) : !has(self.rsa)",message="rsa is required when type is RSA, and forbidden otherwise"
-// +kubebuilder:validation:XValidation:rule="has(self.algorithm) && self.algorithm == 'ECDSA' ?  has(self.ecdsa) : !has(self.ecdsa)",message="ecdsa is required when type is ECDSA, and forbidden otherwise"
+// +kubebuilder:validation:XValidation:rule="has(self.algorithm) && self.algorithm == 'RSA' ?  has(self.rsa) : !has(self.rsa)",message="rsa is required when algorithm is RSA, and forbidden otherwise"
+// +kubebuilder:validation:XValidation:rule="has(self.algorithm) && self.algorithm == 'ECDSA' ?  has(self.ecdsa) : !has(self.ecdsa)",message="ecdsa is required when algorithm is ECDSA, and forbidden otherwise"
 // +union
 type KeyConfig struct {
     // algorithm specifies the key generation algorithm.
-    // +kubebuilder:validation:Required
+    // Valid values are "RSA" and "ECDSA".
+    // +required
     // +kubebuilder:validation:Enum=RSA;ECDSA
     // +unionDiscriminator
-    Algorithm KeyAlgorithm `json:"algorithm"`
+    Algorithm KeyAlgorithm `json:"algorithm,omitempty"`
 
     // rsa specifies RSA key parameters.
-    // Required when algorithm is RSA, must be nil otherwise.
+    // Required when algorithm is RSA, and forbidden otherwise.
     // +optional
     // +unionMember
-    RSA *RSAKeyConfig `json:"rsa,omitempty"`
+    RSA RSAKeyConfig `json:"rsa,omitzero"`
 
     // ecdsa specifies ECDSA key parameters.
-    // Required when algorithm is ECDSA, must be nil otherwise.
+    // Required when algorithm is ECDSA, and forbidden otherwise.
     // +optional
     // +unionMember
-    ECDSA *ECDSAKeyConfig `json:"ecdsa,omitempty"`
+    ECDSA ECDSAKeyConfig `json:"ecdsa,omitzero"`
 }
 
 // RSAKeyConfig specifies parameters for RSA key generation.
 type RSAKeyConfig struct {
     // keySize specifies the size of RSA keys in bits.
-    // +kubebuilder:validation:Required
+    // Valid values are 2048, 3072, and 4096.
+    // +required
     // +kubebuilder:validation:Enum=2048;3072;4096
-    KeySize int32 `json:"keySize"`
+    // +kubebuilder:validation:Minimum=2048
+    KeySize int32 `json:"keySize,omitempty"`
 }
 
 // ECDSAKeyConfig specifies parameters for ECDSA key generation.
 type ECDSAKeyConfig struct {
     // curve specifies the elliptic curve for ECDSA keys.
-    // +kubebuilder:validation:Required
+    // Valid values are "P256", "P384", and "P521".
+    // +required
     // +kubebuilder:validation:Enum=P256;P384;P521
-    Curve ECDSACurve `json:"curve"`
+    Curve ECDSACurve `json:"curve,omitempty"`
 }
 
 type CategoryCertificateConfig struct {
-    // category identifies the certificate category
-    // +kubebuilder:validation:Required
+    // category identifies the certificate category.
+    // Valid values are "SignerCertificate", "ServingCertificate", and "ClientCertificate".
+    // +required
     // +kubebuilder:validation:Enum=SignerCertificate;ServingCertificate;ClientCertificate
-    Category CertificateCategory `json:"category"`
+    Category CertificateCategory `json:"category,omitempty"`
 
     // certificate specifies the configuration for this category
-    // +kubebuilder:validation:Required
-    Certificate CertificateConfig `json:"certificate"`
+    // +required
+    Certificate CertificateConfig `json:"certificate,omitzero"`
 }
 
 // +kubebuilder:validation:XValidation:rule="self.certificateName in [
@@ -512,13 +529,14 @@ type CertificateOverride struct {
     // The name must match a well-known certificate name in the cluster.
     // Examples: "kube-apiserver-to-kubelet-signer", "kube-apiserver-localhost-server",
     // "admin-kubeconfig-client", "etcd-signer", "service-ca"
-    // +kubebuilder:validation:Required
+    // +required
     // +kubebuilder:validation:MinLength=1
-    CertificateName string `json:"certificateName"`
+    // +kubebuilder:validation:MaxLength=253
+    CertificateName string `json:"certificateName,omitempty"`
 
     // certificate specifies the configuration for this certificate
-    // +kubebuilder:validation:Required
-    Certificate CertificateConfig `json:"certificate"`
+    // +required
+    Certificate CertificateConfig `json:"certificate,omitzero"`
 }
 
 type KeyAlgorithm string
@@ -650,19 +668,20 @@ This enhancement is fully applicable and relevant for standalone clusters. All i
 apiVersion: v1alpha1
 kind: MicroShiftConfig
 pki:
-  type: Custom
-  defaults:
-    key:
-      algorithm: ECDSA
-      ecdsa:
-        curve: P256
-  categories:
-  - category: SignerCertificate
-    certificate:
+  policy:
+    type: Custom
+    defaults:
       key:
-        algorithm: RSA
-        rsa:
-          keySize: 4096
+        algorithm: ECDSA
+        ecdsa:
+          curve: P256
+    categories:
+    - category: SignerCertificate
+      certificate:
+        key:
+          algorithm: RSA
+          rsa:
+            keySize: 4096
 ```
 
 - MicroShift's lighter weight makes ECDSA particularly attractive for resource-constrained environments
@@ -796,7 +815,7 @@ The CRD uses **CEL (Common Expression Language) validation rules** instead of va
    - Implemented via: `+union`, `+unionDiscriminator`, `+unionMember` markers plus CEL validation
    - CEL rule: `(self.algorithm == 'RSA' && has(self.rsa) && !has(self.ecdsa)) || (self.algorithm == 'ECDSA' && has(self.ecdsa) && !has(self.rsa))`
 
-2. **Well-known certificate name validation** (`CertificateKeyConfigOverride` type):
+2. **Well-known certificate name validation** (`CertificateOverride` type):
    - `certificateName` must match one of the well-known certificate names
    - List includes: `kube-apiserver-to-kubelet-signer`, `kube-control-plane-signer`, `etcd-signer`, `service-ca`, etc.
    - Implemented via: CEL `in` operator against predefined list
@@ -1181,11 +1200,11 @@ This enhancement does not deprecate or remove any existing features. It adds new
 When upgrading from a version without this feature to a version with it:
 
 1. The PKI CRD (API definition) is installed during upgrade
-2. A PKI resource is automatically created with `type: Unmanaged`
-3. With `type: Unmanaged`, operators use their existing hardcoded defaults, ensuring zero behavior change
+2. A PKI resource is automatically created with `spec.policy.type: Unmanaged`
+3. With `spec.policy.type: Unmanaged`, operators use their existing hardcoded defaults, ensuring zero behavior change
 4. Existing certificates continue to function unchanged
 5. Certificate rotation uses existing defaults until the PKI resource is updated
-6. Administrators can update the PKI resource post-upgrade to `type: Default` or `type: Custom` with configuration
+6. Administrators can update the PKI resource post-upgrade to `spec.policy.type: Default` or `spec.policy.type: Custom` with configuration
 7. New parameters apply on the next rotation cycle after PKI resource is updated
 
 This approach ensures zero disruption during upgrade and preserves backward compatibility.
@@ -1351,7 +1370,7 @@ However, there are some considerations:
 
 3. Compare against PKI configuration:
    ```bash
-   oc get pki cluster -o jsonpath='{.spec.categories[?(@.category=="ServingCertificate")].keyConfig}'
+   oc get pki cluster -o jsonpath='{.spec.policy.categories[?(@.category=="ServingCertificate")].certificate.key}'
    ```
 
 4. Check certificate generation time vs PKI configuration update time:
