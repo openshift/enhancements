@@ -327,6 +327,22 @@ be added to
   * It needs to be available during cluster installation
   * To be running iff the confidential-cluster CVO capability is enabled
 
+#### Additional CRDs used by the Confidential Cluster Operator
+
+* **Machine** Internal type for attested machines (or to-be-attested)
+  New nodes register themselves via the operator and are to be attested.
+  The operator keeps a list of such machines.
+  This type contains:
+  * Id - Machine ID, typically a UUID
+  * RegistrationAddress - Machine IP Address at registration time
+
+* **ApprovedImage** Internal type for approved OS (CoreOs) images
+  The operator configures Trustee with reference-values that match all
+  approved images. A node that boots with a different OS should fail
+  attestation.
+  This type contains:
+  * Reference - Approved image reference, specificed with digest
+
 #### Programming Languages
 The Confidential Cluster Operator is written in Rust.
 
