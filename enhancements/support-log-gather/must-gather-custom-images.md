@@ -29,9 +29,9 @@ tracking-link:
 
 ## Summary
 
-This proposal outlines a plan to enhance the must-gather-operator to support custom must-gather images by leveraging native OpenShift `ImageStream` resources. This is achieved by requiring administrators to create `ImageStream`s in the must-gather-operator's own namespace, which then serves as a centrally managed allowlist of approved custom images.
+This proposal outlines a plan to enhance the must-gather-operator to support custom must-gather images by leveraging native OpenShift `ImageStream` resources. This is achieved by requiring administrators to manually create `ImageStream`s in the must-gather-operator's own namespace, which then serves as a centrally managed allowlist of approved custom images.
 
-To enable this, the `MustGather` CRD will be extended with a new `imageStreamTag` field. The operator's role is limited to validating the requested image from the allowlist and using the user-provided `ServiceAccount` to run the must-gather job. The administrator remains fully responsible for all RBAC management.
+To enable this, the `MustGather` CRD will be extended with new fields to specify a custom image and its configuration. The administrator remains fully responsible for creating the `ImageStream`s and all necessary RBAC (`ServiceAccounts` and `Roles`). The operator's role is limited to validating the requested image from the allowlist and using a user-provided or default `ServiceAccount` to run the must-gather job.
 
 ## Motivation
 
@@ -42,17 +42,20 @@ The default must-gather image provides a broad set of diagnostic data. However, 
 - As a cluster administrator, I want to define a list of approved custom must-gather images by creating `ImageStream`s in the operator's namespace.
 - As a cluster administrator, I want to create and manage a set of long-lived `ServiceAccounts` with specific `Roles` or `ClusterRoles` for different diagnostic purposes.
 - As a support engineer, I want to run a must-gather job using a pre-approved custom image by specifying an `ImageStreamTag` and the appropriate, pre-configured `serviceAccountName` for my task.
+- As a user running a specialized diagnostic image, I want to pass custom command-line arguments to control its behavior.
 - As an administrator, I want to leverage the `ImageStreamTag` import status to know if an allowlisted image has become unpullable.
 
 ### Goals
 
-- Utilize the OpenShift `ImageStream` resource as a centrally managed allowlist for custom must-gather images.
-- Add a new `imageStreamTag` field to the `MustGather` CRD.
-- Update the must-gather-operator to validate any specified `imageStreamTag` against the allowlisted `ImageStream`s.
-- Leverage the built-in import status of an `ImageStreamTag` to asynchronously verify that an image is valid and pullable.
-- The operator will use the user-provided `serviceAccountName` directly to run the must-gather job.
-- If the `ImageStreamTag` is invalid or the import has failed, the `MustGather` resource will report a failure.
-- Ensure that if no custom image is specified, the operator continues to use the default must-gather image.
+-   Utilize the OpenShift `ImageStream` resource as a centrally managed allowlist for custom must-gather images.
+-   Add a new `imageStreamTag` field to the `MustGather` CRD to allow specifying custom images.
+-   Add a placeholder `additionalConfig` field to the `MustGather` CRD to provide a framework for toggling specific, operator-aware features in the future.
+-   Add an `args` field to the `MustGather` CRD to allow passing custom arguments to the image.
+-   Update the must-gather-operator to validate any specified `imageStreamTag` against the allowlisted `ImageStream`s.
+-   Leverage the built-in import status of an `ImageStreamTag` to asynchronously verify that an image is valid and pullable.
+-   The operator will use the user-provided `serviceAccountName` directly to run the must-gather job.
+-   If the `ImageStreamTag` is invalid or the import has failed, the `MustGather` resource will report a failure.
+-   Ensure that if no custom image is specified, the operator continues to use the default must-gather image.
 
 ### Non-Goals
 
@@ -67,30 +70,49 @@ The workflow is divided into two main parts: the administrative setup and the us
 
 **Part 1: Administrative Configuration**
 
-1.  **Create Roles:** A cluster-admin creates the `Roles` or `ClusterRoles` that contain the permissions required for various diagnostic tasks.
-2.  **Create ServiceAccounts and Bindings:** The admin creates long-lived `ServiceAccount`s and binds each one to the appropriate role using a `RoleBinding` or `ClusterRoleBinding`.
-3.  **Define Allowlist via `ImageStream`:** The admin creates `ImageStream`s in operator's namespace, where each `ImageStreamTag` points to an allowed custom image URL.
-4.  **Automatic Verification:** OpenShift's native image import mechanism periodically attempts to import the tag, updating the `ImageStreamTag` status, which the operator monitors to verify image pullability.
+1.  **Create Roles and ServiceAccounts**: The administrator creates the necessary `Roles`, `ServiceAccounts`, and `RoleBindings` for various diagnostic tasks.
+2.  **Define Allowlist via `ImageStream`**: The administrator manually creates `ImageStream` resources in the operator's namespace. Each `ImageStreamTag` points to an allowed custom image URL.
 
 **Part 2: User Request and Operator Execution**
 
-1.  **User Request:** A user creates a `MustGather` CR, setting the new `spec.imageStreamTag` field to an allowed tag.
+1.  **User Request:** A user creates a `MustGather` CR, setting the new `spec.imageStreamTag` field to an allowed tag and optionally providing a `additionalConfig`, and `args`.
 2.  **Operator Validation:** The operator validates that the requested `ImageStreamTag` exists and its import status is successful.
-3.  **Execution:** If the image is valid, the operator creates the Kubernetes `Job`, specifying the user-provided `serviceAccountName` in the pod spec. The job runs with the permissions granted to that `ServiceAccount`.
+3.  **Execution:** If the image is valid, the operator creates the Kubernetes `Job`.
+    - It specifies the user-provided `serviceAccountName` in the pod spec (or the default if none is provided).
+    - It inspects the `spec.additionalConfig` field and injects corresponding environment variables into the container (e.g., `MUST_GATHER_METRICS=true`).
+    - If a custom image is specified via `imageStreamTag`, it passes the `spec.args` list directly to the container's `args` field. These arguments are ignored if the default must-gather image is used.
+    - The job runs with the permissions granted to the `ServiceAccount` and the custom configuration.
 4.  **Cleanup:** Once the job completes, the operator deletes the job. The `ServiceAccount` and its associated RBAC resources remain.
 
 ### API Extensions
 
 #### `MustGather` CRD Modification
 
-The `MustGather` spec will be modified to include the new `imageStreamTag` field.
+The `MustGather` spec will be modified to include the new `imageStreamTag`, `additionalConfig`, and `args` fields.
 
 ```go
+// AdditionalConfig is a placeholder struct for enabling specific, operator-aware
+// data gathering features. The fields within this struct are examples; the actual
+// supported features will be proposed and implemented in separate enhancement proposals.
+type AdditionalConfig struct {
+	// +kubebuilder:validation:Optional
+	// Metrics is an example field that could specify whether to collect Prometheus metrics.
+	Metrics bool `json:"metrics,omitempty"`
+}
+
 type MustGatherSpec struct {
 	// ... existing fields ...
 	// +kubebuilder:validation:Optional
 	// ImageStreamTag is the new field to specify a custom image from the allowlist.
 	ImageStreamTag string `json:"imageStreamTag,omitempty"`
+
+	// +kubebuilder:validation:Optional
+	// AdditionalConfig allows enabling specific data collection features.
+	AdditionalConfig AdditionalConfig `json:"additionalConfig,omitempty"`
+
+	// +kubebuilder:validation:Optional
+	// Args allows passing custom command-line arguments to the must-gather image.
+	Args []string `json:"args,omitempty"`
 
 	// ... existing fields ...
 }
@@ -115,7 +137,8 @@ No unique considerations.
 
 ### Implementation Details/Notes/Constraints
 
--   All `ImageStream`s for the allowlist must be created in operator's namespace.
+-   All `ImageStream`s for the allowlist must be created manually in the operator's namespace.
+-   The `spec.args` field will only be honored when a custom image is specified via `spec.imageStreamTag`. It will be ignored when using the default must-gather image.
 -   The administrator is responsible for communicating to users which `serviceAccountName` to use for a given diagnostic task.
 
 ### Risks and Mitigations
@@ -124,7 +147,7 @@ No unique considerations.
     -   **Mitigation:** This design relies on administrative controls and clear documentation. The user running `must-gather` is expected to have the permissions to *use* the specified `ServiceAccount`.
 -   **Risk:** Long-lived, privileged `ServiceAccount`s increase the cluster's attack surface.
     -   **Mitigation:** Administrators must follow security best practices, granting only the minimal required permissions to each `ServiceAccount`.
--   **Risk:** An administrator misconfigures an image URL.
+-   **Risk:** An administrator misconfigures an image URL in a manual `ImageStream`.
     -   **Mitigation:** The `ImageStreamTag` import status will fail, making the error visible. The operator will reject `MustGather` requests for failed tags.
 
 ### Drawbacks
@@ -186,7 +209,7 @@ A design using a dedicated `MustGatherImage` CRD with an automated, ephemeral `S
 
 #### Example 1: Administrator Configuration
 
-The admin must create all required resources: the `Role`, the `ServiceAccount`, the `RoleBinding`, and the `ImageStream`.
+The administrator must create all required resources manually: the `Role`, the `ServiceAccount`, the `RoleBinding`, and the `ImageStream` allowlist entry.
 
 ```yaml
 # /deploy/examples/admin-full-setup.yaml
@@ -238,7 +261,7 @@ spec:
 
 #### Example 2: User Request (`MustGather`)
 
-The user specifies the new `imageStreamTag` and, optionally, the existing `serviceAccountName` field.
+The user specifies the `imageStreamTag`, the `serviceAccountName`, and the new config fields.
 
 ```yaml
 # /deploy/examples/must-gather-with-imagestream-and-sa.yaml
@@ -248,10 +271,17 @@ metadata:
   name: my-network-diagnostics-run
   namespace: team-a-namespace
 spec:
-  # Reference to the allowed image via the new field
+  # Reference to the allowed image
   imageStreamTag: "network-debug-tools:v1.2"
-  # Reference to the pre-configured ServiceAccount via the existing field
+  # Reference to the pre-configured ServiceAccount
   serviceAccountName: "must-gather-network-sa"
+  # Enable specific data gathering features. Note: `additionalConfig` is a
+  # placeholder for features to be defined in future proposals. `metrics` is an example.
+  additionalConfig:
+    metrics: true
+  # Pass custom arguments to the image
+  args:
+  - "--verbose"
   storage:
     type: PersistentVolume
     persistentVolume:
