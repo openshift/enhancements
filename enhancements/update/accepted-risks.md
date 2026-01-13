@@ -21,7 +21,7 @@ see-also:
 
 ## Summary
 
-A cluster admin can express accepted risks for a cluster so that when [a conditional update](https://docs.redhat.com/en/documentation/openshift_container_platform/4.18/html/updating_clusters/understanding-openshift-updates-1#conditional-updates-overview_understanding-update-channels-releases) of cluster is requested, it can be accepted only if the risks exposed to the conditional update are all accepted.
+A cluster admin can express accepted risks for a cluster so that when [a conditional update](https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html/updating_clusters/understanding-openshift-updates-1#conditional-updates-overview_understanding-update-channels-releases) of cluster is requested, it can be accepted only if the risks exposed to the conditional update are all accepted.
 
 ## Motivation
 

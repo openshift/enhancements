@@ -137,7 +137,7 @@ device plugin is more lightweight, but also tedious. Running a stripped down
 version of the operator (without the metrics exporter and webhook) is also a
 possible alternative.
 
-The [webhook](https://docs.redhat.com/en/documentation/openshift_container_platform/4.19/html/networking_operators/sr-iov-operator#about-sr-iov-operator-admission-control-webhook_configuring-sriov-operator), along with the [resources injector](https://docs.redhat.com/en/documentation/openshift_container_platform/4.19/html/networking_operators/sr-iov-operator#about-network-resource-injector_configuring-sriov-operator) provide the following validation and mutation functionality:
+The [webhook](https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html/networking_operators/sr-iov-operator#about-sr-iov-operator-admission-control-webhook_configuring-sriov-operator), along with the [resources injector](https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html/networking_operators/sr-iov-operator#about-network-resource-injector_configuring-sriov-operator) provide the following validation and mutation functionality:
 - Validation of the SriovNetworkNodePolicy CR when it is created or updated.
 - Mutation of the SriovNetworkNodePolicy CR by setting the default value for the
   priority and deviceType fields when the CR is created or updated. 
