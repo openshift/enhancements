@@ -6,9 +6,10 @@ reviewers:
   - "@mkowalski"
   - "someone from installer"
 approvers:
-  - TBD
+  - "@zaneb"
 api-approvers:
-  - TBD
+  - "@JoelSpeed"
+  - "@everettraven"
 creation-date: 2024-10-18
 last-updated: 2026-01-12
 tracking-link:
@@ -220,7 +221,7 @@ No API extensions.
 The same as we would currently use for host networking issues (sosreports,
 NetworkManager trace logs, etc.).
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 There is a web app that can also be used to generate these configs in a more
 user-friendly way: https://access.redhat.com/articles/7111145
