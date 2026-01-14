@@ -193,6 +193,10 @@ Detailed CLI usage follows the patterns documented for existing platforms.
 **GCPBootDisk** - Boot disk configuration:
 - `diskSizeGB`: Size in GB (default 64, min 20, max 65536)
 - `diskType`: `pd-standard`, `pd-ssd`, or `pd-balanced` (default)
+- `encryptionKey` (optional): Customer-managed encryption key (CMEK) configuration
+
+**GCPDiskEncryptionKey** - Customer-managed encryption key for boot disks:
+- `kmsKeyName` (required): Cloud KMS key resource name (format: `projects/{project}/locations/{location}/keyRings/{keyRing}/cryptoKeys/{key}`)
 
 **GCPNodeServiceAccount** - Instance service account:
 - `email`: Service account email
