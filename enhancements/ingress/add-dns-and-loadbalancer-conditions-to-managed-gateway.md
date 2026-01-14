@@ -305,6 +305,10 @@ or `False` state as LoadBalancer services are not available
 * A new `gateway-status` controller is created on existing Cluster Ingress Operator
 * Negligible increase in etcd storage for condition status (~1KB per Gateway)
 
+#### OpenShift Kubernetes Engine
+
+No special considerations for OpenShift Kubernetes Engine.
+
 ### Implementation Details/Notes/Constraints
 
 **Architecture Overview:**
