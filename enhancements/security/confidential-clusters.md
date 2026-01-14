@@ -258,6 +258,8 @@ bootstrap node.
 1. The rest of the installation process should not differ from the cluster
 creation perspective.
 
+[Design for the bootstrap phase](https://github.com/trusted-execution-clusters/operator/pull/154/files)
+
 ##### New node creation
 
 The cluster administrator flow should not change when adding new nodes to the
