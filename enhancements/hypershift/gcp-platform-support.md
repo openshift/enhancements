@@ -88,9 +88,9 @@ Establishes the essential foundation for GCP platform integration:
 Enables secure connectivity between management and customer projects using GCP Private Service Connect:
 
 **PSC API Types:**
-- `GCPResourceReference`: Name-based resource references for GCP (MaxLength=255)
-- `GCPEndpointAccessType`: Enum with Public, PublicAndPrivate, Private values
-- `GCPNetworkConfig`: Management and customer VPC configuration
+- `GCPResourceReference`: Name-based resource references for GCP (MaxLength=63)
+- `GCPEndpointAccessType`: Enum with PublicAndPrivate, Private values
+- `GCPNetworkConfig`: Customer VPC configuration
 - `GCPPrivateServiceConnect`: CRD for PSC lifecycle management
 
 **PSC Controllers:**
@@ -261,11 +261,11 @@ Note: Machine API Operator is not applicable for HyperShift as it is replaced by
 
 ### Risks and Mitigations
 
-#### Risk: Private Service Connect Scalability
+#### Private Service Connect Scalability
 
-For large-scale deployments, be aware of GCP PSC constraints:
-- NAT subnet sizing must accommodate expected connections (exhaustion blocks new connections)
-- GCP quotas for service attachments and PSC forwarding rules are per-project/region (can be increased via quota request)
+The PSC architecture addresses common scalability concerns:
+- **NAT subnet sizing**: Each hosted cluster provisions its own NAT subnet, eliminating connection exhaustion risks
+- **GCP quotas**: Each management cluster runs in its own GCP project, so quotas (1,000 service attachments, 500 forwarding rules per project) apply per management cluster rather than globally
 
 #### Risk: GKE Autopilot Mode Compatibility
 
