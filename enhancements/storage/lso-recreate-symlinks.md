@@ -83,6 +83,8 @@ To stop diskmaker from attempting to change the symlink, the administrator can s
 
 LocalVolumeDeviceLink will be deleted when its owner object is deleted (LocalVolume / LocalVolumeSet).
 
+The PV that the LocalVolumeDeviceLink refers to may be deleted and recreated multiple times, but the chosen policy in the device link should persist once it is set. Diskmaker creates PV's with a name based on the basename of the symlink under /mnt/local-storage, the node name, and the storageclass (see [GeneratePVName](https://github.com/openshift/local-storage-operator/blob/c930ea412cde390f45acaa9643da69f12fbeb57e/pkg/common/provisioner_utils.go#L236-L246)). These parameters should not change for existing devices.
+
 ### API Extensions
 
 ```
@@ -125,6 +127,20 @@ type LocalVolumeDeviceLinkStatus struct {
 	Conditions []operatorv1.OperatorCondition `json:"conditions,omitempty"`
 ```
 
+Additionally, `LocalVolume` and `LocalVolumeSet` will both have a new field to optionally set a default policy for the LocalVolumeDeviceLink objects it creates.
+
+```
+type LocalVolumeSpec struct {
+    ...
+    DefaultDeviceLinkPolicy LocalVolumeDeviceLinkPolicy `json:"defaultDeviceLinkPolicy"`
+}
+
+type LocalVolumeSetSpec struct {
+    ...
+    DefaultDeviceLinkPolicy LocalVolumeDeviceLinkPolicy `json:"defaultDeviceLinkPolicy"`
+}
+```
+
 ### Topology Considerations
 
 #### Hypershift / Hosted Control Planes
@@ -154,6 +170,8 @@ Diskmaker will use the following selection criteria when choosing the recommende
 
 Diskmaker will keep the link name and only change the link target. For example, if a PV has an existing symlink `/mnt/local-storage/localblock/scsi-0NVME_MODEL_abcde` pointing to `/dev/disk/by-id/scsi-0NVME_MODEL_abcde`, but there is a by-id link `/dev/disk/by-id/scsi-2ace42e0035eabcde`, setting the device link policy to `PreferredLinkTarget` will cause diskmaker to replace `/mnt/local-storage/localblock/scsi-0NVME_MODEL_abcde` with a new symlink pointing to `/dev/disk/by-id/scsi-2ace42e0035eabcde`.
 
+Ceph Bluestore (and therefore ODF) does not automatically create by-uuid symlinks on the node. See [Bug 2414811](https://bugzilla.redhat.com/show_bug.cgi?id=2414811). However, diskmaker will still record the UUID from `ceph-volume raw list /dev/xyz --format=json` in `localVolumeDeviceLink.status.filesystemUUID` to help with support procedures.
+
 ### Risks and Mitigations
 
 What happens if a symlink is changed while a workload is still running? This actually works as long as the new symlink is created first and then moved to the existing `/mnt/local-storage` link name. An existing process can hold a reference to the old (replaced) symlink until the process exits, and a new process will read the new symlink after `mv`.
@@ -164,13 +182,14 @@ Why opt-in? There may be other valid ways to resolve the issue and LSO does not 
 
 The biggest drawback is that without relying on some on-disk metadata LSO still relies on at least one symlink remaining stable across upgrades. This design is of limited help if _all_ of the by-id symlinks change between two releases.
 
+We mitigate this drawback by recording the UUID of the filesystem in `localVolumeDeviceLink.status.filesystemUUID`, as this should not change in a node update and may help in some recovery scenarios.
+
 ### Future Work
 
 We have some ideas to improve this in the future if there is a need, but they are out-of-scope for the initial implementation:
 
 * Fine-grained filtering mechanism to influence which by-id symlink is used
 * Other policy options for the `localVolumeDeviceLink.spec.policy` field
-* Detect ceph bluestore UUID (i.e. `ceph-volume raw list /dev/xyz --format=json`) or by-uuid symlink [Bug 2414811](https://bugzilla.redhat.com/show_bug.cgi?id=2414811).
 
 ## Alternatives (Not Implemented)
 
@@ -187,6 +206,11 @@ None
 ## Test Plan
 
 We'll extend existing LSO unit tests, e2e, extended test suite, and manual testing where needed.
+
+There will be a new e2e test with a simulated symlink change testing:
+- The alert when `localVolumeDeviceLink.spec.policy == None`
+- Symlinks are fixed automatically when `localVolumeDeviceLink.spec.policy == PreferredLinkTarget`
+- Symlinks stay the same and no alert is thrown when `localVolumeDeviceLink.spec.policy == CurrentLinkTarget`
 
 We do not have easy access to many hardware configurations and much of our testing will be limited to simulating these symlink issues.
 
