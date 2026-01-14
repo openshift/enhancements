@@ -4,6 +4,7 @@ authors:
   - "@ckandaga"
   - "@cveiga"
   - "@apahim"
+  - "@billmvt"
 reviewers:
   - TBD
 approvers:
@@ -11,7 +12,7 @@ approvers:
 api-approvers:
   - TBD
 creation-date: 2026-01-05
-last-updated: 2026-01-05
+last-updated: 2026-01-14
 tracking-link:
   - https://issues.redhat.com/browse/GCP-75
 see-also:
@@ -223,6 +224,40 @@ GCP platform support is gated behind the `GCPPlatform` feature gate.
 
 - **Hypershift**: This enhancement is HyperShift-specific.
 - **Standalone/SNO/MicroShift**: Not applicable.
+
+### Affected Components
+
+This section enumerates the OpenShift components that may require modifications to support
+GCP as a HyperShift platform. Components are organized by current work status.
+
+#### Components with Dedicated Work Items
+
+The following components have dedicated feature epics and are actively being addressed:
+
+| Component                         | Epic    |
+|-----------------------------------|---------|
+| Cloud Network Config Controller   | GCP-282 |
+| Cloud Controller Manager          | GCP-311 |
+| Cluster Ingress Operator / Router | GCP-314 |
+| Image Registry Operator           | GCP-315 |
+| Cluster Storage Operator / CSI    | GCP-322 |
+
+#### Components Under Investigation
+
+The following components may require modifications. Investigation is tracked under GCP-303.
+
+| Component                       | Cloud Integration            |
+|---------------------------------|------------------------------|
+| Machine Config Operator         | Ignition, cloud-init         |
+| Cluster Authentication Operator | OIDC                         |
+| Cluster Monitoring Operator     | Metrics/alerting             |
+| Kube Controller Manager         | Cloud provider               |
+| Cluster Autoscaler              | Node scaling                 |
+| OLM / Marketplace               | Catalog access               |
+| Console Operator                | UI                           |
+| DNS Operator                    | CoreDNS                      |
+
+Note: Machine API Operator is not applicable for HyperShift as it is replaced by CAPI/CAPG.
 
 ### Risks and Mitigations
 
