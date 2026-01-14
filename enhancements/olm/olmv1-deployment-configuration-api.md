@@ -259,14 +259,24 @@ The merge and override policies will also match OLMv0:
 
 #### JSON Schema Validation and Controller Integration
 
-The inline configuration will be validated using JSON schema-based validation. The JSON schema for `DeploymentConfig` will be based on a static snapshot of the Kubernetes apps v1 and core v1 OpenAPI specifications. This approach:
+The inline configuration will be validated using JSON schema-based validation. The JSON schema for `DeploymentConfig` will be based on a static snapshot of the Kubernetes apps v1 and core v1 OpenAPI specifications with build-time flexibility. This approach:
 
-- Provides stability: The schema will not change unexpectedly with Kubernetes updates
-- Ensures compatibility: Operators using current Kubernetes API types will continue to work
-- Simplifies maintenance: No need for dynamic schema generation based on go.mod updates
-- Is safe for the foreseeable future: Breaking changes are unlikely until apps v2 or core v2 API groups are introduced
+- **Provides stability**: The schema is static at runtime, preventing unexpected changes with Kubernetes updates
+- **Stability with Build-time Flexibility**: While the schema is a static snapshot at runtime to ensure predictable validation, the generation of this snapshot can be automated at build-time. This allows OLMv1 to stay in sync with the k8s.io/api version defined in go.mod without manual schema authoring
+- **Ensures compatibility**: Operators using current Kubernetes API types will continue to work
+- **Is safe for the foreseeable future**: Breaking changes are unlikely until apps v2 or core v2 API groups are introduced
 
-When Kubernetes introduces new API versions, the schema can be updated deliberately as part of a planned OLMv1 enhancement.
+A Makefile target will provide a low-effort path to refresh the schema when the project's Kubernetes dependencies are updated:
+
+```makefile
+OPENAPI_VERSION := $(shell go list -m k8s.io/api | cut -d" " -f2 | sed 's/^v0/v1/')
+.PHONY: update-schema
+update-schema:
+    curl -sSL https://raw.githubusercontent.com/kubernetes/kubernetes/refs/tags/$(OPENAPI_VERSION)/api/openapi-spec/v3/apis__apps__v1_openapi.json > ./pkg/schema/apis__apps__v1_openapi.json
+```
+
+This ensures that while the first iteration uses a static snapshot, there is an established, low-effort path to update the schema manifests whenever the project's Kubernetes dependencies are bumped.
+
 Validation errors should provide clear user feedback that indicates the source of the error and why it is invalid.
 
 The ClusterExtension controller will be updated to validate and extract deployment configuration from inline configuration, and pass it to the renderer.
@@ -288,7 +298,7 @@ User-facing documentation and examples should be provided. The following topics 
 
 **Risk**: Schema validation may become outdated as new Kubernetes fields are added to core v1 and apps v1 types.
 
-**Mitigation**: Use a static schema snapshot that is updated deliberately with OLMv1 releases. Monitor Kubernetes API changes and update the schema when necessary. Document the supported Kubernetes API version for deployment configuration.
+**Mitigation**: Use a static schema snapshot at runtime for stability, with automated build-time tooling to refresh the schema when k8s.io/api dependencies are updated. Implement `make verify` checks in CI to detect when the schema needs updating. When Kubernetes dependencies are bumped, maintainers can run `make update-schema` to automatically fetch the corresponding OpenAPI specs. Document the supported Kubernetes API version for deployment configuration.
 
 **Risk**: Incorrect deployment configuration could cause operator pods to fail scheduling or startup or could cause performance issues.
 
@@ -356,10 +366,17 @@ Keep the status quo and do not provide deployment configuration in OLMv1.
 ## Open Questions / Considerations
 
 ### Track changes to underlying kubernetes corev1 structures?
-SubscriptionConfig uses many kubernetes corev1 structures from the standard kube lib. This means that the OLMv0 Subscription API would track changes to those structures (e.g. if a new Volume type is added to the API etc.). We need to think about whether we want the same behavior here, and if so how we’d like to implement it. E.g. we could have some process downloading and mining the openapi specs for the given kube lib version we have in go.mod, and having make verify fail when that changes. We’d want to think about how we’d handle any CEL expressions in those corev1 structures when doing the validation (and whether we want to handle them?).
+SubscriptionConfig uses many kubernetes corev1 structures from the standard kube lib. This means that the OLMv0 Subscription API would track changes to those structures (e.g. if a new Volume type is added to the API etc.). We need to think about whether we want the same behavior here, and if so how we'd like to implement it. E.g. we could have some process downloading and mining the openapi specs for the given kube lib version we have in go.mod, and having make verify fail when that changes. We'd want to think about how we'd handle any CEL expressions in those corev1 structures when doing the validation (and whether we want to handle them?).
 
 #### Proposed Response
-As these structures should change very rarely, we should use the latest definition of these structures and only update if there's a clear user ask. Ultimately, the goal for OLMv1 is to have Cluster Extension Authors define their own bundle configuration surface. Therefore, the extra complexity of building and maintaing a mechanism to automatically track and update these definitions is probably not warranted without clear customer demands.
+To prevent the DeploymentConfig from becoming stale as new Kubernetes volume types or fields are added, we will adopt a **"static at runtime, dynamic at build-time"** approach:
+
+- **Runtime Stability**: The schema remains a static snapshot during runtime to ensure predictable validation behavior and prevent unexpected changes with Kubernetes updates
+- **Build-time Automation**: The schema snapshot generation will be automated via Makefile targets that extract OpenAPI specs from the k8s.io/api version in go.mod
+- **CI Enforcement**: `make verify` will be integrated into CI to detect when k8s.io/api dependencies change and the schema needs updating
+- **Low-Effort Updates**: When Kubernetes dependencies are bumped, maintainers can refresh the schema by running `make update-schema`, which automatically fetches the corresponding OpenAPI specs
+
+This strategy provides the best of both worlds: runtime stability with a clear, automated path to stay current with Kubernetes API evolution. While the initial implementation uses a static snapshot, the build-time tooling ensures we have an established, low-effort mechanism to refresh the schema when needed, without requiring manual schema authoring or complex runtime generation.
 
 
 ## Test Plan
