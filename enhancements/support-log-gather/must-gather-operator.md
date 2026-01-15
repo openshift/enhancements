@@ -52,6 +52,7 @@ The cli utility, oc adm must-gather can collect data from the cluster and dump t
 2. Collect a must-gather dump in the event of apisever being completely off
 3. Different products or operators should be responsible for gathering for their own components from the operator (see <https://github.com/advisories/GHSA-77c2-c35q-254w>)
 4. Reduce or skim the information collected by the must-gather script itself
+5. Track and reconcile updates to the **trusted CA** ConfigMap contents after it has been copied/mounted for the must-gather job.
 
 ## Proposal
 
