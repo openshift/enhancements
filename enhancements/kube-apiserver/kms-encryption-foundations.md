@@ -25,11 +25,11 @@ replaces:
 
 ## Summary
 
-Extend OpenShift encryption controllers to support external Key Management Services (KMS v2) alongside existing local encryption modes (aescbc, aesgcm). 
+Extend OpenShift encryption controllers to support external Key Management Services (KMS v2) alongside existing local encryption modes (aescbc, aesgcm).
 This allows encryption keys to be stored and managed outside the cluster for enhanced security.
 
 This enhancement:
-- Extends the `config.openshift.io/v1/APIServer` resource for KMS configuration
+- Uses existing `config.openshift.io/v1/APIServer` resource `encryption.type` field to enable KMS mode
 - Extends encryption controllers in `openshift/library-go` to support KMS as a new encryption mode
 - Maintains feature parity with existing encryption modes (migration, monitoring, key rotation)
 - Provider-agnostic implementation supporting any KMS v2-compatible plugin
@@ -95,7 +95,7 @@ From the encryption controllers' perspective, the core logic remains the same; o
 **keyController** manages encryption key lifecycle. Creates encryption key secrets in `openshift-config-managed` namespace. For KMS mode, creates secrets storing KMS configuration.
 
 **stateController** generates EncryptionConfiguration for API server consumption. Implements distributed state machine ensuring all API servers converge to same revision.
-For KMS mode, generates EncryptionConfiguration based on the KMS configuration given in APIServer resource.
+For KMS mode, generates EncryptionConfiguration using the KMS configuration.
 
 **migrationController** orchestrates resource re-encryption. Marks resources as migrated after rewriting in etcd. Works with all encryption modes including KMS.
 
@@ -115,7 +115,7 @@ To enable the apiservers to access the KMS plugin, the `/var/run/kmsplugin` dire
        type: kms
    ```
 
-2. keyController detects the new encryption mode and reads the KMS configuration from APIServer resource.
+2. keyController detects the new encryption mode.
 
 3. keyController creates encryption key secret with KMS configuration:
    ```yaml
@@ -133,7 +133,7 @@ To enable the apiservers to access the KMS plugin, the `/var/run/kmsplugin` dire
      # - Tech Preview v2: Will also include key_id and other plugin-specific configuration for other kms provider types
    ```
 
-4. stateController generates EncryptionConfiguration using the user-provided endpoint:
+4. stateController generates EncryptionConfiguration using the endpoint:
    ```yaml
    apiVersion: apiserver.config.k8s.io/v1
    kind: EncryptionConfiguration
@@ -196,9 +196,9 @@ Migration controller reuses existing logic - no changes required.
 
 **Tech Preview V1**
 
-The APIServer resource is extended to support KMS encryption.
-For Tech Preview v1, users set `encryption.type: kms` in the APIServer resource and deploy KMS plugins at the hardcoded endpoint `unix:///var/run/kmsplugin/kms.sock`.
-No additional KMS configuration fields are needed.
+For Tech Preview v1, no new API fields are added to the APIServer resource.
+Users simply set `encryption.type: kms` and deploy KMS plugins at the hardcoded endpoint `unix:///var/run/kmsplugin/kms.sock`.
+Previously defined KMSConfig and related types (KMSProviderType, AWSKMSConfig) will be removed from the codebase as they are not used in this design.
 
 ```go
 // TOMBSTONED: KMSConfig and related types are not needed for Tech Preview v1.
