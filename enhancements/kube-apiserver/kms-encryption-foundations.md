@@ -60,12 +60,12 @@ Extend the existing encryption controller framework in `openshift/library-go` to
 
 **Tech Preview v1 (External Plugin Management):**
 
-Users deploy KMS plugins manually on all control plane nodes as static pods or systemd units at a predefined socket path (`unix:///var/run/kmsplugin/kms.sock`) and set the KMS type to Manual in the APIServer resource.
+Users deploy KMS plugins manually on all control plane nodes as static pods or systemd units at a predefined socket path (`unix:///var/run/kmsplugin/kms.sock`).
 Encryption controllers use the static endpoint in EncryptionConfiguration. KMS-to-KMS migrations are not supported in Tech Preview v1 since only one plugin can listen at the static socket path at a time.
 
 **Tech Preview v2 (Managed Plugin Lifecycle):**
 
-Users specify plugin-specific configuration (details TBD). The "Manual" provider type will be dropped in favor of managed KMS provider types (e.g. Vault).
+Users specify plugin-specific configuration for managed KMS provider types (e.g. Vault).
 From the encryption controllers' perspective, the core logic remains the same; only the tracked fields change.
 
 **Key changes in library-go:**
@@ -113,8 +113,6 @@ To enable the apiservers to access the KMS plugin, the `/var/run/kmsplugin` dire
    spec:
      encryption:
        type: kms
-       kms:
-         type: Manual
    ```
 
 2. keyController detects the new encryption mode and reads the KMS configuration from APIServer resource.
@@ -198,18 +196,22 @@ Migration controller reuses existing logic - no changes required.
 
 **Tech Preview V1**
 
-The APIServer resource is extended to support KMS encryption configuration. 
-Users can specify `type: Manual` to indicate they are manually managing the KMS plugin deployment. 
-The plugin must listen at the predefined socket path `unix:///var/run/kmsplugin/kms.sock`. 
+The APIServer resource is extended to support KMS encryption.
+For Tech Preview v1, users set `encryption.type: kms` in the APIServer resource and deploy KMS plugins at the hardcoded endpoint `unix:///var/run/kmsplugin/kms.sock`.
+No additional KMS configuration fields are needed.
 
 ```go
+// TOMBSTONED: KMSConfig and related types are not needed for Tech Preview v1.
+// Tech Preview v1 uses a hardcoded endpoint without provider-specific configuration.
+// Future managed KMS provider types (Tech Preview v2) will introduce new API types.
+//
 // KMSConfig defines the configuration for the KMS instance
 // that will be used with KMSEncryptionProvider encryption
 // +kubebuilder:validation:XValidation:rule="has(self.type) && self.type == 'AWS' ?  has(self.aws) : !has(self.aws)",message="aws config is required when kms provider type is AWS, and forbidden otherwise"
 // +union
 type KMSConfig struct {
 // type defines the kind of platform for the KMS provider.
-// Available provider types are AWS and Manual.
+// Available provider types are AWS.
 //
 // +unionDiscriminator
 // +required
@@ -225,7 +227,7 @@ AWS *AWSKMSConfig `json:"aws,omitempty"`
 }
 
 // KMSProviderType is a specific supported KMS provider
-// +kubebuilder:validation:Enum=AWS;Manual
+// +kubebuilder:validation:Enum=AWS
 type KMSProviderType string
 ```
 
