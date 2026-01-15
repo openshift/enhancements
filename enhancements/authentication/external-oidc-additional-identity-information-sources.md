@@ -143,10 +143,9 @@ spec:
       clientAuth:
         type: RequestProvidedToken # Use the token from the request as the access token to the UserInfo endpoint
       claims:
-      - method: GET
         url:
-          type: Static
-          static: "\"https://tenant.foo.io/userinfo\""
+          base: "https://contoso.com"
+          pathExpression: "'/userinfo'"
         mappings:
           - name: groups
             expression: "has(response.groups) ? response.groups.join(',') : \"\""
@@ -178,7 +177,7 @@ status:
   userInfo:
     ...
     groups:
-    - system:authenticated
+    - system:authenticated # automatically applied by the Kubernetes API server when a user is successfully authenticated
     - foo # fetched from UserInfo endpoint
 ```
 
@@ -209,10 +208,9 @@ spec:
           id: "kas"
           secret: "kas-foo-client-secret"
       claims:
-      - method: GET
         url:
-          type: Expression
-          expression: "\"https://graph.microsoft.com/v1.0/users/\" + claims.upn + \"/memberOf\""
+          base: "https://graph.microsoft.com"
+          pathExpression: "'/v1.0/users/' + claims.upn + '/memberOf'"
         mappings:
           - name: groups
             expression: "has(response.value) ? response.value.map(x, x.displayName).join(',') : \"\""
@@ -244,7 +242,7 @@ status:
   userInfo:
     ...
     groups:
-    - system:authenticated
+    - system:authenticated # automatically applied by the Kubernetes API server when a user is successfully authenticated
     - foo # fetched from Microsoft Graph API endpoint
 ```
 
