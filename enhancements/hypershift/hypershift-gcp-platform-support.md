@@ -6,11 +6,17 @@ authors:
   - "@apahim"
   - "@billmvt"
 reviewers:
-  - TBD
+  - "@csrwng"
+  - "@muraee"
+  - "@devguyio"
 approvers:
-  - TBD
+  - "@csrwng"
+  - "@muraee"
+  - "@devguyio"
 api-approvers:
-  - TBD
+  - "@csrwng"
+  - "@muraee"
+  - "@devguyio"
 creation-date: 2026-01-05
 last-updated: 2026-01-14
 tracking-link:
