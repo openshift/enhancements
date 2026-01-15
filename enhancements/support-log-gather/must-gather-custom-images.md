@@ -42,15 +42,14 @@ The default must-gather image provides a broad set of diagnostic data. However, 
 - As a cluster administrator, I want to define a list of approved custom must-gather images by creating `ImageStream`s in the operator's namespace.
 - As a cluster administrator, I want to create and manage a set of long-lived `ServiceAccounts` with specific `Roles` or `ClusterRoles` for different diagnostic purposes.
 - As a support engineer, I want to run a must-gather job using a pre-approved custom image by specifying an `ImageStreamTag` and the appropriate, pre-configured `serviceAccountName` for my task.
-- As a user running a specialized diagnostic image, I want to pass custom command-line arguments to control its behavior.
+- As a user running a specialized diagnostic image, I want to override its default entrypoint and/or arguments to control its behavior.
 - As an administrator, I want to leverage the `ImageStreamTag` import status to know if an allowlisted image has become unpullable.
 
 ### Goals
 
 -   Utilize the OpenShift `ImageStream` resource as a centrally managed allowlist for custom must-gather images.
 -   Add a new `imageStreamRef` field to the `MustGather` CRD to allow specifying custom images.
--   Add a placeholder `additionalConfig` field to the `MustGather` CRD to provide a framework for toggling specific, operator-aware features in the future.
--   Add an `args` field to the `MustGather` CRD to allow passing custom arguments to the image.
+-   Add a `command` field to the `MustGather` CRD to allow overriding the image's command and arguments.
 -   Update the must-gather-operator to validate any specified `imageStreamRef` against the allowlisted `ImageStream`s.
 -   Leverage the built-in import status of an `ImageStreamTag` to asynchronously verify that an image is valid and pullable.
 -   The operator will use the user-provided `serviceAccountName` directly to run the must-gather job.
@@ -75,33 +74,38 @@ The workflow is divided into two main parts: the administrative setup and the us
 
 **Part 2: User Request and Operator Execution**
 
-1.  **User Request:** A user creates a `MustGather` CR, setting the new `spec.imageStreamRef` field to an allowed tag and optionally providing a `additionalConfig`, and `args`.
-2.  **Operator Validation:** The operator validates that the requested `ImageStreamTag` exists and its import status is successful.
+1.  **User Request:** A user creates a `MustGather` CR, setting the `spec.imageStreamRef` field and optionally providing a `serviceAccountName` and a `command` override.
+2.  **Operator Validation:** The operator validates that the requested `ImageStreamRef` exists and its import status is successful.
 3.  **Execution:** If the image is valid, the operator creates the Kubernetes `Job`.
     - It specifies the user-provided `serviceAccountName` in the pod spec (or the default if none is provided).
-    - It inspects the `spec.additionalConfig` field and injects corresponding environment variables into the container (e.g., `MUST_GATHER_METRICS=true`).
-    - If a custom image is specified via `imageStreamRef`, it passes the `spec.args` list directly to the container's `args` field. These arguments are ignored if the default must-gather image is used.
-    - The job runs with the permissions granted to the `ServiceAccount` and the custom configuration.
+    - If a `command` is specified in the `MustGather` spec, its contents are passed directly to the `command` and `args` fields of the Job's container spec.
+    - The job runs with the permissions granted to the `ServiceAccount` and the custom command.
 4.  **Cleanup:** Once the job completes, the operator deletes the job. The `ServiceAccount` and its associated RBAC resources remain.
 
 ### API Extensions
 
 #### `MustGather` CRD Modification
 
-The `MustGather` spec will be modified to include the new `imageStreamRef`, `additionalConfig`, and `args` fields.
+The `MustGather` spec will be modified to include the new `imageStreamRef` and `command` fields.
 
 ```go
-// AdditionalConfig is a placeholder struct for enabling specific, operator-aware
-// data gathering features. The fields within this struct are examples; the actual
-// supported features will be proposed and implemented in separate enhancement proposals.
-type AdditionalConfig struct {
-	// +kubebuilder:validation:Optional
-	// Metrics is an example field that could specify whether to collect Prometheus metrics.
-	Metrics bool `json:"metrics,omitempty"`
+// GatherCommand allows overriding the default command and arguments of the must-gather image,
+// mirroring the functionality of the `oc adm must-gather -- <command>` CLI.
+// This is only applicable when a custom image is specified via `imageStreamRef`.
+type GatherCommand struct {
+	// Command is a string array representing the new entrypoint for the container.
+	// If not specified, the image's default ENTRYPOINT is used.
+	// +optional
+	Command []string `json:"command,omitempty"`
+
+	// Args is a string array of arguments passed to the command. If `command` is not specified,
+	// these are passed to the default entrypoint.
+	// +optional
+	Args []string `json:"args,omitempty"`
 }
 
-// ImageStreamTagReference provides a structured reference to a specific tag within an ImageStream.
-type ImageStreamTagReference struct {
+// ImageStreamTagRef provides a structured reference to a specific tag within an ImageStream.
+type ImageStreamTagRef struct {
 	// +kubebuilder:validation:Required
 	// Name is the name of the ImageStream resource in the operator's namespace.
 	Name string `json:"name"`
@@ -114,17 +118,14 @@ type ImageStreamTagReference struct {
 type MustGatherSpec struct {
 	// ... existing fields ...
 	// +kubebuilder:validation:Optional
-	// ImageStreamRef is the new field to specify a custom image from the allowlist
-	// using a structured reference.
-	ImageStreamRef *ImageStreamTagReference `json:"imageStreamRef,omitempty"`
+	// ImageStreamRef specifies a custom image from the allowlist to be used for the
+	// must-gather run.
+	ImageStreamRef *ImageStreamTagRef `json:"imageStreamRef,omitempty"`
 
 	// +kubebuilder:validation:Optional
-	// AdditionalConfig allows enabling specific data collection features.
-	AdditionalConfig AdditionalConfig `json:"additionalConfig,omitempty"`
-
-	// +kubebuilder:validation:Optional
-	// Args allows passing custom command-line arguments to the must-gather image.
-	Args []string `json:"args,omitempty"`
+	// Command allows overriding the command and/or arguments for the custom must-gather image.
+	// This field is ignored if ImageStreamRef is not specified.
+	Command *GatherCommand `json:"command,omitempty"`
 
 	// ... existing fields ...
 }
@@ -150,7 +151,6 @@ No unique considerations.
 ### Implementation Details/Notes/Constraints
 
 -   All `ImageStream`s for the allowlist must be created manually in the operator's namespace.
--   The `spec.args` field will only be honored when a custom image is specified via `spec.imageStreamRef`. It will be ignored when using the default must-gather image.
 -   The administrator is responsible for communicating to users which `serviceAccountName` to use for a given diagnostic task.
 
 ### Risks and Mitigations
@@ -273,29 +273,29 @@ spec:
 
 #### Example 2: User Request (`MustGather`)
 
-The user specifies the `imageStreamRef`, the `serviceAccountName`, and the new config fields.
+The user specifies the `imageStreamRef`, the `serviceAccountName`, and provides a custom command override.
 
 ```yaml
-# /deploy/examples/must-gather-with-imagestream-and-sa.yaml
+# /deploy/examples/must-gather-with-custom-command.yaml
 apiVersion: operator.openshift.io/v1alpha1
 kind: MustGather
 metadata:
   name: my-network-diagnostics-run
   namespace: team-a-namespace
 spec:
-  # Reference to the allowed image via the new structured field
+  # Reference to the allowed image
   imageStreamRef:
     name: "network-debug-tools"
     tag: "v1.2"
   # Reference to the pre-configured ServiceAccount
   serviceAccountName: "must-gather-network-sa"
-  # Enable specific data gathering features. Note: `additionalConfig` is a
-  # placeholder for features to be defined in future proposals. `metrics` is an example.
-  additionalConfig:
-    metrics: true
-  # Pass custom arguments to the image
-  args:
-  - "--verbose"
+  # Override the default command and arguments for the image
+  command:
+    command:
+    - "/bin/sh"
+    - "-c"
+    args:
+    - "/usr/bin/custom-network-gather --verbose --output-file=/must-gather/custom-network.log"
   storage:
     type: PersistentVolume
     persistentVolume:
