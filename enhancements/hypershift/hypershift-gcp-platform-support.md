@@ -226,8 +226,25 @@ GCP platform support is gated behind the `GCPPlatform` feature gate.
 
 ### Topology Considerations
 
-- **Hypershift**: This enhancement is HyperShift-specific.
-- **Standalone/SNO/MicroShift**: Not applicable.
+#### Hypershift / Hosted Control Planes
+
+This enhancement is HyperShift-specific. It adds GCP as a new platform type for hosted control planes, enabling deployment of OpenShift hosted clusters on GCP infrastructure with the management cluster running on GKE.
+
+#### Standalone Clusters
+
+Not applicable. This enhancement is specific to the HyperShift topology.
+
+#### Single-node Deployments or MicroShift
+
+Not applicable. This enhancement is specific to the HyperShift topology.
+
+#### OpenShift Kubernetes Engine
+
+Not applicable. This enhancement is specific to the HyperShift topology and does not affect OKE.
+
+### Implementation Details/Notes/Constraints
+
+See the Proposal and API Extensions sections above.
 
 ### Affected Components
 
@@ -344,7 +361,7 @@ Uses existing OpenShift Prow CI infrastructure.
 
 Not applicable - this is a new feature.
 
-## Upgrade Strategy
+## Upgrade / Downgrade Strategy
 
 GCP platform support is introduced as a new capability. Existing clusters on other platforms are not affected.
 
@@ -352,6 +369,18 @@ For GCP clusters:
 - Control plane component upgrades follow standard HyperShift patterns
 - CAPG version upgrades are managed by the control plane operator
 - NodePool upgrades follow existing machine rollout strategies
+
+## Version Skew Strategy
+
+Nothing novel; follows standard HyperShift patterns.
+
+## Operational Aspects of API Extensions
+
+Nothing novel; follows standard HyperShift patterns.
+
+## Support Procedures
+
+Nothing novel; follows standard HyperShift patterns.
 
 ## Implementation History
 
