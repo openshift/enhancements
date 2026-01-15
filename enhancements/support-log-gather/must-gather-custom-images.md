@@ -17,7 +17,7 @@ tracking-link:
   - https://issues.redhat.com/browse/MG-155
 ---
 
-# Enhancement Proposal: Custom Must-Gather Images
+# Custom must-gather Images for Support Log Gather operator
 
 ## Release Signoff Checklist
 
