@@ -60,18 +60,18 @@ Extend the existing encryption controller framework in `openshift/library-go` to
 
 **Tech Preview v1 (External Plugin Management):**
 
-Users deploy KMS plugins manually as static pods (e.g. `unix:///var/run/kmsplugin/my-plugin.sock`) and specify a plugin name (e.g. `my-plugin`). The plugin name is templated into a Unix socket path (`unix:///var/run/kmsplugin/<name>.sock`).
-Encryption controllers track the endpoint and use it in EncryptionConfiguration. For KMS-to-KMS migrations, users update the plugin name, allowing both old and new plugins to run simultaneously during migration.
+Users deploy KMS plugins manually on all control plane nodes as static pods or systemd units at a predefined socket path (`unix:///var/run/kmsplugin/kms.sock`) and set the KMS type to Manual in the APIServer resource.
+Encryption controllers use the static endpoint in EncryptionConfiguration. KMS-to-KMS migrations are not supported in Tech Preview v1 since only one plugin can listen at the static socket path at a time.
 
 **Tech Preview v2 (Managed Plugin Lifecycle):**
 
-Users specify plugin-specific configuration (details TBD). The ManualKMSConfig struct and Manual provider type will be dropped in favor of managed KMS provider types (e.g. Vault).
+Users specify plugin-specific configuration (details TBD). The "Manual" provider type will be dropped in favor of managed KMS provider types (e.g. Vault).
 From the encryption controllers' perspective, the core logic remains the same; only the tracked fields change.
 
 **Key changes in library-go:**
 1. Add KMS mode constant to encryption state types
-2. Track KMS configuration in encryption key secrets (v1: plugin name, v2: plugin-specific config)
-3. Manage encryption key secrets with KMS metadata (actual keys are stored externally in KMS provider)
+2. Track KMS configuration in encryption key secrets
+3. Manage encryption key secrets with KMS configuration (actual keys are stored externally in KMS provider)
 4. Detect configuration changes to trigger migration
 5. Reuse existing migration controller (no changes needed)
 
@@ -92,10 +92,10 @@ From the encryption controllers' perspective, the core logic remains the same; o
 
 #### Encryption Controllers
 
-**keyController** manages encryption key lifecycle. Creates encryption key secrets in `openshift-config-managed` namespace. For KMS mode, creates secrets storing KMS configuration metadata.
+**keyController** manages encryption key lifecycle. Creates encryption key secrets in `openshift-config-managed` namespace. For KMS mode, creates secrets storing KMS configuration.
 
 **stateController** generates EncryptionConfiguration for API server consumption. Implements distributed state machine ensuring all API servers converge to same revision.
-For KMS mode, generates EncryptionConfiguration based on the KMS metadata given in APIServer resource.
+For KMS mode, generates EncryptionConfiguration based on the KMS configuration given in APIServer resource.
 
 **migrationController** orchestrates resource re-encryption. Marks resources as migrated after rewriting in etcd. Works with all encryption modes including KMS.
 
@@ -105,7 +105,8 @@ For KMS mode, generates EncryptionConfiguration based on the KMS metadata given 
 
 #### Steps for Enabling KMS Encryption (Tech Preview v1)
 
-1. Cluster admin deploys KMS plugin as static pod (listening at `unix:///var/run/kmsplugin/my-plugin.sock`) and updates the APIServer resource with the socket name:
+1. Cluster admin deploys KMS plugin on all control plane nodes (listening at `unix:///var/run/kmsplugin/kms.sock`) as static pod or systemd unit and updates the APIServer resource to enable KMS encryption.
+To enable the apiservers to access the KMS plugin, the `/var/run/kmsplugin` directory is mounted as a hostPath volume in the apiserver pods.
    ```yaml
    apiVersion: config.openshift.io/v1
    kind: APIServer
@@ -114,11 +115,9 @@ For KMS mode, generates EncryptionConfiguration based on the KMS metadata given 
        type: kms
        kms:
          type: Manual
-         manual:
-           name: my-plugin
    ```
 
-2. keyController detects the new encryption mode and reads the KMS metadata from APIServer resource.
+2. keyController detects the new encryption mode and reads the KMS configuration from APIServer resource.
 
 3. keyController creates encryption key secret storing the endpoint:
    ```yaml
@@ -129,7 +128,7 @@ For KMS mode, generates EncryptionConfiguration based on the KMS metadata given 
      namespace: openshift-config-managed
      annotations:
        encryption.apiserver.operator.openshift.io/mode: "kms"
-       encryption.apiserver.operator.openshift.io/kms-name: "my-plugin"
+       encryption.apiserver.operator.openshift.io/kms: "kms" # base64-encoded KMS configuration to track any changes
    data:
      keys: ""  # Empty in Tech Preview - KEK stored in external KMS
               # In Tech Preview v2, will contain base64-encoded key_id
@@ -144,36 +143,13 @@ For KMS mode, generates EncryptionConfiguration based on the KMS metadata given 
        providers:
          - kms:
              name: configmap-1
-             endpoint: unix:///var/run/kmsplugin/my-plugin.sock
+             endpoint: unix:///var/run/kmsplugin/kms.sock
              apiVersion: v2
    ```
 
 5. migrationController detects the new secret and initiates re-encryption (no code changes - works with any mode).
 
 6. conditionController updates status conditions: `EncryptionInProgress`, then `EncryptionCompleted`.
-
-#### Variation: Plugin Name Changes (KMS-to-KMS Migration, Tech Preview v1)
-
-When cluster admin updates the KMS plugin name (e.g., switching to a different KMS plugin):
-
-1. Admin deploys new KMS plugin at a different socket path (listening at `unix:///var/run/kmsplugin/my-new-plugin.sock`) and updates APIServer resource:
-   ```yaml
-   spec:
-     encryption:
-       type: kms
-       kms:
-         type: Manual
-         manual:
-           name: my-new-plugin
-   ```
-
-2. keyController reads the new KMS metadata from updated APIServer resource.
-3. Compares new metadata with metadata in most recent encryption key secret annotation.
-4. If metadata differs:
-   - Creates new encryption key secret with new metadata
-   - migrationController automatically triggers re-encryption
-   - **Both old and new KMS plugins must remain running during migration**
-5. If metadata matches: No action.
 
 **Note:** Automatic weekly key rotation (used for aescbc/aesgcm) is disabled for KMS since rotation is triggered externally.
 
@@ -192,14 +168,14 @@ When external KMS rotates the key internally:
 > Tech Preview v2 will require introducing a mechanism to poll KMS plugin Status endpoints for `key_id` changes and health monitoring, and expose this information to the operators.
 
 **Two change detection mechanisms:**
-- Tracking KMS metadata detects admin configuration changes
+- Tracking KMS configuration detects admin configuration changes
 - Tracking key_id detects external key rotation
 
 #### Variation: Migration Between Encryption Modes
 
 **From aescbc to KMS:**
-1. Admin deploys KMS plugin and updates APIServer: `type: kms` with KMS metadata.
-2. keyController creates KMS secret (empty data, with KMS metadata annotation).
+1. Admin deploys KMS plugin and updates APIServer: `type: kms` with KMS configuration.
+2. keyController creates KMS secret (empty data, with KMS configuration annotation).
 3. migrationController re-encrypts resources using external KMS.
 
 **From KMS to aescbc:**
@@ -221,86 +197,43 @@ Migration controller reuses existing logic - no changes required.
 
 **Tech Preview V1**
 
+The APIServer resource is extended to support KMS encryption configuration. 
+Users can specify `type: Manual` to indicate they are manually managing the KMS plugin deployment. 
+The plugin must listen at the predefined socket path `unix:///var/run/kmsplugin/kms.sock`. 
+
 ```go
 // KMSConfig defines the configuration for the KMS instance
 // that will be used with KMSEncryptionProvider encryption
-// +kubebuilder:validation:XValidation:rule="has(self.type) && self.type == 'Manual' ? (has(self.manual) && has(self.manual.name) && self.manual.name != '') : !has(self.manual)",message="manual config with non-empty name is required when kms provider type is Manual, and forbidden otherwise"
 // +kubebuilder:validation:XValidation:rule="has(self.type) && self.type == 'AWS' ?  has(self.aws) : !has(self.aws)",message="aws config is required when kms provider type is AWS, and forbidden otherwise"
 // +union
 type KMSConfig struct {
 // type defines the kind of platform for the KMS provider.
-// Available provider types are AWS, Manual.
+// Available provider types are AWS and Manual.
 //
 // +unionDiscriminator
 // +required
 Type KMSProviderType `json:"type"`
 
-// manual defines the configuration for manually managed KMS plugins.
-// The KMS plugin must be deployed as a static pod by the cluster admin.
-//
-// +unionMember
-// +optional
-Manual *ManualKMSConfig `json:"manual,omitempty"`
-
 // aws defines the key config for using an AWS KMS instance
 // for the encryption. The AWS KMS instance is managed
 // by the user outside the purview of the control plane.
-// Deprecated: There is no logic listening to this resource type, we plan to remove it in next release.
 //
 // +unionMember
 // +optional
 AWS *AWSKMSConfig `json:"aws,omitempty"`
 }
 
-// ManualKMSConfig defines the configuration for manually managed KMS plugins
-type ManualKMSConfig struct {
-// name specifies the KMS plugin name.
-// This name is templated into the UNIX domain socket path: unix:///var/run/kmsplugin/<name>.sock
-// and is between 1 and 80 characters in length.
-// The KMS plugin must listen at this socket path.
-// The name must be a safe socket filename and must not contain '/' or '..'.
-//
-// +kubebuilder:validation:MaxLength=80
-// +kubebuilder:validation:MinLength=1
-// +kubebuilder:validation:XValidation:rule="!self.contains('/') && !self.contains('..')",message="name must be a safe socket filename (must not contain '/' or '..')"
-// +optional
-Name string `json:"name,omitempty"`
-}
-```
-
-**Tech Preview V2**
-
-In Tech Preview v2, Manual type support is dropped in favor of managed plugin lifecycle.
-Vault is introduced as the first managed KMS provider type.
-The ManualKMSConfig struct is removed entirely as manual plugin management is no longer supported.
-
-```go
-// KMSConfig defines the configuration for the KMS instance
-// that will be used with KMSEncryptionProvider encryption
-// +kubebuilder:validation:XValidation:rule="has(self.type) && self.type == 'Vault' ?  has(self.vault) : !has(self.vault)",message="vault config is required when kms provider type is Vault, and forbidden otherwise"
-// +union
-type KMSConfig struct {
-// type defines the kind of platform for the KMS provider.
-// Valid values are "Vault".
-//
-// +unionDiscriminator
-// +required
-Type KMSProviderType `json:"type"`
-
-// vault defines the configuration for using HashiCorp Vault as KMS provider.
-//
-// +unionMember
-// +optional
-Vault *VaultKMSConfig `json:"vault,omitempty"`
-}
+// KMSProviderType is a specific supported KMS provider
+// +kubebuilder:validation:Enum=AWS;Manual
+type KMSProviderType string
 ```
 
 ### Topology Considerations
 
 #### Hypershift / Hosted Control Planes
 
-The library-go encryption controllers run in the management cluster as part of the hosted control plane operators.
-KMS plugin health checks must account for the split architecture where plugins may run in different contexts than the controllers.
+Hypershift has a parallel implementation that supports AESCBC and KMS without using the encryption controllers in library-go. 
+Unifying the two implementations is out of scope for this enhancement.
 
 #### Standalone Clusters
 
@@ -342,9 +275,12 @@ This feature does not depend on the features that are excluded from the OKE prod
 - `migration_controller_test.go`: KMS migration scenarios
 - `state_controller_test.go`: KMS state changes
 
-**E2E Tests** (Future work):
+**E2E Tests** (v1):
+- Migration between identity ↔ KMS 
+
+**E2E Tests** (v2):
 - Full cluster with KMS encryption enabled
-- Migration between encryption modes (aescbc → KMS, KMS → KMS, KMS → identity)
+- Migration between encryption modes (aescbc → KMS, KMS → KMS)
 - Verify data re-encryption completes
 
 ## Graduation Criteria
