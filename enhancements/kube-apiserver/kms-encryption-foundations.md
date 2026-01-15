@@ -106,7 +106,7 @@ For KMS mode, generates EncryptionConfiguration based on the KMS configuration g
 #### Steps for Enabling KMS Encryption (Tech Preview v1)
 
 1. Cluster admin deploys KMS plugin on all control plane nodes (listening at `unix:///var/run/kmsplugin/kms.sock`) as static pod or systemd unit and updates the APIServer resource to enable KMS encryption.
-To enable the apiservers to access the KMS plugin, the `/var/run/kmsplugin` directory is mounted as a hostPath volume in the apiserver pods.
+To enable the apiservers to access the KMS plugin, the `/var/run/kmsplugin` directory is mounted as a hostPath volume in all the apiserver pods.
    ```yaml
    apiVersion: config.openshift.io/v1
    kind: APIServer
@@ -119,7 +119,7 @@ To enable the apiservers to access the KMS plugin, the `/var/run/kmsplugin` dire
 
 2. keyController detects the new encryption mode and reads the KMS configuration from APIServer resource.
 
-3. keyController creates encryption key secret storing the endpoint:
+3. keyController creates encryption key secret with KMS configuration:
    ```yaml
    apiVersion: v1
    kind: Secret
@@ -128,10 +128,11 @@ To enable the apiservers to access the KMS plugin, the `/var/run/kmsplugin` dire
      namespace: openshift-config-managed
      annotations:
        encryption.apiserver.operator.openshift.io/mode: "kms"
-       encryption.apiserver.operator.openshift.io/kms: "kms" # base64-encoded KMS configuration to track any changes
    data:
-     keys: ""  # Empty in Tech Preview - KEK stored in external KMS
-              # In Tech Preview v2, will contain base64-encoded key_id
+     encryption.apiserver.operator.openshift.io-key: "<base64-encoded-kms-config>"
+     # Contains base64-encoded structured data with KMS configuration:
+     # - Tech Preview v1: Static endpoint path (unix:///var/run/kmsplugin/kms.sock)
+     # - Tech Preview v2: Will also include key_id and other plugin-specific configuration for other kms provider types
    ```
 
 4. stateController generates EncryptionConfiguration using the user-provided endpoint:
