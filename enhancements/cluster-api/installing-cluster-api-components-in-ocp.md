@@ -36,12 +36,12 @@ This feature is currently only available in Tech Preview clusters.
 
 The benefits of this changes include:
 * Reduced potential for using the CAPI installer as a means of privilege escalation to Cluster Admin
-* Simplified handling of manifests too large for a ConfigMap
-* Simplified manifest generation and review
-* Move manifest generation (almost) entirely into provider repos
+* Simplified handling of manifests too large to be nested into a ConfigMap
+* Simplified CAPI manifest generation and review
+* Move provider specific manifest generation (almost) entirely into CAPI provider repos
 
-Additionally, the change supports a reimplementation of the installer controller to enable:
-* Phased installation of providers, with gates between phases
+Additionally, the change supports a reimplementation of the CAPI installer controller to enable:
+* Phased installation of CAPI providers, with gates between phases
 * Ability to temporarily pin CAPI providers to a previous cluster version
 * Ability to remove assets previously installed by a CAPI provider
 * Ability to support generation of CRD Compatibility Requirements for unmanged CRDs
@@ -62,7 +62,7 @@ As an OpenShift engineer I want to _have a way to load and customize provider ma
 
 ## Proposal
 
-We will implement a series of steps which allow us to transition smoothly from the current implementation to a new implementation without breaking.
+We will implement a series of steps which allow us to transition smoothly from the current implementation to a new implementation without temporarily breaking the payload (see the **Interim flow** section below).
 In summary:
 
 * Add support for image-based CAPI manifests to the CAPI installer
@@ -103,14 +103,14 @@ Build time:
 * The manifests and metadata file are added to the provider image in the `/capi-operator-manifests` directory
 
 Differences:
-* `manifests-gen` no longer does any provider-specific modifications to manifests.
-  These modifications move from `manifests-gen`, which is in the `cluster-capi-operator` repo, to the provider repo which requires them.
+* `manifests-gen` no longer implements custom go logic to do provider-specific modifications to manifests.
+  These modifications move from `manifests-gen` custom logic, which is in the `cluster-capi-operator` repo, to kustomize patches in the provider repo's which requires them. `manifests-gen` already invokes `kustomize` under the hood so no extra changes are going to be required.
 * `manifests-gen` writes CAPI Operator assets instead of a CVO asset.
 
 Runtime:
 * At startup, CAPI installer reads a list of provider images associated with the current OpenShift release
 * CAPI installer pulls these images and extracts manifests and metadata from the `/capi-operator-manifests` directory
-* The revision controller creates a new Revision references all manifests relevant to the current cluster
+* The revision controller creates a new Revision that references all manifests relevant to the current cluster
 * The installer controller installs the new Revision using Boxcutter
 * Once successful, the installer controller deletes orphaned artifacts associated with previous Revisions
 
