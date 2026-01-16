@@ -388,13 +388,14 @@ To customize proxy settings, a cluster administrator can override the `HTTP_PROX
 
 ### Trusted Certificate Authority
 
-The operator supports custom Certificate Authority (CA) bundles for environments using proxy servers with TLS interception. When the `TRUSTED_CA_CONFIGMAP_NAME` environment variable is set on the operator deployment (via OLM Subscription or direct patch), the operator mounts the referenced ConfigMap containing the CA bundle at `/etc/pki/tls/certs/ca-bundle.crt`. This ConfigMap should be labeled with `config.openshift.io/inject-trusted-cabundle=true` to leverage OpenShift's [CA bundle injection](https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html/configuring_network_settings/configuring-a-custom-pki#certificate-injection-using-operators_configuring-a-custom-pki). See [openshift/must-gather-operator#312](https://github.com/openshift/must-gather-operator/pull/312) for implementation details.
+The operator supports custom Certificate Authority (CA) bundles for environments using proxy servers with TLS interception. When the `TRUSTED_CA_CONFIGMAP_NAME` environment variable is set on the operator deployment (via OLM Subscription patch on `spec.config.env`), the operator mounts the referenced ConfigMap containing the CA bundle at `/etc/pki/tls/certs/ca-bundle.crt`. This ConfigMap should be labeled with `config.openshift.io/inject-trusted-cabundle=true` to leverage OpenShift's [CA bundle injection](https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html/configuring_network_settings/configuring-a-custom-pki#certificate-injection-using-operators_configuring-a-custom-pki). See [openshift/must-gather-operator#312](https://github.com/openshift/must-gather-operator/pull/312) for implementation details.
 
 #### Reconcile flow
 
 During the MustGather CR reconciliation, the operator copies the trusted CA ConfigMap from the operator namespace (`must-gather-operator`) to the operand namespace where the MustGather CR is present. This ensures that the upload container in the must-gather job can mount and use the trusted CA bundle for SFTP uploads, even when the job runs in a different namespace than the operator.
 
-The copied ConfigMap should include an `ownerReference` pointing to the MustGather CR. Since both the MustGather CR and the copied ConfigMap reside in the same namespace, Kubernetes garbage collection will automatically delete the ConfigMap when the MustGather CR is deleted. This approach ensures automatic cleanup without explicit deletion logic in the operator.
+The copied ConfigMap will include an owner reference pointing to the MustGather CR. When multiple MustGather(s) are created in the same namespace, the operator during reconciliation will update the `ownerReferences` list on the copied config map to include references to all non-deleted CRs. Upon CR deletion, operator checks if it is the one and only owner reference in the config map and if so then it triggers deletion of the copied config map.
+Additionally, Kubernetes garbage collection will also automatically delete the ConfigMap when the MustGather CR is deleted. This approach ensures automatic cleanup without explicit deletion logic in the absence of the operator being active.
 
 ## Implementation History
 
