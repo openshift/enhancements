@@ -49,7 +49,7 @@ The default must-gather image provides a broad set of diagnostic data. However, 
 
 -   Utilize the OpenShift `ImageStream` resource as a centrally managed allowlist for custom must-gather images.
 -   Add a new `imageStreamRef` field to the `MustGather` CRD to allow specifying custom images.
--   Add a `command` field to the `MustGather` CRD to allow overriding the image's command and arguments.
+-   Add a `gatherSpec` field to the `MustGather` CRD to allow overriding the image's command and arguments.
 -   Update the must-gather-operator to validate any specified `imageStreamRef` against the allowlisted `ImageStream`s.
 -   Leverage the built-in import status of an `ImageStreamTag` to asynchronously verify that an image is valid and pullable.
 -   The operator will use the user-provided `serviceAccountName` directly to run the must-gather job.
@@ -74,11 +74,11 @@ The workflow is divided into two main parts: the administrative setup and the us
 
 **Part 2: User Request and Operator Execution**
 
-1.  **User Request:** A user creates a `MustGather` CR, setting the `spec.imageStreamRef` field and optionally providing a `serviceAccountName` and a `command` override.
+1.  **User Request:** A user creates a `MustGather` CR, setting the `spec.imageStreamRef` field and optionally providing a `serviceAccountName` and a `gatherSpec` override.
 2.  **Operator Validation:** The operator validates that the requested `ImageStreamRef` exists and its import status is successful.
 3.  **Execution:** If the image is valid, the operator creates the Kubernetes `Job`.
     - It specifies the user-provided `serviceAccountName` in the pod spec (or the default if none is provided).
-    - If a `command` is specified in the `MustGather` spec, its contents are passed directly to the `command` and `args` fields of the Job's container spec.
+    - If a `gatherSpec` is specified in the `MustGather` spec, its contents are passed directly to the `command` and `args` fields of the Job's container spec.
     - The job runs with the permissions granted to the `ServiceAccount` and the custom command.
 4.  **Cleanup:** Once the job completes, the operator deletes the job. The `ServiceAccount` and its associated RBAC resources remain.
 
@@ -86,13 +86,12 @@ The workflow is divided into two main parts: the administrative setup and the us
 
 #### `MustGather` CRD Modification
 
-The `MustGather` spec will be modified to include the new `imageStreamRef` and `command` fields.
+The `MustGather` spec will be modified to include the new `imageStreamRef` and `gatherSpec` fields.
 
 ```go
-// GatherCommand allows overriding the default command and arguments of the must-gather image,
-// mirroring the functionality of the `oc adm must-gather -- <command>` CLI.
+// GatherSpec allows overriding the default command and arguments of the must-gather image,
 // This is only applicable when a custom image is specified via `imageStreamRef`.
-type GatherCommand struct {
+type GatherSpec struct {
 	// Command is a string array representing the new entrypoint for the container.
 	// If not specified, the image's default ENTRYPOINT is used.
 	// +optional
@@ -123,9 +122,9 @@ type MustGatherSpec struct {
 	ImageStreamRef *ImageStreamTagRef `json:"imageStreamRef,omitempty"`
 
 	// +kubebuilder:validation:Optional
-	// Command allows overriding the command and/or arguments for the custom must-gather image.
+	// GatherSpec allows overriding the command and/or arguments for the custom must-gather image.
 	// This field is ignored if ImageStreamRef is not specified.
-	Command *GatherCommand `json:"command,omitempty"`
+	GatherSpec *GatherSpec `json:"gatherSpec,omitempty"`
 
 	// ... existing fields ...
 }
@@ -290,7 +289,7 @@ spec:
   # Reference to the pre-configured ServiceAccount
   serviceAccountName: "must-gather-network-sa"
   # Override the default command and arguments for the image
-  command:
+  gatherSpec:
     command:
     - "/bin/sh"
     - "-c"
