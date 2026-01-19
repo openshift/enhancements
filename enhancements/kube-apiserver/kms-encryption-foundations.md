@@ -112,7 +112,7 @@ To enable the apiservers to access the KMS plugin, the `/var/run/kmsplugin` dire
    kind: APIServer
    spec:
      encryption:
-       type: kms
+       type: KMS
    ```
 
 2. keyController detects the new encryption mode.
@@ -173,7 +173,7 @@ When external KMS rotates the key internally:
 #### Variation: Migration Between Encryption Modes
 
 **From aescbc to KMS:**
-1. Admin deploys KMS plugin and updates APIServer: `type: kms` with KMS configuration.
+1. Admin deploys KMS plugin and updates APIServer: `type: KMS` with KMS configuration.
 2. keyController creates KMS secret (empty data, with KMS configuration annotation).
 3. migrationController re-encrypts resources using external KMS.
 
@@ -197,39 +197,8 @@ Migration controller reuses existing logic - no changes required.
 **Tech Preview V1**
 
 For Tech Preview v1, no new API fields are added to the APIServer resource.
-Users simply set `encryption.type: kms` and deploy KMS plugins at the hardcoded endpoint `unix:///var/run/kmsplugin/kms.sock`.
-Previously defined KMSConfig and related types (KMSProviderType, AWSKMSConfig) will be removed from the codebase as they are not used in this design.
-
-```go
-// TOMBSTONED: KMSConfig and related types are not needed for Tech Preview v1.
-// Tech Preview v1 uses a hardcoded endpoint without provider-specific configuration.
-// Future managed KMS provider types (Tech Preview v2) will introduce new API types.
-//
-// KMSConfig defines the configuration for the KMS instance
-// that will be used with KMSEncryptionProvider encryption
-// +kubebuilder:validation:XValidation:rule="has(self.type) && self.type == 'AWS' ?  has(self.aws) : !has(self.aws)",message="aws config is required when kms provider type is AWS, and forbidden otherwise"
-// +union
-type KMSConfig struct {
-// type defines the kind of platform for the KMS provider.
-// Available provider types are AWS.
-//
-// +unionDiscriminator
-// +required
-Type KMSProviderType `json:"type"`
-
-// aws defines the key config for using an AWS KMS instance
-// for the encryption. The AWS KMS instance is managed
-// by the user outside the purview of the control plane.
-//
-// +unionMember
-// +optional
-AWS *AWSKMSConfig `json:"aws,omitempty"`
-}
-
-// KMSProviderType is a specific supported KMS provider
-// +kubebuilder:validation:Enum=AWS
-type KMSProviderType string
-```
+Users simply set `encryption.type: KMS` ([EncryptionType](https://github.com/openshift/api/blob/6fb7fdae95fd20a36809d502cfc0e0459550d527/config/v1/types_apiserver.go#L214))
+and deploy KMS plugins at the hardcoded endpoint `unix:///var/run/kmsplugin/kms.sock`. Current `KMSConfig` will not be used.
 
 ### Topology Considerations
 
