@@ -30,32 +30,29 @@ see-also:
 
 ## Summary
 
-This enhancement adds Google Cloud Platform (GCP) as a supported platform for HyperShift hosted clusters. The implementation enables users to deploy OpenShift hosted clusters on GCP infrastructure, leveraging Cluster API Provider GCP (CAPG) for infrastructure management, Workload Identity Federation (WIF) for secure keyless authentication, and Private Service Connect (PSC) for private networking between management and hosted clusters.
+This enhancement adds the necessary changes to HyperShift to enable a managed OpenShift service on Google Cloud Platform (GCP). The implementation enables deployment of OpenShift hosted clusters on GCP infrastructure, leveraging Cluster API Provider GCP (CAPG) for infrastructure management, Workload Identity Federation (WIF) for secure keyless authentication, and Private Service Connect (PSC) for private networking between management and hosted clusters.
 
 ## Motivation
 
-HyperShift supports a variety of cloud and on-premise platforms. Adding GCP support expands the options available to customers who operate in Google Cloud environments, enabling them to benefit from HyperShift's cost-effective and efficient hosted control plane model.
+Red Hat offers managed OpenShift services on AWS (ROSA) and Azure (ARO), both built on HyperShift. GCP is a major cloud provider with a significant customer base, and extending managed OpenShift to GCP requires adding GCP platform support to HyperShift.
 
-GCP is a major cloud provider with a significant customer base. Many organizations operate hybrid or multi-cloud environments that include GCP, and they require the ability to run OpenShift hosted clusters on GCP infrastructure while maintaining consistency with their existing HyperShift deployments on other platforms.
+This enhancement covers the HyperShift changes required to underpin a managed OpenShift service on GCP, following the patterns established for AWS and Azure.
 
 ### User Stories
 
-- As a cluster administrator using GCP, I want to deploy HyperShift hosted clusters on GCP infrastructure so that I can reduce control plane costs and simplify cluster management in my GCP environment.
+- As a managed service operator, I want HyperShift to support GCP as a platform so that I can offer a managed OpenShift service to customers running on GCP infrastructure.
 
-- As a platform engineer, I want to use Workload Identity Federation for HyperShift hosted clusters on GCP so that I can avoid managing long-lived service account keys and improve security posture.
+- As a managed service operator, I want HyperShift to use Workload Identity Federation on GCP so that the service avoids long-lived credentials and follows GCP security best practices.
 
-- As a security-conscious operator, I want to deploy HyperShift hosted clusters on GCP using Private Service Connect so that control plane traffic remains within private networks.
+- As a managed service operator, I want HyperShift to use Private Service Connect so that control plane traffic between management and hosted clusters does not traverse the public internet.
 
-- As a DevOps engineer, I want CLI commands to create and destroy GCP infrastructure for HyperShift so that I can automate hosted cluster lifecycle management.
-
-- As a cluster administrator, I want to configure GCP-specific NodePool settings (machine type, zones, disk configuration) so that I can optimize worker node specifications for my workloads.
+- As a customer of a managed OpenShift service on GCP, I want to configure GCP-specific NodePool settings (machine type, zones, disk configuration) so that I can optimize worker nodes for my workloads.
 
 ### Goals
 
-- Enable deployment of HyperShift hosted clusters on GCP infrastructure
-- Support GKE as a management cluster platform for running HyperShift
+- Enable deployment of HyperShift hosted clusters on GCP infrastructure to underpin a managed OpenShift service
 - Implement secure, keyless authentication using GCP Workload Identity Federation
-- Support secure, private control plane traffic using GCP Private Service Connect
+- Support private control plane traffic using GCP Private Service Connect
 - Provide CLI commands for creating and destroying GCP infrastructure and IAM resources
 - Support GCP-specific NodePool configuration for worker nodes
 - Integrate with external-dns for GCP Cloud DNS management
@@ -63,6 +60,7 @@ GCP is a major cloud provider with a significant customer base. Many organizatio
 
 ### Non-Goals
 
+- Self-managed HyperShift on GCP (this enhancement targets managed service enablement only)
 - Supporting legacy service account key-based authentication (WIF is mandatory)
 - Windows worker nodes (may be added in a future enhancement)
 
@@ -234,7 +232,7 @@ GCP platform support is gated behind the `GCPPlatform` feature gate.
 
 #### Hypershift / Hosted Control Planes
 
-This enhancement is HyperShift-specific. It adds GCP as a new platform type for hosted control planes, enabling deployment of OpenShift hosted clusters on GCP infrastructure with the management cluster running on GKE.
+This enhancement is HyperShift-specific. It adds GCP as a new platform type for hosted control planes to enable a managed OpenShift service on GCP. Management clusters running on GKE are specific to the managed service architecture and are not intended for self-managed OCP deployments.
 
 #### Standalone Clusters
 
