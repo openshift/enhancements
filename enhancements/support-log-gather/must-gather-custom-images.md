@@ -60,6 +60,7 @@ The default must-gather image provides a broad set of diagnostic data. However, 
 
 - This proposal does not cover the process of building, hosting, or distributing custom must-gather images.
 - The operator will not create, manage, or validate any RBAC resources (`Roles`, `ClusterRoles`, `ServiceAccounts`, or bindings). This is the administrator's responsibility.
+- This proposal does not include any mechanism for the operator to automatically discover custom must-gather images from other installed operators (e.g., by scanning `ClusterServiceVersion` annotations).
 
 ## Proposal
 
@@ -76,10 +77,16 @@ The workflow is divided into two main parts: the administrative setup and the us
 
 1.  **User Request:** A user creates a `MustGather` CR, setting the `spec.imageStreamRef` field and optionally providing a `serviceAccountName` and a `gatherSpec` override.
 2.  **Operator Validation:** The operator validates that the requested `ImageStreamRef` exists and its import status is successful.
-3.  **Execution:** If the image is valid, the operator creates the Kubernetes `Job`.
-    - It specifies the user-provided `serviceAccountName` in the pod spec (or the default if none is provided).
-    - If a `gatherSpec` is specified in the `MustGather` spec, its contents are passed directly to the `command` and `args` fields of the Job's container spec.
-    - The job runs with the permissions granted to the `ServiceAccount` and the custom command.
+3.  **Execution:** The operator inspects the `MustGather` CR and creates the Kubernetes `Job` according to the following logic:
+    - The operator translates `spec.gatherSpec.audit` or `.metrics` fields into standard signals (e.g., environment variables `MUST_GATHER_AUDIT=true`).
+    - If `spec.imageStreamRef` is **not** set (default image run):
+        - The operator uses the default must-gather image, which is designed to understand these signals.
+        - If `spec.gatherSpec.command` or `.args` are set, the operator rejects the CR with a validation error.
+    - If `spec.imageStreamRef` **is** set (custom image run):
+        - The operator validates the image reference and uses the resolved custom image.
+        - The standard signals for `audit` and `metrics` are still injected, allowing the custom image to optionally respect them.
+        - It passes the `spec.gatherSpec.command` and `.args` fields directly to the Job's container spec.
+    - The job always runs with the permissions of the `spec.serviceAccountName` if provided, or the namespace default otherwise.
 4.  **Cleanup:** Once the job completes, the operator deletes the job. The `ServiceAccount` and its associated RBAC resources remain.
 
 ### API Extensions
@@ -89,17 +96,36 @@ The workflow is divided into two main parts: the administrative setup and the us
 The `MustGather` spec will be modified to include the new `imageStreamRef` and `gatherSpec` fields.
 
 ```go
-// GatherSpec allows overriding the default command and arguments of the must-gather image,
-// This is only applicable when a custom image is specified via `imageStreamRef`.
+// GatherSpec allows specifying the execution details for a must-gather run.
 type GatherSpec struct {
-	// Command is a string array representing the new entrypoint for the container.
-	// If not specified, the image's default ENTRYPOINT is used.
-	// +optional
+	// +kubebuilder:validation:Optional
+	// Audit specifies whether to collect audit logs. This is translated to a signal
+	// (e.g., an environment variable) that can be respected by the default image
+	// or any custom image designed to do so.
+	Audit bool `json:"audit,omitempty"`
+
+	// +kubebuilder:validation:Optional
+	// Metrics specifies whether to collect Prometheus metrics. This is translated to a signal
+	// (e.g., an environment variable) that can be respected by the default image
+	// or any custom image designed to do so.
+	Metrics bool `json:"metrics,omitempty"`
+
+	// --- Fields for a CUSTOM must-gather image ONLY ---
+	// These fields are only honored when a custom image IS specified via imageStreamRef.
+	// If they are set for a default must-gather run, the request will be rejected.
+
+	// +kubebuilder:validation:Optional
+	// Command is a string array representing the entrypoint for the custom image.
+	// Each string in the slice is limited to a maximum length of 256 characters by API validation.
+	// +kubebuilder:validation:MaxItems=256
+	// +kubebuilder:validation:Items:MaxLength=256
 	Command []string `json:"command,omitempty"`
 
-	// Args is a string array of arguments passed to the command. If `command` is not specified,
-	// these are passed to the default entrypoint.
-	// +optional
+	// +kubebuilder:validation:Optional
+	// Args is a string array of arguments passed to the custom image's command.
+	// Each string in the slice is limited to a maximum length of 256 characters by API validation.
+	// +kubebuilder:validation:MaxItems=256
+	// +kubebuilder:validation:Items:MaxLength=256
 	Args []string `json:"args,omitempty"`
 }
 
@@ -150,6 +176,9 @@ No unique considerations.
 ### Implementation Details/Notes/Constraints
 
 -   All `ImageStream`s for the allowlist must be created manually in the operator's namespace.
+-   The `spec.gatherSpec.command` and `spec.gatherSpec.args` fields will only be honored when `spec.imageStreamRef` is set. If they are set for a default must-gather run, the request will be rejected by the operator.
+-   The `spec.gatherSpec.audit` and `spec.gatherSpec.metrics` fields are translated into signals (e.g., environment variables) for both default and custom images.
+-   Each string within the `command` and `args` slices is limited to a maximum length of 256 characters by API validation.
 -   The administrator is responsible for communicating to users which `serviceAccountName` to use for a given diagnostic task.
 
 ### Risks and Mitigations
@@ -270,9 +299,9 @@ spec:
       name: 'quay.io/my-org/network-debug-tools:v1.2'
 ```
 
-#### Example 2: User Request (`MustGather`)
+#### Example 2: User Request (Custom Image)
 
-The user specifies the `imageStreamRef`, the `serviceAccountName`, and provides a custom command override.
+The user specifies a custom image, provides a custom command override, and also enables `audit` collection. The custom image must be designed to respect the `MUST_GATHER_AUDIT=true` environment variable for this to have an effect.
 
 ```yaml
 # /deploy/examples/must-gather-with-custom-command.yaml
@@ -288,13 +317,37 @@ spec:
     tag: "v1.2"
   # Reference to the pre-configured ServiceAccount
   serviceAccountName: "must-gather-network-sa"
-  # Override the default command and arguments for the image
+  # Override the command and enable audit logging
   gatherSpec:
+    audit: true
     command:
-    - "/bin/sh"
-    - "-c"
+    - "/usr/bin/custom-gather"
     args:
-    - "/usr/bin/custom-network-gather --verbose --output-file=/must-gather/custom-network.log"
+    - "--verbose"
+    - "--subsystem=network"
+  storage:
+    type: PersistentVolume
+    persistentVolume:
+      claim:
+        name: my-diagnostics-pvc
+```
+
+#### Example 3: User Request (Default Image with Flags)
+
+The user runs a standard must-gather but enables the collection of audit logs via the `gatherSpec`.
+
+```yaml
+# /deploy/examples/must-gather-with-flags.yaml
+apiVersion: operator.openshift.io/v1alpha1
+kind: MustGather
+metadata:
+  name: default-gather-with-audit
+  namespace: openshift-must-gather-operator
+spec:
+  # No imageStreamRef is specified, so the default image will be used.
+  # The `command` and `args` fields would be rejected if set here.
+  gatherSpec:
+    audit: true
   storage:
     type: PersistentVolume
     persistentVolume:
