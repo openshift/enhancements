@@ -242,10 +242,14 @@ This feature does not depend on the features that are excluded from the OKE prod
 
 ## Test Plan
 
-**Unit Tests:**
+**Unit Tests**:
 - `key_controller_test.go`: KMS key creation, rotation detection, endpoint changes
 - `migration_controller_test.go`: KMS migration scenarios
 - `state_controller_test.go`: KMS state changes
+
+**Integration Tests**:
+- State transitions in encryption controllers in library-go
+- Explore MOM framework for integration tests in apiserver operators (add tests if it makes sense)
 
 **E2E Tests** (v1):
 - Migration between identity ↔ KMS 
