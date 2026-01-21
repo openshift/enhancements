@@ -236,6 +236,10 @@ This is the primary target for this enhancement. Standalone clusters will fully 
 
 **MicroShift:** **TBD**
 
+#### OpenShift Kubernetes Engine
+
+This enhancement applies to OpenShift Kubernetes Engine (OKE) clusters. The TLS configuration mechanism works identically to standard OpenShift Container Platform clusters.
+
 ### Implementation Details/Notes/Constraints
 
 #### Go crypto/tls Limitations
@@ -277,22 +281,7 @@ Create a dedicated new Custom Resource for cluster-wide TLS configuration. This 
 
 1. How should the API handle components that report they cannot support the configured profile (e.g., older operator versions)?
 
-## Test Plan
-
-**Unit Tests:**
-- Profile expansion (predefined profiles to actual TLS settings)
-- `tlsAdherence` field correctly parsed and applied
-
-**Integration Tests:**
-- Component operators correctly watch and respond to APIServer TLS configuration changes
-- Components apply the correct TLS settings based on the profile
-- Ingress override works correctly alongside cluster-wide settings
-- `tlsAdherence` mode correctly controls enforcement behavior
-
-**E2E Tests:**
-- Create cluster with each predefined profile and verify TLS settings with tls-scanner
-- Change profile and verify components update correctly
-- Test passthrough and re-encrypt scenarios with different profiles
+## Graduation Criteria
 
 ### Dev Preview -> Tech Preview
 
@@ -311,6 +300,23 @@ Create a dedicated new Custom Resource for cluster-wide TLS configuration. This 
 ### Removing a deprecated feature
 
 Not applicable for initial implementation.
+
+## Test Plan
+
+**Unit Tests:**
+- Profile expansion (predefined profiles to actual TLS settings)
+- `tlsAdherence` field correctly parsed and applied
+
+**Integration Tests:**
+- Component operators correctly watch and respond to APIServer TLS configuration changes
+- Components apply the correct TLS settings based on the profile
+- Ingress override works correctly alongside cluster-wide settings
+- `tlsAdherence` mode correctly controls enforcement behavior
+
+**E2E Tests:**
+- Create cluster with each predefined profile and verify TLS settings with tls-scanner
+- Change profile and verify components update correctly
+- Test passthrough and re-encrypt scenarios with different profiles
 
 ## Upgrade / Downgrade Strategy
 
