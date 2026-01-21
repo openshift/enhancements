@@ -108,10 +108,14 @@ Enables secure connectivity between management and customer projects using GCP P
 - WIF integration for cross-project authentication
 
 **DNS Management:**
-Three DNS zones created after PSC endpoints are ready:
-1. `{cluster}.hypershift.local` (private) for internal services
-2. `in.{clusterDNSZoneBaseDomain}` (public) for ACME challenge delegation
-3. `in.{clusterDNSZoneBaseDomain}` (private) for VPC-internal ingress
+
+The control-plane-operator creates three DNS zones in the customer project after the KubeAPI is available:
+
+1. `{cluster}.hypershift.local` (private) - Internal cluster DNS for PSC endpoints
+2. `in.{clusterDNSZoneBaseDomain}` (public) - Customer ingress zone for ACME challenge delegation to enable Let's Encrypt certificate issuance
+3. `in.{clusterDNSZoneBaseDomain}` (private, VPC-scoped) - Customer ingress zone for private ingress resolution within the VPC
+
+After zone creation, the control-plane-operator reports zone metadata via HostedCluster status. A controller in the managed service infrastructure then creates NS delegation records in the regional zone to complete the DNS hierarchy. The ingress operator running on worker nodes subsequently populates `*.apps...` records in the customer ingress zones.
 
 ### NodePool Support
 
