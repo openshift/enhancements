@@ -263,13 +263,13 @@ GCP as a HyperShift platform. Components are organized by current work status.
 
 The following components have dedicated feature epics and are actively being addressed:
 
-| Component                         | Epic    |
-|-----------------------------------|---------|
-| Cloud Network Config Controller   | GCP-282 |
-| Cloud Controller Manager          | GCP-311 |
-| Cluster Ingress Operator / Router | GCP-314 |
-| Image Registry Operator           | GCP-315 |
-| Cluster Storage Operator / CSI    | GCP-322 |
+| Component                         | Epic    | Work Required |
+|-----------------------------------|---------|---------------|
+| Cloud Network Config Controller   | GCP-282 | WIF credential support for GCP networking APIs |
+| Cloud Controller Manager          | GCP-311 | GCP cloud provider for node and load balancer lifecycle |
+| Cluster Ingress Operator / Router | GCP-314 | GCP load balancer provisioning for ingress |
+| Image Registry Operator           | GCP-315 | GCS backend support for image registry storage |
+| Cluster Storage Operator / CSI    | GCP-322 | GCE Persistent Disk CSI driver integration |
 
 #### Components Under Investigation
 
