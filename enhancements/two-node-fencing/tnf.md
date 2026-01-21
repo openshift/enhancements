@@ -28,7 +28,7 @@ approvers:
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
   - "@deads2k"
 creation-date: 2024-09-05
-last-updated: 2024-09-22
+last-updated: 2026-01-16
 tracking-link:
   - https://issues.redhat.com/browse/OCPSTRAT-1514
 ---
@@ -155,8 +155,8 @@ At a glance, here are the components we are proposing to change:
 | Component                                                         | Change                                                                                                                          |
 | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | [Feature Gates](#feature-gate-changes)                            | Add a new `DualReplicaTopology` feature which can be enabled via the `CustomNoUpgrade` feature set                              |
-| [OpenShift API](#openshift-api-changes)                           | Add `DualReplica` as a new value for `ControlPlaneTopology`                                                                     |
-| [ETCD Operator](#etcd-operator-changes)                           | Add a mode to stop managing the etcd container, a new scaling strategy, and new TNF controller for initializing pacemaker       |
+| [OpenShift API](#openshift-api-changes)                           | Add `DualReplica` as a new value for `ControlPlaneTopology`, `PacemakerCluster` CRD for CEO health checking                     |
+| [ETCD Operator](#etcd-operator-changes)                           | Add external etcd mode, new scaling strategy, new TNF controller for initializing pacemaker, and pacemaker health  checker      |
 | [Install Config](#install-config-changes)                         | Update install config API to accept fencing credentials in the control plane for `platform: None` and `platform: Baremetal`     |
 | [Installer](#installer-changes)                                   | Populate the nodes with initial pacemaker configuration when deploying with 2 control-plane nodes and no arbiter                |
 | [MCO](#mco-changes)                                               | Add an MCO extension for installing pacemaker and corosync in RHCOS; MachineConfigPool maxUnavailable set to 1                  |
@@ -317,6 +317,9 @@ In the future, it may be possible to lower the privilege level of the TNF contro
 to run without root privileges. We are working with the RHEL-HA team to identify the specific set of commands that we use to narrow the scope of progress towards this goal. This remains a long-term
 objective for both teams.
 
+##### The PacemakerCluster Health Check
+See [Status Propagation with PacemakerCluster Health Check](#status-propagation-with-pacemakercluster-health-check)
+
 #### Install Config Changes
 
 In order to initialize pacemaker with valid fencing credentials, they will be consumed by the installer via the installation config and created on the cluster as a cluster secret.
@@ -382,53 +385,8 @@ sshKey: ''
 ```
 
 Unfortunately, Bare Metal Operator already has an API that accepts BMC credentials as part of configuring BareMetalHost CRDs. Adding BMC credentials to the BareMetalHost CRD allows the Baremetal
-Operator to manage the power status of that host via ironic. This is **strictly incompatible** with TNF because both the Bare Metal Operator and the pacemaker fencing agent will have control over the
-machine state.
-
-This example shows an **invalid** install configuration that the installer will reject for TNF.
-```
-apiVersion: v1
-baseDomain: example.com
-compute:
-- name: worker
-  replicas: 0
-controlPlane:
-  name: master
-  replicas: 2
-  fencing:
-    credentials:
-      - hostname: <control-0-hostname>
-        address: https://<redfish-api-url>
-        username: <username>
-        password: <password>
-      - hostname: <control-1-hostname>
-        address: https://<redfish-api-url>
-        username: <username>
-        password: <password>
-metadata:
-  name: <cluster-name>
-platform:
-  baremetal:
-    apiVIPs:
-      - <api_ip>
-    ingressVIPs:
-      - <wildcard_ip>
-    hosts:
-      - name: openshift-cp-0
-        role: master
-        bmc:
-          address: ipmi://<out_of_band_ip>
-          username: <username>
-          password: <password>
-      - name: openshift-cp-1
-        role: master
-        bmc:
-          address: ipmi://<out_of_band_ip>
-          username: <username>
-          password: <password>
-pullSecret: ''
-sshKey: ''
-```
+Operator to manage the power status of that host via ironic. To work around this, we detach the control-plane nodes from ironic once they are provisioned by adding the detached annotation
+(`baremetalhost.metal3.io/detached: ""`).
 
 ##### Why don't we reuse the existing APIs in the `Baremetal` platform?
 Reusing the existing APIs tightly couples separate outcomes that are important to distinguish for the end user.
@@ -708,6 +666,44 @@ This collection of diagrams collects a series of scenarios where both nodes fail
 
 ![Diagrams of Multi-Node Failure Scenarios](etcd-flowchart-both-nodes-reboot-scenarios.svg)
 
+#### Status Propagation with PacemakerCluster Health Check
+An important goal of Two Node OpenShift with Fencing is ensuring an early warning when the cluster enters a state where automatic recovery from quorum loss is not possible. To provide this
+warning, we need pacemaker health information to be available in the cluster. An example of this would be if the cluster administrator rotated their BMC password without updating the fencing secret
+in the cluster. This would be caught by the pacemaker monitoring checks, but something in the cluster needs to propagate that information to the user directly.
+
+To achieve this, we use two controllers in CEO. The first is a status collector which syncs every 30 seconds to gather the current state of pacemaker via `sudo pcs status xml`.
+This is parsed to update the `PacemakerCluster` status, a singleton resource created by CEO when the transition to etcd running externally is completed.
+Additionally, it creates events for:
+- Error events when kubelet, etcd, or fencing agents enter an unhealthy state
+- Warning events when resources are started or stopped
+- Warning events when fencing actions are taken
+
+The `PacemakerCluster` status structure:
+- `lastUpdated` - timestamp tracking when status was last updated (required, immutable once set)
+- `conditions` - cluster-level conditions: `Healthy`, `InService`, `NodeCountAsExpected`
+- `nodes` - list of node statuses (0-5 nodes; empty indicates catastrophic failure)
+
+Each `PacemakerClusterNodeStatus` contains:
+- `name` - node name (RFC 1123 subdomain)
+- `addresses` - list of `PacemakerNodeAddress` entries (type: `InternalIP`, address: canonical IPv4/IPv6). The first address is used for etcd peer URLs.
+- `conditions` - 9 node conditions: `Healthy`, `Online`, `InService`, `Active`, `Ready`, `Clean`, `Member`, `FencingAvailable`, `FencingHealthy`
+- `resources` - status for `Kubelet` and `Etcd` resources (each with 8 conditions: `Healthy`, `InService`, `Managed`, `Enabled`, `Operational`, `Active`, `Started`, `Schedulable`)
+- `fencingAgents` - fencing agent status (mapped to target node, not scheduling node)
+
+For full API details, see the [openshift/api pull request](https://github.com/openshift/api/pull/2544).
+
+The `PacemakerCluster` object used by a new pacemaker healthcheck controller to inform the status of CEO. The healthcheck controller is responsible for applying conditions to
+the cluster-etcd-operator to reflect when pacemaker is unhealthy and at risk of not being able to automatically recover from quorum loss events. Specifically it sets the CEO's
+status to degraded if one of the following conditions are true:
+- One or more of the nodes has an unhealthy kubelet, etcd, or fencing agent
+- The `PacemakerCluster` status object is stale (hasn't been updated in the last 5 minutes)
+
+Both of these conditions indicate that the cluster adminstrator should take action to restore these health checks or services to ensure the continued healthy operation of their cluster. The risk of
+ignoring this is that automic quorum recovery might not be active in the cluster.
+
+The only time the contents of `PacemakerCluster` are used outside of operator status reporting is during a node replacement event. In this situation, we need to match the node being removed to a node
+registered by pacemaker. This ensures that CEO can enforce replacing the correct (failed) node in pacemaker as well as the cluster.
+
 #### Running Two Node OpenShift with Fencing with a Failed Node
 
 An interesting aspect of TNF is that should a node fail and remain in a failed state, the cluster recovery operation will allow the survivor to restart etcd as a cluster-of-one and resume normal
@@ -716,9 +712,8 @@ aspects:
 
 1. Operators that deploy to multiple nodes will become degraded.
 2. Operations that would violate pod-disruption budgets will not work.
-3. Lifecycle operations that would violate the `MaxUnavailable` setting of the control-plane
-   [MachineConfigPool](https://docs.openshift.com/container-platform/4.17/updating/understanding_updates/understanding-openshift-update-duration.html#factors-affecting-update-duration_openshift-update-duration)
-   cannot proceed. This includes MCO node reboots and cluster upgrades.
+3. Lifecycle operations that would violate the `MaxUnavailable` setting of the control-plane [MachineConfigPool](https://docs.openshift.com/container-platform/4.17/updating/understanding_updates/
+   understanding-openshift-update-duration.html#factors-affecting-update-duration_openshift-update-duration) cannot proceed. This includes MCO node reboots and cluster upgrades.
 
 In short - it is not recommended that users allow their clusters to remain in this semi-operational state longterm. It is intended help ensure that api-server and workloads are available as much as
 possible, but it is not sufficient for the operation of a healthy cluster longterm.
@@ -840,11 +835,12 @@ Disadvantages:
 
    Pacemaker will be running as a system daemon and reporting errors about its various agents to the system journal. The question is, what is the best way to expose these to a cluster admin? A simple
    example would be an issue where pacemaker discovers that its fencing agent can no longer talk to the BMC. What is the best way to raise this error to the cluster admin, such that they can see that
-   their cluster may be at risk of failure if no action is taken to resolve the problem? In our current design, we'd likely need to explore what kinds of errors we can bubble up through existing
-   cluster health APIs to see if something suitable can be reused.
+   their cluster may be at risk of failure if no action is taken to resolve the problem?
 
    For situations where we recognize a risk to etcd health if no action is taken, we plan on monitoring the pacemaker status via the TNF controller and setting CEO to degraded with a message to
    explain the action(s) needed. This has the added benefit of ensuring that the installer fails during deployment if we cannot properly set up etcd under pacemaker.
+
+See [Status Propagation with PacemakerCluster Health Check](#status-propagation-with-pacemakercluster-health-check) for more details.
 
 ## Test Plan
 
@@ -869,7 +865,7 @@ The initial release of TNF should aim to build a regression baseline.
 | Test  | Kubelet failure [^2]                        | A new TNF test to detect if the cluster recovers if kubelet fails.                                                |
 | Test  | Failure in etcd [^2]                        | A new TNF test to detect if the cluster recovers if etcd fails.                                                   |
 | Test  | Valid PDBs                                  | A new TNF test to verify that PDBs are set to the correct configuration                                           |
-| Test  | Conformant recovery                         | A new TNF test to verify recovery times for failure events are within the creteria defined in the requirements    |
+| Test  | Conformant recovery                         | A new TNF test to verify recovery times meet or beat requirements if requirements are set.                        |
 | Test  | Fencing health check                        | A new TNF test to verify that the [Fencing Health Check](#fencing-health-check) process is successful             |
 | Test  | Replacing a control-plane node              | A new TNF test to verify that you can replace a control-plane node in a 2-node cluster                            |
 | Test  | Certificate rotation with an unhealthy node | A new TNF test to verify certificate rotation on a cluster with an unhealthy node that rejoins after the rotation |
