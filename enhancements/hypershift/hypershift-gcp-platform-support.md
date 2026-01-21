@@ -271,21 +271,6 @@ The following components have dedicated feature epics and are actively being add
 | Image Registry Operator           | GCP-315 | GCS backend support for image registry storage |
 | Cluster Storage Operator / CSI    | GCP-322 | GCE Persistent Disk CSI driver integration |
 
-#### Components Under Investigation
-
-The following components may require modifications. Investigation is tracked under GCP-303.
-
-| Component                       | Cloud Integration            |
-|---------------------------------|------------------------------|
-| Machine Config Operator         | Ignition, cloud-init         |
-| Cluster Authentication Operator | OIDC                         |
-| Cluster Monitoring Operator     | Metrics/alerting             |
-| Kube Controller Manager         | Cloud provider               |
-| Cluster Autoscaler              | Node scaling                 |
-| OLM / Marketplace               | Catalog access               |
-| Console Operator                | UI                           |
-| DNS Operator                    | CoreDNS                      |
-
 Note: Machine API Operator is not applicable for HyperShift as it is replaced by CAPI/CAPG.
 
 ### Risks and Mitigations
