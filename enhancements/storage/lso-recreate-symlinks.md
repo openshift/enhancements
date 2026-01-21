@@ -10,13 +10,12 @@ approvers:
 api-approvers:
   - "None"
 creation-date: 2025-11-06
-last-updated: 2025-12-16
+last-updated: 2026-01-20
 tracking-link:
   - "https://issues.redhat.com/browse/STOR-2682"
 see-also:
   - "https://issues.redhat.com/browse/OCPBUGS-61988"
   - "https://issues.redhat.com/browse/OCPBUGS-63310"
-  - "https://issues.redhat.com/browse/OCPBUGS-60033"
   - "https://bugzilla.redhat.com/show_bug.cgi?id=2414811"
 replaces:
 superseded-by:
@@ -26,24 +25,25 @@ superseded-by:
 
 ## Summary
 
-Local Storage Operator (LSO) creates symlinks under `/mnt/local-storage` pointing to local disks by their `/dev/disk/by-id` path, and then creates a PersistentVolume (PV) pointing to each `/mnt/local-storage` symlink. This design presumed that the `/dev/disk/by-id` links were stable, and while they are more stable across reboots than `/dev/sdb` for example, it is still possible for the underlying by-id symlinks to change based on udev rule changes or even firmware updates from hardware vendors. LSO needs a documented and supported way to recover from these `/dev/disk/by-id` symlink changes on the node.
+Local Storage Operator (LSO) creates symlinks under `/mnt/local-storage` pointing to local disks by their `/dev/disk/by-id` path, and then creates a PersistentVolume (PV) pointing to each `/mnt/local-storage` symlink. This design presumed that the `/dev/disk/by-id` links were stable, and while they are more stable across reboots than `/dev/sdb` for example, it is still possible for the underlying by-id symlinks to change based on udev rule changes or even firmware updates from hardware vendors. Refer to the OCPBUGS links in the `see-also` section for examples of known cases where this can happen. LSO needs a documented and supported way to recover from these `/dev/disk/by-id` symlink changes on the node.
 
 ## Motivation
 
-[RHEL docs](https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/managing_storage_devices/persistent-naming-attributes_managing-storage-devices#persistent-attributes-for-identifying-file-systems-and-block-devices_persistent-naming-attributes) state that "Device names managed by udev in /dev/disk/ can change between major releases, requiring link updates." and we have a specific case that became apparent in [OCPBUGS-61988](https://issues.redhat.com/browse/OCPBUGS-61988) that we need to mitigate for RHEL 10.
+[RHEL docs](https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/managing_storage_devices/persistent-naming-attributes_managing-storage-devices#persistent-attributes-for-identifying-file-systems-and-block-devices_persistent-naming-attributes) state that "Device names managed by udev in /dev/disk/ can change between major releases, requiring link updates." and we have specific cases where this can happen that we need to mitigate for OCP when upgrading the nodes to RHEL 10. LSO needs some way to recreate symlinks for existing PVs in these scenarios.
 
-sg3_utils 1.48 in RHEL 10 disables a udev rule that creates `/dev/disk/by-id/scsi-0NVME_*` symlinks on RHEL 9.x. This udev rule is already problematic for customers affected by OCPBUGS-61988 but it is also problematic for others who may already be using those symlinks successfully today because upgrading to RHEL 10 will cause those `/dev/disk/by-id` symlinks to disappear. LSO needs some way to recreate symlinks for existing PV's when this happens.
+* [OCPBUGS-61988](https://issues.redhat.com/browse/OCPBUGS-61988): sg3_utils 1.48 in RHEL 10 disables a udev rule that creates `/dev/disk/by-id/scsi-0NVME_*` symlinks on RHEL 9.x. This udev rule is already problematic for customers affected by OCPBUGS-61988 but it is also problematic for others who may already be using those symlinks successfully today because upgrading to RHEL 10 will cause those `/dev/disk/by-id` symlinks to disappear.
+* [OCPBUGS-63310](https://issues.redhat.com/browse/OCPBUGS-63310): A vendor firmware change caused device symlinks to change, and the kernel added a quirk for the affected drives to correct the symlinks. However, if either change is applied without the other (firmware or kernel) then the symlinks used by existing PVs can change.
 
 ### User Stories
 
-* As an administrator, I want the option to switch to more stable symlinks for LSO PV's prior to upgrading OCP to a version which may cause existing by-id symlinks to change.
-* As an administrator, I want a way to recover existing LSO PV's when existing by-id symlinks change unexpectedly.
+* As an administrator, I want the option to switch to more stable symlinks for LSO PVs prior to upgrading OCP to a version which may cause existing by-id symlinks to change. LSO must alert when manual intervention is needed prior to upgrade.
+* As an administrator, I want a way to recover existing LSO PVs when existing by-id symlinks change unexpectedly. For example, a firmware upgrade may cause a symlink change outside of the usual OCP upgrade path.
 
 ### Goals
 
-* Preventative opt-in to recreate symlinks for existing LSO PV's based on the by-id symlink recommended by LSO as the most stable in relative terms.
-* Recovery mechanism to recreate symlinks for existing LSO PV's after the by-id symlinks have already changed.
-* Avoid manual changes on the node or other one-off recovery workarounds.
+* Provide an option to switch to more stable symlinks for existing LSO PVs prior to upgrading OCP to a version which may cause existing by-id symlinks to change.
+* Provide a recovery mechanism to recreate symlinks for existing LSO PVs after the by-id symlinks have already changed unexpectedly, either by firmware upgrade or some other event that LSO can not prevent.
+* Avoid one-off recovery workarounds, like using `oc debug` to log into the node and manually change symlinks.
 
 ### Non-Goals
 
@@ -55,35 +55,47 @@ sg3_utils 1.48 in RHEL 10 disables a udev rule that creates `/dev/disk/by-id/scs
 
 ### Workflow Description
 
-This enhancement introduces a new LocalVolumeDeviceLink CRD. LSO will create new LocalVolumeDeviceLink objects for each PV created by LSO's diskmaker. Diskmaker will detect all valid by-id symlinks for each PV and update `localVolumeDeviceLink.status`. This status will include the full list of valid symlink targets, the by-id symlink currently used by the PV, the preferred symlink chosen by LSO, and the corresponding UUID of the filesystem if one is found.
+This enhancement introduces a new LocalVolumeDeviceLink CRD. LSO will create new LocalVolumeDeviceLink objects for each PV created by LSO's diskmaker. Diskmaker will detect all valid by-id symlinks for each PV and update `localVolumeDeviceLink.status`. This status will include:
 
-These status fields will be updated periodically from diskmaker's existing reconcile loop, which runs on start up and on changes to the PV or the owner object (LocalVolume / LocalVolumeSet). Additionally, we want reconcile to be triggered by udev disk changes as an indication that by-id symlinks may have changed.
+* `localVolumeDeviceLink.status.validLinkTargets`: The full list of valid symlink targets, since there may be multiple by-id symlinks pointing to the same physical device.
+* `localVolumeDeviceLink.status.currentLinkTarget`: The by-id symlink currently used by the PV.
+* `localVolumeDeviceLink.status.preferredLinkTarget`: The preferred symlink chosen by diskmaker.
+* `localVolumeDeviceLink.status.filesystemUUID`: The corresponding UUID of the filesystem if one is found.
+
+These status fields will be updated periodically from diskmaker's existing reconcile loop, which runs on start up and on changes to the PV or the owner object (LocalVolume / LocalVolumeSet). Much of the PV spec is immutable, but changes to the PV status for example will trigger reconcile.
+
+Additionally, we want reconcile to be triggered by udev disk changes as an indication that by-id symlinks may have changed. The implementation of this enhancement will include some logic to rate-limit the number of reconcile calls per second in cases where the rate of udev events is unpredictably high.
 
 #### Alert
 
 LSO will throw an alert if:
 1) `localVolumeDeviceLink.spec.policy == None` and `localVolumeDeviceLink.status.currentLinkTarget != localVolumeDeviceLink.status.preferredLinkTarget`. This means the administrator has not yet specified a policy and the current target is different from the preferred target.
-2) `localVolumeDeviceLink.spec.policy == None` and no by-id symlink is found at all. This means there is no `/dev/disk/by-id` symlink found for the device.
+2) `localVolumeDeviceLink.spec.policy == None` and no by-id symlink is found at all. For example, the PV does exist and uses `/dev/sdb` directly but there is no `/dev/disk/by-id` symlink found for the device.
 
 #### Administrator response
 
 The administrator can review the device link status and make a choice:
 1) set `localVolumeDeviceLink.spec.policy` to `CurrentLinkTarget` to keep the current symlink as it is and silence the alert.
-2) set `localVolumeDeviceLink.spec.policy` to `PreferredLinkTarget` to tell diskmaker to recreate the symlink using the target from `localVolumeDeviceLink.status.preferredLinkTarget`. This can be done to proactively switch to the recommended symlink, or it can be done reactively when a symlink is no longer valid (assuming there is another known valid by-id symlink).
+2) set `localVolumeDeviceLink.spec.policy` to `PreferredLinkTarget` to tell diskmaker to recreate the symlink using the target from `localVolumeDeviceLink.status.preferredLinkTarget`. This can be done to proactively switch to the preferred symlink, or it can be done reactively when a symlink is no longer valid (assuming there is another known valid by-id symlink).
+
+Only the administrator will update `localVolumeDeviceLink.spec.policy`. Diskmaker and other LSO components will not try to change it.
 
 #### Recreate Symlink
 
 If `localVolumeDeviceLink.spec.policy == PreferredLinkTarget`, diskmaker will recreate the symlink pointing to the preferred link target. If successful, it will update `localVolumeDeviceLink.status`. If there is any error that prevents this, diskmaker will add a failure condition and retry as part of the reconcile loop.
 
-If the value of `localVolumeDeviceLink.status.preferredLinkTarget` changes later and `localVolumeDeviceLink.spec.policy` is still set to `PreferredLinkTarget`, diskmaker will again reconcile the symlink using the new target found in `localVolumeDeviceLink.status.preferredLinkTarget`.
+If diskmaker updates the value of `localVolumeDeviceLink.status.preferredLinkTarget` while `localVolumeDeviceLink.spec.policy` is still set to `PreferredLinkTarget`, diskmaker will again reconcile the symlink using the new target found in `localVolumeDeviceLink.status.preferredLinkTarget`.
 
 To stop diskmaker from attempting to change the symlink, the administrator can set `localVolumeDeviceLink.spec.policy` to `None` or `CurrentLinkTarget`.
 
-#### Deletion
+#### Lifecycle
 
 LocalVolumeDeviceLink will be deleted when its owner object is deleted (LocalVolume / LocalVolumeSet).
+The PV that the LocalVolumeDeviceLink refers to may be deleted and recreated multiple times, but the chosen policy in LocalVolumeDeviceLink must persist once it is set.
 
-The PV that the LocalVolumeDeviceLink refers to may be deleted and recreated multiple times, but the chosen policy in the device link should persist once it is set. Diskmaker creates PV's with a name based on the basename of the symlink under /mnt/local-storage, the node name, and the storageclass (see [GeneratePVName](https://github.com/openshift/local-storage-operator/blob/c930ea412cde390f45acaa9643da69f12fbeb57e/pkg/common/provisioner_utils.go#L236-L246)). These parameters should not change for existing devices.
+We do not expect accumulating an infinite number of LocalVolumeDeviceLink objects because of the deterministic nature of PV creation.
+Diskmaker creates PVs with a name based on the basename of the symlink under /mnt/local-storage, the node name, and the storageclass (see [GeneratePVName](https://github.com/openshift/local-storage-operator/blob/c930ea412cde390f45acaa9643da69f12fbeb57e/pkg/common/provisioner_utils.go#L236-L246)).
+Since these parameters do not change for existing devices, the PV name stays exactly the same in the create-delete-create cycle.
 
 ### API Extensions
 
@@ -161,7 +173,7 @@ N/A, not topology specific.
 
 ### Implementation Details/Notes/Constraints
 
-Diskmaker will use the following selection criteria when choosing the recommended symlink for each PV and return the first valid link from the by-id list that meets this criteria:
+Diskmaker will use the following selection criteria when choosing the preferred symlink for each PV and return the first valid link from the by-id list that meets this criteria:
 
 1. The link must be in the sorted by-id list, starting from highest priority based on the [prefix priority list](https://github.com/openshift/local-storage-operator/blob/397dcaa02032f52916aa3ed49e5b9ecd1b96cc01/pkg/internal/diskutil.go#L177-L199).
 2. If the current link target still exists, the new by-id target must point to the same device.
@@ -193,8 +205,8 @@ We have some ideas to improve this in the future if there is a need, but they ar
 
 ## Alternatives (Not Implemented)
 
-* The `/mnt/local-storage` disk path stored in the PV is immutable, and we want the ability to fix existing PV's, which means we must keep the same `/mnt/local-storage` link name and update only the `/dev/disk/by-id` link target.
-* We can't partition a device without breaking consumers or introducing separate API and does not help existing PV's recover.
+* The `/mnt/local-storage` disk path stored in the PV is immutable, and we want the ability to fix existing PVs, which means we must keep the same `/mnt/local-storage` link name and update only the `/dev/disk/by-id` link target.
+* We can't partition a device without breaking consumers or introducing separate API and does not help existing PVs recover.
 * If diskmaker added a label to each device, it could easily be wiped by the disk consumer. It could label a device after kubelet creates a filesystem on it and save it in the device link status but this only helps with filesystem volumes.
 * LSO could store udev attributes instead of symlinks but we would need to have some logic to filter useful and useless attributes, not clear if it helps rebuilding symlinks in all cases.
 * We considered implementing this using annotations on the PV, but compared to an API it limits our options for maintainability, error reporting, and future enhancements.
@@ -230,7 +242,9 @@ N/A
 
 ## Version Skew Strategy
 
-LSO already sets [maxOpenShiftVersion](https://github.com/openshift/local-storage-operator/blob/397dcaa02032f52916aa3ed49e5b9ecd1b96cc01/config/manifests/stable/local-storage-operator.clusterserviceversion.yaml#L118) to N+1, meaning if the cluster is running 4.21 OCP with 4.20 LSO, upgrades to 4.22 OCP will be blocked until LSO is upgraded to 4.21. This is important because we want to deliver these changes to alert of potential symlink issues prior to upgrades to RHEL 10.
+LSO already sets [maxOpenShiftVersion](https://github.com/openshift/local-storage-operator/blob/397dcaa02032f52916aa3ed49e5b9ecd1b96cc01/config/manifests/stable/local-storage-operator.clusterserviceversion.yaml#L118) to N+1. This means if the cluster is running 4.22 OCP with 4.21 LSO, then upgrades to 4.23 OCP will be blocked until LSO is upgraded to 4.22.
+
+This is important because this enhancement is mostly concerned with OCP upgrade scenarios where the nodes are upgraded from RHEL 9.x (4.22 and earlier) to RHEL 10 (4.23 and later). We expect this enhancement to be implemented in LSO before 4.22.0 is released, which will allow it to create LocalVolumeDeviceLink objects and alert of potential problems prior to upgrading the nodes to RHEL 10.
 
 ## Operational Aspects of API Extensions
 
