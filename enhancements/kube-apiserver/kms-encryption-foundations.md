@@ -194,6 +194,11 @@ Migration controller reuses existing logic - no changes required.
 
 **APIServer Resource** ([config.openshift.io/v1](https://github.com/openshift/api/blob/master/config/v1/types_kmsencryption.go)):
 
+**Current Behavior:**
+
+The `encryption.type` field already supports the `KMS` value ([EncryptionType](https://github.com/openshift/api/blob/master/config/v1/types_apiserver.go#L214)), and the `KMSConfig` struct exists in the API.
+However, the encryption controllers do not implement KMS support. Setting `type: KMS` has no effect - controllers ignore it and no encryption occurs.
+
 **Tech Preview V1**
 
 For Tech Preview v1, no new API fields are added to the APIServer resource.
