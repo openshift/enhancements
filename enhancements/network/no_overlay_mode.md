@@ -753,6 +753,14 @@ Until phase 2 is complete, the feature will be considered in Tech Preview and wi
 - User facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 - Add `+kubebuilder:default=Geneve` to `defaultNetworkTransport` field so that the default value is visible in the CRD schema and applied automatically by the API server (omitted during Tech Preview to avoid breaking existing ungated tests; CNO handles the default during Tech Preview)
 
+### Stretch Goal
+
+A stretch goal for GA would be to allow changing the default network transport mode from overlay to no-overlay (and vice versa) on day 2. This requires extra considerations with regards to the cluster MTU.
+
+The rule is: as long as `spec.defaultNetwork.ovnKubernetesConfig.mtu` + Geneve overhead (100 bytes) <= host MTU, the default network transport can be seamlessly switched between no-overlay and Geneve. When this condition does not hold (typically when using the full host MTU in no-overlay mode, that is when `spec.defaultNetwork.ovnKubernetesConfig.mtu := host MTU`), the default network MTU must be lowered through the existing [MTU migration procedure for OCP](https://github.com/openshift/enhancements/blob/67e388d2b6f14c9cc968ddc2fb1c125aae4ad78b/enhancements/network/allow-mtu-changes.md) before switching to overlay mode.
+
+This stretch goal requires an API change to allow the `defaultNetworkTransport` field to be mutable, and a check in CNO to verify that the MTU requirements are satisfied before applying the change.
+
 ### Removing a deprecated feature
 
 ## Upgrade / Downgrade Strategy
