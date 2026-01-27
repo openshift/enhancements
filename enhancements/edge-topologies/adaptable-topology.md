@@ -2,6 +2,7 @@
 title: adaptable-topology
 authors:
   - "@jaypoulz"
+  - "@jeff-roche"
 reviewers:
   - "@tjungblu, for cluster-etcd-operator"
   - "@joelanford, for OLM"
@@ -148,20 +149,20 @@ The Adaptable topology determines the effective behavior based on these rules:
 *Note: When AutomaticQuorumRecovery (AQR) is implemented in a future enhancement, the two control-plane node case will transition to DualReplica behavior when AQR is enabled.*
 
 | Control-Plane Nodes | Arbiter Nodes | Effective controlPlaneTopology Behavior |
-|---------------------|---------------|----------------------------------------|
-| 1                   | 0             | SingleReplica                          |
-| 2                   | 0             | SingleReplica (AQR not implemented)    |
-| 2                   | 1+            | HighlyAvailableArbiter                 |
-| 3+                  | any           | HighlyAvailable                        |
+|:-------------------:|:-------------:|:---------------------------------------:|
+| 1                   | 0             | SingleReplica                           |
+| 2                   | 0             | SingleReplica (AQR not implemented)     |
+| 2                   | 1+            | HighlyAvailableArbiter                  |
+| 3+                  | any           | HighlyAvailable                         |
 
 **Infrastructure Topology Behavior:**
 
 *Note: When there are no worker nodes, control-plane nodes serve as workers.*
 
 | Worker Nodes | Effective infrastructureTopology Behavior |
-|--------------|------------------------------------------|
-| 0 or 1       | SingleReplica                            |
-| 2+           | HighlyAvailable                          |
+|:------------:|:-----------------------------------------:|
+| 0 or 1       | SingleReplica                             |
+| 2+           | HighlyAvailable                           |
 
 ### How Adaptable Topology Works
 
@@ -364,11 +365,11 @@ spec:
 
 The `oc adm topology transition` command interprets compatibility as follows:
 
-| Annotation Present | Annotation Value | Status | Transition Behavior |
-|-------------------|------------------|---------|---------------------|
-| Yes | `["Adaptable"]` | Compatible | Proceed (after user confirmation) |
-| No | N/A | Unknown | Warning, requires additional confirmation |
-| Yes | `[]` or other value | Incompatible | Blocked (unless `--force` is used) |
+| Annotation Present | Annotation Value    | Status       | Transition Behavior                       |
+|:------------------:|:-------------------:|:------------:|:------------------------------------------|
+| Yes                | `["Adaptable"]`     | Compatible   | Proceed (after user confirmation)         |
+| No                 | N/A                 | Unknown      | Warning, requires additional confirmation |
+| Yes                | `[]` or other value | Incompatible | Blocked (unless `--force` is used)        |
 
 The console and CLI display compatibility information before
 topology transitions, allowing cluster administrators to make informed decisions.
@@ -423,7 +424,7 @@ which may leverage Adaptable topology at transition time.
 The following components require updates to support Adaptable topology:
 
 | Component | Changes Required |
-|-----------|-----------------|
+| --------- | ---------------- |
 | [Infrastructure API](#infrastructure-config-changes) | Add `Adaptable` enum value, ValidatingAdmissionPolicy for paired field updates |
 | [openshift/installer](#installer-changes) | Add `adaptableTopology` flag to install-config, validate platform support, set Infrastructure config fields |
 | [openshift/oc](#oc-cli-changes) | New `oc adm topology transition` command with dry-run and compatibility checks |
@@ -437,56 +438,59 @@ The following components require updates to support Adaptable topology:
 
 #### Initial Topology Audit
 
-*This data was gathered via GitHub API search queries for `ControlPlaneTopology` and `InfrastructureTopology` references in Go code across the openshift organization. Test repositories (origin), documentation, enhancements, and non-operator repositories were filtered out. Operators showing "No" for both fields had no search hits, indicating they do not currently reference these topology APIs. Results reflect actual code usage as of December 2025.*
+*This data was gathered via GitHub API search queries for `ControlPlaneTopology` and `InfrastructureTopology` references in Go code
+across the openshift organization. Test repositories (origin), documentation, enhancements, and non-operator repositories were filtered out.
+Operators showing "No" for both fields had no search hits, indicating they do not currently reference these topology APIs.
+Results reflect actual code usage as of December 2025.*
 
 **In-Payload Operators**
 
-| Operator Name | References ControlPlaneTopology | References InfrastructureTopology |
-|---------------|--------------------------------|----------------------------------|
-| cluster-authentication-operator | Yes | No |
-| cluster-autoscaler-operator | Yes | No |
-| cluster-baremetal-operator | Yes | No |
-| cluster-cloud-controller-manager-operator | Yes | Yes |
-| cluster-config-operator | Yes | No |
-| cluster-control-plane-machine-set-operator | Yes | No |
-| cluster-csi-snapshot-controller-operator | Yes | No |
-| cluster-etcd-operator | Yes | Yes |
-| cluster-image-registry-operator | No | Yes |
-| cluster-ingress-operator | Yes | Yes |
-| cluster-kube-apiserver-operator | Yes | Yes |
-| cluster-monitoring-operator | Yes | Yes |
-| cluster-network-operator | Yes | Yes |
-| cluster-openshift-apiserver-operator | Yes | No |
-| cluster-storage-operator | Yes | No |
-| cluster-version-operator | Yes | No |
-| cloud-credential-operator | Yes | Yes |
-| console-operator | Yes | Yes |
-| csi-operator | Yes | No |
-| machine-api-operator | Yes | No |
-| machine-config-operator | Yes | No |
-| operator-framework-olm | Yes | Yes |
-| operator-framework-operator-controller | Yes | Yes |
-| service-ca-operator | Yes | No |
-| cluster-dns-operator | No | No |
-| cluster-kube-controller-manager-operator | No | No |
-| cluster-kube-scheduler-operator | No | No |
-| cluster-machine-approver | No | No |
-| cluster-samples-operator | No | No |
-| insights-operator | No | No |
+| Operator Name                                | References ControlPlaneTopology | References InfrastructureTopology |
+| -------------------------------------------- | ------------------------------- | --------------------------------- |
+| cluster-authentication-operator              | Yes                             | No                                |
+| cluster-autoscaler-operator                  | Yes                             | No                                |
+| cluster-baremetal-operator                   | Yes                             | No                                |
+| cluster-cloud-controller-manager-operator    | Yes                             | Yes                               |
+| cluster-config-operator                      | Yes                             | No                                |
+| cluster-control-plane-machine-set-operator   | Yes                             | No                                |
+| cluster-csi-snapshot-controller-operator     | Yes                             | No                                |
+| cluster-etcd-operator                        | Yes                             | Yes                               |
+| cluster-image-registry-operator              | No                              | Yes                               |
+| cluster-ingress-operator                     | Yes                             | Yes                               |
+| cluster-kube-apiserver-operator              | Yes                             | Yes                               |
+| cluster-monitoring-operator                  | Yes                             | Yes                               |
+| cluster-network-operator                     | Yes                             | Yes                               |
+| cluster-openshift-apiserver-operator         | Yes                             | No                                |
+| cluster-storage-operator                     | Yes                             | No                                |
+| cluster-version-operator                     | Yes                             | No                                |
+| cloud-credential-operator                    | Yes                             | Yes                               |
+| console-operator                             | Yes                             | Yes                               |
+| csi-operator                                 | Yes                             | No                                |
+| machine-api-operator                         | Yes                             | No                                |
+| machine-config-operator                      | Yes                             | No                                |
+| operator-framework-olm                       | Yes                             | Yes                               |
+| operator-framework-operator-controller       | Yes                             | Yes                               |
+| service-ca-operator                          | Yes                             | No                                |
+| cluster-dns-operator                         | No                              | No                                |
+| cluster-kube-controller-manager-operator     | No                              | No                                |
+| cluster-kube-scheduler-operator              | No                              | No                                |
+| cluster-machine-approver                     | No                              | No                                |
+| cluster-samples-operator                     | No                              | No                                |
+| insights-operator                            | No                              | No                                |
 
 **Out-of-Payload Operators**
 
-| Operator Name | References ControlPlaneTopology | References InfrastructureTopology |
-|---------------|--------------------------------|----------------------------------|
-| cluster-nfd-operator | Yes | No |
-| cluster-node-tuning-operator | Yes | No |
-| csi-driver-shared-resource-operator | Yes | No |
-| local-storage-operator | Yes | No |
-| node-observability-operator | Yes | No |
-| oadp-operator | Yes | No |
-| ptp-operator | Yes | No |
-| sriov-network-operator | Yes | Yes |
-| vmware-vsphere-csi-driver-operator | Yes | No |
+| Operator Name                       | References ControlPlaneTopology | References InfrastructureTopology |
+| ----------------------------------- | ------------------------------- | --------------------------------- |
+| cluster-nfd-operator                | Yes                             | No                                |
+| cluster-node-tuning-operator        | Yes                             | No                                |
+| csi-driver-shared-resource-operator | Yes                             | No                                |
+| local-storage-operator              | Yes                             | No                                |
+| node-observability-operator         | Yes                             | No                                |
+| oadp-operator                       | Yes                             | No                                |
+| ptp-operator                        | Yes                             | No                                |
+| sriov-network-operator              | Yes                             | Yes                               |
+| vmware-vsphere-csi-driver-operator  | Yes                             | No                                |
 
 #### Reviewer's Guide
 
@@ -518,7 +522,7 @@ This section provides quick navigation to relevant content for each reviewing te
 - [Initial Topology Audit](#initial-topology-audit) - Bare metal operator topology API usage
 - [Platform Support Constraints](#platform-support-constraints) - Bare metal limitations
 - [Topology Considerations - Standalone Clusters](#standalone-clusters) - Platform support details
-- [Risks - Platform Bare Metal](#risk-platform-baremetal-may-not-support-single-node-clusters) - SNO networking challenge
+- [Risks - Platform Bare Metal](#risk-platform-bare-metal-may-not-support-single-node-clusters) - SNO networking challenge
 
 **Core Operator Teams:**
 
@@ -614,7 +618,7 @@ A new `oc adm topology transition` command will be added to facilitate safe topo
 The following core operators require updates to support Adaptable topology. All will invoke library-go subscription functions and adjust behavior based on node counts:
 
 | Operator | Specific Changes |
-|----------|------------------|
+| -------- | ---------------- |
 | cluster-etcd-operator | Enhanced scaling logic for 2↔3 node transitions (see [How Adaptable Topology Works](#how-adaptable-topology-works)) |
 | cluster-authentication-operator | Adjust minimum kube-apiserver replica count checks based on node counts |
 | cluster-ingress-operator | Adjust ingress controller replica counts and placement based on node counts |
@@ -671,7 +675,7 @@ These metrics enable tracking feature adoption and identifying issues in product
 The following SLOs define success criteria for Adaptable topology:
 
 | Objective | Target |
-|-----------|--------|
+| --------- | ------ |
 | Topology transition completion time | Within 2 seconds of CLI command approval |
 | Operator health after transition | All compatible operators healthy within 3 minutes |
 | Operator stability during transitions | No crashes for operators labeled as compatible |
@@ -882,7 +886,7 @@ for different source topologies.
 ### CI Lanes
 
 | Lane | Frequency | Description |
-|------|-----------|-------------|
+| ---- | --------- | ----------- |
 | AdaptableTopology Suite on cluster installed with Adaptable topology | Nightly | Run AdaptableTopology test suite on a cluster installed with `adaptableTopology: true` in install-config |
 | AdaptableTopology Suite on SNO-transitioned cluster | Nightly | Run AdaptableTopology test suite on a cluster transitioned from SingleReplica SNO to Adaptable topology |
 | End-to-End tests (e2e) | Weekly | Standard test suite (openshift/conformance/parallel) on Adaptable topology clusters |
@@ -897,7 +901,7 @@ The `AdaptableTopology` test suite contains pre-transition and post-transition t
 #### Pre-Transition Tests
 
 | Test | Description |
-|------|-------------|
+| ---- | ----------- |
 | Operator compatibility check | Verify `oc adm topology transition` correctly reports operator compatibility status |
 | Topology transition validation | Verify ValidatingAdmissionPolicy prevents setting controlPlaneTopology and infrastructureTopology independently |
 | Dry-run transition check | Verify `oc adm topology transition --dry-run` correctly identifies incompatibilities without applying changes |
@@ -905,7 +909,7 @@ The `AdaptableTopology` test suite contains pre-transition and post-transition t
 #### Post-Transition Tests
 
 | Test | Description |
-|------|-------------|
+| ---- | ----------- |
 | Scale 1→2→3 control-plane nodes | Verify cluster behavior crosses thresholds correctly when adding control-plane nodes |
 | Scale 3→2→1 control-plane nodes | Verify cluster behavior crosses thresholds correctly when removing control-plane nodes |
 | Scale 0→1→2 worker nodes | Verify infrastructure topology adjusts correctly when adding worker nodes |
