@@ -89,7 +89,7 @@ In a nutshell, the necessary steps to enable no-overlay are the following:
   - `spec.additionalRoutingCapabilities.providers`: `FRR`
   - `spec.defaultNetwork.ovnKubernetesConfig.routeAdvertisements`: `Enabled`
 - enable no-overlay mode for the default network (if desired) in `operator.openshift.io/v1 Network` and configure it with the per-network parameters:
-  - `outboundSNAT`: `Enabled` (`Disabled` can be set on day 2)
+  - `outboundSNAT`: `Enabled` or `Disabled`
   - `routing`: `Managed`, `Unmanaged`
 - provide the necessary manifests for the `Unmanaged` routing scenario, if that's the preferred routing mode for either the default network (as configured above) or for CUDNs (created later on, after cluster installation):
   - FRRConfiguration CR
@@ -145,7 +145,7 @@ $ oc patch network.operator cluster --type merge --patch \
 #### No-overlay for the default network with unmanaged routing
 
 On day 0, in `operator.openshift.io/v1 Network` the cluster administrator should enable no-overlay mode for the default network and configure it with the necessary per-network parameters:
-  - `outboundSNAT`: `Enabled` (`Disabled` can be set on day 2)
+  - `outboundSNAT`: `Enabled` or `Disabled`
   - `routing`: `Unmanaged`
 
 In the prerequisite step, the cluster administrator already created a manifest for `operator.openshift.io/v1 Network` to enable BGP and placed it in the `manifests` folder. This manifest should therefore be extended to include the aforementioned parameters for the default network. For instance:
@@ -250,7 +250,7 @@ If there are errors in setting up no-overlay mode for the default network (e.g.,
 
 #### No-overlay for the default network with managed routing
 In `operator.openshift.io/v1 Network` the cluster administrator should enable no-overlay mode for the default network and configure it with the necessary per-network parameters:
-  - `outboundSNAT`: `Enabled` (`Disabled` can be set on day 2)
+  - `outboundSNAT`: `Enabled` or `Disabled`
   - `routing`: `Managed`
 
 In addition to that, the managed routing options should also be set in `operator.openshift.io/v1 Network`: `bgpTopology` (required) and optionally `asNumber` (when omitted, this defaults to 64512).
@@ -543,9 +543,8 @@ type NoOverlayOptions struct {
 	// When set to "Enabled", SNAT is performed on outbound traffic from pods.
 	// When set to "Disabled", SNAT is not performed and pod IPs are preserved in outbound traffic.
 	// This field is required when the network operates in no-overlay mode.
-	// This field must be set to "Enabled" at installation time and can be changed afterwards.
+	// This field can be set to any value at installation time and can be changed afterwards.
 	// +kubebuilder:validation:Enum=Enabled;Disabled
-	// +kubebuilder:validation:XValidation:rule="!oldSelf.hasValue() ? self == 'Enabled' : true",message="outboundSNAT must be Enabled at installation time and can be changed on day 2",optionalOldSelf=true
 	// +required
 	OutboundSNAT SNATOption `json:"outboundSNAT,omitempty"`
 
@@ -569,7 +568,7 @@ type BGPManagedConfig struct {
 	// When omitted, this defaults to 64512.
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=4294967295
-	// +kubebuilder:default=64512
+	// +default=64512
 	// +optional
 	ASNumber int64 `json:"asNumber,omitempty"`
 
@@ -620,7 +619,7 @@ CEL (Common Expression Language) validation rules are used to reject invalid con
 - `defaultNetworkTransport` can only be set at installation time and cannot be changed afterwards
 - `defaultNetworkNoOverlayOptions` must be set if and only if `defaultNetworkTransport` is `NoOverlay`
 - `defaultNetworkNoOverlayOptions` cannot be removed once set
-- `defaultNetworkNoOverlayOptions.outboundSNAT` must be set to `Enabled` at installation time but can be changed afterwards
+- `defaultNetworkNoOverlayOptions.outboundSNAT` can be set to any value at installation time and can be changed afterwards
 - `defaultNetworkNoOverlayOptions.routing` is immutable once set
 - `bgpManagedConfig` is required when `defaultNetworkNoOverlayOptions.routing` is set to `Managed`
 
@@ -652,13 +651,13 @@ For detailed implementation specifics, refer to the [upstream OVN-Kubernetes enh
 
 #### Bootstrap Node Connectivity and outboundSNAT
 
-The `outboundSNAT` field must be set to `Enabled` at installation time. This is enforced by API validation.
+The `outboundSNAT` field can be set to either `Enabled` or `Disabled` at installation time. However, extra care must be taken when installing a cluster with `outboundSNAT=Disabled`.
 
-During installation, pods need to communicate with the kube-apiserver on the bootstrap node. However, the bootstrap node is not registered as a Kubernetes Node and does not participate in BGP peering, so it has no routes to pod subnets. With `outboundSNAT=Disabled`, pod traffic preserves the original pod IP and the bootstrap node cannot route return traffic back. With `outboundSNAT=Enabled`, traffic is SNATed to the node IP, which is routable from the bootstrap node.
+During installation, pods need to communicate with the kube-apiserver that runs on the bootstrap node. However, the bootstrap node is not registered as a Kubernetes Node and does not participate in BGP peering, so it has no routes to pod subnets. With `outboundSNAT=Disabled`, pod traffic preserves the original pod IP and the bootstrap node cannot route return traffic back unless specific routing is in place. With `outboundSNAT=Enabled`, traffic is SNATed to the node IP, which is routable from the bootstrap node.
 
-After the bootstrap node is gone, the administrator can change `outboundSNAT` to `Disabled` by patching the `network.operator cluster` resource; Cluster Network Operator will detect this change and trigger a restart of ovn-kubernetes-node pods in order to apply the new configuration value.
+When `outboundSNAT=Disabled` is used at installation time, the designated cluster gateway must be BGP-enabled and configured to accept and install BGP routes from the cluster nodes. This ensures that the bootstrap node can reach pod IPs via the cluster gateway, enabling successful bootstrap operations.
 
-`outboundSNAT` can be changed any number of times on day 2.
+After installation, the administrator can change `outboundSNAT` at any time by patching the `network.operator cluster` resource; Cluster Network Operator will detect this change and trigger a restart of ovn-kubernetes-node pods in order to apply the new configuration value.
 
 ### Risks and Mitigations
 
