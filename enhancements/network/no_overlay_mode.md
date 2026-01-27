@@ -389,7 +389,7 @@ spec:
 Any error in setting up no-overlay mode for a CUDN will be reflected in the status conditions of the CUDN.
 
 #### No-overlay for CUDNs with managed routing
-The cluster administrator should enable BGP either on day 0 or on day 2, as described in the prerequisite section. In order to configure managed routing, `bgpManagedConfig` options should also be set in `operator.openshift.io/v1 Network` either at installation time (day 0) or once on day 2. Once set, `bgpManagedConfig` is immutable. If done on day 2, an example of the patch operation could be:
+The cluster administrator should enable BGP either on day 0 or on day 2, as described in the prerequisite section. In order to configure managed routing, `bgpManagedConfig` options should also be set in `operator.openshift.io/v1 Network` either at installation time (day 0) or on day 2 and is mutable thereafter. An example of the patch operation could be:
 
 ```sh
 oc patch network.operator cluster --type merge --patch '
@@ -467,7 +467,6 @@ The following changes are to be added to the operator network configuration (`op
 // +openshift:validation:FeatureGateAwareXValidation:featureGate=NoOverlayMode,rule="!has(self.defaultNetworkNoOverlayOptions) || self.defaultNetworkNoOverlayOptions.routing != 'Managed' || has(self.bgpManagedConfig)",message="bgpManagedConfig is required when defaultNetworkNoOverlayOptions.routing is Managed"
 // +openshift:validation:FeatureGateAwareXValidation:featureGate=NoOverlayMode,rule="!has(oldSelf.defaultNetworkTransport) || oldSelf.defaultNetworkTransport == '' || has(self.defaultNetworkTransport)",message="defaultNetworkTransport cannot be removed once set to a non-empty value"
 // +openshift:validation:FeatureGateAwareXValidation:featureGate=NoOverlayMode,rule="!has(oldSelf.defaultNetworkNoOverlayOptions) || has(self.defaultNetworkNoOverlayOptions)",message="defaultNetworkNoOverlayOptions cannot be removed once set"
-// +openshift:validation:FeatureGateAwareXValidation:featureGate=NoOverlayMode,rule="!has(oldSelf.bgpManagedConfig) || oldSelf.bgpManagedConfig.bgpTopology == '' || has(self.bgpManagedConfig)",message="bgpManagedConfig cannot be removed once configured"
 type OVNKubernetesConfig struct {
 	// ... existing fields ...
 
@@ -495,9 +494,8 @@ type OVNKubernetesConfig struct {
 	// in no-overlay mode that specify routing="Managed" in their NoOverlayOptions.
 	// It is required when DefaultNetworkNoOverlayOptions.Routing is set to "Managed".
 	// When omitted, this means the user does not configure BGP for managed routing.
-	// This field can be set once, either at installation time or on day 2, and is immutable thereafter.
+	// This field can be set at installation time or on day 2 and is mutable thereafter.
 	// +openshift:enable:FeatureGate=NoOverlayMode
-	// +kubebuilder:validation:XValidation:rule="!oldSelf.hasValue() || oldSelf.value().bgpTopology == '' || self == oldSelf.value()",message="bgpManagedConfig can only be set once and is immutable thereafter",optionalOldSelf=true
 	// +optional
 	BGPManagedConfig BGPManagedConfig `json:"bgpManagedConfig,omitzero,omitempty"`
 }
@@ -625,7 +623,6 @@ CEL (Common Expression Language) validation rules are used to reject invalid con
 - `defaultNetworkNoOverlayOptions.outboundSNAT` must be set to `Enabled` at installation time but can be changed afterwards
 - `defaultNetworkNoOverlayOptions.routing` is immutable once set
 - `bgpManagedConfig` is required when `defaultNetworkNoOverlayOptions.routing` is set to `Managed`
-- `bgpManagedConfig` can be set once, either at installation time or on day 2, and is immutable thereafter
 
 This ensures that misconfigurations are caught early at admission time, before CNO or OVN-Kubernetes attempt to apply them.
 
@@ -649,7 +646,7 @@ OVN-Kubernetes handles no-overlay mode by:
 
 - **Default network**: Must be configured at installation time (day 0) via manifests provided to the OpenShift installer. The configuration is immutable after installation except for `outboundSNAT`.
 - **CUDNs**: Can be configured at run time (day 2) when creating the CUDN. The transport mode is immutable after CUDN creation.
-- **bgpManagedConfig**: Can be set either at installation time (day 0) or once on day 2. Once set, it is immutable.
+- **bgpManagedConfig**: Can be set at installation time (day 0) or on day 2 and is mutable thereafter.
 
 For detailed implementation specifics, refer to the [upstream OVN-Kubernetes enhancement](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/deaf3c549936ee975d80d7b9447ede652165e69a/docs/okeps/okep-5259-no-overlay.md).
 
@@ -760,7 +757,7 @@ Until phase 2 is complete, the feature will be considered in Tech Preview and wi
 
 ## Upgrade / Downgrade Strategy
 
-There are no special concerns about upgrades, since the feature can only be turned on for the default network at installation time and for CUDNs at the time of creation of the affected CUDNs. The `bgpManagedConfig` field can be set once on day 2 if not set at installation time, but is immutable thereafter. Configuration changes to immutable fields are rejected by CEL validation rules during upgrades.
+There are no special concerns about upgrades, since the feature can only be turned on for the default network at installation time and for CUDNs at the time of creation of the affected CUDNs. Configuration changes to immutable fields are rejected by CEL validation rules during upgrades.
 QA coverage will include testing the upgrade of a cluster that already runs in no-overlay mode.
 
 ## Version Skew Strategy
