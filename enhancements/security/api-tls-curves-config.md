@@ -6,9 +6,9 @@ authors:
 reviewers:
   - dsalerno # OpenShift networking stack knowledge
 approvers: 
-  - JoelSpeed
+  - joelanford
 api-approvers:
-  - JoelSpeed
+  - everettraven
 creation-date: 2025-11-19
 last-updated: 2025-11-20
 tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
