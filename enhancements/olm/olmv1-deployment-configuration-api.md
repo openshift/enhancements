@@ -22,6 +22,10 @@ tracking-link:
 
 This enhancement extends OLMv1's ClusterExtension API to support operator deployment customization through the configuration API. This provides feature parity with OLMv0's `SubscriptionConfig`, enabling users to configure resource limits, pod placement, environment variables, storage, and metadata annotations for operators installed via registry+v1 bundles.
 
+### Further Reading
+
+The RFC associated with this proposal can be found [here](https://docs.google.com/document/d/18O4qBvu5I4WIJgo5KU1opyUKcrfgk64xsI3tyXxmVEU/edit?tab=t.0#heading=h.x3tfh25grvnv).
+
 ## Motivation
 
 OLMv0 provides users with deployment customization capabilities via the `Subscription.spec.config` field. This allows critical modifications to operator deployment behavior including node selectors, tolerations, resource requirements, environment variables, volumes, and affinity rules. OLMv1 currently lacks this functionality, creating a feature gap that prevents users from performing advanced customizations required for production-grade operator deployments.
@@ -62,7 +66,7 @@ This gap blocks migration from OLMv0 to OLMv1 for operators that require or whos
 
 ## Proposal
 
-This proposal extends the existing ClusterExtension inline configuration structure to support deployment customization by adding a new `deploymentConfig` field that follows the same structure as [OLMv0's](https://github.com/operator-framework/api/blob/master/pkg/operators/v1alpha1/subscription_types.go#L42-L100) `SubscriptionConfig` and incorporates the OpenAPI specification from Kubernetes core v1 types. This will help OLMv1 maintain feature parity with OLMv0 for Deployment configuration without importing any OLMv0 packages and keeping OLMv1 self contained.
+This proposal extends the existing ClusterExtension inline configuration structure to support deployment customization by using [OLMv0's](https://github.com/operator-framework/api/blob/master/pkg/operators/v1alpha1/subscription_types.go#L42-L100) `v1alpha1.SubscriptionConfig`. For clarity in the OLMv1 codebase, a type alias, `DeploymentConfig`, will be introduced, since Subscription is a v0 concept only. OLMv1 will directly use the `SubscriptionConfig` type from operator-framework/api to define the `DeploymentConfig` type. This ensures feature parity with OLMv0 by using the same type definition and reduces our maintenance overhead while we navigate a period of simultaneous maintenance of both OLMv0 and OLMv1.
 
 ### Workflow Description
 
@@ -117,137 +121,45 @@ For MicroShift, this enhancement applies to any operators that are installed via
 
 #### registry+v1 Bundle Configuration Schema Design
 
-The registry+v1 bundle configuration will support a new `deploymentConfig` field that follows the same structure as OLMv0's `SubscriptionConfig`:
+The registry+v1 bundle configuration will support a new `deploymentConfig` type that is a type alias for OLMv0's `SubscriptionConfig`:
 
 ```go
-// DeploymentConfig contains configuration specified for a
-// ClusterExtension that follows the same structure and behavior as OLM
-// v0's SubscriptionConfig.
-//
-// This enables v0-style deployment customization including environment variables,
-// resource scheduling, storage, and pod placement for registry+v1 bundle installations.
-type DeploymentConfig struct {
-    // selector is the label selector for pods to be configured.
-    // Existing ReplicaSets whose pods are selected by this will be the ones affected by this deployment.
-    // It must match the pod template's labels.
-    //
-    // +optional
-    Selector *metav1.LabelSelector `json:"selector,omitempty"`
+// DeploymentConfig is a type alias for v1alpha1.SubscriptionConfig
+// to maintain clear naming in the OLMv1 context while reusing the v0 type.
+type DeploymentConfig = v1alpha1.SubscriptionConfig
+```
 
-    // nodeSelector is a selector which must be true for the pod to fit on a node.
-    // Selector which must match a node's labels for the pod to be scheduled on that node.
-    // More info: https://kubernetes.io/docs/concepts/configuration/assign-pod-node/
-    //
-    // +optional
-    NodeSelector map[string]string `json:"nodeSelector,omitempty"`
+Example inline configuration structure:
 
-    // tolerations are the pod's tolerations.
-    //
-    // +optional
-    Tolerations []corev1.Toleration `json:"tolerations,omitempty"`
-
-    // resources represents compute resources required by this container.
-    // More info: https://kubernetes.io/docs/concepts/configuration/manage-compute-resources-container/
-    //
-    // +optional
-    Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
-
-    // envFrom is a list of sources to populate environment variables in the container.
-    // The keys defined within a source must be a C_IDENTIFIER. All invalid keys
-    // will be reported as an event when the container is starting. When a key exists in multiple
-    // sources, the value associated with the last source will take precedence.
-    // Values defined by an Env with a duplicate key will take precedence.
-    //
-    // +optional
-    EnvFrom []corev1.EnvFromSource `json:"envFrom,omitempty"`
-
-    // env is a list of environment variables to set in the container.
-    // Cannot be updated.
-    //
-    // +patchMergeKey=name
-    // +patchStrategy=merge
-    // +optional
-    Env []corev1.EnvVar `json:"env,omitempty" patchMergeKey:"name" patchStrategy:"merge"`
-
-    // volumes is a list of Volumes to set in the podSpec.
-    //
-    // +optional
-    Volumes []corev1.Volume `json:"volumes,omitempty"`
-
-    // volumeMounts is a list of VolumeMounts to set in the container.
-    //
-    // +optional
-    VolumeMounts []corev1.VolumeMount `json:"volumeMounts,omitempty"`
-
-    // affinity, if specified, overrides the pod's scheduling constraints.
-    // nil sub-attributes will *not* override the original values in the pod.spec for those sub-attributes.
-    // Use empty object ({}) to erase original sub-attribute values.
-    //
-    // +optional
-    Affinity *corev1.Affinity `json:"affinity,omitempty"`
-
-    // annotations is an unstructured key value map stored with each Deployment, Pod, APIService in the Operator.
-    // Typically, annotations may be set by external tools to store and retrieve arbitrary metadata.
-    // Use this field to pre-define annotations that OLM should add to each of the ClusterExtension's
-    // deployments, pods, and apiservices.
-    //
-    // +optional
-    Annotations map[string]string `json:"annotations,omitempty"`
+```yaml
+{
+  "watchNamespace": "my-namespace",
+  "deploymentConfig": {
+    "nodeSelector": {"infrastructure": "dedicated"},
+    "tolerations": [
+      {
+        "key": "dedicated",
+        "operator": "Equal",
+        "value": "operators",
+        "effect": "NoSchedule"
+      }
+    ],
+    "resources": {
+      "requests": {"memory": "256Mi", "cpu": "100m"},
+      "limits": {"memory": "512Mi", "cpu": "200m"}
+    },
+    "env": [
+      {"name": "LOG_LEVEL", "value": "debug"}
+    ]
+  }
 }
 ```
 
-Example ClusterExtension with deployment configuration:
-
-```yaml
-apiVersion: olm.operatorframework.io/v1
-kind: ClusterExtension
-metadata:
-  name: my-operator
-spec:
-  namespace: my-namespace
-  serviceAccount:
-    name: my-operator-sa
-  source:
-    sourceType: Catalog
-    catalog:
-      packageName: my-operator
-  install:
-    namespace: my-namespace
-    serviceAccount:
-      name: my-operator-sa
-  config:
-    inline:
-      watchNamespace: "my-namespace"
-      deploymentConfig:
-        # Schedule pods on specific nodes
-        nodeSelector:
-          infrastructure: "dedicated"
-        # Add tolerations for dedicated nodes
-        tolerations:
-          - key: "dedicated"
-            operator: "Equal"
-            value: "operators"
-            effect: "NoSchedule"
-        # Set resource requirements
-        resources:
-          requests:
-            memory: "256Mi"
-            cpu: "100m"
-          limits:
-            memory: "512Mi"
-            cpu: "200m"
-        # Add environment variables
-        env:
-          - name: LOG_LEVEL
-            value: "debug"
-        # Add custom annotations
-        annotations:
-          monitoring.io/scrape: "true"
-```
+The `Selector` field in the `SubscriptionConfig` is present but is not ever extracted or used by OLMv0. OLMv1 will maintain this behavior so the field will be accepted but ignored.
 
 #### Renderer Modifications
 
-The OLMv1 bundle renderer will be extended to accept and apply deployment configuration during the rendering process. For each configuration type (environment variables, resource limits, tolerations, etc.), functions to apply the configuration will be implemented that replicate [OLMv0's behavior](https://github.com/operator-framework/operator-lifecycle-manager/blob/d55d4899c17db9caeb90aac2ec86d5c82651593a/pkg/controller/operators/olm/overrides/inject/inject.go). 
+The OLMv1 bundle renderer will be extended to accept and apply deployment configuration during the rendering process. For each configuration type (environment variables, resource limits, tolerations, etc.), functions to apply the configuration will be implemented that replicate [OLMv0's behavior](https://github.com/operator-framework/operator-lifecycle-manager/blob/d55d4899c17db9caeb90aac2ec86d5c82651593a/pkg/controller/operators/olm/overrides/inject/inject.go).
 
 The merge and override policies will also match OLMv0:
 
@@ -259,12 +171,11 @@ The merge and override policies will also match OLMv0:
 
 #### JSON Schema Validation and Controller Integration
 
-The inline configuration will be validated using JSON schema-based validation. The JSON schema for `DeploymentConfig` will be based on a static snapshot of the Kubernetes apps v1 and core v1 OpenAPI specifications with build-time flexibility. This approach:
+The inline configuration will be validated using JSON schema-based validation. The JSON schema for `DeploymentConfig` will be generated by introspecting the `v1alpha1.SubscriptionConfig` struct. This approach:
 
-- **Provides stability**: The schema is static at runtime, preventing unexpected changes with Kubernetes updates
-- **Stability with Build-time Flexibility**: While the schema is a static snapshot at runtime to ensure predictable validation, the generation of this snapshot can be automated at build-time. This allows OLMv1 to stay in sync with the k8s.io/api version defined in go.mod without manual schema authoring
-- **Ensures compatibility**: Operators using current Kubernetes API types will continue to work
-- **Is safe for the foreseeable future**: Breaking changes are unlikely until apps v2 or core v2 API groups are introduced
+- **Ensures parity with OLMv0**: The schema is derived from the exact same type definition used in OLMv0
+- **Automatic updates**: When the github.com/operator-framework/api dependency is updated, the schema generation can be re-run to incorporate any new fields
+- **Maintains stability**: Schema regeneration only happens during explicit dependency updates, not automatically
 
 A Makefile target will provide a low-effort path to refresh the schema when the project's Kubernetes dependencies are updated:
 
