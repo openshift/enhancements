@@ -56,6 +56,8 @@ As an application developer, I want to understand clearly which TLS profile appl
 
 5. TLS curves configuration for the APIServer (this is being addressed in a separate Ingress TLS Curves enhancement).
 
+6. Enforcing client TLS settings. This enhancement applies only to the server-side TLS configuration of managed components.
+
 ## Proposal
 
 We propose extending the existing `apiserver.config.openshift.io/v1` API to serve as the source of truth for TLS security settings across the cluster. All components (with specific documented exceptions) should honor the TLS configuration defined in this API.
