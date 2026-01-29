@@ -107,10 +107,10 @@ The following Kubernetes components lack explicit configuration support for TLS 
 
 | Component | Status | Reference |
 |-----------|--------|-----------|
-| Kubelet | Does not have support for TLS curves | [types.go#L182](https://github.com/kubernetes/kubelet/blob/ce0febd5f9e2c0e97ef3b3161a9098ef3f34afcb/config/v1beta1/types.go#L182) |
-| Etcd | Does not support TLS curves | [config.go#L250](https://github.com/etcd-io/etcd/blob/ed430d025f5d1ff33d997e42569073c55f3ef513/server/embed/config.go#L250) |
-| Controller-manager | Has `--tls-cipher-suites` flag but no `--tls-curves` flag | [kube-controller-manager.md](https://github.com/kubernetes/website/blob/8d4885bbb055ec4558520a021ab1ac65064cd896/content/en/docs/reference/command-line-tools-reference/kube-controller-manager.md#L972-L998) |
-| Kube-scheduler | Pulls from SecureServing struct which lists tlsminversion and ciphers but omits curve support | [serving.go#L66](https://github.com/kubernetes/kubernetes/blob/master/staging/src/k8s.io/apiserver/pkg/server/options/serving.go#L66) |
+| Kubelet | No Support | [types.go#L182](https://github.com/kubernetes/kubelet/blob/ce0febd5f9e2c0e97ef3b3161a9098ef3f34afcb/config/v1beta1/types.go#L182) |
+| Etcd | No Support | [config.go#L250](https://github.com/etcd-io/etcd/blob/ed430d025f5d1ff33d997e42569073c55f3ef513/server/embed/config.go#L250) |
+| Controller-manager | No Support | [kube-controller-manager.md](https://github.com/kubernetes/website/blob/8d4885bbb055ec4558520a021ab1ac65064cd896/content/en/docs/reference/command-line-tools-reference/kube-controller-manager.md#L972-L998) |
+| Kube-scheduler | No Support | [serving.go#L66](https://github.com/kubernetes/kubernetes/blob/master/staging/src/k8s.io/apiserver/pkg/server/options/serving.go#L66) |
 
 This limitation means that TLS curve configuration will primarily benefit components that use their own TLS implementations (such as Ingress controllers using HAProxy/OpenSSL) rather than components that rely on upstream Kubernetes code. Upstream support would need to be added for these components to honor TLS curve configuration.
 
