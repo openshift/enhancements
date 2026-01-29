@@ -141,6 +141,9 @@ HyperShift:
 #### HyperShift Repository Components
 
 1. **HyperShift CLI (`hypershift` binary)**
+   This enhancement references the upstream `hypershift` CLI. Equivalent
+   functionality will be available in the downstream `hcp` CLI for
+   production use.
    - `hypershift install`: Add Azure-specific flags for External DNS
      configuration and credential management when installing the HyperShift
      operator on a self-managed management cluster.
@@ -149,7 +152,7 @@ HyperShift:
      (OIDC issuer URL, managed identities file).
    - `hypershift create infra azure`: New infrastructure provisioning command
      for creating Azure resources (VNets, subnets, NSGs, storage accounts).
-   - `hypershift create credentials azure`: New command for generating workload
+   - `hypershift create iam azure`: New command for generating workload
      identity credentials and federated credential configurations.
 
 2. **Control Plane Operator (CPO)**
@@ -313,7 +316,9 @@ lifecycles.
    **Supported Management Cluster Configurations**: For Dev Preview, the
    supported management cluster configuration is a standalone OpenShift cluster.
    The management cluster can run on Azure or AWS. This is the configuration
-   that has been validated through testing.
+   that has been validated through testing. The workflow and diagram below
+   describe the Azure management cluster setup; the AWS management cluster
+   setup follows a similar pattern.
 
 3. The platform engineer installs the HyperShift operator on the management
    cluster following the
@@ -419,7 +424,7 @@ The proposal defines how self-managed Azure deployments differ from the managed
 ARO HCP offering:
 
 - **Management Cluster**: Must be a customer-provisioned OpenShift cluster
-  running in Azure (unlike ARO HCP which uses an AKS management cluster)
+  running in Azure or AWS (unlike ARO HCP which uses an AKS management cluster)
 - **Infrastructure Lifecycle**: Users are responsible for provisioning and
   maintaining all Azure infrastructure
 - **Workload Identity**: Users must configure Azure Workload Identity Federation
@@ -493,45 +498,63 @@ replaces long-lived service principal secrets with short-lived tokens.
 
 ```mermaid
 sequenceDiagram
-    participant Pod as Control Plane Pod<br/>(e.g., CCM)
+    participant Minter as Token Minter<br/>Sidecar
+    participant Guest as Guest Cluster<br/>API Server
+    participant Pod as Main Container<br/>(e.g., CCM)
     participant Azure as Azure Workload<br/>Identity
     participant API as Azure APIs
 
-    Pod->>Pod: 1. Read projected SA token from volume
-    Pod->>Azure: 2. Exchange SA token for Azure token
-    Azure->>Azure: 3. Validate token signature against OIDC JWKS
+    Minter->>Guest: 1. TokenRequest API (via kubeconfig)
+    Guest-->>Minter: Guest cluster SA token (signed by guest OIDC issuer)
+    Minter->>Minter: 2. Write token to shared EmptyDir volume
+    Pod->>Pod: 3. Read token from shared volume
+    Pod->>Azure: 4. Exchange guest SA token for Azure access token
+    Azure->>Azure: 5. Validate token signature against guest cluster OIDC JWKS
     Azure-->>Pod: Return Azure access token
-    Pod->>API: 4. Call Azure API with access token
+    Pod->>API: 6. Call Azure API with access token
     API-->>Pod: API response
 ```
 
 **CPO Token Minter Configuration**:
 
-The Control Plane Operator configures each Azure-aware component with:
+Control plane pods run on the management cluster but must authenticate using
+tokens signed by the **guest cluster's** OIDC issuer, which Azure is configured
+to trust. A standard Kubernetes projected service account token cannot be used
+because it would be signed by the management cluster's issuer. Instead, CPO
+configures each Azure-aware component with a token-minter sidecar that mints
+guest cluster tokens:
 
-1. **Service Account**: A dedicated service account for the component:
-   ```yaml
-   apiVersion: v1
-   kind: ServiceAccount
-   metadata:
-     name: cloud-controller-manager
-   ```
-
-2. **Projected Token Volume**: The pod spec includes a projected volume that
-   mounts a bound service account token:
+1. **EmptyDir Volume**: A memory-backed EmptyDir volume shared between the
+   token-minter sidecar and the main container
+   (`token-minter-container.go:145-152`):
    ```yaml
    volumes:
-   - name: azure-identity-token
-     projected:
-       sources:
-       - serviceAccountToken:
-           audience: api://AzureADTokenExchange
-           expirationSeconds: 3600
-           path: azure-identity-token
+   - name: <component>-token
+     emptyDir:
+       medium: Memory
    ```
 
-3. **Environment Variables**: The container is configured with Azure SDK
-   environment variables:
+2. **Token Minter Sidecar**: A sidecar container that connects to the guest
+   cluster via kubeconfig and mints service account tokens using the
+   Kubernetes TokenRequest API (`token-minter-container.go:95-123`):
+   ```yaml
+   containers:
+   - name: token-minter
+     image: <HYPERSHIFT_IMAGE>
+     command: ["/usr/bin/control-plane-operator", "token-minter"]
+     args:
+     - "--service-account-namespace=<component-namespace>"
+     - "--service-account-name=<component-sa>"
+     - "--token-file=/var/run/secrets/openshift/serviceaccount/token"
+     volumeMounts:
+     - name: <component>-token
+       mountPath: /var/run/secrets/openshift/serviceaccount
+   ```
+   The token-minter automatically renews tokens at 80% of their lifetime
+   (`tokenminter.go:119-229`).
+
+3. **Environment Variables**: The main container is configured with Azure SDK
+   environment variables pointing to the token written by the sidecar:
    ```yaml
    env:
    - name: AZURE_CLIENT_ID
@@ -539,11 +562,13 @@ The Control Plane Operator configures each Azure-aware component with:
    - name: AZURE_TENANT_ID
      value: "<azure-tenant-id>"
    - name: AZURE_FEDERATED_TOKEN_FILE
-     value: "/var/run/secrets/azure/tokens/azure-identity-token"
+     value: "/var/run/secrets/openshift/serviceaccount/token"
    ```
 
-The Azure SDK's `azidentity.NewDefaultAzureCredential()` automatically detects
-these environment variables and uses workload identity authentication.
+The Azure SDK's `azidentity.WorkloadIdentityCredential` reads the token from
+`AZURE_FEDERATED_TOKEN_FILE` and exchanges it with Azure AD for an access
+token. Azure validates the token signature against the guest cluster's OIDC
+JWKS endpoint.
 
 #### Managed Identity Requirements
 
@@ -572,7 +597,7 @@ automatically assigned to the managed identities. When `--assign-custom-hcp-role
 is passed, custom roles with least-privilege permissions are assigned instead of
 the default Contributor role.
 
-The `hypershift create credentials azure` command generates the required managed
+The `hypershift create iam azure` command generates the required managed
 identities and federated credentials based on a workload identities
 configuration file.
 
