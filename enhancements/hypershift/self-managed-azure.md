@@ -141,6 +141,9 @@ HyperShift:
 #### HyperShift Repository Components
 
 1. **HyperShift CLI (`hypershift` binary)**
+   This enhancement references the upstream `hypershift` CLI. Equivalent
+   functionality will be available in the downstream `hcp` CLI for
+   production use.
    - `hypershift install`: Add Azure-specific flags for External DNS
      configuration and credential management when installing the HyperShift
      operator on a self-managed management cluster.
@@ -149,7 +152,7 @@ HyperShift:
      (OIDC issuer URL, managed identities file).
    - `hypershift create infra azure`: New infrastructure provisioning command
      for creating Azure resources (VNets, subnets, NSGs, storage accounts).
-   - `hypershift create credentials azure`: New command for generating workload
+   - `hypershift create iam azure`: New command for generating workload
      identity credentials and federated credential configurations.
 
 2. **Control Plane Operator (CPO)**
@@ -313,7 +316,9 @@ lifecycles.
    **Supported Management Cluster Configurations**: For Dev Preview, the
    supported management cluster configuration is a standalone OpenShift cluster.
    The management cluster can run on Azure or AWS. This is the configuration
-   that has been validated through testing.
+   that has been validated through testing. The workflow and diagram below
+   describe the Azure management cluster setup; the AWS management cluster
+   setup follows a similar pattern.
 
 3. The platform engineer installs the HyperShift operator on the management
    cluster following the
@@ -419,7 +424,7 @@ The proposal defines how self-managed Azure deployments differ from the managed
 ARO HCP offering:
 
 - **Management Cluster**: Must be a customer-provisioned OpenShift cluster
-  running in Azure (unlike ARO HCP which uses an AKS management cluster)
+  running in Azure or AWS (unlike ARO HCP which uses an AKS management cluster)
 - **Infrastructure Lifecycle**: Users are responsible for provisioning and
   maintaining all Azure infrastructure
 - **Workload Identity**: Users must configure Azure Workload Identity Federation
@@ -572,7 +577,7 @@ automatically assigned to the managed identities. When `--assign-custom-hcp-role
 is passed, custom roles with least-privilege permissions are assigned instead of
 the default Contributor role.
 
-The `hypershift create credentials azure` command generates the required managed
+The `hypershift create iam azure` command generates the required managed
 identities and federated credentials based on a workload identities
 configuration file.
 
