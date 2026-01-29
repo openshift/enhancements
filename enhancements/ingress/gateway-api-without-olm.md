@@ -35,8 +35,9 @@ via an OLM Subscription to provide Gateway API support. This enhancement
 proposes replacing the OLM-based installation with a direct Helm chart
 installation using sail-operator libraries. This change eliminates the OLM
 dependency, avoids conflicts with existing OSSM subscriptions, enables Gateway
-API on clusters without OLM/Marketplace capabilities, and allows faster
-Gateway API releases independent of OLM release cycles.
+API on clusters without OLM/Marketplace capabilities, and simplifies the
+process for testing and releasing Gateway API updates. This approach makes
+Gateway API a platform feature rather than depending on a layered product.
 
 ## Motivation
 
@@ -66,6 +67,12 @@ Gateway API versions independently of OLM release cycles, so that I can deliver
 features and bug fixes to customers faster and respond more quickly to upstream
 Gateway API changes.
 
+#### Story 4: Layered Product
+
+As a layered product (RHCL, RHOAI), I want to use Gateway API without requiring
+OSSM installation, so that I can provide Gateway API capabilities to my users
+with minimal dependencies.
+
 ### Goals
 
 - Remove the dependency on OLM for installing OSSM/istiod for Gateway API
@@ -77,20 +84,25 @@ Gateway API changes.
   installation (4.22).
 - Support downgrade from Helm-based installation (4.22) to OLM-based
   installation (4.21).
-- Enable faster Gateway API releases independent of OLM release cycles.
+- Simplify the process for testing and releasing Gateway API updates and
+  pre-releases, reducing complexity for QE testing and e2e jobs.
+- Simplify Gateway API lifecycle management and reduce engineering complexity.
+- Enable future day 0 installation as a core operator when needed, which OLM
+  cannot currently provide.
 
 ### Non-Goals
 
 - Changing the user-facing Gateway API experience. Cluster admins will continue
-  to create `GatewayClass`, `Gateway`, and `HTTPRoute` resources in the same
-  way.
+  to create `GatewayClass`, `Gateway`, and route resources in the same way.
 - Affecting service mesh use cases or OSSM installations created by cluster
   admins for mesh purposes.
 - Adding new Gateway API features beyond what is currently supported.
 - Making OSSM a core operator bundled in the OpenShift release payload (though
   this may be reconsidered in the future).
+- Including istiod and envoy images in the OCP release payload. Images will
+  initially be pulled from registry.redhat.io.
 - Changing the control plane architecture. istiod will continue to run in the
-  same namespace with the same configuration.
+  openshift-ingress namespace with the same configuration.
 
 ## Proposal
 
@@ -122,10 +134,10 @@ From the user's perspective, the workflow for enabling and using Gateway API
 remains unchanged. The implementation details of how istiod is installed differ
 from previous releases.
 
-#### Enabling Gateway API
+#### Fresh Installation (4.22+)
 
 1.  Cluster admin creates a `GatewayClass` with
-    `spec.controllerName: openshift.io/gateway-controller`.
+    `spec.controllerName: openshift.io/gateway-controller/v1`.
 2.  The cluster-ingress-operator's gatewayclass-controller detects the
     new `GatewayClass` owned by OpenShift.
 3.  The controller uses sail-operator libraries to install istiod via
@@ -134,15 +146,37 @@ from previous releases.
     `WasmPlugin`, `DestinationRule`) if they do not already exist.
 5.  Cluster admin creates `Gateway` and `HTTPRoute` resources as before.
 
+#### Migrating from OLM to Helm (4.21 → 4.22)
+
+1.  Cluster admin initiates cluster upgrade to 4.22.
+2.  The upgraded cluster-ingress-operator detects the existing OLM-based
+    installation and deletes the `Istio` CR.
+3.  The sail-operator removes its Helm chart and istiod installation.
+4.  The cluster-ingress-operator installs istiod using sail-operator
+    libraries via Helm.
+5.  Existing `Gateway` and route resources continue functioning with no data
+    plane downtime.
+
+#### Upgrading Between Helm Versions (4.22+)
+
+1.  Cluster admin initiates cluster upgrade (e.g., 4.22 to 4.23).
+2.  The upgraded cluster-ingress-operator detects the existing Helm-based
+    installation.
+3.  The cluster-ingress-operator updates the Helm chart to a new revision
+    using sail-operator libraries.
+4.  Existing `Gateway` and route resources continue functioning with no data
+    plane downtime.
+
 ```mermaid
 sequenceDiagram
     participant Admin as Cluster Admin
     participant CIO as cluster-ingress-operator
+    participant SO as sail-operator
     participant Sail as sail-operator library
     participant Helm as Helm
     participant Istiod as istiod
 
-    Note over Admin,Istiod: New Installation (4.22+)
+    Note over Admin,Istiod: Fresh Installation (4.22+)
     Admin->>CIO: Create GatewayClass
     CIO->>CIO: Install Istio CRDs
     CIO->>Sail: Use sail-operator libraries
@@ -150,6 +184,23 @@ sequenceDiagram
     Helm->>Istiod: Deploy istiod
     Admin->>Istiod: Create Gateway/HTTPRoute
     Istiod->>Istiod: Configure Envoy
+
+    Note over Admin,Istiod: Migrating from OLM to Helm (4.21→4.22)
+    Admin->>CIO: Upgrade cluster to 4.22
+    CIO->>CIO: Detect and delete Istio CR
+    SO->>Helm: Remove Helm chart
+    Helm->>Istiod: Remove istiod
+    CIO->>Sail: Use sail-operator libraries
+    Sail->>Helm: Install istiod chart
+    Helm->>Istiod: Deploy istiod
+    Note over Istiod: Gateway/routes continue, no downtime
+
+    Note over Admin,Istiod: Upgrading Between Helm Versions (4.22+)
+    Admin->>CIO: Upgrade cluster (e.g., 4.22→4.23)
+    CIO->>Sail: Use sail-operator libraries
+    Sail->>Helm: Update to new chart revision
+    Helm->>Istiod: Update istiod
+    Note over Istiod: Gateway/routes continue, no downtime
 ```
 
 ### API Extensions
@@ -211,12 +262,23 @@ vendoring to eliminate drift in the chart YAML. When the sail-operator library
 version is updated in `go.mod`, the Helm charts are automatically synchronized
 with the OSSM team's updates.
 
+#### Component Versioning
+
+OpenShift Gateway API releases remain linked to OSSM releases through the
+vendored sail-operator library. Each OCP release uses a specific OSSM version
+(e.g., OCP 4.22 uses sail-operator library from OSSM 3.3.0). This enhancement
+changes the installation mechanism from OLM to Helm, but does not change the
+version alignment between OCP and OSSM releases.
+
 #### CRD Management
 
 The cluster-ingress-operator will manage the following Istio CRDs required for
-layered products: `WasmPlugin`, `EnvoyFilter`, and `DestinationRule`. These
-CRDs will be maintained long-term to support layered products that may not
-adopt newer Gateway API features immediately.
+layered products, which will be maintained long-term to support products that
+may not adopt newer Gateway API features immediately:
+- `EnvoyFilter` and `WasmPlugin`: Required by RHCL/Kuadrant and MCP Gateway for
+  fine-grained Envoy configuration.
+- `DestinationRule`: Required by RHCL/Kuadrant versions not yet supporting
+  `BackendTLSPolicy`.
 
 The operator will implement the following ownership model:
 - **If no CRDs exist**: The cluster-ingress-operator creates them when a
@@ -289,7 +351,8 @@ including webhook configurations, Istio API groups, and coordination resources.
 **Description**: If the cluster-ingress-operator's Helm charts fall out of
 sync with the sail-operator/OSSM team's charts, incompatibilities may arise.
 
-**Mitigation**: Use `go.mod` to vendor charts from the sail-operator repository.
+**Mitigation**: Use `go.mod` to vendor charts from the sail-operator
+repository. Upgrade tests will validate compatibility between versions.
 
 #### Risk: Istio Control Plane Protocol Changes
 
@@ -302,6 +365,16 @@ updated xDS protocol, or configuration format changes).
 the new istiod version will reference a new proxy image. This ensures Envoy
 proxies are updated alongside the control plane, preventing communication
 issues.
+
+#### Risk: Resource Drift or Deletion
+
+**Description**: If Helm-managed resources (such as the istiod `Deployment`)
+are deleted or modified outside of the operator's control, they will not be
+automatically reconciled since sail-operator is not running.
+
+**Mitigation**: The gatewayclass-controller will watch and reconcile all
+Helm-managed resources. See [Object Watching and
+Reconciliation](#object-watching-and-reconciliation) for details.
 
 ### Drawbacks
 
@@ -334,7 +407,7 @@ installation.
 **Cons**:
 - Does not address conflicts with existing OSSM subscriptions.
 - Does not enable Gateway API on clusters without OLM/Marketplace.
-- Does not allow faster Gateway API releases independent of OLM.
+- Does not simplify the process for testing and releasing Gateway API updates.
 - Higher resource consumption (sail-operator deployment).
 
 **Reason Not Chosen**: Does not solve the core problems this enhancement
@@ -346,8 +419,8 @@ Include OSSM as a core operator in the OCP release payload, similar to other
 core operators.
 
 **Pros**:
-- istiod images would be part of the release payload, supporting disconnected
-  installations from the start.
+- istiod and envoy images would be part of the release payload, supporting
+  disconnected installations from the start.
 - OSSM would be tightly integrated with OCP releases.
 - Eliminates OLM dependency for Gateway API.
 
@@ -379,6 +452,11 @@ if needed.
    sail-operator repository simplify dependency management and align with Go
    module conventions?
 
+4. **Webhook management**: Who manages the webhook certificates, and is this
+   still a concern with modern Kubernetes? During implementation, confirm that
+   the sail-operator library creates webhooks that only select resources with
+   the appropriate revision label to avoid conflicts.
+
 ## Test Plan
 
 Testing for this enhancement will cover the following scenarios:
@@ -391,8 +469,9 @@ installation to ensure no regressions in end-user functionality.
 Additional test scenarios specific to this enhancement:
 
 1. **Upgrade Path**: Upgrade from 4.21 (OLM-based) to 4.22 (Helm-based).
-   Verify automatic migration occurs and `Gateway`/`HTTPRoute` resources remain
-   functional.
+   Verify automatic migration occurs, `Gateway`/`HTTPRoute` resources remain
+   functional with no traffic interruption, and an `HTTPRoute` created during
+   the upgrade works immediately after the upgrade completes.
 
 2. **CRD Lifecycle**: Test Istio CRD installation, upgrade, and handling of
    pre-existing CRDs from user-managed OSSM installations.
@@ -453,6 +532,6 @@ workflows, so they have minimal operational impact.
 No new infrastructure required. This enhancement uses existing OpenShift
 components:
 - Existing CI infrastructure for e2e tests
-- Existing image registry (registry.redhat.io) for istiod images
+- Existing image registry (registry.redhat.io) for istiod and envoy images
 - Helm charts vendored via sail-operator libraries
 - Existing cluster-ingress-operator
