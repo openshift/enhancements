@@ -100,7 +100,8 @@ with minimal dependencies.
 - Making OSSM a core operator bundled in the OpenShift release payload (though
   this may be reconsidered in the future).
 - Including istiod and envoy images in the OCP release payload. Images will
-  initially be pulled from registry.redhat.io.
+  initially be pulled from registry.redhat.io. Custom image sources and image
+  mirroring are out of scope for this enhancement.
 - Changing the control plane architecture. istiod will continue to run in the
   openshift-ingress namespace with the same configuration.
 
@@ -478,6 +479,14 @@ Additional test scenarios specific to this enhancement:
 
 3. **Reconciliation Logic**: Verify operator correctly detects and reconciles
    Helm objects, Istio CRDs, and istiod deployments.
+
+#### Testing Pre-releases of OSSM
+
+This enhancement simplifies pre-release testing by eliminating OLM-specific
+test infrastructure. The existing `e2e-aws-pre-release-ossm` job will need to
+be updated since it currently uses OLM subscriptions. The approach will either
+be to remove it in favor of manual vendor bump smoke test PRs, or adapt it to
+vendor the new pre-release version directly.
 
 ## Graduation Criteria
 
