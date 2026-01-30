@@ -37,6 +37,8 @@ For `MachineSet` managed clusters, the end goal is to create automated mechanism
 
 For clusters that are not managed by `MachineSets`, the end goal is to create a document(KB or otherwise) that a cluster admin would follow to update their boot images to be compliant with the acceptable skew. In such cases, the admin will be expected to record their cluster's boot image in the skew enforcement API object.
 
+Aside from standard self-managed OpenShift clusters using ART-shipped builds from the CoreOS team, managed OpenShift offerings create their own boot media on supported cloud platforms (AWS, GCP, Azure) for marketplace offerings (AWS Marketplace, GCP Marketplace, Azure Marketplace), managed services (ROSA, ARO), or specialized variants (OCP, OPP, OKE). The MCO will also detect which "stream" a boot image belongs to and ensure updates occur within the same stream, and will have platform-specific detection logic and coordination between Installer, CoreOS, and Managed Services teams to properly identify and track both historical and future boot images across all supported platforms.
+
 
 ## Motivation
 
@@ -64,6 +66,8 @@ This is also a soft pre-requisite for both dual-stream RHEL support in OpenShift
 * As an Openshift engineer, having nodes boot up on an unsupported OCP version is a security liability. By having nodes boot on the latest OCP supported boot image for a given OCP release, there will be less of a skew with the release payload image. This helps me avoid tracking incompatibilities across OCP release versions and shore up technical debt(see issues linked above). 
 
 * As a cluster administrator, having to keep track of a "boot" vs "live" image for a given cluster is not intuitive or user friendly. In the worst case scenario, I will have to reset a cluster(or do a lot of manual steps with rh-support in recovering the node) simply to be able to scale up nodes after an upgrade. If I'm managing a `MachineSet` managed cluster, once opted in, this feature will be a "switch on and forget" mechanism for me. If I'm managing a non `Machineset` managed cluster, this would provide me with documentation that I could follow after an upgrade to ensure my cluster has the latest bootimages.
+
+* As a cluster administrator running OpenShift on marketplace offerings (AWS Marketplace, GCP Marketplace, or Azure Marketplace) or managed services (ROSA, ARO), I need my boot images to stay within the same billing and licensing stream when they're automatically updated. I should be able to opt into automatic boot image management with a simple configuration change, without worrying about whether my marketplace or managed service cluster will be correctly identified. The MCO should automatically detect my deployment type and update my boot images to the appropriate marketplace or managed service variant, ensuring I maintain compliance with my licensing agreements and billing arrangements.
 
 ### Goals
 
@@ -110,13 +114,14 @@ It is important to note that there would be two "opt-in" knobs while this featur
 
 See the API extension section for examples of how this feature can be turned on and off. 
 
-#### Variation and form factor considerations [optional]
+#### Variation and form factor considerations
 
 Any form factor using the MCO and `MachineSets` will be impacted by this proposal. So case by case:
 - Standalone OpenShift: Yes, this is the main target form factor.
 - microshift: No, as it does [not](https://github.com/openshift/microshift/blob/main/docs/contributor/enabled_apis.md) use `MachineSets`.
 - Hypershift: No, Hypershift does not have this issue.
 - Hive: Hive manages `MachineSets` via `MachinePools`. The MachinePool controller generates the `MachineSets` manifests (by invoking vendored installer code) which include the `providerSpec`. Once a `MachineSet` has been created on the spoke, the only things that will be reconciled on it are replicas, labels, and taints - [unless a backdoor is enabled](https://github.com/openshift/hive/blob/0d5507f91935701146f3615c990941f24bd42fe1/pkg/constants/constants.go#L518). If the `providerSpec` ever goes out of sync, a warning will be logged by the MachinePool controller but otherwise this discrepancy is ignored. In such cases, the MSBIC will not have any issue reconciling the `providerSpec` to the correct boot image. However, if the backdoor is enabled, both the MSBIC and the MachinePool Controller will attempt to reconcile the `providerSpec` field, causing churn. The Hive team has [updated the comment](https://github.com/openshift/hive/pull/2596/files) on the backdoor annotation to indicate that it is mutually exclusive with this feature.
+- Marketplace and Managed Services clusters: Yes. We will need to additionally introduce "streams" of metadata, such that each marketplace (OCP/OPP/OKE) and managed cluster (ROSA/ARO) can update to the right image for its cluster type. This will require us to both detect the origin stream/cluster type of an existing bootimage, as well as ship a manifest for the latest image reference per stream. See [Boot Image Stream Management](#boot-image-stream-management) section for details.
 
 ##### Supported platforms
 
@@ -318,6 +323,194 @@ Based on the observation above, here is a rough outline of what CAPI support wou
 When [MachineDeployments](https://cluster-api.sigs.k8s.io/developer/architecture/controllers/machine-deployment#machinedeployment) are introduced into CAPI, this mechanism will need to be updated to reconcile them as well. `MachineDeployments` manage a fleet of `MachineSets`, and this can be checked via the `OwnerReference` field in the `MachineSet` object. In the long term, `MachineDeployments` and `MachineSets` are expected to co-exist so this feature will need to account for both cases. 
 
 Much of the existing design regarding architecture & platform detection, opt-in, degradation and storing boot image history can remain the same. 
+
+### Boot Image Stream Management
+
+To properly manage boot images across different deployment scenarios and platforms, a stream-based approach is necessary. Each stream represents a distinct boot image variant that serves different use cases (e.g., standard IPI installations, marketplace offerings, managed service deployments).
+
+Each team that currently owns bootimage creation for these platforms will now have the additional responsibility of tagging the image accordingly with stream metadata, as well as update the installer's bootimage data, preferrably at least once per y-stream.
+
+#### Stream Definitions
+
+The following streams will need to be detectable and shipped with corresponding metadata such that the MCO can detect and find the latest image for the stream. This will require coordination between Installer, RHCOS, MCO, Marketplace and ARO/ROSA teams:
+
+**AWS Streams:**
+- IPI - Standard installer-provisioned infrastructure on AWS
+- Marketplace - AWS Marketplace published images
+- ROSA - Red Hat OpenShift Service on AWS
+
+**GCP Streams:**
+- IPI - Standard installer-provisioned infrastructure on GCP
+- Marketplace - GCP Marketplace published images (OCP, OPP, OKE variants)
+
+**Azure Streams:**
+- IPI/ARO - Standard installations and Azure Red Hat OpenShift (both HyperV Gen1 and Gen2)
+- Marketplace - Azure Marketplace published images (paid offerings with OCP, OPP, OKE, OCP-EMEA, OPP-EMEA, OKE-EMEA variants for both HyperV Gen1 and Gen2, for a total of 12 streams)
+
+**OKD Streams:**
+- SCOS-OKD - Singular SCOS stream on AWS
+
+The MCO examines the current MachineSet boot image, determines its stream, and then determines the desired image from the appropriate stream metadata. Once all known streams are handled, the MCO should enter a degraded state if it expects to manage a boot image but cannot determine its stream.
+
+#### Platform-Specific Stream Detection and Update Strategy
+
+##### AWS
+
+###### History Bootimage Tracking (Existing Clusters)
+
+For existing upgrade clusters, determining the boot image source requires examining multiple data sources:
+
+**AWS MachineSet backed installer-shipped image:**
+- Create a historical list of all installer-shipped AMIs from RHCOS.json files
+- Match current MachineSet AMI against this historical data
+
+**ROSA:**
+- Create a list of all ROSA AMIs based on GitLab cluster image set metadata (see Red Hat internal Gitlab instance - service/clusterimagesets)
+
+**AWS Marketplace:**
+Two potential approaches:
+1. Filter out all non-ROSA marketplace published images and curate a list
+2. Default to not supported - require user to update to a "new" marketplace image once skew enforcement is in place
+
+**Detection fallback:**
+If the boot image is not found in any historical list:
+- Use AWS SDK to check publisher and RHCOS version:
+  - **Deregistered/Not Found**: We will estimate the skew based on the install version of the cluster, and have the skew enforcement rules apply to it as normal
+  - **Marketplace-published**: Could be UPI or ROSA - apply normal skew enforcement rules, but require update to future images with proper metadata
+  - **RHCOS**: Follow regular skew rules (consider raising warning since it should be in the historical list)
+
+###### Future Bootimage Tracking (New Images)
+
+**Installer changes:**
+
+Create multiple JSON files of AMI variant metadata for different streams:
+- rhcos (standard IPI)
+- rosa
+- marketplace-ocp
+- marketplace-oke
+- marketplace-opp
+
+**Image creation:**
+
+- All variants are tagged with `variantType` metadata to enable deterministic stream detection
+- The tagging will be done with AWS's [tagSet](https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_Image.html) field, with `variantType as the Key and stream name as the value
+
+##### GCP
+
+###### History Bootimage Tracking (Existing Clusters)
+
+GCP boot images use format: `projects/<project-name>/global/images/<image-name>`, which we can use to parse the historical stream where possible.
+
+**GCP IPI installs:**
+- Installer images have project name `rhcos-cloud`
+
+**GCP Marketplace:**
+- Marketplace images have project name `redhat-marketplace-public`
+- The image name should contain the variant.
+
+**GCP UPI:**
+- UPI installations typically upload their own images, although most users end up using the same published RHCOS image as IPI.
+- If we detect that they are using the RHCOS pulished images, we will update them if the user has turned on bootimage updates. For the rare case where the user has provided their own image, we will consider them to be the non-managed case and require manual updates.
+
+**Managed:**
+- No GCP managed service currently exists (see Open Questions regarding Dedicated)
+
+**Detection fallback:**
+
+If the image project parsing does not match any known streams or variants, we will default to requiring the user to do so manually.
+
+###### Future Bootimage Tracking (New Images)
+
+**Installer changes:**
+
+Create stream metadata files for:
+- rhcos (GCP IPI)
+- marketplace-ocp
+- marketplace-oke
+- marketplace-opp
+
+**Image creation:**
+
+While the image project can presently be used to detect stream, we should nevertheless do the same variantType tagging to make it explicit.
+
+For GCP, we will leverage [labels](https://cloud.google.com/compute/docs/labeling-resources) with `varianttype` as key and the stream name as value.
+
+###### Open Questions
+
+While GCP does not have a managed service offering, there is OpenShift Dedicated on GCP. We should check if they have special boot media in use.
+
+##### Azure
+
+###### History Bootimage Tracking (Existing Clusters)
+
+**Azure IPI installs and ARO (Azure Red Hat OpenShift)**
+
+ARO and regular IPI installs use the same images.
+
+Check the ProviderSpec `image` field structure:
+```yaml
+image:
+  offer: ''
+  publisher: ''
+  resourceID: /resourceGroups/...
+  sku: ''
+  version: ''
+```
+
+If `offer`, `publisher`, `sku`, and `version` are already set, this is already using the new marketplace image for IPI. We can check `publisher == azureopenshift` for unpaid images, and `publisher == redhat` or `publisher == redhat-limited` for paid images.
+
+If only `resourceID` is set (other fields empty), this is a pre-4.20 RHCOS IPI boot image.
+
+We would also need to check HyperV generation. For images that use ResourceID, "" is gen1, and "gen2" is gen2, whereas for newer images, "gen1" indicates gen1, and otherwise we default to gen2.
+
+**Azure paid marketplace:**
+
+Check ProviderSpec for populated `offer` and `publisher` field:
+```yaml
+image:
+  offer: 'rh-ocp-worker'
+  publisher: 'redhat'
+  resourceID:
+  sku: 'rh-ocp-worker'
+  version: '...'
+```
+
+This will have 6 combinations:
+{"redhat", "rh-ocp-worker"}
+{"redhat", "rh-opp-worker"}
+{"redhat", "rh-oke-worker"}
+{"redhat-limited", "rh-ocp-worker"}
+{"redhat-limited", "rh-opp-worker"}
+{"redhat-limited", "rh-oke-worker"}
+
+The last 3 are for the EMEA region specifically.
+
+###### Future Bootimage Tracking (New Images)
+
+**Installer changes:**
+- There is already [implemented stream metadata for Azure](https://github.com/openshift/installer/pull/9329)
+  - Azure IPI/ARO HyperV Gen1
+  - Azure IPI/ARO HyperV Gen2
+  - Marketplace ocp-gen1
+  - Marketplace ocp-gen2
+  - Marketplace opp-gen1
+  - Marketplace opp-gen2
+  - Marketplace oke-gen1
+  - Marketplace oke-gen2
+  - Marketplace EMEA ocp-gen1
+  - Marketplace EMEA ocp-gen2
+  - Marketplace EMEA opp-gen1
+  - Marketplace EMEA opp-gen2
+  - Marketplace EMEA oke-gen1
+  - Marketplace EMEA oke-gen2
+
+**Image creation:**
+
+Images are already created with necessary metadata, via publisher, offer, sku, and HyperV generation metadata. No changes should be required.
+
+##### OKD
+
+Special mention for OKD: we only have AWS images updated via SCOS.json, and only supported in us-east-1 (OKD only publishes to us-east-1 and uses live-replication for other regions).
 
 ### API Extensions
 
