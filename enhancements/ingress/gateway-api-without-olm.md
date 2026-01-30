@@ -62,10 +62,10 @@ ingress capabilities without requiring OLM infrastructure.
 
 #### Story 3: Platform Engineer
 
-As a platform engineer working on Gateway API features, I want to release new
-Gateway API versions independently of OLM release cycles, so that I can deliver
-features and bug fixes to customers faster and respond more quickly to upstream
-Gateway API changes.
+As a platform engineer maintaining Gateway API, I want to install and upgrade
+istiod directly without managing OLM Subscriptions and InstallPlans, so that
+the lifecycle is simpler and more predictable with fewer components to
+coordinate.
 
 #### Story 4: Layered Product
 
@@ -75,8 +75,7 @@ with minimal dependencies.
 
 ### Goals
 
-- Remove the dependency on OLM for installing OSSM/istiod for Gateway API
-  support.
+- Remove the dependency on OLM for installing istiod for Gateway API support.
 - Enable Gateway API on clusters without OLM and Marketplace capabilities.
 - Avoid conflicts with existing OSSM subscriptions created by cluster
   administrators.
@@ -84,8 +83,6 @@ with minimal dependencies.
   installation (4.22).
 - Support downgrade from Helm-based installation (4.22) to OLM-based
   installation (4.21).
-- Simplify the process for testing and releasing Gateway API updates and
-  pre-releases, reducing complexity for QE testing and e2e jobs.
 - Simplify Gateway API lifecycle management and reduce engineering complexity.
 - Enable future day 0 installation as a core operator when needed, which OLM
   cannot currently provide.
@@ -102,6 +99,8 @@ with minimal dependencies.
 - Including istiod and envoy images in the OCP release payload. Images will
   initially be pulled from registry.redhat.io. Custom image sources and image
   mirroring are out of scope for this enhancement.
+- Accelerating OSSM release availability. This enhancement still depends on
+  OSSM production images being released.
 - Changing the control plane architecture. istiod will continue to run in the
   openshift-ingress namespace with the same configuration.
 
@@ -135,7 +134,10 @@ From the user's perspective, the workflow for enabling and using Gateway API
 remains unchanged. The implementation details of how istiod is installed differ
 from previous releases.
 
-#### Fresh Installation (4.22+)
+#### Initial Gateway API Installation
+
+This workflow applies when Gateway API is being enabled for the first time on a
+4.22+ cluster (no existing `Istio` CR from prior Gateway API enablement).
 
 1.  Cluster admin creates a `GatewayClass` with
     `spec.controllerName: openshift.io/gateway-controller/v1`.
@@ -147,9 +149,12 @@ from previous releases.
     `WasmPlugin`, `DestinationRule`) if they do not already exist.
 5.  Cluster admin creates `Gateway` and `HTTPRoute` resources as before.
 
-#### Migrating from OLM to Helm (4.21 → 4.22)
+#### Migrating from OLM-based Gateway API Installation
 
-1.  Cluster admin initiates cluster upgrade to 4.22.
+This workflow applies when upgrading from 4.21 to 4.22 on a cluster where Gateway
+API was previously enabled via OLM (existing `Istio` CR detected).
+
+1.  Cluster admin initiates cluster upgrade to 4.22+.
 2.  The upgraded cluster-ingress-operator detects the existing OLM-based
     installation and deletes the `Istio` CR.
 3.  The sail-operator removes its Helm chart and istiod installation.
@@ -158,7 +163,10 @@ from previous releases.
 5.  Existing `Gateway` and route resources continue functioning with no data
     plane downtime.
 
-#### Upgrading Between Helm Versions (4.22+)
+#### Upgrading Helm-based Installation
+
+This workflow applies when upgrading a 4.22+ cluster that already has
+Helm-based Gateway API installed.
 
 1.  Cluster admin initiates cluster upgrade (e.g., 4.22 to 4.23).
 2.  The upgraded cluster-ingress-operator detects the existing Helm-based
@@ -177,7 +185,7 @@ sequenceDiagram
     participant Helm as Helm
     participant Istiod as istiod
 
-    Note over Admin,Istiod: Fresh Installation (4.22+)
+    Note over Admin,Istiod: Initial Gateway API Installation
     Admin->>CIO: Create GatewayClass
     CIO->>CIO: Install Istio CRDs
     CIO->>Sail: Use sail-operator libraries
@@ -186,7 +194,7 @@ sequenceDiagram
     Admin->>Istiod: Create Gateway/HTTPRoute
     Istiod->>Istiod: Configure Envoy
 
-    Note over Admin,Istiod: Migrating from OLM to Helm (4.21→4.22)
+    Note over Admin,Istiod: Migrating from OLM-based Gateway API Installation
     Admin->>CIO: Upgrade cluster to 4.22
     CIO->>CIO: Detect and delete Istio CR
     SO->>Helm: Remove Helm chart
@@ -196,7 +204,7 @@ sequenceDiagram
     Helm->>Istiod: Deploy istiod
     Note over Istiod: Gateway/routes continue, no downtime
 
-    Note over Admin,Istiod: Upgrading Between Helm Versions (4.22+)
+    Note over Admin,Istiod: Upgrading Helm-based Installation
     Admin->>CIO: Upgrade cluster (e.g., 4.22→4.23)
     CIO->>Sail: Use sail-operator libraries
     Sail->>Helm: Update to new chart revision
@@ -312,9 +320,8 @@ environments without hardcoding image locations.
 
 #### Upgrade Detection and Migration
 
-The operator will detect OLM-based installations by:
-- Checking for an existing `Istio` CR created by the operator.
-- Checking for the existence of a sail-operator `Subscription`.
+The operator will detect OLM-based installations by checking for an existing
+`Istio` CR created by the operator.
 
 Migration steps:
 1. Detect and delete the existing `Istio` CR created by the operator.
@@ -331,6 +338,11 @@ Migration steps:
 **Note**: The sail-operator deployment will NOT be removed during upgrade. If a
 cluster admin has installed sail-operator separately for service mesh use cases,
 it will remain in place and continue operating independently.
+
+**Migration Timeline**: This migration logic is only required for the 4.21 to
+4.22 upgrade. Once a cluster is on 4.22+, any Gateway API installation will
+already be Helm-based. The migration code can be removed in a future release
+(e.g., 4.23+) once 4.21 is no longer supported.
 
 #### Object Watching and Reconciliation
 
@@ -362,10 +374,12 @@ the old Envoy proxy pods may be unable to communicate with the new istiod
 control plane due to protocol changes (e.g., new authentication mechanisms,
 updated xDS protocol, or configuration format changes).
 
-**Mitigation**: The gateway deployment should roll out when istiod updates, as
-the new istiod version will reference a new proxy image. This ensures Envoy
-proxies are updated alongside the control plane, preventing communication
-issues.
+**Mitigation**: This is a pre-existing risk that exists in the current
+sail-operator upgrade process. Istio documents that the control plane can be
+one version ahead of the data plane, requiring backwards compatibility during
+upgrades. Regardless, the gateway deployment should roll out when istiod updates,
+as the new istiod version will reference a new proxy image. This ensures Envoy
+proxies are updated alongside the control plane, preventing communication issues.
 
 #### Risk: Resource Drift or Deletion
 
@@ -376,6 +390,20 @@ automatically reconciled since sail-operator is not running.
 **Mitigation**: The gatewayclass-controller will watch and reconcile all
 Helm-managed resources. See [Object Watching and
 Reconciliation](#object-watching-and-reconciliation) for details.
+
+#### Risk: Future Sail Operator Feature Requirements
+
+**Description**: If future Istio features require additional sail-operator
+functionality beyond what the vendored libraries provide, the
+cluster-ingress-operator would need to either implement that functionality
+itself (increasing maintenance burden) or migrate back to using the
+sail-operator deployment (wasting effort).
+
+**Mitigation**: Monitor sail-operator development and engage with the OSSM team
+early when new features are planned. If sail-operator functionality becomes
+essential, evaluate migrating to CIO-managed sail-operator deployment (see
+Alternative 3) or advocating for the functionality to be included in the
+sail-operator libraries.
 
 ### Drawbacks
 
@@ -391,13 +419,22 @@ Reconciliation](#object-watching-and-reconciliation) for details.
   istiod.
 - **Potential Conflict with Future Plans**: If OSSM becomes a core operator,
   this approach may need to be reworked.
+- **Pre-release Testing Workflow Complexity**: Pre-release testing requires both
+  vendoring the new sail-operator library (go.mod update to obtain updated Helm
+  charts) and providing pre-release istiod/envoy images. This is more complex
+  than the current approach which only requires overriding a single
+  sail-operator image. Vendor bumps may require code changes, making fully
+  automated pre-release testing more difficult. The existing
+  `e2e-aws-pre-release-ossm` job will likely break when this enhancement is
+  rolled out and will need to be redesigned or replaced.
 
 ## Alternatives (Not Implemented)
 
 ### Alternative 1: Keep OLM-Based Approach
 
-Continue using the OLM-based approach with the sail-operator managing istiod
-installation.
+Continue using the current OLM-based approach where the cluster-ingress-operator
+creates an OSSM Subscription, and OLM manages the sail-operator deployment which
+installs istiod. This is the status quo / no-change approach.
 
 **Pros**:
 - No implementation changes required.
@@ -435,6 +472,30 @@ alignment and architectural changes. The Helm-based approach provides a
 near-term solution and can be migrated to a core operator model in the future
 if needed.
 
+### Alternative 3: CIO Manages Sail-Operator Deployment Directly
+
+The cluster-ingress-operator would deploy and manage its own sail-operator
+instance directly (without OLM), which would then manage istiod installation via
+Helm.
+
+**Pros**:
+- Avoids CIO directly managing Istio CRDs, webhooks, and Helm resources.
+- Sail-operator handles istiod lifecycle complexity.
+- Eliminates OLM dependency for Gateway API.
+
+**Cons**:
+- Multiple sail-operator instances would exist when users also install OSSM
+  (larger resource footprint).
+- Sail-operator is designed as a singleton and uses cluster-scoped Istio CRs,
+  requiring changes to support multiple instances managing separate Istio
+  installations.
+- Still requires CIO to manage the sail-operator deployment, service account,
+  RBAC, and other resources.
+
+**Reason Not Chosen**: Requires architectural changes to sail-operator to
+support multiple instances. The direct Helm approach provides a near-term
+solution without requiring upstream changes.
+
 ## Open Questions
 
 1. **Sail-operator library readiness**: Will the OSSM team's enhanced
@@ -448,15 +509,23 @@ if needed.
    if they don't match, or skip CRD installation and proceed with the existing
    versions?
 
-3. **Semantic versioning for sail-operator**: Would adopting semantic
-   versioning with 'v' prefixes (e.g., v1.27.1 instead of 1.27.1) in the
-   sail-operator repository simplify dependency management and align with Go
-   module conventions?
+   **Answer**: Skip CRD installation if they already exist and log this
+   occurrence. Given the stability of Istio CRDs, minor version differences can
+   be safely tolerated.
+
+3. **Go module conventions for sail-operator**: Would adding 'v' prefixes to
+   tags (e.g., v1.27.1 instead of 1.27.1) in the sail-operator repository
+   simplify dependency management and align with Go module conventions? Note
+   that sail-operator already uses semantic versioning, this question is about
+   adopting the 'v' prefix convention.
 
 4. **Webhook management**: Who manages the webhook certificates, and is this
    still a concern with modern Kubernetes? During implementation, confirm that
    the sail-operator library creates webhooks that only select resources with
    the appropriate revision label to avoid conflicts.
+
+   **Answer**: Webhook certificates are managed by istiod itself. CIO does not
+   need to handle certificate generation or rotation for the webhooks.
 
 ## Test Plan
 
@@ -482,11 +551,23 @@ Additional test scenarios specific to this enhancement:
 
 #### Testing Pre-releases of OSSM
 
-This enhancement simplifies pre-release testing by eliminating OLM-specific
-test infrastructure. The existing `e2e-aws-pre-release-ossm` job will need to
-be updated since it currently uses OLM subscriptions. The approach will either
-be to remove it in favor of manual vendor bump smoke test PRs, or adapt it to
-vendor the new pre-release version directly.
+The existing `e2e-aws-pre-release-ossm` job will need to be updated since it
+currently uses OLM subscriptions and index images. Pre-release testing requires
+both vendoring the new sail-operator library (to obtain updated Helm charts) and
+providing pre-release istiod/envoy images, which increases workflow complexity
+compared to the current approach (see [Pre-release Testing Workflow
+Complexity](#drawbacks)).
+
+A mechanism for providing pre-release images to CIO (similar to the [current
+override approach](https://github.com/openshift/cluster-ingress-operator/blob/master/hack/ossm-overrides.md))
+will be required, as pre-release testing cannot wait for images to be published
+in the production registry. The approach will either be to remove the job in
+favor of manual vendor bump smoke test PRs, or adapt it to vendor the new
+pre-release version directly.
+
+Pre-release istiod images may be available a few days earlier than the full OSSM
+index image in the stage registry, providing a minor improvement for early
+testing.
 
 ## Graduation Criteria
 
