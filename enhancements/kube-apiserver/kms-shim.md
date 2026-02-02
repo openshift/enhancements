@@ -5,13 +5,12 @@ authors:
   - "@flavianmissi"
 reviewers:
   - "@ibihim"
-  - "@sjenning"
-  - "@tkashem"
-  - "@derekwaynecarr"
+  - "@ardaguclu"
+  - "@flavianmissi"
 approvers:
   - "@benluddy"
 api-approvers:
-  - "None"
+  - "@JoelSpeed"
 creation-date: 2025-12-04
 last-updated: 2025-12-04
 tracking-link:
@@ -31,7 +30,7 @@ superseded-by:
 
 ## Summary
 
-Provide a lightweight KMS shim architecture that enables users to deploy and manage their own KMS plugins (AWS, Vault, Thales, etc.) while OpenShift handles the complexity of Unix socket communication required by the Kubernetes KMS v2 API. OpenShift provides a socket proxy container image that users deploy alongside their KMS plugins to translate between network communication (used by the shim in API server pods) and Unix socket communication (required by standard KMS v2 plugins). This creates a clear support boundary, reduces Red Hat's support burden, and allows users to deploy KMS plugins anywhere (in-cluster, external infrastructure, or separate clusters) and update them independently of OpenShift's release cycle.
+Enable users to deploy their own KMS plugins (AWS, Vault, Thales, etc.) as static pods while OpenShift provides a shim and socket proxy to handle Unix socket communication. This creates a clear support boundary: Red Hat supports the shim and socket proxy images, users manage plugin deployment and configuration. Users can update plugins independently of OpenShift releases.
 
 ## Motivation
 
@@ -48,160 +47,135 @@ A shim-based architecture allows users to deploy their own KMS plugins while Ope
 
 ### User Stories
 
-* As a cluster admin, I want to deploy standard upstream KMS plugins (AWS, Vault, Azure, GCP, Thales) without modification, so that I can use well-tested community implementations
-* As a cluster admin, I want to deploy my KMS plugin anywhere (in-cluster, on external infrastructure, or in a separate cluster), so that I have architectural flexibility
-* As a cluster admin, I want OpenShift to provide the socket proxy component, so that I don't need to write network-to-Unix-socket translation code myself
-* As a cluster admin, I want to update my KMS plugin independently of OpenShift releases, so that I can fix security vulnerabilities or bugs without waiting for a new OpenShift version
-* As a cluster admin, I want OpenShift to handle key rotation orchestration, so that I don't need to understand OpenShift's encryption controller internals
-* As a Red Hat support engineer, I want a clear support boundary between OpenShift-managed components (shim + socket proxy images) and user-managed components (plugin deployment and configuration), so that I can efficiently troubleshoot issues without needing deep expertise in every KMS provider
+* As a cluster admin, I want to deploy standard upstream KMS plugins without modification
+* As a cluster admin, I want to deploy KMS plugins as static pods to avoid circular dependencies with kube-apiserver
+* As a cluster admin, I want OpenShift to provide the socket proxy, so I don't need to write network-to-Unix-socket translation code
+* As a cluster admin, I want to update KMS plugins independently of OpenShift releases
+* As a cluster admin, I want OpenShift to handle key rotation automatically
+* As a Red Hat support engineer, I want a clear support boundary between OpenShift-managed components (shim + socket proxy images) and user-managed components (plugin deployment and configuration)
 
 ### Goals
 
-* Enable users to deploy **unmodified upstream KMS v2 plugins** (no custom builds or forks required)
+* Enable users to deploy unmodified upstream KMS v2 plugins
 * Provide socket proxy container image that users deploy alongside their plugins
-* Support flexible deployment models: in-cluster, external infrastructure, or separate clusters
+* Support static pod deployment model on control plane nodes
 * Provide lightweight shim and socket proxy components that handle Unix socket ↔ network translation
-* Reduce Red Hat's support scope to shim and socket proxy images (not plugin deployment, configuration, or KMS provider integration)
+* Reduce Red Hat's support scope to shim and socket proxy images
 * Allow user-managed plugins to be deployed and updated independently of OpenShift
-* Maintain full automation of key rotation and migration (no user intervention required for KEK rotation)
-* Support all KMS providers that implement the Kubernetes KMS v2 API
+* Maintain full automation of key rotation and migration
+* Support any KMS provider implementing the Kubernetes KMS v2 API (adding new providers requires only testing and documentation)
 
 ### Non-Goals
 
-* Managing user KMS plugin deployment or lifecycle (user deploys plugin + socket proxy)
-* Providing KMS plugin images or implementations (only socket proxy image)
+* Managing user KMS plugin deployment or lifecycle
+* Providing KMS plugin images or implementations
 * Automatic injection or mutation of user plugin pods
-* Prescribing how users deploy socket proxy (sidecar, separate pod, external - all valid)
-* Authentication between shim and socket proxy (out of scope for Tech Preview)
-* Custom or non-standard KMS plugin interfaces (only KMS v2 API supported)
-* Performance optimization beyond minimal overhead (network hops are acceptable tradeoff)
+* Supporting deployment patterns other than static pods
+* Supporting external infrastructure deployments
+* Custom or non-standard KMS plugin interfaces
+* Performance optimization beyond minimal overhead
 
 ## Proposal
 
-Deploy a two-component architecture that enables user-managed KMS plugins while maintaining compatibility with the Kubernetes KMS v2 Unix socket API:
+Deploy a two-component architecture that enables user-managed KMS plugins:
 
-1. **KMS Shim** (OpenShift-managed sidecar in API server pods): Translates Unix socket → HTTP/gRPC network calls
-2. **Socket Proxy** (OpenShift-provided image, user-deployed): Translates HTTP/gRPC network calls → Unix socket
+1. **KMS Shim** (OpenShift-managed sidecar in API server pods): Translates Unix socket → HTTP/gRPC
+2. **Socket Proxy** (OpenShift-provided image, user-deployed): Translates HTTP/gRPC → Unix socket
 
-This architecture solves the **SELinux MCS isolation problem** that prevents different pods from sharing Unix sockets via hostPath, while allowing users to deploy standard upstream KMS v2 plugins without modification. Users deploy the socket proxy alongside their plugin using OpenShift's provided container image, giving them full control over the deployment architecture (in-cluster, external, or hybrid).
+This solves the SELinux MCS isolation problem that prevents different pods from sharing Unix sockets via hostPath. Users deploy the socket proxy alongside their plugin as static pods on control plane nodes.
 
 **Complete Architecture:**
 ```
 ┌──────────────────────────────────────────────────────────┐
-│ Control Plane: API Server Pod (OpenShift-managed)       │
-│ SELinux MCS: s0:c333,c444                                │
+│ Control Plane: API Server Pod (OpenShift-managed)        │
 │                                                          │
-│  ┌─────────────────┐         ┌────────────────────┐     │
-│  │ API Server      │  Unix   │ KMS Shim           │     │
-│  │ Container       │ Socket  │ Sidecar            │     │
-│  │                 │◄───────►│                    │─────┼──┐
-│  │ kube-apiserver/ │ emptyDir│ Unix→HTTP          │     │  │
-│  │ openshift-api/  │ (same   │ Intelligent routing│     │  │
-│  │ oauth-api       │  MCS)   │                    │     │  │
-│  └─────────────────┘         └────────────────────┘     │  │
+│  ┌─────────────────┐         ┌────────────────────┐      │
+│  │ API Server      │  Unix   │ KMS Shim           │      │
+│  │ Container       │ Socket  │ Sidecar            │      │
+│  │                 │◄───────►│                    │──────┼──┐
+│  │ kube-apiserver/ │ emptyDir│ Unix→HTTP          │      │  │
+│  │ openshift-api/  │ volume  │ Simple forwarding  │      │  │
+│  │ oauth-api       │         │                    │      │  │
+│  └─────────────────┘         └────────────────────┘      │  │
 └──────────────────────────────────────────────────────────┘  │
                                                               │
                   HTTP/gRPC to user-configured endpoint       │
-           (Kubernetes Service, external URL, or IP address)  │
+           kube-apiserver: http://127.0.0.1:8080 (localhost)  │
+           openshift/oauth: http://service.svc:8080 (Service) │
                                                               │
 ┌──────────────────────────────────────────────────────────┐  │
-│ User-Deployed Plugin (flexible architecture)            │  │
-│ User controls: location, pod layout, networking         │◄─┘
-│ SELinux MCS: s0:c111,c222 (if in-cluster)                │
+│ User-Deployed Static Pod (on control plane nodes)        │  │
+│ Location: /etc/kubernetes/manifests/                     │◄─┘
 │                                                          │
-│  ┌────────────────────┐       ┌────────────────────┐    │
-│  │ Socket Proxy       │ Unix  │ User's KMS Plugin  │    │
-│  │ (user deploys      │Socket │ Container          │    │
-│  │  OpenShift image)  │◄─────►│ (User-managed)     │    │
-│  │ HTTP→Unix          │       │                    │    │
-│  │                    │ (user │ Standard upstream  │    │
-│  │ Listens: :8080     │ choice│ KMS v2 plugin      │    │
-│  │ Forwards: unix://  │ how to│ (unmodified)       │    │
-│  │                    │ share)│                    │    │
-│  └────────────────────┘       └────────────────────┘    │
+│  ┌────────────────────┐       ┌────────────────────┐     │
+│  │ Socket Proxy       │ Unix  │ User's KMS Plugin  │     │
+│  │ (user deploys      │Socket │ Container          │     │
+│  │  OpenShift image)  │◄─────►│ (User-managed)     │     │
+│  │ HTTP→Unix          │       │                    │     │
+│  │                    │emptyDir Standard upstream  │     │
+│  │ Listens: :8080     │ volume│ KMS v2 plugin      │     │
+│  │ Forwards: unix://  │       │ (unmodified)       │     │
+│  │                    │       │                    │     │
+│  └────────────────────┘       └────────────────────┘     │
 │                                         │                │
 └─────────────────────────────────────────┼────────────────┘
                                           │
                                           ▼
                                 External KMS Provider
                                 (AWS KMS, Vault, Thales, etc.)
-
-Alternative: Plugin + Socket Proxy on External Infrastructure
-┌──────────────────────────────────────────────────────────┐
-│ External VM / Separate Cluster / Cloud Provider         │
-│                                                          │
-│  Socket Proxy + Plugin                                  │
-│  Exposed via: Load Balancer / Ingress / VPN             │
-│  Example: https://kms.company.com:8080                  │
-└──────────────────────────────────────────────────────────┘
 ```
 
-**Key Innovation: User-Controlled Deployment with OpenShift-Provided Components**
+**Deployment Model**
 
 OpenShift provides the socket proxy container image, and users deploy it as **static pods on control plane nodes** to avoid circular dependencies with the kube-apiserver.
 
 **Supported Deployment Pattern: Static Pods**
 
-The only supported deployment pattern is static pods on control plane nodes:
+The only supported deployment pattern is static pods on control plane nodes.
 
-- Deploy plugin + socket proxy as static pods on control plane nodes
-- Similar pattern to how etcd and kube-apiserver themselves run
-- **Why static pods:**
-  - Avoids circular dependency (pods start independently of kube-apiserver)
-  - Lowest latency (same node as API server, no external network hops)
-  - No external infrastructure required
-  - Plugin lifecycle tied to node lifecycle (automatic restart on node reboot)
-  - Network policies can restrict access (in-cluster communication only)
-- **Requirements:**
-  - Direct node access to create static pod manifests in `/etc/kubernetes/manifests/`
-  - Plugin runs on every control plane node (one static pod per node)
-- **Example:** Plugin static pods on master nodes alongside API servers
+**Why static pods:**
+- Avoids circular dependency (pods start independently of kube-apiserver)
+- Lowest latency (same node as API server)
+- No external infrastructure required
+- Plugin lifecycle tied to node lifecycle
+- Network policies can restrict access
+
+**Requirements:**
+- Direct node access to create static pod manifests in `/etc/kubernetes/manifests/`
+- Plugin runs on every control plane node (one static pod per node)
 
 **Unsupported Deployment Patterns:**
 
 **⚠️ In-cluster Regular Workloads (Deployment/StatefulSet/DaemonSet) - NOT SUPPORTED**
-- **DO NOT** deploy plugin as Deployment, StatefulSet, or DaemonSet
-- **Why:** Creates circular dependency - kube-apiserver needs KMS plugin to start, but kube-apiserver must be running to schedule the plugin pods
-- **Risk:** Cluster cannot recover from full control plane restart
-- **Recovery requires manual intervention** (SSH to nodes, modify etcd directly, or disable encryption)
+- Creates circular dependency: kube-apiserver needs KMS plugin to start, but must be running to schedule plugin pods
+- Cluster cannot recover from full control plane restart without manual intervention
 
 **⚠️ External Infrastructure (VMs, bare metal, separate clusters) - NOT SUPPORTED**
-- **Why not supported:**
-  - Adds network latency for every encryption/decryption operation
-  - Requires external infrastructure management (out of scope)
-  - Complicates authentication (would require mTLS or shared secrets)
-  - Network policies don't help for external endpoints
-  - Increases support complexity
-- **Note:** Users can still deploy KMS plugins externally if they choose, but OpenShift only supports and documents the static pod pattern
+- Adds network latency
+- Requires external infrastructure management
+- Complicates authentication
+- Increases support complexity
 
-**Circular Dependency Problem:**
-
-If the KMS plugin runs as a regular in-cluster workload (Deployment/StatefulSet/DaemonSet):
-1. Control plane restarts (e.g., upgrade, node failure)
-2. kube-apiserver tries to start but needs KMS plugin to decrypt etcd data
-3. kube-apiserver cannot schedule the plugin pod because kube-apiserver isn't running yet
-4. **Cluster is deadlocked** - cannot start without manual intervention
-
-**Why static pods solve this:** Static pods are managed directly by the kubelet on each node, not by the kube-apiserver. They start when the node starts, before kube-apiserver is running, breaking the circular dependency.
+**Why static pods solve this:** Static pods are managed by the kubelet, not kube-apiserver. They start before kube-apiserver, breaking the circular dependency.
 
 **Responsibilities:**
 
 **OpenShift Provides:**
-- **Shim container image**: Sidecar for API server pods, translates Unix socket → HTTP/gRPC
-- **Socket proxy container image**: Translates HTTP/gRPC → Unix socket for standard KMS v2 plugins
-- **Operators**: Inject shim into API server pods, validate endpoint reachability
-- **Monitoring**: Metrics specifications for shim and socket proxy
-- **Documentation**: Example static pod manifests for common KMS providers
-- **Lifecycle**: Manage shim and socket proxy images and updates via release payload
-- **Network policies** (GA): Restrict socket proxy access to API server namespaces only
+- Shim container image (sidecar for API server pods)
+- Socket proxy container image
+- Operators (inject shim, validate endpoint reachability)
+- Monitoring specifications
+- Example static pod manifests
+- Image lifecycle management via release payload
+- Network policies (GA)
 
 **User Deploys and Manages:**
-- Static pod manifests for KMS plugin + socket proxy on control plane nodes
-- Plugin configuration (Vault address, AWS credentials, key IDs, etc.)
-- KMS provider-specific authentication (Vault tokens, AWS IAM, certificates)
-- Kubernetes Service to expose socket proxy (in-cluster only)
-- Plugin and socket proxy updates (update static pod manifests on nodes)
-- Additional plugin instances when changing KEKs (deploy new static pods, configure new endpoint)
+- Static pod manifests for KMS plugin + socket proxy
+- Plugin configuration
+- KMS provider-specific authentication
+- Kubernetes Service to expose socket proxy
+- Plugin and socket proxy updates
+- Additional plugin instances when changing KEKs
 
 ### Workflow Description
 
@@ -230,6 +204,8 @@ If the KMS plugin runs as a regular in-cluster workload (Deployment/StatefulSet/
    metadata:
      name: vault-kms-plugin
      namespace: kube-system
+     labels:
+       app: vault-kms-plugin
    spec:
      hostNetwork: true
      containers:
@@ -254,9 +230,9 @@ If the KMS plugin runs as a regular in-cluster workload (Deployment/StatefulSet/
        emptyDir: {}
    ```
 
-   **Note:** The socket proxy listens on `127.0.0.1:8080` (localhost only) since it's on the same node as the API server.
+   **Note:** The socket proxy listens on `127.0.0.1:8080` (localhost only). This uses `hostNetwork: true` so localhost is the node's network namespace.
 
-2. The cluster admin creates a Service to expose the static pods:
+2. The cluster admin creates a Service to expose the static pods (required for openshift-apiserver and oauth-apiserver):
    ```yaml
    apiVersion: v1
    kind: Service
@@ -266,13 +242,13 @@ If the KMS plugin runs as a regular in-cluster workload (Deployment/StatefulSet/
    spec:
      type: ClusterIP
      selector:
-       # Static pods get labels from their name
-       # This requires adding a label to the static pod manifest
        app: vault-kms-plugin
      ports:
      - port: 8080
        targetPort: 8080
    ```
+
+   **Why the Service is needed:** openshift-apiserver and oauth-apiserver run with `hostNetwork: false` and cannot use localhost to connect to the plugin. They need the Service. kube-apiserver runs with `hostNetwork: true` and will use localhost directly (see step 7).
 
 3. The cluster admin updates the APIServer configuration:
    ```yaml
@@ -289,14 +265,26 @@ If the KMS plugin runs as a regular in-cluster workload (Deployment/StatefulSet/
            endpoint: http://vault-kms-plugin.kube-system.svc:8080
    ```
 
+   **Note:** The endpoint is a Service URL. Operators will transform this for kube-apiserver (see step 7).
+
 4. API server operators detect the configuration change
 5. Operators validate endpoint is reachable (health check + KMS Status call)
 6. Operators inject KMS shim sidecars into API server pods
-7. Operators configure shim to forward to `http://vault-kms-plugin.kube-system.svc:8080`
+7. Operators configure shim endpoints using **hybrid approach**:
+   - **kube-apiserver-operator**: Configures shim to forward to `http://127.0.0.1:8080` (localhost, avoids Service circular dependency)
+   - **openshift-apiserver-operator**: Configures shim to forward to `http://vault-kms-plugin.kube-system.svc:8080` (Service)
+   - **authentication-operator (oauth-apiserver)**: Configures shim to forward to `http://vault-kms-plugin.kube-system.svc:8080` (Service)
 8. Shim creates Unix socket for API server (e.g., `/var/run/kmsplugin/kms-abc123.sock`)
 9. Encryption controllers detect new KMS configuration and begin encryption
 
 **What the user deployed**: Static pod manifests on control plane nodes, Service
+
+**Why the hybrid approach works:**
+- **kube-apiserver** runs as static pod with `hostNetwork: true`, can use localhost
+- **openshift-apiserver** and **oauth-apiserver** run as Deployments with `hostNetwork: false`, need Service
+- **Bootstrap ordering**: kube-apiserver starts first (static pod managed by kubelet), then openshift/oauth-apiserver start (Deployments managed by kube-apiserver)
+- **Circular dependency avoided**: kube-apiserver doesn't depend on Service objects in etcd, it uses localhost
+- **NetworkPolicy enforcement**: Service access is restricted to API server namespaces only (see Authentication section)
 **What OpenShift manages**: Shim sidecar in API server pods, endpoint validation
 
 **Why static pod deployment works well:** Lowest latency (plugin on same node as API server), no external infrastructure required, plugin lifecycle tied to node lifecycle. Also avoids circular dependency since static pods start independently of kube-apiserver.
@@ -351,7 +339,10 @@ The same workflow applies whether changing keys within the same KMS provider or 
 **Migration flow:**
 
 5. Operators detect configuration change (endpoint URL changed)
-6. Operators create a **second shim instance** configured with the new endpoint
+6. Operators create a **second shim instance** configured with the new endpoint:
+   - **kube-apiserver-operator**: New shim configured with `http://127.0.0.1:8080` (localhost to new plugin)
+   - **openshift-apiserver-operator**: New shim configured with `http://vault-kms-new.kube-system.svc:8080` (Service)
+   - **authentication-operator**: New shim configured with `http://vault-kms-new.kube-system.svc:8080` (Service)
 7. Operators update the `EncryptionConfiguration` to reference both shim sockets:
    ```yaml
    resources:
@@ -376,9 +367,29 @@ The same workflow applies whether changing keys within the same KMS provider or 
 
 ### API Extensions
 
-This enhancement does not introduce new CRDs or API extensions. It extends the existing `config.openshift.io/v1/APIServer` resource with new fields for external KMS plugin configuration.
+This enhancement extends the existing `config.openshift.io/v1/APIServer` resource with:
+1. New Spec fields for external KMS plugin configuration
+2. New Status field for conditions (following precedent of other config objects like Authentication, Network, Ingress)
 
 **API Changes:**
+
+**Status Changes (for condition-based validation):**
+
+```go
+// In config/v1/types_apiserver.go
+
+type APIServerStatus struct {
+    // conditions represent the observations of the APIServer's current state.
+    // Known condition types include "KMSPluginAvailable".
+    //
+    // +listType=map
+    // +listMapKey=type
+    // +optional
+    Conditions []metav1.Condition `json:"conditions,omitempty"`
+}
+```
+
+**Spec Changes (for KMS configuration):**
 
 ```go
 // In config/v1/types_kmsencryption.go
@@ -466,21 +477,7 @@ spec:
         endpoint: http://vault-kms-plugin.kms-plugins.svc:8080
 ```
 
-**Example with external deployment:**
-
-```yaml
-apiVersion: config.openshift.io/v1
-kind: APIServer
-metadata:
-  name: cluster
-spec:
-  encryption:
-    type: KMS
-    kms:
-      type: External
-      external:
-        endpoint: https://kms.company.com:8080
-```
+**Note:** The endpoint URL is always a Service URL in the user configuration. The kube-apiserver-operator transforms this to localhost (`http://127.0.0.1:8080`) internally, while openshift-apiserver-operator and authentication-operator use the Service URL unchanged. See the "Hybrid Endpoint Configuration" section for details.
 
 #### Future Extensibility
 
@@ -557,7 +554,7 @@ pkg/kmsshim/
 **Key Methods:**
 ```go
 type Shim struct {
-    endpoint string           // Endpoint URL (from spec.encryption.kms.external.endpoint)
+    endpoint string           // Endpoint URL (configured by operator)
     client   *KMSClient       // gRPC client to socket proxy
 }
 
@@ -580,6 +577,25 @@ func (s *Shim) Status(ctx context.Context, req *StatusRequest) (*StatusResponse,
 **Design Principle:**
 
 The shim is a **simple, stateless proxy**. It doesn't implement routing logic or make decisions about which endpoint to use. Each shim instance forwards to exactly one endpoint. During KEK changes, multiple shim instances run simultaneously, each with its own socket path, and the API server's `EncryptionConfiguration` defines the provider order and fallback logic.
+
+**Hybrid Endpoint Configuration:**
+
+Operators transform the endpoint URL from `spec.encryption.kms.external.endpoint` based on which API server is being configured:
+
+- **kube-apiserver-operator**:
+  - Input: `http://vault-kms-plugin.kube-system.svc:8080`
+  - Configured endpoint: `http://127.0.0.1:8080` (localhost)
+  - Why: Avoids Service circular dependency (Service stored in encrypted etcd)
+
+- **openshift-apiserver-operator**:
+  - Input: `http://vault-kms-plugin.kube-system.svc:8080`
+  - Configured endpoint: `http://vault-kms-plugin.kube-system.svc:8080` (unchanged)
+  - Why: Deployment has `hostNetwork: false`, cannot use localhost
+
+- **authentication-operator (oauth-apiserver)**:
+  - Input: `http://vault-kms-plugin.kube-system.svc:8080`
+  - Configured endpoint: `http://vault-kms-plugin.kube-system.svc:8080` (unchanged)
+  - Why: Deployment has `hostNetwork: false`, cannot use localhost
 
 #### Socket Proxy Implementation
 
@@ -627,12 +643,28 @@ func (p *SocketProxy) Status(ctx context.Context, req *StatusRequest) (*StatusRe
 
 #### Endpoint Validation
 
-Before injecting the shim sidecar, operators validate that the configured endpoint is reachable and responds to KMS v2 API calls. This ensures the user has correctly deployed their plugin + socket proxy.
+Before injecting shim sidecars, the KMS plugin must be validated to ensure users have correctly deployed their plugin + socket proxy. To avoid unnecessary complexity and network dependencies, **only kube-apiserver-operator validates the KMS plugin directly**. Other operators trust this validation by watching a shared condition.
 
-**Validation Steps:**
+**Condition-Based Validation Approach:**
+
+1. **kube-apiserver-operator** validates the KMS plugin at `http://127.0.0.1:8080` (localhost)
+2. **kube-apiserver-operator** sets `KMSPluginAvailable` condition on the `config.openshift.io/v1/APIServer` object Status
+3. **openshift-apiserver-operator** and **authentication-operator** watch this condition as a precondition before injecting their shim sidecars
+
+**Why this approach:**
+- Only one operator communicates with the KMS plugin (kube-apiserver-operator via localhost, no Service dependency)
+- Other operators trust the validation done by kube-apiserver-operator
+- Simpler architecture, less network traffic, clear dependency chain
+- Makes sense because kube-apiserver is the first to start anyway (bootstrap ordering)
+- APIServer config object is the shared configuration space for all API servers (follows precedent of Authentication, Network, Ingress config objects which use Status conditions)
+
+**Validation Implementation (kube-apiserver-operator only):**
 
 ```go
-func (c *Controller) validateKMSEndpoint(ctx context.Context, endpoint string) error {
+func (c *KubeAPIServerOperator) validateKMSEndpoint(ctx context.Context) error {
+    // kube-apiserver-operator always validates localhost (no Service dependency)
+    endpoint := "http://127.0.0.1:8080"
+
     // 1. Health check the socket proxy
     healthURL := endpoint + "/healthz"
     resp, err := http.Get(healthURL)
@@ -658,29 +690,91 @@ func (c *Controller) validateKMSEndpoint(ctx context.Context, endpoint string) e
 
     return nil
 }
+
+func (c *KubeAPIServerOperator) updateKMSPluginCondition(ctx context.Context, available bool, reason, message string) error {
+    // Update the APIServer config object Status with KMSPluginAvailable condition
+    apiServer, err := c.configClient.Get("cluster")
+    if err != nil {
+        return err
+    }
+
+    condition := metav1.Condition{
+        Type:               "KMSPluginAvailable",
+        Status:             metav1.ConditionTrue,
+        Reason:             reason,
+        Message:            message,
+        LastTransitionTime: metav1.Now(),
+    }
+    if !available {
+        condition.Status = metav1.ConditionFalse
+    }
+
+    // Update or append condition
+    apiServer.Status.Conditions = updateCondition(apiServer.Status.Conditions, condition)
+    _, err = c.configClient.UpdateStatus(apiServer)
+    return err
+}
 ```
 
-**Operator Behavior:**
+**Precondition Check (openshift-apiserver-operator and authentication-operator):**
 
-- If validation succeeds: Inject shim, enable encryption
-- If validation fails: Set condition `KMSPluginAvailable=False` with error details
-- Operators periodically retry validation (every 60 seconds)
+```go
+func (c *OpenShiftAPIServerOperator) shouldInjectKMSShim(ctx context.Context) (bool, error) {
+    // Check if kube-apiserver has validated the KMS plugin
+    apiServer, err := c.configClient.Get("cluster")
+    if err != nil {
+        return false, err
+    }
 
-**Operator Conditions:**
+    condition := findCondition(apiServer.Status.Conditions, "KMSPluginAvailable")
+    if condition == nil {
+        return false, fmt.Errorf("KMSPluginAvailable condition not set by kube-apiserver-operator")
+    }
+
+    if condition.Status != metav1.ConditionTrue {
+        return false, fmt.Errorf("KMS plugin not available: %s - %s", condition.Reason, condition.Message)
+    }
+
+    return true, nil
+}
+```
+
+**kube-apiserver-operator Behavior:**
+
+- Validates KMS plugin at localhost (`http://127.0.0.1:8080`)
+- If validation succeeds: Set `KMSPluginAvailable=True` condition on APIServer config object, inject shim
+- If validation fails: Set `KMSPluginAvailable=False` condition with error details
+- Periodically retry validation (every 60 seconds)
+
+**openshift-apiserver-operator and authentication-operator Behavior:**
+
+- Watch `KMSPluginAvailable` condition on APIServer config object
+- If condition is `True`: Inject shim sidecar with Service endpoint
+- If condition is `False` or missing: Do not inject shim, wait for kube-apiserver-operator validation
+
+**APIServer Config Object Status Conditions:**
+
+The `KMSPluginAvailable` condition is set on the `config.openshift.io/v1/APIServer` object Status (following the precedent of other config objects like Authentication, Network, Ingress which use Status conditions):
 
 ```yaml
+apiVersion: config.openshift.io/v1
+kind: APIServer
+metadata:
+  name: cluster
 status:
   conditions:
   - type: KMSPluginAvailable
     status: "True"
     reason: PluginHealthy
-    message: "KMS plugin endpoint http://vault-kms.kms-plugins.svc:8080 is reachable and healthy"
+    message: "KMS plugin at http://127.0.0.1:8080 is healthy and responding to Status calls"
+    lastTransitionTime: "2025-12-09T10:00:00Z"
 
   # If validation fails:
   - type: KMSPluginAvailable
     status: "False"
     reason: EndpointUnreachable
-    message: "KMS plugin endpoint http://vault-kms.kms-plugins.svc:8080 is not reachable. Please verify the plugin and socket proxy are deployed and the endpoint is correct."
+    message: "KMS plugin health check failed at http://127.0.0.1:8080: connection refused. Please verify the plugin and socket proxy static pods are running on all control plane nodes."
+    lastTransitionTime: "2025-12-09T10:00:00Z"
 ```
 
 #### Shim Sidecar Injection
@@ -940,6 +1034,22 @@ Operators expose both shim and socket proxy metrics via existing monitoring infr
 - Metrics distinguish between shim errors, socket proxy errors, and plugin errors
 - Troubleshooting guide helps users diagnose their deployment issues independently
 
+#### Risk: Service Circular Dependency
+
+**Risk:** Service objects defining KMS plugin endpoints are stored in encrypted etcd, creating a potential circular dependency where kube-apiserver needs the KMS plugin to decrypt etcd, but needs to read the Service from etcd to connect to the plugin.
+
+**Impact:**
+- If kube-apiserver used Service URL directly, it could not bootstrap after restart
+- Cluster could fail to recover from control plane restart
+- Circular dependency would prevent encryption from working
+
+**Mitigation:**
+- **Hybrid approach**: kube-apiserver uses localhost (`http://127.0.0.1:8080`), completely avoiding Service dependency
+- **Bootstrap ordering**: kube-apiserver (static pod) starts before openshift-apiserver and oauth-apiserver (Deployments), ensuring Services are available when aggregated apiservers need them
+- **NetworkPolicy enforcement**: Even though kube-apiserver uses localhost, Services are still created for aggregated apiservers, and NetworkPolicy restricts access
+- **Well-tested pattern**: This leverages Kubernetes' natural bootstrap sequence (static pods → kube-apiserver → Deployments)
+- **Clear documentation**: Document the hybrid approach and why it's safe
+
 ### Drawbacks
 
 1. **Performance overhead**: Network hops (shim → socket proxy → plugin) add latency compared to native plugins (though minimal for localhost communication)
@@ -1060,12 +1170,24 @@ ls: cannot access 'kms.sock': Permission denied
    - GA: Network policies restricting socket proxy access to API server namespaces only
    - Decision: Network policies are sufficient for static pod deployments (in-cluster only), simpler than mTLS or shared secrets
 
-2. **Shim image distribution:**
+2. **Service circular dependency resolution:**
+   - Problem: Service objects stored in encrypted etcd create circular dependency with kube-apiserver
+   - Solution: Hybrid approach where kube-apiserver uses localhost, aggregated apiservers use Service
+   - Decision: **kube-apiserver-operator** transforms Service URL to localhost (`http://127.0.0.1:8080`), **openshift-apiserver-operator** and **authentication-operator** use Service URL unchanged
+   - Rationale: kube-apiserver has `hostNetwork: true` (can use localhost), aggregated apiservers have `hostNetwork: false` (need Service). Bootstrap ordering ensures kube-apiserver starts first, making Services available for aggregated apiservers.
+
+3. **Endpoint validation approach:**
+   - Problem: Should each operator validate its own endpoint, or should validation be centralized?
+   - Solution: Condition-based validation where only kube-apiserver-operator validates directly
+   - Decision: **kube-apiserver-operator** validates KMS plugin at localhost and sets `KMSPluginAvailable` condition on `APIServer` config object Status. **openshift-apiserver-operator** and **authentication-operator** watch this condition before injecting shim sidecars.
+   - Rationale: Only one operator communicates with KMS plugin (no Service dependency for validation), simpler architecture, clear dependency chain. Follows precedent of other config objects (Authentication, Network, Ingress) which use Status conditions.
+
+4. **Shim image distribution:**
    - Tech Preview: Users may need to manually specify shim image
    - GA: Include shim in OpenShift release payload?
    - Decision: Start with manual, automate for GA
 
-3. **Endpoint discovery:**
+5. **Endpoint discovery:**
    - Current: User provides explicit endpoint URL
    - Alternative: Convention-based (e.g., always look for service named `kms-plugin` in specific namespace)
    - Decision: Explicit endpoint for flexibility, consider convention for GA
@@ -1076,13 +1198,11 @@ ls: cannot access 'kms.sock': Permission denied
 
 **Shim Component:**
 - Shim forwarding logic (Unix socket → HTTP/gRPC)
-- Intelligent routing logic:
-  - Encrypt requests always use primary endpoint
-  - Decrypt requests try primary endpoint first, fall back to additionalEndpoints
-  - Status requests use primary endpoint
+- Simple forwarding (all requests to single endpoint)
 - Error handling (connection failures, endpoint unreachable)
-- Configuration parsing and validation (endpoint URL format, additionalEndpoints list)
-- Metrics collection (per-endpoint counters)
+- Configuration parsing and validation (endpoint URL format)
+- Metrics collection
+- Endpoint URL transformation logic (Service → localhost for kube-apiserver-operator)
 
 **Socket Proxy Component:**
 - Socket proxy translation logic (HTTP/gRPC → Unix socket)
@@ -1092,10 +1212,10 @@ ls: cannot access 'kms.sock': Permission denied
 - Metrics collection (translation counters, plugin connection status)
 
 **Operator Validation Logic:**
-- Endpoint reachability validation (health check + Status call)
-- Validation error handling and operator condition updates
-- Shim configuration with validated endpoints
-- Configuration updates when endpoints change
+- kube-apiserver-operator endpoint validation (health check + Status call at localhost)
+- Condition setting on APIServer config object Status (`KMSPluginAvailable`)
+- openshift-apiserver-operator and authentication-operator watching condition
+- Precondition check before shim injection (condition must be `True`)
 
 ### Integration Tests
 
@@ -1109,11 +1229,12 @@ ls: cannot access 'kms.sock': Permission denied
 - Old shim removed after migration completes
 
 **Operator Integration:**
-- Operator validates endpoint before injecting shim
-- Validation failures set correct operator conditions
-- Shim configured with correct endpoint URL
+- kube-apiserver-operator validates endpoint at localhost before injecting shim
+- Validation failures set `KMSPluginAvailable=False` condition on APIServer config object
+- openshift-apiserver-operator and authentication-operator watch condition before injecting shim
+- Shim configured with correct endpoint URL (localhost for kube-apiserver, Service for others)
 - Multiple shim instances during KEK change (operators manage lifecycle)
-- Endpoint validation retries on failure
+- Endpoint validation retries on failure by kube-apiserver-operator
 
 ### E2E Tests
 
@@ -1122,12 +1243,13 @@ ls: cannot access 'kms.sock': Permission denied
 - User deploys OpenShift-provided socket proxy alongside plugin (in same static pod)
 - User creates Kubernetes Service to expose socket proxy
 - User configures APIServer CR with in-cluster Service endpoint URL
-- Operators validate endpoint reachability
-- Operators inject shim into API server pods with validated endpoint
+- kube-apiserver-operator validates endpoint at localhost, sets `KMSPluginAvailable=True` condition
+- openshift-apiserver-operator and authentication-operator observe condition, inject shim with Service endpoint
 - Verify data encrypted end-to-end
 - Trigger KEK rotation, verify migration
 - Perform KEK change (update endpoint to point to new plugin), verify:
   - User creates new static pod manifests with new key
+  - kube-apiserver-operator validates new endpoint, updates condition
   - Operators create second shim instance
   - EncryptionConfiguration references both shim sockets
   - Migration completes successfully
@@ -1152,10 +1274,11 @@ ls: cannot access 'kms.sock': Permission denied
 - Plugin pod deleted (verify endpoint routing failure, recovery after recreation)
 
 **Endpoint Validation Failures:**
-- Endpoint URL malformed (invalid format, port out of range)
-- Endpoint unreachable (connection refused, timeout)
+- Endpoint unreachable at localhost (connection refused, timeout)
 - Endpoint health check fails (socket proxy not responding)
 - Endpoint KMS Status call fails (plugin not responding via socket proxy)
+- Verify `KMSPluginAvailable=False` condition set on APIServer config object
+- Verify openshift-apiserver-operator and authentication-operator do not inject shim when condition is `False`
 
 **User Deployment Errors:**
 - Socket proxy deployed with wrong socket path (doesn't match plugin)
@@ -1177,8 +1300,9 @@ ls: cannot access 'kms.sock': Permission denied
 - ✅ Shim implementation complete (Unix socket ↔ HTTP/gRPC simple forwarding)
 - ✅ Socket proxy implementation complete (HTTP/gRPC ↔ Unix socket translation)
 - ✅ Operator integration (shim sidecar injection into API server pods)
-- ✅ Endpoint validation (health check + KMS Status call)
-- ✅ Operator conditions reporting endpoint validation status
+- ✅ Hybrid endpoint approach (localhost for kube-apiserver, Service for aggregated apiservers)
+- ✅ Condition-based validation (kube-apiserver-operator validates, sets `KMSPluginAvailable` condition)
+- ✅ APIServer config object Status conditions support
 
 **Key Rotation:**
 - ✅ Basic KEK rotation working (forwarding Status calls through socket proxy)
@@ -1186,15 +1310,16 @@ ls: cannot access 'kms.sock': Permission denied
 - ✅ EncryptionConfiguration updates to reference multiple shim sockets during migration
 
 **Documentation and Feature Gate:**
-- ✅ Documentation with complete example deployment YAMLs (plugin + socket proxy + Service)
+- ✅ Documentation with complete example static pod manifests (plugin + socket proxy + Service)
 - ✅ Troubleshooting guide for shim, socket proxy, and plugin issues
-- ✅ Example YAMLs for common deployment patterns (in-cluster sidecar, external)
+- ✅ Example static pod manifests for common KMS providers (Vault, AWS)
+- ✅ Clear warnings about unsupported deployment patterns (Deployment/StatefulSet/DaemonSet, external infrastructure)
 - ✅ Behind `KMSEncryptionProvider` feature gate (disabled by default)
 
 **Compatibility:**
 - ✅ Works with standard upstream KMS v2 plugins (unmodified)
-- ✅ Users can update plugin images independently
-- ✅ Socket proxy deployment flexible (sidecar, separate pod, external)
+- ✅ Users can update plugin images independently by updating static pod manifests
+- ✅ Static pod deployment pattern documented and validated
 
 ### Tech Preview → GA
 
@@ -1205,13 +1330,14 @@ ls: cannot access 'kms.sock': Permission denied
 - ✅ Performance benchmarks and SLO definition (two-hop latency acceptable)
 
 **Operational Readiness:**
-- ✅ Authentication between shim and socket proxy (if required for security)
+- ✅ Network policies for authentication (restrict socket proxy access to API server namespaces)
 - ✅ Comprehensive troubleshooting documentation (three-layer architecture)
 - ✅ Support runbooks for common failure scenarios:
   - Endpoint validation failures
-  - User deployment misconfigurations
+  - User static pod deployment misconfigurations
   - Plugin socket connection issues
-- ✅ Operator conditions for endpoint validation status
+  - Service circular dependency mitigation
+- ✅ APIServer config object Status conditions for validation status (`KMSPluginAvailable`)
 - ✅ Metrics and alerts for shim and socket proxy health
 
 **Infrastructure:**
@@ -1221,8 +1347,9 @@ ls: cannot access 'kms.sock': Permission denied
 
 **User Feedback:**
 - ✅ 6+ months of Tech Preview feedback incorporated
-- ✅ User validation that manual socket proxy deployment provides needed flexibility
-- ✅ User validation of endpoint URL configuration approach
+- ✅ User validation that static pod deployment pattern is acceptable
+- ✅ User validation of hybrid endpoint approach (localhost for kube-apiserver, Service for aggregated apiservers)
+- ✅ User validation of condition-based validation approach
 
 ## Upgrade / Downgrade Strategy
 

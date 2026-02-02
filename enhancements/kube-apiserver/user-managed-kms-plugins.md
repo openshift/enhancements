@@ -30,53 +30,71 @@ superseded-by:
 
 ## Summary
 
-Enable users to deploy their own KMS (Key Management Service) plugins as static pods and configure OpenShift to use them for etcd encryption. Users manage the entire plugin lifecycle (deployment, configuration, updates, credentials) while OpenShift handles encryption operations and data migration.
+This feature lets users deploy their own KMS plugins. A KMS plugin is a tool that encrypts data using an external key management service.
+
+Users deploy the plugin as a static pod (a pod that kubelet manages directly). Users configure OpenShift to use their plugin for encrypting etcd data.
+
+Users manage the plugin's lifecycle: deployment, configuration, updates, and credentials. OpenShift handles encryption operations and data migration.
 
 ## Motivation
 
-Customers require KMS encryption for compliance and security, and Red Hat prefers not to manage the lifecycle of multiple external KMS provider plugins.
-By allowing customers to manage their own kms plugin infrastructure, we establish a clear support boundary: Red Hat supports OpenShift's encryption controllers and APIs, users manage KMS plugin deployment and configuration.
+Customers need KMS encryption to meet compliance and security requirements. Red Hat does not want to manage the lifecycle of many different external KMS provider plugins.
+
+When users manage their own KMS plugin infrastructure, the support boundary becomes clear:
+- Red Hat supports OpenShift's encryption controllers and APIs
+- Users manage KMS plugin deployment and configuration
 
 ### User Stories
 
-* As a cluster admin, I want to deploy a standard upstream KMS plugin without modification, so that I can use any KMS provider that implements the Kubernetes KMS v2 API
-* As a cluster admin, I want to configure OpenShift to use my KMS plugin by providing a socket path, so that OpenShift automatically handles encryption and migration
-* As a cluster admin, I want to update my KMS plugin independently of OpenShift releases, so that I can patch CVEs or bugs immediately
-* As a Red Hat support engineer, I want a clear support boundary where I support OpenShift components and customers manage their KMS plugins
+* As a cluster admin, I want to deploy a standard upstream KMS plugin without changing it. This lets me use any KMS provider that follows the Kubernetes KMS v2 API standard.
+
+* As a cluster admin, I want to configure OpenShift to use my KMS plugin by giving it a socket path. OpenShift should then handle encryption and migration automatically.
+
+* As a cluster admin, I want to update my KMS plugin separately from OpenShift releases. This lets me patch security problems or bugs right away.
+
+* As a Red Hat support engineer, I want a clear support boundary. I support OpenShift components. Customers manage their KMS plugins.
 
 ### Goals
 
-* Support any KMS provider implementing Kubernetes KMS v2 API
-* Users deploy KMS plugins as static pods on control plane nodes
-* Clear documentation with complete examples for common providers
-* Minimal operational burden on Red Hat (no plugin lifecycle management)
+* Support any KMS provider that implements the Kubernetes KMS v2 API
+* Let users deploy KMS plugins as static pods on control plane nodes
+* Provide clear documentation with complete examples for common providers
+* Keep operational burden on Red Hat minimal (no plugin lifecycle management)
 
 ### Non-Goals
 
-* Red Hat managing KMS plugin deployment or lifecycle
-* Providing KMS plugin container images
-* Automatic credential provisioning for KMS authentication
-* Support for KMS plugins deployed as regular workloads (Deployments/DaemonSets)
-* Direct hardware security module (HSM) integration (only supported via KMS plugins)
-* Support for KMS v1 API (only KMS v2 is supported)
+* Red Hat will not manage KMS plugin deployment or lifecycle
+* Red Hat will not provide KMS plugin container images
+* The system will not automatically provision credentials for KMS authentication
+* We will not support KMS plugins deployed as regular workloads (Deployments or DaemonSets)
+* We will not integrate directly with hardware security modules (HSMs). Users must use a KMS plugin to connect to an HSM.
+* We will not support the KMS v1 API (only KMS v2)
 
 ## Proposal
 
-Users deploy KMS plugins as static pods on each control plane node and configure the socket path in the `APIServer` CR. OpenShift API server operators validate connectivity to the user-deployed plugin and integrate it with the cluster's encryption infrastructure.
+Users deploy KMS plugins as static pods on each control plane node. They then configure the socket path in the `APIServer` custom resource.
+
+OpenShift's API server operators validate that they can connect to the user's plugin. They integrate the plugin with the cluster's encryption system.
 
 ### Workflow Description
 
 #### Initial KMS Configuration (AWS KMS Example)
 
-1. User creates encryption key (KEK) in AWS KMS
-2. User configures control plane node IAM roles with KMS permissions (`kms:Encrypt`, `kms:Decrypt`, `kms:DescribeKey`)
-3. User creates socket directory on each control plane node with appropriate permissions:
+1. Create an encryption key in AWS KMS. This is called the Key Encryption Key (KEK).
+
+2. Configure control plane node IAM roles with KMS permissions:
+   - `kms:Encrypt`
+   - `kms:Decrypt`
+   - `kms:DescribeKey`
+
+3. Create a socket directory on each control plane node with the right permissions:
    ```bash
    mkdir -p /var/run/kmsplugin
    chown 65532:65532 /var/run/kmsplugin  # nobody:nogroup
    chmod 0750 /var/run/kmsplugin
    ```
-4. User creates static pod manifest on each control plane node:
+
+4. Create a static pod manifest on each control plane node:
    ```yaml
    # /etc/kubernetes/manifests/aws-kms-plugin.yaml
    apiVersion: v1
@@ -129,7 +147,7 @@ Users deploy KMS plugins as static pods on each control plane node and configure
          type: Directory  # must exist with correct permissions
    ```
 
-5. User updates APIServer configuration:
+5. Update the APIServer configuration:
    ```yaml
    apiVersion: config.openshift.io/v1
    kind: APIServer
@@ -142,16 +160,20 @@ Users deploy KMS plugins as static pods on each control plane node and configure
          endpoint: unix:///var/run/kmsplugin/socket.sock
    ```
 
-6. API server operators detect configuration change
-7. API server operators generate `EncryptionConfiguration` with specified endpoint
-8. API server operators validate KMS plugin is reachable (health check + Status call)
-9. API server encryption controllers begin encrypting resources
-10. User observes progress via `clusteroperator/kube-apiserver` conditions
+6. API server operators detect the configuration change.
+
+7. API server operators generate an `EncryptionConfiguration` with the endpoint users specified.
+
+8. API server operators validate that the KMS plugin is reachable. They do a health check and call the plugin's Status endpoint.
+
+9. API server encryption controllers begin encrypting resources.
+
+10. Users can watch progress through the `clusteroperator/kube-apiserver` conditions.
 
 
 ### API Extensions
 
-Users configure KMS plugins via the `APIServer` CR:
+Users configure KMS plugins through the `APIServer` custom resource:
 
 ```yaml
 apiVersion: config.openshift.io/v1
@@ -165,38 +187,49 @@ spec:
       endpoint: unix:///var/run/kmsplugin/socket.sock
 ```
 
-API type definitions are in [KMS Encryption Foundations](kms-encryption-foundations.md).
+The API type definitions are in [KMS Encryption Foundations](kms-encryption-foundations.md).
 
 ### Topology Considerations
 
 #### Hypershift / Hosted Control Planes
 
-In Hypershift, users must deploy KMS plugins in the management cluster where hosted control plane API servers run. The plugin must be network-accessible from the management cluster's control plane namespace.
+In Hypershift, users must deploy KMS plugins in the management cluster. This is where the hosted control plane API servers run.
+
+The plugin must be reachable over the network from the management cluster's control plane namespace.
 
 #### Standalone Clusters
 
-Primary deployment model. Users deploy static pods on all control plane nodes.
+This is the primary deployment model. Users deploy static pods on all control plane nodes.
 
 #### Single-node Deployments or MicroShift
 
-Supported. Single static pod on the control plane node. MicroShift may adopt this with file-based configuration instead of APIServer CR.
+These are supported. Users deploy a single static pod on the control plane node.
+
+MicroShift may use file-based configuration instead of the APIServer custom resource.
 
 ### Implementation Details/Notes/Constraints
 
 #### Operator Responsibilities
 
-**API Server Operators:**
-1. Detect `spec.encryption.type: KMS` in APIServer CR
-2. Generate `EncryptionConfiguration` with user-specified endpoint
-3. Apply EncryptionConfiguration to API server static pods
-4. Monitor API server pod readiness (which reflects KMS plugin health)
-5. Surface API server degraded status via operator conditions and metrics
-6. Trigger encryption controllers when configuration changes
+**API Server Operators do these things:**
 
-**What operators do NOT do:**
+1. Detect when users set `spec.encryption.type: KMS` in the APIServer custom resource
+
+2. Generate an `EncryptionConfiguration` with the endpoint users specified
+
+3. Apply the EncryptionConfiguration to API server static pods
+
+4. Monitor API server pod readiness. When a pod is ready, the KMS plugin is healthy.
+
+5. Report API server degraded status through operator conditions and metrics
+
+6. Trigger encryption controllers when the configuration changes
+
+**API Server Operators do NOT do these things:**
+
 - Deploy or manage KMS plugin pods
 - Provision credentials
-- Directly validate KMS plugin connectivity (operators lack host filesystem access)
+- Directly validate KMS plugin connectivity. The operators run as non-privileged pods. They cannot access the host filesystem.
 - Restart or recover failed plugins
 - Manage plugin lifecycle (updates, patches, configuration changes)
 
@@ -204,47 +237,69 @@ Supported. Single static pod on the control plane node. MicroShift may adopt thi
 
 All three API servers can access the KMS plugin Unix socket:
 
-- **kube-apiserver** (static pod, `hostNetwork: true`): Direct access via hostPath volume
-- **openshift-apiserver** (Deployment, privileged): Can access host filesystem via hostPath volume
-- **oauth-apiserver** (Deployment, privileged): Can access host filesystem via hostPath volume
+- **kube-apiserver**: This is a static pod with `hostNetwork: true`. It gets direct access through a hostPath volume.
 
-API server operators configure all three API servers with the same socket path specified in the APIServer CR.
+- **openshift-apiserver**: This is a Deployment with privileged access. It can access the host filesystem through a hostPath volume.
+
+- **oauth-apiserver**: This is a Deployment with privileged access. It can access the host filesystem through a hostPath volume.
+
+API server operators configure all three API servers. They all use the same socket path users specified in the APIServer custom resource.
 
 #### Validation and Health Checking
 
 **How validation works:**
 
-API server operators do not have direct access to the host filesystem where KMS plugin sockets reside (operators run as non-privileged pods without hostPath volumes). Instead, validation happens through API server pod health and continuous monitoring:
+API server operators cannot access the host filesystem directly. They run as non-privileged pods without hostPath volumes.
 
-**When user configures KMS encryption:**
-1. User updates APIServer CR with KMS endpoint
-2. Each API server operator's state controller detects APIServer CR change (via informer):
-   - `cluster-kube-apiserver-operator` for kube-apiserver
-   - `cluster-openshift-apiserver-operator` for openshift-apiserver
-   - `cluster-authentication-operator` for oauth-apiserver
-3. Each API server operator generates EncryptionConfiguration with user-specified endpoint
-4. Each API server operator applies EncryptionConfiguration secret to openshift-config-managed namespace
-5. API server pods restart with new configuration (one pod at a time, per API server type)
-6. Each API server pod reads EncryptionConfiguration from mounted secret
-7. API server attempts to connect to KMS plugin and checks health via Status gRPC call
-8. If plugin unavailable: API server waits and retries, readiness probe fails
-9. If plugin healthy: API server becomes ready
+Instead, validation happens through API server pod health and continuous monitoring:
 
-**Continuous monitoring (after configuration is applied):**
-1. API server continuously polls KMS plugin Status endpoint to verify health
-2. API server exposes a consolidated health endpoint: `/healthz/kms-providers` (KMS v2 uses a single endpoint for all providers)
-3. API server readiness probe checks `/readyz` endpoint, which includes KMS health checks
-4. If plugin becomes unavailable during runtime:
-   - Health endpoint returns unhealthy status
-   - Encrypt/decrypt operations fail with errors
-   - API server logs errors but may remain "ready" (can still serve non-secret requests)
+**When users configure KMS encryption:**
+
+1. Users update the APIServer custom resource with a KMS endpoint.
+
+2. Each API server operator's state controller detects the change. The operators watch the APIServer custom resource through an informer (a Kubernetes watch mechanism):
+   - `cluster-kube-apiserver-operator` handles kube-apiserver
+   - `cluster-openshift-apiserver-operator` handles openshift-apiserver
+   - `cluster-authentication-operator` handles oauth-apiserver
+
+3. Each API server operator generates an EncryptionConfiguration with the endpoint users specified.
+
+4. Each API server operator applies the EncryptionConfiguration secret to the openshift-config-managed namespace.
+
+5. API server pods restart with the new configuration. They restart one pod at a time for each API server type.
+
+6. Each API server pod reads the EncryptionConfiguration from a mounted secret.
+
+7. The API server tries to connect to the KMS plugin. It checks health through a Status gRPC call.
+
+8. If the plugin is unavailable:
+   - The API server waits and retries
+   - The readiness probe fails
+
+9. If the plugin is healthy:
+   - The API server becomes ready
+
+**Continuous monitoring (after users apply the configuration):**
+
+1. The API server continuously polls the KMS plugin Status endpoint. This verifies the plugin is healthy.
+
+2. The API server exposes a health endpoint: `/healthz/kms-providers`. KMS v2 uses a single endpoint for all providers.
+
+3. The API server readiness probe checks the `/readyz` endpoint. This includes KMS health checks.
+
+4. If the plugin becomes unavailable during runtime:
+   - The health endpoint returns an unhealthy status
+   - Encrypt and decrypt operations fail with errors
+   - The API server logs errors but may stay "ready". It can still serve requests that don't involve secrets.
 
 **Operator monitoring:**
-- Watch APIServer CR for configuration changes (via informer)
-- Monitor API server pod readiness (readiness probe includes KMS health via `/readyz`)
-- Surface degraded conditions when API server pods fail to become ready or report errors
+
+- The operators watch the APIServer custom resource for configuration changes. They use an informer.
+- They monitor API server pod readiness. The readiness probe includes KMS health through `/readyz`.
+- They report degraded conditions when API server pods fail to become ready or report errors.
 
 **User debugging:**
+
 - Check API server pod status: `oc get pods -n openshift-kube-apiserver`
 - Check pod events: `oc describe pod -n openshift-kube-apiserver <pod-name>`
 - Check pod logs for KMS errors: `oc logs -n openshift-kube-apiserver <pod-name> | grep -i kms`
@@ -252,129 +307,147 @@ API server operators do not have direct access to the host filesystem where KMS 
 
 #### Static Pod Deployment Requirements
 
-**Why static pods:**
-- Avoid circular dependency (kube-apiserver needs plugin to start, but regular pods need kube-apiserver)
-- Plugin available before kube-apiserver starts
-- No dependency on kube-scheduler or other control plane components
-- Matches community best practice (AWS, Vault plugins all recommend static pods)
+**Why use static pods:**
 
-**User must:**
-- Create manifest in `/etc/kubernetes/manifests/` on each control plane node
+- This avoids a circular dependency. The kube-apiserver needs the plugin to start. But regular pods need the kube-apiserver to run.
+- The plugin is available before kube-apiserver starts.
+- Users don't depend on kube-scheduler or other control plane components.
+- This matches community best practice. AWS and Vault plugins both recommend static pods.
+
+**Users must:**
+
+- Create a manifest in `/etc/kubernetes/manifests/` on each control plane node
 - Use `hostNetwork: true` for network access
 - Set `priorityClassName: system-node-critical`
-- Mount socket directory via hostPath
-- Ensure plugin creates socket at configured path
+- Mount the socket directory through hostPath
+- Make sure the plugin creates a socket at the configured path
 
 #### Key Rotation (Tech Preview)
 
-For Tech Preview, key rotation is a **manual operation**:
+In Tech Preview, key rotation is a manual operation:
 
-1. User becomes aware that external KMS has rotated the key
-2. User deploys new KMS plugin static pod with different socket path (e.g., `/var/run/kmsplugin/socket-new.sock`)
-3. User updates APIServer CR with new endpoint
-4. OpenShift treats this as a provider migration (add new provider, migrate data, remove old provider)
-5. User removes old plugin static pod after migration completes
+1. Users discover that the external KMS has rotated the key.
 
-**Automatic key rotation detection (monitoring `key_id` changes) is deferred to GA.**
+2. Users deploy a new KMS plugin static pod. Use a different socket path (for example, `/var/run/kmsplugin/socket-new.sock`).
+
+3. Users update the APIServer custom resource with the new endpoint.
+
+4. OpenShift treats this as a provider migration:
+   - Add the new provider
+   - Migrate data
+   - Remove the old provider
+
+5. Users remove the old plugin static pod after migration completes.
+
+**Note:** Automatic key rotation detection is deferred to GA. In GA, the system will monitor `key_id` changes automatically.
 
 #### Provider Migration
 
-When switching KMS providers:
-1. User deploys second static pod (new provider) with different socket path
-2. User updates APIServer CR with new endpoint
-3. API server operators create second `EncryptionConfiguration` with both endpoints
-4. Migration proceeds automatically
-5. User removes old static pod after completion
+When users switch KMS providers:
+
+1. Deploy a second static pod for the new provider. Use a different socket path.
+
+2. Update the APIServer custom resource with the new endpoint.
+
+3. API server operators create a second `EncryptionConfiguration`. It includes both endpoints.
+
+4. Migration proceeds automatically.
+
+5. Remove the old static pod after migration completes.
 
 ### Risks and Mitigations
 
 #### Risk: User Deployment Errors
 
-**Risk:** Users incorrectly configure static pods (wrong socket path, missing volume, etc.)
+**Risk:** Users might configure static pods incorrectly. For example, they might use the wrong socket path or miss a volume.
 
 **Mitigation:**
-- Comprehensive documentation with tested examples
-- API server operators validate socket accessibility and provide specific error messages
-- Troubleshooting guide for common mistakes
+- We provide comprehensive documentation with tested examples
+- API server operators validate that they can access the socket. They provide specific error messages.
+- We include a troubleshooting guide for common mistakes
 
 #### Risk: Circular Dependency with Regular Pods
 
-**Risk:** Users deploy KMS plugin as Deployment/DaemonSet, creating bootstrap deadlock
+**Risk:** Users might deploy the KMS plugin as a Deployment or DaemonSet. This creates a bootstrap deadlock.
 
 **Mitigation:**
 - Documentation explicitly requires static pods
-- Explain circular dependency problem clearly
-- Validation could warn if endpoint doesn't match expected static pod socket pattern
+- We explain the circular dependency problem clearly
+- Validation could warn users if the endpoint doesn't match the expected static pod socket pattern
 
 #### Risk: Credentials Management
 
-**Risk:** Static pods cannot use Secret volumes, complicating credential management
+**Risk:** Static pods cannot use Secret volumes. This makes credential management more complex.
 
 **Mitigation:**
-- Document authentication options per provider (IAM roles, cert files on host, etc.)
-- Provide examples for each supported provider
+- We document authentication options for each provider. For example: IAM roles, certificate files on the host.
+- We provide examples for each supported provider
 - For AWS: Use IMDS (IAM instance profile)
-- For Vault: Use cert-based auth with cert files on host
+- For Vault: Use certificate-based authentication with certificate files on the host
 
 #### Risk: Plugin Unavailability
 
-**Risk:** Plugin crashes or stops responding, blocking encryption/decryption
+**Risk:** The plugin might crash or stop responding. This blocks encryption and decryption.
 
-**Impact:** kube-apiserver readiness fails (since Kubernetes 1.16+), doesn't serve requests until plugin available
+**Impact:** Since Kubernetes 1.16+, kube-apiserver readiness fails. It doesn't serve requests until the plugin is available.
 
 **Mitigation:**
-- kube-apiserver has built-in KMS health checks (won't serve traffic if plugin unhealthy)
-- API server operator conditions surface plugin status
-- Users responsible for plugin reliability (monitor, restart, etc.)
+- kube-apiserver has built-in KMS health checks. It won't serve traffic if the plugin is unhealthy.
+- API server operator conditions report plugin status
+- Users are responsible for plugin reliability. Users must monitor it and restart it if needed.
 
 ### Drawbacks
 
-1. **User operational burden:** Users must manually deploy and manage plugins on each control plane node
-2. **No automatic updates:** Users responsible for plugin updates and CVE patching
-3. **Limited troubleshooting support:** Red Hat can only help with OpenShift components, not user-deployed plugins
-4. **Manual node access required:** Must SSH to control plane nodes to create static pod manifests
-5. **Credential complexity:** Cannot use Secrets, must use alternative authentication methods
+1. **User operational burden:** Users must manually deploy and manage plugins on each control plane node.
+
+2. **No automatic updates:** Users are responsible for plugin updates and CVE patching.
+
+3. **Limited troubleshooting support:** Red Hat can only help with OpenShift components. We cannot help with user-deployed plugins.
+
+4. **Manual node access required:** Users must SSH to control plane nodes to create static pod manifests.
+
+5. **Credential complexity:** Users cannot use Secrets. Users must use alternative authentication methods.
 
 ## Alternatives
 
 ### Alternative 1: Red Hat-Managed Plugins (Sidecar)
 
-**Approach:** OpenShift API server operators automatically deploy KMS plugins as sidecar containers in API server pods, manage lifecycle, credentials, and updates.
+**Approach:** OpenShift API server operators automatically deploy KMS plugins as sidecar containers. They run in API server pods. The operators manage lifecycle, credentials, and updates.
 
 **Pros:**
-- Zero user operational burden
-- Disruption-free upgrades guaranteed
-- Unified troubleshooting (Red Hat owns all components)
-- Automatic credential provisioning via Cloud Credential Operator
+- Users have zero operational burden
+- Upgrades happen without disruption
+- Troubleshooting is unified. Red Hat owns all components.
+- Credentials are automatically provisioned through the Cloud Credential Operator
 
 **Cons:**
 - Red Hat must deeply understand 5+ external KMS systems
-- Plugin updates tied to OpenShift release cycle
-- Large support burden (IAM, Vault auth, PKCS#11, etc.)
+- Plugin updates are tied to the OpenShift release cycle
+- This creates a large support burden. We must understand IAM, Vault authentication, PKCS#11, and more.
 - Users cannot update plugins independently
 
-**Why not chosen:** Business decision - Red Hat prefers not to carry the support burden for managing multiple external KMS provider plugins.
+**Why we didn't choose this:** This is a business decision. Red Hat prefers not to carry the support burden for managing multiple external KMS provider plugins.
 
 ### Alternative 2: Shim/Proxy Architecture
 
-**Approach:** OpenShift provides shim (sidecar in API server) and socket proxy (user-deployed), users deploy plugins separately.
+**Approach:** OpenShift provides a shim (a sidecar in the API server) and a socket proxy (which users deploy). Users deploy plugins separately.
 
 **Pros:**
-- Clear support boundary (Red Hat: shim/proxy images, User: plugin deployment)
-- Users update plugins independently
-- Solves SELinux MCS isolation issues
+- The support boundary is clear. Red Hat provides shim and proxy images. Users handle plugin deployment.
+- Users can update plugins independently
+- This solves SELinux MCS isolation issues
 
 **Cons:**
-- Three-layer architecture (shim → proxy → plugin) adds complexity
-- Additional network latency
+- The three-layer architecture (shim → proxy → plugin) adds complexity
+- Users get additional network latency
 - Users still manually deploy and manage components
-- More troubleshooting surface area
+- There is more surface area for troubleshooting
 
-**Why not chosen:** Adds complexity without clear benefits over direct user-managed approach. If users manage plugins anyway, simpler to access them directly.
+**Why we didn't choose this:** This adds complexity without clear benefits. If users manage plugins anyway, it's simpler to access them directly.
 
 ## Open Questions
 
-None - design finalized based on business direction.
+None. We finalized the design based on business direction.
 
 ## Test Plan
 
@@ -392,26 +465,39 @@ None - design finalized based on business direction.
 
 ### Integration Tests
 
-**E2E Flow:**
-1. Deploy mock KMS plugin as static pod
-2. Configure APIServer CR with endpoint
-3. Verify EncryptionConfiguration created
+**End-to-end Flow:**
+
+1. Deploy a mock KMS plugin as a static pod
+
+2. Configure the APIServer custom resource with an endpoint
+
+3. Verify that EncryptionConfiguration was created
+
 4. Encrypt resources
-5. Simulate provider migration (deploy second plugin, update CR, verify migration)
-6. Remove KMS plugin, verify degraded condition
+
+5. Simulate provider migration:
+   - Deploy a second plugin
+   - Update the custom resource
+   - Verify migration
+
+6. Remove the KMS plugin. Verify the degraded condition.
 
 **Validation Tests:**
-- Invalid socket path → API server operator degraded
-- Plugin not responding → API server operator degraded
-- Plugin returns errors → API server operator degraded
+- Invalid socket path → API server operator becomes degraded
+- Plugin not responding → API server operator becomes degraded
+- Plugin returns errors → API server operator becomes degraded
 
 ### Manual Testing
 
 **Per KMS Provider:**
+
 - AWS KMS: Complete setup with IAM roles
-- Vault: Complete setup with cert authentication
-- Verify all three API servers can encrypt/decrypt
-- Test manual key rotation (deploy new plugin, update CR, migrate)
+- Vault: Complete setup with certificate authentication
+- Verify all three API servers can encrypt and decrypt
+- Test manual key rotation:
+  - Deploy a new plugin
+  - Update the custom resource
+  - Verify migration
 - Test provider migration (AWS → Vault)
 
 ## Graduation Criteria
@@ -420,9 +506,9 @@ None - design finalized based on business direction.
 
 **Core Functionality:**
 - ✅ Users can deploy standard upstream KMS plugins as static pods
-- ✅ OpenShift encrypts resources using user-deployed plugins
+- ✅ OpenShift encrypts resources using user plugins
 - ✅ Manual provider migration works (for key rotation or provider changes)
-- ✅ Basic validation and error reporting
+- ✅ Basic validation and error reporting work
 
 **Documentation:**
 - ✅ Complete setup guides for AWS KMS and Vault
@@ -436,7 +522,7 @@ None - design finalized based on business direction.
 
 **Known Limitations:**
 - ⚠️ Manual key rotation (automatic detection deferred to GA)
-- ⚠️ User must monitor external KMS for key rotation events
+- ⚠️ Users must monitor the external KMS for key rotation events
 
 ### Tech Preview → GA
 
@@ -457,9 +543,9 @@ None - design finalized based on business direction.
 
 **New Features for GA:**
 - ✅ Automatic key rotation detection (poll `key_id` from Status endpoint)
-- ✅ Automatic migration on key rotation (no user intervention required)
+- ✅ Automatic migration on key rotation (no manual steps required)
 - ✅ Key rotation observability (metrics, conditions, events)
-- ✅ Support for KMS encryption configuration changes (e.g., provider migration, local encryption to KMS)
+- ✅ Support for KMS encryption configuration changes (for example, provider migration, local encryption to KMS)
 
 **Feature Gate:**
 - Removed (enabled by default)
@@ -469,37 +555,47 @@ None - design finalized based on business direction.
 ### Upgrade
 
 **From non-KMS to KMS encryption:**
-1. User deploys KMS plugin static pods
-2. User updates APIServer CR
-3. OpenShift automatically migrates from `aescbc`/`aesgcm` to KMS
+
+1. Users deploy KMS plugin static pods
+
+2. Users update the APIServer custom resource
+
+3. OpenShift automatically migrates from `aescbc` or `aesgcm` to KMS
 
 **During OpenShift upgrade:**
-- KMS plugin static pods unaffected (user-managed)
-- API server operators upgraded, continue using existing plugin
-- No disruption if plugin remains available
+
+- User KMS plugin static pods are not affected (users manage them)
+- API server operators are upgraded. They continue using the existing plugin.
+- There is no disruption if the plugin stays available
 
 ### Downgrade
 
 **From KMS to non-KMS encryption:**
-1. User updates APIServer CR to `type: aescbc`
+
+1. Users update the APIServer custom resource to `type: aescbc`
+
 2. OpenShift migrates data from KMS to local keys
-3. User removes KMS plugin static pods after migration
+
+3. Users remove KMS plugin static pods after migration
 
 **OpenShift version downgrade:**
-- If KMS enabled, must first disable or migrate to non-KMS
-- Cannot downgrade with KMS encryption active
+
+- If KMS is enabled, users must first disable it or migrate to non-KMS
+- Users cannot downgrade with KMS encryption active
 
 ## Version Skew Strategy
 
 **API server operator version skew:**
+
 - API server operators at different versions can coexist
-- All use same `EncryptionConfiguration` format
-- KMS v2 API is stable across Kubernetes versions
+- All operators use the same `EncryptionConfiguration` format
+- The KMS v2 API is stable across Kubernetes versions
 
 **Plugin version skew:**
-- KMS v2 API is stable
-- Plugins implement standard gRPC interface
-- No coordination required between OpenShift and plugin versions
+
+- The KMS v2 API is stable
+- Plugins implement a standard gRPC interface
+- OpenShift and plugin versions don't need to be coordinated
 
 ## Operational Aspects of API Extensions
 
@@ -510,12 +606,12 @@ None - design finalized based on business direction.
 
 **Impact on existing SLIs:**
 - API throughput: KMS operations add latency (~5-20ms per encrypted resource operation)
-- API availability: Dependent on KMS plugin availability (user responsibility)
+- API availability: This depends on KMS plugin availability (user responsibility)
 
 **Failure modes:**
 - Plugin unavailable → kube-apiserver readiness fails, doesn't serve traffic
 - Plugin slow → increased API latency, potential timeouts
-- Plugin returns errors → encryption/decryption fails, surfaced to users
+- Plugin returns errors → encryption/decryption fails, errors are shown to users
 
 ## Support Procedures
 
@@ -527,7 +623,7 @@ None - design finalized based on business direction.
 - ✅ Validation and error reporting
 - ✅ Migration orchestration
 
-**User responsible for:**
+**Users are responsible for:**
 - ❌ KMS plugin deployment and configuration
 - ❌ KMS plugin health and monitoring
 - ❌ KMS provider configuration and credentials
@@ -536,24 +632,30 @@ None - design finalized based on business direction.
 ### Troubleshooting
 
 **"KMS plugin not found":**
-1. Check static pod manifest exists: `ls /etc/kubernetes/manifests/`
-2. Check pod running: `crictl pods | grep kms`
-3. Check socket exists: `ls -la /var/run/kmsplugin/socket.sock`
+
+1. Check that the static pod manifest exists: `ls /etc/kubernetes/manifests/`
+2. Check that the pod is running: `crictl pods | grep kms`
+3. Check that the socket exists: `ls -la /var/run/kmsplugin/socket.sock`
 
 **"Cannot connect to KMS plugin":**
+
 1. Check socket permissions
 2. Check plugin container logs: `crictl logs <container-id>`
-3. Test socket manually: `grpcurl -unix /var/run/kmsplugin/socket.sock kmsv2.KeyManagementService/Status`
+3. Test the socket manually: `grpcurl -unix /var/run/kmsplugin/socket.sock kmsv2.KeyManagementService/Status`
 
 **"KMS plugin returns errors":**
+
 - This is user responsibility (plugin or KMS provider issue)
 - Verify plugin configuration (key ARN, region, credentials)
 - Check KMS provider status and permissions
-- Contact plugin vendor if needed
+- Contact the plugin vendor if needed
 
-**"External KMS rotated keys, how do I migrate?":**
-- For Tech Preview, this is a manual operation
-- Follow the provider migration workflow (deploy new plugin, update APIServer CR)
+**"External KMS rotated keys, how do users migrate?":**
+
+- In Tech Preview, this is a manual operation
+- Follow the provider migration workflow:
+  - Deploy a new plugin
+  - Update the APIServer custom resource
 - Automatic rotation detection will be available in GA
 
 ## Infrastructure Needed

@@ -20,6 +20,7 @@ tracking-link:
   - "https://issues.redhat.com/browse/OCPSTRAT-1638" # GA feature
 see-also:
   - "enhancements/kube-apiserver/kms-encryption-foundations.md"
+  - "enhancements/kube-apiserver/kms-shim.md"
   - "enhancements/kube-apiserver/kms-migration-recovery.md"
   - "enhancements/kube-apiserver/encrypting-data-at-datastore-layer.md"
   - "enhancements/etcd/storage-migration-for-etcd-encryption.md"
@@ -344,6 +345,155 @@ KMS plugin container images are specified via environment variables on each oper
 - For Tech Preview: Users may need to manually specify image
 - For GA: Plugin images included in OpenShift release payload (automatic)
 
+### Plugin Configuration Storage and Versioning
+
+**Design Principle: Plugin Lifecycle Mirrors Encryption Configuration Lifecycle**
+
+Since encryption configurations are stored as versioned secrets in the `openshift-config-managed` namespace, KMS plugin configurations follow the same pattern. This ensures that **API servers always use the newest plugin configuration**, even during rollback scenarios.
+
+**Why this matters:**
+
+When an API server rolls back to a previous revision, it must still be able to decrypt resources that were encrypted with newer keys. The current behavior for encryption configurations is:
+
+- EncryptionConfig stored as secret: `encryption-config-<apiserver>-<revision>`
+- During rollback: old API server revision reads the **newest** EncryptionConfig secret (not the previous revision's config)
+- Reason: Must be able to decrypt resources encrypted with the new key
+
+**Plugin configurations must adopt the same behavior:**
+
+- Plugin config stored as ConfigMap: `kms-plugin-config-<apiserver>-<revision>`
+- During rollback: old API server revision uses the **newest** plugin configuration
+- Reason: Must be able to decrypt resources encrypted with the new key (plugin must have access to new key materials)
+
+**Storage Mechanism:**
+
+Each operator stores KMS plugin configurations as versioned ConfigMaps in the `openshift-config-managed` namespace:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kms-plugin-config-kube-apiserver-15
+  namespace: openshift-config-managed
+  labels:
+    encryption.apiserver.operator.openshift.io/component: kube-apiserver
+    encryption.apiserver.operator.openshift.io/revision: "15"
+data:
+  plugin-config.yaml: |
+    # Sidecar container configuration
+    containers:
+    - name: aws-kms-plugin
+      image: registry.redhat.io/openshift4/aws-kms-plugin:v4.17
+      args:
+      - --key=arn:aws:kms:us-east-1:123456789012:key/new-key-id
+      - --region=us-east-1
+      - --listen=/var/run/kmsplugin/kms-abc123.sock
+      # ... full container spec
+  key-id: "arn:aws:kms:us-east-1:123456789012:key/new-key-id"
+```
+
+**Retrieval During Reconciliation:**
+
+When any operator reconciles its API server deployment (including after rollback), it:
+
+1. Lists all plugin config ConfigMaps for its component
+2. Sorts by revision number
+3. Selects the **newest** (highest revision) regardless of API server revision
+4. Applies that configuration to the sidecar container
+
+```go
+// In operator reconciliation loop
+func (c *KMSPluginController) getNewestPluginConfig() (*PluginConfig, error) {
+    // List all plugin config ConfigMaps
+    cmList, err := c.configMapClient.List(
+        "openshift-config-managed",
+        metav1.ListOptions{
+            LabelSelector: "encryption.apiserver.operator.openshift.io/component=" + c.component,
+        },
+    )
+
+    // Sort by revision label, take newest
+    sort.SliceStable(cmList.Items, func(i, j int) bool {
+        revI, _ := strconv.Atoi(cmList.Items[i].Labels["encryption.apiserver.operator.openshift.io/revision"])
+        revJ, _ := strconv.Atoi(cmList.Items[j].Labels["encryption.apiserver.operator.openshift.io/revision"])
+        return revI < revJ
+    })
+
+    newest := cmList.Items[len(cmList.Items)-1]
+    return parsePluginConfig(newest.Data["plugin-config.yaml"])
+}
+
+// Apply newest config to sidecar, regardless of API server revision
+func (c *KMSPluginController) syncKMSPluginSidecar(ctx context.Context) error {
+    newestConfig := c.getNewestPluginConfig()
+
+    // Inject sidecar with newest plugin configuration
+    return c.injectSidecar(newestConfig)
+}
+```
+
+**Rollback Scenario Example:**
+
+```
+Timeline:
+T=0:   API Server revision 10, KMS plugin config revision 10 (old key)
+T=10:  Cluster admin updates KMS key
+T=15:  API Server revision 11, KMS plugin config revision 11 (new key)
+T=20:  Data migration in progress (old key → new key)
+T=30:  Some resources encrypted with new key
+T=35:  API Server rollback to revision 10 (due to unrelated issue)
+
+What happens during rollback:
+1. API server revision 10 pod starts
+2. Operator reconciles: "I need to inject KMS plugin sidecar"
+3. Operator calls getNewestPluginConfig()
+   - Finds: plugin-config-kube-apiserver-10 (old key)
+   - Finds: plugin-config-kube-apiserver-11 (new key)
+   - Selects: revision 11 (newest)
+4. Operator injects sidecar with NEW key configuration
+5. API server revision 10 pod can now decrypt resources encrypted with new key ✓
+6. Reads newest EncryptionConfig secret (per existing behavior)
+7. EncryptionConfig references both old and new keys during migration
+8. Rollback succeeds without data loss
+```
+
+**Benefits:**
+
+- ✅ **Consistency**: Plugin lifecycle mirrors encryption config lifecycle
+- ✅ **Rollback safety**: Old API server revisions can decrypt new data
+- ✅ **Forward-only progression**: Plugin configs only move forward, never backward
+- ✅ **Decoupled versioning**: API server revision ≠ plugin config revision
+
+**During KEK Rotation:**
+
+When a KEK changes, operators create new plugin config revisions:
+
+```yaml
+# Before rotation
+kms-plugin-config-kube-apiserver-15:
+  key-id: "old-key"
+
+# During rotation (both configs exist)
+kms-plugin-config-kube-apiserver-15:
+  key-id: "old-key"
+kms-plugin-config-kube-apiserver-16:
+  key-id: "new-key"
+
+# After rotation completes
+kms-plugin-config-kube-apiserver-16:
+  key-id: "new-key"
+# (revision 15 pruned after migration completes)
+```
+
+All 3 API servers independently read the newest config, ensuring they can all decrypt resources encrypted with the new key.
+
+**Cleanup:**
+
+Old plugin config ConfigMaps are pruned using the same mechanism as encryption key secrets:
+- Retained until data migration completes
+- Pruned by the pruneController after all resources migrated
+- Follows same retention policy as encryption configs (keep N recent revisions)
+
 ### KEK Rotation and Multi-Revision Deployment
 
 When a KMS provider rotates the Key Encryption Key (KEK), OpenShift must support both the old and new keys simultaneously during the data re-encryption period. This is achieved by running **two complete revisions of each API server deployment/static pod** - one configured with the old KEK and one with the new KEK.
@@ -370,11 +520,21 @@ While some KMS plugins (notably AWS KMS) support configuring multiple keys withi
 
 1. KMS rotates KEK externally (key materials change, `key_id` changes)
 2. Operators detect `key_id` change via plugin Status gRPC call
-3. Operators create new deployment/static pod revision with new KMS plugin configuration
-4. Both pod revisions run simultaneously (old KEK + new KEK)
-5. Encryption controllers (Enhancement A) migrate data from old KEK to new KEK
-6. Once migration completes, operators remove old pod revision
-7. Only new revision remains, ready for next rotation
+3. **Operators create new plugin config ConfigMap** with new key configuration (see "Plugin Configuration Storage and Versioning" section)
+   - New ConfigMap: `kms-plugin-config-<apiserver>-<new-revision>`
+   - Contains sidecar spec with new key ARN/ID
+   - Both old and new configs coexist during migration
+4. Operators create new deployment/static pod revision with new KMS plugin configuration
+   - Operator retrieves **newest** plugin config (the new revision)
+   - Injects sidecar with new key configuration
+5. Both pod revisions run simultaneously (old KEK + new KEK)
+   - Old pod: reads newest plugin config → gets new key config ✓
+   - New pod: reads newest plugin config → gets new key config ✓
+   - **Both can decrypt resources encrypted with new key**
+6. Encryption controllers (Enhancement A) migrate data from old KEK to new KEK
+7. Once migration completes, operators remove old pod revision
+8. Old plugin config ConfigMap pruned (see "Cleanup" in storage section)
+9. Only new revision remains, ready for next rotation
 
 **Socket Path Isolation:**
 
@@ -383,6 +543,30 @@ The per-config socket naming (`kms-<config-hash>.sock`) prevents conflicts betwe
 - New revision: `/var/run/kmsplugin/kms-def456.sock`
 
 The API server's `EncryptionConfiguration` (managed by stateController in Enhancement A) references both sockets during migration, with the new key as the write key and the old key available for decryption only.
+
+**Rollback During Rotation:**
+
+If an API server rollback occurs during KEK rotation, the "always use newest plugin config" pattern ensures data integrity:
+
+```
+Scenario: KEK rotation in progress, API server rollback occurs
+
+Before rollback:
+- API Server revision N+1 (new)
+- Plugin config revision M+1 (new key)
+- EncryptionConfig has both old and new keys
+- Some resources encrypted with new key
+
+During rollback:
+- API server rolls back to revision N (old)
+- Operator reconciles and retrieves newest plugin config (M+1)
+- Injects sidecar with NEW key configuration
+- Old API server revision can decrypt resources encrypted with new key ✓
+
+Result: Rollback succeeds without data loss
+```
+
+This mirrors the existing behavior where API servers always read the newest EncryptionConfig secret, ensuring rollback safety.
 
 ---
 
@@ -724,11 +908,105 @@ TODO: Define test strategy for multi-provider support
 
 ## Upgrade / Downgrade Strategy
 
-TODO: Define upgrade/downgrade procedures
+### Upgrade
+
+**From version without KMS plugin management to version with:**
+
+- No user action required if not using KMS encryption
+- If KMS encryption enabled: Operators automatically deploy KMS plugin sidecars
+- Plugin config ConfigMaps created in `openshift-config-managed` namespace
+- Seamless transition during upgrade
+
+**During upgrade:**
+
+- KMS plugin sidecar images updated with operator upgrade
+- Existing sidecars restarted with new image version
+- No encryption downtime (rolling update, pod-level sidecar isolation)
+
+**Plugin configuration behavior during upgrade:**
+
+- Operators always read newest plugin config ConfigMap (see "Plugin Configuration Storage and Versioning" section)
+- If upgrade creates new plugin config revision, all API servers (old and new) use newest config
+- Ensures backward compatibility: old API server revisions can decrypt resources encrypted with new keys
+
+### Downgrade
+
+**From version with KMS plugin management to version without:**
+
+- If KMS encryption enabled with managed plugins: **Cannot downgrade without migration**
+- User must first migrate to different encryption provider or disable encryption
+- Migration requires updating APIServer config and waiting for data re-encryption
+
+**Procedure:**
+
+1. Update APIServer config to use non-KMS encryption (type: aescbc) or disable encryption (type: identity)
+2. Wait for migration to complete (all resources re-encrypted)
+3. Downgrade OpenShift version
+4. KMS plugin sidecars removed (not deployed by older operators)
+
+**Important:** Plugin config ConfigMaps remain in `openshift-config-managed` namespace after downgrade. These are harmless but can be manually deleted if desired.
 
 ## Version Skew Strategy
 
-TODO: Define version skew handling
+### Operator Version Skew
+
+During cluster upgrade, operators may be at different versions:
+- kube-apiserver-operator upgraded, injects new plugin sidecar version
+- openshift-apiserver-operator still on old version, injects old sidecar or no sidecar
+
+**Impact:** Some API servers have new plugin sidecars, others have old sidecars
+
+**Mitigation:**
+- Plugin API (KMS v2) is stable across versions
+- Old and new plugin versions can coexist
+- Each API server operates independently with its own sidecar
+- **Plugin config "always use newest" pattern ensures compatibility:**
+  - Old operator reads newest plugin config ConfigMap
+  - New operator reads newest plugin config ConfigMap
+  - Both inject sidecars compatible with newest key configuration
+  - No coordination required between operators
+
+### API Server vs Plugin Version Skew
+
+API server updated but KMS plugin unchanged (or vice versa).
+
+**Impact:** Minimal - KMS v2 API is stable
+
+**Mitigation:**
+- Sidecars implement standard KMS v2 API (stable interface)
+- API servers consume KMS v2 API (stable interface)
+- No version coordination required
+- Plugin config ConfigMaps versioned independently of API server revisions
+
+### During KEK Rotation with Version Skew
+
+**Scenario:** KEK rotation occurs while operators are at different versions
+
+**Example:**
+```
+T=0:  kube-apiserver-operator at v4.17, creates plugin config revision 10 (old key)
+T=10: Cluster upgrade begins
+T=15: kube-apiserver-operator upgraded to v4.18
+T=20: External KMS rotates key
+T=25: kube-apiserver-operator (v4.18) detects rotation, creates plugin config revision 11 (new key)
+T=30: openshift-apiserver-operator still at v4.17
+```
+
+**What happens:**
+
+- kube-apiserver-operator (v4.18):
+  - Reads newest plugin config → gets revision 11 (new key) ✓
+  - Injects sidecar with new key
+  - Works correctly
+
+- openshift-apiserver-operator (v4.17):
+  - Reads newest plugin config → gets revision 11 (new key) ✓
+  - Injects sidecar with new key
+  - Works correctly (KMS v2 API stable)
+
+**Result:** Version skew has no impact. The "always use newest plugin config" pattern ensures all operators inject sidecars compatible with the current key configuration, regardless of operator version.
+
+**No coordination needed between operators** - they independently converge on the newest plugin configuration.
 
 ## Operational Aspects of API Extensions
 
