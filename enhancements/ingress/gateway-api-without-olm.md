@@ -86,6 +86,9 @@ with minimal dependencies.
 - Simplify Gateway API lifecycle management and reduce engineering complexity.
 - Enable future day 0 installation as a core operator when needed, which OLM
   cannot currently provide.
+- Reduce resource overhead by eliminating the sail-operator deployment when
+  service mesh is not needed.
+- Enable Gateway API on OKE clusters, which do not include OSSM licensing.
 
 ### Non-Goals
 
@@ -118,10 +121,10 @@ The cluster-ingress-operator will make the following changes:
     sail-operator project to install istiod programmatically with
     gateway-api configurations.
 
-2.  **Install Istio CRDs for Layered Products**: Install required Istio
-    CRDs (`EnvoyFilter`, `WasmPlugin`, `DestinationRule`) if they don't already
-    exist, to support layered products requiring fine-grained Envoy
-    configuration.
+2.  **Install Istio CRDs for Layered Products**: Install a subset of Istio
+    CRDs if they don't already exist, to support layered products requiring
+    fine-grained Envoy configuration. See [CRD Management](#crd-management)
+    for the complete list.
 
 3.  **Upgrade Migration**: Detect when upgrading from an OLM-based
     installation (4.21) to Helm-based (4.22), delete the `Istio` CR,
@@ -145,8 +148,8 @@ This workflow applies when Gateway API is being enabled for the first time on a
     new `GatewayClass` owned by OpenShift.
 3.  The controller uses sail-operator libraries to install istiod via
     Helm.
-4.  The controller installs the required Istio CRDs (`EnvoyFilter`,
-    `WasmPlugin`, `DestinationRule`) if they do not already exist.
+4.  The controller installs the required Istio CRDs if they do not already
+    exist. See [CRD Management](#crd-management) for the complete list.
 5.  Cluster admin creates `Gateway` and `HTTPRoute` resources as before.
 
 #### Migrating from OLM-based Gateway API Installation
@@ -214,13 +217,13 @@ sequenceDiagram
 
 ### API Extensions
 
-This enhancement does not introduce new CRDs. It changes ownership of three
-Istio CRDs (`EnvoyFilter`, `WasmPlugin`, `DestinationRule`) and associated
-webhooks (`ValidatingWebhookConfiguration`, `MutatingWebhookConfiguration`)
-from the sail-operator to the cluster-ingress-operator.
+This enhancement does not introduce new CRDs. It changes ownership of a subset
+of Istio CRDs and associated webhooks (`ValidatingWebhookConfiguration`,
+`MutatingWebhookConfiguration`) from the sail-operator to the
+cluster-ingress-operator.
 
 See the [CRD Management](#crd-management) section in Implementation Details for
-more information about how these CRDs are managed.
+the complete list and information about how these CRDs are managed.
 
 ### Topology Considerations
 
@@ -284,10 +287,11 @@ version alignment between OCP and OSSM releases.
 The cluster-ingress-operator will manage the following Istio CRDs required for
 layered products, which will be maintained long-term to support products that
 may not adopt newer Gateway API features immediately:
-- `EnvoyFilter` and `WasmPlugin`: Required by RHCL/Kuadrant and MCP Gateway for
-  fine-grained Envoy configuration.
+- `EnvoyFilter`: Required by RHCL/Kuadrant, MCP Gateway, and RHOAI
+- `WasmPlugin`: Required by RHCL/Kuadrant
 - `DestinationRule`: Required by RHCL/Kuadrant versions not yet supporting
-  `BackendTLSPolicy`.
+  `BackendTLSPolicy`
+- `PeerAuthentication`: Required by RHCL/Kuadrant
 
 The operator will implement the following ownership model:
 - **If no CRDs exist**: The cluster-ingress-operator creates them when a
@@ -402,8 +406,16 @@ sail-operator deployment (wasting effort).
 **Mitigation**: Monitor sail-operator development and engage with the OSSM team
 early when new features are planned. If sail-operator functionality becomes
 essential, evaluate migrating to CIO-managed sail-operator deployment (see
-Alternative 3) or advocating for the functionality to be included in the
+Alternative 4) or advocating for the functionality to be included in the
 sail-operator libraries.
+
+#### Risk: Sail-Operator Library Dependency
+
+**Description**: Consuming the sail-operator library creates a dependency on
+library completion for the initial 4.22 implementation.
+
+**Mitigation**: Maintain close collaboration with the OSSM team on delivery
+timelines for 4.22.
 
 ### Drawbacks
 
@@ -451,7 +463,27 @@ installs istiod. This is the status quo / no-change approach.
 **Reason Not Chosen**: Does not solve the core problems this enhancement
 addresses.
 
-### Alternative 2: Make OSSM a Core Operator
+### Alternative 2: Use Existing Sail-Operator Libraries Without Enhancements
+
+The cluster-ingress-operator would use the sail-operator Helm chart manager
+libraries as they exist today, without waiting for the OSSM team to enhance them
+for this use case. This achieves the same architectural outcome as the chosen
+approach (Helm-based istiod installation), but differs in implementation details.
+
+**Pros**:
+- No dependency on OSSM team timeline or library enhancements for 4.22.
+
+**Cons**:
+- Higher maintenance burden as ingress operator must implement additional
+  functionality around the basic libraries that enhanced libraries would provide.
+- More duplicative code between ingress operator and sail-operator implementations.
+
+**Reason Not Chosen**: Coordinating with the OSSM team on library enhancements
+reduces long-term duplicative work and maintenance burden. The enhanced libraries
+will also benefit other OSSM projects that plan to consume them, making the
+coordination valuable beyond just the ingress operator use case.
+
+### Alternative 3: Make OSSM a Core Operator
 
 Include OSSM as a core operator in the OCP release payload, similar to other
 core operators.
@@ -472,14 +504,14 @@ alignment and architectural changes. The Helm-based approach provides a
 near-term solution and can be migrated to a core operator model in the future
 if needed.
 
-### Alternative 3: CIO Manages Sail-Operator Deployment Directly
+### Alternative 4: Ingress Operator Manages Sail-Operator Deployment Directly
 
 The cluster-ingress-operator would deploy and manage its own sail-operator
 instance directly (without OLM), which would then manage istiod installation via
 Helm.
 
 **Pros**:
-- Avoids CIO directly managing Istio CRDs, webhooks, and Helm resources.
+- Avoids ingress operator directly managing Istio CRDs, webhooks, and Helm resources.
 - Sail-operator handles istiod lifecycle complexity.
 - Eliminates OLM dependency for Gateway API.
 
@@ -489,8 +521,8 @@ Helm.
 - Sail-operator is designed as a singleton and uses cluster-scoped Istio CRs,
   requiring changes to support multiple instances managing separate Istio
   installations.
-- Still requires CIO to manage the sail-operator deployment, service account,
-  RBAC, and other resources.
+- Still requires ingress operator to manage the sail-operator deployment,
+  service account, RBAC, and other resources.
 
 **Reason Not Chosen**: Requires architectural changes to sail-operator to
 support multiple instances. The direct Helm approach provides a near-term
@@ -524,8 +556,9 @@ solution without requiring upstream changes.
    the sail-operator library creates webhooks that only select resources with
    the appropriate revision label to avoid conflicts.
 
-   **Answer**: Webhook certificates are managed by istiod itself. CIO does not
-   need to handle certificate generation or rotation for the webhooks.
+   **Answer**: Webhook certificates are managed by istiod itself. The ingress
+   operator does not need to handle certificate generation or rotation for the
+   webhooks.
 
 ## Test Plan
 
@@ -558,8 +591,9 @@ providing pre-release istiod/envoy images, which increases workflow complexity
 compared to the current approach (see [Pre-release Testing Workflow
 Complexity](#drawbacks)).
 
-A mechanism for providing pre-release images to CIO (similar to the [current
-override approach](https://github.com/openshift/cluster-ingress-operator/blob/master/hack/ossm-overrides.md))
+A mechanism for providing pre-release images to the ingress operator (similar
+to the [current override
+approach](https://github.com/openshift/cluster-ingress-operator/blob/master/hack/ossm-overrides.md))
 will be required, as pre-release testing cannot wait for images to be published
 in the production registry. The approach will either be to remove the job in
 favor of manual vendor bump smoke test PRs, or adapt it to vendor the new
@@ -611,11 +645,11 @@ issues.
 
 ## Operational Aspects of API Extensions
 
-This enhancement does not introduce new CRDs. It changes ownership of three
-Istio CRDs (`EnvoyFilter`, `WasmPlugin`, `DestinationRule`) from the
-sail-operator to the cluster-ingress-operator. These CRDs do not have
-admission or conversion webhooks and are not used in typical Gateway API
-workflows, so they have minimal operational impact.
+This enhancement does not introduce new CRDs. It changes ownership of a subset
+of Istio CRDs from the sail-operator to the cluster-ingress-operator. See the
+[CRD Management](#crd-management) section for the complete list. These CRDs do
+not have admission or conversion webhooks and are not used in typical Gateway
+API workflows, so they have minimal operational impact.
 
 ## Infrastructure Needed
 
