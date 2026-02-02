@@ -68,8 +68,8 @@ Time-based filtering addresses these issues by allowing users to collect only th
 
 Add two new fields to the `MustGatherSpec` API to support time-based log filtering:
 
-1. **`additionalConfig.since`**: A duration field that specifies a relative time window from the current time
-2. **`additionalConfig.sinceTime`**: A timestamp field that specifies an absolute point in time
+1. **`gatherSpec.since`**: A duration field that specifies a relative time window from the current time
+2. **`gatherSpec.sinceTime`**: A timestamp field that specifies an absolute point in time
 
 These fields map directly to the existing `--since` and `--since-time` flags in the `oc adm must-gather` CLI, ensuring consistency between the declarative API and the imperative CLI.
 
@@ -78,7 +78,7 @@ These fields map directly to the existing `--since` and `--since-time` flags in 
 **Cluster Administrator** is a human user responsible for collecting diagnostic data from an OpenShift cluster.
 
 1. The cluster administrator identifies an issue that occurred approximately 2 hours ago
-2. The administrator creates a MustGather CR with `additionalConfig.since: "2h"` to limit log collection
+2. The administrator creates a MustGather CR with `gatherSpec.since: "2h"` to limit log collection
 3. The Must-Gather Operator creates a collection Job with the time filter passed via environment variable
 4. The gather container runs the must-gather script, which filters logs to only include entries from the last 2 hours
 5. The resulting archive is significantly smaller than a full collection
@@ -88,26 +88,26 @@ These fields map directly to the existing `--since` and `--since-time` flags in 
 **Alternative: Absolute Time Window**
 
 1. The cluster administrator knows an incident occurred on January 10th, 2026 at 14:00 UTC
-2. The administrator creates a MustGather CR with `additionalConfig.sinceTime: "2026-01-10T14:00:00Z"`
+2. The administrator creates a MustGather CR with `gatherSpec.sinceTime: "2026-01-10T14:00:00Z"`
 3. The operator collects only logs from that timestamp forward
 4. This is useful when the incident time is known precisely or when collecting data after the fact
 
 ### API Extensions
 
-The following fields are added under `spec.additionalConfig` in the `mustgathers.operator.openshift.io` CRD:
+The following fields are added under `spec.gatherSpec` in the `mustgathers.operator.openshift.io` CRD:
 
 ```go
 // MustGatherSpec defines the desired state of MustGather
 type MustGatherSpec struct {
 	// ... existing fields ...
 
-	// additionalConfig holds optional gather configuration that is passed through to the gather container.
+	// gatherSpec holds optional gather configuration that is passed through to the gather container.
 	// +optional
-	AdditionalConfig *AdditionalConfig `json:"additionalConfig,omitempty"`
+	GatherSpec *GatherSpec `json:"gatherSpec,omitempty"`
 }
 
-// AdditionalConfig is a new struct introduced by this enhancement to hold optional configuration
-type AdditionalConfig struct {
+// GatherSpec is a struct introduced by this enhancement to hold gather-time configuration.
+type GatherSpec struct {
 	// since restricts log collection to entries newer than the specified duration.
 	// Accepts a duration string (e.g., "1h", "30m", "24h") relative to the current time.
 	// When set, only logs within this time window are collected, reducing archive size.
@@ -139,7 +139,7 @@ metadata:
   namespace: openshift-must-gather-operator
 spec:
   serviceAccountName: must-gather-admin
-  additionalConfig:
+  gatherSpec:
     since: "2h"
   uploadTarget:
     type: SFTP
@@ -159,7 +159,7 @@ metadata:
   namespace: openshift-must-gather-operator
 spec:
   serviceAccountName: must-gather-admin
-  additionalConfig:
+  gatherSpec:
     sinceTime: "2026-01-10T14:00:00Z"
   uploadTarget:
     type: SFTP
@@ -196,9 +196,12 @@ These environment variables are already defined and supported by the must-gather
 
 #### Validation
 
-- `additionalConfig.since` and `additionalConfig.sinceTime` are mutually exclusive in practice but not enforced at the API level. If both are specified, `sinceTime` takes precedence (matching CLI behavior).
-- The `additionalConfig.since` field uses `metav1.Duration` which validates duration format
-- The `additionalConfig.sinceTime` field uses `metav1.Time` which validates RFC3339 format
+- `gatherSpec.since` and `gatherSpec.sinceTime` are mutually exclusive in practice but not enforced at the API level. If both are specified, `sinceTime` takes precedence (matching CLI behavior).
+- The `gatherSpec.since` field uses `metav1.Duration` which validates duration format
+- The `gatherSpec.sinceTime` field uses `metav1.Time` which validates RFC3339 format
+- The operator will normalize the effective start time derived from `gatherSpec.since` / `gatherSpec.sinceTime`:
+  - If the computed start time is earlier than the cluster lifecycle start time, it will be clamped to the beginning of the cluster lifecycle (effectively "collect all available logs").
+  - This cannot be enforced via CRD validation because the API server does not have access to cluster creation time.
 
 #### Gather Script Integration
 
@@ -214,7 +217,7 @@ The must-gather gather script already supports `--since` and `--since-time` flag
 |------|------------|
 | User specifies too narrow a time window and misses relevant logs | Document best practices; recommend starting with broader windows |
 | Time skew between cluster nodes causes inconsistent filtering | This is an existing issue with the must-gather toolchain; no new risk introduced |
-| User confusion between `additionalConfig.since` (duration) and `additionalConfig.sinceTime` (timestamp) | Clear field documentation and examples in API comments and user docs |
+| User confusion between `gatherSpec.since` (duration) and `gatherSpec.sinceTime` (timestamp) | Clear field documentation and examples in API comments and user docs |
 
 ### Drawbacks
 
@@ -263,7 +266,7 @@ TimeWindow string `json:"timeWindow,omitempty"`
 
 ## Open Questions
 
-1. Should the API enforce mutual exclusivity between `additionalConfig.since` and `additionalConfig.sinceTime` via CEL validation, or allow both with documented precedence?
+1. Should the API enforce mutual exclusivity between `gatherSpec.since` and `gatherSpec.sinceTime` via CEL validation, or allow both with documented precedence?
 
 2. Should we add `tailLines` as an additional non-time-based filtering option for users who want to limit by line count rather than time?
 
@@ -290,10 +293,10 @@ TimeWindow string `json:"timeWindow,omitempty"`
 
 ## Upgrade / Downgrade Strategy
 
-- **Upgrade**: Existing MustGather CRs continue to work. If `additionalConfig.since`/`additionalConfig.sinceTime` are omitted (the default), collection proceeds unfiltered (collect all logs).
+- **Upgrade**: Existing MustGather CRs continue to work. If `gatherSpec.since`/`gatherSpec.sinceTime` are omitted (the default), collection proceeds unfiltered (collect all logs).
 - **Downgrade**:
-  - If only the operator is downgraded (CRD still includes `additionalConfig.since`/`additionalConfig.sinceTime`), older operator versions will ignore the new fields and collection proceeds without filtering.
-  - If the CRD is also downgraded to a version that does not include `additionalConfig.since`/`additionalConfig.sinceTime`, creating or updating MustGather CRs that specify those fields may be rejected by API validation and/or the fields may be pruned. Remove the fields (or recreate the CR) before downgrading.
+  - If only the operator is downgraded (CRD still includes `gatherSpec.since`/`gatherSpec.sinceTime`), older operator versions will ignore the new fields and collection proceeds without filtering.
+  - If the CRD is also downgraded to a version that does not include `gatherSpec.since`/`gatherSpec.sinceTime`, creating or updating MustGather CRs that specify those fields may be rejected by API validation and/or the fields may be pruned. Remove the fields (or recreate the CR) before downgrading.
 
 ## Version Skew Strategy
 
@@ -301,7 +304,7 @@ The time filtering feature is self-contained within the Must-Gather Operator. No
 
 ## Operational Aspects of API Extensions
 
-The `additionalConfig.since` and `additionalConfig.sinceTime` fields are optional additions to an existing CRD. They do not introduce new webhooks, finalizers, or API servers.
+The `gatherSpec.since` and `gatherSpec.sinceTime` fields are optional additions to an existing CRD. They do not introduce new webhooks, finalizers, or API servers.
 
 - **Impact on existing SLIs**: None. These are optional fields that only affect the behavior of newly created MustGather CRs.
 - **Failure modes**: If the selected must-gather image does not honor `MUST_GATHER_SINCE` / `MUST_GATHER_SINCE_TIME`, log filtering will be ineffective and collection will default to full logs.
@@ -309,7 +312,7 @@ The `additionalConfig.since` and `additionalConfig.sinceTime` fields are optiona
 ## Support Procedures
 
 - **Detecting issues**: If time filtering is not working, check the gather container logs for warnings about invalid `MUST_GATHER_SINCE` or `MUST_GATHER_SINCE_TIME` values
-- **Disabling**: Simply omit the `additionalConfig.since` and `additionalConfig.sinceTime` fields from the MustGather CR to collect all logs
+- **Disabling**: Simply omit the `gatherSpec.since` and `gatherSpec.sinceTime` fields from the MustGather CR to collect all logs
 - **Consequences of disabling**: Archives will be larger but will contain complete log history
 
 ## Infrastructure Needed
