@@ -183,6 +183,10 @@ Fully supported. This is the primary deployment model for the Must-Gather Operat
 
 Time filtering reduces resource consumption during must-gather collection, which is beneficial for resource-constrained single-node deployments. Smaller archives also reduce storage pressure on single-node clusters.
 
+#### OpenShift Kubernetes Engine
+
+No special considerations for OpenShift Kubernetes Engine.
+
 ### Implementation Details/Notes/Constraints
 
 #### Environment Variable Passing
@@ -290,6 +294,10 @@ TimeWindow string `json:"timeWindow,omitempty"`
 - Comprehensive test coverage
 - User facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/)
 - No breaking changes to the API fields
+
+### Removing a deprecated feature
+
+Not applicable.
 
 ## Upgrade / Downgrade Strategy
 
