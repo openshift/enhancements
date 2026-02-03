@@ -11,7 +11,8 @@ api-approvers:
 creation-date: 2026-01-20
 last-updated: 2026-01-26
 tracking-link:
-  - TBD
+  - https://issues.redhat.com/browse/OCPSTRAT-2611 
+  - https://issues.redhat.com/browse/OCPSTRAT-2321
 ---
 
 # Cluster-wide TLS Security Profile Configuration
