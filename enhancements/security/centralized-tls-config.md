@@ -38,7 +38,7 @@ As an application developer, I want to understand clearly which TLS profile appl
 
 1. **Unified Configuration:** Extend the existing `apiserver.config.openshift.io/v1` API to serve as the cluster-wide TLS security profile source of truth, avoiding the introduction of new Custom Resources.
 
-2. **TLS Adherence Control:** Introduce a `tlsAdherence` field that allows administrators to choose between `legacy` behavior (for backward compatibility) and `strict` behavior (for enforced compliance).
+2. **TLS Adherence Control:** Introduce a `tlsAdherence` field that allows administrators to choose between `LegacyExternalAPIServerComponentsOnly` behavior (for backward compatibility) and `StrictAllComponents` behavior (for enforced compliance).
 
 3. **TLS 1.3 Transparency:** Clearly document and enforce the behavior that TLS 1.3 uses a hardcoded set of ciphers as defined by the Go runtime, removing ambiguity about cipher configuration.
 
@@ -74,11 +74,11 @@ We propose extending the existing `apiserver.config.openshift.io/v1` API to serv
 
 The new `tlsAdherence` field is a **sibling** to the existing `tlsSecurityProfile` field on the APIServer config object. It controls how strictly the TLS configuration is enforced by components:
 
-**`legacy` (default):** Provides backward-compatible behavior. Components will attempt to honor the configured TLS profile but may fall back to their individual defaults if conflicts arise. This mode is intended for clusters that need to maintain compatibility with existing configurations during migration.
+**`LegacyExternalAPIServerComponentsOnly` (default):** Provides backward-compatible behavior. Only the externally exposed API server components (kube-apiserver, openshift-apiserver, oauth-apiserver) honor the configured TLS profile. Other components continue to use their individual TLS configurations. This mode is intended for clusters that need to maintain compatibility with existing configurations during migration.
 
-**`strict`:** Enforces strict adherence to the TLS configuration. All components must honor the configured profile. If a core component fails to honor the TLS configuration when `strict` is set, this is treated as a **bug** requiring fixes and backporting. This mode is recommended for security-conscious deployments and is required for certain compliance frameworks.
+**`StrictAllComponents`:** Enforces strict adherence to the TLS configuration. All components must honor the configured profile. If a core component fails to honor the TLS configuration when `StrictAllComponents` is set, this is treated as a **bug** requiring fixes and backporting. This mode is recommended for security-conscious deployments and is required for certain compliance frameworks.
 
-**Unknown Enum Handling:** If a component encounters an unknown value for `tlsAdherence`, it should treat it as `strict` and log a warning. This ensures forward compatibility while defaulting to the more secure behavior.
+**Unknown Enum Handling:** If a component encounters an unknown value for `tlsAdherence`, it should treat it as `StrictAllComponents` and log a warning. This ensures forward compatibility while defaulting to the more secure behavior.
 
 ### TLS 1.3 Cipher Behavior
 
@@ -100,7 +100,7 @@ All OpenShift components should honor the TLS configuration defined in `apiserve
 
 **Components Excluded from `tlsAdherence` Toggle:**
 
-The `strict` vs `legacy` toggle applies to all components **except** the following, which already have their own TLS security profile configuration paths:
+The `StrictAllComponents` vs `LegacyExternalAPIServerComponentsOnly` toggle applies to all components **except** the following, which already have their own TLS security profile configuration paths:
 
 - **Kubelet:** Configured via `KubeletConfig` CR with its own `tlsSecurityProfile` field
 - **Ingress Controller:** Configured via `IngressController` CR with its own `tlsSecurityProfile` field
@@ -164,7 +164,7 @@ spec:
         - TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
       minTLSVersion: VersionTLS12  # Custom ciphers only valid with TLS 1.2
   # New field introduced by this enhancement (sibling to tlsSecurityProfile)
-  tlsAdherence: strict  # One of: legacy, strict (default: legacy)
+  tlsAdherence: StrictAllComponents  # One of: LegacyExternalAPIServerComponentsOnly, StrictAllComponents (default: LegacyExternalAPIServerComponentsOnly)
 ```
 
 **Note:** The APIServer config currently lacks a status field. Future work may add a status field for components to report observed configuration and flag non-compliance.
@@ -186,7 +186,7 @@ spec:
     # - TLS_AES_128_GCM_SHA256
     # - TLS_AES_256_GCM_SHA384
     # - TLS_CHACHA20_POLY1305_SHA256
-  tlsAdherence: strict
+  tlsAdherence: StrictAllComponents
 ```
 
 #### Custom Profile with TLS 1.2 Example
@@ -208,7 +208,7 @@ spec:
         - TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
         - TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
       minTLSVersion: VersionTLS12
-  tlsAdherence: strict
+  tlsAdherence: StrictAllComponents
 ```
 
 #### Invalid Configuration (Rejected)
@@ -227,7 +227,7 @@ spec:
       ciphers:
         - TLS_AES_128_GCM_SHA256
       minTLSVersion: VersionTLS13  # ERROR: Cannot specify ciphers with TLS 1.3
-  tlsAdherence: strict
+  tlsAdherence: StrictAllComponents
 # Validation Error: Cipher suites cannot be configured when minTLSVersion is VersionTLS13.
 # TLS 1.3 cipher suites are hardcoded by the Go runtime.
 ```
@@ -292,19 +292,19 @@ The APIServer validation will reject configurations that attempt to set cipher s
 ### Risks and Mitigations
 
 **Risk:** Component teams may not adopt the unified approach in the required timeframe.
-**Mitigation:** Establish clear adoption deadlines, provide implementation guidance, and require justification for any component that cannot adopt the new approach. The `legacy` adherence mode provides a migration path.
+**Mitigation:** Establish clear adoption deadlines, provide implementation guidance, and require justification for any component that cannot adopt the new approach. The `LegacyExternalAPIServerComponentsOnly` adherence mode provides a migration path.
 
 **Risk:** Breaking existing configurations during migration.
-**Mitigation:** The `tlsAdherence: legacy` mode (default) maintains backward compatibility. Existing component-specific configurations will continue to work. Clear migration documentation will be provided.
+**Mitigation:** The `tlsAdherence: LegacyExternalAPIServerComponentsOnly` mode (default) maintains backward compatibility. Existing component-specific configurations will continue to work. Clear migration documentation will be provided.
 
 **Risk:** Components may have bugs where they don't honor the TLS configuration.
-**Mitigation:** When `tlsAdherence: strict` is set, non-compliance is treated as a bug requiring fixes and backporting. CI tests will probe TLS servers to verify compliance.
+**Mitigation:** When `tlsAdherence: StrictAllComponents` is set, non-compliance is treated as a bug requiring fixes and backporting. CI tests will probe TLS servers to verify compliance.
 
 ### Drawbacks
 
 **Complexity:** Extending the existing APIServer API with new semantics adds complexity. However, this is offset by avoiding the introduction of yet another Custom Resource.
 
-**Migration Effort:** Existing clusters will need to consciously adopt `strict` mode for full enforcement. This creates a transition period where both behaviors coexist.
+**Migration Effort:** Existing clusters will need to consciously adopt `StrictAllComponents` mode for full enforcement. This creates a transition period where both behaviors coexist.
 
 ## Alternatives (Not Implemented)
 
@@ -351,7 +351,7 @@ Not applicable for initial implementation.
 - Validation accepts valid configurations (ciphers with TLS 1.2, no ciphers with TLS 1.3)
 - Profile expansion (predefined profiles to actual TLS settings)
 - `tlsAdherence` field correctly parsed and applied
-- Unknown `tlsAdherence` enum values treated as `strict`
+- Unknown `tlsAdherence` enum values treated as `StrictAllComponents`
 
 **Integration Tests:**
 - Component operators correctly watch and respond to APIServer TLS configuration changes
@@ -369,9 +369,9 @@ Not applicable for initial implementation.
 ## Upgrade / Downgrade Strategy
 
 **Upgrade:**
-- Existing clusters upgrading will default to `tlsAdherence: legacy` for backward compatibility
+- Existing clusters upgrading will default to `tlsAdherence: LegacyExternalAPIServerComponentsOnly` for backward compatibility
 - Components will continue to use their existing configuration sources
-- Administrators can opt-in to strict enforcement by setting `tlsAdherence: strict`
+- Administrators can opt-in to strict enforcement by setting `tlsAdherence: StrictAllComponents`
 - Component-specific configurations (like IngressController, KubeletConfig) continue to use their own TLS profile settings
 
 **Downgrade:**
@@ -443,7 +443,7 @@ oc get apiserver cluster -o jsonpath='{.spec.tlsSecurityProfile}'
 - Check component operator logs
 - Restart the component operator if necessary
 - Verify the component supports the configured profile
-- If `tlsAdherence: strict` is set and component is not compliant, file a bug
+- If `tlsAdherence: StrictAllComponents` is set and component is not compliant, file a bug
 
 ## Infrastructure Needed [optional]
 
