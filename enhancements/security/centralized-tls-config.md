@@ -18,7 +18,7 @@ tracking-link:
 
 ## Summary
 
-This enhancement proposes extending the existing `apiserver.config.openshift.io/v1` API to serve as the unified source of truth for TLS security settings across OpenShift clusters. Rather than introducing a new Custom Resource, we will leverage the existing APIServer configuration and establish that all components (with specific exceptions) should honor its TLS settings. This enhancement introduces a new `tlsAdherence` field to control how strictly components follow the configured TLS profile, adds validation to prevent invalid TLS 1.3 cipher configurations, and provides clear documentation around TLS 1.3 cipher behavior.
+This enhancement proposes extending the existing `apiserver.config.openshift.io/v1` API to serve as the unified source of truth for TLS security settings across OpenShift clusters. We will leverage the existing APIServer configuration and establish that all components should honor its TLS settings by default, with specific components supporting explicit overrides via their own Custom Resources. This enhancement introduces a new `tlsAdherence` field to control how strictly components follow the configured TLS profile, adds validation to prevent invalid TLS 1.3 cipher configurations, and provides clear documentation around TLS 1.3 cipher behavior.
 
 ## Motivation
 
@@ -60,7 +60,7 @@ As an application developer, I want to understand clearly which TLS profile appl
 
 ## Proposal
 
-We propose extending the existing `apiserver.config.openshift.io/v1` API to serve as the source of truth for TLS security settings across the cluster. All components (with specific documented exceptions) should honor the TLS configuration defined in this API.
+We propose extending the existing `apiserver.config.openshift.io/v1` API to serve as the source of truth for TLS security settings across the cluster. All components should honor the TLS configuration defined in this API by default, with specific components supporting explicit overrides via their own Custom Resources. 
 
 ### API Design Principles
 
@@ -96,24 +96,30 @@ When the minimum TLS version is set to TLS 1.3, the following behavior applies:
 
 ### Scope and Component Expectations
 
-All OpenShift components should honor the TLS configuration defined in `apiserver.config.openshift.io/v1`, with the following exceptions.
+All OpenShift components should honor the TLS configuration defined in `apiserver.config.openshift.io/v1`.
 
-**Components Excluded from `tlsAdherence` Toggle:**
+**Components With Explicit Override Capability:**
 
-The `StrictAllComponents` vs `LegacyExternalAPIServerComponentsOnly` toggle applies to all components **except** the following, which already have their own TLS security profile configuration paths:
+The following components inherit the cluster-wide TLS configuration from `apiserver.config.openshift.io/cluster` by default, but support explicit overrides via their own Custom Resources:
 
-- **Kubelet:** Configured via `KubeletConfig` CR with its own `tlsSecurityProfile` field
-- **Ingress Controller:** Configured via `IngressController` CR with its own `tlsSecurityProfile` field
-
-These components will continue to use their existing configuration mechanisms. Fresh clusters will default to the APIServer config, while upgraded clusters will retain their existing configurations.
-
-**Components With Override Capability:**
-
-- **Ingress Controller:** Retains its existing capability to define a specific `tlsSecurityProfile`. This allows Ingress to support legacy external clients (e.g., using Intermediate or Old profiles) even if the cluster internal communication is set to Modern.
+- **Kubelet:** Can be overridden via `KubeletConfig` CR with its own `tlsSecurityProfile` field. If not explicitly set, inherits the APIServer TLS config.
+- **Ingress Controller:** Can be overridden via `IngressController` CR with its own `tlsSecurityProfile` field. If not explicitly set, inherits the APIServer TLS config. This allows Ingress to support legacy external clients (e.g., using Intermediate or Old profiles) even when the cluster uses Modern internally.
 - **Routes:** Individual routes may specify TLS settings that differ from the cluster-wide default for specific application requirements.
-- **Gateway Controller:** Will initially honor the APIServer TLS profile. No configurable TLS 1.3 suites or curves. Overrides may be added later if needed.
+- **Gateway Controller:** Will initially honor the APIServer TLS profile. Overrides may be added later if needed.
 
-**Layered Products:** Layered products are expected to inherit the cluster default. Products unable to support the default (e.g., due to version incompatibility) must document their deviation and provide a justification. For non-metrics or non-webhook product servers, the expectation is to fall back to the APIServer's TLS configuration; offering specific override configuration is a product team decision.
+**Override Precedence:**
+1. Component-specific CR configuration (e.g., `IngressController.spec.tlsSecurityProfile`) takes highest precedence when explicitly set
+2. If no component-specific override is set, the cluster-wide `apiserver.config.openshift.io/cluster` configuration applies
+
+**Documentation Requirements:**
+
+All override mechanisms must be explicitly documented in user-facing documentation. This includes:
+- Clear explanation of how each override mechanism works (Kubelet, Ingress Controller, Routes, Gateway Controller)
+- The inheritance behavior when overrides are not set
+- Examples of common override scenarios (e.g., using a less restrictive profile for Ingress to support legacy clients)
+- Any limitations or caveats specific to each component's override capability
+
+**Layered Products:** Layered products are expected to inherit the cluster default. Products unable to support the default (e.g., due to version incompatibility) must document their deviation and provide a justification. Any override configurations offered by layered products must be clearly documented, including the rationale for why overrides are necessary. For non-metrics or non-webhook product servers, the expectation is to fall back to the APIServer's TLS configuration; offering specific override configuration is a product team decision.
 
 ### Workflow Description
 
@@ -338,7 +344,10 @@ Create a dedicated new Custom Resource for cluster-wide TLS configuration. This 
 - CI tests verify TLS server compliance
 - Upgrade/downgrade testing complete
 - Performance testing complete
-- User-facing documentation in openshift-docs
+- User-facing documentation in openshift-docs, including:
+  - Complete documentation of all override mechanisms (Kubelet, Ingress Controller, Routes, Gateway Controller)
+  - Clear explanation of inheritance behavior and override precedence
+  - Examples of common override scenarios
 
 ### Removing a deprecated feature
 
@@ -389,7 +398,7 @@ During upgrades, there will be a period where some components support the enhanc
 
 For n-2 kubelet skew:
 - Older kubelets that don't support the enhanced TLS configuration will continue using KubeletConfig-based TLS settings
-- This is acceptable as kubelet is explicitly excluded from the `tlsAdherence` toggle
+- This is acceptable as kubelet supports explicit TLS configuration overrides via `KubeletConfig` CR
 - Documentation will advise administrators to ensure compatibility during mixed-version periods
 
 ## Operational Aspects of API Extensions
