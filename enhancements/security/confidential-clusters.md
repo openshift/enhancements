@@ -49,6 +49,32 @@ layer of protection for sensitive data in memory. All nodes of the cluster are
 also remotely attested to be running valid versions of RHCOS before they join
 the cluster and on every boot.
 
+### Acronyms
+
+* CVM (Confidential Virtual Machine): A virtual machine where the memory and
+  CPU state are encrypted, preventing even the cloud provider from seeing
+  the data inside.
+
+* TEE (Trusted Execution Environment): A secure, isolated area within a main
+  processor (CPU) that guarantees code and data loaded inside are protected
+  and private.
+
+* TPM (Trusted Platform Module): A specialized device used to store
+  cryptographic keys, ensure the computer's hardware hasn't been tampered
+  with and validate software integrity.
+
+* PCR (Platform Configuration Register): A specific memory slot inside a TPM
+  that stores "measurements" (hashes) of the system's software state.
+
+* AMD SEV-SNP (Secure Encrypted Virtualization - Secure Nested Paging): AMD's
+  technology for Confidential Virtual Machines.
+
+* Intel TDX (Trust Domain Extensions): Intel's technology for Confidential
+  Virtual Machines.
+
+* UKI (Unified Kernel Image): A single signed executable file that bundles the
+  Linux Kernel, the initrd (initial RAM disk), and the kernel command line.
+
 ## Motivation
 
 In today's cloud-first world, organizations are increasingly migrating sensitive
