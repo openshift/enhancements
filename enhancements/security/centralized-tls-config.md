@@ -5,9 +5,9 @@ authors:
 reviewers:
   - dsalerno # OpenShift networking stack knowledge
 approvers: 
-  - JoelSpeed
+  - joelanford
 api-approvers:
-  - JoelSpeed
+  - joelanford
 creation-date: 2026-01-20
 last-updated: 2026-01-26
 tracking-link:
