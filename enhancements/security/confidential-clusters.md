@@ -420,6 +420,9 @@ As HCP operators are not allowed to set up MachineConfigs, we will need an
 option during HCP cluster creation to set up a MachineConfig in the control
 plane and tell the Confidential Cluster Operator to use it.
 
+For a HostedControlPlane cluster to be confidential, the hosting cluster must
+run in a trusted environment (e.g. be a confidential cluster by itself).
+
 #### Standalone Clusters
 
 Standalone Clusters running on cloud providers supporting confidential virtual
