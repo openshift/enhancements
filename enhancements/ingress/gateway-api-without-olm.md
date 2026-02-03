@@ -285,13 +285,14 @@ version alignment between OCP and OSSM releases.
 #### CRD Management
 
 The cluster-ingress-operator will manage the following Istio CRDs required for
-layered products, which will be maintained long-term to support products that
-may not adopt newer Gateway API features immediately:
+layered products' north/south ingress use cases. These CRDs enable functionality
+that can be used without requiring service mesh to be enabled, and will be
+maintained long-term to support products that may not adopt newer Gateway API
+features immediately:
 - `EnvoyFilter`: Required by RHCL/Kuadrant, MCP Gateway, and RHOAI
 - `WasmPlugin`: Required by RHCL/Kuadrant
 - `DestinationRule`: Required by RHCL/Kuadrant versions not yet supporting
   `BackendTLSPolicy`
-- `PeerAuthentication`: Required by RHCL/Kuadrant
 
 The operator will implement the following ownership model:
 - **If no CRDs exist**: The cluster-ingress-operator creates them when a
@@ -307,6 +308,10 @@ The operator will implement the following ownership model:
 This ownership handoff approach allows the cluster-ingress-operator to provide
 CRDs when needed for basic Gateway API functionality, while gracefully deferring
 to user-managed OSSM installations when present.
+
+The OSSM team plans to provide library functions in the sail-operator to handle
+CRD management implementation, so while the cluster-ingress-operator will run
+this code, the OSSM team will own the maintenance of the implementation.
 
 #### Image Management
 
