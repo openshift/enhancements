@@ -13,7 +13,7 @@ approvers:
 api-approvers:
   - None
 creation-date: 2026-01-28
-last-updated: 2026-01-28
+last-updated: 2026-02-04
 tracking-link:
   - https://issues.redhat.com/browse/NE-2470
 see-also:
@@ -67,12 +67,6 @@ istiod directly without managing OLM Subscriptions and InstallPlans, so that
 the lifecycle is simpler and more predictable with fewer components to
 coordinate.
 
-#### Story 4: Layered Product
-
-As a layered product (RHCL, RHOAI), I want to use Gateway API without requiring
-OSSM installation, so that I can provide Gateway API capabilities to my users
-with minimal dependencies.
-
 ### Goals
 
 - Remove the dependency on OLM for installing istiod for Gateway API support.
@@ -121,12 +115,7 @@ The cluster-ingress-operator will make the following changes:
     sail-operator project to install istiod programmatically with
     gateway-api configurations.
 
-2.  **Install Istio CRDs for Layered Products**: Install a subset of Istio
-    CRDs if they don't already exist, to support layered products requiring
-    fine-grained Envoy configuration. See [CRD Management](#crd-management)
-    for the complete list.
-
-3.  **Upgrade Migration**: Detect when upgrading from an OLM-based
+2.  **Upgrade Migration**: Detect when upgrading from an OLM-based
     installation (4.21) to Helm-based (4.22), delete the `Istio` CR,
     wait for sail-operator cleanup, then install via Helm with no data
     plane downtime.
@@ -148,9 +137,7 @@ This workflow applies when Gateway API is being enabled for the first time on a
     new `GatewayClass` owned by OpenShift.
 3.  The controller uses sail-operator libraries to install istiod via
     Helm.
-4.  The controller installs the required Istio CRDs if they do not already
-    exist. See [CRD Management](#crd-management) for the complete list.
-5.  Cluster admin creates `Gateway` and `HTTPRoute` resources as before.
+4.  Cluster admin creates `Gateway` and `HTTPRoute` resources as before.
 
 #### Migrating from OLM-based Gateway API Installation
 
@@ -190,7 +177,6 @@ sequenceDiagram
 
     Note over Admin,Istiod: Initial Gateway API Installation
     Admin->>CIO: Create GatewayClass
-    CIO->>CIO: Install Istio CRDs
     CIO->>Sail: Use sail-operator libraries
     Sail->>Helm: Install istiod chart
     Helm->>Istiod: Deploy istiod
@@ -217,13 +203,7 @@ sequenceDiagram
 
 ### API Extensions
 
-This enhancement does not introduce new CRDs. It changes ownership of a subset
-of Istio CRDs and associated webhooks (`ValidatingWebhookConfiguration`,
-`MutatingWebhookConfiguration`) from the sail-operator to the
-cluster-ingress-operator.
-
-See the [CRD Management](#crd-management) section in Implementation Details for
-the complete list and information about how these CRDs are managed.
+This enhancement does not introduce new CRDs or API extensions.
 
 ### Topology Considerations
 
@@ -281,37 +261,6 @@ vendored sail-operator library. Each OCP release uses a specific OSSM version
 (e.g., OCP 4.22 uses sail-operator library from OSSM 3.3.0). This enhancement
 changes the installation mechanism from OLM to Helm, but does not change the
 version alignment between OCP and OSSM releases.
-
-#### CRD Management
-
-The cluster-ingress-operator will manage the following Istio CRDs required for
-layered products' north/south ingress use cases. These CRDs enable functionality
-that can be used without requiring service mesh to be enabled, and will be
-maintained long-term to support products that may not adopt newer Gateway API
-features immediately:
-- `EnvoyFilter`: Required by RHCL/Kuadrant, MCP Gateway, and RHOAI
-- `WasmPlugin`: Required by RHCL/Kuadrant
-- `DestinationRule`: Required by RHCL/Kuadrant versions not yet supporting
-  `BackendTLSPolicy`
-
-The operator will implement the following ownership model:
-- **If no CRDs exist**: The cluster-ingress-operator creates them when a
-  `GatewayClass` is created.
-- **If OLM subscription is created afterwards**: OLM takes ownership of the
-  CRDs that the cluster-ingress-operator created. The cluster-ingress-operator
-  yields control and no longer manages them.
-- **If OLM has previously created CRDs or taken ownership**: The
-  cluster-ingress-operator does not touch them and skips installation.
-- **CRD deletion**: CRDs are never deleted when `GatewayClass` is deleted, to
-  preserve any instances that may exist and avoid breaking user workloads.
-
-This ownership handoff approach allows the cluster-ingress-operator to provide
-CRDs when needed for basic Gateway API functionality, while gracefully deferring
-to user-managed OSSM installations when present.
-
-The OSSM team plans to provide library functions in the sail-operator to handle
-CRD management implementation, so while the cluster-ingress-operator will run
-this code, the OSSM team will own the maintenance of the implementation.
 
 #### Image Management
 
@@ -425,9 +374,8 @@ timelines for 4.22.
 ### Drawbacks
 
 - **Maintenance Burden**: The cluster-ingress-operator takes on additional
-  maintenance responsibilities for Helm chart installation, Istio CRD
-  management, object watches, and reconciliation logic that the sail-operator
-  previously handled.
+  maintenance responsibilities for Helm chart installation, object watches, and
+  reconciliation logic that the sail-operator previously handled.
 - **Increased Testing Burden**: The NID team must test Helm-based istiod
   installation, upgrade paths, downgrade paths, and compatibility with
   user-managed OSSM installations, increasing the testing surface area.
@@ -565,6 +513,41 @@ solution without requiring upstream changes.
    operator does not need to handle certificate generation or rotation for the
    webhooks.
 
+5. **Istio CRD management**: Should the cluster-ingress-operator manage Istio
+   CRDs for layered products' north/south ingress use cases? On 4.21, layered
+   products (RHOAI, Kuadrant, MCP Gateway) rely on Istio CRDs that are provided
+   when the cluster-ingress-operator installs OSSM via OLM. Without CRD management
+   in 4.22, these features would break unless layered products install OSSM
+   themselves (recreating the subscription conflict problem this EP solves).
+
+   If the cluster-ingress-operator were to manage these CRDs, the following would
+   need to be included:
+   - `EnvoyFilter`: Required by RHCL/Kuadrant, MCP Gateway, and RHOAI
+   - `WasmPlugin`: Required by RHCL/Kuadrant
+   - `DestinationRule`: Required by RHCL/Kuadrant versions not yet supporting
+     `BackendTLSPolicy`
+
+   The proposed ownership model would be:
+   - **If no CRDs exist**: The cluster-ingress-operator creates them when a
+     `GatewayClass` is created.
+   - **If OLM subscription is created afterwards**: OLM takes ownership of the
+     CRDs that the cluster-ingress-operator created. The cluster-ingress-operator
+     yields control and no longer manages them.
+   - **If OLM has previously created CRDs or taken ownership**: The
+     cluster-ingress-operator does not touch them and skips installation.
+   - **CRD deletion**: CRDs are never deleted when `GatewayClass` is deleted, to
+     preserve any instances that may exist and avoid breaking user workloads.
+
+   The OSSM team plans to provide library functions in the sail-operator to handle
+   CRD management implementation, so while the cluster-ingress-operator would run
+   this code, the OSSM team would own the maintenance of the implementation.
+
+   **Alternatives:**
+   - Layered products manage CRDs themselves (coordination challenge, duplicated work)
+   - Require OSSM installation for these features (adds resource overhead when service
+     mesh capabilities aren't needed)
+   - Defer to future enhancement (causes regression from 4.21 to 4.22)
+
 ## Test Plan
 
 Testing for this enhancement will cover the following scenarios:
@@ -581,11 +564,8 @@ Additional test scenarios specific to this enhancement:
    functional with no traffic interruption, and an `HTTPRoute` created during
    the upgrade works immediately after the upgrade completes.
 
-2. **CRD Lifecycle**: Test Istio CRD installation, upgrade, and handling of
-   pre-existing CRDs from user-managed OSSM installations.
-
-3. **Reconciliation Logic**: Verify operator correctly detects and reconciles
-   Helm objects, Istio CRDs, and istiod deployments.
+2. **Reconciliation Logic**: Verify operator correctly detects and reconciles
+   Helm objects and istiod deployments.
 
 #### Testing Pre-releases of OSSM
 
@@ -610,10 +590,23 @@ testing.
 
 ## Graduation Criteria
 
-This enhancement is an improvement to an existing GA feature (Gateway API), not
-a new feature. Therefore, it does not follow the typical Dev Preview → Tech
-Preview → GA graduation path. Instead, it will be released directly in
-OpenShift 4.22 as GA.
+This enhancement will initially be released behind a feature gate in 4.22 to
+de-risk the implementation and enable safer backports, then promoted to GA in
+the same 4.22 release after validation.
+
+### Dev Preview -> Tech Preview
+
+N/A. This feature will be introduced behind a feature gate as Tech Preview.
+
+### Tech Preview -> GA
+
+The feature gate will be removed and the Helm-based installation will become the
+default Gateway API installation mechanism in 4.22 after E2E tests pass
+consistently, and Istio CRD management decisions are resolved.
+
+### Removing a deprecated feature
+
+N/A.
 
 ## Upgrade / Downgrade Strategy
 
@@ -643,18 +636,10 @@ This enhancement does not introduce new version skew concerns. The
 cluster-ingress-operator and istiod versions remain synchronized through the OCP
 release as they were with the OLM-based approach.
 
-The only consideration is when Istio CRDs are already present from a
-user-managed OSSM installation. In this case, the operator will not overwrite
-them to avoid conflicts, though CRD version mismatches could potentially cause
-issues.
-
 ## Operational Aspects of API Extensions
 
-This enhancement does not introduce new CRDs. It changes ownership of a subset
-of Istio CRDs from the sail-operator to the cluster-ingress-operator. See the
-[CRD Management](#crd-management) section for the complete list. These CRDs do
-not have admission or conversion webhooks and are not used in typical Gateway
-API workflows, so they have minimal operational impact.
+This enhancement does not introduce new CRDs or API extensions, so it has no
+operational impact related to API extensions.
 
 ## Infrastructure Needed
 
