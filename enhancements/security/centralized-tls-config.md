@@ -75,11 +75,15 @@ We propose extending the existing `apiserver.config.openshift.io/v1` API to serv
 
 The new `tlsAdherence` field is a **sibling** to the existing `tlsSecurityProfile` field on the APIServer config object. It controls how strictly the TLS configuration is enforced by components:
 
-**`LegacyExternalAPIServerComponentsOnly` (default):** Provides backward-compatible behavior. Only the externally exposed API server components (kube-apiserver, openshift-apiserver, oauth-apiserver) honor the configured TLS profile. Other components continue to use their individual TLS configurations. This mode is intended for clusters that need to maintain compatibility with existing configurations during migration.
+**Empty/Unset (default):** When the field is omitted or set to an empty string, the cluster defaults to `LegacyExternalAPIServerComponentsOnly` behavior. Components should treat an empty value the same as `LegacyExternalAPIServerComponentsOnly`.
+
+**`LegacyExternalAPIServerComponentsOnly`:** Provides backward-compatible behavior. Only the externally exposed API server components (kube-apiserver, openshift-apiserver, oauth-apiserver) honor the configured TLS profile. Other components continue to use their individual TLS configurations. This mode is intended for clusters that need to maintain compatibility with existing configurations during migration.
 
 **`StrictAllComponents`:** Enforces strict adherence to the TLS configuration. All components must honor the configured profile. If a core component fails to honor the TLS configuration when `StrictAllComponents` is set, this is treated as a **bug** requiring fixes and backporting. This mode is recommended for security-conscious deployments and is required for certain compliance frameworks.
 
 **Unknown Enum Handling:** If a component encounters an unknown value for `tlsAdherence`, it should treat it as `StrictAllComponents` and log a warning. This ensures forward compatibility while defaulting to the more secure behavior.
+
+**Implementation Note:** Component implementors should use the `ShouldAllComponentsAdhere` helper function from library-go rather than checking the `tlsAdherence` field values directly. This helper encapsulates the logic for handling empty values and future enum additions.
 
 ### TLS 1.3 Cipher Behavior
 
@@ -154,7 +158,24 @@ All override mechanisms must be explicitly documented in user-facing documentati
 
 ### API Extensions
 
-This enhancement extends the existing `apiserver.config.openshift.io/v1` resource with a new `tlsAdherence` field as a sibling to the existing `tlsSecurityProfile`:
+This enhancement extends the existing `apiserver.config.openshift.io/v1` resource with a new `tlsAdherence` field as a sibling to the existing `tlsSecurityProfile`.
+
+**Type Definitions:**
+
+```go
+// TLSAdherencePolicy defines which components adhere to the TLS security profile.
+// Implementors should use the ShouldAllComponentsAdhere helper function from library-go
+// rather than checking these values directly.
+// +kubebuilder:validation:Enum=LegacyExternalAPIServerComponentsOnly;StrictAllComponents
+type TLSAdherencePolicy string
+
+// In APIServerSpec:
+// tlsAdherence controls which components honor the configured TLS security profile.
+// +optional
+TLSAdherence TLSAdherencePolicy `json:"tlsAdherence,omitempty"`
+```
+
+**Example Configuration:**
 
 ```yaml
 apiVersion: config.openshift.io/v1
@@ -171,7 +192,9 @@ spec:
         - TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
       minTLSVersion: VersionTLS12  # Custom ciphers only valid with TLS 1.2
   # New field introduced by this enhancement (sibling to tlsSecurityProfile)
-  tlsAdherence: StrictAllComponents  # One of: LegacyExternalAPIServerComponentsOnly, StrictAllComponents (default: LegacyExternalAPIServerComponentsOnly)
+  # Valid values: LegacyExternalAPIServerComponentsOnly, StrictAllComponents
+  # When omitted or empty, defaults to LegacyExternalAPIServerComponentsOnly behavior
+  tlsAdherence: StrictAllComponents
 ```
 
 **Note:** The APIServer config currently lacks a status field. Future work may add a status field for components to report observed configuration and flag non-compliance.
@@ -361,7 +384,9 @@ Not applicable for initial implementation.
 - Validation accepts valid configurations (ciphers with TLS 1.2, no ciphers with TLS 1.3)
 - Profile expansion (predefined profiles to actual TLS settings)
 - `tlsAdherence` field correctly parsed and applied
+- Empty/unset `tlsAdherence` values treated as `LegacyExternalAPIServerComponentsOnly`
 - Unknown `tlsAdherence` enum values treated as `StrictAllComponents`
+- `ShouldAllComponentsAdhere` helper function correctly handles all enum values including empty
 
 **Integration Tests:**
 - Component operators correctly watch and respond to APIServer TLS configuration changes
@@ -395,7 +420,7 @@ During upgrades, there will be a period where some components support the enhanc
 
 - Components that support the enhanced configuration will respect `tlsAdherence` mode
 - Components that don't yet support enhanced configuration will continue using their existing behavior
-- Operators should check if the `tlsAdherence` field is set and honor it when supported
+- Operators should use the `ShouldAllComponentsAdhere` helper function from library-go to determine whether to honor the cluster-wide TLS configuration
 
 For n-2 kubelet skew:
 - Older kubelets that don't support the enhanced TLS configuration will continue using KubeletConfig-based TLS settings
