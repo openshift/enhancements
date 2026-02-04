@@ -64,6 +64,7 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 
 | Port      | Process                                         | Protocol | Control-plane only | Owning Team   | Since | Notes                                                                                                            |
 |-----------|-------------------------------------------------|----------|--------------------|---------------|-------|------------------------------------------------------------------------------------------------------------------|
+| 53        | coredns                                         |          |                    | opnet         | 4.7   |                                                                                                                  |
 | 80        | haproxy                                         |          |                    | net edge      | 3.0   | HTTP routes; baremetal only; only on nodes running router pod replicas                                           |
 | 443       | haproxy                                         |          |                    | net edge      | 3.0   | HTTPS routes; baremetal only; only on nodes running router pod replicas                                          |
 | 1936      | openshift-router                                |          |                    | net edge      | 3.0   | healthz/stats; baremetal only; only on nodes running router pod replicas                                         |
