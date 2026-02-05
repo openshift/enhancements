@@ -13,7 +13,7 @@ approvers:
 api-approvers:
   - None
 creation-date: 2026-01-28
-last-updated: 2026-02-04
+last-updated: 2026-02-05
 tracking-link:
   - https://issues.redhat.com/browse/NE-2470
 see-also:
@@ -35,9 +35,9 @@ via an OLM Subscription to provide Gateway API support. This enhancement
 proposes replacing the OLM-based installation with a direct Helm chart
 installation using sail-operator libraries. This change eliminates the OLM
 dependency, avoids conflicts with existing OSSM subscriptions, enables Gateway
-API on clusters without OLM/Marketplace capabilities, and simplifies the
-process for testing and releasing Gateway API updates. This approach makes
-Gateway API a platform feature rather than depending on a layered product.
+API on clusters without OLM/Marketplace capabilities, and reduces component
+dependencies. This approach makes Gateway API a platform feature rather than
+depending on a layered product.
 
 ## Motivation
 
@@ -64,8 +64,7 @@ ingress capabilities without requiring OLM infrastructure.
 
 As a platform engineer maintaining Gateway API, I want to install and upgrade
 istiod directly without managing OLM Subscriptions and InstallPlans, so that
-the lifecycle is simpler and more predictable with fewer components to
-coordinate.
+I have fewer components to coordinate and the system is more predictable.
 
 ### Goals
 
@@ -77,7 +76,7 @@ coordinate.
   installation (4.22).
 - Support downgrade from Helm-based installation (4.22) to OLM-based
   installation (4.21).
-- Simplify Gateway API lifecycle management and reduce engineering complexity.
+- Reduce component dependencies and engineering complexity.
 - Enable future day 0 installation as a core operator when needed, which OLM
   cannot currently provide.
 - Reduce resource overhead by eliminating the sail-operator deployment when
@@ -106,6 +105,12 @@ coordinate.
 The cluster-ingress-operator will transition from creating an OLM Subscription
 to installing istiod directly using Helm charts. This will be accomplished by
 leveraging libraries provided by the sail-operator project.
+
+**Note**: Throughout this document, "Helm-based installation" refers to the
+cluster-ingress-operator using sail-operator libraries to install istiod
+directly, as opposed to "OLM-based installation" where OLM manages a
+sail-operator deployment which then installs istiod. Both approaches ultimately
+use Helm charts; the distinction is in the management layer.
 
 ### High-Level Changes
 
@@ -640,6 +645,31 @@ release as they were with the OLM-based approach.
 
 This enhancement does not introduce new CRDs or API extensions, so it has no
 operational impact related to API extensions.
+
+## Support Procedures
+
+### Verify Installation
+
+Check istiod is running:
+```bash
+oc -n openshift-ingress get deployment istiod-openshift-gateway
+```
+
+Check operator logs:
+```bash
+oc -n openshift-ingress-operator logs deployment/ingress-operator
+```
+
+### Troubleshooting
+
+**Failed migration (4.21 to 4.22)**: Verify `Istio` and `IstioRevision` CR deleted, verify state of the helm chart,
+and check the logs of the ingress operator:
+```bash
+oc get istio
+oc get istiorevision
+helm list -A
+oc -n openshift-ingress-operator logs deployment/ingress-operator
+```
 
 ## Infrastructure Needed
 
