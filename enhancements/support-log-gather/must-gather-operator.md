@@ -44,6 +44,7 @@ The cli utility, oc adm must-gather can collect data from the cluster and dump t
 4. Provide role-based access control allowing users can trigger must-gather collection by creating a MustGather CR
 5. Maintain compatibility with existing must-gather toolchain and image formats
 6. Report status of the must-gather collection into the MustGather CR
+7. Support cluster-wide egress proxy settings for SFTP uploads in air-gapped environments
 
 ### Non-Goals
 
@@ -51,6 +52,7 @@ The cli utility, oc adm must-gather can collect data from the cluster and dump t
 2. Collect a must-gather dump in the event of apisever being completely off
 3. Different products or operators should be responsible for gathering for their own components from the operator (see <https://github.com/advisories/GHSA-77c2-c35q-254w>)
 4. Reduce or skim the information collected by the must-gather script itself
+5. Track and reconcile updates to the **trusted CA** ConfigMap contents after it has been copied/mounted for the must-gather job.
 
 ## Proposal
 
@@ -119,10 +121,6 @@ type MustGatherSpec struct {
     // currently enabling audit logs is the only supported field.
     // +optional
     AdditionalConfig *AdditionalConfig `json:"additionalConfig,omitempty"`
-
-    // This represents the proxy configuration to be used. If left empty it will default to the cluster-level proxy configuration.
-    // +optional
-    ProxyConfig ProxySpec `json:"proxyConfig,omitempty"`
 
     // A time limit for gather command to complete a floating point number with a suffix:
     // "s" for seconds, "m" for minutes, "h" for hours, or "d" for days.
@@ -238,21 +236,6 @@ type PersistentVolumeClaimReference struct {
     // +kubebuilder:validation:MaxLength:=253
     // +required
     Name string `json:"name"`
-}
-
-// +k8s:openapi-gen=true
-type ProxySpec struct {
- // httpProxy is the URL of the proxy for HTTP requests.  Empty means unset and will not result in an env var.
- // +optional
- HTTPProxy string `json:"httpProxy,omitempty"`
-
- // httpsProxy is the URL of the proxy for HTTPS requests.  Empty means unset and will not result in an env var.
- // +optional
- HTTPSProxy string `json:"httpsProxy,omitempty"`
-
- // noProxy is the list of domains for which the proxy should not be used.  Empty means unset and will not result in an env var.
- // +optional
- NoProxy string `json:"noProxy,omitempty"`
 }
 
 // MustGatherStatus defines the observed state of MustGather
@@ -397,7 +380,22 @@ None, as a day-2 operator dedicated OpenShift and Hosted Clusters are both treat
 
 #### Proxy clusters
 
-`mustgather.spec.proxyConfig` if set by the user in the CR, will be propagated as pod environment variables to the gather and upload containers of the Job. The configuration set in the resource is given precedence over the cluster-wide proxy settings set on the cluster through `configv1.Proxy` object. Due to the nature of SOCKS proxy protocol and the HTTP "CONNECT" verb in most proxy servers used with OpenShift, the upload process using SFTP's TCP can essentially make a CONNECT request over netcat and intercept to upload the mustgather bundle even when on a airgapped proxy setup.
+The operator inherits cluster-wide proxy settings from the `configv1.Proxy` object via environment variables propagated by OLM and passes them to the upload container of the Job.
+
+For SFTP uploads through HTTP proxies (common in air-gapped OpenShift environments), the upload process uses an HTTP CONNECT proxy via netcat (`nc --proxy-type http`) as an SSH `ProxyCommand`. This allows SFTP traffic to tunnel through the configured HTTP proxy.
+
+To customize proxy settings, a cluster administrator can override the `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` environment variables through the OLM Subscription object.
+
+### Trusted Certificate Authority
+
+The operator supports custom Certificate Authority (CA) bundles for environments using proxy servers with TLS interception. When the `TRUSTED_CA_CONFIGMAP_NAME` environment variable is set on the operator deployment (via OLM Subscription patch on `spec.config.env`), the operator mounts the referenced ConfigMap containing the CA bundle at `/etc/pki/tls/certs/ca-bundle.crt`. This ConfigMap should be labeled with `config.openshift.io/inject-trusted-cabundle=true` to leverage OpenShift's [CA bundle injection](https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html/configuring_network_settings/configuring-a-custom-pki#certificate-injection-using-operators_configuring-a-custom-pki). See [openshift/must-gather-operator#312](https://github.com/openshift/must-gather-operator/pull/312) for implementation details.
+
+#### Reconcile flow
+
+During the MustGather CR reconciliation, the operator copies the trusted CA ConfigMap from the operator namespace (`must-gather-operator`) to the operand namespace where the MustGather CR is present. This ensures that the upload container in the must-gather job can mount and use the trusted CA bundle for SFTP uploads, even when the job runs in a different namespace than the operator.
+
+The copied ConfigMap will include an owner reference pointing to the MustGather CR. When multiple MustGather(s) are created in the same namespace, the operator during reconciliation will update the `ownerReferences` list on the copied config map to include references to all non-deleted CRs. Upon CR deletion, operator checks if it is the one and only owner reference in the config map and if so then it triggers deletion of the copied config map.
+Additionally, Kubernetes garbage collection will also automatically delete the ConfigMap when the MustGather CR is deleted. This approach ensures automatic cleanup without explicit deletion logic in the absence of the operator being active.
 
 ## Implementation History
 
