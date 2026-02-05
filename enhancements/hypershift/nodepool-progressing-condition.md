@@ -1,7 +1,7 @@
 ---
 title: nodepool-progressing-condition
 authors: 
-  - @sdminonne
+  - "@sdminonne"
 reviewers:
   - "@csrwng"
   - "@enxebre"
@@ -12,7 +12,7 @@ approvers:
   - "@csrwng"
   - "@enxebre"
   - "@sjenning"
-api-approvers:"
+api-approvers:
   - None
 creation-date: 2026-02-04
 last-updated: 2026-02-04
