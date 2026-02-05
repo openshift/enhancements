@@ -253,15 +253,10 @@ The TLS implementation will proceed with only the valid and supported curves fro
 **Runtime behavior:**
 If no mutually supported curves remain after filtering, TLS handshakes will fail with errors like "no shared group". This is the expected and desired behavior—it ensures only supported cryptographic parameters are used.
 
-**Why not validate at API level:**
-Validating curve support at the API level would require maintaining a comprehensive 
-registry of:
-- All TLS implementation libraries used across OpenShift components
-- Version-specific support matrices for each library
-- Continuous updates as libraries evolve
+**API-level validation:**
+The `curves` field uses an enum to validate curve names, ensuring that only well-formed, recognized curve identifiers can be specified. This prevents typos and provides clear documentation of available options. The enum will need to be updated as new curves are standardized and support is requested, but this is a reasonable tradeoff for improved user experience.
 
-This approach is infeasible and would create a maintenance burden that outweighs 
-the benefit. Runtime failures provide clear, immediate feedback about incompatibilities.
+**Note:** Enum validation ensures curve names are syntactically valid, but cannot guarantee that a specific curve is supported by every component's underlying TLS implementation. Components will filter the configured curves to only those they support at runtime.
 
 **Recommended approach:**
 - **Most users**: Use the predefined profiles (Old, Intermediate, Modern), which are 
