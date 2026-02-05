@@ -188,7 +188,7 @@ For operators managing components that need to respect TLS configuration:
 
 **Configuration Precedence**
 
-When multiple TLS configuration sources exist, components follow this precedence:
+When multiple TLS configuration sources exist, components follow this precedence (highest to lowest priority):
 1. Component-specific configuration (e.g., `IngressController.spec.tlsSecurityProfile`)
 2. Category-level configuration (e.g., `KubeletConfig.spec.tlsSecurityProfile` for node components)
 3. Cluster-wide default (e.g., `apiserver.config.openshift.io/cluster` for API server components)
