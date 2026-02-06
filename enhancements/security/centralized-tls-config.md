@@ -55,7 +55,7 @@ As an application developer, I want to understand clearly which TLS profile appl
 
 4. Backporting fixes to existing Ingress controllers (new development efforts will focus on the Gateway API).
 
-5. TLS curves configuration for the APIServer (this is being addressed in a separate Ingress TLS Curves enhancement).
+5. TLS curves configuration (this is being addressed in a separate TLS Curves enhancement).
 
 6. Enforcing client TLS settings. This enhancement applies only to the server-side TLS configuration of managed components.
 
