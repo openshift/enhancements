@@ -69,7 +69,7 @@ We propose extending the existing `apiserver.config.openshift.io/v1` API to serv
 
 **Custom Profile:** A Custom profile will be available for users requiring granular control to set configuration parameters manually. However, this profile will be explicitly documented as high-risk. Users utilizing the Custom profile must understand the limitations of underlying TLS implementations. Custom profiles are subject to the same TLS 1.3 cipher behavior documented below.
 
-**Restrictive Validation:** The APIServer TLS configuration will validate that cipher suites cannot be specified when `minTLSVersion` is set to TLS 1.3, preventing silent failures where users believe they have configured ciphers but they are being ignored.
+**Restrictive Validation:** The TLS configuration API used by most components will validate that cipher suites cannot be specified when `minTLSVersion` is set to TLS 1.3, preventing silent failures where users believe they have configured ciphers but they are being ignored. Non-go based components that maintain their own overrides _may_ still allow ciphers to be configured with `minTLSVersion` TLS 1.3.
 
 ### TLS Adherence Modes
 
