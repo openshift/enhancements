@@ -190,10 +190,8 @@ flowchart TB
     subgraph SecretTargets["SecretTargets Configuration"]
         D --> ST{secretTargets.policy?}
         ST -->|Disabled| ST1[No secret write access]
-        ST -->|All| ST2[Add secret write rules<br/>to ClusterRole]
         ST -->|Custom| ST3[Add secret write rules<br/>with resourceNames]
-        ST2 --> ST4[Add --secret-targets-enabled<br/>to Deployment args]
-        ST3 --> ST4
+        ST3 --> ST4[Add --secret-targets-enabled<br/>to Deployment args]
     end
 
     subgraph DefaultCA["DefaultCAPackage Configuration"]
@@ -404,9 +402,8 @@ type TrustManagerConfig struct {
 // +kubebuilder:validation:XValidation:rule="self.policy == 'Custom' || !has(self.authorizedSecrets) || size(self.authorizedSecrets) == 0",message="authorizedSecrets must be empty when policy is not Custom"
 type SecretTargetsConfig struct {
 	// policy controls whether and how trust-manager can write trust bundles to Secrets.
-	// Allowed values are "Disabled", "All", or "Custom".
+	// Allowed values are "Disabled" or "Custom".
 	// "Disabled" means trust-manager cannot write trust bundles to Secrets (default behavior).
-	// "All" grants trust-manager permission to create and update ALL secrets across all namespaces.
 	// "Custom" grants trust-manager permission to create and update only the secrets listed in authorizedSecrets.
 	// +kubebuilder:default:="Disabled"
 	// +kubebuilder:validation:Optional
@@ -465,14 +462,12 @@ const (
 )
 
 // SecretTargetsPolicy defines the policy for writing trust bundles to Secrets.
-// +kubebuilder:validation:Enum:=Disabled;All;Custom
+// +kubebuilder:validation:Enum:=Disabled;Custom
 type SecretTargetsPolicy string
 
 const (
 	// SecretTargetsPolicyDisabled means trust-manager cannot write trust bundles to Secrets.
 	SecretTargetsPolicyDisabled SecretTargetsPolicy = "Disabled"
-	// SecretTargetsPolicyAll grants trust-manager permission to write to ALL secrets.
-	SecretTargetsPolicyAll SecretTargetsPolicy = "All"
 	// SecretTargetsPolicyCustom grants trust-manager permission to write to specific secrets only.
 	SecretTargetsPolicyCustom SecretTargetsPolicy = "Custom"
 )
@@ -504,6 +499,9 @@ type TrustManagerStatus struct {
 
 	// defaultCAPackagePolicy indicates the current default CA package policy.
 	DefaultCAPackagePolicy DefaultCAPackagePolicy `json:"defaultCAPackagePolicy,omitempty"`
+
+	// filterExpiredCertificatesPolicy indicates the current policy for filtering expired certificates.
+	FilterExpiredCertificatesPolicy FilterExpiredCertificatesPolicy `json:"filterExpiredCertificatesPolicy,omitempty"`
 }
 ```
 
@@ -648,7 +646,6 @@ The ClusterRole for trust-manager is dynamically configured based on the `secret
 
 - **Default (secretTargets.policy: Disabled)**: Read-only access to secrets, read-write access to configmaps
 - **secretTargets.policy: Custom**: Additional rules to create/update specific secret names listed in authorizedSecrets
-- **secretTargets.policy: All**: Full create/update access to all secrets
 
 #### OLM Bundle Manifest
 
@@ -712,14 +709,14 @@ Below are example static manifests used for creating required resources for inst
      - apiGroups: [""]
        resources: ["events"]
        verbs: ["create", "patch"]
-    # Secret read access (when secretTargets.policy is All or Custom)
+    # Secret read access (when secretTargets.policy is Custom)
     - apiGroups: [""]
       resources: ["secrets"]
       verbs: ["get", "list", "watch"]
-    # Secret write access (when secretTargets.policy is All or Custom)
+    # Secret write access (when secretTargets.policy is Custom)
      # - apiGroups: [""]
      #   resources: ["secrets"]
-     #   resourceNames: ["specific-secret-names"]  # when policy is Custom; omit resourceNames when policy is All
+     #   resourceNames: ["specific-secret-names"]  # secrets listed in authorizedSecrets
      #   verbs: ["create", "update", "patch", "delete"]
    ```
 
@@ -790,7 +787,7 @@ Below are example static manifests used for creating required resources for inst
               - --webhook-host=0.0.0.0
               - --webhook-port=6443
               - --webhook-certificate-dir=/tls
-              # Added when secretTargets.policy is All or Custom
+              # Added when secretTargets.policy is Custom
               # - --secret-targets-enabled=true
               # Added when defaultCAPackage.policy is Enabled
               # - --default-package-location=/packages/cert-manager-package-openshift.json
@@ -917,7 +914,7 @@ None
 - Enable `trust-manager-controller` by creating the `trustmanagers.operator.openshift.io` CR with permutations of 
   configurations and validate the behavior:
   - Custom trust namespace
-  - Secret targets policy (Disabled/All/Custom)
+  - Secret targets policy (Disabled/Custom)
   - DefaultCAPackage policy (Enabled/Disabled)
   - FilterExpiredCertificates policy (Enabled/Disabled)
   - Common configurations: log levels and formats, resources, node selector, tolerations and affinity
