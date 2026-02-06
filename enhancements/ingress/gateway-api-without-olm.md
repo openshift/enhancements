@@ -13,7 +13,7 @@ approvers:
 api-approvers:
   - None
 creation-date: 2026-01-28
-last-updated: 2026-02-05
+last-updated: 2026-02-06
 tracking-link:
   - https://issues.redhat.com/browse/NE-2470
 see-also:
@@ -33,17 +33,28 @@ project.
 The cluster-ingress-operator currently installs OpenShift Service Mesh (OSSM)
 via an OLM Subscription to provide Gateway API support. This enhancement
 proposes replacing the OLM-based installation with a direct Helm chart
-installation using sail-operator libraries. This change eliminates the OLM
-dependency, avoids conflicts with existing OSSM subscriptions, enables Gateway
-API on clusters without OLM/Marketplace capabilities, and reduces component
-dependencies. This approach makes Gateway API a platform feature rather than
-depending on a layered product.
+installation using shared library code from the sail-operator project. This
+eliminates dependencies on both OLM and the sail-operator deployment for
+Gateway API, avoids conflicts with existing OSSM subscriptions, and enables
+Gateway API on clusters without OLM/Marketplace capabilities.
 
 ## Motivation
 
 The current OLM-based approach for installing OSSM to support Gateway API
 presents several challenges that impact both cluster administrators and the
 engineering team's ability to deliver Gateway API features.
+
+When the cluster-ingress-operator creates an OLM Subscription to install
+sail-operator, it takes ownership of and overwrites any existing
+OSSM subscription, potentially disrupting existing service mesh
+installations managed by cluster administrators. Additionally, clusters
+without OLM/Marketplace capabilities cannot enable Gateway API at all.
+
+The OLM dependency also increases operational complexity and resource
+consumption. The ingress operator must manage Subscriptions and InstallPlans,
+while the multi-layer architecture (OLM → sail-operator → istiod) makes
+troubleshooting more difficult. The sail-operator deployment adds unnecessary
+overhead when service mesh capabilities aren't needed.
 
 ### User Stories
 
@@ -74,24 +85,22 @@ I have fewer components to coordinate and the system is more predictable.
   administrators.
 - Support seamless upgrade from OLM-based installation (4.21) to Helm-based
   installation (4.22).
-- Support downgrade from Helm-based installation (4.22) to OLM-based
-  installation (4.21).
+- Preserve the current user-facing Gateway API experience, excluding issues
+  caused by the OLM-based installation mechanism.
 - Reduce component dependencies and engineering complexity.
-- Enable future day 0 installation as a core operator when needed, which OLM
-  cannot currently provide.
 - Reduce resource overhead by eliminating the sail-operator deployment when
   service mesh is not needed.
 - Enable Gateway API on OKE clusters, which do not include OSSM licensing.
 
 ### Non-Goals
 
-- Changing the user-facing Gateway API experience. Cluster admins will continue
-  to create `GatewayClass`, `Gateway`, and route resources in the same way.
 - Affecting service mesh use cases or OSSM installations created by cluster
   admins for mesh purposes.
 - Adding new Gateway API features beyond what is currently supported.
 - Making OSSM a core operator bundled in the OpenShift release payload (though
   this may be reconsidered in the future).
+- Enabling day 0 installation for this enhancement. This is not in scope for
+  this EP but is not precluded for future enhancements.
 - Including istiod and envoy images in the OCP release payload. Images will
   initially be pulled from registry.redhat.io. Custom image sources and image
   mirroring are out of scope for this enhancement.
@@ -121,9 +130,10 @@ The cluster-ingress-operator will make the following changes:
     gateway-api configurations.
 
 2.  **Upgrade Migration**: Detect when upgrading from an OLM-based
-    installation (4.21) to Helm-based (4.22), delete the `Istio` CR,
-    wait for sail-operator cleanup, then install via Helm with no data
-    plane downtime.
+    installation (4.21) to Helm-based (4.22), delete the `Istio` CR in order to
+    remove the control-plane (istiod) while leaving the data plane (Envoy)
+    operational, wait for sail-operator cleanup, then re-install the
+    control-plane via Helm with no data-plane downtime.
 
 ### Workflow Description
 
@@ -215,7 +225,9 @@ This enhancement does not introduce new CRDs or API extensions.
 #### Hypershift / Hosted Control Planes
 
 This enhancement applies to Hypershift with no additional considerations beyond
-existing Gateway API support.
+existing Gateway API support. The Gateway API control plane (istiod) and data
+plane (Envoy) both run on the guest cluster, so there is no operational
+difference for this feature between standalone OpenShift and Hypershift.
 
 #### Standalone Clusters
 
@@ -235,8 +247,9 @@ cluster-ingress-operator, so this enhancement does not directly affect it.
 
 #### OpenShift Kubernetes Engine
 
-This enhancement applies to OKE with no additional considerations beyond
-existing Gateway API support.
+This enhancement enables the use of the Gateway API controller on OKE by
+eliminating OSSM licensing concerns. OKE does not include OSSM licensing, so
+the current OLM-based approach cannot be used on OKE clusters.
 
 ### Implementation Details/Notes/Constraints
 
@@ -254,15 +267,15 @@ The process works as follows:
    embedded charts from the vendored library.
 3. No external chart files are needed at runtime.
 
-This approach ensures charts are version controlled and synchronized via go
-vendoring to eliminate drift in the chart YAML. When the sail-operator library
-version is updated in `go.mod`, the Helm charts are automatically synchronized
-with the OSSM team's updates.
+This approach ensures charts are version controlled and synchronized via Go
+vendoring, eliminating drift between the Helm charts and the Istio version they
+deploy. When the sail-operator library version is updated in `go.mod`, the Helm
+charts are automatically synchronized with the corresponding Istio version.
 
 #### Component Versioning
 
-OpenShift Gateway API releases remain linked to OSSM releases through the
-vendored sail-operator library. Each OCP release uses a specific OSSM version
+OpenShift releases remain linked to OSSM releases through the vendored
+sail-operator library. Each OCP release uses a specific OSSM version
 (e.g., OCP 4.22 uses sail-operator library from OSSM 3.3.0). This enhancement
 changes the installation mechanism from OLM to Helm, but does not change the
 version alignment between OCP and OSSM releases.
@@ -270,24 +283,25 @@ version alignment between OCP and OSSM releases.
 #### Image Management
 
 Images will be sourced as follows:
-- **Initially**: Pull from registry.redhat.io using standard image references in
-  the Helm chart values.
+- **Initially**: Pull from registry.redhat.io using the same image references
+  that OLM currently uses. This enhancement does not change which container
+  images are used or which image registry they are pulled from.
 - **Future**: Incorporate images into the OCP release payload to support
   disconnected/offline installations. This will require coordination with the
   ART team.
 
-The operator will configure the Helm chart values to reference the appropriate
-image registry based on the cluster configuration. The sail-operator libraries
-will provide this configurability to support mirrored images in disconnected
-environments without hardcoding image locations.
+The operator will provide a mechanism to override image references in the Helm
+chart values for the purpose of prerelease testing with unreleased istiod and
+Envoy images. Image mirroring for disconnected environments is not supported
+in this initial implementation and remains out of scope for this enhancement.
 
 #### Upgrade Detection and Migration
 
 The operator will detect OLM-based installations by checking for an existing
-`Istio` CR created by the operator.
+`Istio` CR created by cluster-ingress-operator.
 
 Migration steps:
-1. Detect and delete the existing `Istio` CR created by the operator.
+1. Detect and delete the existing `Istio` CR created by cluster-ingress-operator.
 2. Wait for the sail-operator to delete all Helm chart resources (istiod
    deployment, services, etc.).
 3. Install istiod using the operator's Helm-based approach.
@@ -362,11 +376,11 @@ cluster-ingress-operator would need to either implement that functionality
 itself (increasing maintenance burden) or migrate back to using the
 sail-operator deployment (wasting effort).
 
-**Mitigation**: Monitor sail-operator development and engage with the OSSM team
-early when new features are planned. If sail-operator functionality becomes
-essential, evaluate migrating to CIO-managed sail-operator deployment (see
-Alternative 4) or advocating for the functionality to be included in the
-sail-operator libraries.
+**Mitigation**: The Sail Operator itself is being refactored to use the exact
+same sail library logic that CIO will use, so this risk is mitigated by design.
+Any functionality required by sail-operator will be available in the shared
+library. Additionally, monitor sail-operator development and engage with the
+OSSM team early when new features are planned.
 
 #### Risk: Sail-Operator Library Dependency
 
@@ -378,15 +392,13 @@ timelines for 4.22.
 
 ### Drawbacks
 
-- **Maintenance Burden**: The cluster-ingress-operator takes on additional
-  maintenance responsibilities for Helm chart installation, object watches, and
-  reconciliation logic that the sail-operator previously handled.
-- **Increased Testing Burden**: The NID team must test Helm-based istiod
-  installation, upgrade paths, downgrade paths, and compatibility with
-  user-managed OSSM installations, increasing the testing surface area.
-- **Loss of OLM Benefits**: Automatic updates, dependency management, and
-  operator lifecycle management provided by OLM are no longer available for
-  istiod.
+- **Maintenance Burden**: While the sail-operator library provides Helm
+  installation logic, the cluster-ingress-operator is a direct consumer and
+  remains in the path of responsibility.
+- **Increased Testing Burden**: The NID team must test the 4.21 to 4.22 migration
+  and add E2E tests for vendored sail-operator library integration (e.g.,
+  istiod deployment reconciliation). While the library provides the logic,
+  CIO must verify correct usage.
 - **Potential Conflict with Future Plans**: If OSSM becomes a core operator,
   this approach may need to be reworked.
 - **Pre-release Testing Workflow Complexity**: Pre-release testing requires both
@@ -493,32 +505,7 @@ solution without requiring upstream changes.
    implementation use only the lower-level sail-operator libraries, or wait
    for the enhanced library?
 
-2. **CRD version mismatch handling**: If a user has installed OSSM separately
-   and created the same CRDs with different versions, how should the operator
-   handle version mismatches? Should it require matching CRD versions and fail
-   if they don't match, or skip CRD installation and proceed with the existing
-   versions?
-
-   **Answer**: Skip CRD installation if they already exist and log this
-   occurrence. Given the stability of Istio CRDs, minor version differences can
-   be safely tolerated.
-
-3. **Go module conventions for sail-operator**: Would adding 'v' prefixes to
-   tags (e.g., v1.27.1 instead of 1.27.1) in the sail-operator repository
-   simplify dependency management and align with Go module conventions? Note
-   that sail-operator already uses semantic versioning, this question is about
-   adopting the 'v' prefix convention.
-
-4. **Webhook management**: Who manages the webhook certificates, and is this
-   still a concern with modern Kubernetes? During implementation, confirm that
-   the sail-operator library creates webhooks that only select resources with
-   the appropriate revision label to avoid conflicts.
-
-   **Answer**: Webhook certificates are managed by istiod itself. The ingress
-   operator does not need to handle certificate generation or rotation for the
-   webhooks.
-
-5. **Istio CRD management**: Should the cluster-ingress-operator manage Istio
+2. **Istio CRD management**: Should the cluster-ingress-operator manage Istio
    CRDs for layered products' north/south ingress use cases? On 4.21, layered
    products (RHOAI, Kuadrant, MCP Gateway) rely on Istio CRDs that are provided
    when the cluster-ingress-operator installs OSSM via OLM. Without CRD management
@@ -552,6 +539,21 @@ solution without requiring upstream changes.
    - Require OSSM installation for these features (adds resource overhead when service
      mesh capabilities aren't needed)
    - Defer to future enhancement (causes regression from 4.21 to 4.22)
+
+3. **Go module conventions for sail-operator**: Would adding 'v' prefixes to
+   tags (e.g., v1.27.1 instead of 1.27.1) in the sail-operator repository
+   simplify dependency management and align with Go module conventions? Note
+   that sail-operator already uses semantic versioning, this question is about
+   adopting the 'v' prefix convention.
+
+4. **Webhook management**: Who manages the webhook certificates, and is this
+   still a concern with modern Kubernetes? During implementation, confirm that
+   the sail-operator library creates webhooks that only select resources with
+   the appropriate revision label to avoid conflicts.
+
+   **Answer**: Webhook certificates are managed by istiod itself. The ingress
+   operator does not need to handle certificate generation or rotation for the
+   webhooks.
 
 ## Test Plan
 
@@ -605,9 +607,10 @@ N/A. This feature will be introduced behind a feature gate as Tech Preview.
 
 ### Tech Preview -> GA
 
-The feature gate will be removed and the Helm-based installation will become the
-default Gateway API installation mechanism in 4.22 after E2E tests pass
-consistently, and Istio CRD management decisions are resolved.
+The feature gate will be promoted to the Default feature set and the Helm-based
+installation will become the default Gateway API installation mechanism in 4.22
+after E2E tests pass consistently, and Istio CRD management decisions are
+resolved.
 
 ### Removing a deprecated feature
 
@@ -628,7 +631,8 @@ implementation details.
 When a cluster upgrade to 4.22 fails and rolls back to 4.21, the downgraded
 cluster-ingress-operator will revert to the OLM-based installation:
 
-1. Recreate the `Istio` CR to trigger sail-operator installation.
+1. Recreate the `Istio` CR to trigger installation via sail-operator.
+   Note: Since upgrade does not uninstall sail-operator, it should still be running during downgrade.
 2. sail-operator reconciles the existing Helm chart, adding a new revision and
    migrating ownership back to sail-operator.
 
