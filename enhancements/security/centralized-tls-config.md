@@ -43,7 +43,7 @@ As an application developer, I want to understand clearly which TLS profile appl
 
 3. **TLS 1.3 Transparency:** Clearly document and enforce the behavior that TLS 1.3 uses a hardcoded set of ciphers as defined by the Go runtime, removing ambiguity about cipher configuration.
 
-4. **Validation:** Add validation to the APIServer TLS configuration to disallow cipher suite configuration when `minTLSVersion` is set to TLS 1.3.
+4. **Validation:** Add validation to the APIServer and Kubelet (and any other component that inherits the configv1.TLSSecurityProfile type) TLS configuration to disallow cipher suite configuration when `minTLSVersion` is set to TLS 1.3.
 
 ### Non-Goals
 
