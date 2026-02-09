@@ -285,10 +285,12 @@ The `tlsAdherence` field will be introduced behind a feature gate:
 
 ### Related Work
 
-**Ingress TLS Curves:** A separate enhancement (led by Davide Salerno) will create a divergent TLS security profile struct for Ingress, allowing configuration of TLS curves and cipher suites. This is necessary because:
+**TLS Curves:** A separate enhancement (led by Davide Salerno) adds TLS curve configuration to the existing TLS security profile. This applies to all components, not just Ingress.
+
+**Ingress Cipher Suite Validation:** A divergent TLS security profile type is being created specifically for Ingress to handle cipher suite validation differences. This is necessary because:
 - The Ingress controller uses HAProxy (not Go's crypto/tls)
-- HAProxy supports TLS curve configuration
-- The separated struct allows Ingress-specific fields without affecting the APIServer's restrictive validation
+- HAProxy does not have the same TLS 1.3 cipher restrictions as Go's crypto/tls
+- The separated type allows Ingress-specific cipher validation without affecting the APIServer's restrictive TLS 1.3 cipher validation
 
 ### Topology Considerations
 
