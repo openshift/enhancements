@@ -114,10 +114,23 @@ All OpenShift components should honor the TLS configuration defined in `apiserve
 
 The following components inherit the cluster-wide TLS configuration from `apiserver.config.openshift.io/cluster` by default, but support explicit overrides via their own Custom Resources:
 
-- **Kubelet:** Can be overridden via `KubeletConfig` CR with its own `tlsSecurityProfile` field. If not explicitly set, inherits the APIServer TLS config.
-- **Ingress Controller:** Can be overridden via `IngressController` CR with its own `tlsSecurityProfile` field. If not explicitly set, inherits the APIServer TLS config. This allows Ingress to support legacy external clients (e.g., using Intermediate or Old profiles) even when the cluster uses Modern internally.
+- **Kubelet:** Can be overridden via [`KubeletConfig`](https://github.com/openshift/api/blob/dadbf81f35e99354e51056157c05c44b9118b6a6/machineconfiguration/v1/types.go#L762) CR (defined in `machineconfiguration.openshift.io/v1`) with its own `tlsSecurityProfile` field. If not explicitly set, inherits the APIServer TLS config. **Note:** Kubelet currently only supports `Old` and `Intermediate` profiles, with a maximum of `VersionTLS12`. The `Modern` profile (TLS 1.3) is not yet supported.
+- **Ingress Controller:** Can be overridden via [`IngressController`](https://github.com/openshift/api/blob/dadbf81f35e99354e51056157c05c44b9118b6a6/operator/v1/types_ingress.go#L200) CR (defined in `operator.openshift.io/v1`) with its own `tlsSecurityProfile` field. If not explicitly set, inherits the APIServer TLS config. This allows Ingress to support legacy external clients (e.g., using Intermediate or Old profiles) even when the cluster uses Modern internally.
 - **Routes:** Individual routes may specify TLS settings that differ from the cluster-wide default for specific application requirements.
 - **Gateway Controller:** Will initially honor the APIServer TLS profile. Overrides may be added later if needed.
+
+**APIs Referencing TLSSecurityProfile:**
+
+Changes to `configv1.TLSSecurityProfile` validation (e.g., TLS 1.3 cipher restrictions) will affect APIs that reference this type. Known usages include:
+
+*In-tree (openshift/api):*
+- [`KubeletConfig.spec.tlsSecurityProfile`](https://github.com/openshift/api/blob/dadbf81f35e99354e51056157c05c44b9118b6a6/machineconfiguration/v1/types.go#L762) (`machineconfiguration.openshift.io/v1`)
+- [`IngressController.spec.tlsSecurityProfile`](https://github.com/openshift/api/blob/dadbf81f35e99354e51056157c05c44b9118b6a6/operator/v1/types_ingress.go#L200) (`operator.openshift.io/v1`)
+
+*Out-of-tree (will pick up validation changes when bumping openshift/api dependency):*
+- [`openshift/oc`](https://github.com/openshift/oc/blob/8b0a043216f7ae608606afb5bdb0ce451561021e/pkg/cli/admin/rebootmachineconfigpool/types.go#L396)
+- [`openshift/cluster-logging-operator`](https://github.com/openshift/cluster-logging-operator/blob/754ef3e6d0c48470afa470092c709dc5ad094702/api/observability/v1/output_types.go#L206) - `OutputSpec.TLS.TLSSecurityProfile`
+- [`openshift/lightspeed-operator`](https://github.com/openshift/lightspeed-operator/blob/122c7a163aa662c04e1cbc8272cc063ec8a4006e/api/v1alpha1/olsconfig_types.go#L205) - `OLSConfig.spec.ols.deployment.api.tlsSecurityProfile`
 
 **Override Precedence:**
 1. Component-specific CR configuration (e.g., `IngressController.spec.tlsSecurityProfile`) takes highest precedence when explicitly set
