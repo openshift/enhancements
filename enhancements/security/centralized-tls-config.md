@@ -7,7 +7,7 @@ reviewers:
 approvers: 
   - joelanford
 api-approvers:
-  - joelanford
+  - everettraven
 creation-date: 2026-01-20
 last-updated: 2026-01-26
 tracking-link:
