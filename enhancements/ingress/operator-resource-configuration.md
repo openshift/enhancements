@@ -225,10 +225,12 @@ type IngressControllerSpec struct {
     //
     // +optional
     // +openshift:enable:FeatureGate=IngressRouterResourceLimits
-    Resources *RouterResourceRequirements `json:"resources,omitempty"`
+    Resources RouterResourceRequirements `json:"resources,omitzero"`
 }
 
+// +kubebuilder:validation:MinProperties=1
 // RouterResourceRequirements defines resource requirements for ingress router pod containers.
+// At least one of routerContainer, metricsContainer, or logsContainer must be set.
 type RouterResourceRequirements struct {
     // routerContainer specifies resource requirements (requests and limits) for the
     // router (HAProxy) container in router pods.
