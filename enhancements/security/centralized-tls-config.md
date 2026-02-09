@@ -90,7 +90,7 @@ The new `tlsAdherence` field is a **sibling** to the existing `tlsSecurityProfil
 
 **Unknown Enum Handling:** If a component encounters an unknown value for `tlsAdherence`, it should treat it as `StrictAllComponents` and log a warning. This ensures forward compatibility while defaulting to the more secure behavior.
 
-**Implementation Note:** Component implementors should use the `ShouldAllComponentsAdhere` helper function from library-go rather than checking the `tlsAdherence` field values directly. This helper encapsulates the logic for handling empty values and future enum additions.
+**Implementation Note:** Component implementors should use the `ShouldHonorClusterTLSProfile` helper function from library-go rather than checking the `tlsAdherence` field values directly. This helper encapsulates the logic for handling empty values and future enum additions.
 
 ### TLS 1.3 Cipher Behavior
 
@@ -171,7 +171,7 @@ This enhancement extends the existing `apiserver.config.openshift.io/v1` resourc
 
 ```go
 // TLSAdherencePolicy defines which components adhere to the TLS security profile.
-// Implementors should use the ShouldAllComponentsAdhere helper function from library-go
+// Implementors should use the ShouldHonorClusterTLSProfile helper function from library-go
 // rather than checking these values directly.
 // +kubebuilder:validation:Enum=LegacyExternalAPIServerComponentsOnly;StrictAllComponents
 type TLSAdherencePolicy string
@@ -393,7 +393,7 @@ Not applicable for initial implementation.
 - `tlsAdherence` field correctly parsed and applied
 - Empty/unset `tlsAdherence` values treated as `LegacyExternalAPIServerComponentsOnly`
 - Unknown `tlsAdherence` enum values treated as `StrictAllComponents`
-- `ShouldAllComponentsAdhere` helper function correctly handles all enum values including empty
+- `ShouldHonorClusterTLSProfile` helper function correctly handles all enum values including empty
 
 **Integration Tests:**
 - Component operators correctly watch and respond to APIServer TLS configuration changes
@@ -427,7 +427,7 @@ During upgrades, there will be a period where some components support the enhanc
 
 - Components that support the enhanced configuration will respect `tlsAdherence` mode
 - Components that don't yet support enhanced configuration will continue using their existing behavior
-- Operators should use the `ShouldAllComponentsAdhere` helper function from library-go to determine whether to honor the cluster-wide TLS configuration
+- Operators should use the `ShouldHonorClusterTLSProfile` helper function from library-go to determine whether to honor the cluster-wide TLS configuration
 
 For n-2 kubelet skew:
 - Older kubelets that don't support the enhanced TLS configuration will continue using KubeletConfig-based TLS settings
