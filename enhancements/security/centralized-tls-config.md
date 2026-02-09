@@ -282,6 +282,8 @@ spec:
 # TLS 1.3 cipher suites are hardcoded by the Go runtime.
 ```
 
+**Note on Validation Ratcheting:** This configuration is currently accepted today. When the new CEL validation is added, it will use ratcheting (comparing against `oldSelf`) to ensure that existing resources with this configuration are not immediately invalidated upon upgrade. Clusters that already have TLS 1.3 + cipher configurations will continue to function, but the configuration will be rejected if the user attempts to modify the resource. This gives administrators time to update their configuration to remove the cipher specification when using TLS 1.3.
+
 The API modifies existing behavior by:
 - Establishing the APIServer configuration as the default source for TLS configuration that all core components will consume
 - Introducing the `tlsAdherence` field to control enforcement behavior
