@@ -195,6 +195,11 @@ type TLSAdherencePolicy string
 TLSAdherence TLSAdherencePolicy `json:"tlsAdherence,omitempty"`
 ```
 
+**Field Behavior:**
+
+- **Optional:** The `tlsAdherence` field is optional (`+optional`, `omitempty`). This is required for upgrade compatibility—existing clusters upgrading to a version with this field will not have it set.
+- **Omission Semantics:** When the field is omitted (empty string `""`), components treat it the same as `LegacyExternalAPIServerComponentsOnly`. This "no opinion" approach preserves existing behavior on upgrade.
+
 **Example Configuration:**
 
 ```yaml
@@ -373,6 +378,11 @@ Create a dedicated new Custom Resource for cluster-wide TLS configuration. This 
 1. How should the API handle components that report they cannot support the configured profile (e.g., older operator versions)?
 
 2. Should a status field be added to the APIServer config for components to report compliance?
+
+3. **Migration strategy for `tlsAdherence` field:** If we decide to eventually enforce `StrictAllComponents` as the default, which migration approach should we use?
+   - **Option A (leaning towards):** Use omission to mean "no opinion" with `LegacyExternalAPIServerComponentsOnly` behavior. Eventually require setting `StrictAllComponents` explicitly before upgrade.
+   - **Option B:** Use omission to mean "no opinion" and require admins to explicitly opt-in to a supported mode before they can upgrade.
+   - **Option C:** Have a controller set the field to the default behavior if it is omitted on upgrade.
 
 ## Graduation Criteria
 
