@@ -70,16 +70,25 @@ In summary:
 * Update all providers to use image-based manifests
 * Re-implement the CAPI installer, with the new version supporting only the new format
 
-The new installer will use [Boxcutter](https://github.com/package-operator/boxcutter). The installer controller will be split into 2 controllers:
+The new installer will use [Boxcutter](https://github.com/package-operator/boxcutter).
+The installer controller will be split into 2 controllers:
 * The revision controller creates 'Revisions': a desired set of manifests to be installed
 * The installer controller installs and deletes revisions which were created by the revision controller
 
-Additionally, for improved security the installer controllers move to a new manager which runs:
-* with a separate service account
-* with its own RBAC
-* in a new namespace, `openshift-cluster-api-operator`
-
+An installer necessarily requires considerable privileges.
+For improved security the installer controller will run in the separate `openshift-cluster-api-operator` namespace with its own RBAC and service account.
 This allows us to greatly reduce the RBAC of the CAPI migration and sync controllers, which will continue to run in the `openshift-cluster-api` namespace.
+
+## Transition from 'Transport ConfigMaps'
+
+Although never released, a previous version of the CAPIO Operator used a scheme of 'Transport ConfigMaps' where manifests were stored in ConfigMaps in the `openshift-cluster-api` namespace.
+The ConfigMaps themselves were installed by CVO.
+The provider manifests they contained were installed by the CAPI Operator as required.
+
+Although these scheme has never been released and we do not need to consider upgrades, it is currently deployed in TechPreview clusters, and all currently supported CAPI providers currently use this scheme.
+To avoid disruption to TechPreview installations until all providers have been updated to use the new scheme, we will minimally enhance the current installer to support an interim state where both ConfigMaps and image-based manifests are present.
+This will not be supported for longer than necessary during the transition period.
+Specifically, the new installer controller described in this document will not support this interim state.
 
 ### Current flow
 
@@ -105,7 +114,7 @@ Build time:
 Differences:
 * `manifests-gen` no longer implements custom go logic to do provider-specific modifications to manifests.
   These modifications move from `manifests-gen` custom logic, which is in the `cluster-capi-operator` repo, to kustomize patches in the provider repo's which requires them. `manifests-gen` already invokes `kustomize` under the hood so no extra changes are going to be required.
-* `manifests-gen` writes CAPI Operator assets instead of a CVO asset.
+* `manifests-gen` writes CAPI Operator assets (defined in more detail below) instead of a CVO asset.
 
 Runtime:
 * At startup, CAPI installer reads a list of provider images associated with the current OpenShift release
@@ -135,7 +144,7 @@ Runtime:
 
 This change is supported by a new `ClusterAPI` operator config CRD, proposed in [openshift/api#2564](https://github.com/openshift/api/pull/2564).
 
-An example `ClusterAPI` in use:
+An example `ClusterAPI` in use defining 2 `Revision`s:
 
 ```yaml
 apiVersion: operator.openshift.io/v1alpha1
@@ -146,10 +155,10 @@ spec:
   unmanagedCustomResourceDefinitions:
   - machines.cluster-api.x-k8s.io
 status:
-  currentRevision: 4.22.5-0d2d3148cd1faa581e3d2924cdd8e9122d298de41cda51cf4e55fcdc1f5d1463-1
-  desiredRevision: 4.22.6-873bdf9a2a6a324231a06ce04b4d52f781022493ca0480bfb2edcb8d22ae1c9b-2
+  currentRevision: 4.22.5-0d2d314-1
+  desiredRevision: 4.22.6-873bdf9-2
   revisions:
-  - name: 4.22.5-0d2d3148cd1faa581e3d2924cdd8e9122d298de41cda51cf4e55fcdc1f5d1463-1
+  - name: 4.22.5-0d2d314-1
     revision: 1
     contentID: 0d2d3148cd1faa581e3d2924cdd8e9122d298de41cda51cf4e55fcdc1f5d1463
     components:
@@ -159,7 +168,7 @@ status:
     - image:
         digest: quay.io/openshift/cluster-api-provider-aws@sha256:00000000...
         profile: default
-  - name: 4.22.6-873bdf9a2a6a324231a06ce04b4d52f781022493ca0480bfb2edcb8d22ae1c9b-2
+  - name: 4.22.6-873bdf9-2
     revision: 2
     contentID: 873bdf9a2a6a324231a06ce04b4d52f781022493ca0480bfb2edcb8d22ae1c9b
     unmanagedCustomResourceDefinitions:
@@ -198,11 +207,13 @@ This metadata will be used to determine whether the profile will be installed.
 
 Example `metadata.yaml`:
 ```yaml
+attributes:
+  type: infrastructure
+  version: v2.10.0
+installOrder: 20
+name: cluster-api-provider-aws
 ocpPlatform: AWS
-providerImageRef: registry.ci.openshift.org/openshift:aws-cluster-api-controllers
-providerName: cluster-api-provider-aws
-providerType: infrastructure
-providerVersion: v2.10.0
+selfImageRef: registry.ci.openshift.org/openshift:aws-cluster-api-controllers
 ```
 
 ### Risks and Mitigations
@@ -222,14 +233,18 @@ This means:
 The installer now scans a fixed set of images for manifests.
 These images are contained in a ConfigMap in the installer namespace which is managed by CVO.
 The images in this ConfigMap are all specified by digest, and are part of the release payload.
-
 Anybody who is able to both modify this ConfigMap and restart the installer would be able to load manifests from an arbitrary image.
-Given that RBAC to modify ConfigMaps is more common than RBAC to modify Deployments, it might be safer to embed the image list directly in the installer's Deployment.
-We are not planning to make this change at this time.
+
+As future work, it may be possible to grant the installer an aggregated role with minimal initial permissions.
+In-payload providers would be responsible for defining a role with sufficient privilege to install the provider's payload, and adding that to the aggregated role.
+This 'installation RBAC' would be installed by CVO.
+I believe CAPI uses a similar model to enable infrastructure providers to allow core CAPI components to manage their custom resources.
+We do not plan to implement this feature initially, but it may be a way to useful reduce the RBAC requirements of the installer.
 
 ### Drawbacks
 
-- Not  using CVO to manage the entirety of the CAPI providers installation means there's an extra layer of operator management within the OpenShift cluster. That said this is not an uncommon pattern, but rather it is the norm when it comes to perform custom deploying behaviour in OpenShift. See for example MAO, CCMO, CSO, CNO.
+- Not  using CVO to manage the entirety of the CAPI providers installation means there's an extra layer of operator management within the OpenShift cluster.
+  That said this is not an uncommon pattern, but rather it is the norm when it comes to perform custom deploying behaviour in OpenShift. See for example MAO, CCMO, CSO, CNO.
 - Not using Upstream Cluster API Operator (which uses the default clusterctl contract) to apply the CAPI providers might require extra downstream work in the future to adapt the manifests before applying them if their format/assumptions change. Worth noting here that clusterctl currently handles API storage version changes,
 which will now need to be handled differently. Within OpenShift we can make use of the [kube-storage-version-migrator-operator](https://github.com/openshift/cluster-kube-storage-version-migrator-operator) crafting a [migration request](https://github.com/kubernetes-sigs/kube-storage-version-migrator/blob/60dee538334c2366994c2323c0db5db8ab4d2838/pkg/apis/migration/v1alpha1/types.go#L30)
 to easily handle one off migrations of CAPI CRDs storage version, later tombstoning the migration request manifest.
