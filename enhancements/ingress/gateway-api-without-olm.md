@@ -315,32 +315,6 @@ When CRDs exist but do not contain CIO or OSSM management labels:
 Layered products can use the `GatewayClass` condition to determine whether they can
 operate on the current cluster.
 
-The following diagram illustrates the CRD management decision flow:
-
-```mermaid
-flowchart TD
-    Start[CIO Reconciles Gateway API] --> CheckCRD{Do Istio CRDs exist?}
-    CheckCRD -->|No| InstallCRD[Install CRDs with CIO labels]
-    CheckCRD -->|Yes| CheckOwner{Check CRD labels}
-
-    CheckOwner -->|Has 'ingress.operator.openshift.io/owned'| UpdateCRD[Update CRDs to current version]
-    CheckOwner -->|Has 'olm.managed: true'| WatchOLM[Watch OSSM subscription]
-    CheckOwner -->|No management labels| SetCondition[Set CompatibleIstioCRDs=False]
-
-    WatchOLM --> SubRemoved{Subscription removed?}
-    SubRemoved -->|Yes| TakeOwnership[Take ownership and update CRDs]
-    SubRemoved -->|No| Continue[Continue monitoring]
-
-    SetCondition --> UserAction{User action?}
-    UserAction -->|Removes CRDs| InstallCRD
-    UserAction -->|Adds CIO label| UpdateCRD
-    UserAction -->|No action| Continue
-
-    InstallCRD --> Complete[CRDs managed by CIO]
-    UpdateCRD --> Complete
-    TakeOwnership --> Complete
-```
-
 #### GatewayClass Condition
 
 **Note**: Adding conditions is a soft requirement for this Enhancement Proposal. While
