@@ -319,7 +319,6 @@ To detect the failure modes in a support situation, admins can look at the clust
 * CAPI on OCP enhancements from the past:
   * [Cluster API Integration](https://github.com/openshift/enhancements/blob/master/enhancements/machine-api/cluster-api-integration.md)
 
-
 ## Alternatives (Not Implemented)
 
 * **Extend CVO capabilities to selectively deploy CAPI providers manifests**
@@ -417,3 +416,8 @@ The standard modifications made by `manifests-gen` are detailed below.
   * Set resource requests of all containers to `cpu: 10m` and `memory: 50Mi`.
   * Remove resource limits from all containers.
   * Set the terminationMessagePolicy of all containers to `FallbackToLogsOnError`.
+
+## TODO
+
+* Theo: Add a more complete description of Revisions.
+* Matt: Clarify which 'content' is covered by 'contentID'.
