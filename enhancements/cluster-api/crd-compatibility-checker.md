@@ -97,6 +97,7 @@ The responsibilities of each are as follows:
 * Communicates API version deprecation lifecycles to other CRD users.
 * Runs validating and mutating webhooks for all namespaces appropriate to the Adopting manager's storage version[^adopting-manager-webhooks].
 [^adopting-manager-webhooks]: Although note that the CRD user may run additional validating and mutating webhooks against objects in their own namespace.
+* Configures the Cluster CAPI Operator to disable management of the CRDs that it owns.
 
 Note that the Adopting Manager is also expected to be a CRD User.
 
@@ -158,9 +159,11 @@ It is the responsibility of the Adopting Manager to communicate this clearly.
 
 ### Definition of compatible
 
-A CRD is compatible with a compatibility requirement if:
-* All fields defined in the compatibility requirement are present
-* **TODO**: ...other things
+A CRD is considered compatible with a compatibility requirement if all fields defined in the compatibility requirement are present.
+Any additional fields are permitted as the object validation flow will prune these such that the controllers will never observe fields they do not support.
+
+Validation tightening and loosening is permitted. Object validation will ensure that the tighter of the requirement or live CRD will take effect.
+When the live CRD has tighter validation, the controllers will still be able to read all values permitted.
 
 ### Workflow Description
 
@@ -274,6 +277,7 @@ spec:
       type: YAML
     excludedFields:
     - path: "status.deprecated"
+      versions:
       - v1beta2
     requiredVersions:
       # The v1beta1 version was added because we observed an annotation on a Deployment in OpenStack's
@@ -369,7 +373,7 @@ spec:
     - path: "status.deprecated"
       # versions are the API versions the field is excluded from.
       # When not specified, the field is excluded from all versions.
-      # versions: []
+      versions: []
     # requiredVersions specifies a subset of the CRD's API versions which will be
     # asserted for compatibility.
     requiredVersions:
@@ -378,7 +382,7 @@ spec:
       # additionalVersions which was also selected by the default selection. The
       # selections will be merged and deduplicated.
       additionalVersions:
-      # - v1
+      - v1
       # defaultSelection specifies a method for automatically selecting a set of
       # versions to require.
       # Valid options are StorageOnly and AllServed.
@@ -492,9 +496,6 @@ Delete will deny/warn if any CompatibilityRequirement references it in `status.c
 
 ##### Dynamically created by `objectSchemaValidation`
 
-[!NOTE]
-Implementation of `objectSchemaValidation` will be deferred to a second phase to be implemented after the CRD validation webhook is fully implemented and integrated.
-
 If a CompatibilityRequirement defines `objectSchemaValidation` we will dynamically create a new `ValidatingWebhookConfiguration` to implement it.
 This webhook will ensure that matching objects conform to the CRD given in `compatibilitySchema`, which may be different to the current CRD version.
 It will either warn or deny admission based on the setting of `objectSchemaValidation.action`.
@@ -592,9 +593,8 @@ The benefits of enabling safe multi-actor CRD management outweigh these drawback
 
 ## Open Questions [optional]
 
-1. What is the specific algorithm for determining CRD compatibility?
-2. How should the system handle CRD conversion webhooks during compatibility checks?
-3. What is the performance impact of the admission webhooks on high-traffic clusters?
+1. What is the performance impact of the admission webhooks on high-traffic clusters?
+  - We will measure the performance using existing metricsand look at optimising this post GA.
 
 ## Test Plan
 
