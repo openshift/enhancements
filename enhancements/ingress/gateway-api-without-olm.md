@@ -310,16 +310,22 @@ When CRDs exist and contain the labels `olm.managed: "true"` and `operators.core
 When CRDs exist but do not contain CIO or OSSM management labels:
 1. `CIO` sets the `CompatibleIstioCRDs` condition on the `GatewayClass` status to `False` with reason `UnknownManagement` to indicate the CRD management state
 2. If the user removes the third-party CRDs, `CIO` will install its own CRDs and update the condition to reflect CIO management
-3. Alternatively, if the user adds the `ingress.operator.openshift.io/owned` label to the existing CRDs, `CIO` will take ownership and manage them
+3. Alternatively, if the user adds the `ingress.operator.openshift.io/owned` label to the existing CRDs, `CIO` will take ownership and replace 
+them with the supported version
+
+**Scenario 5: CRDs Exist with Mixed Management**
+
+When some CRDs have CIO labels and others have OSSM or third-party labels:
+1. `CIO` sets the `CompatibleIstioCRDs` condition to `False` with reason `ManagementMismatch`
+2. The condition message identifies which CRDs are in which management state
+3. If the user removes the third-party CRDs, `CIO` will install its own CRDs and update the condition to reflect CIO management
+4. Alternatively, if the user adds the `ingress.operator.openshift.io/owned` label to the existing CRDs, `CIO` will take ownership and replace 
+them with the supported version
 
 Layered products can use the `GatewayClass` condition to determine whether they can
 operate on the current cluster.
 
 #### GatewayClass Condition
-
-**Note**: Adding conditions is a soft requirement for this Enhancement Proposal. While
-it provides valuable observability for layered products, its implementation is not
-mandatory for this enhancement proposal and can be delivered in a future release if needed.
 
 To provide visibility into Istio CRD management for layered products, `CIO` adds
 a condition to the `GatewayClass` status that indicates the compatibility and
@@ -342,7 +348,15 @@ The condition uses the following structure:
 
 * **Status: `False`, Reason: `UnknownManagement`**
   - The CRDs were installed by a third party
-  - Message: Indicates the reason of the status and that the user can either remove the CRDs to allow CIO to install its own version, or add the `ingress.operator.openshift.io/owned` label to allow CIO to take ownership and manage them
+  - Message: Indicates the reason for the status and that the user can either remove the CRDs to allow CIO to install its own version, or add the `ingress.operator.openshift.io/owned` label to allow CIO to take ownership and manage them
+
+* **Status: `False`, Reason: `ManagementMismatch`**
+  - Happens when CRDs are managed inconsistently (different management labels for CRDs in the Istio group)
+  - Message: Indicates the reason for the status and identifies the mismatched CRDs (e.g., which CRD is in which management state)
+
+The sail-operator library must provide information about which CRDs are being managed
+(this information does not need to be dynamic and can be a public constant), so that `CIO`
+can watch only these CRDs to calculate the GatewayClass state.
 
 ### API Extensions
 
