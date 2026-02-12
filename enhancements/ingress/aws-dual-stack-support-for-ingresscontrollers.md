@@ -6,9 +6,13 @@ reviewers:
   - "@sadasu"
   - "@tthvo"
   - "@nrb"
+  - "@davidesalerno"
+  - "@rfredette"
   - "@Miciah"
 approvers:
   - "@sadasu"
+  - "@davidesalerno"
+  - "@rfredette"
   - "@Miciah"
 api-approvers:
   - None
@@ -37,7 +41,8 @@ feature only, configured at cluster installation time.
 
 AWS NLBs support dual-stack IP address type, allowing
 services to be accessible via both IPv4 and IPv6 addresses. However,
-OpenShift Ingress does not currently support this capability. As IPv6 adoption increases and organizations require
+OpenShift does not currently support dual-stack for IngressController publishing services.
+As IPv6 adoption increases and organizations require
 dual-stack networking for compliance, accessibility, or future-proofing
 their infrastructure, OpenShift needs to provide a way to configure
 IngressController publishing services with dual-stack support.
@@ -82,6 +87,8 @@ is specifically targeted at clusters using NLBs on AWS.
 
 * Forbidding the creation of an IngressController with CLB type on day-2, as well as changing the type to CLB.
 
+* Supporting dual-stack for Gateway API implementation.
+
 ## Proposal
 
 The implementation will automatically configure the publishing service for IngressControllers
@@ -98,9 +105,9 @@ dual-stack. The implementation will:
    `DualStackIPv4Primary` or `DualStackIPv6Primary`), automatically configure
    the load balancer service's `ipFamilies` and `ipFamilyPolicy` fields:
    - For `DualStackIPv4Primary`: set `service.spec.ipFamilies: ["IPv4", "IPv6"]`
-     and `service.spec.ipFamilyPolicy: PreferDualStack`
+     and `service.spec.ipFamilyPolicy: RequireDualStack`
    - For `DualStackIPv6Primary`: set `service.spec.ipFamilies: ["IPv6", "IPv4"]`
-     and `service.spec.ipFamilyPolicy: PreferDualStack`
+     and `service.spec.ipFamilyPolicy: RequireDualStack`
    - The AWS cloud provider (cloud-provider-aws) will read these service
      fields and configure the NLB with dual-stack support accordingly.
 
@@ -431,7 +438,7 @@ Diagnosis:
 3. Review ingress-operator logs: `oc -n openshift-ingress-operator logs deployment/ingress-operator` -
    look for messages about reading IP family from Infrastructure CR.
 4. Check load balancer service: `oc -n openshift-ingress get svc router-<name> -o yaml` -
-   verify it has `spec.ipFamilies: ["IPv4", "IPv6"]` (or `["IPv6", "IPv4"]`) and `spec.ipFamilyPolicy: PreferDualStack`,
+   verify it has `spec.ipFamilies: ["IPv4", "IPv6"]` (or `["IPv6", "IPv4"]`) and `spec.ipFamilyPolicy: RequireDualStack`,
    and a hostname in `status.loadBalancer.ingress[].hostname`.
 5. Verify the AWS NLB hostname resolves to both IPv4 and IPv6: `dig A <nlb-hostname>` and `dig AAAA <nlb-hostname>`.
 6. Verify platform is AWS and load balancer type is NLB (Classic LB does
