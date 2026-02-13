@@ -175,7 +175,23 @@ This adds the installNetworkObservability field in the Network CRD under the spe
 
 ### Topology Considerations
 
-All topologies are supported where CNO is supported, so this excludes MicroShift.  Due to resource constraints, Single Node OpenShift (SNO) might default to off.
+#### Hypershift / Hosted Control Planes
+
+This proposal doesn't change how Network Observability works in a Hosted Control Plane (HCP) environment. Network Observability is supported on host clusters and the management cluster.
+
+#### Standalone Clusters
+
+This proposal applies to standalone clusters.
+
+#### Single-node Deployments or MicroShift
+
+Due to resource constraints, Single Node OpenShift (SNO) might default to off.
+
+MicroShift is not supported since Network Observability and CNO are not supported on that platform.
+
+#### OpenShift Kubernetes Engine
+
+OpenShift Kubernetes Engine is supported.
 
 ### Implementation Details/Notes/Constraints
 
@@ -234,9 +250,13 @@ Performance testing will be done to optimize the use of resources and to determi
 
 ## Graduation Criteria
 
-Network Observability reached GA back in January 2023.  Because the feature is to simply enable Network Observability, which has already existed for 3+ years, the plan is to forego the Tech Preview and provide GA requirements.
+### Dev Preview -> Tech Preview
 
-### GA Requirements
+Network Observability reached GA back in January 2023.  Because the feature is to simply enable Network Observability, which has already existed for 3+ years, the plan is to forego the Dev Preview and Tech Preview, and go directly to GA.
+
+### Tech Preview -> GA
+
+Here are the GA requirements.
 
 * [NETOBSERV-2533](https://issues.redhat.com/browse/NETOBSERV-2533) Performance testing in Loki-less mode with default settings
     - Provide guidance on CPU, memory, and storage resources
@@ -246,6 +266,10 @@ Network Observability reached GA back in January 2023.  Because the feature is t
 * [NETOBSERV-2535](https://issues.redhat.com/browse/NETOBSERV-2535) Security audit on Network Observability code
 * [NETOBSERV-2428](https://issues.redhat.com/browse/NETOBSERV-2428) New Service deployment model
 * User facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/)
+
+### Removing a deprecated feature
+
+N/A
 
 ## Upgrade / Downgrade Strategy
 
