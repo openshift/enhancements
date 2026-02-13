@@ -10,10 +10,11 @@ reviewers:
   - "@pavolloffay"
   - "@jan--f"
   - "@abhat"
+  - "@simonpasquier"
 approvers:
 api-approvers:
 creation-date: 2025-09-30
-last-updated: 2025-12-09
+last-updated: 2026-02-12
 tracking-link:
   - https://issues.redhat.com/browse/OCPSTRAT-2469
 see-also:
@@ -53,13 +54,15 @@ Being able to manage and observe the network in an OpenShift cluster is critical
 
 Currently, Network Observability is an optional operator that many customers are not aware of.  A majority of customers using OpenShift Networking do not have Network Observability installed.  Customers are missing out on features that they should have and have already paid for.
 
-By enabling Network Observability at install time, customers don’t need to know about installing a separate operator.  Network observability should just be a part of networking and not thought of as a separate item.  However, there are a few scenarios where you don’t want Network Observability, so there is a way to opt out.
+By enabling Network Observability at install time, customers don’t need to know about installing a separate operator.  Network observability should just be a part of networking and not thought of as a separate component.  However, there are a few scenarios where you might not want Network Observability, so there is an easy way to opt out.
 
-There is no one size fits all solution in terms of configuring Network Observability, but the goal is to keep this part simple, while still providing as much value as possible given the constraints, and make it an easy way to change parameters on day 2.
+There is no one-size-fits-all solution in terms of configuring Network Observability, but the goal is to keep this part simple, while still providing as much value as possible given the constraints, and make it an easy way to change parameters on day 2.
 
 ### Non-Goals
 
 There are other proposals to make Network Observability more visible and prominent, such as displaying a panel that would describe the features of Network Observability and provide a button to install it.  However, this feature enhancement addresses [OCPSTRAT-2469](https://issues.redhat.com/browse/OCPSTRAT-2469) that explicitly calls for Network Observability to be up and running after install.
+
+There is a separate effort to add Network Observability to OpenShift Assisted Installer ([NETOBSERV-2486](https://issues.redhat.com/browse/NETOBSERV-2486)).  That addresses some installation cases but not all.
 
 Network Observability Operator manages the components, such as flowlog pipelines.  Therefore, there is no need to consider the lifecycle management, since that will not change.
 
@@ -88,7 +91,7 @@ If the value is true or doesn't exist, Network Observability is enabled.  If it 
 
 The actual enabling of Network Observability is done in the Cluster Network Operator (CNO).  The rationale is that we want the network observability feature to be part of networking.  This is as opposed to being part of the general observability or as a standalone entity.  Yet, there is still a separation at the lower level so that the two can be independently developed and released at different times, particularly for bug fixes.
 
-In CNO, it adds a new controller for observability and adds it to the manager.  The controller is a single Go file where the Reconciler is called initially and reads the state of the installNetworkObservability field.  If true, it does the following:
+In CNO, it adds a new controller for observability and adds it to the manager.  The controller is a single Go file where the Reconciler reads the state of the installNetworkObservability field.  If true, it does the following:
 
 1. Check if Network Observability Operator (NOO) is installed. If yes, exit.
 2. Create "openshift-netobserv-operator" namespace if it doesn't exist.
@@ -113,7 +116,7 @@ networking:
 
 Listing 2: install-config.yaml
 
-The `installNetworkObservability` field is passed on to CNO to set the field of the samename in the Network CRD.  If this field is set to true or doesn’t exist, it sets the Network CR’s `installNetworkObservability` field to true.  To *not* enable Network Observability, set it to false as shown above.  This then sets the Network CR’s `installNetworkObservability` field to false.
+The `installNetworkObservability` field is passed on to CNO to set the field of the same name in the Network CRD.  If this field is set to true or doesn’t exist, it sets the Network CR’s `installNetworkObservability` field to true.  To *not* enable Network Observability, set it to false as shown above.  This then sets the Network CR’s `installNetworkObservability` field to false.
 
 ### FlowCollector Custom Resource (CR)
 
@@ -164,7 +167,7 @@ Finally, to create the cluster, enter:
 
 `$ openshift-install create cluster`
 
-When you bring up the OpenShift web console, you should see that NOO is installed just like it would be, had you gone to **Ecosystem > Software Catalog** (formerly **Operators > OperatorHub** in 4.19 or earlier) to install **Network Observability** from Red Hat (not the Community version).  In **Installed Operators**, there should be a row for **Network Observability**.  And in the **Observe** menu, there should be a panel named **Network Traffic**.
+When you bring up the OpenShift web console, you should see that NOO is installed just like it would be, had you gone to **Ecosystem > Software Catalog** to install **Network Observability** from Red Hat (not the Community version).  In **Installed Operators**, there should be a row for **Network Observability**.  In the **Observe** menu, there should be a panel named **Network Traffic**.
 
 ### API Extensions
 
@@ -172,7 +175,7 @@ This adds the installNetworkObservability field in the Network CRD under the spe
 
 ### Topology Considerations
 
-All topologies are supported where CNO is supported, so this excludes MicroShift.
+All topologies are supported where CNO is supported, so this excludes MicroShift.  Due to resource constraints, Single Node OpenShift (SNO) might default to off.
 
 ### Implementation Details/Notes/Constraints
 
@@ -180,10 +183,13 @@ See PoC at [https://github.com/stleerh/cno-observability](https://github.com/stl
 
 ### Risks and Mitigations
 
-* Network Observability requires CPU, memory, and storage that the customer might not be aware of.
-  Mitigation: The default setting stores only metrics at a high sampling interval to minimize the use of resources. If this isn’t sufficient, more fine-tuning and filtering can be done in the provided default configuration (e.g. filtering on specific interfaces only).
+* Network Observability requires CPU, memory, and storage that the customer might not be aware of.  See the Test Plan section for the target goals.
+
+  **Mitigation:** The default setting stores only metrics at a high sampling interval to minimize the use of resources. If this isn’t sufficient, more fine-tuning and filtering can be done in the provided default configuration (e.g. filtering on specific interfaces only).
+
 * Some of the Network Observability features aren’t enabled in order to use minimal resources.  Therefore, users might not know about these features.
-  Mitigation: Determine what features, particularly related to troubleshooting, can be enabled with minimal CPU and memory impact. Mention other features in the panels.
+
+  **Mitigation:** Determine what features, particularly related to troubleshooting, can be enabled with minimal CPU and memory impact. Mention other features in the panels.
 
 ### Drawbacks
 
@@ -209,9 +215,7 @@ One of the central questions boils down to, "Do we want to position Network Obse
 
 Instead of CNO enabling Network Observability, the Cluster Observability Operator (COO) can take this responsibility.  COO is becoming the operator and the central place for core observability components to be installed.  In addition, it provides services like metrics, Perses for dashboards, and troubleshooting via Korrel8r (Observability Signal Correlation).
 
-One major issue is that COO is itself an optional operator, so it can’t enable Network Observability on day 0, because it has to be installed first.  While the author is advocating for COO to be enabled by default for other reasons, it might take longer to get there if that happens.
-
-Architecturally, COO provides common observability services and functions.  Component-based observability, such as Network Observability, should be a layer on top of COO rather than a part of COO, much like observability is for service mesh and virtualization.
+One critical issue is that COO is itself an optional operator, so it can’t enable Network Observability on day 0, because it has to be installed first.  Architecturally, COO provides common observability services and functions.  Component-based observability, such as Network Observability, should be a layer on top of COO rather than a part of COO, much like observability is for service mesh and virtualization.
 
 ### Alternative #3: Have CVO enable Network Observability
 
@@ -223,13 +227,14 @@ Consider the following in developing a test plan for this enhancement:
 
 - Different architectures
 - Different size clusters
-- Does it need to integrate with OpenShift’s CI/CD?
+- Hosted Control Plane (HCP) environment
+- Add e2e tests in [OpenShift Release Tooling](https://github.com/openshift/release)
 
 Performance testing will be done to optimize the use of resources and to determine the specific FlowCollector settings, with the goal of using less than 5% resources (CPU and memory) and an ideal target of less than 3%.
 
 ## Graduation Criteria
 
-Network Observability reached GA back in January 2023.  Because the feature is to simply enable Network Observability, which has already existed for three years, the plan is to forego the Tech Preview and provide GA requirements.
+Network Observability reached GA back in January 2023.  Because the feature is to simply enable Network Observability, which has already existed for 3+ years, the plan is to forego the Tech Preview and provide GA requirements.
 
 ### GA Requirements
 
