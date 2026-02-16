@@ -1,5 +1,5 @@
 ---
-title: Enable Network Observability on Day 0
+title: enable-network-observability-on-day-0
 authors:
   - "@stleerh"
 reviewers:
@@ -12,7 +12,11 @@ reviewers:
   - "@abhat"
   - "@simonpasquier"
 approvers:
+  - "@jotak"
+  - "@knobunc"
 api-approvers:
+  - "@jotak"
+  - "@knobunc"
 creation-date: 2025-09-30
 last-updated: 2026-02-12
 tracking-link:
