@@ -142,7 +142,8 @@ The cluster-ingress-operator will make the following changes:
     installation (4.21) to Helm-based (4.22), delete the `Istio` CR to
     remove the control plane (istiod) while leaving the data plane (Envoy)
     operational, wait for sail-operator cleanup, then reinstall the
-    control plane via Helm with no data plane downtime.
+    control plane via Helm with no data plane downtime. The subscription of OSSM
+    will NOT be removed automatically.
 
 See the [Istio CRD Management](#istio-crd-management) section for details about Istio CRDs installation
 and lifecycle management.
@@ -180,7 +181,7 @@ API was previously enabled via OLM (existing `Istio` CR detected).
     * Istio CRDs are not removed, as they have the annotation `helm.sh/resource-policy: keep`
 4.  The cluster-ingress-operator installs istiod using sail-operator
     libraries via Helm.
-    * The OSSM subscription is not removed automatically. If the user manually removes the subscription,
+    * The OSSM subscription is NOT removed automatically. If the user manually removes the subscription,
     CIO will take ownership and update the existing Istio CRDs to the version shipped with
     the current bundled Helm chart.
 5.  Existing `Gateway` and route resources continue functioning with no data
@@ -644,18 +645,13 @@ solution without requiring upstream changes.
 
 ## Open Questions
 
-1. **Sail-operator library readiness**: Will the OSSM team's enhanced
-   library (`pkg/install`) be production-ready for 4.22? Should the initial
-   implementation use only the lower-level sail-operator libraries, or wait
-   for the enhanced library?
-
-2. **Go module conventions for sail-operator**: Would adding 'v' prefixes to
+1. **Go module conventions for sail-operator**: Would adding 'v' prefixes to
    tags (e.g., v1.27.1 instead of 1.27.1) in the sail-operator repository
    simplify dependency management and align with Go module conventions? Note
    that sail-operator already uses semantic versioning, this question is about
    adopting the 'v' prefix convention.
 
-3. **Webhook management**: Who manages the webhook certificates, and is this
+2. **Webhook management**: Who manages the webhook certificates, and is this
    still a concern with modern Kubernetes? During implementation, confirm that
    the sail-operator library creates webhooks that only select resources with
    the appropriate revision label to avoid conflicts.
@@ -663,6 +659,12 @@ solution without requiring upstream changes.
    **Answer**: Webhook certificates are managed by istiod itself. The ingress
    operator does not need to handle certificate generation or rotation for the
    webhooks.
+
+3. **OLM standards and CRD management**: As of today, OLM marks all of its managed
+   resources with `olm.managed: "true"` label. When a subscription is removed, the
+   CRDs are kept with this label even if not managed by OLM anymore.
+   We need a confirmation from OLM team that this is the expected behavior (and not a bug),
+   and also what is the proper way to validate that a subscription and operators have been removed.
 
 ## Test Plan
 
