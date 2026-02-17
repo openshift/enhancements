@@ -98,12 +98,11 @@ The actual enabling of Network Observability is done in the Cluster Network Oper
 In CNO, it adds a new controller for observability and adds it to the manager.  The controller is a single Go file where the Reconciler reads the state of the installNetworkObservability field.  If true, it does the following:
 
 1. Check if Network Observability Operator (NOO) is installed. If yes, exit.
-2. Create "openshift-netobserv-operator" namespace if it doesn't exist.
-3. Install NOO using OLM's OperatorGroup and Subscription.
-4. Wait for NOO to be ready and the OpenShift web console to be available.
-5. Create the "netobserv" namespace if it doesn't exist.
-6. Check if a FlowCollector instance exists. If yes, exit.
-7. Create a FlowCollector instance.
+2. Install NOO using OLM's OperatorGroup and Subscription.
+3. Wait for NOO to be ready and the OpenShift web console to be available.
+4. Create the "netobserv" namespace if it doesn't exist.
+5. Check if a FlowCollector instance exists. If yes, exit.
+6. Create a FlowCollector instance.
 
 The Reconciler leverages the existing framework and reuses the concept of client, scheme, and manager.  It provides a clear ownership by having a separate controller for it.  If the Network CR changes, the Reconciler will repeat the above steps.  Note it doesn’t monitor NOO or any of NOO's components for changes, and it doesn’t do any upgrades.  That is still the responsibility of NOO.
 
@@ -181,7 +180,7 @@ This adds the installNetworkObservability field in the Network CRD under the spe
 
 #### Hypershift / Hosted Control Planes
 
-This proposal doesn't change how Network Observability works in a Hosted Control Plane (HCP) environment. Network Observability is supported on host clusters and the management cluster.
+This proposal doesn't change how Network Observability works in a Hosted Control Plane (HCP) environment. Network Observability is supported on host clusters and the management cluster, therefore it will be enabled by default.
 
 #### Standalone Clusters
 
@@ -250,7 +249,7 @@ Consider the following in developing a test plan for this enhancement:
 - Hosted Control Plane (HCP) environment
 - Add e2e tests in [OpenShift Release Tooling](https://github.com/openshift/release)
 
-Performance testing will be done to optimize the use of resources and to determine the specific FlowCollector settings, with the goal of using less than 5% resources (CPU and memory) and an ideal target of less than 3%.
+Performance testing will be done to optimize the use of resources and to determine the specific FlowCollector settings, with the goal of using less than 5% resources (CPU and memory) and an ideal target of less than 3%, including external components that are affected.
 
 ## Graduation Criteria
 
