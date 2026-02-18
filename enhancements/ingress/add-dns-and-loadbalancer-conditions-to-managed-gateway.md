@@ -11,11 +11,12 @@ approvers:
 api-approvers:
   - None
 creation-date: 2025-10-21
-last-updated: 2025-10-21
+last-updated: 2026-02-18
 tracking-link:
   - https://issues.redhat.com/browse/NE-1816
 see-also:
   - "/enhancements/ingress/configurable-dns-loadbalancerservice.md"
+  - "/enhancements/ingress/gateway-api-with-cluster-ingress-operator.md"
 replaces:
   - N/A
 superseded-by:
@@ -33,8 +34,6 @@ namespace. Specifically, it adds `DNSReady` conditions to each listener's status
 Gateway status (in `status.conditions[]`). These conditions provide visibility
 into per-listener DNS provisioning and gateway-level cloud LoadBalancer service
 status, similar to the existing conditions on OpenShift IngressController resources.
-This feature is scoped to cloud platform deployments where native LoadBalancer
-services are available (AWS, Azure, GCP, etc.).
 
 ## Motivation
 
@@ -68,18 +67,20 @@ that reflects the state of cloud LoadBalancer service provisioning
 IngressController DNS and LoadBalancer conditions by reusing the same status
 computation logic
 * Scope the feature to Gateways in the `openshift-ingress` namespace that are managed
-by Openshift Gateway Class (`openshift.io/gateway-controller/v1`)
+by OpenShift gateway controller name (`openshift.io/gateway-controller/v1`)
 * Support cloud platforms with native LoadBalancer services (AWS, Azure, GCP, etc.)
 
 ### Non-Goals
 
-* Supporting environments where DNS is not managed by Openshift
+* Supporting environments where DNS is not managed by OpenShift
 * Adding these conditions to user-managed Gateway resources outside the 
 `openshift-ingress` namespace
 * Modifying or changing existing IngressController condition behavior or semantics
 * Introducing custom condition types beyond DNS and LoadBalancer at this time
 * Automatic remediation of DNS or LoadBalancer failures (this enhancement 
 provides visibility only)
+* Reporting status of DNS records managed by `external-dns`. Only records managed
+by `cluster-ingress-operator` are supported
 
 ## Proposal
 
@@ -111,8 +112,8 @@ functions
 convert to Gateway API condition types
 
 The gateway-status controller will:
-1. Watch Gateway resources in `openshift-ingress` namespace that specify the
-OpenShift Gateway Class
+1. Watch Gateway resources in `openshift-ingress` namespace that specify any
+GatewayClass that specifies OpenShift's gateway controller name.
 2. Discover associated DNSRecord and Service resources using a matching gateway name in the
 `gateway.networking.k8s.io/gateway-name` label
 3. For each listener in the Gateway:
@@ -124,8 +125,10 @@ OpenShift Gateway Class
    - Fetch the single Service resource for the Gateway
    - Compute LoadBalancer condition using the shared status logic
    - Update the Gateway's status in `status.conditions[]`
-5. Fetch cluster DNS and Infrastructure configuration
-6. Patch Gateway status with the computed conditions including ObservedGeneration
+5. Fetch cluster DNS configuration, that will be used to define `DNSReady` condition
+   based on what are the managed zones.
+6. Patch Gateway status with the computed `LoadBalancerReady` and `DNSReady` status
+conditions, including setting `ObservedGeneration` on these two conditions.
 
 This is a purely additive change that does not modify existing Gateway behavior 
 or APIs. The conditions provide read-only status information to users and 
@@ -139,23 +142,25 @@ and troubleshoots platform issues.
 **Customer/Developer** is a user who deploys applications and monitors
 application ingress health.
 
+**Gateway API controller** is the controller that runs in the cluster and reconciles
+Gateway API resources.
+
 **Ingress Operator** is the OpenShift operator responsible for managing ingress
 resources including Gateways and IngressControllers.
 
-**DNS Operator** is responsible for managing DNS records for cluster ingress.
-
-**Cloud Provider API** is the underlying cloud infrastructure that provisions
-LoadBalancer services.
+**Load Balancer controller** is the underlying load balancer controller that provisions
+Load balancer services. The load balancer can be provisioned on a cloud provider, or
+on any other service that implements a Kubernetes-compatible Load Balancer.
 
 #### Normal Flow (Success Case)
 
 1. Customer creates or updates a Gateway resource with a single or multiple listeners in the `openshift-ingress` namespace
 2. Gateway API controller (Istio) creates LoadBalancer service for the Gateway
-3. Cloud Provider API provisions the LoadBalancer successfully
-4. LoadBalancer service status is updated with external IP/hostname
+3. Load Balancer controller provisions the LoadBalancer successfully
+4. Load Balancer controller  updates the LoadBalancer service status with the external IP address or host name
 5. Cluster Ingress Operator detects the Gateway resource and begins reconciliation
-6. Cluster Ingress Operator initiates DNS record provisioning through its own dns controller,
-creating one DNSRecord per unique listener hostname
+6. Cluster Ingress Operator initiates DNS record provisioning through `gateway-service-dns` controller,
+that creates one DNSRecord per unique listener hostname
 7. Cluster Ingress Operator dns controller successfully creates all DNS records and
 updates their status
 8. Gateway Status Controller updates Gateway condition `LoadBalancerReady=True`
@@ -184,7 +189,7 @@ DNSRecord resource
 has DNS issues by checking each listener's conditions
 8. Cluster Administrator resolves the DNS issue (e.g., increases quota,
 fixes zone configuration)
-9. DNS Operator retries and successfully provisions the DNS record
+9. Cluster Ingress Operator DNS controller retries and successfully provisions the DNS record
 10. Gateway Status Controller updates the affected listener's condition `DNSReady=True` with
 reason "NoFailedZones"
 
@@ -192,7 +197,7 @@ reason "NoFailedZones"
 
 1. Customer creates a Gateway resource in the `openshift-ingress` namespace
 2. Gateway API controller creates LoadBalancer service for the Gateway
-3. Cloud Provider API fails to provision LoadBalancer (e.g., quota exceeded,
+3. Load Balancer controller fails to provision LoadBalancer (e.g., quota exceeded,
 subnet full, invalid configuration)
 4. LoadBalancer service remains in Pending state with event describing the error
 5. Gateway Status Controller updates Gateway condition `LoadBalancerReady=False`
@@ -201,8 +206,8 @@ with reason `LoadBalancerPending` and error details from service events
 infrastructure issue from the `LoadBalancerReady` condition message
 7. Cluster Administrator resolves the issue (e.g., increases quota, adjusts VPC
 configuration)
-8. Cloud Provider API successfully provisions the LoadBalancer
-9. LoadBalancer service status is updated with external IP/hostname
+8. Load Balancer controller successfully provisions the LoadBalancer
+9. Load Balancer controller  updates the LoadBalancer service status with the external IP address or host name
 10. Gateway Status Controller updates Gateway condition `LoadBalancerReady=True`
 with reason "LoadBalancerProvisioned"
 
@@ -257,8 +262,8 @@ sequenceDiagram
 
 ### API Extensions
 
-No API extension will be made, just conditions being added to the already existing 
-Gateway resource.
+- Adds new conditions to `gateways.gateway.networking.k8s.io` resources that
+represent the state of a Load Balancer and DNS Record provisioning
 
 ### Topology Considerations
 
@@ -279,15 +284,15 @@ DNS and LoadBalancer provisioning for the cluster's ingress infrastructure.
 
 For on-premises environments, the same behavior existing on Ingress Controllers is replicated
 to Gateway API status: the `LoadBalancerReady` will reflect the existence of a Load balancer
-controller on the environment, while `DNSReady` will reflect the DNS record provisioning status.
+controller on the environment, while `DNSReady` will reflect the DNS record provisioning status;
+namely, `DNSReady` will report `False` with a message indicating that OpenShift cannot manage
+DNS records on non-cloud infrastructure platforms.
 
 #### Single-node Deployments or MicroShift
 
 **Single-node OpenShift (SNO):**
 * Applicable only when SNO is deployed on a cloud platform with LoadBalancer support
-* On bare metal SNO deployments, LoadBalancer conditions would remain in `Unknown`
-or `False` state as LoadBalancer services are not available
-* DNS conditions apply regardless of platform if DNS records are being managed
+or it has some Load Balancer controller, like MetalLB installed.
 
 **MicroShift:**
 * This enhancement is not applicable to MicroShift deployments
@@ -400,7 +405,7 @@ has a different hostname and shows a DNS failure, while the LoadBalancer is work
 the entire Gateway.
 
 **Controller Architecture:**
-* A new `gateway-status` controller is added to the cluster-ingress-operator
+* A new "Gateway Status" controller is added to the Cluster Ingress Operator
 * Uses the controller-runtime framework with predicates to filter relevant Gateway resources
 * Creates a dedicated cache for Gateway API resources, limited to the operand namespace with managed fields stripped to reduce memory overhead
 * Uses direct API reader for events (instead of cache) to ensure access to the latest LoadBalancer failure events
@@ -518,21 +523,11 @@ conditions, this can be a problem.
 
 * Mitigation:
   - The implementation intentionally does NOT add `LoadBalancerManaged` or `DNSManaged`
-    conditions to Gateway resources to conserve the limited condition slots. These
-    "managed" conditions would always be `True` for Gateways in `openshift-ingress`
-    namespace and provide limited value compared to the "ready" conditions.
+    conditions to Gateway resources to conserve the limited condition slots.
   - An e2e test should be added to assert that the total number of conditions
     at both gateway and listener levels is consistent with the current Istio and Cluster
     Ingress Operator conditions. In case of change, the test should fail and engineering
     should verify if Istio is adding additional conditions.
-
-**Risk: Exposure of sensitive information in condition messages**
-* Mitigation: Sanitize error messages to remove any credentials or sensitive
-data before including in conditions
-
-**Risk: Compatibility with future Gateway API versions**
-* Mitigation: Use well-defined condition types that align with Kubernetes
-conventions and Gateway API patterns
 
 **Security Review:**
 * No new authentication or authorization mechanisms introduced
@@ -540,10 +535,6 @@ conventions and Gateway API patterns
 * Standard RBAC applies to Gateway resources
 * Cluster Ingress Operator cluster role needs a new permission to `UPDATE` and `PATCH`
 Gateway status subresource.
-
-**UX Review:**
-* Condition messages should be clear and actionable for both administrators and developers
-* Error messages should include enough detail to enable self-service troubleshooting
 
 ### Drawbacks
 
@@ -576,11 +567,13 @@ be confusing
 * We could map DNS/LB status into these existing conditions rather than adding new ones
 * Rejected because: Standard conditions don't provide the granularity needed to
 distinguish DNS vs. LoadBalancer issues
+* Additionally, Istio already sets the standard conditions and using the same conditions would conflict with Istio
+in case both controllers are updating the same conditions.
 
 **Alternative 2: Add conditions to all Gateway resources cluster-wide**
 * Could add these conditions to any Gateway resource, not just those in `openshift-ingress`
-* Rejected because: User-managed Gateways may not follow the same DNS/LB
-provisioning patterns, and this would create inconsistent behavior
+* Rejected because: It is out of the original scope of this EP, but may be reassessed
+as a followup of this enhancement.
 
 **Alternative 3: Create separate status CRD for infrastructure details**
 * Could create a new CRD (e.g., `GatewayInfrastructureStatus`) to hold DNS/LB information
@@ -609,9 +602,7 @@ status across all DNSRecords
 
 ## Open Questions [optional]
 
-1. What should the condition status be on platforms without LoadBalancer support (bare metal)?
-   - Proposed: The condition `LoadBalancerReady` will reflect the availability of the load
-   balancer provisioned by the Gateway API controller (Istio).
+N/A
   
 ## Test Plan
 
@@ -630,13 +621,13 @@ status across all DNSRecords
 * Create Gateway in `openshift-ingress` namespace with listeners and verify:
   - Gateway-level condition `LoadBalancerReady=True` in `status.conditions[]`
   - Each listener has `DNSReady=True` in `status.listeners[].conditions[]`
-* On the same test, verify that changing Gateway generation will bump the conditions `observedGeneration`
+* On the same test, verify that a change that implies the Gateway `metadata.generation` change will bump the conditions `observedGeneration`
 * On the same test, verify that the Gateway API controller (Istio) reconciliation
 does not replace OpenShift conditions
 * On the same test, verify the condition count is consistent with Istio and OpenShift
 added conditions (both at gateway and listener levels)
 * Create Gateway out of `openshift-ingress` and verify that no OpenShift condition is added
-* Create Gateway with wrong DNS Domain and verify that listener DNS conditions reflect the failure
+* Create Gateway with unmanaged DNS Domain and verify that listener DNS conditions reflect the failure
 in `status.listeners[].conditions[]`
 * Create Gateway with multiple listeners with different hostnames. Verify:
   - Each listener gets its own `DNSReady` condition in `status.listeners[].conditions[]`
@@ -692,8 +683,8 @@ these conditions will ignore them
 ## Version Skew Strategy
 
 This enhancement involves coordination between:
-* Ingress operator (adds conditions to Gateway status)
-* Gateway API controller (adds labels, creates services)
+* Ingress operator: adds conditions to Gateway status
+* Gateway API controller (Istio): adds labels on managed resources, creates services for Gateway resources
 
 **Version Skew Handling:**
 * No kubelet changes are involved
@@ -715,9 +706,8 @@ This enhancement involves coordination between:
 * Status conditions are a standard Kubernetes and Gateway API pattern and do not require API approval for new types
 
 **Impact on Existing SLIs:**
-* Negligible impact on API throughput: condition updates happen during normal reconciliation
-* No new API calls introduced; only status updates to existing Gateway resources
-* Expected number of managed Gateways in `openshift-ingress` namespace: typically 1-10 per cluster
+* Negligible impact on API write throughput: condition updates happen during normal reconciliation
+* Negligible impact on API read throughput: Query for resources happens on the cached client, events related to a service are read from the direct client
 
 **Failure Modes:**
 * If ingress operator is unavailable, conditions will not be updated, but Gateways continue to function
@@ -749,7 +739,7 @@ This enhancement involves coordination between:
 * Check DNSRecord resource by matching the hostname: `oc get dnsrecord -n openshift-ingress -l gateway.networking.k8s.io/gateway-name=<gateway-name> -o yaml`
 * Look for the DNSRecord where `.spec.dnsName` matches the listener's hostname (trailing dots are stripped for matching)
 * Check DNSRecord's DNSManagementPolicy: `oc get dnsrecord <name> -n openshift-ingress -o jsonpath='{.spec.dnsManagementPolicy}'`
-* Check DNS operator logs: `oc logs -n openshift-dns-operator deployment/dns-operator`
+* Check DNS controller logs in ingress-operator Pods: `oc logs -n openshift-ingress-operator deployment/ingress-operator | grep dns_controller`
 * Common causes: DNS zone misconfiguration, DNS provider quota exceeded, invalid DNS records, provider API failures, unmanaged DNS policy
 
 *Symptom: Gateway conditions show `LoadBalancerReady=False`*
@@ -761,12 +751,13 @@ This enhancement involves coordination between:
 * Check Service resource: `oc get svc -n openshift-ingress -l gateway.networking.k8s.io/gateway-name=<gateway-name> -o yaml`
 * Check service events: `oc describe svc <lb-service-name> -n openshift-ingress`
 * Common causes: Cloud quota exceeded, subnet IP exhaustion, invalid security group configuration, VPC limits
+  - Check the pods and logs in the `openshift-cloud-controller-manager` namespace
 
 *Symptom: Conditions are missing entirely, or stale*
 * Check ingress operator health: `oc get pods -n openshift-ingress-operator`
-* Check ingress operator logs for errors: `oc logs -n openshift-ingress-operator deployment/ingress-operator | grep gateway-status`
+* Check ingress operator logs for errors: `oc logs -n openshift-ingress-operator deployment/ingress-operator | grep gateway_status`
 * Verify Gateway is in `openshift-ingress` namespace (conditions only apply there)
-* Verify Gateway has correct controller class: `oc get gateway <name> -n openshift-ingress -o jsonpath='{.spec.gatewayClassName}'`
+* Verify Gateway has a correct GatewayClass: `oc get gateway <gateway-name> -n openshift-ingress -o jsonpath='{.spec.gatewayClassName}{"\n"}'` and then `oc get gatewayclass <gatewayclass-name> -o jsonpath='{.spec.controllerName}{"\n"}'`.
 * Check if gateway-status controller is running by verifying ingress operator logs: `oc logs -n openshift-ingress-operator deployment/ingress-operator | grep gateway-status`
 * For DNS conditions: Check that listeners have hostnames specified in `.spec.listeners[].hostname`
   (DNS conditions are only added to listeners with hostnames)
@@ -786,7 +777,7 @@ This enhancement involves coordination between:
 * Stale conditions do not prevent Gateways from functioning correctly
 
 **Bug Reports:**
-	* For DNS-related issues: open an OCP bug in the Networking / DNS component
+	* For DNS-related issues: open an OCP bug in the Networking / router
 	* For LoadBalancer issues: open an OCP bug in the Cloud Compute / <cloud provider> component
 	* For condition update issues: open an OCP bug in the Networking / router component
 
@@ -794,5 +785,4 @@ This enhancement involves coordination between:
 
 No new infrastructure required. This enhancement uses existing OpenShift components:
 * Ingress operator (existing)
-* DNS operator (existing)
 * Cloud controller manager / LoadBalancer services (existing)
