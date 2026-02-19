@@ -241,7 +241,9 @@ sequenceDiagram
 ### Istio CRD Management
 
 **Note**: For the sake of brevity, `cluster-ingress-operator` will be also referred
-simply as `CIO` in this section.
+simply as `CIO` in this section. 
+
+**Note**: The CRD Management is made by the provided `sail-library` during the Apply operation.
 
 One of the key aspects of this proposal is that `CIO` effectively installs Istio,
 which includes a set of Custom Resource Definitions required for Istio and its
@@ -257,7 +259,7 @@ For CRDs managed by Red Hat/OpenShift, either by `CIO` or by `OSSM`, the CRDs
 contain the annotation `"helm.sh/resource-policy": keep` to prevent deletion
 during Helm operations.
 
-When `CIO` installs Istio CRDs, it installs the complete set of CRDs provided by
+During the library `Apply` operation, it installs the complete set of CRDs provided by
 the sail-operator library, even if some CRDs are not immediately used by layered
 products. This approach provides several benefits:
 
@@ -281,28 +283,28 @@ rather than requiring CRD installation updates when adopting new Istio custom re
 
 #### CRD Installation and Management Workflow
 
-When enabling Gateway API with Helm-based installation, `CIO` follows this
-process for Istio CRD installation and lifecycle management:
+The workflow described here is executed by the `Sail Operator` library during `CIO`
+Istio installation reconciliation process.
 
 **Scenario 1: CRDs Do Not Exist**
 
-When `CIO` verifies that Istio CRDs do not exist on the cluster:
-1. `CIO` installs the CRDs provided by the sail-operator library
+When the library verifies that Istio CRDs do not exist on the cluster:
+1. It installs the CRDs provided by the vendored helm chart.
 2. The CRDs are labeled with `ingress.operator.openshift.io/owned` to indicate CIO ownership
 3. The CRDs are annotated with `helm.sh/resource-policy: keep` to prevent deletion during Helm operations
 
 **Scenario 2: CRDs Exist and Are Managed by CIO**
 
 When CRDs exist and contain the label `ingress.operator.openshift.io/owned`:
-1. `CIO` updates (replaces) the CRDs with the version from the current sail-operator library
+1. The CRDs are updated (replaced) with the current vendored CRDs from the current `Sail Operator` library
 2. This ensures CRDs stay synchronized with the installed Istio version
 
 **Scenario 3: CRDs Exist and Are Managed by OSSM Subscription**
 
 When CRDs exist and contain the labels `olm.managed: "true"` and `operators.coreos.com/<subscription-name>.<namespace>: ""`:
-1. `CIO` recognizes that OSSM owns the CRDs and does not modify them
-2. `CIO` watches the OSSM subscription identified by the CRD label
-3. If the watched subscription is removed, `CIO` takes ownership by:
+1. Sail Operator library requests to `CIO` via a callback function to verify if the subscription used by the CRD exists
+2. If the referred subscription exists, the CRDs will not be modified.
+3. If the referred subscription does not exist, Sail Operator library will mark the CRDs as CIO Managed with:
    - Replacing the Istio CRDs with the version from the current sail-operator library
    - Adding the appropriate labels and annotations to indicate CIO management
 
