@@ -134,13 +134,11 @@ IngressController resources and their associated router deployments.
 cluster and configuring the Infrastructure CR.
 
 1. The cluster administrator installs an OpenShift cluster on AWS with
-   the `AWSDualStackInstall` feature gate enabled and [a dual-stack IP family](https://github.com/openshift/installer/pull/9930),
+   the `AWSDualStackInstall` feature gate enabled and [a dual-stack IP family](https://github.com/openshift/installer/blob/b0514c8e022d8445e57f303852487d3cd59c4a0a/pkg/types/aws/platform.go#L134-L144) (`DualStackIPv4Primary` or `DualStackIPv6Primary`),
    which configures the cluster's VPC, subnets, and network stack for dual-stack.
 
 2. The installer creates the Infrastructure CR with the cluster's IP family
-   configuration in `.status.platformStatus.aws.ipFamily` (e.g.,
-   `DualStackIPv4Primary` or `DualStackIPv6Primary` for dual-stack clusters,
-   `IPv4` for IPv4-only clusters).
+   configuration in `.status.platformStatus.aws.ipFamily` (`DualStackIPv4Primary` or `DualStackIPv6Primary`).
 
 3. The ingress-operator starts and reads the Infrastructure CR to
    determine the cluster's platform and IP family configuration.
@@ -189,7 +187,7 @@ cluster and configuring the Infrastructure CR.
 
 4. The ingress-operator does not create an Alias AAAA record for the wildcard domain.
 
-5. AWS provisions a standard IPv4-only NLB.
+5. AWS provisions an IPv4-only CLB or NLB (depending on [the load balancer type from Ingress Config API|https://github.com/openshift/api/blob/de86ee3bf48122ecb00fde7287aa633642ddc215/config/v1/types_ingress.go#L153]).
 
 6. IngressControllers function normally with IPv4 connectivity only.
 
@@ -203,11 +201,12 @@ cluster and configuring the Infrastructure CR.
 
 3. The ingress-operator sets the status to `Progressing=True` with a message to the user
    about the need to recreate the service manually. Also, the message highlights the fact
-   that CLB does not support the cluster-wide dual-stack IP family.
+   that CLB does not support the cluster-wide dual-stack IP family (to be added as part of this enhancement).
 
 4. When the user proceeds with a service recreation, the ingress-operator creates the
    LoadBalancer service without the `ipFamilies` and `ipFamilyPolicy` fields,
    falling back to IPv4-only configuration for that specific IngressController.
+   The ingress-operator sets the status back to `Progressing=False`.
 
 ### API Extensions
 
@@ -346,14 +345,13 @@ N/A
 - Unit tests for operator logic that reads IP family from Infrastructure
   CR and configures services accordingly.
 - E2E tests verifying:
-  - On clusters installed with `AWSDualStackInstall` feature gate:
+  - On clusters installed with `AWSDualStackInstall` feature gate and a dual-stack IP family:
     - IngressControllers with NLB are automatically configured with
       dual-stack IP address type.
     - Load balancer service is provisioned with correct `ipFamilies` and
       `ipFamilyPolicy` fields.
     - AWS NLB hostname is populated in service status.
-    - DNS alias records of the wildcard domain point to the AWS NLB hostname.
-    - AWS NLB hostname resolves to both IPv4 and IPv6 addresses.
+    - DNS alias records of the wildcard domain point to the AWS NLB hostname and resolve to both IPv4 and IPv6 addresses.
     - Applications are accessible via both IPv4 and IPv6.
     - IngressControllers with CLB type fall back to IPv4-only.
 
@@ -367,7 +365,7 @@ adapts to the cluster's IP family configuration set by the installer.
 **Graduation path:**
 - The ingress operator changes can be implemented and merged independently
   of the `AWSDualStackInstall` installer feature gate state.
-- When the installer's `AWSDualStackInstall` feature gate is enabled,
+- When the installer's `AWSDualStackInstall` feature gate is enabled and the IPFamily is dual-stack,
   the ingress operator will automatically configure the dual-stack IP address type for
   publishing services of IngressControllers.
 - When the installer's `AWSDualStackInstall` feature gate is not used,
@@ -444,5 +442,4 @@ Diagnosis:
 6. Verify platform is AWS and load balancer type is NLB (Classic LB does
    not support dual-stack).
 7. Check DNSRecord status: `oc -n openshift-ingress-operator get dnsrecord <name>-wildcard -o yaml`.
-8. Verify DNS alias is published: `dig <wildcard-domain>` should show
-   alias to AWS NLB hostname.
+8. Verify DNS alias is published: `dig <wildcard-domain>` should show AWS NLB's IP.
