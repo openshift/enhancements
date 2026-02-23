@@ -13,7 +13,7 @@ approvers:
 api-approvers:
   - None
 creation-date: 2026-02-16
-last-updated: 2026-02-19
+last-updated: 2026-02-23
 tracking-link:
   - https://issues.redhat.com/browse/OCPSTRAT-1852
 see-also:
@@ -52,11 +52,11 @@ metrics visible in the guest cluster's monitoring stack.
   `source_pod` label into each metric, and serves the merged response. The
   metrics proxy has no management cluster RBAC.
 - **Endpoint resolver** - A new component proposed in this enhancement. A
-  lightweight deployment in the HCP namespace that watches
-  Endpoints/EndpointSlices and serves pod IP resolution requests over HTTPS.
-  It is internal to the HCP namespace (not exposed via a route) and is the
-  only request-serving component with management cluster RBAC for reading
-  Endpoints.
+  lightweight deployment in the HCP namespace that watches Pods (selected
+  by label selectors derived from each component's ServiceMonitor or
+  PodMonitor) and serves pod IP resolution requests over HTTPS. It is
+  internal to the HCP namespace (not exposed via a route) and is the only
+  request-serving component with management cluster RBAC for listing Pods.
 
 ## Motivation
 
@@ -148,8 +148,9 @@ platform Prometheus to scrape the metrics route.
 Critically, the metrics proxy does **not** interact with the management
 cluster's kube-apiserver. Pod endpoint discovery is handled by a separate
 **endpoint resolver** deployment in the HCP namespace. The endpoint resolver
-watches Endpoints/EndpointSlices and serves pod IP resolution requests over
-HTTPS. The metrics proxy queries the endpoint resolver to resolve pod
+watches Pods using label selectors derived from each component's
+ServiceMonitor or PodMonitor spec, and serves pod IP resolution requests
+over HTTPS. The metrics proxy queries the endpoint resolver to resolve pod
 endpoints for each component, keeping the externally-exposed request-serving
 component (the metrics proxy) fully decoupled from management cluster
 credentials. The endpoint resolver is internal to the HCP namespace — it
@@ -181,8 +182,8 @@ graph TD
         proxy --> etcd2
         proxy --> others
 
-        resolver["Endpoint Resolver<br/>(watches Endpoints,<br/>serves pod IPs over HTTPS)"]
-        proxy -. "resolve pod IPs<br/>for service" .-> resolver
+        resolver["Endpoint Resolver<br/>(watches Pods by label selector,<br/>serves pod IPs over HTTPS)"]
+        proxy -. "resolve pod IPs<br/>for component" .-> resolver
 
         svc["Service"]
         route["Route<br/>(passthrough TLS)"]
@@ -224,18 +225,18 @@ delegated to the endpoint resolver (see
 
 The metrics proxy exposes control plane metrics under component-specific paths:
 
-| Path | Component | Pod discovery via | Injected labels |
-|------|-----------|-------------------|-----------------|
-| `/metrics/kube-apiserver` | kube-apiserver | Endpoints for kube-apiserver service | `job="apiserver"`, `namespace="default"`, `service="kubernetes"`, `endpoint="https"` |
-| `/metrics/kube-controller-manager` | kube-controller-manager | Endpoints for kube-controller-manager service | `job="kube-controller-manager"`, `namespace="openshift-kube-controller-manager"`, `service="kube-controller-manager"`, `endpoint="https"` |
-| `/metrics/openshift-apiserver` | openshift-apiserver | Endpoints for openshift-apiserver service | `job="api"`, `namespace="openshift-apiserver"`, `service="api"`, `endpoint="https"` |
-| `/metrics/openshift-controller-manager` | openshift-controller-manager | Endpoints for openshift-controller-manager service | `job="controller-manager"`, `namespace="openshift-controller-manager"`, `service="controller-manager"`, `endpoint="https"` |
-| `/metrics/etcd` | etcd | Endpoints for etcd-client service | `job="etcd"`, `namespace="openshift-etcd"`, `service="etcd"`, `endpoint="etcd-metrics"` |
-| `/metrics/cluster-version-operator` | cluster-version-operator | Endpoints for cluster-version-operator service | `job="cluster-version-operator"`, `namespace="openshift-cluster-version"`, `service="cluster-version-operator"`, `endpoint="metrics"` |
-| `/metrics/olm-operator` | olm-operator | Endpoints for olm-operator-metrics service | `job="olm-operator-metrics"`, `namespace="openshift-operator-lifecycle-manager"`, `service="olm-operator-metrics"`, `endpoint="https-metrics"` |
-| `/metrics/catalog-operator` | catalog-operator | Endpoints for catalog-operator-metrics service | `job="catalog-operator-metrics"`, `namespace="openshift-operator-lifecycle-manager"`, `service="catalog-operator-metrics"`, `endpoint="https-metrics"` |
-| `/metrics/openshift-route-controller-manager` | openshift-route-controller-manager | Endpoints for openshift-route-controller-manager service | `job="route-controller-manager"`, `namespace="openshift-route-controller-manager"`, `service="route-controller-manager"`, `endpoint="https"` |
-| `/metrics/cluster-node-tuning-operator` | cluster-node-tuning-operator | Endpoints for node-tuning-operator service | `job="node-tuning-operator"`, `namespace="openshift-cluster-node-tuning-operator"`, `service="node-tuning-operator"`, `endpoint="60000"` |
+| Path | Component | Pod selector | Injected labels |
+|------|-----------|--------------|-----------------|
+| `/metrics/kube-apiserver` | kube-apiserver | `app=kube-apiserver` (from Service) | `job="apiserver"`, `namespace="default"`, `service="kubernetes"`, `endpoint="https"` |
+| `/metrics/kube-controller-manager` | kube-controller-manager | `app=kube-controller-manager` (from Service) | `job="kube-controller-manager"`, `namespace="openshift-kube-controller-manager"`, `service="kube-controller-manager"`, `endpoint="https"` |
+| `/metrics/openshift-apiserver` | openshift-apiserver | `app=openshift-apiserver` (from Service) | `job="api"`, `namespace="openshift-apiserver"`, `service="api"`, `endpoint="https"` |
+| `/metrics/openshift-controller-manager` | openshift-controller-manager | `app=openshift-controller-manager` (from Service) | `job="controller-manager"`, `namespace="openshift-controller-manager"`, `service="controller-manager"`, `endpoint="https"` |
+| `/metrics/etcd` | etcd | `app=etcd` (from Service) | `job="etcd"`, `namespace="openshift-etcd"`, `service="etcd"`, `endpoint="etcd-metrics"` |
+| `/metrics/cluster-version-operator` | cluster-version-operator | `app=cluster-version-operator` (from Service) | `job="cluster-version-operator"`, `namespace="openshift-cluster-version"`, `service="cluster-version-operator"`, `endpoint="metrics"` |
+| `/metrics/olm-operator` | olm-operator | `app=olm-operator` (from Service) | `job="olm-operator-metrics"`, `namespace="openshift-operator-lifecycle-manager"`, `service="olm-operator-metrics"`, `endpoint="https-metrics"` |
+| `/metrics/catalog-operator` | catalog-operator | `app=catalog-operator` (from Service) | `job="catalog-operator-metrics"`, `namespace="openshift-operator-lifecycle-manager"`, `service="catalog-operator-metrics"`, `endpoint="https-metrics"` |
+| `/metrics/openshift-route-controller-manager` | openshift-route-controller-manager | `app=openshift-route-controller-manager` (from Service) | `job="route-controller-manager"`, `namespace="openshift-route-controller-manager"`, `service="route-controller-manager"`, `endpoint="https"` |
+| `/metrics/cluster-node-tuning-operator` | cluster-node-tuning-operator | `app=cluster-node-tuning-operator` (from Service) | `job="node-tuning-operator"`, `namespace="openshift-cluster-node-tuning-operator"`, `service="node-tuning-operator"`, `endpoint="60000"` |
 
 The table above lists the components present in a default hosted control plane.
 This is not a fixed list -- the control-plane-operator dynamically discovers
@@ -256,7 +257,7 @@ For each request, the metrics proxy:
    Rejects unauthenticated or unauthorized requests with 401/403.
 2. Queries the endpoint resolver (see
    [Endpoint Resolver Deployment](#6-endpoint-resolver-deployment)) to
-   discover all pod IPs and names backing the component's service.
+   discover all pod IPs and names for the component.
 3. Sends parallel GET requests to each pod's metrics endpoint using the pod IP
    directly (bypassing the service ClusterIP to reach every pod).
 4. Parses each response using the Prometheus `expfmt` library.
@@ -608,8 +609,8 @@ in the HCP namespace:
   and RBAC (see
   [Endpoint Resolver Deployment](#6-endpoint-resolver-deployment) below).
   The endpoint resolver is the component that holds management cluster RBAC
-  for reading Endpoints/EndpointSlices, keeping this access out of the
-  externally-exposed metrics proxy.
+  for listing Pods, keeping this access out of the externally-exposed
+  metrics proxy.
 - **Respect the `hypershift.openshift.io/disable-monitoring-services`
   annotation**: When this annotation is set on the HostedControlPlane, the
   control-plane-operator skips creation of the metrics proxy Deployment,
@@ -681,7 +682,6 @@ endpointResolverURL: https://endpoint-resolver:8443/resolve/
 endpointResolverCAFile: /etc/metrics-proxy/ca/endpoint-resolver-ca/ca.crt
 components:
   etcd:
-    service: etcd-client
     port: metrics
     scheme: https
     tlsConfig:
@@ -696,7 +696,6 @@ components:
       endpoint: etcd-metrics
 
   kube-apiserver:
-    service: kube-apiserver
     port: client
     scheme: https
     tlsConfig:
@@ -711,7 +710,6 @@ components:
       endpoint: https
 
   cluster-version-operator:
-    service: cluster-version-operator
     port: https
     scheme: https
     tlsConfig:
@@ -725,7 +723,6 @@ components:
       endpoint: metrics
 
   cluster-autoscaler:
-    service: cluster-autoscaler
     port: metrics
     scheme: http
     # No tlsConfig -- plain HTTP
@@ -745,10 +742,18 @@ are absent (as for cluster-version-operator), the proxy connects with
 server-side TLS verification only. When the entire `tlsConfig` is absent
 and `scheme` is `http`, the proxy connects over plain HTTP.
 
+The component name (the key in the `components` map) is used as the
+identifier when querying the endpoint resolver for pod IPs. The CPO also
+generates the endpoint resolver's ConfigMap at the same time, mapping
+each component name to the pod label selector derived from the
+ServiceMonitor or PodMonitor spec (see
+[Endpoint Resolver Deployment](#6-endpoint-resolver-deployment) for
+details on how the pod selector is derived).
+
 The `endpointResolverURL` field specifies the endpoint resolver's base URL.
-The metrics proxy appends the component's `service` value to this URL when
-resolving pod endpoints (e.g.
-`https://endpoint-resolver:8443/resolve/etcd-client`). The
+The metrics proxy appends the component name (the key in the `components`
+map) to this URL when resolving pod endpoints (e.g.
+`https://endpoint-resolver:8443/resolve/etcd`). The
 `endpointResolverCAFile` field points to the CA used to verify the endpoint
 resolver's serving certificate.
 
@@ -782,9 +787,9 @@ action is required from any user.
    scraping the forwarder pod on each component path.
 8. For each scrape, the forwarder TCP-proxies the connection to the metrics
    proxy route. The metrics proxy terminates TLS, authenticates the request,
-   queries the endpoint resolver to discover pod IPs, fans out to all pods
-   for the component, injects `source_pod` labels, and returns the merged
-   response.
+   queries the endpoint resolver to discover pod IPs (resolved via pod
+   label selectors), fans out to all pods for the component, injects
+   `source_pod` labels, and returns the merged response.
 9. Control plane metrics become available in the guest cluster's Prometheus and
    are visible in the OpenShift Console monitoring UI.
 
@@ -811,8 +816,9 @@ management cluster alongside the other control plane components. They add
 two additional pods per hosted cluster on the management cluster, plus one
 lightweight forwarder pod per guest cluster. Resource consumption is minimal
 since none of these components store metrics — the proxy fans out and merges
-on demand, the endpoint resolver serves from an in-memory informer cache,
-and the forwarder simply proxies TCP connections.
+on demand, the endpoint resolver serves from in-memory informer caches
+(one per component's pod label selector), and the forwarder simply proxies
+TCP connections.
 
 #### Standalone Clusters
 
@@ -840,9 +846,9 @@ The metrics proxy is a single Go binary that handles the full request lifecycle:
    the hosted kube-apiserver, and verifies the identity matches an authorized
    ServiceAccount. Rejects unauthorized requests with 401/403.
 3. **Pod discovery**: Maps the URL path to a control plane component and queries
-   the endpoint resolver to discover all pod IPs and names backing that
-   component's service. The metrics proxy has no direct access to the
-   management cluster's kube-apiserver.
+   the endpoint resolver to discover all pod IPs and names for that
+   component. The metrics proxy has no direct access to the management
+   cluster's kube-apiserver.
 4. **Fan-out scraping**: Sends parallel GET requests to each discovered pod's
    metrics endpoint using the pod IP directly (bypassing the service ClusterIP).
    Uses the authentication method specified in the component's ServiceMonitor
@@ -862,28 +868,61 @@ The metrics proxy is a single Go binary that handles the full request lifecycle:
    into a single response and serializes it back to Prometheus exposition format.
 
 Configuration (hosted kube-apiserver endpoint, authorized ServiceAccounts,
-component-to-service mapping, port details, endpoint resolver URL and CA)
+per-component upstream details, port details, endpoint resolver URL and CA)
 is provided as a ConfigMap generated by the control-plane-operator.
 
 #### 6. Endpoint Resolver Deployment
 
 The **endpoint resolver** is a separate, lightweight deployment in the HCP
 namespace that handles pod endpoint discovery on behalf of the metrics
-proxy. It is the component that holds management cluster RBAC for reading
-Endpoints/EndpointSlices, keeping this access out of the externally-exposed
-metrics proxy.
+proxy. It is the component that holds management cluster RBAC for listing
+Pods, keeping this access out of the externally-exposed metrics proxy.
 
 The endpoint resolver is a simple Go binary that:
 
-1. Watches Endpoints (or EndpointSlices) resources in the HCP namespace
-   using an informer-based cache.
-2. Serves HTTPS requests from the metrics proxy to resolve service names
-   to pod IPs and names.
+1. Reads its configuration (a map of component names to pod label
+   selectors) from a ConfigMap generated by the control-plane-operator.
+2. Watches Pods in the HCP namespace using informer-based caches, with
+   one label selector per component.
+3. Serves HTTPS requests from the metrics proxy to resolve component
+   names to pod IPs and names.
+
+The pod label selectors are derived by the control-plane-operator from
+each component's monitoring spec:
+
+- **For ServiceMonitor-based components**: The CPO looks up the Service
+  matched by the ServiceMonitor's `spec.selector`, then uses the
+  Service's `spec.selector` (which selects Pods). For example, the
+  `etcd` ServiceMonitor selects Services with `app: etcd`, and the
+  `etcd-client` Service selects Pods with `app: etcd`.
+- **For PodMonitor-based components**: The CPO uses the PodMonitor's
+  `spec.selector.matchLabels` directly, since PodMonitors already select
+  Pods. For example, the `cluster-autoscaler` PodMonitor selects Pods
+  with `app: cluster-autoscaler`.
+
+The endpoint resolver's ConfigMap maps each component name to its pod
+label selector:
+
+```yaml
+components:
+  etcd:
+    matchLabels:
+      app: etcd
+  kube-apiserver:
+    matchLabels:
+      app: kube-apiserver
+  cluster-autoscaler:
+    matchLabels:
+      app: cluster-autoscaler
+  ingress-operator:
+    matchLabels:
+      name: ingress-operator
+```
 
 The endpoint accepts requests of the form:
 
 ```
-GET /resolve/<service-name>
+GET /resolve/<component-name>
 ```
 
 and returns a JSON response containing the pod endpoints:
@@ -898,10 +937,14 @@ and returns a JSON response containing the pod endpoints:
 }
 ```
 
-When an Endpoints resource changes (pods are added, removed, or their IPs
-change), the informer cache is updated automatically. Requests are served
-from this in-memory cache, so they are fast and do not generate additional
-kube API calls.
+When Pods are added, removed, or their IPs change, the informer caches
+are updated automatically. Requests are served from these in-memory
+caches, so they are fast and do not generate additional kube API calls.
+
+This approach works uniformly for all components regardless of whether
+they have a Service resource. ServiceMonitor-based components (which
+have Services) and PodMonitor-based components (which may not have
+Services) are both discovered via their pod labels.
 
 The endpoint resolver serves HTTPS using a serving certificate signed by
 the HCP's certificate authority. The CPO creates this certificate as part
@@ -917,9 +960,10 @@ endpoint resolver:
 - A **Service** (`endpoint-resolver`) exposing the resolver's HTTPS port
   within the HCP namespace.
 - A **serving certificate** signed by the HCP's CA.
+- A **ConfigMap** mapping component names to pod label selectors
+  (generated alongside the proxy ConfigMap during reconciliation).
 - An **RBAC Role and RoleBinding** granting the endpoint resolver's
-  ServiceAccount read access to Endpoints/EndpointSlices in the HCP
-  namespace.
+  ServiceAccount read access to Pods in the HCP namespace.
 
 The endpoint resolver is **not** exposed via a route — it is only
 reachable within the HCP namespace pod network. This is the key security
@@ -928,12 +972,12 @@ reachable from the data plane.
 
 **Security rationale**: This design ensures that the metrics proxy — which
 is a request-serving component exposed to the data plane via a route — has
-no management cluster RBAC. All management cluster API access (reading
-Endpoints/EndpointSlices) is confined to the endpoint resolver, which is
-internal to the HCP namespace and not exposed to external traffic. This
-follows the same security pattern established for the ignition server,
-where a separate proxy was placed in front to avoid giving management
-cluster credentials to a request-serving component.
+no management cluster RBAC. All management cluster API access (listing
+Pods) is confined to the endpoint resolver, which is internal to the HCP
+namespace and not exposed to external traffic. This follows the same
+security pattern established for the ignition server, where a separate
+proxy was placed in front to avoid giving management cluster credentials
+to a request-serving component.
 
 #### Pod Discovery and Label Injection
 
@@ -945,7 +989,7 @@ restarts.
 For a request to `/metrics/etcd`, the proxy:
 
 1. Queries the endpoint resolver:
-   `GET https://endpoint-resolver:8443/resolve/etcd-client`.
+   `GET https://endpoint-resolver:8443/resolve/etcd`.
 2. Receives the pod endpoints: `etcd-0` (10.0.1.5), `etcd-1` (10.0.1.6),
    `etcd-2` (10.0.1.7).
 3. Sends `GET https://10.0.1.5:9979/metrics`, `GET https://10.0.1.6:9979/metrics`,
@@ -1205,9 +1249,10 @@ managed by CMO and not accessible to unprivileged guest cluster users.
 Additionally, the route uses passthrough TLS, so all traffic is encrypted.
 The metrics proxy itself has no management cluster RBAC — pod endpoint
 discovery is delegated to the endpoint resolver (see
-[Endpoint Resolver Deployment](#6-endpoint-resolver-deployment)), so even
-if the proxy were compromised via a stolen token, the attacker would gain
-no management cluster API access.
+[Endpoint Resolver Deployment](#6-endpoint-resolver-deployment)), which
+only has read access to Pods in the HCP namespace. Even if the proxy
+were compromised via a stolen token, the attacker would gain no
+management cluster API access.
 
 **Risk**: The proxy introduces a new component that could fail, making control
 plane metrics unavailable to the guest cluster.
