@@ -121,7 +121,6 @@ dual-stack. The implementation will:
    family is dual-stack. The IP family is passed to the provider at
    initialization time, similar to [AWS region](https://github.com/openshift/cluster-ingress-operator/blob/8afaffbf8ddbe65565bad52eea6267b615eceec2/pkg/dns/aws/dns.go).
 
-
 ### Workflow Description
 
 **cluster administrator** is a human user responsible for installing and
@@ -269,6 +268,17 @@ would be available if the underlying infrastructure supports it.
   The exact mapping of Infrastructure CR IPFamily values to service
   `ipFamilies` and `ipFamilyPolicy` fields may change based on the
   cloud-provider-aws implementation details.
+
+- Day-2 changes to the IP family configuration are not possible at
+  multiple levels. The Infrastructure CR's
+  [`.status.platformStatus.aws.ipFamily`](https://github.com/openshift/api/blob/de86ee3bf48122ecb00fde7287aa633642ddc215/config/v1/types_infrastructure.go#L650-L660)
+  field is immutable once set. Kubernetes does not allow changing the
+  [primary IP family](https://kubernetes.io/docs/concepts/services-networking/dual-stack/#services)
+  of an existing service. Additionally, Kubernetes does not allow
+  removing the second IP family from the service `spec.ipFamilies` field
+  when `spec.ipFamilyPolicy` is set to `RequireDualStack`. Together,
+  these constraints effectively forbid changing the `ipFamilies` order
+  and number at the API level on day-2.
 
 ### Risks and Mitigations
 
