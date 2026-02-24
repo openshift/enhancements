@@ -13,7 +13,7 @@ approvers:
 api-approvers:
   - None
 creation-date: 2026-02-16
-last-updated: 2026-02-16
+last-updated: 2026-02-23
 tracking-link:
   - https://issues.redhat.com/browse/OCPSTRAT-1852
 see-also:
@@ -46,10 +46,17 @@ metrics visible in the guest cluster's monitoring stack.
   platform metrics.
 - **HCP** - HostedControlPlane. The custom resource representing a hosted control
   plane on the management cluster.
-- **Metrics proxy** - The new component proposed in this enhancement. A custom
-  Go binary that authenticates requests via TokenReview, discovers pod endpoints
-  for each control plane component, fans out scrape requests to all pods,
-  injects a `source_pod` label into each metric, and serves the merged response.
+- **Metrics proxy** - A new component proposed in this enhancement. A custom
+  Go binary that authenticates requests via TokenReview, resolves pod endpoints
+  via the endpoint resolver, fans out scrape requests to all pods, injects a
+  `source_pod` label into each metric, and serves the merged response. The
+  metrics proxy has no management cluster RBAC.
+- **Endpoint resolver** - A new component proposed in this enhancement. A
+  lightweight deployment in the HCP namespace that watches Pods (selected
+  by label selectors derived from each component's ServiceMonitor or
+  PodMonitor) and serves pod IP resolution requests over HTTPS. It is
+  internal to the HCP namespace (not exposed via a route) and is the only
+  request-serving component with management cluster RBAC for listing Pods.
 
 ## Motivation
 
@@ -72,22 +79,25 @@ This enhancement closes that gap.
 
 ### User Stories
 
-- As a **guest cluster administrator**, I want to view control plane metrics
-  (API server latency, etcd leader changes, controller queue depths) in the
-  OpenShift Console monitoring UI, so that I can diagnose cluster performance
-  issues without needing access to the management cluster.
+- As a **hosted cluster user**, I expect the same monitoring experience as a
+  standalone OpenShift cluster. Control plane metrics (API server latency, etcd
+  health, controller queue depths) should be visible in the OpenShift Console
+  monitoring UI and queryable via PromQL without any additional setup, regardless
+  of whether my cluster is self-managed or hosted.
 
-- As a **guest cluster administrator**, I want to create PrometheusRule alerts
-  based on control plane metrics, so that I can be notified when control plane
-  health degrades.
+- As a **hosted cluster user**, I want to define PrometheusRule alerts on
+  control plane metrics (e.g. high API server error rate, etcd leader changes)
+  the same way I would on a standalone cluster, so that my existing alerting
+  workflows work without modification.
 
 - As an **SRE**, I want a single mechanism for exposing control plane metrics to
   the data plane that works across all HyperShift deployment models (self-managed
-  and managed service), so that the monitoring architecture is consistent.
+  and managed service), so that the monitoring architecture is consistent and
+  requires no per-cluster manual configuration.
 
-- As a **service provider**, I want the metrics exposure to be automatic and
-  require no manual configuration from guest cluster administrators, so that the
-  experience is seamless.
+- As a **service provider**, I want the monitoring parity to be automatic and
+  transparent to cluster users, so that hosted clusters are indistinguishable
+  from standalone clusters in terms of monitoring capabilities.
 
 ### Goals
 
@@ -127,13 +137,27 @@ This enhancement closes that gap.
 
 The solution introduces a new **metrics proxy** deployment in each hosted control
 plane namespace on the management cluster. The metrics proxy is a custom Go
-binary that handles authentication, pod endpoint discovery, metrics fan-out,
-label injection, and response merging in a single process. For each control
-plane component, it discovers all backing pods, scrapes them in parallel,
-injects a `source_pod` label into every metric to identify the originating pod,
-and serves the merged response. A route exposes the proxy to the data plane. On
-the guest cluster side, a metrics forwarder pod and PodMonitor are automatically
-created to enable the platform Prometheus to scrape the metrics route.
+binary that handles authentication, metrics fan-out, label injection, and
+response merging. For each control plane component, it resolves all backing
+pod endpoints, scrapes them in parallel, injects a `source_pod` label into
+every metric to identify the originating pod, and serves the merged response.
+A route exposes the proxy to the data plane. On the guest cluster side, a
+metrics forwarder pod and PodMonitor are automatically created to enable the
+platform Prometheus to scrape the metrics route.
+
+Critically, the metrics proxy does **not** interact with the management
+cluster's kube-apiserver. Pod endpoint discovery is handled by a separate
+**endpoint resolver** deployment in the HCP namespace. The endpoint resolver
+watches Pods using label selectors derived from each component's
+ServiceMonitor or PodMonitor spec, and serves pod IP resolution requests
+over HTTPS. The metrics proxy queries the endpoint resolver to resolve pod
+endpoints for each component, keeping the externally-exposed request-serving
+component (the metrics proxy) fully decoupled from management cluster
+credentials. The endpoint resolver is internal to the HCP namespace — it
+has no route and is not reachable from the data plane. This follows the
+same security pattern used for the ignition server, where an additional
+proxy was placed in front to avoid giving management cluster RBAC to a
+request-serving component.
 
 ```mermaid
 graph TD
@@ -158,8 +182,8 @@ graph TD
         proxy --> etcd2
         proxy --> others
 
-        ep["Endpoints / EndpointSlices<br/>(pod discovery)"]
-        ep -. "discover pod IPs" .-> proxy
+        resolver["Endpoint Resolver<br/>(watches Pods by label selector,<br/>serves pod IPs over HTTPS)"]
+        proxy -. "resolve pod IPs<br/>for component" .-> resolver
 
         svc["Service"]
         route["Route<br/>(passthrough TLS)"]
@@ -170,20 +194,22 @@ graph TD
 
     subgraph gc["Guest Cluster (openshift-monitoring)"]
         subgraph fwdpod["Metrics Forwarder Pod"]
-            fwd["HAProxy<br/>(forwards to route)"]
+            fwd["HAProxy<br/>(TCP proxy)"]
         end
 
         pm["PodMonitor<br/>(per-component paths)"]
         prom["Platform Prometheus"]
         sa["ServiceAccount<br/>prometheus-k8s"]
         hosted_kas["Hosted kube-apiserver"]
+        ca["metrics-proxy-serving-ca<br/>ConfigMap"]
 
         pm -. "configures" .-> prom
         sa -. "bearer token" .-> prom
-        prom -- "scrape" --> fwd
+        ca -. "TLS verification" .-> prom
+        prom -- "TLS + bearer token" --> fwd
     end
 
-    fwd -- "HTTPS + bearer token<br/>(preserves path)" --> route
+    fwd -- "TCP proxy<br/>(end-to-end TLS)" --> route
     proxy -. "TokenReview" .-> hosted_kas
 ```
 
@@ -192,29 +218,46 @@ graph TD
 #### 1. Metrics Proxy Deployment
 
 A new Deployment in the HCP namespace runs a single-container pod with the
-**metrics proxy**, a custom Go binary that handles authentication, endpoint
-discovery, metrics fan-out, label injection, and response merging.
+**metrics proxy**, a custom Go binary that handles authentication, metrics
+fan-out, label injection, and response merging. Pod endpoint resolution is
+delegated to the endpoint resolver (see
+[Endpoint Resolver Deployment](#6-endpoint-resolver-deployment)).
 
 The metrics proxy exposes control plane metrics under component-specific paths:
 
-| Path | Component | Pod discovery via |
-|------|-----------|-------------------|
-| `/metrics/kube-apiserver` | kube-apiserver | Endpoints for kube-apiserver service |
-| `/metrics/kube-controller-manager` | kube-controller-manager | Endpoints for kube-controller-manager service |
-| `/metrics/openshift-apiserver` | openshift-apiserver | Endpoints for openshift-apiserver service |
-| `/metrics/openshift-controller-manager` | openshift-controller-manager | Endpoints for openshift-controller-manager service |
-| `/metrics/etcd` | etcd | Endpoints for etcd-client service |
-| `/metrics/cluster-version-operator` | cluster-version-operator | Endpoints for cluster-version-operator service |
-| `/metrics/olm-operator` | olm-operator | Endpoints for olm-operator-metrics service |
-| `/metrics/catalog-operator` | catalog-operator | Endpoints for catalog-operator-metrics service |
-| `/metrics/openshift-route-controller-manager` | openshift-route-controller-manager | Endpoints for openshift-route-controller-manager service |
-| `/metrics/cluster-node-tuning-operator` | cluster-node-tuning-operator | Endpoints for node-tuning-operator service |
+| Path | Component | Pod selector | Injected labels |
+|------|-----------|--------------|-----------------|
+| `/metrics/kube-apiserver` | kube-apiserver | `app=kube-apiserver` (from Service) | `job="apiserver"`, `namespace="default"`, `service="kubernetes"`, `endpoint="https"` |
+| `/metrics/kube-controller-manager` | kube-controller-manager | `app=kube-controller-manager` (from Service) | `job="kube-controller-manager"`, `namespace="openshift-kube-controller-manager"`, `service="kube-controller-manager"`, `endpoint="https"` |
+| `/metrics/openshift-apiserver` | openshift-apiserver | `app=openshift-apiserver` (from Service) | `job="api"`, `namespace="openshift-apiserver"`, `service="api"`, `endpoint="https"` |
+| `/metrics/openshift-controller-manager` | openshift-controller-manager | `app=openshift-controller-manager` (from Service) | `job="controller-manager"`, `namespace="openshift-controller-manager"`, `service="controller-manager"`, `endpoint="https"` |
+| `/metrics/etcd` | etcd | `app=etcd` (from Service) | `job="etcd"`, `namespace="openshift-etcd"`, `service="etcd"`, `endpoint="etcd-metrics"` |
+| `/metrics/cluster-version-operator` | cluster-version-operator | `app=cluster-version-operator` (from Service) | `job="cluster-version-operator"`, `namespace="openshift-cluster-version"`, `service="cluster-version-operator"`, `endpoint="metrics"` |
+| `/metrics/olm-operator` | olm-operator | `app=olm-operator` (from Service) | `job="olm-operator-metrics"`, `namespace="openshift-operator-lifecycle-manager"`, `service="olm-operator-metrics"`, `endpoint="https-metrics"` |
+| `/metrics/catalog-operator` | catalog-operator | `app=catalog-operator` (from Service) | `job="catalog-operator-metrics"`, `namespace="openshift-operator-lifecycle-manager"`, `service="catalog-operator-metrics"`, `endpoint="https-metrics"` |
+| `/metrics/openshift-route-controller-manager` | openshift-route-controller-manager | `app=openshift-route-controller-manager` (from Service) | `job="route-controller-manager"`, `namespace="openshift-route-controller-manager"`, `service="route-controller-manager"`, `endpoint="https"` |
+| `/metrics/cluster-node-tuning-operator` | cluster-node-tuning-operator | `app=cluster-node-tuning-operator` (from Service) | `job="node-tuning-operator"`, `namespace="openshift-cluster-node-tuning-operator"`, `service="node-tuning-operator"`, `endpoint="60000"` |
+
+The table above lists the components present in a default hosted control plane.
+This is not a fixed list -- the control-plane-operator dynamically discovers
+the set of components to include by enumerating the ServiceMonitors and
+PodMonitors in the HCP namespace. The injected label values (`job`,
+`namespace`, `service`, `endpoint`) are specified as annotations on each
+ServiceMonitor or PodMonitor (see
+[Component Discovery](#component-discovery) for the annotation keys). When
+optional features are enabled via day-2 operations (e.g. enabling `autonode`
+or other optional components) and new ServiceMonitors or PodMonitors appear
+in the HCP namespace with the appropriate annotations, the
+control-plane-operator detects them during reconciliation and regenerates the
+proxy ConfigMap to include the new component paths. See
+[Component Discovery](#component-discovery) for details on how this works.
 
 For each request, the metrics proxy:
 1. Validates the bearer token via TokenReview against the hosted kube-apiserver.
    Rejects unauthenticated or unauthorized requests with 401/403.
-2. Queries the Kubernetes Endpoints (or EndpointSlices) API to discover all
-   pod IPs and names backing the component's service.
+2. Queries the endpoint resolver (see
+   [Endpoint Resolver Deployment](#6-endpoint-resolver-deployment)) to
+   discover all pod IPs and names for the component.
 3. Sends parallel GET requests to each pod's metrics endpoint using the pod IP
    directly (bypassing the service ClusterIP to reach every pod).
 4. Parses each response using the Prometheus `expfmt` library.
@@ -226,9 +269,28 @@ For each request, the metrics proxy:
    serializing the response (see [Metric Filtering](#metric-filtering) below).
 7. Merges all labeled metric families and serializes the combined output.
 
-The metrics proxy uses the internal cluster CA and client certificates to
-authenticate to upstream metrics endpoints, since most control plane components
-require mTLS for their metrics ports.
+The metrics proxy authenticates to upstream metrics endpoints using the same
+method specified in each component's existing ServiceMonitor or PodMonitor in
+the HCP namespace. The authentication method varies per component:
+
+- **mTLS** (HTTPS with client certificate): Most ServiceMonitor-based
+  components (kube-apiserver, kube-controller-manager, openshift-apiserver,
+  openshift-controller-manager, olm-operator, catalog-operator,
+  openshift-route-controller-manager, node-tuning-operator) use the
+  `metrics-client` TLS secret for client certificate authentication.
+- **Dedicated mTLS**: etcd uses a separate `etcd-metrics-client-tls` secret
+  with etcd-specific client certificates and the `etcd-ca` CA.
+- **Server-side TLS only** (HTTPS with CA verification, no client certificate):
+  Some components (e.g. cluster-version-operator) expose HTTPS metrics
+  endpoints that verify the server certificate but do not require a client
+  certificate.
+- **Plain HTTP**: Some PodMonitor-based components (e.g. cluster-autoscaler,
+  ingress-operator) expose metrics over plain HTTP with no TLS.
+
+The proxy configuration (generated by the control-plane-operator) includes
+per-component upstream authentication details (scheme, CA, client certificate
+references, and server name) derived from the component's ServiceMonitor or
+PodMonitor spec.
 
 The metrics proxy serves HTTPS using a serving certificate signed by the HCP's
 certificate authority.
@@ -245,9 +307,10 @@ The authentication flow:
 1. The existing `prometheus-k8s` ServiceAccount in the guest cluster's
    `openshift-monitoring` namespace is used. This is the ServiceAccount that
    CMO's Prometheus already runs under, so no new ServiceAccount is needed.
-2. The platform Prometheus is configured (via the PodMonitor's `authorization`
-   field) to use this ServiceAccount's token when scraping the metrics
-   forwarder.
+2. The platform Prometheus is configured (via the PodMonitor's
+   `bearerTokenFile` field, set to
+   `/var/run/secrets/kubernetes.io/serviceaccount/token`) to attach this
+   ServiceAccount's token to each scrape request to the metrics forwarder.
 3. A request arrives at the metrics proxy. The proxy extracts the
    `Authorization: Bearer <token>` header.
 4. The proxy performs a **TokenReview** against the hosted kube-apiserver to
@@ -316,6 +379,30 @@ exposing it via a different mechanism than Ignition), a new `ServiceType` can
 be introduced in a follow-up enhancement. This is tracked as an open question
 below.
 
+**Platform-specific DNS and network considerations**: The metrics proxy route
+hostname must be resolvable and reachable from the guest cluster's data plane
+network. This has different implications depending on the platform:
+
+- **AWS (ROSA)**: For private hosted clusters, the metrics proxy route is
+  exposed to the data plane transparently via PrivateLink, following the same
+  pattern used for the API server and other HCP services. No additional DNS
+  configuration is required beyond what the existing HyperShift AWS
+  infrastructure provides.
+- **Azure (ARO)**: The cluster service must ensure the metrics proxy route
+  hostname is resolvable from the data plane. The metrics proxy pod in the
+  HCP namespace must be exposed to the data plane network (e.g. via the
+  existing Swift/networking infrastructure used for other HCP services). DNS
+  records for the route must be created in the appropriate zone.
+- **Self-managed / on-premise**: The management cluster's ingress router must
+  be reachable from the data plane network. For private clusters using
+  internal routes, the internal DNS zone must include a record for the
+  metrics proxy route hostname.
+
+These are the same DNS and connectivity requirements that apply to other
+HyperShift routes (API server, OAuth server, Ignition server). The metrics
+proxy does not introduce any new networking patterns -- it follows the
+existing route exposure infrastructure for the platform.
+
 #### 4. Guest Cluster Metrics Forwarder and PodMonitor
 
 Since the metrics proxy is exposed via a route (external hostname), it cannot
@@ -327,14 +414,56 @@ not available in OCP.
 
 To bridge this gap, the **hosted-cluster-config-operator** (HCCO) deploys a
 simple **metrics forwarder** pod in the guest cluster's `openshift-monitoring`
-namespace. This is a lightweight HAProxy instance that forwards all incoming
-requests to the metrics proxy route on the management cluster, preserving the
-request path. The HAProxy configuration is trivial -- a single backend pointing
-at the metrics proxy route hostname.
+namespace. This is a lightweight HAProxy instance running in **TCP proxy
+mode** -- it does not terminate TLS. It simply accepts TCP connections and
+forwards them to the metrics proxy route on the management cluster. The TLS
+connection is end-to-end between Prometheus and the metrics proxy.
+
+The HAProxy configuration is trivial -- a single TCP backend pointing at the
+metrics proxy route hostname on port 443:
+
+```
+frontend metrics_proxy
+    bind *:9443
+    mode tcp
+    default_backend metrics_proxy_backend
+
+backend metrics_proxy_backend
+    mode tcp
+    server metrics-proxy <metrics-proxy-route-hostname>:443
+```
+
+Because HAProxy operates in TCP mode, the TLS ClientHello (including the SNI
+hostname) passes through transparently. The OpenShift router on the
+management cluster reads the SNI and routes the connection to the metrics
+proxy pod, which terminates TLS. The forwarder requires no certificates --
+it is opaque to the TLS protocol.
 
 A **PodMonitor** targets the metrics forwarder pod directly (no Service
 required), with one `podMetricsEndpoints` entry per control plane component
-path:
+path. Each endpoint configures:
+
+- `scheme: https` -- Prometheus initiates a TLS connection to the forwarder
+  pod. Since the forwarder is a TCP proxy, this TLS connection passes
+  through end-to-end to the metrics proxy, which terminates it.
+- `tlsConfig.ca` -- references the `metrics-proxy-serving-ca` ConfigMap in
+  the `openshift-monitoring` namespace (synced by the HCCO from the HCP's
+  CA). This allows Prometheus to verify the metrics proxy's serving
+  certificate. The CA is referenced by ConfigMap name (not by file path),
+  since this is a custom CA not already mounted into the Prometheus pod.
+  This follows the same pattern used by ServiceMonitors like
+  `monitor-network` in `openshift-multus`, except those reference CAs
+  already available to Prometheus via `caFile` paths.
+- `tlsConfig.serverName` -- set to the metrics proxy route hostname. This
+  is needed for both SNI routing (so the OpenShift router directs the
+  connection to the correct backend) and certificate verification (so
+  Prometheus checks the cert against the route hostname, not the forwarder
+  pod IP).
+- `bearerTokenFile` -- set to
+  `/var/run/secrets/kubernetes.io/serviceaccount/token`, which is the
+  `prometheus-k8s` ServiceAccount token already mounted into the Prometheus
+  pod. This token is sent inside the TLS tunnel and forwarded transparently
+  by the TCP proxy to the metrics proxy, which validates it via TokenReview.
 
 ```yaml
 apiVersion: monitoring.coreos.com/v1
@@ -349,12 +478,20 @@ spec:
   podMetricsEndpoints:
     - port: metrics
       path: /metrics/kube-apiserver
-      metricRelabelings:
+      scheme: https
+      bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+      tlsConfig: &tlsConfig
+        ca:
+          configMap:
+            name: metrics-proxy-serving-ca
+            key: ca.crt
+        serverName: <metrics-proxy-route-hostname>
+      metricRelabelings: &relabeling
         # The metrics proxy injects labels like pod, namespace, job, service,
-        # instance into the metric samples to match standalone OCP conventions.
-        # Prometheus prefixes these with "exported_" when they conflict with
-        # target labels from the PodMonitor. The relabeling below restores the
-        # proxy-injected values as the authoritative labels.
+        # endpoint, instance into the metric samples to match standalone OCP
+        # conventions. Prometheus prefixes these with "exported_" when they
+        # conflict with target labels from the PodMonitor. The relabeling
+        # below restores the proxy-injected values as the authoritative labels.
         - sourceLabels: [exported_pod]
           targetLabel: pod
           action: replace
@@ -364,76 +501,116 @@ spec:
         - sourceLabels: [exported_instance]
           targetLabel: instance
           action: replace
+        - sourceLabels: [exported_job]
+          targetLabel: job
+          action: replace
+        - sourceLabels: [exported_service]
+          targetLabel: service
+          action: replace
+        - sourceLabels: [exported_endpoint]
+          targetLabel: endpoint
+          action: replace
         - action: labeldrop
           regex: exported_(.+)
     - port: metrics
       path: /metrics/etcd
-      metricRelabelings: # ... same relabeling as above
+      scheme: https
+      bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+      tlsConfig: *tlsConfig
+      metricRelabelings: *relabeling
     - port: metrics
       path: /metrics/kube-controller-manager
-      metricRelabelings: # ... same relabeling as above
+      scheme: https
+      bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+      tlsConfig: *tlsConfig
+      metricRelabelings: *relabeling
     - port: metrics
       path: /metrics/openshift-apiserver
-      metricRelabelings: # ... same relabeling as above
+      scheme: https
+      bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+      tlsConfig: *tlsConfig
+      metricRelabelings: *relabeling
     - port: metrics
       path: /metrics/openshift-controller-manager
-      metricRelabelings: # ... same relabeling as above
+      scheme: https
+      bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+      tlsConfig: *tlsConfig
+      metricRelabelings: *relabeling
     - port: metrics
       path: /metrics/cluster-version-operator
-      metricRelabelings: # ... same relabeling as above
+      scheme: https
+      bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+      tlsConfig: *tlsConfig
+      metricRelabelings: *relabeling
     - port: metrics
       path: /metrics/olm-operator
-      metricRelabelings: # ... same relabeling as above
+      scheme: https
+      bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+      tlsConfig: *tlsConfig
+      metricRelabelings: *relabeling
     - port: metrics
       path: /metrics/catalog-operator
-      metricRelabelings: # ... same relabeling as above
+      scheme: https
+      bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+      tlsConfig: *tlsConfig
+      metricRelabelings: *relabeling
     - port: metrics
       path: /metrics/openshift-route-controller-manager
-      metricRelabelings: # ... same relabeling as above
+      scheme: https
+      bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+      tlsConfig: *tlsConfig
+      metricRelabelings: *relabeling
     - port: metrics
       path: /metrics/cluster-node-tuning-operator
-      metricRelabelings: # ... same relabeling as above
+      scheme: https
+      bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+      tlsConfig: *tlsConfig
+      metricRelabelings: *relabeling
 ```
 
-The guest cluster's platform Prometheus discovers the PodMonitor, scrapes the
-forwarder pod on each path, and the forwarder proxies each request to the
-metrics proxy route. The metrics proxy authenticates the request, fans out to
-the backing pods, injects `source_pod` labels, and returns the merged response.
-
-The bearer token for authentication is attached to the scrape requests via the
-PodMonitor's `authorization` field, referencing the `prometheus-k8s`
-ServiceAccount token. Since this is the same ServiceAccount that Prometheus
-already uses, no additional credentials need to be provisioned.
+The guest cluster's platform Prometheus discovers the PodMonitor and opens
+a TLS connection to the forwarder pod for each scrape. The forwarder
+TCP-proxies the connection to the metrics proxy route. The metrics proxy
+terminates TLS, authenticates the bearer token via TokenReview, fans out to
+the backing pods, injects `source_pod` labels, and returns the merged
+response through the same connection.
 
 The HCCO is responsible for creating the following resources in the guest
-cluster:
-- The metrics forwarder Deployment (single-replica HAProxy pod).
+cluster's `openshift-monitoring` namespace:
+- The metrics forwarder Deployment (single-replica HAProxy pod in TCP proxy
+  mode). No certificates are mounted -- the forwarder is opaque to TLS.
 - The HAProxy configuration as a ConfigMap, containing the metrics proxy route
-  hostname as the backend.
-- The PodMonitor targeting the forwarder pod (using the existing
-  `prometheus-k8s` ServiceAccount for authentication).
-- A Secret containing the CA certificate for the metrics proxy's serving
-  certificate (so the forwarder can verify the upstream TLS connection).
+  hostname as the TCP backend.
+- A **`metrics-proxy-serving-ca` ConfigMap** containing the HCP's CA
+  certificate. This is synced from the HCP namespace on the management
+  cluster. Prometheus uses this CA (referenced by name in the PodMonitor's
+  `tlsConfig.ca.configMap`) to verify the metrics proxy's serving
+  certificate end-to-end through the TCP proxy.
+- The PodMonitor targeting the forwarder pod, with `scheme: https`,
+  `tlsConfig` referencing the CA ConfigMap by name and `serverName` set to
+  the metrics proxy route hostname, and `bearerTokenFile` pointing to the
+  `prometheus-k8s` ServiceAccount token.
 
 #### 5. Control Plane Operator Changes
 
 The **control-plane-operator** is responsible for reconciling the new resources
 in the HCP namespace:
 
-- Create the metrics proxy Deployment.
+- Create the metrics proxy Deployment (see below for how the Deployment is
+  constructed from ServiceMonitor/PodMonitor specs).
 - Create the Service fronting the metrics proxy's port.
 - Create the Route using the existing `util.ReconcileExternalRoute()` /
   `util.ReconcileInternalRoute()` helpers.
 - Generate and manage the metrics proxy's serving certificate.
-- Generate and manage the metrics proxy's client certificates for upstream
-  mTLS.
-- Configure the metrics proxy with the hosted kube-apiserver endpoint, the
-  list of authorized ServiceAccounts, and the component-to-service mapping
-  (service names, metrics port details). This configuration is provided as
-  a ConfigMap.
-- Create an RBAC role and binding on the management cluster allowing the
-  metrics proxy's ServiceAccount to read Endpoints/EndpointSlices in the
-  HCP namespace for pod discovery.
+- Generate the proxy ConfigMap with per-component entries that include
+  upstream connection details and file paths to mounted credentials (see
+  below).
+- Create the **endpoint resolver** Deployment, Service, serving certificate,
+  and RBAC (see
+  [Endpoint Resolver Deployment](#6-endpoint-resolver-deployment) below).
+  The endpoint resolver is the component that holds management cluster RBAC
+  for listing Pods, keeping this access out of the externally-exposed
+  metrics proxy.
 - **Respect the `hypershift.openshift.io/disable-monitoring-services`
   annotation**: When this annotation is set on the HostedControlPlane, the
   control-plane-operator skips creation of the metrics proxy Deployment,
@@ -445,6 +622,145 @@ in the HCP namespace:
   is not deployed. The HCCO similarly skips creation of the guest cluster
   metrics forwarder and PodMonitor when this annotation is present.
 
+##### Building the Metrics Proxy Deployment
+
+The control-plane-operator constructs the metrics proxy Deployment by
+inspecting the `tlsConfig` (and `scheme`) of each annotated ServiceMonitor
+and PodMonitor endpoint. The process has two phases: collecting volume
+mounts and generating the proxy ConfigMap.
+
+**Phase 1: Collecting volumes and volume mounts**
+
+The control-plane-operator iterates over each annotated ServiceMonitor and
+PodMonitor endpoint and inspects its `tlsConfig` field. Each `tlsConfig`
+may reference Secrets (for client certificates and keys) and ConfigMaps
+(for CA bundles). The control-plane-operator collects all unique Secret and
+ConfigMap references and adds them as volumes on the metrics proxy
+Deployment. Each volume is mounted at a deterministic path under
+`/etc/metrics-proxy/`:
+
+- **CA ConfigMaps** are mounted at `/etc/metrics-proxy/ca/<configmap-name>/`.
+  For example, the `root-ca` ConfigMap is mounted at
+  `/etc/metrics-proxy/ca/root-ca/`, making the CA bundle available at
+  `/etc/metrics-proxy/ca/root-ca/ca.crt`.
+- **Client certificate Secrets** are mounted at
+  `/etc/metrics-proxy/tls/<secret-name>/`. For example, the `metrics-client`
+  Secret is mounted at `/etc/metrics-proxy/tls/metrics-client/`, making the
+  certificate and key available at
+  `/etc/metrics-proxy/tls/metrics-client/tls.crt` and
+  `/etc/metrics-proxy/tls/metrics-client/tls.key`.
+
+Because many components share the same Secrets and ConfigMaps (e.g. most
+ServiceMonitors reference `root-ca` and `metrics-client`), the
+control-plane-operator deduplicates volume references. A given Secret or
+ConfigMap is mounted only once, regardless of how many ServiceMonitors
+reference it.
+
+For a typical hosted control plane, the resulting volumes are:
+
+| Volume type | Name | Mount path | Referenced by |
+|-------------|------|------------|---------------|
+| ConfigMap | `root-ca` | `/etc/metrics-proxy/ca/root-ca/` | kube-apiserver, kube-controller-manager, openshift-apiserver, openshift-controller-manager, CVO, olm-operator, catalog-operator, route-controller-manager, node-tuning-operator, cluster-image-registry-operator |
+| ConfigMap | `etcd-ca` | `/etc/metrics-proxy/ca/etcd-ca/` | etcd |
+| ConfigMap | `endpoint-resolver-ca` | `/etc/metrics-proxy/ca/endpoint-resolver-ca/` | endpoint resolver TLS verification |
+| Secret | `metrics-client` | `/etc/metrics-proxy/tls/metrics-client/` | kube-apiserver, kube-controller-manager, openshift-apiserver, openshift-controller-manager, olm-operator, catalog-operator, route-controller-manager, node-tuning-operator |
+| Secret | `etcd-metrics-client-tls` | `/etc/metrics-proxy/tls/etcd-metrics-client-tls/` | etcd |
+
+Components that use plain HTTP (e.g. cluster-autoscaler, ingress-operator)
+have no `tlsConfig` and contribute no volumes.
+
+**Phase 2: Generating the proxy ConfigMap**
+
+The control-plane-operator generates the proxy ConfigMap with one entry per
+component. Each entry includes the upstream connection details extracted from
+the ServiceMonitor/PodMonitor spec, with Secret and ConfigMap references
+translated to the corresponding file paths inside the container. For
+example:
+
+```yaml
+endpointResolverURL: https://endpoint-resolver:8443/resolve/
+endpointResolverCAFile: /etc/metrics-proxy/ca/endpoint-resolver-ca/ca.crt
+components:
+  etcd:
+    port: metrics
+    scheme: https
+    tlsConfig:
+      caFile: /etc/metrics-proxy/ca/etcd-ca/ca.crt
+      certFile: /etc/metrics-proxy/tls/etcd-metrics-client-tls/etcd-client.crt
+      keyFile: /etc/metrics-proxy/tls/etcd-metrics-client-tls/etcd-client.key
+      serverName: etcd-client
+    labels:
+      job: etcd
+      namespace: openshift-etcd
+      service: etcd
+      endpoint: etcd-metrics
+
+  kube-apiserver:
+    port: client
+    scheme: https
+    tlsConfig:
+      caFile: /etc/metrics-proxy/ca/root-ca/ca.crt
+      certFile: /etc/metrics-proxy/tls/metrics-client/tls.crt
+      keyFile: /etc/metrics-proxy/tls/metrics-client/tls.key
+      serverName: kube-apiserver
+    labels:
+      job: apiserver
+      namespace: default
+      service: kubernetes
+      endpoint: https
+
+  cluster-version-operator:
+    port: https
+    scheme: https
+    tlsConfig:
+      caFile: /etc/metrics-proxy/ca/root-ca/ca.crt
+      serverName: cluster-version-operator
+      # No certFile/keyFile -- server-side TLS only
+    labels:
+      job: cluster-version-operator
+      namespace: openshift-cluster-version
+      service: cluster-version-operator
+      endpoint: metrics
+
+  cluster-autoscaler:
+    port: metrics
+    scheme: http
+    # No tlsConfig -- plain HTTP
+    labels:
+      job: cluster-autoscaler
+      namespace: openshift-machine-api
+      service: cluster-autoscaler
+      endpoint: metrics
+```
+
+The `labels` values come from the `hypershift.openshift.io/metrics-*`
+annotations on the ServiceMonitor or PodMonitor. The `tlsConfig` fields
+(`caFile`, `certFile`, `keyFile`, `serverName`) are derived by mapping each
+Secret/ConfigMap reference in the ServiceMonitor/PodMonitor's `tlsConfig`
+to its mount path under `/etc/metrics-proxy/`. When `certFile` and `keyFile`
+are absent (as for cluster-version-operator), the proxy connects with
+server-side TLS verification only. When the entire `tlsConfig` is absent
+and `scheme` is `http`, the proxy connects over plain HTTP.
+
+The component name (the key in the `components` map) is used as the
+identifier when querying the endpoint resolver for pod IPs. The CPO also
+generates the endpoint resolver's ConfigMap at the same time, mapping
+each component name to the pod label selector derived from the
+ServiceMonitor or PodMonitor spec (see
+[Endpoint Resolver Deployment](#6-endpoint-resolver-deployment) for
+details on how the pod selector is derived).
+
+The `endpointResolverURL` field specifies the endpoint resolver's base URL.
+The metrics proxy appends the component name (the key in the `components`
+map) to this URL when resolving pod endpoints (e.g.
+`https://endpoint-resolver:8443/resolve/etcd`). The
+`endpointResolverCAFile` field points to the CA used to verify the endpoint
+resolver's serving certificate.
+
+At runtime, the metrics proxy reads this ConfigMap and uses the file paths
+to load the appropriate certificates for each component's upstream
+connection.
+
 ### Workflow Description
 
 **Cluster lifecycle automation** (HyperShift Operator + Control Plane Operator +
@@ -454,9 +770,11 @@ action is required from any user.
 1. A HostedCluster is created (or upgraded to a version that includes this
    feature).
 2. The control-plane-operator reconciles the HCP and creates the metrics proxy
-   Deployment, Service, and Route in the HCP namespace.
+   Deployment, Service, and Route in the HCP namespace. The CPO also creates
+   the endpoint resolver Deployment and Service.
 3. The control-plane-operator generates the proxy configuration with the
-   component-to-service mapping for all control plane components.
+   component-to-service mapping for all control plane components, including
+   the endpoint resolver's URL and CA.
 4. The metrics proxy is configured to authorize the existing `prometheus-k8s`
    ServiceAccount from the guest cluster's `openshift-monitoring` namespace.
 5. The hosted-cluster-config-operator deploys the metrics forwarder pod
@@ -467,10 +785,11 @@ action is required from any user.
    plane component path.
 7. The guest cluster's platform Prometheus discovers the PodMonitor and begins
    scraping the forwarder pod on each component path.
-8. For each scrape, the forwarder proxies the request (with the bearer token)
-   to the metrics proxy route. The metrics proxy authenticates the request,
-   fans out to all pods for the component, injects `source_pod` labels, and
-   returns the merged response.
+8. For each scrape, the forwarder TCP-proxies the connection to the metrics
+   proxy route. The metrics proxy terminates TLS, authenticates the request,
+   queries the endpoint resolver to discover pod IPs (resolved via pod
+   label selectors), fans out to all pods for the component, injects
+   `source_pod` labels, and returns the merged response.
 9. Control plane metrics become available in the guest cluster's Prometheus and
    are visible in the OpenShift Console monitoring UI.
 
@@ -492,12 +811,14 @@ This enhancement is exclusively for the HyperShift topology. It addresses the
 fundamental architectural split between the control plane (on the management
 cluster) and the data plane (guest cluster) that is unique to HyperShift.
 
-The metrics proxy runs in the HCP namespace on the management cluster alongside
-the other control plane components. It adds one additional pod per hosted
-cluster on the management cluster, plus one lightweight forwarder pod per
-guest cluster. Resource consumption is minimal since neither component stores
-metrics -- the proxy fans out and merges on demand, and the forwarder simply
-proxies requests.
+The metrics proxy and endpoint resolver run in the HCP namespace on the
+management cluster alongside the other control plane components. They add
+two additional pods per hosted cluster on the management cluster, plus one
+lightweight forwarder pod per guest cluster. Resource consumption is minimal
+since none of these components store metrics — the proxy fans out and merges
+on demand, the endpoint resolver serves from in-memory informer caches
+(one per component's pod label selector), and the forwarder simply proxies
+TCP connections.
 
 #### Standalone Clusters
 
@@ -525,56 +846,207 @@ The metrics proxy is a single Go binary that handles the full request lifecycle:
    the hosted kube-apiserver, and verifies the identity matches an authorized
    ServiceAccount. Rejects unauthorized requests with 401/403.
 3. **Pod discovery**: Maps the URL path to a control plane component and queries
-   the Kubernetes Endpoints or EndpointSlices API to discover all pod IPs and
-   names backing that component's service.
+   the endpoint resolver to discover all pod IPs and names for that
+   component. The metrics proxy has no direct access to the management
+   cluster's kube-apiserver.
 4. **Fan-out scraping**: Sends parallel GET requests to each discovered pod's
    metrics endpoint using the pod IP directly (bypassing the service ClusterIP).
-   Presents client certificates for mTLS authentication.
+   Uses the authentication method specified in the component's ServiceMonitor
+   or PodMonitor (mTLS with client certificates, server-side TLS only, or
+   plain HTTP).
 5. **Label injection**: Parses each pod's metrics response using the Prometheus
    `expfmt` library (`github.com/prometheus/common/expfmt`) and injects labels
    into every metric sample to match what a standalone OCP cluster's Prometheus
-   would produce for that component (e.g. `pod`, `job`, `namespace`, `service`,
-   `endpoint`, `instance`). The exact label values per component will be
-   determined by examining the ServiceMonitor configurations and console
-   dashboard queries in standalone OCP.
+   would produce for that component. The injected labels are `pod`, `job`,
+   `namespace`, `service`, `endpoint`, and `instance`. The specific values for
+   `job`, `namespace`, `service`, and `endpoint` are read from annotations on
+   the component's ServiceMonitor or PodMonitor (see
+   [Component Discovery](#component-discovery) for the annotation keys and
+   the table in [Metrics Proxy Deployment](#1-metrics-proxy-deployment) for
+   the complete mapping).
 6. **Merge and response**: Combines all labeled metric families from all pods
    into a single response and serializes it back to Prometheus exposition format.
 
 Configuration (hosted kube-apiserver endpoint, authorized ServiceAccounts,
-component-to-service mapping, port details) is provided as a ConfigMap generated
-by the control-plane-operator.
+per-component upstream details, port details, endpoint resolver URL and CA)
+is provided as a ConfigMap generated by the control-plane-operator.
+
+#### 6. Endpoint Resolver Deployment
+
+The **endpoint resolver** is a separate, lightweight deployment in the HCP
+namespace that handles pod endpoint discovery on behalf of the metrics
+proxy. It is the component that holds management cluster RBAC for listing
+Pods, keeping this access out of the externally-exposed metrics proxy.
+
+The endpoint resolver is a simple Go binary that:
+
+1. Reads its configuration (a map of component names to pod label
+   selectors) from a ConfigMap generated by the control-plane-operator.
+2. Watches Pods in the HCP namespace using informer-based caches, with
+   one label selector per component.
+3. Serves HTTPS requests from the metrics proxy to resolve component
+   names to pod IPs and names.
+
+The pod label selectors are derived by the control-plane-operator from
+each component's monitoring spec:
+
+- **For ServiceMonitor-based components**: The CPO looks up the Service
+  matched by the ServiceMonitor's `spec.selector`, then uses the
+  Service's `spec.selector` (which selects Pods). For example, the
+  `etcd` ServiceMonitor selects Services with `app: etcd`, and the
+  `etcd-client` Service selects Pods with `app: etcd`.
+- **For PodMonitor-based components**: The CPO uses the PodMonitor's
+  `spec.selector.matchLabels` directly, since PodMonitors already select
+  Pods. For example, the `cluster-autoscaler` PodMonitor selects Pods
+  with `app: cluster-autoscaler`.
+
+The endpoint resolver's ConfigMap maps each component name to its pod
+label selector:
+
+```yaml
+components:
+  etcd:
+    matchLabels:
+      app: etcd
+  kube-apiserver:
+    matchLabels:
+      app: kube-apiserver
+  cluster-autoscaler:
+    matchLabels:
+      app: cluster-autoscaler
+  ingress-operator:
+    matchLabels:
+      name: ingress-operator
+```
+
+The endpoint accepts requests of the form:
+
+```
+GET /resolve/<component-name>
+```
+
+and returns a JSON response containing the pod endpoints:
+
+```json
+{
+  "pods": [
+    {"name": "etcd-0", "ip": "10.0.1.5"},
+    {"name": "etcd-1", "ip": "10.0.1.6"},
+    {"name": "etcd-2", "ip": "10.0.1.7"}
+  ]
+}
+```
+
+When Pods are added, removed, or their IPs change, the informer caches
+are updated automatically. Requests are served from these in-memory
+caches, so they are fast and do not generate additional kube API calls.
+
+This approach works uniformly for all components regardless of whether
+they have a Service resource. ServiceMonitor-based components (which
+have Services) and PodMonitor-based components (which may not have
+Services) are both discovered via their pod labels.
+
+The endpoint resolver serves HTTPS using a serving certificate signed by
+the HCP's certificate authority. The CPO creates this certificate as part
+of reconciliation, following the same pattern used for the metrics proxy's
+serving certificate. The metrics proxy verifies the endpoint resolver's
+certificate using the CA referenced in `endpointResolverCAFile` in its
+ConfigMap.
+
+The control-plane-operator creates the following resources for the
+endpoint resolver:
+
+- A **Deployment** running the endpoint resolver binary.
+- A **Service** (`endpoint-resolver`) exposing the resolver's HTTPS port
+  within the HCP namespace.
+- A **serving certificate** signed by the HCP's CA.
+- A **ConfigMap** mapping component names to pod label selectors
+  (generated alongside the proxy ConfigMap during reconciliation).
+- An **RBAC Role and RoleBinding** granting the endpoint resolver's
+  ServiceAccount read access to Pods in the HCP namespace.
+
+The endpoint resolver is **not** exposed via a route — it is only
+reachable within the HCP namespace pod network. This is the key security
+property: the component that holds management cluster RBAC is not
+reachable from the data plane.
+
+**Security rationale**: This design ensures that the metrics proxy — which
+is a request-serving component exposed to the data plane via a route — has
+no management cluster RBAC. All management cluster API access (listing
+Pods) is confined to the endpoint resolver, which is internal to the HCP
+namespace and not exposed to external traffic. This follows the same
+security pattern established for the ignition server, where a separate
+proxy was placed in front to avoid giving management cluster credentials
+to a request-serving component.
 
 #### Pod Discovery and Label Injection
 
-The metrics proxy uses the Kubernetes API to discover pod endpoints dynamically.
-This is necessary because most control plane components are deployed as
-Deployments, meaning pod names and IPs are not stable across restarts.
+The metrics proxy resolves pod endpoints dynamically via the endpoint
+resolver. This is necessary because most control plane components are
+deployed as Deployments, meaning pod names and IPs are not stable across
+restarts.
 
 For a request to `/metrics/etcd`, the proxy:
 
-1. Looks up the Endpoints resource for the `etcd-client` service in the HCP
-   namespace.
-2. Finds 3 pod endpoints: `etcd-0` (10.0.1.5), `etcd-1` (10.0.1.6),
+1. Queries the endpoint resolver:
+   `GET https://endpoint-resolver:8443/resolve/etcd`.
+2. Receives the pod endpoints: `etcd-0` (10.0.1.5), `etcd-1` (10.0.1.6),
    `etcd-2` (10.0.1.7).
-3. Sends `GET https://10.0.1.5:2381/metrics`, `GET https://10.0.1.6:2381/metrics`,
-   `GET https://10.0.1.7:2381/metrics` in parallel.
+3. Sends `GET https://10.0.1.5:9979/metrics`, `GET https://10.0.1.6:9979/metrics`,
+   `GET https://10.0.1.7:9979/metrics` in parallel.
 4. Parses each response. A metric line like:
    ```
    etcd_server_leader_changes_seen_total 3
    ```
    becomes (for the response from pod `etcd-0` at `10.0.1.5`):
    ```
-   etcd_server_leader_changes_seen_total{pod="etcd-0",namespace="openshift-etcd",job="etcd",service="etcd-client",instance="10.0.1.5:2381"} 3
+   etcd_server_leader_changes_seen_total{pod="etcd-0",namespace="openshift-etcd",job="etcd",service="etcd",endpoint="etcd-metrics",instance="10.0.1.5:9979"} 3
    ```
 5. Merges all three responses and returns the combined output.
 
 The injected labels are chosen to match what Prometheus would produce when
-scraping the same component in a standalone OCP cluster. This ensures that
-existing OpenShift Console dashboards, alerting rules, and recording rules
-that filter on labels like `job="etcd"` or `namespace="openshift-etcd"` work
-without modification in hosted clusters. The exact label values per component
-(job name, namespace, service name, etc.) will be determined by examining the
-ServiceMonitor configurations and console dashboard queries in standalone OCP.
+scraping the same component in a standalone OCP cluster. The values for
+`job`, `namespace`, `service`, and `endpoint` are read from annotations on
+each component's ServiceMonitor or PodMonitor in the HCP namespace (see
+[Component Discovery](#component-discovery) for the annotation keys). The
+following table shows the complete label mapping for each component:
+
+| Component | `job` | `namespace` | `service` | `endpoint` |
+|-----------|-------|-------------|-----------|------------|
+| kube-apiserver | `apiserver` | `default` | `kubernetes` | `https` |
+| kube-controller-manager | `kube-controller-manager` | `openshift-kube-controller-manager` | `kube-controller-manager` | `https` |
+| etcd | `etcd` | `openshift-etcd` | `etcd` | `etcd-metrics` |
+| openshift-apiserver | `api` | `openshift-apiserver` | `api` | `https` |
+| openshift-controller-manager | `controller-manager` | `openshift-controller-manager` | `controller-manager` | `https` |
+| cluster-version-operator | `cluster-version-operator` | `openshift-cluster-version` | `cluster-version-operator` | `metrics` |
+| olm-operator | `olm-operator-metrics` | `openshift-operator-lifecycle-manager` | `olm-operator-metrics` | `https-metrics` |
+| catalog-operator | `catalog-operator-metrics` | `openshift-operator-lifecycle-manager` | `catalog-operator-metrics` | `https-metrics` |
+| openshift-route-controller-manager | `route-controller-manager` | `openshift-route-controller-manager` | `route-controller-manager` | `https` |
+| cluster-node-tuning-operator | `node-tuning-operator` | `openshift-cluster-node-tuning-operator` | `node-tuning-operator` | `60000` |
+
+The `pod` label is set to the actual pod name (e.g. `etcd-0`) and `instance`
+is set to `<pod_ip>:<target_port>` (e.g. `10.0.1.5:9979`). These labels
+ensure that existing OpenShift Console dashboards, alerting rules, and
+recording rules that filter on labels like `job="etcd"` or
+`namespace="openshift-etcd"` work without modification in hosted clusters.
+
+Note that several annotation values differ from what one might expect based
+on component names alone. These values are chosen to match the labels that
+Prometheus produces in a standalone OCP cluster for the same component:
+- **kube-apiserver** uses `job="apiserver"` (not `kube-apiserver`),
+  `namespace="default"`, and `service="kubernetes"` because in standalone OCP
+  the ServiceMonitor targets the `kubernetes` Service in the `default`
+  namespace, whose `component=apiserver` label maps to the `job` label.
+- **openshift-apiserver** uses `job="api"` and `service="api"` because the
+  target Service is named `api` in the `openshift-apiserver` namespace.
+- **openshift-controller-manager** uses `job="controller-manager"` and
+  `service="controller-manager"` because the target Service is named
+  `controller-manager`.
+- **openshift-route-controller-manager** uses `job="route-controller-manager"`
+  and `service="route-controller-manager"`.
+- **olm-operator** and **catalog-operator** use service names with a
+  `-metrics` suffix (`olm-operator-metrics`, `catalog-operator-metrics`)
+  because the ServiceMonitors target separate metrics services.
 
 #### Relabeling on the Guest Cluster
 
@@ -587,8 +1059,41 @@ The PodMonitor uses `metricRelabelings` to resolve this. Prometheus prefixes
 conflicting metric labels with `exported_` (e.g. the proxy-injected `pod`
 becomes `exported_pod` while the target's `pod` label takes precedence). The
 relabeling configuration restores the proxy-injected values as the authoritative
-labels and drops the forwarder's target labels. The specific relabeling rules
-will be determined alongside the label injection configuration.
+labels and drops the forwarder's target labels:
+
+```yaml
+metricRelabelings:
+  # Restore proxy-injected labels as authoritative
+  - sourceLabels: [exported_pod]
+    targetLabel: pod
+    action: replace
+  - sourceLabels: [exported_namespace]
+    targetLabel: namespace
+    action: replace
+  - sourceLabels: [exported_instance]
+    targetLabel: instance
+    action: replace
+  - sourceLabels: [exported_job]
+    targetLabel: job
+    action: replace
+  - sourceLabels: [exported_service]
+    targetLabel: service
+    action: replace
+  - sourceLabels: [exported_endpoint]
+    targetLabel: endpoint
+    action: replace
+  # Drop all remaining exported_ prefixed labels
+  - action: labeldrop
+    regex: exported_(.+)
+```
+
+These relabelings ensure that labels like `job="etcd"`,
+`namespace="openshift-etcd"`, and `service="etcd"` (as injected by the
+metrics proxy) take precedence over the target labels that describe the
+forwarder pod itself (e.g. `namespace="openshift-monitoring"`,
+`pod="control-plane-metrics-forwarder-..."`). The same relabeling
+configuration is applied to all `podMetricsEndpoints` entries in the
+PodMonitor.
 
 #### Error Handling for Pod Scraping
 
@@ -604,11 +1109,14 @@ The following certificates are needed:
 
 - **Serving certificate**: Used by the metrics proxy to serve HTTPS. Signed by
   the HCP's CA. The guest cluster's Prometheus must trust this CA.
-- **Client certificate**: Used by the metrics proxy to connect to upstream pod
-  metrics endpoints via mTLS. Must be signed by a CA trusted by the control
-  plane components. The existing metrics client certificates (used by
-  ServiceMonitors on the management cluster) can be reused or a new certificate
-  can be generated from the same CA.
+- **Upstream authentication credentials**: The metrics proxy reuses the
+  existing Secrets and ConfigMaps already present in the HCP namespace for
+  management-side monitoring. These are collected dynamically from the
+  `tlsConfig` of each annotated ServiceMonitor/PodMonitor and mounted into
+  the metrics proxy pod. The proxy ConfigMap references the mounted
+  credentials by file path. See
+  [Building the Metrics Proxy Deployment](#building-the-metrics-proxy-deployment)
+  for the volume mount structure and ConfigMap format.
 
 #### Metric Filtering
 
@@ -664,10 +1172,69 @@ ConfigMap if platform-specific customization is required.
 
 #### Component Discovery
 
-The proxy configuration is static and generated at reconciliation time. When the
-set of control plane components changes (e.g. a component is added or removed),
-the control-plane-operator regenerates the proxy ConfigMap and rolls the proxy
-deployment.
+The proxy configuration is generated by the control-plane-operator at
+reconciliation time by enumerating the **ServiceMonitors and PodMonitors**
+that exist in the HCP namespace. This approach avoids maintaining a separate
+hardcoded registry of components -- the ServiceMonitors and PodMonitors
+already encode the complete set of metrics endpoint details (service or pod
+selector, port, scheme, TLS configuration, and metric relabelings) for each
+component.
+
+Each ServiceMonitor or PodMonitor that should be exposed to the data plane
+carries annotations specifying the label values that the metrics proxy should
+inject into the scraped metrics. These annotations correspond to the labels
+that Prometheus would produce when scraping the same component in a
+standalone OCP cluster:
+
+| Annotation | Description | Example (etcd) |
+|------------|-------------|----------------|
+| `hypershift.openshift.io/metrics-job` | Value for the `job` label | `etcd` |
+| `hypershift.openshift.io/metrics-namespace` | Value for the `namespace` label | `openshift-etcd` |
+| `hypershift.openshift.io/metrics-service` | Value for the `service` label | `etcd` |
+| `hypershift.openshift.io/metrics-endpoint` | Value for the `endpoint` label | `etcd-metrics` |
+
+ServiceMonitors or PodMonitors that do not carry these annotations are
+ignored by the control-plane-operator and are not included in the proxy
+configuration. This serves as the opt-in mechanism: system components
+whose metrics are internal to the HyperShift infrastructure (e.g.
+`controlplane-operator`, `hosted-cluster-config-operator`,
+`ignition-server`) simply omit these annotations and are excluded
+automatically.
+
+During each reconciliation loop, the control-plane-operator:
+
+1. Lists all ServiceMonitors and PodMonitors in the HCP namespace.
+2. Filters to only those that carry the `hypershift.openshift.io/metrics-*`
+   annotations. ServiceMonitors and PodMonitors without these annotations
+   are skipped.
+3. For each annotated ServiceMonitor or PodMonitor, extracts the upstream
+   connection details (scheme, TLS config, target port, metrics path) from
+   the spec, and reads the label values to inject (`job`, `namespace`,
+   `service`, `endpoint`) from the annotations.
+4. Generates the proxy ConfigMap with one entry per discovered component.
+
+When the set of control plane components changes -- for example, when an
+optional feature like `autonode` is enabled via a day-2 operation and a new
+ServiceMonitor or PodMonitor appears in the HCP namespace with the
+appropriate annotations -- the control-plane-operator detects the change
+during its next reconciliation, regenerates the proxy ConfigMap to include
+the new component's path and configuration, and rolls the proxy deployment
+to pick up the updated configuration. The same applies when a component is
+removed: its ServiceMonitor or PodMonitor is deleted, the entry is dropped
+from the ConfigMap, and the proxy stops serving that path.
+
+On the guest cluster side, the HCCO similarly reconciles the PodMonitor to
+add or remove `podMetricsEndpoints` entries corresponding to the components
+present in the proxy configuration. This ensures the guest cluster's
+Prometheus automatically starts scraping new components and stops scraping
+removed ones without manual intervention.
+
+Because the ServiceMonitors and PodMonitors in the HCP namespace are the
+complete source of truth (connection details from the spec, label values
+from annotations), adding support for a new component requires only that
+the component's operator creates a ServiceMonitor or PodMonitor in the HCP
+namespace with the `hypershift.openshift.io/metrics-*` annotations. No code
+change in the control-plane-operator is needed.
 
 ### Risks and Mitigations
 
@@ -678,8 +1245,14 @@ cluster could scrape control plane metrics.
 **Mitigation**: The bearer token is validated via TokenReview against the guest
 cluster's API server, and only tokens from the `prometheus-k8s` ServiceAccount
 (in `openshift-monitoring` namespace) are authorized. This ServiceAccount is
-managed by CMO and not accessible to unprivileged guest cluster users. Additionally, the route uses passthrough TLS, so all traffic is
-encrypted.
+managed by CMO and not accessible to unprivileged guest cluster users.
+Additionally, the route uses passthrough TLS, so all traffic is encrypted.
+The metrics proxy itself has no management cluster RBAC — pod endpoint
+discovery is delegated to the endpoint resolver (see
+[Endpoint Resolver Deployment](#6-endpoint-resolver-deployment)), which
+only has read access to Pods in the HCP namespace. Even if the proxy
+were compromised via a stolen token, the attacker would gain no
+management cluster API access.
 
 **Risk**: The proxy introduces a new component that could fail, making control
 plane metrics unavailable to the guest cluster.
@@ -700,10 +1273,10 @@ default scrape interval keeps the additional load minimal.
 
 ### Drawbacks
 
-- **Additional resource consumption**: One metrics proxy pod per hosted cluster
-  on the management cluster, plus one forwarder pod per guest cluster. For
-  deployments with hundreds of hosted clusters, this adds up, though both
-  components are lightweight.
+- **Additional resource consumption**: One metrics proxy pod and one endpoint
+  resolver pod per hosted cluster on the management cluster, plus one forwarder
+  pod per guest cluster. For deployments with hundreds of hosted clusters, this
+  adds up, though all three components are lightweight.
 - **Operational complexity**: A new component to monitor, troubleshoot, and
   maintain. Proxy configuration must be kept in sync with the set of control
   plane components.
