@@ -199,7 +199,7 @@ Helm-based Gateway API installed.
     using sail-operator libraries.
     * If the CRDs are owned by cluster-ingress-operator (have the label `ingress.operator.openshift.io/owned`), they will be updated
     * If the CRDs are owned by OSSM (have the label `olm.managed: "true"`), they will not be updated
-    * If the CRDs are managed by a third party, the `CompatibleIstioCRDs` condition will be set to `False` with reason `UnknownManagement` to inform the user that the Istio CRDs are not managed by CIO or OSSM.
+    * If the CRDs are managed by a third party, the `CRDsReady` condition will be set to `False` with reason `UnknownManagement` to inform the user that the Istio CRDs are not managed by CIO or OSSM.
 4.  Existing `Gateway` and route resources continue functioning with no data
     plane downtime.
 
@@ -275,11 +275,18 @@ products. This approach provides several benefits:
 For example, if `CIO` installed only a subset of CRDs, and a user subsequently
 installs OSSM and later removes the OSSM subscription, the cluster could end up
 with a mix of CRD versions (some from OSSM, some from CIO). Installing the complete
-set from the beginning prevents this version fragmentation.
+set from the beginning prevents this version fragmentation. The `sail-library` will
+be responsible to "ask" CIO if there is any in use OSSM subscription, and then take the
+decision if the CRD should be owned by `CIO/sail-library`, by `OSSM/OLM` or should not be
+taken over at all.
 
 Additionally, since Istio will support resource filtering in a future release, this
 approach allows layered products to simply request new resources to be added to the filter configuration
 rather than requiring CRD installation updates when adopting new Istio custom resources.
+
+We are intentionally not doing dynamic addition of Istio resources to `CIO` provisioned Istio
+resource filtering to avoid undesired reconciliation of Istio resources like `VirtualServices` 
+without explicit need.
 
 #### CRD Installation and Management Workflow
 
@@ -303,7 +310,7 @@ When CRDs exist and contain the label `ingress.operator.openshift.io/owned`:
 
 When CRDs exist and contain the labels `olm.managed: "true"` and `operators.coreos.com/<subscription-name>.<namespace>: ""`:
 1. Sail Operator library requests to `CIO` via a callback function to verify if the subscription used by the CRD exists
-2. If the referred subscription exists, the CRDs will not be modified.
+2. If the referred subscription (or its install plan) exists, the CRDs will not be modified.
 3. If the referred subscription does not exist, Sail Operator library will mark the CRDs as CIO Managed with:
    - Replacing the Istio CRDs with the version from the current sail-operator library
    - Adding the appropriate labels and annotations to indicate CIO management
@@ -311,7 +318,7 @@ When CRDs exist and contain the labels `olm.managed: "true"` and `operators.core
 **Scenario 4: CRDs Exist and Are Managed by a Third Party**
 
 When CRDs exist but do not contain CIO or OSSM management labels:
-1. `CIO` sets the `CompatibleIstioCRDs` condition on the `GatewayClass` status to `False` with reason `UnknownManagement` to indicate the CRD management state
+1. `CIO` sets the `CRDsReady` condition on the `GatewayClass` status to `False` with reason `UnknownManagement` to indicate the CRD management state
 2. If the user removes the third-party CRDs, `CIO` will install its own CRDs and update the condition to reflect CIO management
 3. Alternatively, if the user adds the `ingress.operator.openshift.io/owned` label to the existing CRDs, `CIO` will take ownership and replace 
 them with the supported version
@@ -319,25 +326,42 @@ them with the supported version
 **Scenario 5: CRDs Exist with Mixed Management**
 
 When some CRDs have CIO labels and others have OSSM or third-party labels:
-1. `CIO` sets the `CompatibleIstioCRDs` condition to `False` with reason `ManagementMismatch`
+1. `CIO` sets the `CRDsReady` condition to `False` with reason `MixedOwnership`
 2. The condition message identifies which CRDs are in which management state
 3. If the user removes the third-party CRDs, `CIO` will install its own CRDs and update the condition to reflect CIO management
-4. Alternatively, if the user adds the `ingress.operator.openshift.io/owned` label to the existing CRDs, `CIO` will take ownership and replace 
-them with the supported version
+4. Alternatively, if the user adds the `ingress.operator.openshift.io/owned` label to the existing CRDs, `CIO` will take ownership and replace them with the supported version
 
 Layered products can use the `GatewayClass` condition to determine whether they can
 operate on the current cluster.
 
-#### GatewayClass Condition
+#### GatewayClass Conditions
 
 To provide visibility into Istio CRD management for layered products, `CIO` adds
-a condition to the `GatewayClass` status that indicates the compatibility and
+the following conditions to the `GatewayClass` status that indicates the compatibility and
 management state of the Istio CRDs. This allows layered products to determine
 whether they can operate on the current cluster.
 
-The condition uses the following structure:
+---
 
-**Condition Type**: `CompatibleIstioCRDs`
+**Condition**: `ControllerInstalled`
+
+**Possible Status and Reason combinations**:
+
+* **Status: `True`, Reason: `Installed`**
+  - CIO was able to install Istio using the sail-library
+  - Message: Contains the version installed and any warning
+
+* **Status: `False`, Reason: `InstallFailed`**
+  - CIO was not able to install Istio using the sail-library
+  - Message: Contains the error of sail-library
+
+* **Status: `Unknown`, Reason: `Pending`**
+  - CIO didn't started the installation of Istio
+  - Message: "waiting for first reconciliation"
+
+---
+
+**Condition**: `CRDsReady`
 
 **Possible Status and Reason combinations**:
 
@@ -349,11 +373,15 @@ The condition uses the following structure:
   - OLM is managing the Istio CRDs
   - Message: Includes the subscription name and namespace being used (e.g., "Istio CRDs are managed by OSSM subscription 'servicemeshoperator' in namespace 'openshift-operators'")
 
+* **Status: `Unknown`, Reason: `NoneExist`**
+  - CRDs are not installed yet
+  - Message: "CRDs not yet installed"
+
 * **Status: `False`, Reason: `UnknownManagement`**
   - The CRDs were installed by a third party
   - Message: Indicates the reason for the status and that the user can either remove the CRDs to allow CIO to install its own version, or add the `ingress.operator.openshift.io/owned` label to allow CIO to take ownership and manage them
 
-* **Status: `False`, Reason: `ManagementMismatch`**
+* **Status: `False`, Reason: `MixedOwnership`**
   - Happens when CRDs are managed inconsistently (different management labels for CRDs in the Istio group)
   - Message: Indicates the reason for the status and identifies the mismatched CRDs (e.g., which CRD is in which management state)
 
@@ -470,10 +498,8 @@ already be Helm-based. The migration code can be removed in a future release
 
 #### Object Watching and Reconciliation
 
-The gatewayclass-controller is now responsible for watching and reconciling all
-objects created by the istiod Helm chart. The sail-operator library may provide
-controller logic in the future to help manage these objects and reduce the
-maintenance burden.
+The `sail-operator` library is now responsible for watching and reconciling all
+objects created by the istiod Helm chart.
 
 #### RBAC Changes
 
