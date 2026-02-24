@@ -121,7 +121,7 @@ For MicroShift, this enhancement applies to any operators that are installed via
 
 #### registry+v1 Bundle Configuration Schema Design
 
-The registry+v1 bundle configuration will support a new `deploymentConfig` type that is a type alias for OLMv0's `SubscriptionConfig`:
+The registry+v1 bundle configuration will support a new `deploymentConfig` type that is a type alias for OLMv0's [SubscriptionConfig](github.com/operator-framework/api/pkg/operators/v1alpha1/subscription_types.go):
 
 ```go
 // DeploymentConfig is a type alias for v1alpha1.SubscriptionConfig
@@ -155,7 +155,7 @@ Example inline configuration structure:
 }
 ```
 
-The `Selector` field in the `SubscriptionConfig` is present but is not ever extracted or used by OLMv0. OLMv1 will maintain this behavior so the field will be accepted but ignored.
+Note: A `Selector` field present in OLMv0's `SubscriptionConfig` struct is never used by OLMv0, even though a value for it is accepted by the Subscription API. OLMv1 will deviate from this behavior and not accept this field at all.
 
 #### Renderer Modifications
 
