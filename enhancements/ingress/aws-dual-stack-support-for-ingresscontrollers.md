@@ -412,15 +412,19 @@ N/A
 The feature is day-0 only, only fresh installs are supported.
 
 **Downgrade to version without feature:**
+Note: [cluster downgrades are not supported](https://access.redhat.com/solutions/4777861).
+The following is provided for informational purposes only.
 - On clusters installed with the `AWSDualStackInstall` feature gate and dual-stack IP family:
   - The older ingress-operator version will not read the IP family from
     the Infrastructure CR and will fall back to IPv4-only configuration.
-  - The IngressController's publishing service will be reconciled and the `ipFamilies` and
-    `ipFamilyPolicy` fields will be removed if previously set, defaulting to IPv4-only.
-  - The AWS NLB hostname remains the same; AWS removes AAAA record.
-  - IPv4 connectivity continues to work; IPv6 connectivity is lost.
-  - The Alias A and AAAA records for the wildcard domain remain unchanged as they point to the same NLB hostname.
-    However, the Alias AAAA record will not work anymore because the IPv6 address for the load balancer will disappear.
+  - The ingress-operator does not stomp on all fields in the service
+    spec, so the `ipFamilies` and `ipFamilyPolicy` fields will remain
+    untouched on the publishing service.
+  - The behavior of the Cloud Controller Manager (cloud-provider-aws) is
+    unclear, though it may be a no-op if the load balancer is already
+    provisioned.
+  - The Alias A and AAAA records for the wildcard domain remain unchanged
+    as they point to the same NLB hostname.
 
 ## Version Skew Strategy
 No special version skew handling is required beyond normal OpenShift upgrade procedures.
