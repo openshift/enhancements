@@ -276,7 +276,7 @@ For example, if `CIO` installed only a subset of CRDs, and a user subsequently
 installs OSSM and later removes the OSSM subscription, the cluster could end up
 with a mix of CRD versions (some from OSSM, some from CIO). Installing the complete
 set from the beginning prevents this version fragmentation. The `sail-library` will
-be responsible to "ask" CIO if there is any in use OSSM subscription, and then take the
+be responsible for "asking" CIO if there is any in use OSSM subscription, and then take the
 decision if the CRD should be owned by `CIO/sail-library`, by `OSSM/OLM` or should not be
 taken over at all.
 
@@ -356,7 +356,7 @@ whether they can operate on the current cluster.
   - Message: Contains the error of sail-library
 
 * **Status: `Unknown`, Reason: `Pending`**
-  - CIO didn't started the installation of Istio
+  - CIO hasn't started the installation of Istio
   - Message: "waiting for first reconciliation"
 
 ---
