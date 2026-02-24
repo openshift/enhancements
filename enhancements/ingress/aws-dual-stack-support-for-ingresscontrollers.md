@@ -354,6 +354,12 @@ N/A
 **Test Strategy:**
 - Unit tests for operator logic that reads IP family from Infrastructure
   CR and configures services accordingly.
+- The E2E tests will be added to the
+  [origin](https://github.com/openshift/origin) repository as tests
+  for the `AWSDualStackInstall` feature gate.
+- A new CI presubmit job will be added to the cluster-ingress-operator,
+  similar to the [dualstack presubmit job](https://github.com/openshift/release/pull/73270),
+  to run the E2E tests on an AWS cluster with dual-stack networking.
 - E2E tests verifying:
   - On clusters installed with `AWSDualStackInstall` feature gate and a dual-stack IP family:
     - IngressControllers with NLB are automatically configured with
