@@ -130,6 +130,9 @@ directly, as opposed to "OLM-based installation" where OLM manages a
 sail-operator deployment which then installs istiod. Both approaches ultimately
 use Helm charts; the distinction is in the management layer.
 
+**Note**: For the sake of brevity, `cluster-ingress-operator` will be also referred
+simply as `CIO` in this document. 
+
 ### High-Level Changes
 
 The cluster-ingress-operator will make the following changes:
@@ -245,14 +248,13 @@ sequenceDiagram
 
 ### Istio CRD Management
 
-**Note**: For the sake of brevity, `cluster-ingress-operator` will be also referred
-simply as `CIO` in this section. 
-
-**Note**: The CRD Management is made by the provided `sail-library` during the Apply operation.
+**Note**: The CRD Management is made by the provided `sail-operator` library during the Apply operation.
 
 One of the key aspects of this proposal is that `CIO` effectively installs Istio,
 which includes a set of Custom Resource Definitions required for Istio and its
-integrations to work properly.
+integrations to work properly. This means that, if no other component is managing
+Istio CRDs lifecycle, `CIO`, with the help of the `sail-operator` library should be managing
+them as these CRDs are required for Istio and layered products to work properly.
 
 An Istio CRD can exist in one of three management states:
 
@@ -280,22 +282,22 @@ products. This approach provides several benefits:
 For example, if `CIO` installed only a subset of CRDs, and a user subsequently
 installs OSSM and later removes the OSSM subscription, the cluster could end up
 with a mix of CRD versions (some from OSSM, some from CIO). Installing the complete
-set from the beginning prevents this version fragmentation. The `sail-library` will
-be responsible for "asking" CIO if there is any in use OSSM subscription, and then take the
-decision if the CRD should be owned by `CIO/sail-library`, by `OSSM/OLM` or should not be
+set from the beginning prevents this version fragmentation. The `sail-operator` library will
+be responsible for querying `CIO` to check if there is any in-use OSSM subscription, and then take the
+decision if the CRD should be owned by `CIO/sail-operator`, by `OSSM/OLM` or should not be
 taken over at all.
 
 Additionally, since Istio will support resource filtering in a future release, this
 approach allows layered products to simply request new resources to be added to the filter configuration
 rather than requiring CRD installation updates when adopting new Istio custom resources.
 
-We are intentionally not doing dynamic addition of Istio resources to `CIO` provisioned Istio
-resource filtering to avoid undesired reconciliation of Istio resources like `VirtualServices` 
-without explicit need.
+We are intentionally not doing dynamic addition of Istio resources to the Istio resource
+filtering configuration provisioned by `CIO`, to avoid undesired reconciliation of Istio
+resources like `VirtualServices` without an explicit need.
 
 #### CRD Installation and Management Workflow
 
-The workflow described here is executed by the `Sail Operator` library during `CIO`
+The workflow described here is executed by the `sail-operator` library during `CIO`
 Istio installation reconciliation process.
 
 **Scenario 1: CRDs Do Not Exist**
@@ -308,16 +310,16 @@ When the library verifies that Istio CRDs do not exist on the cluster:
 **Scenario 2: CRDs Exist and Are Managed by CIO**
 
 When CRDs exist and contain the label `ingress.operator.openshift.io/owned`:
-1. The CRDs are updated (replaced) with the current vendored CRDs from the current `Sail Operator` library
+1. The CRDs are updated (replaced) with the current vendored CRDs from the current `sail-operator` library
 2. This ensures CRDs stay synchronized with the installed Istio version
 
 **Scenario 3: CRDs Exist and Are Managed by OSSM Subscription**
 
 When CRDs exist and contain the labels `olm.managed: "true"` and `operators.coreos.com/<subscription-name>.<namespace>: ""`:
-1. Sail Operator library requests to `CIO` via a callback function to verify if the subscription used by the CRD exists
-2. If the referred subscription (or its install plan) exists, the CRDs will not be modified.
-3. If the referred subscription does not exist, Sail Operator library will mark the CRDs as CIO Managed with:
-   - Replacing the Istio CRDs with the version from the current sail-operator library
+1. The `sail-operator` library queries `CIO` via a callback function to verify if the subscription referenced by the CRD exists
+2. If the referenced subscription (or its InstallPlan) exists, the CRDs will not be modified.
+3. If the referenced subscription does not exist, the `sail-operator` library will mark the CRDs as CIO-managed with:
+   - Replacing the Istio CRDs with the version from the current `sail-operator` library
    - Adding the appropriate labels and annotations to indicate CIO management
 
 **Scenario 4: CRDs Exist and Are Managed by a Third Party**
@@ -353,12 +355,12 @@ whether they can operate on the current cluster.
 **Possible Status and Reason combinations**:
 
 * **Status: `True`, Reason: `Installed`**
-  - CIO was able to install Istio using the sail-library
+  - CIO was able to install Istio using the `sail-operator` library
   - Message: Contains the version installed and any warning
 
 * **Status: `False`, Reason: `InstallFailed`**
-  - CIO was not able to install Istio using the sail-library
-  - Message: Contains the error of sail-library
+  - CIO was not able to install Istio using the `sail-operator` library
+  - Message: Contains the error from the `sail-operator` library
 
 * **Status: `Unknown`, Reason: `Pending`**
   - CIO hasn't started the installation of Istio
@@ -442,10 +444,9 @@ The process works as follows:
 1. Add the sail-operator library dependency to `go.mod`, which vendors the
    library including its embedded Helm charts.
 2. Use sail-operator library functions to install istiod, which access the
-   embedded charts from the vendored library.
-3. Start the informer provided by sail-operator library to reconcile the resources
-   installed by the Helm chart.
-4. No external chart files are needed at runtime.
+   embedded charts from the vendored library. The sail-operator library is
+   responsible for reconciling the resources and managing resource drifts.
+3. No external chart files are needed at runtime.
 
 This approach ensures charts are version controlled and synchronized via Go
 vendoring, eliminating drift between the Helm charts and the Istio version they
@@ -809,7 +810,7 @@ oc -n openshift-ingress-operator logs deployment/ingress-operator
 
 ### Troubleshooting
 
-**Failed migration (4.21 to 4.22)**: Verify `Istio` and `IstioRevision` CR deleted, verify state of the helm chart,
+**Failed migration (4.21 to 4.22)**: Verify `Istio` and `IstioRevision` CR deleted, verify state of the Helm chart,
 and check the logs of the ingress operator:
 ```bash
 oc get istio
