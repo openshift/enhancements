@@ -344,10 +344,6 @@ Components using Go's `crypto/tls` library have specific limitations:
 - `TLS_AES_256_GCM_SHA384`
 - `TLS_CHACHA20_POLY1305_SHA256`
 
-The APIServer validation will reject configurations that attempt to set cipher suites with TLS 1.3.
-
-**Curve Preferences Ordering:** Starting in Go 1.24, `CurvePreferences` semantics are changing for Go-based components ([golang/go#69393](https://github.com/golang/go/issues/69393)). The list becomes a set of *enabled* curves rather than a preference order—Go's crypto/tls handles prioritization internally. However, non-Go TLS implementations (e.g., HAProxy used by Ingress) continue to respect curve preference ordering. **Users should be aware that the ordering of curves specified in the API is not guaranteed to be honored by all components.** Go-based components will ignore ordering while other implementations may honor it.
-
 ### Risks and Mitigations
 
 **Risk:** Component teams may not adopt the unified approach in the required timeframe.
