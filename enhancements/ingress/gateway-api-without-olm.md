@@ -136,7 +136,8 @@ The cluster-ingress-operator will make the following changes:
 
 1.  **Install istiod Directly via Helm**: Leverage libraries from the
     sail-operator project to install istiod programmatically with
-    gateway-api configurations.
+    gateway-api configurations. Installation state is surfaced via the
+      `ControllerInstalled` condition on the `GatewayClass` status.
 
 2.  **Upgrade Migration**: Detect when upgrading from an OLM-based
     installation (4.21) to Helm-based (4.22), delete the `Istio` CR to
@@ -145,8 +146,12 @@ The cluster-ingress-operator will make the following changes:
     control plane via Helm with no data plane downtime. The subscription of OSSM
     will NOT be removed automatically.
 
-See the [Istio CRD Management](#istio-crd-management) section for details about Istio CRDs installation
-and lifecycle management.
+3.  **Istio CRD Management**: Install and manage the complete set of Istio CRDs
+    using the sail-operator library, with automatic ownership detection to
+    coordinate with existing OSSM subscriptions or third-party installations.
+    CRD management state is surfaced via `GatewayClass` conditions for
+    layered product compatibility. See the [Istio CRD Management](#istio-crd-management)
+    section for details.
 
 ### Workflow Description
 
