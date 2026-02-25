@@ -77,6 +77,13 @@ As a platform engineer maintaining Gateway API, I want to install and upgrade
 istiod directly without managing OLM Subscriptions and InstallPlans, so that
 I have fewer components to coordinate and the system is more predictable.
 
+#### Story 4: Layered product developer
+
+As a layered product developer (RHOAI, RHCL) I want to be able to rely on the platform
+to produce my services. Given I know that Istio is used, and that my application needs
+specific Istio custom resources to work, I want to be able to use these custom resources
+to produce my services without the need of an OSSM subscription.
+
 ### Goals
 
 - Remove the dependency on OLM for installing istiod for Gateway API support.
@@ -108,6 +115,8 @@ I have fewer components to coordinate and the system is more predictable.
   OSSM production images being released.
 - Changing the control plane architecture. istiod will continue to run in the
   openshift-ingress namespace with the same configuration.
+- Allowing regular users to consume Istio resources. Istio resource usage is limited
+  to layered products.
 
 ## Proposal
 
@@ -121,19 +130,31 @@ directly, as opposed to "OLM-based installation" where OLM manages a
 sail-operator deployment which then installs istiod. Both approaches ultimately
 use Helm charts; the distinction is in the management layer.
 
+**Note**: For the sake of brevity, `cluster-ingress-operator` will be also referred
+simply as `CIO` in this document. 
+
 ### High-Level Changes
 
 The cluster-ingress-operator will make the following changes:
 
 1.  **Install istiod Directly via Helm**: Leverage libraries from the
     sail-operator project to install istiod programmatically with
-    gateway-api configurations.
+    gateway-api configurations. Installation state is surfaced via the
+      `ControllerInstalled` condition on the `GatewayClass` status.
 
 2.  **Upgrade Migration**: Detect when upgrading from an OLM-based
-    installation (4.21) to Helm-based (4.22), delete the `Istio` CR in order to
-    remove the control-plane (istiod) while leaving the data plane (Envoy)
-    operational, wait for sail-operator cleanup, then re-install the
-    control-plane via Helm with no data-plane downtime.
+    installation (4.21) to Helm-based (4.22), delete the `Istio` CR to
+    remove the control plane (istiod) while leaving the data plane (Envoy)
+    operational, wait for sail-operator cleanup, then reinstall the
+    control plane via Helm with no data plane downtime. The subscription of OSSM
+    will NOT be removed automatically.
+
+3.  **Istio CRD Management**: Install and manage the complete set of Istio CRDs
+    using the sail-operator library, with automatic ownership detection to
+    coordinate with existing OSSM subscriptions or third-party installations.
+    CRD management state is surfaced via `GatewayClass` conditions for
+    layered product compatibility. See the [Istio CRD Management](#istio-crd-management)
+    section for details.
 
 ### Workflow Description
 
@@ -152,6 +173,8 @@ This workflow applies when Gateway API is being enabled for the first time on a
     new `GatewayClass` owned by OpenShift.
 3.  The controller uses sail-operator libraries to install istiod via
     Helm.
+    * Istio CRDs are also installed with the annotation `helm.sh/resource-policy: keep`
+      and the label `ingress.operator.openshift.io/owned` to indicate they are managed by the Cluster Ingress Operator
 4.  Cluster admin creates `Gateway` and `HTTPRoute` resources as before.
 
 #### Migrating from OLM-based Gateway API Installation
@@ -163,8 +186,12 @@ API was previously enabled via OLM (existing `Istio` CR detected).
 2.  The upgraded cluster-ingress-operator detects the existing OLM-based
     installation and deletes the `Istio` CR.
 3.  The sail-operator removes its Helm chart and istiod installation.
+    * Istio CRDs are not removed, as they have the annotation `helm.sh/resource-policy: keep`
 4.  The cluster-ingress-operator installs istiod using sail-operator
     libraries via Helm.
+    * The OSSM subscription is NOT removed automatically. If the user manually removes the subscription,
+    CIO will take ownership and update the existing Istio CRDs to the version shipped with
+    the current bundled Helm chart.
 5.  Existing `Gateway` and route resources continue functioning with no data
     plane downtime.
 
@@ -178,6 +205,9 @@ Helm-based Gateway API installed.
     installation.
 3.  The cluster-ingress-operator updates the Helm chart to a new revision
     using sail-operator libraries.
+    * If the CRDs are owned by cluster-ingress-operator (have the label `ingress.operator.openshift.io/owned`), they will be updated
+    * If the CRDs are owned by OSSM (have the label `olm.managed: "true"`), they will not be updated
+    * If the CRDs are managed by a third party, the `CRDsReady` condition will be set to `False` with reason `UnknownManagement` to inform the user that the Istio CRDs are not managed by CIO or OSSM.
 4.  Existing `Gateway` and route resources continue functioning with no data
     plane downtime.
 
@@ -215,6 +245,156 @@ sequenceDiagram
     Helm->>Istiod: Update istiod
     Note over Istiod: Gateway/routes continue, no downtime
 ```
+
+### Istio CRD Management
+
+**Note**: The CRD Management is made by the provided `sail-operator` library during the Apply operation.
+
+One of the key aspects of this proposal is that `CIO` effectively installs Istio,
+which includes a set of Custom Resource Definitions required for Istio and its
+integrations to work properly. This means that, if no other component is managing
+Istio CRDs lifecycle, `CIO`, with the help of the `sail-operator` library should be managing
+them as these CRDs are required for Istio and layered products to work properly.
+
+An Istio CRD can exist in one of three management states:
+
+1. **Managed by CIO**: Contains the label `ingress.operator.openshift.io/owned`
+2. **Managed by OSSM subscription via OLM**: Contains the labels `olm.managed: "true"` and `operators.coreos.com/<subscription-name>.<namespace>: ""`
+3. **Installed by a third party**: Does not contain any of the labels above
+
+For CRDs managed by Red Hat/OpenShift, either by `CIO` or by `OSSM`, the CRDs
+contain the annotation `"helm.sh/resource-policy": keep` to prevent deletion
+during Helm operations.
+
+During the library `Apply` operation, it installs the complete set of CRDs provided by
+the sail-operator library, even if some CRDs are not immediately used by layered
+products. This approach provides several benefits:
+
+1. **Consistency with OSSM**: Installing the complete CRD set ensures consistency
+   between `CIO` and `OSSM` installations, avoiding version fragmentation scenarios.
+
+2. **Simplified Management**: Managing the complete bundle simplifies the implementation
+   and maintenance compared to maintaining a curated subset of CRDs.
+
+3. **Future Compatibility**: Installing all CRDs upfront enables layered products to
+   adopt new Istio features without requiring CRD installation changes.
+
+For example, if `CIO` installed only a subset of CRDs, and a user subsequently
+installs OSSM and later removes the OSSM subscription, the cluster could end up
+with a mix of CRD versions (some from OSSM, some from CIO). Installing the complete
+set from the beginning prevents this version fragmentation. The `sail-operator` library will
+be responsible for querying `CIO` to check if there is any in-use OSSM subscription, and then take the
+decision if the CRD should be owned by `CIO/sail-operator`, by `OSSM/OLM` or should not be
+taken over at all.
+
+Additionally, since Istio will support resource filtering in a future release, this
+approach allows layered products to simply request new resources to be added to the filter configuration
+rather than requiring CRD installation updates when adopting new Istio custom resources.
+
+We are intentionally not doing dynamic addition of Istio resources to the Istio resource
+filtering configuration provisioned by `CIO`, to avoid undesired reconciliation of Istio
+resources like `VirtualServices` without an explicit need.
+
+#### CRD Installation and Management Workflow
+
+The workflow described here is executed by the `sail-operator` library during `CIO`
+Istio installation reconciliation process.
+
+**Scenario 1: CRDs Do Not Exist**
+
+When the library verifies that Istio CRDs do not exist on the cluster:
+1. It installs the CRDs provided by the vendored helm chart.
+2. The CRDs are labeled with `ingress.operator.openshift.io/owned` to indicate CIO ownership
+3. The CRDs are annotated with `helm.sh/resource-policy: keep` to prevent deletion during Helm operations
+
+**Scenario 2: CRDs Exist and Are Managed by CIO**
+
+When CRDs exist and contain the label `ingress.operator.openshift.io/owned`:
+1. The CRDs are updated (replaced) with the current vendored CRDs from the current `sail-operator` library
+2. This ensures CRDs stay synchronized with the installed Istio version
+
+**Scenario 3: CRDs Exist and Are Managed by OSSM Subscription**
+
+When CRDs exist and contain the labels `olm.managed: "true"` and `operators.coreos.com/<subscription-name>.<namespace>: ""`:
+1. The `sail-operator` library queries `CIO` via a callback function to verify if the subscription referenced by the CRD exists
+2. If the referenced subscription (or its InstallPlan) exists, the CRDs will not be modified.
+3. If the referenced subscription does not exist, the `sail-operator` library will mark the CRDs as CIO-managed with:
+   - Replacing the Istio CRDs with the version from the current `sail-operator` library
+   - Adding the appropriate labels and annotations to indicate CIO management
+
+**Scenario 4: CRDs Exist and Are Managed by a Third Party**
+
+When CRDs exist but do not contain CIO or OSSM management labels:
+1. `CIO` sets the `CRDsReady` condition on the `GatewayClass` status to `False` with reason `UnknownManagement` to indicate the CRD management state
+2. If the user removes the third-party CRDs, `CIO` will install its own CRDs and update the condition to reflect CIO management
+3. Alternatively, if the user adds the `ingress.operator.openshift.io/owned` label to the existing CRDs, `CIO` will take ownership and replace 
+them with the supported version
+
+**Scenario 5: CRDs Exist with Mixed Management**
+
+When some CRDs have CIO labels and others have OSSM or third-party labels:
+1. `CIO` sets the `CRDsReady` condition to `False` with reason `MixedOwnership`
+2. The condition message identifies which CRDs are in which management state
+3. If the user removes the third-party CRDs, `CIO` will install its own CRDs and update the condition to reflect CIO management
+4. Alternatively, if the user adds the `ingress.operator.openshift.io/owned` label to the existing CRDs, `CIO` will take ownership and replace them with the supported version
+
+Layered products can use the `GatewayClass` condition to determine whether they can
+operate on the current cluster.
+
+#### GatewayClass Conditions
+
+To provide visibility into Istio CRD management for layered products, `CIO` adds
+the following conditions to the `GatewayClass` status that indicates the compatibility and
+management state of the Istio CRDs. This allows layered products to determine
+whether they can operate on the current cluster.
+
+---
+
+**Condition**: `ControllerInstalled`
+
+**Possible Status and Reason combinations**:
+
+* **Status: `True`, Reason: `Installed`**
+  - CIO was able to install Istio using the `sail-operator` library
+  - Message: Contains the version installed and any warning
+
+* **Status: `False`, Reason: `InstallFailed`**
+  - CIO was not able to install Istio using the `sail-operator` library
+  - Message: Contains the error from the `sail-operator` library
+
+* **Status: `Unknown`, Reason: `Pending`**
+  - CIO hasn't started the installation of Istio
+  - Message: "waiting for first reconciliation"
+
+---
+
+**Condition**: `CRDsReady`
+
+**Possible Status and Reason combinations**:
+
+* **Status: `True`, Reason: `ManagedByCIO`**
+  - CIO is managing the Istio CRDs and will keep them updated
+  - Message: "Istio CRDs are being managed by cluster-ingress-operator"
+
+* **Status: `True`, Reason: `ManagedByOLM`**
+  - OLM is managing the Istio CRDs
+  - Message: Includes the subscription name and namespace being used (e.g., "Istio CRDs are managed by OSSM subscription 'servicemeshoperator' in namespace 'openshift-operators'")
+
+* **Status: `Unknown`, Reason: `NoneExist`**
+  - CRDs are not installed yet
+  - Message: "CRDs not yet installed"
+
+* **Status: `False`, Reason: `UnknownManagement`**
+  - The CRDs were installed by a third party
+  - Message: Indicates the reason for the status and that the user can either remove the CRDs to allow CIO to install its own version, or add the `ingress.operator.openshift.io/owned` label to allow CIO to take ownership and manage them
+
+* **Status: `False`, Reason: `MixedOwnership`**
+  - Happens when CRDs are managed inconsistently (different management labels for CRDs in the Istio group)
+  - Message: Indicates the reason for the status and identifies the mismatched CRDs (e.g., which CRD is in which management state)
+
+The sail-operator library must provide information about which CRDs are being managed
+(this information does not need to be dynamic and can be a public constant), so that `CIO`
+can watch only these CRDs to calculate the GatewayClass state.
 
 ### API Extensions
 
@@ -264,7 +444,8 @@ The process works as follows:
 1. Add the sail-operator library dependency to `go.mod`, which vendors the
    library including its embedded Helm charts.
 2. Use sail-operator library functions to install istiod, which access the
-   embedded charts from the vendored library.
+   embedded charts from the vendored library. The sail-operator library is
+   responsible for reconciling the resources and managing resource drifts.
 3. No external chart files are needed at runtime.
 
 This approach ensures charts are version controlled and synchronized via Go
@@ -323,10 +504,8 @@ already be Helm-based. The migration code can be removed in a future release
 
 #### Object Watching and Reconciliation
 
-The gatewayclass-controller is now responsible for watching and reconciling all
-objects created by the istiod Helm chart. The sail-operator library may provide
-controller logic in the future to help manage these objects and reduce the
-maintenance burden.
+The `sail-operator` library is now responsible for watching and reconciling all
+objects created by the istiod Helm chart.
 
 #### RBAC Changes
 
@@ -500,53 +679,13 @@ solution without requiring upstream changes.
 
 ## Open Questions
 
-1. **Sail-operator library readiness**: Will the OSSM team's enhanced
-   library (`pkg/install`) be production-ready for 4.22? Should the initial
-   implementation use only the lower-level sail-operator libraries, or wait
-   for the enhanced library?
-
-2. **Istio CRD management**: Should the cluster-ingress-operator manage Istio
-   CRDs for layered products' north/south ingress use cases? On 4.21, layered
-   products (RHOAI, Kuadrant, MCP Gateway) rely on Istio CRDs that are provided
-   when the cluster-ingress-operator installs OSSM via OLM. Without CRD management
-   in 4.22, these features would break unless layered products install OSSM
-   themselves (recreating the subscription conflict problem this EP solves).
-
-   If the cluster-ingress-operator were to manage these CRDs, the following would
-   need to be included:
-   - `EnvoyFilter`: Required by RHCL/Kuadrant, MCP Gateway, and RHOAI
-   - `WasmPlugin`: Required by RHCL/Kuadrant
-   - `DestinationRule`: Required by RHCL/Kuadrant versions not yet supporting
-     `BackendTLSPolicy`
-
-   The proposed ownership model would be:
-   - **If no CRDs exist**: The cluster-ingress-operator creates them when a
-     `GatewayClass` is created.
-   - **If OLM subscription is created afterwards**: OLM takes ownership of the
-     CRDs that the cluster-ingress-operator created. The cluster-ingress-operator
-     yields control and no longer manages them.
-   - **If OLM has previously created CRDs or taken ownership**: The
-     cluster-ingress-operator does not touch them and skips installation.
-   - **CRD deletion**: CRDs are never deleted when `GatewayClass` is deleted, to
-     preserve any instances that may exist and avoid breaking user workloads.
-
-   The OSSM team plans to provide library functions in the sail-operator to handle
-   CRD management implementation, so while the cluster-ingress-operator would run
-   this code, the OSSM team would own the maintenance of the implementation.
-
-   **Alternatives:**
-   - Layered products manage CRDs themselves (coordination challenge, duplicated work)
-   - Require OSSM installation for these features (adds resource overhead when service
-     mesh capabilities aren't needed)
-   - Defer to future enhancement (causes regression from 4.21 to 4.22)
-
-3. **Go module conventions for sail-operator**: Would adding 'v' prefixes to
+1. **Go module conventions for sail-operator**: Would adding 'v' prefixes to
    tags (e.g., v1.27.1 instead of 1.27.1) in the sail-operator repository
    simplify dependency management and align with Go module conventions? Note
    that sail-operator already uses semantic versioning, this question is about
    adopting the 'v' prefix convention.
 
-4. **Webhook management**: Who manages the webhook certificates, and is this
+2. **Webhook management**: Who manages the webhook certificates, and is this
    still a concern with modern Kubernetes? During implementation, confirm that
    the sail-operator library creates webhooks that only select resources with
    the appropriate revision label to avoid conflicts.
@@ -554,6 +693,12 @@ solution without requiring upstream changes.
    **Answer**: Webhook certificates are managed by istiod itself. The ingress
    operator does not need to handle certificate generation or rotation for the
    webhooks.
+
+3. **OLM standards and CRD management**: As of today, OLM marks all of its managed
+   resources with `olm.managed: "true"` label. When a subscription is removed, the
+   CRDs are kept with this label even if not managed by OLM anymore.
+   We need a confirmation from OLM team that this is the expected behavior (and not a bug),
+   and also what is the proper way to validate that a subscription and operators have been removed.
 
 ## Test Plan
 
@@ -609,8 +754,7 @@ N/A. This feature will be introduced behind a feature gate as Tech Preview.
 
 The feature gate will be promoted to the Default feature set and the Helm-based
 installation will become the default Gateway API installation mechanism in 4.22
-after E2E tests pass consistently, and Istio CRD management decisions are
-resolved.
+after E2E tests pass consistently and the core implementation is validated.
 
 ### Removing a deprecated feature
 
@@ -666,7 +810,7 @@ oc -n openshift-ingress-operator logs deployment/ingress-operator
 
 ### Troubleshooting
 
-**Failed migration (4.21 to 4.22)**: Verify `Istio` and `IstioRevision` CR deleted, verify state of the helm chart,
+**Failed migration (4.21 to 4.22)**: Verify `Istio` and `IstioRevision` CR deleted, verify state of the Helm chart,
 and check the logs of the ingress operator:
 ```bash
 oc get istio
