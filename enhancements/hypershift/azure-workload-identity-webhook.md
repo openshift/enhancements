@@ -2,14 +2,17 @@
 title: azure-workload-identity-webhook
 authors:
   - "@csrwng"
-reviewers: # Include a comment about what domain expertise a reviewer is expected to bring and what area of the enhancement you expect them to focus on. For example: - "@networkguru, for networking aspects, please look at IP bootstrapping aspect"
-  - TBD
-approvers: # This should be a single approver. The role of the approver is to raise important questions, ensure the enhancement receives reviews from all applicable areas/SMEs, and determine when consensus is achieved such that the EP can move forward to implementation.  Having multiple approvers makes it difficult to determine who is responsible for the actual approval. Team leads and staff engineers often make good approvers.
-  - TBD
-api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
+reviewers: 
+  - "@bennerv"
+  - "@bryan-cox"
+  - "@enxebre"
+approvers: 
+  - "@bryan-cox"
+  - "@enxebre"
+api-approvers: 
   - None
 creation-date: 2026-02-23
-last-updated: 2026-02-23
+last-updated: 2026-02-24
 status: provisional
 tracking-link:
   - https://issues.redhat.com/browse/OCPSTRAT-2948
@@ -148,10 +151,27 @@ identity federation.
 responsible for provisioning and managing the Azure HyperShift
 cluster.
 
-#### Prerequisite: Azure Identity Setup
+#### Prerequisite: OIDC Provider
 
-1. The cluster administrator (or automation) creates a
-   User-Assigned Managed Identity in Azure:
+For workload identity federation to function, the hosted
+cluster must have an OIDC provider configured with a publicly
+accessible discovery endpoint that Azure (Entra ID) can reach
+to validate projected service account tokens. The KAS
+`serviceAccountIssuer` must point to this OIDC provider. For
+self-managed Azure HyperShift, this is set up as part of the
+`create iam` workflow. For ARO HCP, this must be in place as
+a platform-level dependency.
+
+#### Prerequisite: Customer Workload Identity Setup
+
+The following steps are performed by the **customer** (or
+their automation) to set up Azure identities for their own
+workloads. These are not managed by the Cluster Service (CS)
+or the platform — customers are responsible for provisioning
+their own workload identities.
+
+1. The customer creates a User-Assigned Managed Identity in
+   Azure for their workload:
    ```sh
    az identity create \
      --name "my-app-identity" \
@@ -159,12 +179,14 @@ cluster.
      --location "${LOCATION}"
    ```
 
-2. The cluster administrator assigns appropriate Azure roles
-   to the Managed Identity.
+2. The customer assigns appropriate Azure roles to the Managed
+   Identity based on what their workload needs to access (e.g.,
+   `Storage Blob Data Reader` for accessing Blob Storage,
+   `Key Vault Secrets User` for reading Key Vault secrets).
 
-3. The cluster administrator creates a federated identity
-   credential linking the Managed Identity to the cluster's
-   OIDC issuer and the target ServiceAccount:
+3. The customer creates a federated identity credential linking
+   the Managed Identity to the hosted cluster's OIDC issuer
+   and the target ServiceAccount:
    ```sh
    OIDC_ISSUER=$(oc get \
      authentication.config.openshift.io/cluster \
@@ -180,11 +202,18 @@ cluster.
      --audiences "api://AzureADTokenExchange"
    ```
 
-#### Using Workload Identity in a Pod
+#### Using Workload Identity in a Pod (Guest Cluster)
+
+The following steps are performed by the application developer
+in the **guest cluster**. The managed identity referenced in
+the ServiceAccount annotations is the **customer-created**
+identity from the prerequisite step above, tied to the
+specific Azure resources the customer's workload needs to
+access.
 
 1. The application developer creates a `ServiceAccount`
-   annotated with the Managed Identity's client ID and tenant
-   ID, and labeled for webhook injection:
+   annotated with the customer's Managed Identity client ID
+   and tenant ID, and labeled for webhook injection:
    ```yaml
    apiVersion: v1
    kind: ServiceAccount
@@ -313,6 +342,19 @@ The container will:
 - Mount TLS serving certificates and a kubeconfig for
   accessing the guest cluster API server
 - Pass the `--audience=api://AzureADTokenExchange` flag
+- Set the `AZURE_TENANT_ID` environment variable from the
+  `HostedControlPlane`'s Azure platform configuration (used
+  as a default tenant ID when a ServiceAccount lacks the
+  `azure.workload.identity/tenant-id` annotation)
+- Set the `AZURE_ENVIRONMENT` environment variable derived
+  from the `HostedControlPlane`'s Azure cloud environment
+  (e.g., `AzurePublicCloud`, `AzureUSGovernmentCloud`). The
+  webhook resolves this to the corresponding authority host
+  URL (e.g., `https://login.microsoftonline.com/`) and
+  injects it as `AZURE_AUTHORITY_HOST` into mutated pods.
+- Configure liveness and readiness probes against the
+  webhook's health endpoint (default `:9440`, configurable
+  via `--health-addr`)
 
 The KAS deployment switch statement (currently handling
 `AWSPlatform`) should be extended with an `AzurePlatform` case.
@@ -451,15 +493,16 @@ is consistent with HyperShift architecture.
 
 ## Test Plan
 
-<!-- TODO: Fill in the test plan once targeted at a release.
+TODO: Fill in the test plan once targeted at a release.
 
 Tests should include the following labels as appropriate:
-- [OCPFeatureGate:FeatureName] for the feature gate
+- `[OCPFeatureGate:FeatureName]` for the feature gate
   (if applicable)
-- [Jira:"Component Name"] for the Jira component
-- [Suite:...], [Serial], [Slow], or [Disruptive] as needed
+- `[Jira:"Component Name"]` for the Jira component
+- `[Suite:...]`, `[Serial]`, `[Slow]`, or `[Disruptive]`
+  as needed
 
-Reference dev-guide/test-conventions.md for details.
+Reference `dev-guide/test-conventions.md` for details.
 
 Suggested test strategy:
 - Unit tests for the new reconciliation functions (webhook
@@ -479,15 +522,13 @@ Suggested test strategy:
   4. A pod created without the label is not mutated.
   5. The webhook failing does not block pod creation
      (failurePolicy: Ignore).
--->
 
 ## Graduation Criteria
 
-<!-- TODO: Fill in graduation criteria once targeted at a
-release.
+TODO: Fill in graduation criteria once targeted at a release.
 
-Per dev-guide/feature-zero-to-hero.md, promotion requirements
-include:
+Per `dev-guide/feature-zero-to-hero.md`, promotion
+requirements include:
 - At least 5 tests per feature
 - All tests run at least 7 times per week
 - All tests run at least 14 times per supported platform
@@ -498,7 +539,6 @@ Since this feature has no feature gate and is deployed
 unconditionally for Azure clusters, graduation criteria
 should focus on demonstrating reliability across Azure
 HyperShift CI jobs.
--->
 
 ### Dev Preview -> Tech Preview
 
