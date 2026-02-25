@@ -316,8 +316,11 @@ The `tlsAdherence` field will be introduced behind a feature gate:
 
 #### Hypershift / Hosted Control Planes
 
-For Hypershift deployments:
-**TBD**
+For Hypershift deployments, components running in the management cluster must honor the management cluster's TLS settings, not the hosted cluster's settings. Managed cluster admins should not control TLS for components in the provider's domain.
+
+- **HCP workloads** (both HCP-aware and non-HCP-aware) obtain TLS configuration from the management cluster KAS. HyperShift may need to preconfigure RBAC and NetworkPolicy for this access.
+- **Hosted cluster KAS endpoint:** The `APIServer` config on `HostedCluster` spec controls how the hosted cluster KAS is exposed.
+- **Management cluster exposed endpoints** (ignition-server, oauth-server, konnectivity) use management cluster TLS settings.
 
 #### Standalone Clusters
 
