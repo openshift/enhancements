@@ -131,6 +131,8 @@ Changes to `configv1.TLSSecurityProfile` validation (e.g., TLS 1.3 cipher restri
 - [`openshift/oc`](https://github.com/openshift/oc/blob/8b0a043216f7ae608606afb5bdb0ce451561021e/pkg/cli/admin/rebootmachineconfigpool/types.go#L396)
 - [`openshift/cluster-logging-operator`](https://github.com/openshift/cluster-logging-operator/blob/754ef3e6d0c48470afa470092c709dc5ad094702/api/observability/v1/output_types.go#L206) - `OutputSpec.TLS.TLSSecurityProfile`
 - [`openshift/lightspeed-operator`](https://github.com/openshift/lightspeed-operator/blob/122c7a163aa662c04e1cbc8272cc063ec8a4006e/api/v1alpha1/olsconfig_types.go#L205) - `OLSConfig.spec.ols.deployment.api.tlsSecurityProfile`
+- [`openshift/microshift`](https://github.com/openshift/microshift/blob/bda126f67a2cdf076f2b608ee9c9c9dec9b2dda2/pkg/config/ingress.go#L140-L151) - Ingress plumbing that likely needs to change to the new Ingress-specific type
+- [`openshift/hypershift`](https://github.com/openshift/hypershift) - Hosted APIServer configuration; ratcheting validation should be propagated
 
 **Override Precedence:**
 1. Component-specific CR configuration (e.g., `IngressController.spec.tlsSecurityProfile`) takes highest precedence when explicitly set
