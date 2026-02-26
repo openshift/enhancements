@@ -165,7 +165,7 @@ All override mechanisms must be explicitly documented in user-facing documentati
    - **CVO-managed operators:** Cluster operators read the configuration and configure their operands accordingly.
    - **OLM-managed operators:** Operators are expected to read the `apiserver.config.openshift.io/cluster` resource themselves for configuration. OLM does not inject or proxy this configuration.
 
-5. Each component applies the new TLS settings. Components report their status via operator conditions.
+5. Each component applies the new TLS settings. Components unable to comply should report their status (mechanism to be standardized for GA; see Graduation Criteria).
 
 #### Ingress Override Workflow
 
@@ -406,6 +406,7 @@ Create a dedicated new Custom Resource for cluster-wide TLS configuration. This 
 - CI tests verify TLS server compliance
 - Upgrade/downgrade testing complete
 - Performance testing complete
+- **Standard mechanism for components to report TLS configuration status** - Define guidance for how components should report inability to comply with TLS settings (e.g., using `Degraded` condition with appropriate message/reason fields)
 - User-facing documentation in openshift-docs, including:
   - Complete documentation of all override mechanisms (Kubelet, Ingress Controller, Routes, Gateway Controller)
   - Clear explanation of inheritance behavior and override precedence
