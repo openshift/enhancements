@@ -1,11 +1,12 @@
 ---
 title: installing-cluster-api-components-in-ocp
 authors:
+  - "@mdbooth"
   - "@damdo"
   - "@nrb"
 reviewers:
   - "@JoelSpeed"
-  - "@mdbooth"
+  - "@damdo"
   - "@sdodson"
 approvers:
   - "@JoelSpeed"
@@ -13,9 +14,10 @@ approvers:
 api-approvers:
   - None
 creation-date: 2023-08-25
-last-updated: 2023-09-25
+last-updated: 2026-01-08
 tracking-link:
   - "https://issues.redhat.com/browse/OCPCLOUD-1910"
+  - "https://issues.redhat.com/browse/OCPCLOUD-3344"
 see-also:
   - "/enhancements/machine-api/converting-machine-api-to-cluster-api.md"
 replaces:
@@ -27,74 +29,22 @@ superseded-by:
 
 ## Summary
 
-This enhancement describes how we (the Cluster Infrastructure team) intend to rework the current flow for the installation of Cluster API components in OpenShift, at the moment only available in Tech Preview, by addressing some of the criticalities of the current implementation, leveraging some of the lessons learned since the first Tech Preview release.
-
-The focus areas of this refactor are mainly around reducing complexity of the architecture and improving the development, stability and maintainability of Standalone Cluster API on OpenShift by preventing payload breakage due to non atomic repository merges, while maintaining the functionality provided up until now.
+This enhancement describes an enhancement to how Cluster API components are installed in an OpenShift cluster.
+This feature is currently only available in Tech Preview clusters.
 
 ## Motivation
 
-The current setup, wiring and installation of Cluster API on OpenShift has several criticalities in both, the complexity of its architecture and the way in which the system comes together within an OpenShift payload.
+The benefits of this changes include:
+* Reduced potential for using the CAPI installer as a means of privilege escalation to Cluster Admin
+* Simplified handling of manifests too large to be nested into a ConfigMap
+* Simplified CAPI manifest generation and review
+* Move provider specific manifest generation (almost) entirely into CAPI provider repos
 
-To understand these issues we need to take a look at the architecture of the system that is currently implemented in Tech Preview.
-
-The system operates in two separate phases: the build time phase, where the manifests and other assets are fetched and customized, and the runtime phase, where operators take over and manage the installation of the CAPI providers and ancillary components.
-
-### Build time
-
-The flow starts with a periodic ProwJob that launches a [RebaseBot](https://github.com/openshift-eng/rebasebot) rebase to update the OpenShift Org's Cluster API Providers forks with the latest available stable release.
-If the bot detects a new release it creates a Pull Request (PR) on the fork that starts a new branch from the new stable release as the base and cherry-picks the OpenShift specific commits on top of that.
-
-The PR is then checked by CI jobs and reviewed by the team, ending up merging in the main branch.
-
-At this point the ART builders build the various providers code into an image that later makes it into to the payload.
-
-Later at an arbitrary time, independent from these previous steps, a team member checks out the `openshift/cluster-capi-operator` repository, they bump the cluster-api core and providers dependencies in the various go modules present in the repository ([see](https://github.com/openshift/cluster-capi-operator/blob/504be5bee927f7c1d0265b82054049283699b988/go.mod#L24-L27)),
-they update the [providers-list.yaml](https://github.com/openshift/cluster-capi-operator/blob/504be5bee927f7c1d0265b82054049283699b988/providers-list.yaml#L1-L20) and then they launch a tool, called the asset generator ([see](https://github.com/openshift/cluster-capi-operator/tree/b99156eb090d7eb76151809754bb7b85d14d9fb6/hack/assets)).
-This tool, reads from the `providers-list.yaml` and `cluster-api-operator.yaml` files the desired providers and their location (usually the under the `openshift` org.),
-fetches their `metadata.yaml` (a clusterctl metadata file) and their kustomize configuration, runs a kustomization and some further manifest transformations and finally dumps some generated manifests under the `/manifests` folder
-(on which the content is later applied by the Cluster Version Operator) and some other under the `/assets` folder.
-
-The team member then opens a PR that goes through the usual flow and gets merged into main.
-Lastly the ART builder builds the repository into an image that is, independently from the other CAPI providers images, embedded in the payload.
-
-_Note: during the build of the image, in the `go build` step, the content `/assets` folder is stored in the
-binary as an embedded filesystem, which is going to be available the later at runtime._
-
-![build-time](./assets/current-build-time.png)
-
-### Runtime
-
-The flow picks up again at cluster runtime.
-During boostrap the CVO (Cluster Version Operator) reads the content of the `/manifests` folder in the `cluster-capi-operator` image and deploys the manifests for the following components:
-- cluster-api core CRDs/RBAC
-- cluster-api providers CRDs/RBAC
-- cluster-api-operator (upstream component) specific CRDs/RBAC
-- cluster-capi-operator (deployment + webhooks)
-- cluster-api-operator (upstream component) (deployment + webhooks)
-
-Once the cluster-capi-operator is deployed, its main process starts up, and loads the assets from the embedded filesystem.
-
-These files are YAML manifests containing the Custom Resources specific to the Cluster API Operator (Core Provider, InfrastructureProvider, Configmaps containing deployment manifests), the upstream operator for deploying Cluster API on the cluster.
-
-These manifests once loaded, are templated with the container image references built for the payload and applied to the cluster.
-
-The upstream Cluster API Operator, which is watching the api server for these resources, detects the new Custom Resources applied and initiates the fetching of the CAPI providers as specified in the CRs provided. Once fetched and validated the operator proceeds with installing the providers in the cluster, by deploying the core and provider specific CAPI controllers.
-
-![runtime](./assets/current-runtime.png)
-
-This flow, while functional, poses two main challenges to the development and usage of the system.
-
-**Complexity**.
-The system has significant complexity to it, due to the sheer amount of components and their dependencies.
-This can be seen by looking at what it takes to deploy a Cluster API Provider.
-The Cluster Version Operator (CVO) deploys two Second Level Operators, the OpenShift-specific cluster-capi-operator, and the upstream cluster-api-operator.
-At build time we generate and embed specific Custom Resources and the manifests ConfigMap defined for the upstream operator within the Openshift-specific operator,
-we template them, apply them, and let the upstream operator pick those up, act on them by unpacking the locally available ConfgMap, from which the CAPI providers manifests get unnested and deployed.
-
-**Development and Payload Stability**.
-The development of this complex system, as previously described, has various steps to it and happens across various repositories, where multiple PRs need to merge before a provider change/bump can actually completely land on an OpenShift payload as a feature.
-The problem with this is that the various PRs that it takes to land a provider rebase, for example, cannot be merged atomically, but will land at separate stages once they are reviewed, approved, their CI is green and the merge bot decides it's time for them to be merged.
-This can lead to payload breakages when a provider image build is not backward compatible with the previous version's manifests (Deployment/CRDs/RBACs), which in the current stage are deployed by CVO from an image build of the `cluster-capi-operator`, and not from the mentioned `cluster-api-provider-x`.
+Additionally, the change supports a reimplementation of the CAPI installer controller to enable:
+* Phased installation of CAPI providers, with gates between phases
+* Ability to temporarily pin CAPI providers to a previous cluster version
+* Ability to remove assets previously installed by a CAPI provider
+* Ability to support generation of CRD Compatibility Requirements for unmanged CRDs
 
 ### User Stories
 
@@ -110,102 +60,191 @@ As an OpenShift engineer I want to _have a way to load and customize provider ma
 
 As an OpenShift engineer I want to _have a way to load and customize provider manifests before applying them_ so that I can _future proof the system_ to be able to give users a way to selectively deploy one or more providers, even ones that are not matching the running platform.
 
-### Goals
-
-This proposal seeks to refactor OpenShift manifest generation to live in provider repositories & apply cloud platform information dynamically at runtime.  It will have succeeded when developers can update code and manifests for a Cluster API provider within one repository, and when users can selectively deploy providers at runtime.
-
-### Non-Goals
-
-This proposal does not seek to completely redesign the existing Cluster API implementation within OpenShift
-
-This proposal does not seek to complete rewrite the [existing asset/manifest generation tools](https://github.com/openshift/cluster-capi-operator/tree/main/hack/assets) or switch to something like [kustomize](https://kustomize.io/). The existing tools work well enough at the moment, and will only require small changes to enable our goals.
-Reworking these tools or switching to another is a task for later. More details on this in the [Alternatives section](#alternatives)
-
-This proposal does not seek to allow installing multiple infrastructure CAPI providers. Although we want to design things in a way so that we do not inhibit this being implemented in the future.
-
 ## Proposal
 
-Considering the two challenges previously described we need to address the two following problems:
-- **Complexity** - mainly caused by the presence of two operators in the system and the number of input transformations it takes to feed them and produce the desired output
-- **Development and Payload Stability** - mainly caused by having manifests for the Cluster API providers deployed from one repository (openshift/cluster-capi-operator) and the actual code for those providers deployed from the providers repositories (openshift/cluster-api-provider-x) endangering the payload stability
+We will implement a series of steps which allow us to transition smoothly from the current implementation to a new implementation without temporarily breaking the payload (see the **Interim flow** section below).
+In summary:
 
-### Proposal 1: Improving Dev Ex + Payload Stability
+* Add support for image-based CAPI manifests to the CAPI installer
+* Update the manifests-gen tool to generate image-based manifests and metadata
+* Update all providers to use image-based manifests
+* Re-implement the CAPI installer, with the new version supporting only the new format
 
-In order to **improve the developer experience and stability of the feature** in the system, we are proposing to **move the asset/manifest generation for the Cluster API providers as a step that happens in the provider repositories during their rebase**,
-then write the resulting manifests embedded in a well known ConfigMap (a.k.a. "transport ConfigMap") in the `/openshift/manifests` folder of the repositories, to then let the Cluster Version Operator (CVO) deploy it at cluster bootstrap.
-The `openshift/cluster-capi-operator` will then be instructed on which ConfigMaps to look out for, it will fetch them, extract the nested manifests and apply them directly to the cluster.
+The new installer will use [Boxcutter](https://github.com/package-operator/boxcutter).
+The installer controller will be split into 2 controllers:
+* The revision controller creates 'Revisions': a desired set of manifests to be installed
+* The installer controller installs and deletes revisions which were created by the revision controller
 
-This change will consist of 3 steps:
-1. Extension of the Rebase Bot (https://github.com/openshift-eng/rebasebot) to include Lifecycle Hooks. These hooks introduce the ability to add extra steps during rebases, which will allow for the asset generation step to run before the creation of the Pull Request (tracked by https://issues.redhat.com/browse/OCPCLOUD-2153)
-2. Renaming of the CAPI Asset/Manifest generator from `assets` (generator) to `manifest-gen`, as it won't need to generate go embeddable assets anymore, but only manifests that will be referenced and applied by CVO
-3. Referencing and invocation of the [CAPI Assets/Manifest generator](https://github.com/openshift/cluster-capi-operator/tree/main/hack/assets) at CAPI Provider Forks rebase time, within the RebaseBot Lifecycle Hooks, as a step during the provider rebase.
+An installer necessarily requires considerable privileges.
+For improved security the installer controller will run in the separate `openshift-cluster-api-operator` namespace with its own RBAC and service account.
+This allows us to greatly reduce the RBAC of the CAPI migration and sync controllers, which will continue to run in the `openshift-cluster-api` namespace.
 
-![build-time](./assets/proposed-build-time.png)
+## Transition from 'Transport ConfigMaps'
 
-### Proposal 2: Reducing Complexity
+Although never released, a previous version of the CAPIO Operator used a scheme of 'Transport ConfigMaps' where manifests were stored in ConfigMaps in the `openshift-cluster-api` namespace.
+The ConfigMaps themselves were installed by CVO.
+The provider manifests they contained were installed by the CAPI Operator as required.
 
-In order to **reduce the complexity** in the system we are proposing to **get rid of the upstream cluster-api operator** ([kubernetes-sigs/cluster-api-operator](https://github.com/kubernetes-sigs/cluster-api-operator)).
-We plan to replace the responsibility of this component, which at the moment is responsible for reading, fetching and installing the desired providers in cluster, by implementing them directly in the downstream `openshift/cluster-capi-operator`.
+Although these scheme has never been released and we do not need to consider upgrades, it is currently deployed in TechPreview clusters, and all currently supported CAPI providers currently use this scheme.
+To avoid disruption to TechPreview installations until all providers have been updated to use the new scheme, we will minimally enhance the current installer to support an interim state where both ConfigMaps and image-based manifests are present.
+This will not be supported for longer than necessary during the transition period.
+Specifically, the new installer controller described in this document will not support this interim state.
 
-This change will consist of 3 steps:
-1. Removal of the upstream [cluster-api-operator](https://github.com/kubernetes-sigs/cluster-api-operator) manifest/CRs generation steps from the asset/manifest generator in (https://github.com/openshift/cluster-capi-operator/tree/main/hack/assets), as this component is removed from the system
-2. Removal of the Cluster Operator controller (which at the moment loads and applies cluster-api-operator CRs)
-3. Introduction of a new controller within the downstream [cluster-capi-operator](https://github.com/openshift/cluster-capi-operator), called CAPI Installer controller, which is going to be responsible for replacing the duties previously carried out by the Cluster Operator controller + cluster-api-operator, in the following way:
-    - detection of the current Infrastructure platform the clutster is running on
-    - loading of the desired CAPI provider manifests at runtime by fetching the relevant transport ConfigMaps (the core and the infrastructure specific one) containing them
-    - extraction of the CAPI provider manifests (CRDs, RBACs, Deployments, Webhooks, Services, ...) from the fetched transport ConfigMaps
-    - injection of the templated values in such manifests (e.g. ART container images references)
-    - order aware direct apply (through client-go) of the resulting CAPI providers manifests at runtime
-    - continuous tracking of the provider ConfigMaps and reconciliation of the applied CAPI components
+### Current flow
 
-![runtime](./assets/proposed-runtime.png)
+Build time:
+* A periodic ProwJob invokes [RebaseBot](https://github.com/openshift-eng/rebasebot)
+* RebaseBot rebases the downstream repo if required
+* RebaseBot invokes [manifests-gen](https://github.com/openshift/cluster-capi-operator/tree/main/manifests-gen) to generate a transport ConfigMap containing the provider manifests with some OpenShift-specific modifications and some provider-specific modifications
+* The transport ConfigMap is added to the Cluster Version Operator (CVO) manifests in the provider image
 
-### Workflow Description
+Runtime:
+* CVO installs the transport ConfigMap
+* CAPI installer selects a set of transport ConfigMaps to install based on metadata in labels
+* CAPI installer applies all manifests contained in its selected set of transport ConfigMaps
 
-As such here is the new proposed workflow to develop and integrate a Cluster API provider into OpenShift:
+### New flow
 
-1. (To be done once) A Cluster API (CAPI) provider repository has to be created in the OpenShift org. The provider should be a syncable fork of an upstream CAPI provider and should adhere to the [`clusterctl` Provider Contract](https://cluster-api.sigs.k8s.io/clusterctl/provider-contract). The repository must then be configured to end up being build and included in the OpenShift payload.
-1. A Periodics Job on the Prow CI runs at regular intervals and launches the [Rebase Bot](https://github.com/openshift-eng/rebasebot). The bot performs a syncronization of the commits from a point release of the upstream repository corresponding to the fork by creating a rebasing the existing main branch and stacking the carried patches on top of the branch.
-1. Once the main branch has been rebased locally, the Rebase Bot invokes the relevant Lifecycle Hook (e.g. post-rebase) an executes the corresponding command defined for this stage, set to be the manifests generation tool (which resides in the [Cluster CAPI Operator](https://github.com/openshift/cluster-capi-operator) repository, and it is imported in the provider as a tool),
-which generates the manifests for the CAPI Provider (CRDs, RBACs, Deployments, Webhooks, Services, ...), it embeds them into the transport ConfigMap, and dumps them to the `/openshift/manifests` folder in the Provider source tree.
-1. The Rebase Bot then proceeds creating a Pull Request (PR) containing the rebase changes to the main branch and the generated manifests. The PR then gets reviewed and merged into the main branch.
-1. Shortly after, the Provider's repository gets built by the ART builders and ends up being included into the payload. Also the transport ConfigMap(s) end up being embedded in the payload.
-1. Once the payload is installed and a new cluster is created the CVO kicks in and applies the manifests embedded introduced by the CAPI Provider repository and embedded in the payload. This results in the creation of the transport ConfigMap(s) in the APIServer. At this point the CVO also launches the [Cluster CAPI Operator](https://github.com/openshift/cluster-capi-operator).
-1. The Cluster CAPI Operator controllers start up. The _CAPI Installer controller_ loads the Infrastructure object's platform from the APIServer.
-1. In Parallel the other Cluster CAPI Operator controllers perform their usual duties (Syncing of the user-data-secret from MAPI to CAPI namespace, Kubeconfig generation fro CAPI, Setting Infrastructure Cluster to be externally managed and ready, setting of the `ControlPlaneInitializedCondition` to `true`)
-1. The Cluster CAPI Operator's _CAPI Installer controller_ fetches the transport ConfigMaps: the core "cluster-api" one and the infrastructure one, according to the loaded platform. It extracts the manifests from the ConfigMaps and performs an order aware apply of them to the APIServer.
-These transport ConfigMaps are constantly watched, also at later stages of the controller execution, and the controller reacts upon changes, keeping the desired state in the ConfigMaps in sync with the actual state in the cluster.
-1. The Cluster API Provider controllers start up at this point, and are ready to accept CAPI specific CRs (Cluster, InfraCluster, MachineDeployment, MachineSet, ...)
+Build time:
+* A periodic ProwJob invokes [RebaseBot](https://github.com/openshift-eng/rebasebot)
+* RebaseBot rebases the downstream repo if required
+* RebaseBot invokes [manifests-gen](https://github.com/openshift/cluster-capi-operator/tree/main/manifests-gen) to generate a file containing the provider manifests with some OpenShift-specific modifications, and a metadata file
+* The manifests and metadata file are added to the provider image in the `/capi-operator-manifests` directory
 
+Differences:
+* `manifests-gen` no longer implements custom go logic to do provider-specific modifications to manifests.
+  These modifications move from `manifests-gen` custom logic, which is in the `cluster-capi-operator` repo, to kustomize patches in the provider repo's which requires them. `manifests-gen` already invokes `kustomize` under the hood so no extra changes are going to be required.
+* `manifests-gen` writes CAPI Operator assets (defined in more detail below) instead of a CVO asset.
+
+Runtime:
+* At startup, CAPI installer reads a list of provider images associated with the current OpenShift release
+* CAPI installer pulls these images and extracts manifests and metadata from the `/capi-operator-manifests` directory
+* The revision controller creates a new Revision that references all manifests relevant to the current cluster
+* The installer controller installs the new Revision using Boxcutter
+* Once successful, the installer controller deletes orphaned artifacts associated with previous Revisions
+
+### Interim flow
+
+This flow is expected to exist only temporarily for a period of a few weeks at most.
+Its purpose is to avoid a 'flag day' when changing the metadata format supported by the CAPI installer.
+It is not expected to be included in any release.
+
+Build time:
+* Providers use either the current or new flows as described above
+
+Runtime:
+* CVO installs transport ConfigMaps for providers which include them
+* At startup, CAPI installer reads a list of provider images associated with the current OpenShift release
+* CAPI installer pulls these images and extracts manifests and metadata from the `/capi-operator-manifests` directory
+* CAPI installer selects a set of transport ConfigMaps to install based on metadata in labels
+* CAPI installer select a set of image-based provider manifests relevant to the current cluster
+* CAPI installer applies all manifests selected by either method
 
 ### API Extensions
 
-Even though there is no formal API Extension to OpenShift in this case,
-we are introducing an interface which the cluster-capi-operator will implement to fetch the previously described CAPI provider ("transport") ConfigMaps.
-The various CAPI providers respositories, infact, via the manifest generator tool, will produce the provider ConfigMaps which follow the upstream [_clusterctl Provider Contract - Components YAML file_] contract
-(see [here](https://github.com/kubernetes-sigs/cluster-api/blob/a36712e28bf5d54e398ea84cb3e20102c0499426/docs/book/src/clusterctl/provider-contract.md?plain=1#L157-L162)), which will end up being created on the cluster.
+This change is supported by a new `ClusterAPI` operator config CRD, proposed in [openshift/api#2564](https://github.com/openshift/api/pull/2564).
 
-The cluster-capi-operator will later be able to fetch the relevant provider's ConfigMap by filtering the ConfigMaps by namespace and on the well known `cluster.x-k8s.io/provider` label [defined in the above contract](https://github.com/kubernetes-sigs/cluster-api/blob/a36712e28bf5d54e398ea84cb3e20102c0499426/docs/book/src/clusterctl/provider-contract.md?plain=1#L240-L242).
+An example `ClusterAPI` in use defining 2 `Revision`s:
 
-The operator will also be able to keep track of the provider's components by putting a watch on them leveraging the same `cluster.x-k8s.io/provider` label.
+```yaml
+apiVersion: operator.openshift.io/v1alpha1
+kind: ClusterAPI
+metadata:
+  name: cluster
+spec:
+  unmanagedCustomResourceDefinitions:
+  - machines.cluster-api.x-k8s.io
+status:
+  currentRevision: 4.22.5-0d2d314-1
+  desiredRevision: 4.22.6-873bdf9-2
+  revisions:
+  - name: 4.22.5-0d2d314-1
+    revision: 1
+    contentID: 0d2d3148cd1faa581e3d2924cdd8e9122d298de41cda51cf4e55fcdc1f5d1463
+    components:
+    - image:
+        digest: quay.io/openshift/cluster-api@sha256:00000000...
+        profile: default
+    - image:
+        digest: quay.io/openshift/cluster-api-provider-aws@sha256:00000000...
+        profile: default
+  - name: 4.22.6-873bdf9-2
+    revision: 2
+    contentID: 873bdf9a2a6a324231a06ce04b4d52f781022493ca0480bfb2edcb8d22ae1c9b
+    unmanagedCustomResourceDefinitions:
+    - machines.cluster-api.x-k8s.io
+    components:
+    - image:
+        digest: quay.io/openshift/cluster-api@sha256:11111111...
+        profile: default
+    - image:
+        digest: quay.io/openshift/cluster-api-provider-aws@sha256:11111111...
+        profile: default
+```
 
+In this example, CAPI installer is installing the `cluster-api` and `cluster-api-provider-aws` components.
+We have just upgraded from 4.22.5 to 4.22.6, which included new images for both components.
+Additionally, the user has indicated that `machine.cluster-api.x-k8s.io`, which was formerly managed by CAPI, will now be independently managed.
+The 4.22.5 manifests are currently applied.
 
-### Implementation Details/Notes/Constraints [optional]
+### Provider manifest format
 
-We already started a POC implementation of these proposals.
-Currently developing on a feature branch on the cluster-capi-operator [here](https://github.com/openshift/cluster-capi-operator/pull/121) and on one of the cluster-api providers to pioneer the efforts, [here](https://github.com/openshift/cluster-api-provider-aws/pull/471).
+Manifests are embedded in provider images under the `/capi-operator-manifests` directory.
+A provider image may contain arbitrarily many 'profiles', each with its own manifests and metadata.
+A profile is located at `/capi-operator-manifests/<profile name>/` in the provider image.
+e.g. the `default` profile is located at `/capi-operator-manifests/default/`.
+
+The installer will process every profile in every provider image.
+The purpose of implementing multiple profiles is to enable future selection of different manifests based on FeatureGates.
+Note that FeatureGate support is not intended for the initial implementation.
+
+Each profile contains 2 files.
+`manifests.yaml` contains a Kubernetes Resource Model(KRM)[^krm] formatted set of resources to be installed.
+`metadata.yaml` contains metadata describing the manifests.
+This metadata will be used to determine whether the profile will be installed.
+
+[^krm] The format produced by kustomize: a set of kubernetes resources in YAML format in a single file, separated by YAML document separators.
+
+Example `metadata.yaml`:
+```yaml
+attributes:
+  type: infrastructure
+  version: v2.10.0
+installOrder: 20
+name: cluster-api-provider-aws
+ocpPlatform: AWS
+selfImageRef: registry.ci.openshift.org/openshift:aws-cluster-api-controllers
+```
 
 ### Risks and Mitigations
 
-A risk of using transport ConfigMaps to produce and load CAPI providers components is the hard limit on the ConfigMap size in Kubernetes.
-In fact Kubernetes has a maximum size of 1MiB for a ConfigMap. If the manifest exceeds this size, Kubernetes will throw an error on manifest creation.
-To mitigate this we can address this from two angles:
-- early prevention of this issue by checking the size of the ConfigMap before writing it to disk by the manifest generator, and erroring if that exceeds the maximum allowed size
-- in the future, if this issue arises, leverage the same mechanism the upstream cluster-api-operator uses and compress/decompress the ConfigMap (see the [upstream specification](https://github.com/kubernetes-sigs/cluster-api-operator/blob/93989812d7d15f3b5dd1930bef9e0208b7301cee/docs/README.md?plain=1#L693-L729) for more details)
+#### Use as a vector for privilege escalation
+
+The CAPI installer needs enough privilege to install arbitrary providers, including their RBAC.
+With the ability to install RBAC, the CAPI installer is capable of granting privilege equivalent to Cluster Admin to any actor able to influence which manifests are installed, or to exploit some bug granting them the privileges of the CAPI installer.
+
+With this redesign, we mitigate this risk in several ways.
+Firstly the installer now runs in a separate deployment to the other functions of the CAPI operator including the migrations and sync controllers.
+The installer runs in a separate namespace with a separate service account and separate RBAC.
+This means:
+* The migration and sync controllers no longer need highly privileged RBAC.
+* Users who need to perform machine operations no longer require any privileges in the installer namespace.
+
+The installer now scans a fixed set of images for manifests.
+These images are contained in a ConfigMap in the installer namespace which is managed by CVO.
+The images in this ConfigMap are all specified by digest, and are part of the release payload.
+Anybody who is able to both modify this ConfigMap and restart the installer would be able to load manifests from an arbitrary image.
+
+As future work, it may be possible to grant the installer an aggregated role with minimal initial permissions.
+In-payload providers would be responsible for defining a role with sufficient privilege to install the provider's payload, and adding that to the aggregated role.
+This 'installation RBAC' would be installed by CVO.
+I believe CAPI uses a similar model to enable infrastructure providers to allow core CAPI components to manage their custom resources.
+We do not plan to implement this feature initially, but it may be a way to useful reduce the RBAC requirements of the installer.
 
 ### Drawbacks
 
-- Not  using CVO to manage the entirety of the CAPI providers installation means there's an extra layer of operator management within the OpenShift cluster. That said this is not an uncommon pattern, but rather it is the norm when it comes to perform custom deploying behaviour in OpenShift. See for example MAO, CCMO, CSO, CNO.
+- Not  using CVO to manage the entirety of the CAPI providers installation means there's an extra layer of operator management within the OpenShift cluster.
+  That said this is not an uncommon pattern, but rather it is the norm when it comes to perform custom deploying behaviour in OpenShift. See for example MAO, CCMO, CSO, CNO.
 - Not using Upstream Cluster API Operator (which uses the default clusterctl contract) to apply the CAPI providers might require extra downstream work in the future to adapt the manifests before applying them if their format/assumptions change. Worth noting here that clusterctl currently handles API storage version changes,
 which will now need to be handled differently. Within OpenShift we can make use of the [kube-storage-version-migrator-operator](https://github.com/openshift/cluster-kube-storage-version-migrator-operator) crafting a [migration request](https://github.com/kubernetes-sigs/kube-storage-version-migrator/blob/60dee538334c2366994c2323c0db5db8ab4d2838/pkg/apis/migration/v1alpha1/types.go#L30)
 to easily handle one off migrations of CAPI CRDs storage version, later tombstoning the migration request manifest.
@@ -243,12 +282,33 @@ This will be covered in a further enhancement about CAPI lifecycle on OpenShift.
 N/A
 
 #### Failure Modes
+
 - Failure of generating the manifests at build time
   - This would result in a Rebase Bot step failure, resulting in a missing rebase PR
-  - the Periodic Prow Job will be retried on failure. Also we already have a notification mechanism in place in the RebaseBot, that will alert us on Slack on failures and their related reasons
-- Failure of applying the CAPI providers contained in the transport ConfigMaps.
-  - This would be logged as an error by the CAPI Installer controller and it would likely set the Cluster-CAPI-Operator as Degraded after a number of failed attempts.
-  - CAPI would not be available for the cluster, and it would be impossible to provision machines
+  - the Periodic Prow Job will be retried on failure.
+    Also we already have a notification mechanism in place in the RebaseBot, that will alert us on Slack on failures and their related reasons
+
+- Failure to apply manifests on installation
+  - During installation, CAPI installer fails to install manifests for the current cluster.
+  - This would result in an inability to provision Machines using Cluster API.
+  - The `cluster-api` ClusterOperator will be marked Degraded with a Message indicating an installation failure.
+  - The CAPI installer logs will contain details of the failure.
+
+- Failure to apply manifests on upgrade
+  - CAPI components are already installed.
+    The cluster has been upgraded.
+    The CAPI installer fails to apply the new manifests
+  - Depending on the nature of the failure, it is possible that the CAPI components from the previous version will continue to operate correctly.
+  - However, if the failure is because an upgraded Deployment has entered a crash loop, it will not be possible to provision new Machines in the cluster.
+  - Either way, the `cluster-api` ClusterOperator will be marked Degraded with a Message indicating an installation failure.
+  - The CAPI installer logs will contain details of the failure.
+
+- Failure to apply revision after some components successfully applied
+  - While applying a revision, some components were installed but one failed.
+  - Depending on the nature of the failure, the component that failed to apply may or may not be in a working state.
+  - If it is not in a working state, this will most likely result in an inability to provision new Machines using Cluster API.
+  - The `cluster-api` ClusterOperator will be marked Degraded with a Message indicating an installation failure.
+  - The CAPI installer logs will contain details of the failure.
 
 #### Support Procedures
 
@@ -256,10 +316,8 @@ To detect the failure modes in a support situation, admins can look at the clust
 
 ## Implementation History
 
-* [Upstream cluster-api-operator introduction enhancement](https://github.com/kubernetes-sigs/cluster-api/blob/main/docs/proposals/20201020-capi-provider-operator.md)
 * CAPI on OCP enhancements from the past:
   * [Cluster API Integration](https://github.com/openshift/enhancements/blob/master/enhancements/machine-api/cluster-api-integration.md)
-
 
 ## Alternatives (Not Implemented)
 
@@ -277,19 +335,89 @@ To detect the failure modes in a support situation, admins can look at the clust
   * *PROs*: it would ensure compatibility with the clusterctl ecosystem and format/contract
   * *CONs*: it would require a lot of extra complexity (~500 more LOC) and dependencies to achieve a similar result
 
+## Reference
 
-* **Replacing Existing Asset Generation With Kustomize**
+### Invoking manifests-gen
 
-  All of the changes that our existing tool makes could be done with kustomize. The existing Go code even [uses kustomize to download and build the base YAML files](https://github.com/openshift/cluster-capi-operator/blob/main/hack/assets/customizations.go#L311).
-  Moving to kustomize would require, roughly, the following changes:
-  - The common customization code currently existing could be deleted
-  - Each provider would have a `kustomization.yaml` file that defines the current [provider URL](https://github.com/openshift/cluster-capi-operator/blob/main/hack/assets/providers.go#L107) as a `resource`. This would be the "base" of the customizations.
-  - A kustomize [component](https://kubectl.docs.kubernetes.io/guides/config_management/components/) would be written defining the common labels and annotations needed. This would likely reside within `cluster-capi-operator`, since it is not specific to any one provider.
-	    - These could be written as [commonLabels](https://kubectl.docs.kubernetes.io/references/kustomize/kustomization/commonlabels/) within each `kustomization.yaml` file, but doing so means repeating the label values in each repository, which could be error-prone.
-  - Any changes that are currently written in the Go code would need to be reimplemented as kustomize [patches](https://kubectl.docs.kubernetes.io/references/kustomize/kustomization/patches/).
-	    - An exception is container images, which have the [image](https://kubectl.docs.kubernetes.io/references/kustomize/kustomization/images/) convenience feature.
-  - The rebase bot would run `kustomize build` to generate the assets when needed.
+`manifests-gen` is typically invoked in a provider repo from a `ocp-manifests` target in `openshift/Makfile`.
+For example, the invocation for cluster-api-provider-aws might look like this:
+```make
+.PHONY: ocp-manifests
+ocp-manifests: | $(RELEASE_DIR) ## Builds openshift specific manifests
+        # Generate provider manifests.
+        cd tools && $(MANIFESTS_GEN) --base-path "../../" --manifests-path "../capi-operator-manifests" --kustomize-dir="openshift" \
+                --provider-name cluster-api-provider-aws \
+                --provider-type infrastructure \
+                --provider-version "${PROVIDER_VERSION}" \
+                --provider-image-ref registry.ci.openshift.org/openshift:aws-cluster-api-controllers \
+                --platform AWS \
+                --protect-cluster-resource awscluster
+```
 
-  These changes are not large or onerous; however, doing so also does not add significant value to the development process.
+`base-path` indicates the root directory of the repo relative to the current working directory, which in this case is `openshift/tools`.
 
-  The move to kustomize in order to eliminate maintaining the current custom asset generation code should likely be done at some point. However, it is not necessary in order to gain benefits from this proposal.
+`manifests-path` specifies the directory where the manifests should be written.
+
+`kustomize-dir` is a directory relative to the root directory, containing a `kustomization.yaml` which will be used to generate the manifests.
+The form of this `kustomization.yaml` is expected to be common across all providers.
+An example of the common parts is given below.
+
+`provider-name`, `provider-type`, `provider-version`, and `platform` are all written as metadata.
+This metadata is used by the installer to determine which manifests to install.
+
+`provider-image-ref` is the image reference of the provider image, as referenced by the generated manifests.
+The installer will substitute this reference with the actual release image during installation.
+This must use the `registry.ci.openshift.org` registry.
+`manifests-gen` will return an error if it detects any image reference which does not use `registry.ci.openshift.org`.
+
+`protect-cluster-resource` indicates the name of the infrastructure cluster resource type which the CAPI operator will create for this provider.
+`manifests-gen` will generate a VAP for this resource to ensure that it cannot be modified.
+
+Each provider is expected to define a `kustomization.yaml` with a form similar to:
+
+```yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+components:
+- tools/vendor/github.com/openshift/cluster-capi-operator/manifests-gen
+
+resources:
+- ../config/default
+
+images:
+- name: gcr.io/k8s-staging-cluster-api-aws/cluster-api-aws-controller
+  newName: registry.ci.openshift.org/openshift
+  newTag: aws-cluster-api-controllers
+```
+
+It must include the kustomize `Component` provided in the `manifests-gen` go module.
+If the `tools` module uses vendoring, this can be included directly as shown above.
+If the `tools` module does not use vendoring, this will have to be dynamically substituted with the location of the `manifests-gen` go module using an appropriate invocation of `go list`.
+
+Assuming the upstream provider uses the typical `kubebuilder` scaffolding, it should include `config/default` from the upstream repo as the base resource.
+
+Whatever value the upstream manifests use as the default image reference should be substituted with a new image reference in `registry.ci.openshift.org`.
+
+If a provider requires any provider-specific modifications to the upstream manifests, they should also be included in this `kustomization.yaml`.
+The standard modifications made by `manifests-gen` are detailed below.
+
+### Standard modifications made by manifests-gen
+
+`manifests-gen` makes the following set of modifications to provider manifests automatically.
+
+* Set the namespace of all namespaced objects to `openshift-cluster-api`
+* Replace cert-manager with OpenShift Service CA:
+  Upstream CAPI providers typically include `cert-manager` metadata and manifests for webhooks.
+  `manifests-gen` will automatically translate `cert-manager` manifests and metadata to use OpenShift Service CA instead.
+* Exclude `Namespace` and `Secret` objects from the manifests: we expect these to be created by other means.
+* The following set of changes to all Deployments:
+  * Set the annotation `target.workload.openshift.io/management: {"effect": "PreferredDuringScheduling"}`.
+  * Set resource requests of all containers to `cpu: 10m` and `memory: 50Mi`.
+  * Remove resource limits from all containers.
+  * Set the terminationMessagePolicy of all containers to `FallbackToLogsOnError`.
+
+## TODO
+
+* Theo: Add a more complete description of Revisions.
+* Matt: Clarify which 'content' is covered by 'contentID'.
