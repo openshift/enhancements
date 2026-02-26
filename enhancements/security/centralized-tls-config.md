@@ -160,7 +160,10 @@ All override mechanisms must be explicitly documented in user-facing documentati
 
 3. Upon successful validation, the configuration is stored in the cluster.
 
-4. Component operators watch the APIServer configuration and update their respective component configurations.
+4. Component operators watch the APIServer configuration and update their respective component configurations. This applies to **all TLS servers in the cluster**—any component implementing TLS should honor this API.
+
+   - **CVO-managed operators:** Cluster operators read the configuration and configure their operands accordingly.
+   - **OLM-managed operators:** Operators are expected to read the `apiserver.config.openshift.io/cluster` resource themselves for configuration. OLM does not inject or proxy this configuration.
 
 5. Each component applies the new TLS settings. Components report their status via operator conditions.
 
