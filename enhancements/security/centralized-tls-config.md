@@ -455,10 +455,6 @@ During upgrades, there will be a period where some components support the enhanc
 - Components that don't yet support enhanced configuration will continue using their existing behavior
 - Operators should use the `ShouldHonorClusterTLSProfile` helper function from library-go to determine whether to honor the cluster-wide TLS configuration
 
-For n-2 kubelet skew:
-- Older kubelets that don't support the enhanced TLS configuration will continue using KubeletConfig-based TLS settings
-- This is acceptable as kubelet supports explicit TLS configuration overrides via `KubeletConfig` CR
-- Documentation will advise administrators to ensure compatibility during mixed-version periods
 
 ## Operational Aspects of API Extensions
 
