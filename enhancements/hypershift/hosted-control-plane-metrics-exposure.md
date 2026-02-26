@@ -317,8 +317,10 @@ The authentication flow:
    CSR controller when it reaches 20-25% remaining lifetime.
 2. The `metrics-client-certs` Secret is already mounted into the Prometheus pod
    at `/etc/prometheus/secrets/metrics-client-certs/` (containing `tls.crt` and
-   `tls.key`). The PodMonitor's `tlsConfig` references these paths for client
-   certificate authentication.
+   `tls.key`). The PodMonitor leverages CMO's `tls-client-certificate-auth`
+   scrape class, which automatically injects the correct cert/key file paths
+   into the scrape configuration without HyperShift needing to reference them
+   directly.
 3. On the management cluster side, the corresponding CA that signed the client
    certificate (`kube-csr-signer`) is stored as the `cluster-signer-ca` Secret
    in the HCP namespace. This Secret is created and reconciled by the
@@ -451,28 +453,18 @@ path. Each endpoint configures:
 - `scheme: https` -- Prometheus initiates a TLS connection to the forwarder
   pod. Since the forwarder is a TCP proxy, this TLS connection passes
   through end-to-end to the metrics proxy, which terminates it.
-- `tlsConfig.ca` -- references the `metrics-proxy-serving-ca` ConfigMap in
-  the `openshift-monitoring` namespace (synced by the HCCO from the HCP's
-  CA). This allows Prometheus to verify the metrics proxy's serving
-  certificate. The CA is referenced by ConfigMap name (not by file path),
-  since this is a custom CA not already mounted into the Prometheus pod.
-  This follows the same pattern used by ServiceMonitors like
-  `monitor-network` in `openshift-multus`, except those reference CAs
-  already available to Prometheus via `caFile` paths.
+- `scrapeClass: tls-client-certificate-auth` -- uses the CMO-defined scrape
+  class that automatically injects the client certificate and key from the
+  `metrics-client-certs` Secret, as well as the CA file for server
+  verification. This means the PodMonitor does not need to explicitly
+  reference these credentials. The client certificate is sent during the
+  TLS handshake and forwarded transparently by the TCP proxy to the metrics
+  proxy, which verifies it against the `cluster-signer-ca` CA bundle.
 - `tlsConfig.serverName` -- set to the metrics proxy route hostname. This
   is needed for both SNI routing (so the OpenShift router directs the
   connection to the correct backend) and certificate verification (so
   Prometheus checks the cert against the route hostname, not the forwarder
   pod IP).
-- `tlsConfig.cert` and `tlsConfig.keySecret` -- reference the
-  `metrics-client-certs` Secret in the `openshift-monitoring` namespace,
-  which contains the client certificate and key for the `prometheus-k8s`
-  ServiceAccount. This Secret is already managed by CMO's embedded CSR
-  controller and is already mounted into the Prometheus pod at
-  `/etc/prometheus/secrets/metrics-client-certs/`. The client certificate
-  is sent during the TLS handshake and forwarded transparently by the TCP
-  proxy to the metrics proxy, which verifies it against the
-  `cluster-signer-ca` CA bundle.
 - `honorLabels: true` -- instructs Prometheus to keep labels from the
   scraped metrics as-is, rather than prefixing them with `exported_`. Since
   the metrics proxy is a custom proxy that injects authoritative labels
@@ -487,6 +479,7 @@ metadata:
   name: control-plane-metrics
   namespace: openshift-monitoring
 spec:
+  scrapeClass: tls-client-certificate-auth
   selector:
     matchLabels:
       app: control-plane-metrics-forwarder
@@ -496,17 +489,6 @@ spec:
       scheme: https
       honorLabels: true
       tlsConfig: &tlsConfig
-        ca:
-          configMap:
-            name: metrics-proxy-serving-ca
-            key: ca.crt
-        cert:
-          secret:
-            name: metrics-client-certs
-            key: tls.crt
-        keySecret:
-          name: metrics-client-certs
-          key: tls.key
         serverName: <metrics-proxy-route-hostname>
     - port: metrics
       path: /metrics/etcd
@@ -571,12 +553,10 @@ cluster's `openshift-monitoring` namespace:
   hostname as the TCP backend.
 - A **`metrics-proxy-serving-ca` ConfigMap** containing the HCP's CA
   certificate. This is synced from the HCP namespace on the management
-  cluster. Prometheus uses this CA (referenced by name in the PodMonitor's
-  `tlsConfig.ca.configMap`) to verify the metrics proxy's serving
-  certificate end-to-end through the TCP proxy.
+  cluster.
 - The PodMonitor targeting the forwarder pod, with `scheme: https`,
-  `honorLabels: true`, `tlsConfig` referencing the CA ConfigMap by name,
-  the `metrics-client-certs` Secret for client certificate authentication,
+  `honorLabels: true`, `scrapeClass: tls-client-certificate-auth` (which
+  injects the client certificate, key, and CA for server verification),
   and `serverName` set to the metrics proxy route hostname.
 
 #### 5. Control Plane Operator Changes
