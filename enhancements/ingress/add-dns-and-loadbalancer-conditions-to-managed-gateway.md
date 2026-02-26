@@ -30,10 +30,11 @@ superseded-by:
 This enhancement adds DNS status conditions to Gateway listeners and LoadBalancer
 status conditions to Gateway resources managed by OpenShift in the `openshift-ingress`
 namespace. Specifically, it adds `DNSReady` conditions to each listener's status
-(in `status.listeners[].conditions[]`) and `LoadBalancerReady` conditions to the
-Gateway status (in `status.conditions[]`). These conditions provide visibility
-into per-listener DNS provisioning and gateway-level cloud LoadBalancer service
-status, similar to the existing conditions on OpenShift IngressController resources.
+(in `status.listeners[].conditions[]`) and both `DNSReady` and `LoadBalancerReady`
+conditions to the Gateway status (in `status.conditions[]`). These conditions provide
+visibility into per-listener DNS provisioning, overall Gateway DNS status, and
+gateway-level cloud LoadBalancer service status, similar to the existing conditions
+on OpenShift IngressController resources.
 
 ## Motivation
 
@@ -61,6 +62,8 @@ issues or resource limits.
 
 * Add `DNSReady` condition to each Gateway listener status (in `status.listeners[].conditions[]`)
 that reflects the state of DNS record provisioning for that specific listener
+* Add `DNSReady` condition to Gateway status (in `status.conditions[]`) that reflects
+the aggregate DNS state across all listeners (True when all listeners are ready)
 * Add `LoadBalancerReady` condition to Gateway status (in `status.conditions[]`)
 that reflects the state of cloud LoadBalancer service provisioning
 * Ensure conditions follow the same semantics and behavior as existing
@@ -92,6 +95,8 @@ listener level and LoadBalancer conditions at the gateway level. Specifically:
     is functioning correctly
 
 * **Gateway-level conditions** (in `status.conditions[]`):
+  - `DNSReady`: Indicates whether DNS records for all listeners are functioning
+    correctly (aggregate status across all listeners)
   - `LoadBalancerReady`: Indicates whether the cloud LoadBalancer service for
     the entire Gateway is functioning correctly
 
@@ -112,8 +117,8 @@ functions
 convert to Gateway API condition types
 
 The gateway-status controller will:
-1. Watch Gateway resources in `openshift-ingress` namespace that specify any
-GatewayClass that specifies OpenShift's gateway controller name.
+1. Watch Gateway resources in `openshift-ingress` namespace whose
+GatewayClass specifies OpenShift's gateway controller name.
 2. Discover associated DNSRecord and Service resources using a matching gateway name in the
 `gateway.networking.k8s.io/gateway-name` label
 3. For each listener in the Gateway:
@@ -125,7 +130,7 @@ GatewayClass that specifies OpenShift's gateway controller name.
    - Fetch the single Service resource for the Gateway
    - Compute LoadBalancer condition using the shared status logic
    - Update the Gateway's status in `status.conditions[]`
-5. Fetch cluster DNS configuration, that will be used to define `DNSReady` condition
+5. Fetch cluster DNS configuration, which will be used to define `DNSReady` condition
    based on what are the managed zones.
 6. Patch Gateway status with the computed `LoadBalancerReady` and `DNSReady` status
 conditions, including setting `ObservedGeneration` on these two conditions.
@@ -170,8 +175,10 @@ updates their status
 with reason "LoadBalancerProvisioned" in `status.conditions[]`
 9. Gateway Status Controller updates each listener's conditions in `status.listeners[].conditions[]`:
    - Sets `DNSReady=True` with reason "NoFailedZones" (DNS record for this listener provisioned successfully)
-10. Customer checks Gateway status and sees:
-    - Gateway-level condition `LoadBalancerReady=True`
+10. Gateway Status Controller updates Gateway condition `DNSReady=True` with reason
+"AllListenersReady" in `status.conditions[]` (all listeners have DNS ready)
+11. Customer checks Gateway status and sees:
+    - Gateway-level conditions: `LoadBalancerReady=True` and `DNSReady=True`
     - Each listener has `DNSReady=True`
     - Confirming the Gateway is fully operational
 
@@ -186,15 +193,19 @@ creating one DNSRecord per unique listener hostname
 DNSRecord resource
 5. Gateway Status Controller updates the affected listener's conditions in
 `status.listeners[].conditions[]`:
-   - Sets `DNSReady=False` with reason `FailedZones` and detailed error message from DNS provider
-6. Other listeners with successful DNS records show `DNSReady=True`
-7. Cluster Administrator reviews Gateway status and identifies which specific listener
-has DNS issues by checking each listener's conditions
-8. Cluster Administrator resolves the DNS issue (e.g., increases quota,
+   - Sets `DNSReady=False` with reason `FailedZones`
+6. Gateway Status Controller updates Gateway condition `DNSReady=False` with reason
+"SomeListenersNotReady" in `status.conditions[]` (at least one listener has DNS failure)
+7. Other listeners with successful DNS records show `DNSReady=True`
+8. Cluster Administrator reviews Gateway status and sees gateway-level `DNSReady=False`,
+then identifies which specific listener has DNS issues by checking each listener's conditions
+9. Cluster Administrator resolves the DNS issue (e.g., increases quota,
 fixes zone configuration)
-9. Cluster Ingress Operator DNS controller retries and successfully provisions the DNS record
-10. Gateway Status Controller updates the affected listener's condition `DNSReady=True` with
+10. Cluster Ingress Operator DNS controller retries and successfully provisions the DNS record
+11. Gateway Status Controller updates the affected listener's condition `DNSReady=True` with
 reason "NoFailedZones"
+12. Gateway Status Controller updates Gateway condition `DNSReady=True` with reason
+"AllListenersReady" (all listeners now have DNS ready)
 
 #### LoadBalancer Failure Flow
 
@@ -228,8 +239,8 @@ sequenceDiagram
 
     User->>Gateway: Create/Update Gateway with multiple listeners (openshift-ingress namespace)
     Gateway->>IngressOp: Reconcile trigger (main ingress operator)
-    IngressOp->>DNSRecords: Create DNSRecord per unique listener hostname with label gateway.networking.k8s.io/gateway-name
-    IngressOp->>LBSvc: Create LoadBalancer Service with label gateway.networking.k8s.io/gateway-name
+    IngressOp->>DNSRecords: Create DNSRecord per unique listener hostname with label `gateway.networking.k8s.io/gateway-name`
+    IngressOp->>LBSvc: Create LoadBalancer Service with label `gateway.networking.k8s.io/gateway-name`
 
     Gateway->>GWStatus: Reconcile trigger (status controller)
     GWStatus->>DNSRecords: Fetch all DNSRecords by label
@@ -285,8 +296,8 @@ This enhancement is fully relevant for standalone OpenShift clusters deployed on
 cloud platforms (AWS, Azure, GCP, etc.). The conditions provide visibility into
 DNS and LoadBalancer provisioning for the cluster's ingress infrastructure.
 
-For on-premises environments, the same behavior existing on Ingress Controllers is replicated
-to Gateway API status: the `LoadBalancerReady` will reflect the existence of a Load balancer
+For on-premises environments, the same behavior that exists on Ingress Controllers is replicated
+to Gateway API status: the `LoadBalancerReady` will reflect the existence of a LoadBalancer
 controller on the environment, while `DNSReady` will reflect the DNS record provisioning status;
 namely, `DNSReady` will report `False` with a message indicating that OpenShift cannot manage
 DNS records on non-cloud infrastructure platforms.
@@ -325,13 +336,15 @@ Gateway (1)
 │       └── Listener[2] (hostname: *.stage.example.com)  # shares hostname with Listener[0]
 │
 └── Infrastructure Resources
-    ├── Service (1) ────────────────────► status.conditions[]: LoadBalancerReady
+    ├── Service (1) ────────────────────────────────────► status.conditions[]: LoadBalancerReady
     │   └── LoadBalancer (cloud)
     │
     └── DNSRecords (N unique hostnames)
-        ├── DNSRecord[0] (*.stage.example.com) ──► status.listeners[0].conditions[]: DNSReady
-        │                                        └► status.listeners[2].conditions[]: DNSReady
-        └── DNSRecord[1] (*.prod.example.com)  ──► status.listeners[1].conditions[]: DNSReady
+        ├── DNSRecord[0] (*.stage.example.com) ───────► status.listeners[0].conditions[]: DNSReady
+        │                                             └► status.listeners[2].conditions[]: DNSReady
+        └── DNSRecord[1] (*.prod.example.com)  ───────► status.listeners[1].conditions[]: DNSReady
+                                                       │
+                                                       └─► status.conditions[]: DNSReady (aggregated)
 ```
 
 **Key Architectural Decisions:**
@@ -363,12 +376,18 @@ spec:
     port: 443
     protocol: HTTPS
 status:
-  # Gateway-level conditions (LoadBalancer status)
+  # Gateway-level conditions (LoadBalancer and aggregate DNS status)
   conditions:
   - type: LoadBalancerReady
     status: "True"
     reason: LoadBalancerProvisioned
     message: "The LoadBalancer service is provisioned"
+    observedGeneration: 1
+    lastTransitionTime: "2025-01-12T10:00:00Z"
+  - type: DNSReady
+    status: "False"
+    reason: SomeListenersNotReady
+    message: "One or more listeners have DNS provisioning issues"
     observedGeneration: 1
     lastTransitionTime: "2025-01-12T10:00:00Z"
 
@@ -404,8 +423,9 @@ status:
 
 Note: In this example, `stage-http` and `stage-https` share the same hostname, so they
 have identical DNS conditions (both map to the same DNSRecord). The `prod-https` listener
-has a different hostname and shows a DNS failure, while the LoadBalancer is working for
-the entire Gateway.
+has a different hostname and shows a DNS failure. The gateway-level `DNSReady` condition
+is `False` because at least one listener has a DNS issue, while the LoadBalancer is working
+for the entire Gateway.
 
 **Controller Architecture:**
 * A new "Gateway Status" controller is added to the Cluster Ingress Operator
@@ -415,7 +435,7 @@ the entire Gateway.
 
 **Condition Update Logic:**
 * The ingress operator watches Gateway resources in the `openshift-ingress`
-namespace that have the OpenShift Gateway Class as their `.spec.gatewayClassName` controller
+namespace that use GatewayClasses with `openshift.io/gateway-controller/v1` as their `.spec.controllerName`
 * Associated DNSRecord and Service resources are discovered using the
 `gateway.networking.k8s.io/gateway-name` label
 * The Istio-created service matching an individual gateway-name is the only one discovered
@@ -434,6 +454,12 @@ for LoadBalancer status computation, as it is expected that Istio provisions jus
 * For the Gateway's LoadBalancer service:
   - LoadBalancer conditions are computed using the shared status logic
   - Conditions are updated in `status.conditions[]` at the Gateway level
+* For the Gateway's aggregate DNS status:
+  - After computing all listener-level DNS conditions, the controller aggregates them
+  - Gateway-level `DNSReady` is set to `True` with reason `AllListenersReady` when all listeners have `DNSReady=True`
+  - Gateway-level `DNSReady` is set to `False` with reason `SomeListenersNotReady` when at least one listener has `DNSReady=False` or `DNSReady=Unknown`
+  - Listeners without hostnames are not included in the aggregation logic
+  - The condition is updated in `status.conditions[]` at the Gateway level
 * These functions wrap the existing functions used for IngressController, ensuring consistency
 * The operator patches Gateway status using the Kubernetes API with the computed conditions
 * Conditions include `ObservedGeneration` to track which Gateway generation the status reflects
@@ -455,6 +481,16 @@ DNS conditions are set per-listener in `status.listeners[].conditions[]`:
 * Error messages include specific DNS provider errors and list of affected zones when provisioning fails
 * If a listener has no hostname specified, DNS conditions are not added to that listener
 * If a listener's hostname is removed, the DNSReady condition is removed from that listener's status
+
+**Gateway-level DNSReady Condition (aggregate status):**
+
+A Gateway condition called `DNSReady` is added to `status.conditions[]` to provide aggregate
+DNS status across all listeners:
+
+* Set to `True` with reason `AllListenersReady` when all listeners with hostnames have `DNSReady=True`
+* Set to `False` with reason `SomeListenersNotReady` when at least one listener has `DNSReady=False` or `DNSReady=Unknown`
+* This condition will never be set to `Unknown`
+* Listeners without hostnames are excluded from the aggregation logic
 
 **LoadBalancer Condition Details:**
 
@@ -482,11 +518,12 @@ events, config) and return conditions
 * Gateway-specific wrappers convert between internal condition types
 and Gateway API `metav1.Condition` types:
   - `ComputeGatewayAPIDNSStatus`: Converts to listener-level conditions in `status.listeners[].conditions[]`
+  - `ComputeGatewayAPIAggregateDNSStatus`: Aggregates listener DNS conditions to gateway-level condition in `status.conditions[]`
   - `ComputeGatewayAPILoadBalancerStatus`: Converts to gateway-level conditions in `status.conditions[]`
 
 **Resource Discovery:**
 * The controller watches the following resources to trigger reconciliation:
-  - Gateway resources in `openshift-ingress` namespace that uses GatewayClasses with 
+  - Gateway resources in `openshift-ingress` namespace that use GatewayClasses with
   `openshift.io/gateway-controller/v1` as their `.spec.controllerName` 
   - DNSRecord resources with `gateway.networking.k8s.io/gateway-name` label matching a gateway name
   - Service resources with `gateway.networking.k8s.io/gateway-name` label matching a gateway name
@@ -500,6 +537,8 @@ and Gateway API `metav1.Condition` types:
 **Condition Lifecycle:**
 * Conditions are added when a Gateway is reconciled in the `openshift-ingress` namespace
 * Listener-level DNS conditions are updated in-place in `status.listeners[].conditions[]`
+using `condutils.SetStatusCondition()` and the transition time must reflect changes
+* Gateway-level DNS conditions (aggregate) are updated in-place in `status.conditions[]`
 using `condutils.SetStatusCondition()` and the transition time must reflect changes
 * Gateway-level LoadBalancer conditions are updated in-place in `status.conditions[]`
 using `condutils.SetStatusCondition()` and the transition time must reflect changes
@@ -520,8 +559,8 @@ to prevent unbounded growth
 Gateway API establishes a limit of 8 conditions on both the Gateway status and each
 listener status. Istio, which is used as our Gateway API implementation, sets 2
 gateway-level conditions and also sets listener-level conditions. Cluster Ingress
-Operator will set 1 additional gateway-level condition (`LoadBalancerReady`) and
-1 listener-level condition per listener (`DNSReady`). If Istio starts adding more
+Operator will set 2 additional gateway-level conditions (`DNSReady` and `LoadBalancerReady`)
+and 1 listener-level condition per listener (`DNSReady`). If Istio starts adding more
 conditions, this can be a problem.
 
 * Mitigation:
@@ -547,8 +586,8 @@ conditions, the size increase scales with the number of listeners (~1KB per
 Gateway + ~1KB per listener with DNS conditions)
 
 **Maintenance burden:**
-* Requires ongoing maintenance to keep condition logic in sync with DNS operator and cloud provider behavior
-* May need updates when DNS operator or cloud provider integrations change
+* Requires ongoing maintenance to keep condition logic in sync with Cluster Ingress Operator
+DNS Controller and cloud provider behavior
 
 **Potential confusion:**
 * Users may expect these conditions to appear on all Gateway resources, not just
@@ -588,21 +627,6 @@ Kubernetes pattern for status reporting
 * Rejected because: Events are transient and harder to query programmatically;
 conditions provide persistent, queryable status
 
-**Alternative 5: Put DNS conditions at Gateway level instead of listener level**
-* Could add DNS conditions to `status.conditions[]` (gateway-level) and aggregate
-status across all DNSRecords
-* Rejected because:
-  - Each listener with a unique hostname gets its own DNSRecord resource
-  - A single gateway-level DNS condition cannot accurately represent the state when
-    some listeners have working DNS and others don't
-  - Users need to know which specific listener has DNS issues for troubleshooting
-  - Gateway API supports listener-level conditions specifically for this use case
-  - The current implementation in cluster-ingress-operator creates per-hostname DNSRecords,
-    making listener-level status the natural fit
-  - Multiple listeners can share the same hostname (and thus the same DNSRecord), so
-    listener-level conditions allow showing the same DNS status for all listeners
-    sharing a hostname
-
 ## Open Questions [optional]
 
 N/A
@@ -613,6 +637,10 @@ N/A
 * Test `ComputeDNSStatus` with various DNSRecord states (no zones, failed zones, successful zones)
 * Test `ComputeLoadBalancerStatus` with various Service states (not found, pending, provisioned, failed)
 * Test `ComputeGatewayAPIDNSStatus` wrapper correctly converts internal conditions to Gateway API listener conditions
+* Test `ComputeGatewayAPIAggregateDNSStatus` correctly aggregates listener DNS conditions to gateway-level condition:
+  - All listeners ready → gateway-level `DNSReady=True` with reason `AllListenersReady`
+  - Some listeners failed → gateway-level `DNSReady=False` with reason `SomeListenersNotReady`
+  - Mix of listeners with and without hostnames → only listeners with hostnames are considered
 * Test `ComputeGatewayAPILoadBalancerStatus` wrapper correctly converts internal conditions to Gateway API gateway-level conditions
 * Test ObservedGeneration is correctly set on conditions
 * Test if the transition times are correctly set on conditions
@@ -622,7 +650,7 @@ N/A
 
 **E2E Tests:**
 * Create Gateway in `openshift-ingress` namespace with listeners and verify:
-  - Gateway-level condition `LoadBalancerReady=True` in `status.conditions[]`
+  - Gateway-level conditions in `status.conditions[]`: `LoadBalancerReady=True` and `DNSReady=True`
   - Each listener has `DNSReady=True` in `status.listeners[].conditions[]`
 * On the same test, verify that a change that causes the Gateway's `metadata.generation` to be updated also causes the conditions' `observedGeneration` to be updated
 * On the same test, verify that the Gateway API controller (Istio) reconciliation
@@ -641,6 +669,10 @@ in `status.listeners[].conditions[]`
 * Create Gateway with a listener without a hostname. Verify:
   - That listener does not have DNS conditions added
   - Other listeners with hostnames do have DNS conditions
+* Create Gateway with multiple listeners where some have DNS failures. Verify:
+  - Gateway-level `DNSReady=False` with reason `SomeListenersNotReady` in `status.conditions[]`
+  - Affected listeners show `DNSReady=False` in `status.listeners[].conditions[]`
+  - After resolving DNS issues, gateway-level `DNSReady=True` with reason `AllListenersReady`
 
 ## Graduation Criteria
 
@@ -703,8 +735,8 @@ This enhancement involves coordination between:
 **API Extension Type:**
 * This enhancement adds status conditions to existing Gateway resources (no new CRDs)
 * Conditions are added at two levels:
-  - Gateway-level conditions in `status.conditions[]` for LoadBalancer status
-  - Listener-level conditions in `status.listeners[].conditions[]` for DNS status
+  - Gateway-level conditions in `status.conditions[]` for LoadBalancer status and aggregate DNS status
+  - Listener-level conditions in `status.listeners[].conditions[]` for per-listener DNS status
 * No admission webhooks, conversion webhooks, aggregated API servers, or finalizers are introduced
 * Status conditions are a standard Kubernetes and Gateway API pattern and do not require API approval for new types
 
@@ -745,6 +777,15 @@ This enhancement involves coordination between:
 * Check DNS controller logs in ingress-operator Pods: `oc logs -n openshift-ingress-operator deployment/ingress-operator | grep dns_controller`
 * Common causes: DNS zone misconfiguration, DNS provider quota exceeded, invalid DNS records, provider API failures, unmanaged DNS policy
 
+*Symptom: Gateway-level condition shows `DNSReady=False`*
+* Check Gateway status: `oc get gateway <name> -n openshift-ingress -o yaml`
+* Look at the gateway-level condition in `status.conditions[]` for type `DNSReady`
+* Review condition reason and message:
+  - Reason `SomeListenersNotReady`: One or more listeners have DNS provisioning issues
+* Check each listener's conditions in `status.listeners[].conditions[]` to identify which listeners have `DNSReady=False` or `DNSReady=Unknown`
+* Follow the troubleshooting steps for "Listener conditions show DNSReady=False" above for each affected listener
+* The gateway-level `DNSReady` will become `True` only after all listeners with hostnames have `DNSReady=True`
+
 *Symptom: Gateway conditions show `LoadBalancerReady=False`*
 * Check Gateway status: `oc get gateway <name> -n openshift-ingress -o yaml`
 * Review condition reason and message:
@@ -767,7 +808,9 @@ This enhancement involves coordination between:
 * For DNS conditions: If a listener previously had a hostname but it was removed, the DNSReady condition
   will be removed from that listener's status
 * For LoadBalancer conditions: Check in `status.conditions[]` at the Gateway level
-* For DNS conditions: Check in `status.listeners[].conditions[]` for each listener
+* For DNS conditions: Check both:
+  - Listener-level in `status.listeners[].conditions[]` for per-listener DNS status
+  - Gateway-level in `status.conditions[]` for aggregate DNS status across all listeners
 
 **Disabling the Feature:**
 * This feature cannot be easily disabled as it's integrated into ingress operator reconciliation
@@ -786,6 +829,4 @@ This enhancement involves coordination between:
 
 ## Infrastructure Needed [optional]
 
-No new infrastructure required. This enhancement uses existing OpenShift components:
-* Ingress operator (existing)
-* Cloud controller manager / LoadBalancer services (existing)
+N/A
