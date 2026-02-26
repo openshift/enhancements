@@ -148,9 +148,12 @@ Gateway API resources.
 **Ingress Operator** is the OpenShift operator responsible for managing ingress
 resources including Gateways and IngressControllers.
 
-**Load Balancer controller** is the underlying load balancer controller that provisions
-Load balancer services. The load balancer can be provisioned on a cloud provider, or
-on any other service that implements a Kubernetes-compatible Load Balancer.
+**Load Balancer controller** is the controller that provisions load balancers
+for services and updates the service status. For example, Cloud Controller
+Manager or MetalLB can act as the Load Balancer controller. The load balancer
+can be provisioned as a cloud load balancer on a cloud provider, as a virtual
+IP address on bare metal, or in some other way that functions as a
+Kubernetes-compatible service load-balancer.
 
 #### Normal Flow (Success Case)
 
@@ -621,7 +624,7 @@ N/A
 * Create Gateway in `openshift-ingress` namespace with listeners and verify:
   - Gateway-level condition `LoadBalancerReady=True` in `status.conditions[]`
   - Each listener has `DNSReady=True` in `status.listeners[].conditions[]`
-* On the same test, verify that a change that implies the Gateway `metadata.generation` change will bump the conditions `observedGeneration`
+* On the same test, verify that a change that causes the Gateway's `metadata.generation` to be updated also causes the conditions' `observedGeneration` to be updated
 * On the same test, verify that the Gateway API controller (Istio) reconciliation
 does not replace OpenShift conditions
 * On the same test, verify the condition count is consistent with Istio and OpenShift
