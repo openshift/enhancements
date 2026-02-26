@@ -213,8 +213,8 @@ spec:
     # If type is Custom:
     custom:
       ciphers:
-        - TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
-        - TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+        - ECDHE-RSA-AES128-GCM-SHA256
+        - ECDHE-RSA-AES256-GCM-SHA384
       minTLSVersion: VersionTLS12  # Custom ciphers only valid with TLS 1.2
   # New field introduced by this enhancement (sibling to tlsSecurityProfile)
   # Valid values: LegacyAdheringComponentsOnly, StrictAllComponents
@@ -258,10 +258,10 @@ spec:
     type: Custom
     custom:
       ciphers:
-        - TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
-        - TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
-        - TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
-        - TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
+        - ECDHE-RSA-AES128-GCM-SHA256
+        - ECDHE-RSA-AES256-GCM-SHA384
+        - ECDHE-ECDSA-AES128-GCM-SHA256
+        - ECDHE-ECDSA-AES256-GCM-SHA384
       minTLSVersion: VersionTLS12
   tlsAdherence: StrictAllComponents
 ```
