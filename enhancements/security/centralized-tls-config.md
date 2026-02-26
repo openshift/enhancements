@@ -379,14 +379,16 @@ Create a dedicated new Custom Resource for cluster-wide TLS configuration. This 
 
 ## Open Questions [optional]
 
-1. How should the API handle components that report they cannot support the configured profile (e.g., older operator versions)?
+1. ~~How should the API handle components that report they cannot support the configured profile (e.g., older operator versions)?~~ **Resolved:** Non-compliance is treated as a bug against the component, which should be fixed and backported.
 
-2. Should a status field be added to the APIServer config for components to report compliance?
+2. ~~Should a status field be added to the APIServer config for components to report compliance?~~ **Resolved:** No. Scalability concerns exist with centralizing compliance reporting in the APIServer status (especially with layered products). Components should use their own status conditions to report issues. Future tooling (ACS, network observability) may provide cluster-wide compliance visibility.
 
-3. **Migration strategy for `tlsAdherence` field:** If we decide to eventually enforce `StrictAllComponents` as the default, which migration approach should we use?
+3. ~~**Migration strategy for `tlsAdherence` field:** If we decide to eventually enforce `StrictAllComponents` as the default, which migration approach should we use?~~
    - **Option A (leaning towards):** Use omission to mean "no opinion" with `LegacyAdheringComponentsOnly` behavior. Eventually require setting `StrictAllComponents` explicitly before upgrade.
    - **Option B:** Use omission to mean "no opinion" and require admins to explicitly opt-in to a supported mode before they can upgrade.
    - **Option C:** Have a controller set the field to the default behavior if it is omitted on upgrade.
+   
+   **Resolved** We will use option A:Use omission to mean "no opinion" with `LegacyAdheringComponentsOnly` behavior. Eventually require setting `StrictAllComponents` explicitly before upgrade. 
 
 ## Graduation Criteria
 
