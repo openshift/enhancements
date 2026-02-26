@@ -1,0 +1,519 @@
+---
+title: centralized-tls-config
+authors:
+  - richardsonnick
+reviewers:
+  - dsalerno # OpenShift networking stack knowledge
+approvers: 
+  - joelanford
+api-approvers:
+  - everettraven
+creation-date: 2026-01-20
+last-updated: 2026-01-26
+tracking-link:
+  - https://issues.redhat.com/browse/OCPSTRAT-2611 
+  - https://issues.redhat.com/browse/OCPSTRAT-2321
+---
+
+# Cluster-wide TLS Security Profile Configuration
+
+## Summary
+
+This enhancement proposes extending the existing `apiserver.config.openshift.io/v1` API to serve as the unified source of truth for TLS security settings across OpenShift clusters. We will leverage the existing APIServer configuration and establish that all components should honor its TLS settings by default, with specific components supporting explicit overrides via their own Custom Resources. This enhancement introduces a new `tlsAdherence` field to control how strictly components follow the configured TLS profile, adds validation to prevent invalid TLS 1.3 cipher configurations, and provides clear documentation around TLS 1.3 cipher behavior.
+
+## Motivation
+
+Currently, OpenShift utilizes multiple TLS configurations distributed across various components (e.g., Ingress Controller, API Server, Kubelet) rather than a single unified configuration.
+
+It is currently unclear which components should honor kubelet vs. ingress configurations, specifically regarding TLS passthrough and decrypt/re-encrypt scenarios.
+
+### User Stories
+
+As a cluster administrator, I want to configure TLS security settings in a single location so that I can ensure consistent security policies across all cluster components without managing multiple configuration points.
+
+As a platform operator managing layered products, I want layered products to inherit cluster-wide TLS settings by default so that I can maintain consistent security posture across the entire platform.
+
+As an application developer, I want to understand clearly which TLS profile applies to my application's ingress so that I can support legacy clients when necessary while the cluster uses stricter internal profiles.
+
+### Goals
+
+1. **Unified Configuration:** Extend the existing `apiserver.config.openshift.io/v1` API to serve as the cluster-wide TLS security profile source of truth, avoiding the introduction of new Custom Resources.
+
+2. **TLS Adherence Control:** Introduce a `tlsAdherence` field that allows administrators to choose between `LegacyAdheringComponentsOnly` behavior (for backward compatibility) and `StrictAllComponents` behavior (for enforced compliance).
+
+3. **TLS 1.3 Transparency:** Clearly document and enforce the behavior that TLS 1.3 uses a hardcoded set of ciphers as defined by the Go runtime, removing ambiguity about cipher configuration.
+
+4. **Validation:** Add validation to the APIServer and Kubelet (and any other component that inherits the configv1.TLSSecurityProfile type) TLS configuration to disallow cipher suite configuration when `minTLSVersion` is set to TLS 1.3.
+
+### Non-Goals
+
+1. Runtime monitoring of components for TLS compliance.
+
+2. Automatic migration of existing component-specific TLS configurations.
+
+3. Removing the existing component-specific TLS configuration capabilities (e.g., IngressController-specific profiles will be retained for legacy support).
+
+4. Backporting fixes to existing Ingress controllers (new development efforts will focus on the Gateway API).
+
+5. TLS curves configuration (this is being addressed in a separate TLS Curves enhancement).
+
+6. Enforcing client TLS settings. This enhancement applies only to the server-side TLS configuration of managed components.
+
+## Proposal
+
+We propose extending the existing `apiserver.config.openshift.io/v1` API to serve as the source of truth for TLS security settings across the cluster. All components should honor the TLS configuration defined in this API by default, with specific components supporting explicit overrides via their own Custom Resources. 
+
+### API Design Principles
+
+**Profile-Based:** The API supports the existing predefined profiles (Old, Intermediate, Modern).
+
+**Custom Profile:** A Custom profile will be available for users requiring granular control to set configuration parameters manually. However, this profile will be explicitly documented as high-risk. Users utilizing the Custom profile must understand the limitations of underlying TLS implementations. Custom profiles are subject to the same TLS 1.3 cipher behavior documented below.
+
+**Restrictive Validation:** The TLS configuration API used by most components will validate that cipher suites cannot be specified when `minTLSVersion` is set to TLS 1.3, preventing silent failures where users believe they have configured ciphers but they are being ignored. Non-go based components that maintain their own overrides _may_ still allow ciphers to be configured with `minTLSVersion` TLS 1.3.
+
+### TLS Adherence Modes
+
+The new `tlsAdherence` field is a **sibling** to the existing `tlsSecurityProfile` field on the APIServer config object. It controls how strictly the TLS configuration is enforced by components:
+
+**Empty/Unset (default):** When the field is omitted or set to an empty string, the cluster defaults to `LegacyAdheringComponentsOnly` behavior. Components should treat an empty value the same as `LegacyAdheringComponentsOnly`.
+
+**`LegacyAdheringComponentsOnly`:** Maintains backward-compatible behavior. Only the externally exposed API server components (kube-apiserver, openshift-apiserver, oauth-apiserver) honor the configured TLS profile. Other components continue to use their individual TLS configurations (e.g., `IngressController.spec.tlsSecurityProfile`, `KubeletConfig.spec.tlsSecurityProfile`, or component defaults). See the "Components With Explicit Override Capability" section for details on component-specific TLS configuration options. This mode prevents breaking changes when upgrading clusters, allowing administrators to opt-in to expanded enforcement via `StrictAllComponents` when ready.
+
+**`StrictAllComponents`:** Enforces strict adherence to the TLS configuration. All components must honor the configured TLS profile unless they have a component-specific TLS configuration that overrides it (see "Override Precedence" below). If a core component fails to honor the TLS configuration when `StrictAllComponents` is set, this is treated as a **bug** requiring fixes and backporting. This mode is recommended for security-conscious deployments and is required for certain compliance frameworks.
+
+**Behavior Summary:**
+
+| Mode | API Servers (kube, openshift, oauth) | Other Components |
+|------|--------------------------------------|------------------|
+| `LegacyAdheringComponentsOnly` | Honor cluster-wide TLS profile | Use their individual TLS configurations |
+| `StrictAllComponents` | Honor cluster-wide TLS profile | Honor cluster-wide TLS profile (unless component-specific override exists) |
+
+**Unknown Enum Handling:** If a component encounters an unknown value for `tlsAdherence`, it should treat it as `StrictAllComponents` and log a warning. This ensures forward compatibility while defaulting to the more secure behavior.
+
+**Implementation Note:** Component implementors should use the `ShouldHonorClusterTLSProfile` helper function from library-go rather than checking the `tlsAdherence` field values directly. This helper encapsulates the logic for handling empty values and future enum additions.
+
+### TLS 1.3 Cipher Behavior
+
+When the minimum TLS version is set to TLS 1.3, the following behavior applies:
+
+**Hardcoded Cipher Suites:** Go's `crypto/tls` library does not allow cipher suite configuration for TLS 1.3. When TLS 1.3 is the minimum version, the following cipher suites are automatically used and cannot be overridden:
+
+- `TLS_AES_128_GCM_SHA256`
+- `TLS_AES_256_GCM_SHA384`
+- `TLS_CHACHA20_POLY1305_SHA256`
+
+**Validation:** The APIServer TLS configuration will reject attempts to specify custom cipher suites when `minTLSVersion` is set to `VersionTLS13`. This validation prevents the "silent failure" scenario where users believe they have configured specific ciphers but the Go runtime ignores them.
+
+**Rationale:** This behavior is mandated by [Go's crypto/tls implementation](https://github.com/golang/go/issues/29349), which intentionally does not expose TLS 1.3 cipher suite configuration. The TLS 1.3 cipher suites are considered secure and the Go team has decided that allowing configuration could lead to weaker security postures.
+
+### Scope and Component Expectations
+
+All OpenShift components should honor the TLS configuration defined in `apiserver.config.openshift.io/v1`.
+
+**Components With Explicit Override Capability:**
+
+The following components inherit the cluster-wide TLS configuration from `apiserver.config.openshift.io/cluster` by default, but support explicit overrides via their own Custom Resources:
+
+- **Kubelet:** Can be overridden via [`KubeletConfig`](https://github.com/openshift/api/blob/dadbf81f35e99354e51056157c05c44b9118b6a6/machineconfiguration/v1/types.go#L762) CR (defined in `machineconfiguration.openshift.io/v1`) with its own `tlsSecurityProfile` field. If not explicitly set, inherits the APIServer TLS config. **Note:** Kubelet currently only supports `Old` and `Intermediate` profiles, with a maximum of `VersionTLS12`. The `Modern` profile (TLS 1.3) is not yet supported.
+- **Ingress Controller:** Can be overridden via [`IngressController`](https://github.com/openshift/api/blob/dadbf81f35e99354e51056157c05c44b9118b6a6/operator/v1/types_ingress.go#L200) CR (defined in `operator.openshift.io/v1`) with its own `tlsSecurityProfile` field. If not explicitly set, inherits the APIServer TLS config. This allows Ingress to support legacy external clients (e.g., using Intermediate or Old profiles) even when the cluster uses Modern internally.
+- **Routes:** Individual routes may specify TLS settings that differ from the cluster-wide default for specific application requirements.
+- **Gateway Controller:** Will initially honor the APIServer TLS profile. Overrides may be added later if needed.
+
+**APIs Referencing TLSSecurityProfile:**
+
+Changes to `configv1.TLSSecurityProfile` validation (e.g., TLS 1.3 cipher restrictions) will affect APIs that reference this type. Known usages include:
+
+*In-tree (openshift/api):*
+- [`KubeletConfig.spec.tlsSecurityProfile`](https://github.com/openshift/api/blob/dadbf81f35e99354e51056157c05c44b9118b6a6/machineconfiguration/v1/types.go#L762) (`machineconfiguration.openshift.io/v1`)
+- [`IngressController.spec.tlsSecurityProfile`](https://github.com/openshift/api/blob/dadbf81f35e99354e51056157c05c44b9118b6a6/operator/v1/types_ingress.go#L200) (`operator.openshift.io/v1`)
+
+*Out-of-tree (will pick up validation changes when bumping openshift/api dependency):*
+- [`openshift/oc`](https://github.com/openshift/oc/blob/8b0a043216f7ae608606afb5bdb0ce451561021e/pkg/cli/admin/rebootmachineconfigpool/types.go#L396)
+- [`openshift/cluster-logging-operator`](https://github.com/openshift/cluster-logging-operator/blob/754ef3e6d0c48470afa470092c709dc5ad094702/api/observability/v1/output_types.go#L206) - `OutputSpec.TLS.TLSSecurityProfile`
+- [`openshift/lightspeed-operator`](https://github.com/openshift/lightspeed-operator/blob/122c7a163aa662c04e1cbc8272cc063ec8a4006e/api/v1alpha1/olsconfig_types.go#L205) - `OLSConfig.spec.ols.deployment.api.tlsSecurityProfile`
+- [`openshift/microshift`](https://github.com/openshift/microshift/blob/bda126f67a2cdf076f2b608ee9c9c9dec9b2dda2/pkg/config/ingress.go#L140-L151) - Ingress plumbing that likely needs to change to the new Ingress-specific type
+- [`openshift/hypershift`](https://github.com/openshift/hypershift) - Hosted APIServer configuration; ratcheting validation should be propagated
+
+**Override Precedence:**
+1. Component-specific CR configuration (e.g., `IngressController.spec.tlsSecurityProfile`) takes highest precedence when explicitly set
+2. If no component-specific override is set, the cluster-wide `apiserver.config.openshift.io/cluster` configuration applies
+
+**Documentation Requirements:**
+
+All override mechanisms must be explicitly documented in user-facing documentation. This includes:
+- Clear explanation of how each override mechanism works (Kubelet, Ingress Controller, Routes, Gateway Controller)
+- The inheritance behavior when overrides are not set
+- Examples of common override scenarios (e.g., using a less restrictive profile for Ingress to support legacy clients)
+- Any limitations or caveats specific to each component's override capability
+
+**Layered Products:** Layered products are expected to inherit the cluster default. Products unable to support the default (e.g., due to version incompatibility) must document their deviation and provide a justification. Any override configurations offered by layered products must be clearly documented, including the rationale for why overrides are necessary. For non-metrics or non-webhook product servers, the expectation is to fall back to the APIServer's TLS configuration; offering specific override configuration is a product team decision.
+
+### Workflow Description
+
+**cluster administrator** is a human user responsible for configuring cluster-wide TLS security settings.
+
+**component operator** is an automated system that consumes the cluster-wide TLS configuration and applies it to managed components.
+
+1. The cluster administrator updates the `apiserver.config.openshift.io/v1` resource specifying the desired TLS security profile and adherence mode.
+
+2. Validation checks the configuration. If cipher suites are specified with `minTLSVersion: VersionTLS13`, the configuration is rejected with a descriptive error.
+
+3. Upon successful validation, the configuration is stored in the cluster.
+
+4. Component operators watch the APIServer configuration and update their respective component configurations. This applies to **all TLS servers in the cluster**—any component implementing TLS should honor this API.
+
+   - **CVO-managed operators:** Cluster operators read the configuration and configure their operands accordingly.
+   - **OLM-managed operators:** Operators are expected to read the `apiserver.config.openshift.io/cluster` resource themselves for configuration. OLM does not inject or proxy this configuration.
+
+5. Each component applies the new TLS settings. Components unable to comply should report their status (mechanism to be standardized for GA; see Graduation Criteria).
+
+#### Ingress Override Workflow
+
+1. The cluster administrator configures a cluster-wide profile (e.g., Modern) in the APIServer configuration.
+
+2. For applications requiring legacy client support, the administrator configures an IngressController-specific `tlsSecurityProfile` (e.g., Intermediate or Old).
+
+3. The Ingress Controller uses its specific profile for external client connections while internal cluster communication continues to use the cluster-wide profile.
+
+#### Passthrough vs. Re-encrypt Scenarios
+
+**Re-encrypt:** In re-encrypt scenarios, the Ingress controller (acting as a Man-in-the-Middle) must honor the cluster-wide profile for the backend connection. The frontend connection uses the IngressController-specific profile if configured.
+
+**Passthrough:** In passthrough scenarios, the backend component is responsible for honoring the cluster-wide profile as the Ingress controller does not terminate TLS.
+
+### API Extensions
+
+This enhancement extends the existing `apiserver.config.openshift.io/v1` resource with a new `tlsAdherence` field as a sibling to the existing `tlsSecurityProfile`.
+
+**Type Definitions:**
+
+```go
+// TLSAdherencePolicy defines which components adhere to the TLS security profile.
+// Implementors should use the ShouldHonorClusterTLSProfile helper function from library-go
+// rather than checking these values directly.
+// +kubebuilder:validation:Enum=LegacyAdheringComponentsOnly;StrictAllComponents
+type TLSAdherencePolicy string
+
+// In APIServerSpec:
+// tlsAdherence controls which components honor the configured TLS security profile.
+// +optional
+TLSAdherence TLSAdherencePolicy `json:"tlsAdherence,omitempty"`
+```
+
+**Field Behavior:**
+
+- **Optional:** The `tlsAdherence` field is optional (`+optional`, `omitempty`). This is required for upgrade compatibility—existing clusters upgrading to a version with this field will not have it set.
+- **Omission Semantics:** When the field is omitted (empty string `""`), components treat it the same as `LegacyAdheringComponentsOnly`. This "no opinion" approach preserves existing behavior on upgrade.
+
+**Example Configuration:**
+
+```yaml
+apiVersion: config.openshift.io/v1
+kind: APIServer
+metadata:
+  name: cluster
+spec:
+  tlsSecurityProfile:
+    type: Modern  # One of: Old, Intermediate, Modern, Custom
+    # If type is Custom:
+    custom:
+      ciphers:
+        - ECDHE-RSA-AES128-GCM-SHA256
+        - ECDHE-RSA-AES256-GCM-SHA384
+      minTLSVersion: VersionTLS12  # Custom ciphers only valid with TLS 1.2
+  # New field introduced by this enhancement (sibling to tlsSecurityProfile)
+  # Valid values: LegacyAdheringComponentsOnly, StrictAllComponents
+  # When omitted or empty, defaults to LegacyAdheringComponentsOnly behavior
+  tlsAdherence: StrictAllComponents
+```
+
+**Note:** The APIServer config currently lacks a status field. Future work may add a status field for components to report observed configuration and flag non-compliance.
+
+#### TLS 1.3 Example
+
+When using TLS 1.3, cipher configuration is not applicable:
+
+```yaml
+apiVersion: config.openshift.io/v1
+kind: APIServer
+metadata:
+  name: cluster
+spec:
+  tlsSecurityProfile:
+    type: Modern
+    # Modern profile sets minTLSVersion: VersionTLS13
+    # Cipher suites are automatically set by Go runtime:
+    # - TLS_AES_128_GCM_SHA256
+    # - TLS_AES_256_GCM_SHA384
+    # - TLS_CHACHA20_POLY1305_SHA256
+  tlsAdherence: StrictAllComponents
+```
+
+#### Custom Profile with TLS 1.2 Example
+
+Custom cipher configuration is only supported with TLS 1.2:
+
+```yaml
+apiVersion: config.openshift.io/v1
+kind: APIServer
+metadata:
+  name: cluster
+spec:
+  tlsSecurityProfile:
+    type: Custom
+    custom:
+      ciphers:
+        - ECDHE-RSA-AES128-GCM-SHA256
+        - ECDHE-RSA-AES256-GCM-SHA384
+        - ECDHE-ECDSA-AES128-GCM-SHA256
+        - ECDHE-ECDSA-AES256-GCM-SHA384
+      minTLSVersion: VersionTLS12
+  tlsAdherence: StrictAllComponents
+```
+
+#### Invalid Configuration (Rejected)
+
+The following configuration will be **rejected by validation**:
+
+```yaml
+apiVersion: config.openshift.io/v1
+kind: APIServer
+metadata:
+  name: cluster
+spec:
+  tlsSecurityProfile:
+    type: Custom
+    custom:
+      ciphers:
+        - TLS_AES_128_GCM_SHA256
+      minTLSVersion: VersionTLS13  # ERROR: Cannot specify ciphers with TLS 1.3
+  tlsAdherence: StrictAllComponents
+# Validation Error: Cipher suites cannot be configured when minTLSVersion is VersionTLS13.
+# TLS 1.3 cipher suites are hardcoded by the Go runtime.
+```
+
+**Note on Existing Validation:** The APIServer already validates that cipher suites cannot be configured with TLS 1.3 via an [admission plugin in openshift-kube-apiserver](https://github.com/openshift/kubernetes/blob/9d521311f5fb67dc43f49eeb728ee2c80976835a/openshift-kube-apiserver/admission/customresourcevalidation/apiserver/validate_apiserver.go#L214-L219). This enhancement will add CEL validation expressions to match this existing behavior. The CEL validation will use ratcheting to ensure that existing resources with this configuration are not immediately invalidated upon upgrade.
+
+The API modifies existing behavior by:
+- Establishing the APIServer configuration as the default source for TLS configuration that all core components will consume
+- Introducing the `tlsAdherence` field to control enforcement behavior
+- Adding validation to reject cipher suite configuration with TLS 1.3
+- Documenting expected component behavior regarding TLS configuration inheritance
+
+### Feature Gate
+
+The `tlsAdherence` field will be introduced behind a feature gate:
+
+- **Feature Gate Name:** `TLSAdherence`
+- **Initial State:** Tech Preview
+- **Promotion Path:** Promote to GA quickly once core components are confirmed to honor the field
+
+### Related Work
+
+**TLS Curves:** A separate enhancement (led by Davide Salerno) adds TLS curve configuration to the existing TLS security profile. This applies to all components, not just Ingress.
+
+**Ingress Cipher Suite Validation:** A divergent TLS security profile type is being created specifically for Ingress to handle cipher suite validation differences. This is necessary because:
+- The Ingress controller uses HAProxy (not Go's crypto/tls)
+- HAProxy does not have the same TLS 1.3 cipher restrictions as Go's crypto/tls
+- The separated type allows Ingress-specific cipher validation without affecting the APIServer's restrictive TLS 1.3 cipher validation
+
+### Topology Considerations
+
+#### Hypershift / Hosted Control Planes
+
+For Hypershift deployments, components running in the management cluster must honor the management cluster's TLS settings, not the hosted cluster's settings. Managed cluster admins should not control TLS for components in the provider's domain.
+
+- **HCP workloads** (both HCP-aware and non-HCP-aware) obtain TLS configuration from the management cluster KAS. HyperShift may need to preconfigure RBAC and NetworkPolicy for this access.
+- **Hosted cluster KAS endpoint:** The `APIServer` config on `HostedCluster` spec controls how the hosted cluster KAS is exposed.
+- **Management cluster exposed endpoints** (ignition-server, oauth-server, konnectivity) use management cluster TLS settings.
+
+#### Standalone Clusters
+
+This is the primary target for this enhancement. Standalone clusters will fully benefit from the unified TLS configuration approach.
+
+#### Single-node Deployments or MicroShift
+
+**Single-node OpenShift (SNO):** The enhancement applies fully. Resource consumption impact is minimal as the APIServer configuration is an existing lightweight resource watched by existing operators.
+
+**MicroShift:** **TBD**
+
+#### OpenShift Kubernetes Engine
+
+This enhancement applies to OpenShift Kubernetes Engine (OKE) clusters. The TLS configuration mechanism works identically to standard OpenShift Container Platform clusters.
+
+### Implementation Details/Notes/Constraints
+
+#### Go crypto/tls Limitations
+
+Components using Go's `crypto/tls` library have specific limitations:
+
+**TLS 1.3 Cipher Suite Configuration:** Go's `crypto/tls` does not allow cipher suite configuration for TLS 1.3 ([golang/go#29349](https://github.com/golang/go/issues/29349)). When TLS 1.3 is configured, the following ciphers are used automatically:
+- `TLS_AES_128_GCM_SHA256`
+- `TLS_AES_256_GCM_SHA384`
+- `TLS_CHACHA20_POLY1305_SHA256`
+
+### Risks and Mitigations
+
+**Risk:** Component teams may not adopt the unified approach in the required timeframe.
+**Mitigation:** Establish clear adoption deadlines, provide implementation guidance, and require justification for any component that cannot adopt the new approach. The `LegacyAdheringComponentsOnly` adherence mode provides a migration path.
+
+**Risk:** Breaking existing configurations during migration.
+**Mitigation:** The `tlsAdherence: LegacyAdheringComponentsOnly` mode (default) maintains backward compatibility. Existing component-specific configurations will continue to work. Clear migration documentation will be provided.
+
+**Risk:** Components may have bugs where they don't honor the TLS configuration.
+**Mitigation:** When `tlsAdherence: StrictAllComponents` is set, non-compliance is treated as a bug requiring fixes and backporting. CI tests will probe TLS servers to verify compliance.
+
+### Drawbacks
+
+**Complexity:** Extending the existing APIServer API with new semantics adds complexity. However, this is offset by avoiding the introduction of yet another Custom Resource.
+
+**Migration Effort:** Existing clusters will need to consciously adopt `StrictAllComponents` mode for full enforcement. This creates a transition period where both behaviors coexist.
+
+## Alternatives (Not Implemented)
+
+**Alternative 1: Create a New ClusterTLSProfile CRD**
+Create a dedicated new Custom Resource for cluster-wide TLS configuration. This was rejected because:
+- Introduces yet another configuration resource for administrators to manage
+- The existing APIServer configuration already has TLS profile support
+- Better to enhance existing APIs than proliferate new ones
+
+## Open Questions [optional]
+
+1. ~~How should the API handle components that report they cannot support the configured profile (e.g., older operator versions)?~~ **Resolved:** Non-compliance is treated as a bug against the component, which should be fixed and backported.
+
+2. ~~Should a status field be added to the APIServer config for components to report compliance?~~ **Resolved:** No. Scalability concerns exist with centralizing compliance reporting in the APIServer status (especially with layered products). Components should use their own status conditions to report issues. Future tooling (ACS, network observability) may provide cluster-wide compliance visibility.
+
+3. ~~**Migration strategy for `tlsAdherence` field:** If we decide to eventually enforce `StrictAllComponents` as the default, which migration approach should we use?~~
+   - **Option A (leaning towards):** Use omission to mean "no opinion" with `LegacyAdheringComponentsOnly` behavior. Eventually require setting `StrictAllComponents` explicitly before upgrade.
+   - **Option B:** Use omission to mean "no opinion" and require admins to explicitly opt-in to a supported mode before they can upgrade.
+   - **Option C:** Have a controller set the field to the default behavior if it is omitted on upgrade.
+   
+   **Resolved** We will use option A:Use omission to mean "no opinion" with `LegacyAdheringComponentsOnly` behavior. Eventually require setting `StrictAllComponents` explicitly before upgrade. 
+
+## Graduation Criteria
+
+### Dev Preview -> Tech Preview
+
+- `TLSAdherence` feature gate implemented
+- Ability to configure TLS profile and `tlsAdherence` in APIServer resource
+- Validation rejects cipher suites when `minTLSVersion` is TLS 1.3
+- At least one core component (e.g., kube-apiserver) respects the cluster-wide profile
+- Documentation of TLS 1.3 hardcoded cipher behavior
+- End user documentation available
+
+### Tech Preview -> GA
+
+- **Explicit list of components confirmed to honor the `tlsAdherence` field** (list TBD before GA)
+- All core components respect the cluster-wide profile
+- CI tests verify TLS server compliance
+- Upgrade/downgrade testing complete
+- Performance testing complete
+- **Standard mechanism for components to report TLS configuration status** - Define guidance for how components should report inability to comply with TLS settings (e.g., using `Degraded` condition with appropriate message/reason fields)
+- User-facing documentation in openshift-docs, including:
+  - Complete documentation of all override mechanisms (Kubelet, Ingress Controller, Routes, Gateway Controller)
+  - Clear explanation of inheritance behavior and override precedence
+  - Examples of common override scenarios
+
+### Removing a deprecated feature
+
+Not applicable for initial implementation.
+
+## Test Plan
+
+**Unit Tests:**
+- Validation correctly rejects cipher suites with TLS 1.3
+- Validation accepts valid configurations (ciphers with TLS 1.2, no ciphers with TLS 1.3)
+- Profile expansion (predefined profiles to actual TLS settings)
+- `tlsAdherence` field correctly parsed and applied
+- Empty/unset `tlsAdherence` values treated as `LegacyAdheringComponentsOnly`
+- Unknown `tlsAdherence` enum values treated as `StrictAllComponents`
+- `ShouldHonorClusterTLSProfile` helper function correctly handles all enum values including empty
+
+**Integration Tests:**
+- Component operators correctly watch and respond to APIServer TLS configuration changes
+- Components apply the correct TLS settings based on the profile
+- Ingress override works correctly alongside cluster-wide settings
+- `tlsAdherence` mode correctly controls enforcement behavior
+
+**E2E Tests:**
+- Create cluster with each predefined profile and verify TLS settings with tls-scanner
+- Change profile and verify components update correctly
+- Verify validation rejects invalid TLS 1.3 + cipher configurations
+- Test passthrough and re-encrypt scenarios with different profiles
+- CI tests probe TLS servers to verify they honor the configured profile (potentially leveraging existing ports-open-registry test patterns)
+
+## Upgrade / Downgrade Strategy
+
+**Upgrade:**
+- Existing clusters upgrading will default to `tlsAdherence: LegacyAdheringComponentsOnly` for backward compatibility
+- Components will continue to use their existing configuration sources
+- Administrators can opt-in to strict enforcement by setting `tlsAdherence: StrictAllComponents`
+- Component-specific configurations (like IngressController, KubeletConfig) continue to use their own TLS profile settings
+
+**Downgrade:**
+- If downgrading to a version without `tlsAdherence` support, the field will be ignored
+- Components will revert to their previous behavior
+- No special handling required as the existing `tlsSecurityProfile` field is preserved
+
+## Version Skew Strategy
+
+During upgrades, there will be a period where some components support the enhanced configuration and others do not:
+
+- Components that support the enhanced configuration will respect `tlsAdherence` mode
+- Components that don't yet support enhanced configuration will continue using their existing behavior
+- Operators should use the `ShouldHonorClusterTLSProfile` helper function from library-go to determine whether to honor the cluster-wide TLS configuration
+
+
+## Operational Aspects of API Extensions
+
+**Impact on Existing SLIs:**
+- Minimal impact as APIServer configuration changes are infrequent (administrative action)
+- No impact on pod scheduling or workload operations
+
+**Escalation Teams:**
+- OpenShift Security team for TLS configuration issues
+- Respective component teams for component-specific application issues
+
+## Support Procedures
+
+### Detecting Configuration Issues
+
+**Symptoms:**
+- Validation errors when attempting to set cipher suites with TLS 1.3
+- Component operator conditions indicate TLS configuration problems
+- TLS handshake failures in component logs
+
+### Troubleshooting Steps
+
+1. Check APIServer TLS configuration:
+```bash
+oc get apiserver cluster -o yaml
+```
+
+2. Check the configured `tlsAdherence` mode:
+```bash
+oc get apiserver cluster -o jsonpath='{.spec.tlsAdherence}'
+```
+
+3. Verify no cipher suites are set with TLS 1.3:
+```bash
+oc get apiserver cluster -o jsonpath='{.spec.tlsSecurityProfile}'
+```
+
+4. Review component operator logs for TLS-related errors
+
+### Recovery Procedures
+
+**Validation Error (cipher suites with TLS 1.3):**
+- Remove the cipher suite configuration, or
+- Change `minTLSVersion` to `VersionTLS12` if custom ciphers are required
+
+**Component Not Applying Configuration:**
+- Check component operator logs
+- Restart the component operator if necessary
+- Verify the component supports the configured profile
+- If `tlsAdherence: StrictAllComponents` is set and component is not compliant, file a bug
+
+## Infrastructure Needed [optional]
+
+No new infrastructure required. The feature will be implemented within existing OpenShift operator patterns using the existing APIServer configuration resource.
