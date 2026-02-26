@@ -475,9 +475,6 @@ During upgrades, there will be a period where some components support the enhanc
 - Component operator conditions indicate TLS configuration problems
 - TLS handshake failures in component logs
 
-**Metrics and Alerts:**
-- Alert: `ClusterTLSConfigurationNotApplied` fires when components haven't applied config for > 15 minutes
-
 ### Troubleshooting Steps
 
 1. Check APIServer TLS configuration:
