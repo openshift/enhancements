@@ -292,7 +292,7 @@ spec:
 # TLS 1.3 cipher suites are hardcoded by the Go runtime.
 ```
 
-**Note on Existing Validation:** The APIServer already validates that cipher suites cannot be configured with TLS 1.3 via an [admission plugin in openshift-kube-apiserver](https://github.com/openshift/kubernetes/blob/9d521311f5fb67dc43f49eeb728ee2c80976835a/openshift-kube-apiserver/admission/customresourcevalidation/apiserver/validate_apiserver.go#L214-L219). This enhancement will add CEL validation expressions to match this existing behavior, and as a follow-up, remove the admission plugin validation. The CEL validation will use ratcheting to ensure that existing resources with this configuration are not immediately invalidated upon upgrade.
+**Note on Existing Validation:** The APIServer already validates that cipher suites cannot be configured with TLS 1.3 via an [admission plugin in openshift-kube-apiserver](https://github.com/openshift/kubernetes/blob/9d521311f5fb67dc43f49eeb728ee2c80976835a/openshift-kube-apiserver/admission/customresourcevalidation/apiserver/validate_apiserver.go#L214-L219). This enhancement will add CEL validation expressions to match this existing behavior. The CEL validation will use ratcheting to ensure that existing resources with this configuration are not immediately invalidated upon upgrade.
 
 The API modifies existing behavior by:
 - Establishing the APIServer configuration as the default source for TLS configuration that all core components will consume
