@@ -1,5 +1,5 @@
 ---
-title: control-plane-version-status
+title: hypershift-control-plane-version-status
 authors:
   - "@enxebre"
 reviewers:
@@ -11,7 +11,7 @@ reviewers:
 approvers:
   - "@csrwng"
 api-approvers:
-  - "joelspeed"
+  - "@joelspeed"
 creation-date: 2026-02-27
 last-updated: 2026-02-27
 tracking-link:
@@ -36,12 +36,34 @@ This was initially captured via https://issues.redhat.com/browse/OCPSTRAT-1751.
 
 - **Management-side components**: Control plane pods running in the HCP namespace on the management cluster (kube-apiserver, etcd, kube-controller-manager, kube-scheduler, openshift-apiserver, etc.). These are represented by `ControlPlaneComponent` custom resources.
 - **Data-plane components**: Operators and workloads running on the guest cluster worker nodes (e.g. OVN pods, ingress controller, image registry). Their rollout depends on NodePool compute availability.
-- **CVO (ClusterVersion Operator)**: Reports the combined version status of both management-side and data-plane components. This is what `HostedClusterStatus.Version` currently reflects.
+- **CVO (ClusterVersion Operator)**: Reports the version status of release components running in the data plane. This is what `HostedClusterStatus.Version` currently reflects.
 - **CPO (Control Plane Operator)**: The operator running on the management cluster that reconciles the HostedControlPlane and manages control plane component deployments in the HCP namespace.
 - **HCP**: HostedControlPlane custom resource.
 - **HC**: HostedCluster custom resource.
 
 ## Motivation
+
+### User Stories
+
+- As a **service provider (ROSA/ARO)**, I want to know when all management-side control plane components have reached a target version so that I can confirm a CVE patch has been applied without waiting for data-plane rollout.
+- As a **service provider**, I want to track control plane upgrade completion independently from data-plane rollout so that I can mark y-stream end-of-support or z-stream forced upgrades as done in Cluster Service.
+- As a **service provider**, I want to upgrade a HostedCluster control plane even when no NodePools exist or all are scaled to zero, and get a clear completion signal.
+- As a **cluster administrator**, I want to see which control plane versions are currently active (including during failed or multi-step upgrades) so that I can understand the allowed NodePool version skew.
+- As an **SRE**, I want fleet-wide visibility into which clusters have completed their management-side upgrade and which are stalled, so that I can prioritize intervention.
+
+### Goals
+
+- Provide a dedicated API field (`controlPlaneVersion`) on `HostedClusterStatus` and `HostedControlPlaneStatus` that reports management-side component version state independently from CVO.
+- Include version history with timestamps and completion state, enabling consumers to determine all currently active management-side versions.
+- Enable NodePool version skew computation by exposing the full set of in-flight and completed control plane versions.
+- Reuse existing clusterVersion semantics and types when possible for consistency with the CVO-based `version` field.
+
+### Non-Goals
+
+- Ensure the control plane version can reach `Completed` even when there are no NodePools or no data-plane compute available. This is orthogonal and subject to each component behaviour. This proposal focuses on signalling that state.
+- Replacing or modifying the existing CVO-based `version` field on `HostedClusterStatus`. The two fields serve different consumers and must coexist.
+- Tracking data-plane component versions. This field covers only management-side components represented by `ControlPlaneComponent` resources.
+- Providing available or conditional update recommendations for the control plane. Update recommendations are already surfaced through the existing `version` field via CVO.
 
 ### Current State
 
@@ -66,6 +88,46 @@ A `ClusterVersionStatus`-style field with update history addresses all of these 
 
 ## Proposal
 
+### Workflow Description
+
+This feature is transparent to users — no manual workflow is required. The `controlPlaneVersion` field is automatically populated and updated by the HostedControlPlane controller (CPO) as management-side components roll out.
+
+**Service provider (ROSA/ARO)** consumes the field to make upgrade orchestration decisions:
+
+1. The service provider initiates a HostedCluster upgrade by updating the release image in the HostedCluster spec.
+2. The HyperShift operator propagates the desired release to the HostedControlPlane spec.
+3. The CPO begins rolling out management-side components (deployments in the HCP namespace).
+4. On each reconciliation, the CPO updates `controlPlaneVersion.history[0]` with the current rollout state (`Partial` while in progress).
+5. When all `ControlPlaneComponent` resources report `RolloutComplete=True` at the desired version, the CPO sets `history[0].State = Completed`.
+6. The HyperShift operator copies `controlPlaneVersion` from HCP status to HC status.
+7. The service provider observes `controlPlaneVersion.history[0].State == Completed` and proceeds with post-upgrade actions (e.g. marking the upgrade as done, confirming CVE patches applied).
+
+**Cluster administrator** can inspect `controlPlaneVersion` on the HostedCluster to understand which management-side versions are active, independently from the CVO-reported `version` field.
+
+### API Extensions
+
+This enhancement modifies the `HostedClusterStatus` and `HostedControlPlaneStatus` CRDs (owned by the HyperShift team) by adding a new `controlPlaneVersion` field. No new CRDs, webhooks, aggregated API servers, or finalizers are introduced. The new field is purely informational (status-only) and does not affect the behavior of existing resources.
+
+See the [API Changes](#api-changes) section below for the detailed type definitions.
+
+### Topology Considerations
+
+#### Hypershift / Hosted Control Planes
+
+This enhancement is specific to HyperShift / Hosted Control Planes. The `controlPlaneVersion` field is added to `HostedClusterStatus` and `HostedControlPlaneStatus`, which are HyperShift-specific resources. The reconciliation logic runs in the CPO on the management cluster and inspects `ControlPlaneComponent` resources in the HCP namespace.
+
+#### Standalone Clusters
+
+This change is not relevant for standalone clusters. Standalone clusters use the CVO-reported `ClusterVersion` for version tracking, and management-side / data-plane components are co-located on the same cluster. There is no split between management and data-plane version state.
+
+#### Single-node Deployments or MicroShift
+
+This proposal does not affect single-node deployments or MicroShift. It only applies to HyperShift-managed HostedClusters.
+
+#### OpenShift Kubernetes Engine
+
+This proposal does not depend on features excluded from OKE. The `controlPlaneVersion` field is part of the HyperShift API surface and is relevant wherever HyperShift is used. OKE standalone clusters are not affected.
+
 ### API Changes
 
 Add a new field `controlPlaneVersion` to both `HostedClusterStatus` and `HostedControlPlaneStatus`, using a new `ControlPlaneVersionStatus` type. This type is modeled after the existing `ClusterVersionStatus` but omits the `AvailableUpdates` and `ConditionalUpdates` fields, which are not exercised for management-side version tracking for now (available updates are already surfaced through the existing `version` field via CVO):
@@ -75,7 +137,7 @@ type HostedClusterStatus struct {
     // ... existing fields ...
 
     // version is the status of the release version applied to the HostedCluster.
-    // This reflects the combined state of both management-side and data-plane components as reported by CVO.
+    // This reflects the state of components running in the data plane as reported by CVO.
     // +optional
     Version *ClusterVersionStatus `json:"version,omitempty"`
 
@@ -111,7 +173,7 @@ type ControlPlaneVersionStatus struct {
     // first in the list. Entries have state Completed when all ControlPlaneComponent resources report the target
     // version with RolloutComplete=True. Entries have state Partial when the rollout is in progress or has failed.
     // +optional
-    // +kubebuilder:validation:MaxItems=50
+    // +kubebuilder:validation:MaxItems=100
     History []configv1.UpdateHistory `json:"history,omitempty"`
 
     // observedGeneration reports which generation of the HCP spec is being synced.
@@ -134,7 +196,7 @@ type UpdateHistory struct {
 
 ### Semantics
 
-**`ControlPlaneVersion.Desired`**: Set to the release image and version from `HostedControlPlane.Spec.ReleaseImage`. This is the version the control plane is reconciling towards.
+**`ControlPlaneVersion.Desired`**: Set to the release image and version from `HostedControlPlane.Spec.ReleaseImage` or`HostedControlPlane.Spec.ControlPlaneReleaseImage` if set. This is the version the control plane is reconciling towards.
 
 **`ControlPlaneVersion.History`**: Ordered list (newest first) of version transitions for management-side components:
 
@@ -148,13 +210,24 @@ type UpdateHistory struct {
 
 **Transition rules**:
 
-1. When `HCP.Spec.ReleaseImage` changes, a new `Partial` history entry is prepended. The previous entry's `CompletionTime` is set to the new entry's `StartedTime` (regardless of whether the previous entry completed).
+1. When the desired release changes (detected by comparing both version string and image against `history[0]`), a new `Partial` history entry is prepended. The previous entry's `CompletionTime` is set to the new entry's `StartedTime` (regardless of whether the previous entry completed). This ensures that image-only changes (e.g. release image rebuilds with the same semver) are not missed, consistent with CVO's `mergeEqualVersions()` semantics.
 2. On each reconciliation, the controller checks all `ControlPlaneComponent` resources. If all report the desired version with `RolloutComplete=True`, the current (first) history entry transitions from `Partial` to `Completed` and `CompletionTime` is set.
-3. History is capped at 50 entries. Oldest entries are pruned when the cap is exceeded.
+3. History is capped at 100 entries. Oldest entries are pruned when the cap is exceeded.
 
 ### Reconciliation Logic
 
-The reconciliation happens in the **HostedControlPlane controller** (`control-plane-operator`), replacing the existing `reconcileControlPlaneUpToDateCondition` function:
+The reconciliation happens in the **HostedControlPlane controller** (`control-plane-operator`):
+
+The desired release image is inferred via the existing function which considers API input for both Spec.ControlPlaneReleaseImage and Spec.ControlPlaneReleaseImage
+
+```
+func HCPControlPlaneReleaseImage(hcp *hyperv1.HostedControlPlane) string {
+	if hcp.Spec.ControlPlaneReleaseImage != nil {
+		return *hcp.Spec.ControlPlaneReleaseImage
+	}
+	return hcp.Spec.ReleaseImage
+}
+```
 
 ```
 reconcileControlPlaneVersion(ctx, hcp, releaseImage):
@@ -162,7 +235,7 @@ reconcileControlPlaneVersion(ctx, hcp, releaseImage):
   2. If listing fails, set observedGeneration and return error.
   3. Determine desired version and image from releaseImage.
   4. Initialize controlPlaneVersion if nil.
-  5. If desired version differs from current history[0].Version:
+  5. If desired release differs from current history[0] (comparing both version AND image):
      a. Close out history[0] by setting CompletionTime = now.
      b. Prepend new entry: {State: Partial, Version: desired, Image: image,
         StartedTime: now, CompletionTime: nil}.
@@ -172,9 +245,11 @@ reconcileControlPlaneVersion(ctx, hcp, releaseImage):
   7. If ALL components match desired version AND have RolloutComplete=True:
      a. Set history[0].State = Completed.
      b. Set history[0].CompletionTime = now (if not already set).
-  8. Prune history to 50 entries.
+  8. Prune history to 100 entries.
   9. Set observedGeneration = hcp.Generation.
 ```
+
+Step 5 compares **both** the version string and the image to determine whether a new history entry should be prepended. This follows the same approach used by CVO in its [`mergeEqualVersions()`](https://github.com/openshift/cluster-version-operator/blob/master/pkg/cvo/status.go) function, which guards against image-only changes (e.g. release image rebuilds with the same semver) being silently ignored. The CVO logic treats two releases as equal only when their image matches (and the version is either empty or also matches), or their version matches (and the image is either empty or also matches). If the image changes but the version string stays the same, CVO correctly treats it as a new update and prepends a new history entry. The CPO reconciliation should follow the same semantics.
 
 The **HostedCluster controller** (`hypershift-operator`) copies `controlPlaneVersion` from the HCP to the HC status, following the same pattern used for other HCP-to-HC status propagation (e.g. conditions, `version`).
 
@@ -277,11 +352,20 @@ In this scenario, a consumer can determine:
 - Expose `controlPlaneVersion.history[0].version` and `controlPlaneVersion.history[0].state` as Prometheus metrics for fleet-wide version distribution dashboards.
 - Alert on clusters where `history[0].State == Partial` for longer than a threshold.
 
+### Implementation Details/Notes/Constraints
+
+The implementation is contained within the existing CPO reconciliation loop. Key constraints:
+
+- The `ControlPlaneComponent` CRD must expose `Status.Version` and a `RolloutComplete` condition. These fields already exist from previous work.
+- History comparison uses both version string and image to detect changes, consistent with CVO's `mergeEqualVersions()` semantics.
+- History is capped at 100 entries to bound status size.
+- The HCP-to-HC status propagation follows the same pattern as existing fields (conditions, version).
+
 ### OVN Limitation
 
 Until [OCPSTRAT-1454](https://issues.redhat.com/browse/OCPSTRAT-1454) is resolved, OVN components running on the data plane might block upgrade of OVN components running management side. This holds the controlPlaneVersion to complete if for any reason OVN data plane can not rollout.
 
-## Risks and Mitigations
+### Risks and Mitigations
 
 **Risk**: The new field adds API surface that consumers may depend on for upgrade orchestration decisions. If the reconciliation logic has bugs (e.g. prematurely marking `Completed`), it could cause incorrect NodePool version skew decisions.
 
@@ -291,6 +375,10 @@ Until [OCPSTRAT-1454](https://issues.redhat.com/browse/OCPSTRAT-1454) is resolve
 
 **Mitigation**: API field documentation clearly distinguishes the two fields. The naming convention (`controlPlaneVersion` vs. `version`) makes the scope difference explicit.
 
+### Drawbacks
+
+The main drawback is adding another version-related status field to an already complex API surface. Consumers must understand the distinction between `version` (CVO-reported, data-plane inclusive) and `controlPlaneVersion` (management-side only). However, this complexity is inherent to the HyperShift architecture where management and data-plane components are decoupled, and the benefit of independent version tracking outweighs the cost of an additional field.
+
 ## Test Plan
 
 - **Unit tests**: Test the `reconcileControlPlaneVersion` function with:
@@ -298,7 +386,7 @@ Until [OCPSTRAT-1454](https://issues.redhat.com/browse/OCPSTRAT-1454) is resolve
   - Version mismatch on one or more components -> Partial.
   - No ControlPlaneComponent resources found -> nil/empty history.
   - Version change (new desired) -> new Partial entry prepended, previous entry closed.
-  - History pruning at 50 entries.
+  - History pruning at 100 entries.
   - Failed upgrade followed by new upgrade -> correct history ordering.
 - **E2E tests**:
   - Verify `controlPlaneVersion` is populated on a steady-state cluster.
@@ -322,11 +410,38 @@ Until [OCPSTRAT-1454](https://issues.redhat.com/browse/OCPSTRAT-1454) is resolve
 - Fleet-scale testing with many HostedClusters.
 - OCM/ARO RP integration validated (consuming `controlPlaneVersion` for upgrade decisions).
 
+### Removing a deprecated feature
+
+Not applicable. This enhancement adds a new field; no existing features are being deprecated or removed.
+
 ## Upgrade / Downgrade Strategy
 
 **Upgrade**: When a HostedCluster is upgraded to a version containing this feature, the controller initializes `controlPlaneVersion` with a single history entry reflecting the current state of `ControlPlaneComponent` resources. No manual action is required.
 
-## Alternatives
+## Version Skew Strategy
+
+The `controlPlaneVersion` field is a status-only addition with no behavioral impact on other components. During an upgrade of the CPO itself:
+
+- An older CPO that does not know about `controlPlaneVersion` will simply not populate the field. Consumers must tolerate a nil `controlPlaneVersion`.
+- A newer CPO will begin populating the field immediately. No coordination with other components is required.
+- The field reuses existing `configv1.UpdateHistory` and `configv1.Release` types, so there are no new type version skew concerns.
+
+## Operational Aspects of API Extensions
+
+This enhancement adds a new status field (`controlPlaneVersion`) to existing CRDs (`HostedCluster` and `HostedControlPlane`). It does not introduce new CRDs, webhooks, aggregated API servers, or finalizers.
+
+- **No impact on existing SLIs**: The field is populated during the existing CPO reconciliation loop. It adds a small amount of additional work (listing `ControlPlaneComponent` resources and comparing versions), which is negligible compared to the existing reconciliation.
+- **No new failure modes**: If the reconciliation logic fails to update `controlPlaneVersion`, the field will be stale or nil. This does not affect cluster health or existing functionality. Consumers should treat a missing field as "unknown."
+- **Monitoring**: The `controlPlaneVersion.history[0].state` and `controlPlaneVersion.history[0].version` can be exposed as Prometheus metrics for fleet dashboards and alerting.
+
+## Support Procedures
+
+- **Detecting issues**: If `controlPlaneVersion` is nil or stale on a HostedCluster that has been running for some time, check the CPO logs for errors related to `ControlPlaneComponent` listing or status updates. The CPO logs will contain entries related to `reconcileControlPlaneVersion`.
+- **Stale `Partial` state**: If `controlPlaneVersion.history[0].State` remains `Partial` for an extended period, inspect individual `ControlPlaneComponent` resources in the HCP namespace to determine which components have not reached the desired version or do not have `RolloutComplete=True`.
+- **Field not populated**: On older CPO versions that predate this feature, the field will be nil. This is expected and not an error.
+- **Disabling**: The field cannot be independently disabled. It is part of the CPO reconciliation. If the field is causing issues, the CPO itself would need to be investigated.
+
+## Alternatives (Not Implemented)
 
 ### Keep ControlPlaneUpToDate Condition Only
 
@@ -341,4 +456,5 @@ One could add conditions like `ControlPlaneUpToDate`, `ControlPlaneUpgradeInProg
 
 ### Extend the Existing version Field
 
-Modifying `HostedClusterStatus.Version` to reflect only management-side components would break existing consumers that rely on it to represent the CVO-reported combined state. The two concerns (management-only vs. combined) serve different users and must remain separate.
+Modifying `HostedClusterStatus.Version` to reflect only management-side components would break existing consumers that rely on it to represent the CVO-reported 
+ state. The two concerns (management-only vs. combined) serve different users and must remain separate.
