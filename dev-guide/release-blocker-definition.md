@@ -4,7 +4,7 @@ authors:
   - "@mffiedler"
   - "@dgoodwin"
 creation-date: 2026-01-20
-last-updated: 2026-01-20
+last-updated: 2026-01-23
 status: informational
 ---
 
@@ -12,17 +12,24 @@ status: informational
 
 ## The “Why” behind Blocker bugs
 
-Release blocker Approved is applied to bugs which fall below the minimum bar of quality we’re willing to release to customers and/or tolerate in our CI system.
+Release blocker `Approved` is applied to bugs which fall below the minimum bar of quality we’re willing to release to customers and/or tolerate in our CI system.
 
+## Determining if a Bug is an X.Y.0 Release Blocker
+
+* When the `Release Blocker` field in an OCPBUG is set to `Approved` (see the _Planning_ tab).
+
+### When to set Release Blocker to `Approved` in an X.Y.0 OCPBUG
+
+When preparing a new X.Y release shipping exciting features, we have the ability to delay the GA X.Y.0 until we are sufficiently comfortable with quality.
 There are effectively two categories of bugs where we use the Release Blocker flag:
 
-### 1. Component Readiness Regressions
+#### Component Readiness Regressions
 
 All component readiness regressions are treated as release blockers, the issue must be fixed or granted an exception via an [SBAR](https://docs.google.com/document/d/1-Lq4p7KhHRUFhkhpZ1ntDOcvDZgj9YVIBOmLSRlNkq0/edit?usp=sharing) approved by the OpenShift leadership team. Component Readiness attempts to be a forgiving system to smooth out the noise of CI for a complex product like OpenShift, but once an issue has crossed that threshold, it must be fixed. With the vast amount of tests, configurations and platforms we test against, clearing sufficiently unreliable issues out of the system is critical for those who monitor it to make sense of whether we're healthy or not. At the scale we operate, unresolved issues will pile up quickly effectively making it impossible for us to monitor health.
 
 The SBAR process is both a safety mechanism ensuring problems are understood and safe to ship, as well as a request for permission to leave a problem active in the CI system where others will have to deal with the signal it generates.
 
-### 2. Sufficiently Severe Product Bugs
+#### Sufficiently Severe Product Bugs
 
 Based on the criteria in the list below, some bugs are deemed too severe to release even in a .0. This implies that fixing the bug in the ".0" release is more important than meeting our internal and external (partner/customer) commitments for the release.   When considering whether a bug is a Blocker, teams should consider if we can ship it in an early z-stream release, and weigh it against the commitment we make when we set a release date.
 
@@ -30,12 +37,7 @@ The criteria below apply to .0/y-stream/pre-GA releases.   The Release Blocker f
 
 In general we would not require an SBAR to remove release blocker for a non-component readiness bug, it would just be a bug we've deemed safe to ship and thus not a Release Blocker.
 
-## Determining if a Bug is a Release Blocker
-
-* When the Release Blocker field in an OCPBUG is set to Approved. (See the Planning tab)
-
-
-## When to set Release Blocker to Approved in an OCPBUG
+#### Release Blocker Approved conditions for an X.Y.0 OCPBUG
 
 * **Most bugs for new features are NOT release blockers** if they do not regress functionality.  Exceptions would be bugs in release blocking features which meet the criteria below.
 
@@ -71,6 +73,33 @@ We know there will be edge cases.  When those come up:
   * Program Call  
   * Service Delivery Architecture Overview  
   * Stand Up
+
+### When to set Release Blocker to `Approved` in an X.Y.Z OCPBUG
+
+When preparing a new X.Y.Z patch release shipping bug fixes, our ability to delay the release is much more constrained.
+If a bug is so terrible that _no cluster_ could possibly benefit from the impacted nightlies, setting `Release Blocker` to `Approved` is appropriate.
+But if there are even small subsets of clusters that would not be exposed to the OCPBUG, or if there are steps a cluster-admin could take to mitigate exposure, we prefer releasing the patch release anyway.
+This avoids delaying access to other bugfixes in the the clusters that could survive with the OCPBUG being considered.
+
+In some cases, a hot fix is about to merge, or is percolating through nightlies, or is otherwise expected to show up very soon in the release pipeline.
+Setting `Release Blocker` to `Approved` in those cases is acceptable as a way to attract ART attention and ask them to wait for that fix.
+They may wait for the fix, or they may decide to build a release anyway, even without the fix, depending on capacity and how much time remains for final QE testing before the planned Errata-publication time.
+
+#### Mitigating exposure
+
+There are multiple options for protecting users when a release ships with a known issue.
+They include:
+
+* Known issues in the release notes, e.g. [known issues with 4.20][4.20-known-issues].
+* [Knowledgebase solutions][kcs].
+* [Insights rules][4.20-insights] for the subset of the fleet that enables remote-health reporting.
+* [Conditional update risk declarations][4.20-conditional-updates], see [the assessment process](/enhancements/update/update-blocker-lifecycle/README.md) and [the distribution tooling](/enhancements/update/targeted-update-edge-blocking.md).
+
+Both Insights rules and conditional update risk declarations can sometimes be scoped down to the exposed subset of the fleet, to reduce distracting the subset of the fleet that is not exposed.
+Both Insights rules and conditional update risk declarations are specific to updating into the risk, and neither provides pre-install warning for users consdering installing an exposed release.
+
+Both known issues, and Knowledgebase solutions are outside the cluster and tooling, and users would need to think to check before updating or installing, and then be successful enough in the check to discover the attempt to call out the issue.
+In the event of a failed install, context from the failure like error strings increases the odds that a search would successfully find a known issue or Knowledgebase solution.
 
 # FAQ
 
@@ -126,3 +155,7 @@ Release blocker can be removed if:
 2. An SBAR has been approved and the bug has a Target Version targetting a z-stream release.
 3. The issue is not from component readiness, and has been deemed safe to ship given the above criteria.
 
+[4.20-known-issues]: https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html/release_notes/ocp-4-20-release-notes#ocp-release-known-issues_release-notes
+[4.20-insights]: https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html/support/remote-health-monitoring-with-connected-clusters#using-insights-operator
+[4.20-conditional-updates]: https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html/updating_clusters/understanding-openshift-updates-1#update-evaluate-availability_how-updates-work
+[kcs]: https://access.redhat.com/kb/search?document_kinds=Solution&start=0
