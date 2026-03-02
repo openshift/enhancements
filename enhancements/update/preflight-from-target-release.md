@@ -152,13 +152,21 @@ We will add a new `mode` property to `spec.desiredUpdate` to mark preflight requ
     status:
       conditionalUpdateRisks:
       - name: "DualStackIncompatible"
-        message: "Cluster uses dual-stack networking configuration incompatible with 5.2.0."
+        message: "Preflight=5.2.0: Cluster uses dual-stack networking configuration incompatible with target version."
         conditions:
         - type: Applies
           status: True
           reason: "PreflightValidation"
-          message: "Risk identified during preflight check for 5.2.0."
+          message: "Risk identified during preflight check"
     ```
+
+    **Target version identification**: All preflight-generated risks use a structured message format that includes machine-readable target version information:
+
+    - **Format**: `"Preflight=X.Y.Z: <descriptive message>"`
+    - **Purpose**: Enables precise filtering of risks by target version during upgrade operations
+    - **Parsing**: The prefix before the first colon and space (`": "`) contains the target version in `Preflight=X.Y.Z` format
+    - **Benefits**: Supports accumulation of preflight results from multiple target versions while allowing version-specific upgrade blocking
+
     Preflight results included in ClusterVersion status will be automatically reported to Red Hat Insights as part of standard ClusterVersion telemetry, providing visibility for support and engineering teams without requiring separate reporting mechanisms.
 1. **Administrator Review**: Administrator reviews risks and can either:
    - Address configuration issues before updating.
@@ -178,10 +186,10 @@ We will add a new `mode` property to `spec.desiredUpdate` to mark preflight requ
    - Preflight CVO deployment is terminated (no longer needed)
    - Standard cluster upgrade workflows proceed
    - `ClusterVersion.status.history` tracks upgrade progress
-1. **Upgrade Completion and Cleanup**: When the upgrade completes successfully:
-   - CVO marks the upgrade as `Completed` in `ClusterVersion.status.history[0].state`
-   - **Automatic preflight cleanup**: As part of the upgrade completion logic, CVO removes all preflight results from `conditionalUpdateRisks`
-   - Cluster is now running the target version with no stale preflight data
+1. **Upgrade Initiation and Cleanup**: When the upgrade is accepted and starts:
+   - CVO begins the upgrade process by updating `ClusterVersion.status.history`
+   - **Immediate preflight cleanup**: As part of the upgrade initiation logic, CVO removes all preflight results from `conditionalUpdateRisks`
+   - Preflight data is no longer needed once the upgrade decision has been made
 
 **Complete workflow example**:
 ```bash
@@ -243,7 +251,21 @@ spec:
 
 This validation approach ensures preflight checks use the same version resolution and security policies as actual cluster updates.
 
-**Note on multiple preflight checks**: The current design supports one active preflight check at a time. To compare results across multiple target versions, administrators would need to run sequential preflight checks. Future enhancements could extend the `mode` field to support multiple concurrent checks (e.g., `mode: "Preflight-test1"` and `mode: "Preflight-test2"`), but this complexity is deferred from the initial Tech Preview implementation to focus on core functionality.
+**⚠️ Multiple Preflight Limitations**: Based on design review feedback, the initial implementation supports **one active preflight check at a time**.
+
+**Comparison workflow for multiple versions (e.g., 5.9 vs 6.0):**
+1. Run preflight for first target version: `oc adm upgrade --mode=preflight --to=5.9.0`
+2. Save/review results from `conditionalUpdateRisks`
+3. Run preflight for second target version: `oc adm upgrade --mode=preflight --to=6.0.0`
+4. Compare results from both preflight operations
+
+**Rationale for serial execution:**
+- **Simplicity**: Avoids resource contention and complex orchestration between multiple preflight CVOs
+- **Resource management**: Prevents multiple preflight deployments from competing for cluster resources
+- **Operational alignment**: Matches existing OpenShift channel-switching workflows for version comparison
+- **Error isolation**: Failures in one preflight check don't affect others
+
+Future enhancements could extend the `mode` field to support multiple concurrent checks (e.g., `mode: "Preflight-test1"`), but this complexity is deferred from the initial Tech Preview implementation.
 
 ### Topology Considerations
 
@@ -251,6 +273,12 @@ This validation approach ensures preflight checks use the same version resolutio
 
 HyperShift is out of scope for the initial Tech Preview release (OpenShift 4.22) to focus implementation efforts on standalone clusters first.
 This aligns with the strategic priority of supporting upcoming skip-level updates ([OCPSTRAT-2843](https://issues.redhat.com/browse/OCPSTRAT-2843)) which primarily target standalone cluster deployments.
+
+**⚠️ Critical HyperShift Considerations**: Based on feedback from HyperShift maintainers, this enhancement must address several compatibility concerns to avoid negatively impacting hosted control plane environments:
+
+- **Multi-authority upgrade management**: In hosted control planes, the CVO is not the sole authority for upgrades - the Control Plane Operator (CPO) also manages lifecycle of control plane components. The preflight design must account for this shared responsibility model.
+- **Managed service impact**: ARO, ROSA, and self-hosted multi-cluster deployments represent significant portions of the OpenShift ecosystem. Deferring HyperShift compatibility risks creating upgrade assessment gaps for these critical customer segments.
+- **Control plane isolation**: Hosted clusters have stricter resource and security isolation requirements that may conflict with the proposed preflight CVO deployment model.
 
 **Compatibility assessment**: The chosen design approach should be compatible with future HyperShift integration:
 
@@ -263,6 +291,7 @@ This aligns with the strategic priority of supporting upcoming skip-level update
 
 - **HostedCluster API extensions**: Adding preflight-related fields to HostedCluster or HostedControlPlane CRDs
 - **Control plane deployment**: Adapting preflight CVO deployment to hosted control plane constraints
+- **CPO coordination**: Ensuring preflight checks coordinate with Control Plane Operator upgrade management
 - **Result aggregation**: Ensuring preflight results surface appropriately in hosted cluster management workflows
 - **RBAC adaptation**: Aligning preflight permissions with HyperShift's security boundaries
 
@@ -296,6 +325,32 @@ This functionality will be implemented in component layers that are part of the 
 
 Cluster administrators can request preflight checks via [the new `mode` property](#clusterversion-spec-desiredupdate-mode).
 The `mode` property will also be wrapped in the existing `oc adm upgrade` command, so cluster administrators can use `oc adm upgrade --mode=preflight ...` to request preflight updates.
+
+#### Preflight result message format
+
+All preflight-generated `conditionalUpdateRisks` entries **MUST** use a structured message format that embeds target version information for machine parsing:
+
+**Specification**:
+- **Format**: `"Preflight=<major>.<minor>.<patch>: <descriptive message>"`
+- **Examples**:
+  - `"Preflight=5.2.0: Current CSI driver version 2.3.1 incompatible with target version. Minimum version 2.4.0 required."`
+  - `"Preflight=5.1.0: Dual-stack networking configuration will be deprecated in target version. Migration to single-stack recommended."`
+  - `"Preflight=5.3.0: Preflight check in progress. Results will be updated as checks complete."`
+
+**Parsing requirements**:
+- Target version extraction: Split message on first occurrence of `": "` and parse `Preflight=` prefix
+- Validation: Target version string must match semantic versioning format `X.Y.Z`
+- Error handling: Messages without valid Preflight prefix are ignored during upgrade filtering
+
+**CVO implementation requirements**:
+- **Generation**: When preflight CVO creates risk entries, embed target version in message field
+- **Filtering**: During upgrade operations, parse target version from message field and filter risks to match desired upgrade target
+- **Backwards compatibility**: Preserve existing risk processing for non-preflight generated risks (no Preflight prefix required)
+
+**Operator implementation requirements**:
+- Preflight check implementations in operators should generate risks with proper Preflight prefix
+- **Avoid version duplication**: Use generic terms like "target version" in descriptive text rather than repeating the specific version number
+- Standard format ensures consistent parsing across all operator-generated preflight results
 
 #### CLI Command Extensions
 
@@ -412,7 +467,7 @@ The preflight Deployment continues running until the administrator either:
 ```yaml
   conditionalUpdateRisks:  # include every risk in the conditional updates (moved up and renamed)
   - name: ConcerningThingA
-    message: Cluster uses dual-stack networking configuration incompatible with 5.2.0.
+    message: "Preflight=5.2.0: Cluster uses dual-stack networking configuration incompatible with target version."
     url: https://issues.redhat.com/browse/SDN-3996
     matchingRules:
     - type: Always
@@ -426,12 +481,23 @@ The preflight Deployment continues running until the administrator either:
 
 **Failed or incomplete preflight results:**
 
-When preflight checks fail or are still running, partial results are stored in `conditionalUpdateRisks` with special conditions indicating their incomplete status:
+When preflight checks fail or are still running, partial results are **always stored** in `conditionalUpdateRisks` to provide transparency about preflight status. Special risk entries with distinctive names indicate incomplete status, ensuring users understand the limitations of available data:
+
+**Storage approach for incomplete results:**
+- **Failed checks**: Create `PreflightIncomplete` risk entry with details about failure scope
+- **Partial successes**: Include successfully checked components while clearly marking incomplete state
+- **In-progress checks**: Create `PreflightInProgress` risk entry with progress indicators
+- **Component-specific failures**: Individual risks marked with failure reasons in their conditions
+
+All incomplete results remain in `conditionalUpdateRisks` until either:
+1. Preflight check completes successfully (replacing incomplete results with final results)
+2. Administrator clears preflight via `--clear-preflight` command
+3. CVO accepts a non-preflight upgrade (automatic cleanup when `Progressing=True` is set)
 
 ```yaml
   conditionalUpdateRisks:
   - name: PreflightIncomplete
-    message: Preflight check for 5.2.0 failed to complete. Partial results may not reflect all compatibility risks.
+    message: "Preflight=5.2.0: failed to complete. Partial results may not reflect all compatibility risks."
     url: https://docs.openshift.com/preflight-troubleshooting
     conditions:
     - status: True
@@ -440,7 +506,7 @@ When preflight checks fail or are still running, partial results are stored in `
       message: Preflight execution failed after checking 3 of 7 operators. Results are incomplete.
       lastTransitionTime: 2021-09-13T17:08:15Z
   - name: NetworkingCompatibilityUnknown
-    message: Networking compatibility could not be determined due to preflight failure.
+    message: "Preflight=5.2.0: Networking compatibility could not be determined due to preflight failure."
     conditions:
     - status: True
       type: Applies
@@ -456,7 +522,7 @@ While preflight checks are actively running, interim results may be populated wi
 ```yaml
   conditionalUpdateRisks:
   - name: PreflightInProgress
-    message: Preflight check for 5.2.0 in progress. Results will be updated as checks complete.
+    message: "Preflight=5.2.0: Preflight check in progress. Results will be updated as checks complete."
     conditions:
     - status: True
       type: Applies
@@ -510,7 +576,7 @@ status:
   conditionalUpdateRisks:
   # Results from preflight check targeting 5.1.0
   - name: "NetworkingDualStackDeprecated"
-    message: "Dual-stack networking configuration will be deprecated in 5.1.0. Migration to single-stack recommended."
+    message: "Preflight=5.1.0: Dual-stack networking configuration will be deprecated in target version. Migration to single-stack recommended."
     url: "https://docs.openshift.com/container-platform/5.1/networking/dual-stack-migration.html"
     conditions:
     - type: Applies
@@ -520,7 +586,7 @@ status:
       lastTransitionTime: "2026-02-09T10:30:00Z"
   # Results from preflight check targeting 5.2.0
   - name: "StorageCSIDriverIncompatible"
-    message: "Current CSI driver version 2.3.1 incompatible with OpenShift 5.2.0. Minimum version 2.4.0 required."
+    message: "Preflight=5.2.0: Current CSI driver version 2.3.1 incompatible with OCP target version. Minimum version 2.4.0 required."
     url: "https://issues.redhat.com/browse/STOR-4521"
     conditions:
     - type: Applies
@@ -529,7 +595,7 @@ status:
       message: "Risk identified during preflight check for 5.2.0"
       lastTransitionTime: "2026-02-09T11:15:00Z"
   - name: "MachineConfigKernelVersionMismatch"
-    message: "Current kernel version 4.18.0 may have performance degradation with 5.2.0 container runtime."
+    message: "Preflight=5.2.0: Current kernel version 4.18.0 may have performance degradation with target container runtime."
     url: "https://docs.openshift.com/container-platform/5.2/updating/kernel-compatibility.html"
     conditions:
     - type: Applies
@@ -539,7 +605,7 @@ status:
       lastTransitionTime: "2026-02-09T11:15:00Z"
   # Results from preflight check targeting 5.3.0 (currently running)
   - name: "PreflightInProgress"
-    message: "Preflight check for 5.3.0 in progress. Results will be updated as checks complete."
+    message: "Preflight=5.3.0: Preflight check in progress. Results will be updated as checks complete."
     conditions:
     - type: Applies
       status: True
@@ -603,12 +669,12 @@ status:
 - **Planning flexibility**: Compare risks across versions without committing to accept all identified risks
 - **Upgrade isolation**: Each upgrade decision is independent and not blocked by unrelated preflight discoveries
 
-**Risk identification by target version**: Each risk entry in `conditionalUpdateRisks` includes metadata indicating which preflight check discovered it, enabling precise filtering during upgrades:
+**Risk identification by target version**: Each risk entry in `conditionalUpdateRisks` includes structured target version information in the risk message field, enabling precise filtering during upgrades:
 
 ```yaml
 conditionalUpdateRisks:
 - name: "StorageCSIDriverIncompatible"
-  message: "Current CSI driver version 2.3.1 incompatible with OpenShift 5.2.0. Minimum version 2.4.0 required."
+  message: "Preflight=5.2.0: Current CSI driver version 2.3.1 incompatible with OCP target version. Minimum version 2.4.0 required."
   conditions:
   - type: Applies
     status: True
@@ -617,38 +683,86 @@ conditionalUpdateRisks:
     lastTransitionTime: "2026-02-09T11:15:00Z"
 ```
 
-When upgrading to 5.2.0, the CVO matches risks based on the target version information in the condition message or associated metadata.
+**Target version parsing specification**: All preflight-generated risks use a structured message format with the target version as a machine-readable prefix:
+
+**Format**: `"Preflight=X.Y.Z: <descriptive message>"`
+
+**Parsing logic**:
+```go
+// Extract target version from risk message
+func extractTargetVersion(message string) (string, error) {
+    if !strings.HasPrefix(message, "Preflight=") {
+        return "", fmt.Errorf("message does not contain preflight prefix")
+    }
+
+    colonIndex := strings.Index(message, ": ")
+    if colonIndex == -1 {
+        return "", fmt.Errorf("invalid preflight format")
+    }
+
+    version := strings.TrimPrefix(message[:colonIndex], "Preflight=")
+    return version, nil
+}
+
+// Filter risks by target version during upgrade
+func filterRisksForTargetVersion(risks []Risk, targetVersion string) []Risk {
+    var filtered []Risk
+    for _, risk := range risks {
+        if version, err := extractTargetVersion(risk.Message); err == nil && version == targetVersion {
+            filtered = append(filtered, risk)
+        }
+    }
+    return filtered
+}
+```
+
+**CVO upgrade filtering**: When upgrading to a specific target version, the CVO:
+1. Parses the `Preflight=X.Y.Z:` prefix from each risk's message field
+2. Filters `conditionalUpdateRisks` to include only entries matching the target upgrade version
+3. Applies blocking logic only to the filtered, version-specific risks
+4. Ignores preflight results from other target versions
 
 #### Preflight data lifecycle and cluster upgrades
 
 **Problem addressed**: Preflight results that persist after cluster upgrades can cause confusion about their relevance to the current cluster state. For example, if a cluster upgrades from 5.0.0 → 5.1.0 after running preflight checks for 5.2.0, administrators might incorrectly assume the 5.2.0 preflight results are still valid for the upgraded cluster.
 
-**Solution**: Automatic preflight data cleanup integrated with upgrade completion workflow:
+**Solution**: Automatic preflight data cleanup integrated with upgrade initiation workflow:
 
-**Upgrade completion hook**: When the CVO marks an upgrade as `Completed` in `ClusterVersion.status.history`, it automatically clears all preflight results from `conditionalUpdateRisks`. This leverages the existing upgrade completion logic that the CVO already implements when transitioning cluster state.
+**Upgrade acceptance hook**: When the CVO accepts an upgrade request (setting `Progressing=True` and beginning to reconcile the new target release's manifests), it immediately clears all preflight results from `conditionalUpdateRisks`. This ensures preflight data is removed as soon as it's no longer relevant - the moment the CVO commits to an upgrade path.
 
 **Implementation approach**:
-1. **Hook integration**: Add preflight cleanup to the existing CVO code path that updates `status.history[].state = Completed`
+1. **Hook integration**: Add preflight cleanup to the existing CVO code path that sets `Progressing=True` when accepting non-preflight updates
 2. **Cleanup scope**: Remove all `conditionalUpdateRisks` entries with `reason: PreflightValidation`
-3. **Timing**: Cleanup occurs as part of the same transaction that marks the upgrade complete, ensuring atomic state transitions
-4. **Logging**: Cleanup actions are logged for audit purposes: "Cleared N preflight results following upgrade completion to version X.Y.Z"
+3. **Timing**: Cleanup occurs when CVO sets `Progressing=True` and starts reconciling the new target release's manifests
+4. **Logging**: Cleanup actions are logged for audit purposes: "Cleared N preflight results following upgrade acceptance for version X.Y.Z"
 
 **Cleanup trigger points**:
-- **Upgrade completes successfully**: When `ClusterVersion.status.history[0].state` transitions to `Completed`
+- **Upgrade accepted**: When CVO sets `Progressing=True` for a non-preflight update and starts reconciling manifests
 - **Manual preflight clearing**: Administrator removes `desiredUpdate.mode` or changes target version
 - **Preflight mode cancellation**: Using `oc adm upgrade --clear-preflight` command
 
-**Benefits of upgrade completion hook**:
-- **Leverages existing logic**: Uses well-tested CVO upgrade completion code paths
-- **Atomic cleanup**: Preflight results are cleared as part of the same operation that completes the upgrade
-- **No version tracking complexity**: No need to store source versions or implement complex comparison logic
-- **Natural integration**: Cleanup happens exactly when cluster state transitions to a new version
+**Benefits of upgrade acceptance hook**:
+- **Precise timing**: Preflight data is cleared at the exact moment it becomes irrelevant (when `Progressing=True` is set)
+- **Clear event boundaries**: Uses well-defined CVO state transitions (`Progressing=True` vs `Progressing=False`) for cleanup triggers
+- **Cleaner upgrade process**: No stale preflight data persists during the entire upgrade operation
+- **Natural integration**: Cleanup happens exactly when CVO commits to an upgrade path, before manifest reconciliation begins
 
 **Example integration point**:
 ```go
-// In CVO upgrade completion logic
-func (c *ClusterVersionOperator) updateHistory(completed bool, version string) error {
-    // ... existing history update logic ...
+// In CVO reconciliation logic when setting Progressing=True
+func (c *ClusterVersionOperator) syncUpdate(update DesiredUpdate) error {
+    // Clear preflight results when accepting a non-preflight update
+    if update.Mode != "Preflight" {
+        // Set Progressing=True to indicate upgrade acceptance
+        if err := c.setProgressingCondition(true, "Updating to "+update.Version); err != nil {
+            return err
+        }
+        // Clear preflight results now that upgrade is accepted
+        if err := c.clearPreflightResults(); err != nil {
+            return fmt.Errorf("failed to clear preflight results: %w", err)
+        }
+    }
+    // ... continue with manifest reconciliation ...
 
     if completed {
         // Clear preflight results when marking upgrade complete
@@ -1228,10 +1342,12 @@ The preflight enhancement extends the existing ClusterVersion API with a new opt
 ### Service Level Indicators (SLIs)
 
 **Health monitoring for preflight operations:**
-- **CVO condition monitoring**: `ClusterVersion.status.conditions` includes preflight-specific conditions:
-  - `type: PreflightRunning` - indicates active preflight deployment
-  - `type: PreflightCompleted` - indicates successful preflight execution
-  - `type: PreflightFailed` - indicates preflight execution failures
+- **CVO condition monitoring**: Preflight status is tracked through the existing `ClusterVersion.status.conditions` without introducing new condition types:
+  - **Existing `type: Progressing` condition**: Used to indicate active preflight deployment with `reason: PreflightRunning`
+  - **Existing `type: Available` condition**: Reflects overall CVO health including preflight operations
+  - **Existing `type: Failing` condition**: Used for preflight execution failures with `reason: PreflightFailed`
+
+  This approach consolidates preflight status into existing condition types rather than introducing new ones, reducing API surface complexity.
 
 - **Deployment health**: Monitor preflight CVO deployment in `openshift-cluster-version-operator` namespace:
   ```bash
@@ -1344,9 +1460,9 @@ The preflight enhancement extends the existing ClusterVersion API with a new opt
 **Symptoms of preflight execution problems:**
 
 1. **Preflight deployment failures:**
-   - **ClusterVersion status**: Check for conditions with `type: PreflightFailed`
+   - **ClusterVersion status**: Check for failing conditions with `reason: PreflightFailed`
    ```bash
-   oc get clusterversion version -o yaml | grep -A5 'type: PreflightFailed'
+   oc get clusterversion version -o yaml | grep -A5 'reason: PreflightFailed'
    ```
    - **CVO logs**: Look for preflight-related errors in cluster-version-operator logs
    ```bash
