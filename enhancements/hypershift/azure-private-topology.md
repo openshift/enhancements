@@ -163,8 +163,9 @@ plane components.
 
 4. The CPO Observer detects the internal LB IP on the private router Service
    and creates an `AzurePrivateLinkService` CR in the HCP namespace,
-   populating it with the LB IP and private connectivity configuration from
-   the HCP spec.
+   populating it with the LB IP, guest network info (VNet ID, subnet ID
+   from the NodePool), and private connectivity configuration from the HCP
+   spec.
 
 5. The HO Platform Controller sees the new `AzurePrivateLinkService` CR,
    authenticates to Azure using the HO's federated managed identity,
@@ -173,7 +174,8 @@ plane components.
    with the PLS resource ID and alias.
 
 6. The CPO Controller sees the PLS alias in the CR status and creates:
-   - A Private Endpoint in the guest VNet targeting the PLS
+   - A Private Endpoint in the guest VNet's worker subnet (from the
+     `guestSubnetID` populated by the CPO Observer) targeting the PLS
    - A Private DNS Zone with an A record mapping the KAS hostname to the PE's
      private IP
    It updates the CR status with the PE and DNS resource IDs.
