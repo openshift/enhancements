@@ -342,24 +342,84 @@ This enhancement introduces the following API changes:
 One new field on `AzurePlatformSpec` in the `hypershift.openshift.io`
 API group:
 
-- `endpointAccess` (`*AzureEndpointAccessSpec`): Controls visibility and
-  private connectivity configuration of the KAS endpoint. Transitions
-  between `PublicAndPrivate` and `Private` are supported after creation,
-  consistent with AWS behavior. Contains:
-  - `type` (`AzureEndpointAccessType`): Access type enum — `Public` (default),
-    `PublicAndPrivate`, `Private`.
-  - `private` (`*AzurePrivateConnectivityConfig`): Configures Azure Private
-    Link Service parameters. Required when `type` is not `Public`. Contains
-    `natSubnetID` (subnet for PLS NAT) and `allowedSubscriptions`
-    (subscription IDs permitted to create PEs).
+```go
+// AzureEndpointAccessType specifies the publishing scope of cluster endpoints.
+// +kubebuilder:validation:Enum=Public;PublicAndPrivate;Private
+type AzureEndpointAccessType string
+
+const (
+	// Public endpoint access allows public API server access and public node
+	// communication with the control plane.
+	AzurePublic AzureEndpointAccessType = "Public"
+
+	// PublicAndPrivate endpoint access allows public API server access and
+	// private node communication with the control plane via Private Link.
+	AzurePublicAndPrivate AzureEndpointAccessType = "PublicAndPrivate"
+
+	// Private endpoint access allows only private API server access and
+	// private node communication with the control plane via Private Link.
+	AzurePrivate AzureEndpointAccessType = "Private"
+)
+
+// AzureEndpointAccessSpec controls visibility and private connectivity
+// configuration of the KAS endpoint.
+type AzureEndpointAccessSpec struct {
+	// type is the access type for the cluster endpoints.
+	//
+	// +kubebuilder:default=Public
+	// +optional
+	Type AzureEndpointAccessType `json:"type,omitempty"`
+
+	// private configures Azure Private Link Service parameters.
+	// Required when type is PublicAndPrivate or Private.
+	//
+	// +optional
+	Private *AzurePrivateConnectivityConfig `json:"private,omitempty"`
+}
+
+// AzurePrivateConnectivityConfig configures Azure Private Link Service
+// parameters for private endpoint access.
+type AzurePrivateConnectivityConfig struct {
+	// natSubnetID is the full Azure resource ID of the subnet used for
+	// PLS NAT (source NAT for Private Link traffic).
+	//
+	// +required
+	// +kubebuilder:validation:MaxLength=512
+	NATSubnetID string `json:"natSubnetID"`
+
+	// allowedSubscriptions is the list of Azure subscription IDs permitted
+	// to create Private Endpoints against the PLS.
+	//
+	// +required
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=10
+	// +kubebuilder:validation:items:MaxLength=36
+	AllowedSubscriptions []string `json:"allowedSubscriptions"`
+}
+```
+
+On `AzurePlatformSpec`:
+
+```go
+type AzurePlatformSpec struct {
+	// ... existing fields ...
+
+	// endpointAccess controls visibility and private connectivity
+	// configuration of the KAS endpoint. Transitions between
+	// PublicAndPrivate and Private are supported after creation.
+	//
+	// +optional
+	EndpointAccess *AzureEndpointAccessSpec `json:"endpointAccess,omitempty"`
+}
+```
+
+CEL validation ensures `private` is required when `type != Public`.
 
 This structure groups the access type discriminator with its associated
 private connectivity configuration, making the relationship self-documenting.
 While AWS and GCP use a bare string for `endpointAccess`, Azure requires
 additional configuration for private networking that those platforms do not,
 so a struct is the appropriate design.
-
-CEL validation ensures `private` is required when `type != Public`.
 
 #### HO-level Azure Identity for Private Link Service
 
@@ -382,20 +442,101 @@ endpoint access.
 
 #### New CRD: AzurePrivateLinkService
 
-A namespaced custom resource in the `hypershift.openshift.io` API group:
+A namespaced custom resource in the `hypershift.openshift.io` API group,
+following the same coordination pattern as `AWSEndpointService` and
+`GCPPrivateServiceConnect`:
 
-- **Spec fields**: `loadBalancerIP`, `subscriptionID`, `resourceGroupName`,
-  `location`, `natSubnetID`, `allowedSubscriptions`, `guestSubnetID`,
-  `guestVNetID`
-- **Status fields**: `conditions`, `internalLoadBalancerID`,
-  `privateLinkServiceID`, `privateLinkServiceAlias`, `privateEndpointID`,
-  `privateEndpointIP`, `privateDNSZoneID`
-- **Conditions**: `AzureInternalLoadBalancerAvailable`,
-  `AzurePLSCreated`, `AzurePrivateEndpointAvailable`,
-  `AzurePrivateDNSAvailable`, `AzurePrivateLinkServiceAvailable`
+```go
+// AzurePrivateLinkServiceSpec defines the desired state of
+// AzurePrivateLinkService.
+type AzurePrivateLinkServiceSpec struct {
+	// loadBalancerIP is the internal LB IP for the private router.
+	// +required
+	LoadBalancerIP string `json:"loadBalancerIP"`
 
-This CRD follows the same coordination pattern as `AWSEndpointService` and
-`GCPPrivateServiceConnect`.
+	// subscriptionID is the Azure subscription for PLS resources.
+	// +required
+	SubscriptionID string `json:"subscriptionID"`
+
+	// resourceGroupName is the resource group for PLS resources.
+	// +required
+	ResourceGroupName string `json:"resourceGroupName"`
+
+	// location is the Azure region.
+	// +required
+	Location string `json:"location"`
+
+	// natSubnetID is the subnet used for PLS NAT.
+	// +required
+	NATSubnetID string `json:"natSubnetID"`
+
+	// allowedSubscriptions are subscription IDs permitted to create PEs.
+	// +required
+	AllowedSubscriptions []string `json:"allowedSubscriptions"`
+
+	// guestSubnetID is the guest VNet subnet for PE placement.
+	// +required
+	GuestSubnetID string `json:"guestSubnetID"`
+
+	// guestVNetID is the guest VNet resource ID.
+	// +required
+	GuestVNetID string `json:"guestVNetID"`
+}
+
+// AzurePrivateLinkServiceStatus defines the observed state of
+// AzurePrivateLinkService.
+type AzurePrivateLinkServiceStatus struct {
+	// conditions contains details for the current state of the PLS lifecycle.
+	// +optional
+	// +listType=map
+	// +listMapKey=type
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// internalLoadBalancerID is the Azure resource ID of the internal LB.
+	// +optional
+	InternalLoadBalancerID string `json:"internalLoadBalancerID,omitempty"`
+
+	// privateLinkServiceID is the Azure resource ID of the PLS.
+	// +optional
+	PrivateLinkServiceID string `json:"privateLinkServiceID,omitempty"`
+
+	// privateLinkServiceAlias is the PLS alias used by PE to connect.
+	// +optional
+	PrivateLinkServiceAlias string `json:"privateLinkServiceAlias,omitempty"`
+
+	// privateEndpointID is the Azure resource ID of the PE.
+	// +optional
+	PrivateEndpointID string `json:"privateEndpointID,omitempty"`
+
+	// privateEndpointIP is the private IP assigned to the PE.
+	// +optional
+	PrivateEndpointIP string `json:"privateEndpointIP,omitempty"`
+
+	// privateDNSZoneID is the Azure resource ID of the private DNS zone.
+	// +optional
+	PrivateDNSZoneID string `json:"privateDNSZoneID,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+// +kubebuilder:resource:path=azureprivatelinkservices,shortName=azpls,scope=Namespaced
+// +kubebuilder:storageversion
+// +kubebuilder:subresource:status
+// AzurePrivateLinkService coordinates the lifecycle of Azure Private Link
+// resources across CPO and HO controllers.
+type AzurePrivateLinkService struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+	Spec              AzurePrivateLinkServiceSpec   `json:"spec,omitempty"`
+	Status            AzurePrivateLinkServiceStatus `json:"status,omitempty"`
+}
+```
+
+**Conditions**:
+- `AzureInternalLoadBalancerAvailable` — ILB IP detected
+- `AzurePLSCreated` — PLS created in management VNet
+- `AzurePrivateEndpointAvailable` — PE created in guest VNet
+- `AzurePrivateDNSAvailable` — DNS zone and A record created
+- `AzurePrivateLinkServiceAvailable` — end-to-end connectivity ready
 
 ### Topology Considerations
 
