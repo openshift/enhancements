@@ -94,9 +94,10 @@ don't have to manually configure Azure networking resources.
 
 ### Non-Goals
 
-1. ARO HCP (managed Azure) support — ARO HCP has its own private connectivity
-   implementation via Azure Private Link Service (Swift). This enhancement only
-   targets self-managed Azure.
+1. ARO HCP (managed Azure) support — ARO HCP uses Swift for private
+   connectivity, which is a different mechanism from the Azure Private Link
+   Service approach proposed here. This enhancement only targets
+   self-managed Azure.
 
 2. Dedicated OAuth private load balancer — the API is designed to accommodate
    this in the future via the `endpointAccess.private` struct, but it is not
