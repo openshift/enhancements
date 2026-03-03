@@ -210,14 +210,60 @@ sequenceDiagram
     Worker->>Azure: Connect via PE → PLS → Router ILB → KAS
 ```
 
-#### Error Handling
+#### Error Handling and Retry Strategy
 
-If any Azure resource creation fails:
-- The corresponding condition on the `AzurePrivateLinkService` CR is set to
-  `False` with the error reason and message
-- The controller retries with exponential backoff
-- Downstream controllers wait for upstream conditions to be met before
-  proceeding (e.g., CPO Controller waits for PLS alias before creating PE)
+All three controllers follow the same patterns established by the AWS and GCP
+private connectivity controllers to prevent unnecessary cloud API calls and
+hot loops.
+
+**Rate limiter**: Each controller uses an exponential failure rate limiter
+with a 3-second initial backoff and 30-second maximum, matching the AWS and
+GCP controllers:
+```go
+RateLimiter: workqueue.NewTypedItemExponentialFailureRateLimiter[reconcile.Request](
+    3*time.Second, 30*time.Second,
+)
+```
+
+**Error-specific requeue intervals**: Azure API errors are classified to
+determine appropriate retry timing:
+- **Rate limiting (HTTP 429)**: requeue after 5 minutes
+- **Permission denied (HTTP 403)**: requeue after 10 minutes (likely
+  requires operator intervention)
+- **Conflict (HTTP 409)**: requeue after 30 seconds
+- **Configuration errors (HTTP 400)**: requeue after 5 minutes with an
+  actionable error message
+- **Transient errors**: requeue after 2 minutes
+
+**Drift detection**: Controllers requeue every 5 minutes to detect and
+report out-of-band changes to Azure resources (e.g., a PLS deleted via the
+Azure portal), matching the AWS/GCP interval.
+
+**Idempotent cloud operations**: Before creating any Azure resource, the
+controller checks whether it already exists (by name or tag). If it exists,
+the controller adopts it by updating the CR status with the existing
+resource's IDs. This prevents duplicate resource creation after a
+reconciliation failure between the cloud API call and the status update.
+
+**Status-based short-circuit**: Controllers cache Azure resource IDs in the
+CR status (e.g., `privateLinkServiceID`, `privateEndpointID`). On
+subsequent reconciliations, the controller uses the cached ID to look up
+the resource directly rather than performing a list/search operation.
+
+**Condition reporting**: Each condition uses a constant machine-readable
+`Reason` (e.g., `AzureError`, `AzureSuccess`) and a human-readable
+`Message` that provides actionable context:
+- Success: `"Private Link Service is ready"`
+- Permission error: `"Azure API permission denied, check PrivateLinkService
+  workload identity RBAC on management resource group"`
+- Configuration error: includes the Azure error message to help diagnose
+  NAT subnet or VNet issues
+
+**Downstream gating**: Controllers wait for upstream conditions before
+proceeding. The CPO Controller will not create a PE until
+`AzurePLSCreated=True` and the PLS alias is populated in the CR status.
+If the upstream condition is `False`, the controller returns without
+requeue and relies on a watch event when the CR status is updated.
 
 #### Deletion
 
