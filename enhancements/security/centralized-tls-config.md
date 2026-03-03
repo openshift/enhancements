@@ -321,10 +321,78 @@ The `tlsAdherence` field will be introduced behind a feature gate:
 
 #### Hypershift / Hosted Control Planes
 
-For Hypershift deployments, components running in the management cluster must honor the management cluster's TLS settings, not the hosted cluster's settings. Managed cluster admins should not control TLS for components in the provider's domain.
+For Hypershift deployments, the TLS security profile for hosted control plane components is determined by the **management cluster**, not the hosted cluster. Hosted cluster administrators should not control TLS for components running in the provider's domain.
 
-- **HCP workloads** (both HCP-aware and non-HCP-aware) obtain TLS configuration from the management cluster KAS. HyperShift may need to preconfigure RBAC and NetworkPolicy for this access.
-- **Hosted cluster KAS endpoint:** The `APIServer` config on `HostedCluster` spec controls how the hosted cluster KAS is exposed.
+HyperShift's control-plane-operator (CPO) directly manages a set of control plane components that, in standalone clusters, are managed through the normal SLO/operand chain. These components fall into three categories, each requiring a different mechanism for TLS configuration:
+
+**Category 1 — Second-Level Operators (SLOs) that are HyperShift-aware:**
+
+In standalone clusters, these operators watch `apiservers.config.openshift.io/cluster` and configure their operands. In HyperShift, some of these SLOs are run directly by the CPO and are already HyperShift-aware — they have access to the management cluster's KAS and can see the `HostedCluster` CR. These components should read the TLS profile from the `HostedCluster` CR spec in the management KAS rather than looking for the `apiservers.config.openshift.io/cluster` object in the hosted cluster's KAS.
+
+**Category 2 — Operands of SLOs (the majority of components):**
+
+In standalone clusters, these components are configured by their SLO via command-line flags or environment variables rather than watching the TLS configuration directly. In HyperShift, the CPO replaces the SLO's role for these components and must **directly set the TLS-related flags and environment variables** on their pod specs. This is the most common case among the components the CPO manages.
+
+**Category 3 — Self-configuring components (both operator and operand):**
+
+In standalone clusters, these components watch `apiservers.config.openshift.io/cluster` and configure their own TLS servers directly. In HyperShift, if such a component does not already have access to the management cluster's KAS, it will be watching the wrong config object (the hosted cluster's rather than the management cluster's). These components need to accept **new CLI flags for TLS settings that take precedence** over the `apiservers.config.openshift.io/cluster` config. The CPO sets these flags when deploying the component.
+
+| Category | Standalone Mechanism | HyperShift Mechanism |
+|---|---|---|
+| 1 — SLOs (HyperShift-aware) | Watch `apiservers.config.openshift.io/cluster` | Read TLS profile from `HostedCluster` CR in management KAS |
+| 2 — Operands (most components) | Configured by SLO via flags/envvars | CPO directly sets flags/envvars on pod specs |
+| 3 — Self-configuring (no mgmt KAS access) | Watch `apiservers.config.openshift.io/cluster` | New CLI flags (set by CPO) override the config watch |
+
+The following components are managed by HyperShift's CPO as ControlPlaneComponents and need to be classified into the categories above. Categorization is being tracked in a [companion spreadsheet](https://docs.google.com/spreadsheets/d/1v_PwUylR7TvK5aM1gwG4d6VSISHOsDqj9jWHagGHhag/edit?gid=0#gid=0).
+
+<details>
+<summary>Full list of HCP ControlPlaneComponents (click to expand)</summary>
+
+- aws-cloud-controller-manager
+- capi-provider
+- catalog-operator
+- certified-operators-catalog
+- cloud-credential-operator
+- cluster-api
+- cluster-autoscaler
+- cluster-image-registry-operator
+- cluster-network-operator
+- cluster-node-tuning-operator
+- cluster-policy-controller
+- cluster-storage-operator
+- cluster-version-operator
+- community-operators-catalog
+- control-plane-operator
+- control-plane-pki-operator
+- csi-snapshot-controller-operator
+- dns-operator
+- etcd
+- featuregate-generator
+- hosted-cluster-config-operator
+- ignition-server
+- ignition-server-proxy
+- ingress-operator
+- konnectivity-agent
+- kube-apiserver
+- kube-controller-manager
+- kube-scheduler
+- machine-approver
+- oauth-openshift
+- olm-collect-profiles
+- olm-operator
+- openshift-apiserver
+- openshift-controller-manager
+- openshift-oauth-apiserver
+- openshift-route-controller-manager
+- packageserver
+- redhat-marketplace-catalog
+- redhat-operators-catalog
+
+</details>
+
+**Additional considerations:**
+
+- **Hosted cluster KAS endpoint:** The `APIServer` config on the `HostedCluster` spec controls how the hosted cluster's KAS is exposed to end users.
 - **Management cluster exposed endpoints** (ignition-server, oauth-server, konnectivity) use management cluster TLS settings.
 
 #### Standalone Clusters
@@ -387,7 +455,7 @@ Create a dedicated new Custom Resource for cluster-wide TLS configuration. This 
    - **Option A (leaning towards):** Use omission to mean "no opinion" with `LegacyAdheringComponentsOnly` behavior. Eventually require setting `StrictAllComponents` explicitly before upgrade.
    - **Option B:** Use omission to mean "no opinion" and require admins to explicitly opt-in to a supported mode before they can upgrade.
    - **Option C:** Have a controller set the field to the default behavior if it is omitted on upgrade.
-   
+
    **Resolved** We will use option A:Use omission to mean "no opinion" with `LegacyAdheringComponentsOnly` behavior. Eventually require setting `StrictAllComponents` explicitly before upgrade. 
 
 ## Graduation Criteria
