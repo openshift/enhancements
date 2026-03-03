@@ -674,6 +674,22 @@ the user to manually sequence resource creation (wait for ILB, then create PLS,
 then create PE, then create DNS) and manually clean up resources on cluster
 teardown, which is error-prone and inconsistent with the existing platforms.
 
+### Alternative 4: Swift Networking (VNet Injection)
+
+ARO HCP uses Swift networking — Azure's CNI infrastructure that injects
+pods directly into customer-delegated subnets. With Swift, the control
+plane pods are placed into the customer's VNet context, so private
+connectivity is handled at the networking layer itself without needing
+PLS or Private Endpoints.
+
+**Not used for self-managed because**: Swift is an Azure-managed, first-party
+infrastructure feature tied to AKS. It requires Azure's orchestration layer
+to delegate subnets and inject pods into customer VNets. Self-managed
+HyperShift runs on standard OpenShift clusters, not AKS, so Swift's
+VNet injection infrastructure is not available. PLS is the standard Azure
+mechanism for cross-VNet private connectivity available to any Azure
+customer regardless of the underlying cluster platform.
+
 ## Open Questions [optional]
 
 1. **PublicAndPrivate dual-path pattern**: The exact mechanism for maintaining
