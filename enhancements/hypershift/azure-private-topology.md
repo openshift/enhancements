@@ -165,7 +165,7 @@ plane components.
    the HCP spec.
 
 5. The HO Platform Controller sees the new `AzurePrivateLinkService` CR,
-   authenticates to Azure using the `PrivateLinkService` workload identity,
+   authenticates to Azure using the HO's federated managed identity,
    looks up the internal LB, and creates an Azure Private Link Service
    attached to the LB's frontend IP configuration. It updates the CR status
    with the PLS resource ID and alias.
@@ -277,8 +277,8 @@ by both the AWS controller (`AWSErrorReason`/`AWSSuccessReason` at
 (`GCPErrorReason`/`GCPSuccessReason` at `psc_endpoint_controller.go:928-934`).
 Example condition messages:
 - Success: `"Private Link Service is ready"`
-- Permission error: `"Azure API permission denied, check PrivateLinkService
-  workload identity RBAC on management resource group"`
+- Permission error: `"Azure API permission denied, check HO federated
+  managed identity RBAC on management resource group"`
 - Configuration error: includes the Azure error message to help diagnose
   NAT subnet or VNet issues
 
@@ -326,12 +326,24 @@ so a struct is the appropriate design.
 
 CEL validation ensures `private` is required when `type != Public`.
 
-#### New field on AzureWorkloadIdentities
+#### HO-level Azure Identity for Private Link Service
 
-- `privateLinkService` (`*WorkloadIdentity`): Client ID of a federated managed
-  identity used by the HyperShift Operator to manage Azure PLS resources.
-  Scoped to the management cluster's resource group. Optional — only required
-  when `endpointAccess.type` is not `Public`.
+The HyperShift Operator pod requires a federated managed identity with
+Network Contributor RBAC on the management cluster's resource group to
+create and manage Azure PLS resources. This identity is configured at the
+HO deployment level (via Azure Workload Identity annotations on the HO
+service account), not per-HostedCluster.
+
+This follows the same pattern as AWS and GCP:
+- AWS: the HO uses `AWS_SHARED_CREDENTIALS_FILE` and `AWS_REGION` env vars
+  set on the operator deployment
+  (`hypershift-operator/controllers/platform/aws/controller.go:109-113`)
+- GCP: the HO uses `GCP_PROJECT` and `GCP_REGION` env vars with application
+  default credentials
+  (`hypershift-operator/controllers/platform/gcp/privateserviceconnect_controller.go:55-73`)
+
+The identity is only required when the HO manages clusters with non-Public
+endpoint access.
 
 #### New CRD: AzurePrivateLinkService
 
@@ -358,8 +370,9 @@ This enhancement is specifically designed for the HyperShift topology. It
 affects:
 
 - **Management cluster**: The HO platform controller runs here and creates
-  Azure PLS resources in the management cluster's VNet. A new workload
-  identity must be provisioned for the HO pod.
+  Azure PLS resources in the management cluster's VNet. The HO pod's
+  federated managed identity (configured at operator installation) must
+  have Network Contributor RBAC on the management resource group.
 - **HCP namespace**: The CPO observer and controller run here, creating the
   `AzurePrivateLinkService` CR and customer-side Azure resources (PE, DNS).
 - **Guest cluster**: Worker nodes use Private DNS to resolve the KAS hostname
@@ -494,7 +507,7 @@ AWS and GCP:
 | Component | Location | Watches | Creates (Azure) | Auth |
 | --------- | -------- | ------- | --------------- | ---- |
 | CPO Observer | `control-plane-operator/controllers/azureprivatelinkservice/observer.go` | Private Router Service | AzurePrivateLinkService CR | N/A (K8s only) |
-| HO Platform Controller | `hypershift-operator/controllers/platform/azure/controller.go` | AzurePrivateLinkService CR | Private Link Service | PrivateLinkService workload identity |
+| HO Platform Controller | `hypershift-operator/controllers/platform/azure/controller.go` | AzurePrivateLinkService CR | Private Link Service | HO-level federated managed identity |
 | CPO Controller | `control-plane-operator/controllers/azureprivatelinkservice/controller.go` | AzurePrivateLinkService CR | Private Endpoint + DNS | Existing CPO workload identity |
 
 This split provides least-privilege security:
@@ -605,9 +618,11 @@ uses Swift for private connectivity and is unaffected by these changes.
    dependencies (armnetwork, armprivatedns). This increases the vendor
    footprint and the surface area for Azure API breaking changes.
 
-2. **New workload identity requirement**: Customers creating private clusters
-   must provision an additional federated managed identity for the HO. This
-   adds complexity to the infrastructure prerequisites.
+2. **New workload identity requirement**: The HO deployment must be configured
+   with a federated managed identity that has Network Contributor RBAC on
+   the management resource group. This is a one-time setup at operator
+   installation, not per-cluster, but adds complexity to the infrastructure
+   prerequisites.
 
 3. **New CRD**: The `AzurePrivateLinkService` CRD adds one more resource type
    to the HyperShift API surface. However, this follows the established
@@ -736,8 +751,8 @@ behavior.
 
 Before upgrading the HyperShift operator to a version that supports private
 topology, customers who intend to use it must:
-1. Provision the `PrivateLinkService` federated managed identity with Network
-   Contributor RBAC on the management cluster's resource group.
+1. Configure the HO deployment with a federated managed identity that has
+   Network Contributor RBAC on the management cluster's resource group.
 2. Provision a NAT subnet in the management cluster's VNet with
    `privateLinkServiceNetworkPolicies` disabled.
 
@@ -792,11 +807,12 @@ topology controllers are gated on `IsPrivateHCP()`.
   - CPO controller logs (`controllers.AzurePrivateLinkServiceEndpoint`)
   - HostedCluster `Available` condition
 
-### New Workload Identity
+### HO Workload Identity
 
-The `PrivateLinkService` workload identity is optional — only required when
-`endpointAccess.type` is not `Public`. It does not affect existing clusters or
-identities.
+The HO's federated managed identity for PLS operations is configured at the
+operator deployment level, not per-cluster. It is only required when the HO
+manages clusters with non-Public endpoint access. It does not affect existing
+clusters or identities.
 
 ## Support Procedures
 
@@ -810,7 +826,7 @@ identities.
    - `AzureInternalLoadBalancerAvailable=False`: ILB not provisioned. Check
      private router Service annotation and Azure cloud provider logs.
    - `AzurePLSCreated=False`: PLS creation failed. Check HO logs and the
-     `PrivateLinkService` workload identity RBAC.
+     HO's federated managed identity RBAC.
    - `AzurePrivateEndpointAvailable=False`: PE creation failed. Check CPO logs
      and guest subscription permissions.
    - `AzurePrivateDNSAvailable=False`: DNS creation failed. Check CPO logs.
@@ -822,7 +838,7 @@ identities.
    - Check NSG rules allow traffic to PE subnet
 
 3. **PLS creation fails with permission error**:
-   - Verify `PrivateLinkService` workload identity has Network Contributor
+   - Verify the HO's federated managed identity has Network Contributor
      on the management resource group
    - Verify federated credential is configured for the HO service account
 
