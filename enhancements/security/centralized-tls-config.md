@@ -323,6 +323,8 @@ The `tlsAdherence` field will be introduced behind a feature gate:
 
 For Hypershift deployments, the TLS security profile for hosted control plane components is determined by the **management cluster**, not the hosted cluster. Hosted cluster administrators should not control TLS for components running in the provider's domain.
 
+Other components that already honor the cluster-wide TLS profile via `apiservers.config.openshift.io/cluster` should continue to do so — the categories below apply specifically to components whose TLS configuration mechanism needs to change in HyperShift.
+
 HyperShift's control-plane-operator (CPO) directly manages a set of control plane components that, in standalone clusters, are managed through the normal SLO/operand chain. These components fall into three categories, each requiring a different mechanism for TLS configuration:
 
 **Category 1 — Second-Level Operators (SLOs) that are HyperShift-aware:**
