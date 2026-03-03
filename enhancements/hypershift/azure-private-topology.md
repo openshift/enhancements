@@ -184,8 +184,9 @@ plane components.
    Endpoint's private IP and communicate with the control plane via:
    `Worker → PE → PLS → Router ILB → Router → KAS pod`
 
-8. The platform engineer monitors the `AzurePrivateLinkService` CR conditions
-   to track lifecycle progress:
+8. The HostedCluster controller aggregates `AzurePrivateLinkService` CR
+   conditions into the HostedCluster status, so errors are visible at
+   the HC level. The platform engineer can also inspect the CR directly:
    ```bash
    kubectl get azpls -A
    ```
@@ -285,6 +286,13 @@ Example condition messages:
   managed identity RBAC on management resource group"`
 - Configuration error: includes the Azure error message to help diagnose
   NAT subnet or VNet issues
+
+The HostedCluster controller aggregates these CR conditions into
+`HostedCluster.Status.Conditions`, following the pattern in
+`computeAWSEndpointServiceCondition`
+(`hostedcluster_controller.go:3116-3155`). This ensures errors are
+visible at the HC level without requiring operators to inspect the CR
+directly.
 
 **Downstream gating**: Controllers wait for upstream conditions before
 proceeding. The CPO Controller will not create a PE until
