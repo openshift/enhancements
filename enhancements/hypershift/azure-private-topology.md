@@ -79,6 +79,8 @@ don't have to manually configure Azure networking resources.
 
 1. Support three endpoint access modes for self-managed Azure: Public
    (default), PublicAndPrivate, and Private, matching AWS and GCP parity.
+   Transitions between PublicAndPrivate and Private are supported after
+   creation, consistent with AWS behavior.
 
 2. Automate Azure Private Link Service lifecycle through HyperShift
    controllers, following the same split-controller pattern used by AWS
@@ -116,7 +118,7 @@ support by adding:
 2. **A new CRD** (`AzurePrivateLinkService`) that coordinates private
    connectivity lifecycle between controllers
 3. **Three controllers** following the established AWS/GCP split pattern:
-   - CPO Observer: watches the KAS internal load balancer
+   - CPO Observer: watches the private router Service for the internal LB IP
    - HO Platform Controller: creates the Azure PLS (management-side)
    - CPO Controller: creates the Private Endpoint and DNS (customer-side)
 4. **CLI flags** on `hypershift create cluster azure` for endpoint access
@@ -150,13 +152,17 @@ plane components.
 2. The HyperShift Operator reconciles the HostedCluster and propagates
    `endpointAccess` (type and private config) to the HostedControlPlane spec.
 
-3. The CPO annotates the KAS Service with
+3. The CPO configures KAS as a Route on the private router. The private
+   router's Service is annotated with
    `service.beta.kubernetes.io/azure-load-balancer-internal: "true"`, causing
-   Azure to provision an internal load balancer instead of a public one.
+   Azure to provision an internal load balancer. All private services (KAS,
+   OAuth, Konnectivity, Ignition) share this single router LB, requiring
+   only one PLS per cluster.
 
-4. The CPO Observer detects the internal LB IP on the KAS Service and creates
-   an `AzurePrivateLinkService` CR in the HCP namespace, populating it with
-   the LB IP and private connectivity configuration from the HCP spec.
+4. The CPO Observer detects the internal LB IP on the private router Service
+   and creates an `AzurePrivateLinkService` CR in the HCP namespace,
+   populating it with the LB IP and private connectivity configuration from
+   the HCP spec.
 
 5. The HO Platform Controller sees the new `AzurePrivateLinkService` CR,
    authenticates to Azure using the `PrivateLinkService` workload identity,
@@ -172,7 +178,7 @@ plane components.
 
 7. Guest cluster worker nodes resolve the KAS hostname to the Private
    Endpoint's private IP and communicate with the control plane via:
-   `Worker → PE → PLS → Internal LB → KAS pod`
+   `Worker → PE → PLS → Router ILB → Router → KAS pod`
 
 8. The platform engineer monitors the `AzurePrivateLinkService` CR conditions
    to track lifecycle progress:
@@ -192,16 +198,16 @@ sequenceDiagram
     Engineer->>CLI: create cluster azure --endpoint-access Private
     CLI->>HO: Create HostedCluster CR
     HO->>CPO: Propagate config to HostedControlPlane
-    CPO->>Azure: Create KAS Service (internal LB annotation)
-    Azure-->>CPO: Internal LB provisioned with IP
+    CPO->>Azure: Configure private router Service (internal LB annotation)
+    Azure-->>CPO: Router internal LB provisioned with IP
     CPO->>CPO: Observer creates AzurePrivateLinkService CR
-    HO->>Azure: Create Private Link Service (on ILB)
+    HO->>Azure: Create Private Link Service (on router ILB)
     HO->>HO: Update CR status with PLS alias
     CPO->>Azure: Create Private Endpoint (in guest VNet)
     CPO->>Azure: Create Private DNS Zone + A record
     CPO->>CPO: Update CR status with PE IP
     Worker->>Azure: Resolve KAS hostname → PE private IP
-    Worker->>Azure: Connect via PE → PLS → ILB → KAS
+    Worker->>Azure: Connect via PE → PLS → Router ILB → KAS
 ```
 
 #### Error Handling
@@ -220,7 +226,8 @@ When the HostedCluster is deleted:
   to the HostedControlPlane
 - Each controller uses finalizers to clean up its Azure resources in reverse
   order: DNS → PE → PLS
-- The internal LB is cleaned up automatically when the KAS Service is deleted
+- The router's internal LB is cleaned up automatically when the router Service
+  is deleted
 
 ### API Extensions
 
@@ -228,12 +235,13 @@ This enhancement introduces the following API changes:
 
 #### New field on AzurePlatformSpec
 
-One new immutable field on `AzurePlatformSpec` in the `hypershift.openshift.io`
+One new field on `AzurePlatformSpec` in the `hypershift.openshift.io`
 API group:
 
 - `endpointAccess` (`*AzureEndpointAccessSpec`): Controls visibility and
-  private connectivity configuration of the KAS endpoint. Immutable after
-  creation. Contains:
+  private connectivity configuration of the KAS endpoint. Transitions
+  between `PublicAndPrivate` and `Private` are supported after creation,
+  consistent with AWS behavior. Contains:
   - `type` (`AzureEndpointAccessType`): Access type enum — `Public` (default),
     `PublicAndPrivate`, `Private`.
   - `private` (`*AzurePrivateConnectivityConfig`): Configures Azure Private
@@ -311,30 +319,35 @@ Not applicable. OKE does not support HyperShift hosted control planes.
 #### Architecture Overview
 
 The following diagram shows the Azure networking architecture for a private
-hosted cluster. The management cluster VNet contains the internal load
-balancer and Private Link Service. The guest VNet contains the Private
-Endpoint and worker nodes. Private DNS resolves the KAS hostname to the PE's
-private IP.
+hosted cluster. The management cluster VNet contains the private router's
+internal load balancer and Private Link Service. The guest VNet contains the
+Private Endpoint and worker nodes. Private DNS resolves the KAS hostname to
+the PE's private IP.
 
-The **data flow** direction is: Worker → PE → PLS → ILB → KAS. The NAT
-subnet is not a hop in the data path — it is a subnet from which Azure PLS
-allocates source IPs for SNAT. When traffic arrives from a PE, Azure rewrites
-the source IP to one from the NAT subnet range before forwarding to the ILB,
-hiding the PE's original IP from the backend.
+KAS is exposed via a Route on the private router, so all private services
+(KAS, OAuth, Konnectivity, Ignition) share a single router LB and PLS.
+
+The **data flow** direction is: Worker → PE → PLS → Router ILB → Router →
+KAS. The NAT subnet is not a hop in the data path — it is a subnet from
+which Azure PLS allocates source IPs for SNAT. When traffic arrives from a
+PE, Azure rewrites the source IP to one from the NAT subnet range before
+forwarding to the ILB, hiding the PE's original IP from the backend.
 
 ```mermaid
 graph TB
     subgraph "Management Cluster VNet"
         subgraph "HCP Namespace"
             KAS[KAS Pod]
+            Router[Private Router]
         end
-        ILB[Internal Load Balancer]
+        ILB[Router Internal Load Balancer]
         PLS[Azure Private Link Service]
         NAT[NAT Subnet<br/>used by PLS for source IP translation]
 
         PLS -.->|allocates SNAT IPs from| NAT
         PLS -->|forwards traffic to| ILB
-        ILB -->|routes to| KAS
+        ILB -->|routes to| Router
+        Router -->|Route passthrough| KAS
     end
 
     subgraph "Guest Cluster VNet"
@@ -369,7 +382,7 @@ lifecycle of Azure resources:
 ```mermaid
 graph LR
     subgraph "Control Plane Operator (per HCP)"
-        OBS[CPO Observer<br/>watches KAS Service]
+        OBS[CPO Observer<br/>watches Private Router Service]
         CTRL[CPO Controller<br/>creates PE + DNS]
     end
 
@@ -378,7 +391,7 @@ graph LR
     end
 
     subgraph "Kubernetes Resources"
-        SVC[KAS Service<br/>type: LoadBalancer<br/>internal annotation]
+        SVC[Private Router Service<br/>type: LoadBalancer<br/>internal annotation]
         CR[AzurePrivateLinkService CR<br/>spec + status]
     end
 
@@ -411,7 +424,7 @@ AWS and GCP:
 
 | Component | Location | Watches | Creates (Azure) | Auth |
 | --------- | -------- | ------- | --------------- | ---- |
-| CPO Observer | `control-plane-operator/controllers/azureprivatelinkservice/observer.go` | KAS Service | AzurePrivateLinkService CR | N/A (K8s only) |
+| CPO Observer | `control-plane-operator/controllers/azureprivatelinkservice/observer.go` | Private Router Service | AzurePrivateLinkService CR | N/A (K8s only) |
 | HO Platform Controller | `hypershift-operator/controllers/platform/azure/controller.go` | AzurePrivateLinkService CR | Private Link Service | PrivateLinkService workload identity |
 | CPO Controller | `control-plane-operator/controllers/azureprivatelinkservice/controller.go` | AzurePrivateLinkService CR | Private Endpoint + DNS | Existing CPO workload identity |
 
@@ -455,16 +468,22 @@ type AzurePrivateConnectivityConfig struct {
 }
 ```
 
-#### KAS Internal Load Balancer
+#### KAS via Route and Private Router
 
-When `endpointAccess.type` is `Private`, the KAS Service is annotated with
-`service.beta.kubernetes.io/azure-load-balancer-internal: "true"`. Azure's
-cloud provider creates an internal LB instead of a public one.
+KAS is exposed via a Route on the private router rather than via a dedicated
+LoadBalancer Service. The private router's Service is annotated with
+`service.beta.kubernetes.io/azure-load-balancer-internal: "true"`, and Azure's
+cloud provider creates an internal LB for it. All private services (KAS,
+OAuth, Konnectivity, Ignition) share this single router LB, so only one PLS
+per cluster is needed.
 
-When `endpointAccess.type` is `PublicAndPrivate`, both a public and private
-endpoint are needed. The implementation follows the same pattern as AWS
-`PublicAndPrivate`, where a separate private service is created alongside the
-public KAS service.
+When `endpointAccess.type` is `Private`, the KAS Service remains ClusterIP
+(no public LB). All external access goes through the private router's
+internal LB → PLS → PE path.
+
+When `endpointAccess.type` is `PublicAndPrivate`, the public KAS endpoint
+is preserved alongside the private router path. The implementation follows
+the same pattern as AWS `PublicAndPrivate`.
 
 #### NAT Subnet Requirements
 
@@ -569,10 +588,11 @@ teardown, which is error-prone and inconsistent with the existing platforms.
 
 ## Open Questions [optional]
 
-1. **PublicAndPrivate dual-service pattern**: The exact mechanism for creating
-   both a public and private KAS endpoint needs to be verified against the AWS
-   `PublicAndPrivate` implementation. AWS creates a separate private router
-   service — Azure may need the same or can use dual-stack annotations.
+1. **PublicAndPrivate dual-path pattern**: The exact mechanism for maintaining
+   both a public KAS endpoint and the private router path needs to be verified
+   against the AWS `PublicAndPrivate` implementation. With the Route-based
+   approach, the private path goes through the router's internal LB while the
+   public KAS endpoint may remain via its existing public LB.
 
 2. **PE subnet**: The current design places the PE in the guest VNet's subnet
    (same as worker nodes). Some deployments may want the PE in a dedicated
@@ -591,11 +611,11 @@ teardown, which is error-prone and inconsistent with the existing platforms.
 ### Unit Tests
 
 - **API validation tests**: CEL rules for `endpointAccess.private` requirement,
-  immutability of `endpointAccess`
+  valid transitions between endpoint access types
 - **HO Platform Controller tests**: PLS creation, status updates, cleanup,
   idempotency, owner references (using Azure SDK interface fakes)
-- **CPO Observer tests**: CR creation on ILB IP detection, skip on Public
-  endpoint access, skip on missing ILB annotation
+- **CPO Observer tests**: CR creation on router Service ILB IP detection,
+  skip on Public endpoint access, skip on missing ILB annotation
 - **CPO Controller tests**: PE creation, DNS zone + A record creation, status
   updates, cleanup, requeue on missing PLS alias
 - **Visibility helper tests**: `IsPrivateHCP`, `IsPublicHCP`, `IsPrivateHC`
@@ -641,8 +661,9 @@ N/A — This is a new feature.
 
 **Upgrade**: Existing public self-managed Azure clusters are unaffected. The
 `endpointAccess.type` field defaults to `Public` when not set. New clusters can
-opt in to private topology at creation time. The `endpointAccess` struct is
-immutable, so existing clusters cannot be changed to Private after creation.
+opt in to private topology at creation time. Existing clusters can transition
+between `PublicAndPrivate` and `Private` after creation, consistent with AWS
+behavior.
 
 Before upgrading the HyperShift operator to a version that supports private
 topology, customers who intend to use it must:
@@ -717,8 +738,8 @@ identities.
    kubectl get azpls -A -o wide
    ```
    Check which condition is `False`:
-   - `AzureInternalLoadBalancerAvailable=False`: ILB not provisioned. Check KAS
-     Service annotation and Azure cloud provider logs.
+   - `AzureInternalLoadBalancerAvailable=False`: ILB not provisioned. Check
+     private router Service annotation and Azure cloud provider logs.
    - `AzurePLSCreated=False`: PLS creation failed. Check HO logs and the
      `PrivateLinkService` workload identity RBAC.
    - `AzurePrivateEndpointAvailable=False`: PE creation failed. Check CPO logs
