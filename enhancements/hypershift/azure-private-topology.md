@@ -212,21 +212,26 @@ sequenceDiagram
 
 #### Error Handling and Retry Strategy
 
-All three controllers follow the same patterns established by the AWS and GCP
-private connectivity controllers to prevent unnecessary cloud API calls and
-hot loops.
+All three controllers follow the patterns established by the existing AWS
+and GCP private connectivity controllers. The specific patterns referenced
+below are from the HyperShift codebase at `openshift/hypershift`.
 
 **Rate limiter**: Each controller uses an exponential failure rate limiter
-with a 3-second initial backoff and 30-second maximum, matching the AWS and
-GCP controllers:
+with a 3-second initial backoff and 30-second maximum:
 ```go
 RateLimiter: workqueue.NewTypedItemExponentialFailureRateLimiter[reconcile.Request](
     3*time.Second, 30*time.Second,
 )
 ```
+This matches the configuration used by the AWS private link controller
+(`control-plane-operator/controllers/awsprivatelink/awsprivatelink_controller.go:329`)
+and the GCP PSC controller
+(`control-plane-operator/controllers/gcpprivateserviceconnect/psc_endpoint_controller.go:125`).
 
-**Error-specific requeue intervals**: Azure API errors are classified to
-determine appropriate retry timing:
+**Error-specific requeue intervals**: Azure API errors are classified by
+HTTP status code to determine appropriate retry timing, following the
+pattern established by the GCP PSC controller's `handleGCPError` function
+(`psc_endpoint_controller.go:891-941`):
 - **Rate limiting (HTTP 429)**: requeue after 5 minutes
 - **Permission denied (HTTP 403)**: requeue after 10 minutes (likely
   requires operator intervention)
@@ -235,15 +240,29 @@ determine appropriate retry timing:
   actionable error message
 - **Transient errors**: requeue after 2 minutes
 
-**Drift detection**: Controllers requeue every 5 minutes to detect and
-report out-of-band changes to Azure resources (e.g., a PLS deleted via the
-Azure portal), matching the AWS/GCP interval.
+The AWS controller does not classify errors by HTTP status code; it uses
+the rate limiter's exponential backoff for all failures
+(`awsprivatelink_controller.go:468-472`). The GCP approach of classifying
+errors is more appropriate for Azure because Azure SDK errors also carry
+HTTP status codes.
+
+**Drift detection**: After a successful reconciliation, controllers requeue
+after 5 minutes to detect out-of-band changes to Azure resources (e.g., a
+PLS deleted via the Azure portal). Both the AWS controller
+(`awsprivatelink_controller.go:496-498`, comment: "always requeue to catch
+and report out of band changes in AWS") and the GCP controller
+(`psc_endpoint_controller.go:55-57`, `driftDetectionRequeueInterval`)
+use this same 5-minute interval.
 
 **Idempotent cloud operations**: Before creating any Azure resource, the
 controller checks whether it already exists (by name or tag). If it exists,
 the controller adopts it by updating the CR status with the existing
-resource's IDs. This prevents duplicate resource creation after a
-reconciliation failure between the cloud API call and the status update.
+resource's IDs. This prevents duplicate resource creation after a failure
+between the cloud API call and the status update. The AWS controller uses
+this pattern when adopting VPC endpoints
+(`awsprivatelink_controller.go:629-657`), and the GCP controller checks
+for existing IP addresses and PSC endpoints before creating
+(`psc_endpoint_controller.go:587-597`, `671-681`).
 
 **Status-based short-circuit**: Controllers cache Azure resource IDs in the
 CR status (e.g., `privateLinkServiceID`, `privateEndpointID`). On
@@ -252,7 +271,11 @@ the resource directly rather than performing a list/search operation.
 
 **Condition reporting**: Each condition uses a constant machine-readable
 `Reason` (e.g., `AzureError`, `AzureSuccess`) and a human-readable
-`Message` that provides actionable context:
+`Message` that provides actionable context. This follows the pattern used
+by both the AWS controller (`AWSErrorReason`/`AWSSuccessReason` at
+`awsprivatelink_controller.go:468-485`) and the GCP controller
+(`GCPErrorReason`/`GCPSuccessReason` at `psc_endpoint_controller.go:928-934`).
+Example condition messages:
 - Success: `"Private Link Service is ready"`
 - Permission error: `"Azure API permission denied, check PrivateLinkService
   workload identity RBAC on management resource group"`
