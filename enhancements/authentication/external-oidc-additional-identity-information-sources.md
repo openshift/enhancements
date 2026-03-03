@@ -96,17 +96,17 @@ identity with necessary metadata.
 
 To achieve the goals of this enhancement, the following is proposed:
 
-* A new component, a webhook authenticator, is created that replicates
-the upstream Structured Authentication Configuration capabilities
-and adds the new configuration options and functionality on top.
+* The oauth-apiserver is updated to have a new mode of operation that
+replicates the existing KAS Structured Authentication Configuration feature,
+extending it to source claims from non-token sources.
 
 * The `authentications.config.openshift.io` API is updated to add new
 configuration fields that map to the configuration options for this new
 functionality.
 
 * The Cluster Authentication Operator / HyperShift Control Plane Operator
-is updated to deploy and configure the new webhook authenticator only 
-when the new API fields are configured.
+is updated to deploy and configure the oauth-apiserver in this new mode of
+operation whenever the External OIDC functionality is opted into.
 
 ### Workflow Description
 
@@ -335,6 +335,8 @@ AuthenticationConfiguration API. This API represents the configuration file
 that is read by the webhook to mimic how the KAS StructuredAuthenticationConfiguration 
 API represents a configuration file.
 
+This will be a net-new API used by the oauth-apiserver, accepted as a configuration file.
+
 > [!NOTE]
 > Deviations from the OpenShift API are intentional to align more closely with the
 > existing AuthenticationConfiguration API structure and input semantics.
@@ -412,7 +414,7 @@ externalClaims:
 #### Hypershift / Hosted Control Planes
 
 No unique considerations for making this change work with HyperShift beyond updates to the appropriate controllers
-to deploy and configure the new webhook authenticator component when necessary based on configuration options.
+to deploy and configure the oauth-apiserver component in its new mode of operation when necessary based on configuration options.
 
 #### Standalone Clusters
 
@@ -423,11 +425,9 @@ Yes, this is applicable to standalone clusters.
 >How does this proposal affect the resource consumption of a
 >single-node OpenShift deployment (SNO), CPU and memory?
 
-Because this will be adding a new component for authentication decisions, there will likely
-be an increase in the CPU and memory consumption of platform components on the cluster.
-
-To mitigate this, the webhook authenticator will only be deployed and configured when an end-user
-has explicitly opted into the new functionality via the new configuration options.
+There will be an increase from how the External OIDC feature is configured today,
+but will be less than or equivalent to the standard mode of cluster authentication
+that deploys the oauth-apiserver today.
 
 >How does this proposal affect MicroShift? For example, if the proposal
 >adds configuration options through API resources, should any of those
@@ -501,27 +501,20 @@ flowchart TD
 
 #### Proposed Architectural Changes
 
-##### New Component: Webhook Authenticator
+##### OpenShift OAuth API Server (oauth-apiserver)
 
-When the new configuration fields for sourcing claim information are set,
-the Cluster Authentication Operator will be responsible for rolling out
-and configuring this new component.
+The OpenShift OAuth API Server, which is already acting as a webhook authenticator,
+will have a new subcommand added to it's binary to enable an external OIDC operation mode.
 
-This component will be responsible for translating a token to user identity information
-to be returned to the Kubernetes API server.
-
-It will be constrained such that _only_ the Kubernetes API server can communicate with it.
-
-It will re-implement/copy all existing logic from the Kubernetes API server for the Structured Authentication Configuration
-authenticator as a baseline.
+In this operation mode, only the `/apis/oauth.openshift.io/v1/tokenreviews` endpoint will be
+served.
+This mode will re-implement/copy all existing logic from the Kubernetes API server for the
+Structured Authentication Configuration authenticator as a baseline.
 From this baseline, additional changes will be made as necessary to support the new desired functionality
-of source claim information from external sources.
-
-It will be stateless and deployed as a standalone component via a deployment in the `openshift-authentication` namespace.
+of sourcing claim information from external sources.
 
 Requests to external sources will be made and processed concurrently with strict timeouts (timeout TBD).
-Validations will be enforced at configuration time to ensure no duplicate requests or
-claims are ever created.
+Validations will be enforced at configuration time to ensure no duplicate requests or claims are ever created.
 
 Request failures will result in partial availability of user identity information for identity mapping.
 For example, a failure to fetch a user's group memberships from an external source may result in the absence
@@ -529,7 +522,7 @@ of a `groups` claim being available for use in cluster identity building.
 It is up to end-user discretion to configure identity mapping behavior to proceed with partial information
 or to fail on absence of a claim through their usage of CEL expressions.
 
-Diagram of how this new component will work:
+Diagram of how this new operation mode will work:
 ```mermaid
 flowchart LR
     A("Kubernetes API Server") -- TokenReview --> B
@@ -539,50 +532,32 @@ flowchart LR
     C("External Claims Source")
 ```
 
-##### Cluster Authentication Operator / HyperShift Control Plane Operator
+To prevent breaking implicit assumptions that the presence of the `oauth-apiserver` `Service` means that the
+oauth-apiserver is running and serving the same API surface it always has, a new `Service`, `token-review`, will be created
+specifically for the Kubernetes API server to use for communicating with the webhook authenticator.
+This enables us to tear down the `oauth-apiserver` `Service` when configuring the new external OIDC operation mode
+without requiring a configuration change on the kube-apiserver.
 
-The Cluster Authentication Operator (Control Plane Operator for HyperShift) will be responsible for deploying and configuring the
-correct components based on the user-provided configuration in the `authentications.config.openshift.io/cluster`
-resource.
+##### Cluster Authentication Operator / Cluster Kube-APIServer Operator / HyperShift Control Plane Operator
 
-If the configuration does not configure any providers with the new external claim sourcing configuration options,
-it will ensure that the webhook authenticator is not deployed and will directly configure the Kubernetes API server
-using the Structured Authentication Configuration file.
+###### Changes to existing external OIDC behavior
 
-If the configuration only contains providers that use the new external claim sourcing configuration options,
-it will ensure that the webhook authenticator is deployed and configured, the Kubernetes API server is configured
-to use the webhook authenticator, and the Structured Authentication Configuration is not configured on the Kubernetes API server
+Today, when configuring the `authentication.config.openshift.io/cluster` resource to use the External OIDC feature,
+the oauth-apiserver and oauth-server components are torn down and the kube-apiserver's Structured Authentication Configuration
+feature is configured to point to a revisioned `ConfigMap` that is mounted as a file.
 
-If there is a mixed configuration, it will ensure that the webook authenticator is deployed and configured for the providers leveraging
-the new configuration options, the Kubernetes API server is configured to use the webhook authenticator, and the Structured Authentication
-Configuration is configured on the Kubernetes API server for the providers that are not configured to leverage the new functionality.
+With the changes proposed in this enhancement, the oauth-apiserver will no longer be torn down but instead configured to use its
+new external OIDC operation mode and the kube-apiserver will not have any configuration changes made.
 
-The webhook authenticator will implement hot-reloading capabilities for the configuration file so that any changes to the configuration file
-are automatically loaded without downtime, preventing disruption of communication between the KAS and the webhook authenticator
-during configuration changes.
+To facilitate this new behavior, the following changes will need to be made:
 
-**NOTE**: The hot-reloading behavior _only_ applies to the webhook authenticator and changes to it's configuration file. For changes that impact
-the Structured Authentication Configuration file for the KAS, there will still need to be a revisioned rollout that occurs, potentially incurring
-disruption on SNO clusters. In an ideal world, there should be minimal to no disruption on HA clusters for a valid Structured Authentication Configuration.
-In the future, work may be done to enable the KAS hot-reloading functionality for the Structured Authentication Configuration to mitigate this but that has non-trivial
-impacts to our revisioned rollout process - and is out of scope of the proposed effort.
-
-Diagram of the new behavior:
-```mermaid
-flowchart LR
-    A("Cluster Authentication Operator") -- Reads --> B
-    B("authentications.config.openshift.io/cluster")
-    C{"External Claim Sources Configured?"}
-    A --> C
-    C -- Yes --> D
-    C -- No --> F
-    D{"Only External Claim Sources Configured?"}
-    D -- Yes --> E
-    D -- No --> E
-    D -- No --> F
-    E("Deploy + Configure Webhook Authenticator")
-    F("Configure kube-apiserver Structured Authn.")
-```
+- The `cluster-kube-apiserver-operator`'s config observer changes made in https://github.com/openshift/cluster-kube-apiserver-operator/pull/1760 are reverted/removed
+so that the kube-apiserver is _always_ configured to call the oauth-apiserver as a webhook authenticator, regardless of its operation mode.
+- The `cluster-authentication-operator` is updated to remove everything _EXCEPT_ the following resources related to the oauth-apiserver:
+    - The `oauth-apiserver` deployment. Instead, this is re-configured to set the new operation mode. The same serving certificates
+    will be reused.
+    - The `oauth-apiserver/token-review` `Service`. The `cluster-authentication-operator` will be updated to ensure this always exists.
+- The HyperShift Control Plane Operator will be updated as appropriate to perform the same behavior.
 
 ##### Full Architecture Diagram
 
@@ -605,7 +580,7 @@ flowchart TD
         F -- Configures --> B
         F -- Configures --> C
         F -- Deploys --> G
-        G("New Webhook Authenticator")
+        G("OAuth API Server w/ External OIDC Mode")
         C -- TokenRequest --> G
         G -- UserInfo --> C
     end
@@ -646,24 +621,9 @@ flowchart TD
     Alternatively, there is always the break-glass scenario of continuing to
     use x509 certificate based authentication in the event of an outage.
 
-4. Mixing authentication responsibilities between the KAS and new webhook authenticator
-    * **Mitigation**: The webhook authenticator is an implementation detail that
-    users do not need to concern themselves with beyond troubleshooting purposes.
-    To an end-user, they will just make configuration changes on a central API
-    and the platform operators will handle the correct configuration of platform components.
-
-5. Additional resource consumption
-    * **Mitigation**: None. This is a side effect of needing to generically support
-    fetching of user identity information from an external source. This is no worse
-    than the integrated OAuth server running. In the future, the intention is for
-    this to get contributed back upstream to be native in the Kubernetes API server
-    so an additional component is no longer necessary.
-
 6. Maintenance burden
     * **Mitigation**: While it is a maintenance burden to re-implement and keep up-to-date
-    the logic that exists today in the Kubernetes API server, this is done with the intention
-    of contributing this back to the upstream to be handled natively by the KAS.
-    In the event this isn't accepted upstream, this approach has a better maintenance cost than
+    the logic that exists today in the Kubernetes API server, this approach has a better maintenance cost than
     maintaining specialized logic for handling the nuances of every identity provider our customers
     use. Kubernetes has a history of maintaining stability and backwards compatibility where
     a per-identity-provider approach to solving this problem is likely to be more brittle.
@@ -677,9 +637,8 @@ flowchart TD
 
 The main drawbacks of this approach are:
 - Technical complexity and development time/cost
-- Yet another middleman component for authentication (we are trying to move away from the OAuth server, this moves the needle back towards that state)
+- Yet another middleman component for authentication (we were trying to move away from the OAuth server, this moves us back to it)
 - Users have more complexity to deal with for sourcing external claim information as opposed to a tailored solution.
-- If contributed back upstream, we may be stuck supporting an API model that doesn't translate well.
 
 While not perfect, the proposed approach was chosen because it:
 - Is less maintenance burden to implement a generic approach than maintaining a specialized implementation per identity provider.
@@ -798,6 +757,143 @@ additional overhead and complexity to this process is not something we should ta
 
 Because there is a mechanism to implement this solution out-of-tree, this approach is not preferred.
 
+### Webhook as a standalone component
+
+This alternative was the original proposal and was rejected in favor of the currently proposed
+approach of re-using the oauth-apiserver. 
+
+**Reason for rejection**:
+
+Re-using the oauth-apiserver has a few benefits over implementing a standalone component:
+
+- No kube-apiserver revision rollouts. Because the kube-apiserver is already configured to
+use the oauth-apiserver as a webhook authenticator we can reconfigure the oauth-apiserver without
+having to make any configuration changes to the kube-apiserver.
+- No need to create the boilerplate to build a new component into the OpenShift payload.
+Because the oauth-apiserver is already a component in the payload, adding the functionality
+there makes it so that it is inherently included in the payload.
+- The oauth-apiserver already has a dedicated allocation of precious control plane node resources.
+Re-using the oauth-apiserver means we don't have to justify adding a new component to the cluster
+that runs on control plane nodes and consumes compute resources.
+
+For posterity, the original proposal text has been copied below:
+
+##### New Component: Webhook Authenticator
+
+When the new configuration fields for sourcing claim information are set,
+the Cluster Authentication Operator will be responsible for rolling out
+and configuring this new component.
+
+This component will be responsible for translating a token to user identity information
+to be returned to the Kubernetes API server.
+
+It will be constrained such that _only_ the Kubernetes API server can communicate with it.
+
+It will re-implement/copy all existing logic from the Kubernetes API server for the Structured Authentication Configuration
+authenticator as a baseline.
+From this baseline, additional changes will be made as necessary to support the new desired functionality
+of source claim information from external sources.
+
+It will be stateless and deployed as a standalone component via a deployment in the `openshift-authentication` namespace.
+
+Requests to external sources will be made and processed concurrently with strict timeouts (timeout TBD).
+Validations will be enforced at configuration time to ensure no duplicate requests or
+claims are ever created.
+
+Request failures will result in partial availability of user identity information for identity mapping.
+For example, a failure to fetch a user's group memberships from an external source may result in the absence
+of a `groups` claim being available for use in cluster identity building.
+It is up to end-user discretion to configure identity mapping behavior to proceed with partial information
+or to fail on absence of a claim through their usage of CEL expressions.
+
+Diagram of how this new component will work:
+```mermaid
+flowchart LR
+    A("Kubernetes API Server") -- TokenReview --> B
+    B("Webhook Authenticator")
+    B -- UserInfo --> A
+    B -- Fetch External Claims --> C
+    C("External Claims Source")
+```
+
+##### Cluster Authentication Operator / HyperShift Control Plane Operator
+
+The Cluster Authentication Operator (Control Plane Operator for HyperShift) will be responsible for deploying and configuring the
+correct components based on the user-provided configuration in the `authentications.config.openshift.io/cluster`
+resource.
+
+If the configuration does not configure any providers with the new external claim sourcing configuration options,
+it will ensure that the webhook authenticator is not deployed and will directly configure the Kubernetes API server
+using the Structured Authentication Configuration file.
+
+If the configuration only contains providers that use the new external claim sourcing configuration options,
+it will ensure that the webhook authenticator is deployed and configured, the Kubernetes API server is configured
+to use the webhook authenticator, and the Structured Authentication Configuration is not configured on the Kubernetes API server
+
+If there is a mixed configuration, it will ensure that the webook authenticator is deployed and configured for the providers leveraging
+the new configuration options, the Kubernetes API server is configured to use the webhook authenticator, and the Structured Authentication
+Configuration is configured on the Kubernetes API server for the providers that are not configured to leverage the new functionality.
+
+The webhook authenticator will implement hot-reloading capabilities for the configuration file so that any changes to the configuration file
+are automatically loaded without downtime, preventing disruption of communication between the KAS and the webhook authenticator
+during configuration changes.
+
+**NOTE**: The hot-reloading behavior _only_ applies to the webhook authenticator and changes to it's configuration file. For changes that impact
+the Structured Authentication Configuration file for the KAS, there will still need to be a revisioned rollout that occurs, potentially incurring
+disruption on SNO clusters. In an ideal world, there should be minimal to no disruption on HA clusters for a valid Structured Authentication Configuration.
+In the future, work may be done to enable the KAS hot-reloading functionality for the Structured Authentication Configuration to mitigate this but that has non-trivial
+impacts to our revisioned rollout process - and is out of scope of the proposed effort.
+
+Diagram of the new behavior:
+```mermaid
+flowchart LR
+    A("Cluster Authentication Operator") -- Reads --> B
+    B("authentications.config.openshift.io/cluster")
+    C{"External Claim Sources Configured?"}
+    A --> C
+    C -- Yes --> D
+    C -- No --> F
+    D{"Only External Claim Sources Configured?"}
+    D -- Yes --> E
+    D -- No --> E
+    D -- No --> F
+    E("Deploy + Configure Webhook Authenticator")
+    F("Configure kube-apiserver Structured Authn.")
+```
+
+##### Full Architecture Diagram
+
+```mermaid
+flowchart TD
+    subgraph Cluster
+        subgraph kube-apiserver
+            subgraph Authentication
+                A("...") -- Chains --> B
+                B("JWTAuthenticator [Structured Authn]") -- Chains --> C
+                C("WebhookTokenAuthenticator")
+            end
+
+            Authentication -- Sends UserInfo --> D
+            D("Authorization")
+        end
+
+        E("authentications.config.openshift.io/cluster")
+        F("Cluster Authentication Operator") -- Reads --> E
+        F -- Configures --> B
+        F -- Configures --> C
+        F -- Deploys --> G
+        G("New Webhook Authenticator")
+        C -- TokenRequest --> G
+        G -- UserInfo --> C
+    end
+
+    H("External Claim Source")
+    G -- Fetches Claims --> H
+
+    I("Request") --> A
+```
+
+
 ## Open Questions [optional]
 
 TBD. Please leave any questions that warrant significant discussion or that you feel are relevant open questions here.
@@ -818,7 +914,7 @@ is rejected for native support in upstream.
 
 ## Test Plan
 
-TBD. This feature will start in DevPreviewNoUpgrade.
+This feature will start in DevPreviewNoUpgrade.
 
 A concrete test plan will be written before promotion to GA.
 
@@ -826,13 +922,14 @@ At a high-level, there will be:
 - Component-specific tests
 - Integration / E2E tests (openshift/origin _or_ OTE tests)
 
-## Graduation Criteria
+There already exists origin and e2e tests for the existing External OIDC feature approach.
+When moving to this new topology, all existing functionality-specific tests should pass (tests that check deployment topology will need to be modified).
 
-TBD.
+## Graduation Criteria
 
 ### Dev Preview -> Tech Preview
 
-TBD.
+Proof that this new mode of operation and functionality successfully enables the use cases outlined by this enhancement.
 
 ### Tech Preview -> GA
 
@@ -846,10 +943,15 @@ Not deprecating any features.
 
 ### Upgrade
 
-In order to utilize this feature after an upgrade, users will have to explicitly configure
-the new configuration fields to opt-in to this functionality.
+In the event a user that has opted-in to the existing External OIDC functionality/deployment topology performs an upgrade
+to a version that uses this new deployment topology, their cluster may undergo another revision rollout cycle
+to configure the cluster with the new External OIDC topology.
 
-If a user does not explicitly opt-in to the functionality, all previous behavior will remain the same.
+For HA clusters, there should be no impact as the same configuration will be in use across an older version of the kube-apiserver and the
+newly configured oauth-apiserver mode.
+
+For SNO clusters, there may be some additional disruption post-upgrade as the sole kube-apiserver undergoes an additional revision rollout
+to be re-configured to talk to the oauth-apiserver serving in it's new mode of operation.
 
 ### Downgrade
 
@@ -862,30 +964,19 @@ If they have not explicitly configured these new fields, this will have no impac
 
 There should be no issues related to version skew.
 
-The new webhook authenticator will be a standalone component managed by the Cluster Authentication Operator.
-The Kubernetes API server, and OpenShift, has had support for configuring webhook authenticators for quite
-some time now.
-The `TokenReview` API that the Kubernetes API server uses to communicate with webhook authenticators has been
-`v1` since Kubernetes 1.6.
-
-In the event the `authentications.config.openshift.io/cluster` resource is configured before the
-Cluster Authentication Operator has successfully upgraded, the configuration will not take effect until
-it's upgrade is completed.
+Re-configuration of the kube-apiserver to talk to the oauth-apiserver running in it's new mode of operation
+will not happen until the Cluster Authentication Operator has successfully upgraded.
 
 ## Operational Aspects of API Extensions
 
 **Impact to SLIs**
 
-- Changes to configuration require updates to either Kubernetes API server configuration or
-webhook authenticator configuration, which causes a revision rollout to occur and may
-cause some cluster disruption - especially if it requires a revision rollout of the KAS.
-- Configuration of the new fields add latency to every request in which claims must
-be sourced from an external source.
+- Changes to configuration will no longer require revision rollouts of the kube-apiserver, which is a net positive impact.
+- Configuration of the new fields add latency to every request in which claims must be sourced from an external source.
 
 **Measurement of SLI Impacts**
 
-SLI impacts will be measured every release automatically in CI through
-automated regression testing.
+SLI impacts will be measured every release automatically in CI through automated regression testing.
 
 **Possible Failure Modes**
 
@@ -915,7 +1006,7 @@ modes are:
 The most common ways to detect failure modes will be:
 - Previously authenticated users receiving unauthenticated errors
 - KAS logs, specifically ones related to token authentication
-- New webhook authenticator logs and metrics
+- oauth-apiserver logs
 
 ### Recovering from failures
 
@@ -928,7 +1019,7 @@ Kubernetes API server.
 
 ### Graceful failures
 
-The new webhook authenticator will be built to fail gracefully.
+The new oauth-apiserver operation mode will be built to fail gracefully.
 
 At a high-level, this means that to the best of our ability things like
 unavailability of an external claims source will not cause
@@ -939,4 +1030,4 @@ A degraded state may result in an unexpected reduction in privileges for end use
 
 ## Infrastructure Needed [optional]
 
-Likely will need a new repository for the new webhook authenticator.
+None.
