@@ -555,9 +555,14 @@ affects:
   to the PE private IP. No changes to guest cluster components.
 
 The existing ARO HCP code paths are not modified. The private topology
-controllers are only registered when the platform is Azure and `IsPrivateHCP()`
-returns true, which only matches self-managed Azure clusters with non-Public
-endpoint access.
+controllers are gated on the presence of `endpointAccess` on
+`AzurePlatformSpec` (the consumer-facing knob introduced by this enhancement),
+not on `IsPrivateHCP()` alone — since `IsPrivateHCP()` also returns true for
+ARO HCP clusters that use Swift
+(`support/util/visibility.go:21`). The `IsPrivateHCP()` function will be
+extended to include Azure `endpointAccess` checks (similar to how it handles
+AWS and GCP), but the PLS controller registration uses `endpointAccess`
+directly to avoid conflating Swift and PLS code paths.
 
 #### Standalone Clusters
 
@@ -784,9 +789,10 @@ before cluster creation. Documentation covers subnet requirements.
 
 **Risk**: Breaking existing ARO HCP code paths.
 
-**Mitigation**: All new controllers are gated on `IsPrivateHCP()` which only
-returns true for self-managed Azure with non-Public endpoint access. ARO HCP
-uses Swift for private connectivity and is unaffected by these changes.
+**Mitigation**: All new controllers are gated on the presence of
+`endpointAccess` on `AzurePlatformSpec`, not on `IsPrivateHCP()` alone (which
+also returns true for ARO HCP with Swift). ARO HCP uses Swift for private
+connectivity and is unaffected by these changes.
 
 ### Drawbacks
 
@@ -974,7 +980,8 @@ acceptable because new private clusters should only be created after both
 components are upgraded.
 
 Existing public clusters are unaffected by version skew as the private
-topology controllers are gated on `IsPrivateHCP()`.
+topology controllers are gated on the presence of `endpointAccess` on
+`AzurePlatformSpec`.
 
 ## Operational Aspects of API Extensions
 
