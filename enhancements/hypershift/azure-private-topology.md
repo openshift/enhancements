@@ -89,7 +89,8 @@ don't have to manually configure Azure networking resources.
 3. Provide CLI flags for configuring private topology at cluster creation time.
 
 4. Design the API to accommodate future enhancements (e.g., dedicated OAuth
-   private load balancer) without breaking changes.
+   private load balancer) and current/future managed services scenarios
+   (e.g., ARO HCP) without breaking changes.
 
 ### Non-Goals
 
