@@ -302,13 +302,36 @@ requeue and relies on a watch event when the CR status is updated.
 
 #### Deletion
 
-When the HostedCluster is deleted:
-- The `AzurePrivateLinkService` CR is garbage collected via owner references
-  to the HostedControlPlane
-- Each controller uses finalizers to clean up its Azure resources in reverse
-  order: DNS → PE → PLS
-- The router's internal LB is cleaned up automatically when the router Service
-  is deleted
+When the HostedCluster is deleted, controllers clean up Azure resources in
+reverse order using finalizers:
+
+1. **CPO Controller** (finalizer on `AzurePrivateLinkService` CR):
+   deletes Private DNS Zone → deletes Private Endpoint
+2. **HO Platform Controller** (finalizer on `AzurePrivateLinkService` CR):
+   rejects/removes active PE connections → deletes Private Link Service
+3. The `AzurePrivateLinkService` CR is garbage collected via owner references
+   to the HostedControlPlane once all finalizers are removed
+4. The router's internal LB is cleaned up automatically when the router
+   Service is deleted
+
+**Rejecting PE connections before PLS deletion**: Azure prevents deleting a
+PLS that has active PE connections. The HO Platform Controller must enumerate
+PE connections on the PLS and reject/remove them before issuing the PLS
+delete, mirroring AWS's `rejectVpcEndpointConnections` pattern
+(`hypershift-operator/controllers/platform/aws/controller.go:615-651`). If
+the PLS has already been deleted, the controller treats this as a no-op.
+
+**Credential lifecycle during deletion**: A chicken-egg problem exists where
+guest cluster infrastructure credentials may become invalid before cleanup
+completes — the CPO Controller needs valid credentials to delete PE and DNS
+resources, but the HCP (which provides those credentials) may be deleted
+first. AWS has this same problem: when `getClients()` fails, the CPO logs
+the error and skips cleanup, potentially orphaning resources
+(`control-plane-operator/controllers/awsprivatelink/awsprivatelink_controller.go:401-412`).
+To mitigate this, the CPO Controller should add a finalizer on the HCP
+itself to ensure Azure cleanup completes while the HCP (and its credentials)
+are still available, removing the finalizer only after PE and DNS resources
+are confirmed deleted.
 
 ### API Extensions
 
