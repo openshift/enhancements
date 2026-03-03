@@ -731,6 +731,37 @@ type AzurePrivateConnectivityConfig struct {
 }
 ```
 
+#### Interaction with Services (ServicePublishingStrategyMapping)
+
+The `endpointAccess` field controls *visibility* (public vs private) while
+`Services []ServicePublishingStrategyMapping` controls *how* each service
+is exposed (Route, LoadBalancer, NodePort, etc.). These are complementary:
+
+- **KAS ServicePublishingStrategy `Route`** (default for Azure): When
+  `endpointAccess.type` is `Private` or `PublicAndPrivate`, the KAS Route
+  is served by the private router, whose LB is annotated as internal. The
+  PLS attaches to this internal LB. This is the supported configuration
+  for this enhancement — KAS via Route means all services share a single
+  internal LB and only one PLS per cluster is needed.
+- **KAS ServicePublishingStrategy `LoadBalancer`**: If KAS uses a dedicated
+  LB, a second PLS would be required (one for KAS LB, one for the router's
+  LB serving OAuth/Konnectivity/Ignition). This configuration is not
+  supported in this enhancement (see Non-Goals).
+- **Other services** (OAuth, Konnectivity, Ignition): These go through the
+  private router regardless and do not need separate PLS resources.
+
+The `endpointAccess` field does not change the `Services` configuration.
+The CPO reads `Services` to determine KAS publishing strategy
+(`infra.go:199`) and reads `endpointAccess` to determine whether to
+set up private connectivity. When both are present, the CPO:
+1. Publishes KAS per the `Services` strategy (Route or LoadBalancer)
+2. If `endpointAccess.type != Public`, the CPO Observer creates the
+   `AzurePrivateLinkService` CR to set up the PLS/PE/DNS path
+
+This mirrors how AWS works: `EndpointAccess` and `Services` are independent
+fields on `AWSPlatformSpec` / `HostedClusterSpec` respectively, and the CPO
+reconciles both independently (`infra.go:198-297`).
+
 #### KAS via Route and Private Router
 
 KAS is exposed via a Route on the private router rather than via a dedicated
