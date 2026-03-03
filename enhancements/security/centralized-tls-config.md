@@ -335,7 +335,16 @@ In standalone clusters, these components are configured by their SLO via command
 
 **Category 3 — Self-configuring components (both operator and operand):**
 
-In standalone clusters, these components watch `apiservers.config.openshift.io/cluster` and configure their own TLS servers directly. In HyperShift, if such a component does not already have access to the management cluster's KAS, it will be watching the wrong config object (the hosted cluster's rather than the management cluster's). These components need to accept **new CLI flags for TLS settings that take precedence** over the `apiservers.config.openshift.io/cluster` config. The CPO sets these flags when deploying the component.
+In standalone clusters, these components watch `apiservers.config.openshift.io/cluster` and configure their own TLS servers directly. In HyperShift, if such a component does not already have access to the management cluster's KAS, it will be watching the wrong config object (the hosted cluster's rather than the management cluster's). These components must accept CLI flags for TLS settings that take precedence over the `apiservers.config.openshift.io/cluster` config. The CPO sets these flags when deploying the component.
+
+To ensure consistency across all category 3 components, these flags must follow the same convention used by upstream Kubernetes components:
+
+- **`--tls-min-version`**: Minimum TLS version supported. Accepts values: `VersionTLS10`, `VersionTLS11`, `VersionTLS12`, `VersionTLS13`.
+- **`--tls-cipher-suites`**: Comma-separated list of cipher suites for the server. Accepts the cipher suite names defined by Go's `crypto/tls` package.
+
+These flags should be implemented using [`k8s.io/component-base/cli/flag`](https://github.com/kubernetes/kubernetes/blob/master/staging/src/k8s.io/component-base/cli/flag/ciphersuites_flag.go), which provides helpers for parsing, validation, and enumeration of accepted values (`TLSVersion()`, `TLSCipherSuites()`, `TLSPossibleVersions()`, `TLSCipherPossibleValues()`). The values are directly pluggable into Go's [`crypto/tls.Config`](https://pkg.go.dev/crypto/tls#Config). For reference, [`k8s.io/apiserver/pkg/server/options/serving.go`](https://github.com/kubernetes/kubernetes/blob/master/staging/src/k8s.io/apiserver/pkg/server/options/serving.go) demonstrates how to define these flags via `AddFlags()` and how to validate and apply them via `Validate()` and `ApplyTo()`.
+
+When these flags are set by the CPO, they take precedence over any value the component would read from `apiservers.config.openshift.io/cluster`. When they are not set, the component falls back to its normal behavior of watching the cluster config.
 
 | Category | Standalone Mechanism | HyperShift Mechanism |
 |---|---|---|
