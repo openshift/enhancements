@@ -77,7 +77,7 @@ The new `tlsAdherence` field is a **sibling** to the existing `tlsSecurityProfil
 
 **Empty/Unset (default):** When the field is omitted or set to an empty string, the cluster defaults to `LegacyAdheringComponentsOnly` behavior. Components should treat an empty value the same as `LegacyAdheringComponentsOnly`.
 
-**`LegacyAdheringComponentsOnly`:** Maintains backward-compatible behavior. Only the externally exposed API server components (kube-apiserver, openshift-apiserver, oauth-apiserver) honor the configured TLS profile. Other components continue to use their individual TLS configurations (e.g., `IngressController.spec.tlsSecurityProfile`, `KubeletConfig.spec.tlsSecurityProfile`, or component defaults). See the "Components With Explicit Override Capability" section for details on component-specific TLS configuration options. This mode prevents breaking changes when upgrading clusters, allowing administrators to opt-in to expanded enforcement via `StrictAllComponents` when ready.
+**`LegacyAdheringComponentsOnly`:** Maintains backward-compatible behavior. Components that already honor the cluster-wide TLS profile (such as kube-apiserver, openshift-apiserver, oauth-apiserver, and others) continue to do so. Components that do not already honor it continue to use their individual TLS configurations (e.g., `IngressController.spec.tlsSecurityProfile`, `KubeletConfig.spec.tlsSecurityProfile`, or component defaults). No additional components are required to start honoring the cluster-wide profile in this mode. See the "Components With Explicit Override Capability" section for details on component-specific TLS configuration options. This mode prevents breaking changes when upgrading clusters, allowing administrators to opt-in to expanded enforcement via `StrictAllComponents` when ready.
 
 **`StrictAllComponents`:** Enforces strict adherence to the TLS configuration. All components must honor the configured TLS profile unless they have a component-specific TLS configuration that overrides it (see "Override Precedence" below). If a core component fails to honor the TLS configuration when `StrictAllComponents` is set, this is treated as a **bug** requiring fixes and backporting. This mode is recommended for security-conscious deployments and is required for certain compliance frameworks.
 
@@ -85,7 +85,7 @@ The new `tlsAdherence` field is a **sibling** to the existing `tlsSecurityProfil
 
 | Mode | API Servers (kube, openshift, oauth) | Other Components |
 |------|--------------------------------------|------------------|
-| `LegacyAdheringComponentsOnly` | Honor cluster-wide TLS profile | Use their individual TLS configurations |
+| `LegacyAdheringComponentsOnly` | Honor cluster-wide TLS profile | Maintain existing behavior (some already honor cluster-wide profile; others use their individual TLS configurations) |
 | `StrictAllComponents` | Honor cluster-wide TLS profile | Honor cluster-wide TLS profile (unless component-specific override exists) |
 
 **Unknown Enum Handling:** If a component encounters an unknown value for `tlsAdherence`, it should treat it as `StrictAllComponents` and log a warning. This ensures forward compatibility while defaulting to the more secure behavior.
@@ -322,8 +322,6 @@ The `tlsAdherence` field will be introduced behind a feature gate:
 #### Hypershift / Hosted Control Planes
 
 For Hypershift deployments, the TLS security profile for hosted control plane components is determined by the **management cluster**, not the hosted cluster. Hosted cluster administrators should not control TLS for components running in the provider's domain.
-
-Other components that already honor the cluster-wide TLS profile via `apiservers.config.openshift.io/cluster` should continue to do so — the categories below apply specifically to components whose TLS configuration mechanism needs to change in HyperShift.
 
 HyperShift's control-plane-operator (CPO) directly manages a set of control plane components that, in standalone clusters, are managed through the normal SLO/operand chain. These components fall into three categories, each requiring a different mechanism for TLS configuration:
 
