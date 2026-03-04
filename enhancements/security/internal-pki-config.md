@@ -292,76 +292,13 @@ The compatibility level is enforced through the `+openshift:compatibility-gen:le
 
 The `PKI` resource is a cluster-scoped singleton named `cluster` in the `config.openshift.io/v1alpha1` API group.
 
-```go
-// PKI configures cryptographic parameters for certificates generated
-// internally by OpenShift components.
-type PKI struct {
-    metav1.TypeMeta   `json:",inline"`
-    metav1.ObjectMeta `json:"metadata,omitempty"`
-    Spec              PKISpec `json:"spec,omitzero"`
-}
+The full API type definitions are available in the API PR: [openshift/api#2645](https://github.com/openshift/api/pull/2645).
 
-type PKISpec struct {
-    CertificateManagement PKICertificateManagement `json:"certificateManagement,omitzero"`
-}
+Key aspects of the API:
 
-// PKICertificateManagement is a union; mode is the discriminator.
-// custom is required when mode is Custom, and forbidden otherwise.
-type PKICertificateManagement struct {
-    // mode: "Unmanaged", "Default", or "Custom".
-    Mode   PKICertificateManagementMode `json:"mode,omitempty"`
-    Custom CustomPKIPolicy              `json:"custom,omitzero"`
-}
-
-type PKICertificateManagementMode string // Unmanaged | Default | Custom
-
-type CustomPKIPolicy struct {
-    PKIProfile `json:",inline"`
-}
-
-// PKIProfile defines certificate generation parameters.
-// Category overrides take precedence over defaults.
-type PKIProfile struct {
-    // defaults applies to all certificates unless overridden. Key is required.
-    Defaults             DefaultCertificateConfig  `json:"defaults,omitzero"`
-    // signerCertificates overrides parameters for CA certificates.
-    SignerCertificates   CertificateConfig         `json:"signerCertificates,omitempty,omitzero"`
-    // servingCertificates overrides parameters for TLS serving certificates.
-    ServingCertificates  CertificateConfig         `json:"servingCertificates,omitempty,omitzero"`
-    // clientCertificates overrides parameters for client auth certificates.
-    ClientCertificates   CertificateConfig         `json:"clientCertificates,omitempty,omitzero"`
-}
-
-// DefaultCertificateConfig requires all fields so every certificate has
-// a well-defined key configuration.
-type DefaultCertificateConfig struct {
-    Key KeyConfig `json:"key,omitzero"` // required
-}
-
-// CertificateConfig is used in overrides. At least one field must be set.
-type CertificateConfig struct {
-    Key KeyConfig `json:"key,omitempty,omitzero"` // optional in overrides
-}
-
-// KeyConfig is a union; algorithm is the discriminator.
-// Exactly one of rsa or ecdsa must be set.
-type KeyConfig struct {
-    Algorithm KeyAlgorithm   `json:"algorithm,omitempty"` // RSA | ECDSA
-    RSA       RSAKeyConfig   `json:"rsa,omitzero"`        // required when RSA
-    ECDSA     ECDSAKeyConfig `json:"ecdsa,omitzero"`      // required when ECDSA
-}
-
-type RSAKeyConfig struct {
-    KeySize int32 `json:"keySize,omitempty"` // 2048–8192, multiples of 1024
-}
-
-type ECDSAKeyConfig struct {
-    Curve ECDSACurve `json:"curve,omitempty"` // P256 | P384 | P521
-}
-
-type KeyAlgorithm string // RSA | ECDSA
-type ECDSACurve   string // P256 | P384 | P521
-```
+- **`PKISpec`** contains a `certificateManagement` discriminated union with modes: `Unmanaged`, `Default`, or `Custom`.
+- **`Custom` mode** exposes a `PKIProfile` with a required `defaults` key configuration and optional category overrides for `signerCertificates`, `servingCertificates`, and `clientCertificates`.
+- **`KeyConfig`** is a discriminated union on `algorithm` (`RSA` or `ECDSA`), with `RSAKeyConfig` (key sizes 2048-8192) and `ECDSAKeyConfig` (curves P256, P384, P521) as discriminants.
 
 ### Topology Considerations
 
