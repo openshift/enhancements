@@ -178,10 +178,15 @@ plane components.
 6. The CPO Controller sees the PLS alias in the CR status and creates:
    - A Private Endpoint in the guest VNet's worker subnet (from the
      `guestSubnetID` populated by the CPO Observer) targeting the PLS
-   - A Private DNS Zone with an A record mapping the KAS hostname to the PE's
-     private IP (the controller creates the DNS zone automatically — no
-     customer pre-provisioning is required, following the GCP pattern)
-   It updates the CR status with the PE and DNS resource IDs.
+   - A Private DNS Zone (created automatically by the controller — no
+     customer pre-provisioning is required, following the GCP pattern) with
+     two A records pointing to the PE's private IP:
+     - `api.<cluster-name>.hypershift.local` — for KAS
+     - `*.apps.<cluster-name>.hypershift.local` — for all other services
+       (OAuth, Konnectivity, Ignition)
+   Both records resolve to the same PE IP since all services share the
+   single private router. It updates the CR status with the PE and DNS
+   resource IDs.
 
 7. Guest cluster worker nodes resolve the KAS hostname to the Private
    Endpoint's private IP and communicate with the control plane via:
