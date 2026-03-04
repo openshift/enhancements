@@ -1,9 +1,9 @@
 ---
 title: internal-pki-config
 authors:
-  - "@jubittajohn"
   - "@sanchezl"
-  - "@dinhxuanvu"
+  - "@hasbro17"
+  - "@rh-roman"
   - "@ksiddiqu"
 reviewers:
   - "@patrickdillon" # cluster infrastructure team, installer integration and Day-1 certificate generation
