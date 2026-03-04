@@ -79,7 +79,7 @@ Success criteria:
 - Administrators can run `oc adm upgrade --mode=preflight --to=<version>` to check compatibility.
 - Administrators can cancel preflight checks using `oc adm upgrade --clear-preflight`.
 - Preflight results appear in ClusterVersion `status` alongside other conditional update risks.
-- Preflight results are automatically cleared after cluster upgrades to prevent stale data confusion.
+- Preflight results are automatically cleared when cluster upgrades is accepted to prevent stale data confusion.
 - Partial or failed preflight results are clearly marked to distinguish from complete assessments.
 - Component maintainers can write compatibility checks into the target release, without backporting logic to earlier releases.
 
@@ -208,7 +208,7 @@ oc adm upgrade --to=5.2.0
 # 5. Monitor upgrade progress
 oc adm upgrade status
 
-# 6. Verify completion - preflight results automatically cleared
+# 6. Verify cleanup - preflight results automatically cleared when upgrade is accepted
 oc get clusterversion version -o yaml  # conditionalUpdateRisks now empty
 ```
 
@@ -371,7 +371,28 @@ This command provides a user-friendly alternative to manual patch operations, si
 ```bash
 oc adm upgrade --status-preflight
 ```
-Enhanced to display preflight execution status when active, including target version and completion progress.
+Displays **preflight execution status** when active, including:
+- **Target version** being evaluated
+- **Execution status** (in progress, completed, failed)
+- **Completion progress** for multi-component checks
+
+**Example output:**
+```
+Preflight Status: Running (target: 5.2.0)
+Progress: 4 of 7 operators checked
+Estimated completion: 2 minutes remaining
+```
+
+**Viewing discovered risks**: Preflight-discovered risks are displayed through existing commands:
+```bash
+# View all conditional update risks (including preflight results)
+oc adm upgrade recommend
+
+# View detailed risk information in ClusterVersion status
+oc get clusterversion version -o yaml
+```
+
+This approach leverages existing risk display patterns from the accepted-risks framework rather than duplicating risk presentation logic.
 
 #### Evaluating preflight checks
 
@@ -732,7 +753,7 @@ func filterRisksForTargetVersion(risks []Risk, targetVersion string) []Risk {
 
 **Implementation approach**:
 1. **Hook integration**: Add preflight cleanup to the existing CVO code path that sets `Progressing=True` when accepting non-preflight updates
-2. **Cleanup scope**: Remove all `conditionalUpdateRisks` entries with `reason: PreflightValidation`
+2. **Cleanup scope**: Remove all `conditionalUpdateRisks` entries with message prefix `"Preflight="` (all preflight-generated results regardless of condition reason)
 3. **Timing**: Cleanup occurs when CVO sets `Progressing=True` and starts reconciling the new target release's manifests
 4. **Logging**: Cleanup actions are logged for audit purposes: "Cleared N preflight results following upgrade acceptance for version X.Y.Z"
 
@@ -763,14 +784,8 @@ func (c *ClusterVersionOperator) syncUpdate(update DesiredUpdate) error {
         }
     }
     // ... continue with manifest reconciliation ...
-
-    if completed {
-        // Clear preflight results when marking upgrade complete
-        if err := c.clearPreflightResults(); err != nil {
-            log.Errorf("Failed to clear preflight results after upgrade completion: %v", err)
-            // Continue - don't fail upgrade completion due to cleanup issues
-        }
-    }
+    return nil
+}
 
     // ... rest of existing logic ...
 }
@@ -1095,7 +1110,7 @@ Since we are proceeding directly to Tech Preview, these criteria are incorporate
 
 **API Stability:**
 - `ClusterVersion.spec.desiredUpdate.mode` API extension approved and implemented
-- Integration with existing `conditionalUpdateRisks` API established with automatic cleanup after cluster upgrades
+- Integration with existing `conditionalUpdateRisks` API established with automatic cleanup when cluster upgrades is accepted
 - `oc adm upgrade` command integration stable for Tech Preview usage, including `--mode=preflight`, `--clear-preflight`, and enhanced `--status-preflight` commands
 
 **Documentation and Testing:**
