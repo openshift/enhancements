@@ -159,7 +159,9 @@ plane components.
    `service.beta.kubernetes.io/azure-load-balancer-internal: "true"`, causing
    Azure to provision an internal load balancer. All private services (KAS,
    OAuth, Konnectivity, Ignition) share this single router LB, requiring
-   only one PLS per cluster.
+   only one PLS per cluster. For `PublicAndPrivate`, a separate public LB is
+   created pointing to the same router deployment; this public LB is destroyed
+   when transitioning to `Private`. This follows the same pattern as AWS.
 
 4. The CPO Observer detects the internal LB IP on the private router Service
    and creates an `AzurePrivateLinkService` CR in the HCP namespace,
@@ -903,11 +905,12 @@ customer regardless of the underlying cluster platform.
 
 ## Open Questions [optional]
 
-1. **PublicAndPrivate dual-path pattern**: The exact mechanism for maintaining
-   both a public KAS endpoint and the private router path needs to be verified
-   against the AWS `PublicAndPrivate` implementation. With the Route-based
-   approach, the private path goes through the router's internal LB while the
-   public KAS endpoint may remain via its existing public LB.
+1. ~~**PublicAndPrivate dual-path pattern**~~: **Resolved** — follows the AWS
+   pattern. The private router deployment handles all traffic. An internal LB
+   backs the PLS for private connectivity. For `PublicAndPrivate`, a separate
+   public LB is created pointing to the same router deployment and is
+   destroyed when transitioning to `Private`. No separate KAS-specific load
+   balancer is needed.
 
 2. **PE subnet**: The current design places the PE in the guest VNet's subnet
    (same as worker nodes). Some deployments may want the PE in a dedicated
