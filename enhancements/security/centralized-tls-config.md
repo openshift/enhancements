@@ -308,6 +308,16 @@ The `tlsAdherence` field will be introduced behind a feature gate:
 - **Initial State:** Tech Preview
 - **Promotion Path:** Promote to GA quickly once core components are confirmed to honor the field
 
+**Component Interaction with the Feature Gate:** The feature gate controls whether the `tlsAdherence` field is accepted by the API server — components themselves do not need to check the feature gate. Because the field is optional (`+optional`, `omitempty`), components only need to handle the field's value when unmarshaling the APIServer config:
+
+- Field not present (feature gate disabled, or field never set): unmarshals as `""` → treat as `LegacyAdheringComponentsOnly`
+- Field present but empty (`""`): treat as `LegacyAdheringComponentsOnly`
+- Field set to `LegacyAdheringComponentsOnly`: treat as `LegacyAdheringComponentsOnly`
+- Field set to `StrictAllComponents`: treat as `StrictAllComponents`
+- Field set to any other value: treat as `StrictAllComponents` and log a warning about the unknown enum value
+
+This means components do not need to set up feature gate watching or add feature-gate-specific code paths. The `ShouldHonorClusterTLSProfile` helper in library-go encapsulates all of this logic.
+
 ### Related Work
 
 **TLS Curves:** A separate enhancement (led by Davide Salerno) adds TLS curve configuration to the existing TLS security profile. This applies to all components, not just Ingress.
