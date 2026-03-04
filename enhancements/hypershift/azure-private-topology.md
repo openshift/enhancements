@@ -147,7 +147,7 @@ plane components.
      --name my-private-cluster \
      --endpoint-access Private \
      --endpoint-access-private-nat-subnet-id /subscriptions/.../subnets/pls-nat \
-     --endpoint-access-private-allowed-subscriptions <subscription-id> \
+     --endpoint-access-private-additional-allowed-subscriptions <subscription-id> \
      # ... other required flags
    ```
 
@@ -395,14 +395,16 @@ type AzurePrivateConnectivityConfig struct {
 	// +kubebuilder:validation:MaxLength=512
 	NATSubnetID string `json:"natSubnetID"`
 
-	// allowedSubscriptions is the list of Azure subscription IDs permitted
-	// to create Private Endpoints against the PLS.
+	// additionalAllowedSubscriptions is an optional list of Azure subscription
+	// IDs permitted to create Private Endpoints against the PLS, in addition
+	// to the guest cluster's own subscription (which is always allowed
+	// automatically). This follows the same pattern as AWS's
+	// additionalAllowedPrincipals.
 	//
-	// +required
-	// +kubebuilder:validation:MinItems=1
+	// +optional
 	// +kubebuilder:validation:MaxItems=10
 	// +kubebuilder:validation:items:MaxLength=36
-	AllowedSubscriptions []string `json:"allowedSubscriptions"`
+	AdditionalAllowedSubscriptions []string `json:"additionalAllowedSubscriptions,omitempty"`
 }
 ```
 
@@ -500,9 +502,11 @@ type AzurePrivateLinkServiceSpec struct {
 	// +required
 	NATSubnetID string `json:"natSubnetID"`
 
-	// allowedSubscriptions are subscription IDs permitted to create PEs.
-	// +required
-	AllowedSubscriptions []string `json:"allowedSubscriptions"`
+	// additionalAllowedSubscriptions are extra subscription IDs permitted
+	// to create PEs, beyond the guest cluster's own subscription (which is
+	// always allowed automatically).
+	// +optional
+	AdditionalAllowedSubscriptions []string `json:"additionalAllowedSubscriptions,omitempty"`
 
 	// guestSubnetID is the guest VNet subnet for PE placement.
 	// +required
@@ -765,8 +769,8 @@ type AzureEndpointAccessSpec struct {
 }
 
 type AzurePrivateConnectivityConfig struct {
-    NATSubnetID          string   `json:"natSubnetID"`
-    AllowedSubscriptions []string `json:"allowedSubscriptions"`
+    NATSubnetID                    string   `json:"natSubnetID"`
+    AdditionalAllowedSubscriptions []string `json:"additionalAllowedSubscriptions,omitempty"`
     // Future: OAuthLoadBalancer *AzureOAuthLBConfig `json:"oauthLoadBalancer,omitempty"`
 }
 ```
@@ -1129,5 +1133,5 @@ clusters or identities.
 
 - Pre-provisioned NAT subnet with `privateLinkServiceNetworkPolicies` disabled
   in the CI Azure VNet for E2E testing
-- The CI Azure subscription ID added to the allowed subscriptions list for
-  test PLS resources
+- The CI Azure subscription ID is automatically allowed on the PLS (as the
+  guest cluster's subscription)
