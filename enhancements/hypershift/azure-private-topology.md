@@ -700,6 +700,15 @@ This split provides least-privilege security:
 - The CPO identity can only create PE and DNS in the guest subscription
 - If either credential is compromised, the blast radius is contained
 
+**Additional CPO workload identity permissions**: The existing CPO workload
+identity does not have permissions to create Private Endpoints or Private DNS
+Zones. When private endpoint access is configured, the CPO identity requires
+the following additional RBAC assignments on the guest subscription:
+- `Microsoft.Network/privateEndpoints/*` — create and manage the Private
+  Endpoint in the guest VNet
+- `Microsoft.Network/privateDnsZones/*` — create and manage the Private DNS
+  Zone and A records
+
 #### Comparison to AWS and GCP
 
 | Aspect | AWS | GCP | Azure (this EP) |
