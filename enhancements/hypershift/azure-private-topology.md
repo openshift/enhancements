@@ -448,6 +448,28 @@ This follows the same pattern as AWS and GCP:
 The identity is only required when the HO manages clusters with non-Public
 endpoint access.
 
+#### Operator Installation Changes
+
+The `hypershift install` command requires a new flag when the operator will
+manage clusters with private endpoint access:
+
+```bash
+hypershift install \
+  --azure-pls-managed-identity-client-id <client-id> \
+  # ... other existing flags
+```
+
+This flag configures the HO deployment to authenticate to Azure for PLS
+operations by:
+1. Annotating the HO service account with
+   `azure.workload.identity/client-id: <client-id>` for Azure Workload
+   Identity federation
+2. Setting the `AZURE_PLS_CLIENT_ID` environment variable on the HO pod
+   so the platform controller can construct an Azure credential
+
+The managed identity referenced by `<client-id>` must have Network
+Contributor RBAC on the management cluster's resource group.
+
 #### New CRD: AzurePrivateLinkService
 
 A namespaced custom resource in the `hypershift.openshift.io` API group,
