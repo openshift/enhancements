@@ -177,7 +177,8 @@ plane components.
    - A Private Endpoint in the guest VNet's worker subnet (from the
      `guestSubnetID` populated by the CPO Observer) targeting the PLS
    - A Private DNS Zone with an A record mapping the KAS hostname to the PE's
-     private IP
+     private IP (the controller creates the DNS zone automatically — no
+     customer pre-provisioning is required, following the GCP pattern)
    It updates the CR status with the PE and DNS resource IDs.
 
 7. Guest cluster worker nodes resolve the KAS hostname to the Private
@@ -705,6 +706,7 @@ This split provides least-privilege security:
 | Management-side resource | VPC Endpoint Service | Service Attachment | Private Link Service |
 | Customer-side resource | VPC Endpoint + SG | PSC Endpoint (Forwarding Rule) | Private Endpoint |
 | DNS | Route53 Private Zone | Cloud DNS | Private DNS Zone |
+| DNS zone creation | CLI (`create infra`) pre-creates private zone | Controller creates Cloud DNS zone | Controller creates Private DNS Zone |
 | HO creates | VPC Endpoint Service | Service Attachment | PLS |
 | CPO creates | VPC Endpoint + SG + DNS | PSC Endpoint + IP + DNS | PE + DNS |
 
