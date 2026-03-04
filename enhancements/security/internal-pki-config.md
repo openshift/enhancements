@@ -349,6 +349,10 @@ pki:
 - MicroShift's lighter weight makes ECDSA particularly attractive for resource-constrained environments
 - The MicroShift team should map this configuration to the same internal PKI infrastructure
 
+#### OpenShift Kubernetes Engine
+
+This enhancement is fully compatible with OpenShift Kubernetes Engine (OKE). The PKI configuration resource controls cryptographic parameters for internally generated certificates, which is a core platform capability available in both OCP and OKE. It does not depend on any features excluded from the OKE product offering.
+
 ### Implementation Details/Notes/Constraints
 
 #### Certificate Category Classification
