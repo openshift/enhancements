@@ -327,7 +327,7 @@ HyperShift's control-plane-operator (CPO) directly manages a set of control plan
 
 **Category 1 — Second-Level Operators (SLOs) that are HyperShift-aware:**
 
-In standalone clusters, these operators watch `apiservers.config.openshift.io/cluster` and configure their operands. In HyperShift, some of these SLOs are run directly by the CPO and are already HyperShift-aware — they have access to the management cluster's KAS and can see the `HostedCluster` CR. These components should read the TLS profile from the `HostedCluster` CR spec in the management KAS rather than looking for the `apiservers.config.openshift.io/cluster` object in the hosted cluster's KAS.
+In standalone clusters, these operators watch `apiservers.config.openshift.io/cluster` and configure their operands. In HyperShift, some of these SLOs are run directly by the CPO and are already HyperShift-aware — they have access to the management cluster's KAS and can see the `HostedCluster` CR. These components should read the TLS profile and `tlsAdherence` setting from the `HostedCluster` CR spec in the management KAS rather than looking for the `apiservers.config.openshift.io/cluster` object in the hosted cluster's KAS. The same `tlsAdherence` semantics described above apply: components should use the `ShouldHonorClusterTLSProfile` helper to determine whether to honor the profile.
 
 **Category 2 — Operands of SLOs (the majority of components):**
 
