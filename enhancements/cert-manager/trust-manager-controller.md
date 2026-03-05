@@ -940,6 +940,7 @@ Trust-manager will be available as Tech Preview starting from cert-manager-opera
 - Complete UTs and e2e tests are present.
 - Evaluate adding `targetNamespaces` configuration to restrict which namespaces trust-manager can write Bundle 
   targets to (currently defaults to all namespaces).
+- Explore NetworkPolicy integration for the trust-manager operand to restrict ingress and egress traffic.
 - Address upstream `Bundle` to `ClusterBundle` API migration if applicable (see Risks section for details).
 - Direct upgrade from Tech Preview to GA is not supported; users should perform a fresh operator installation.
 
