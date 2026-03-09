@@ -18,7 +18,7 @@ tracking-link:
 
 ## Summary
 
-This enhancement adds native support for SPIRE Federation in the Zero Trust Workload Identity Manager operator, enabling secure cross-cluster workload communication. The operator will manage configuration to add federation support, managing lifecycle of trust bundle endpoint, and support federation across N clusters (where N is limited to a configurable maximum).
+This enhancement adds native support for SPIRE Federation in the Zero Trust Workload Identity Manager operator, enabling secure cross-cluster workload communication. The operator will manage configuration to add federation support, managing lifecycle of trust bundle endpoint, and support federation across up to 50 clusters (fixed maximum).
 
 ## Motivation
 
@@ -36,7 +36,7 @@ Organizations deploying workloads across multiple OpenShift clusters need secure
 
 * As an SRE, I want SpireServer status conditions `ConfigurationValid` and `RouteAvailable` with timestamps and error messages, so that I can quickly diagnose federation or route configuration issues.
 
-* As an OpenShift cluster administrator, I want the operator to handle federation configuration removal gracefully when `spec.federation` is removed, so that cross-cluster communication stops cleanly while intra-cluster workloads continue functioning without manual resource cleanup.
+* As an OpenShift cluster administrator, I understand that once `spec.federation` is set it cannot be removed (API validation rejects removal); to disable federation the system must be uninstalled and reinstalled. Peer configurations (`federatesWith`) remain dynamic and can be added or removed.
 
 * As an application developer, I want to create ClusterSPIFFEID resources with `spec.federatesWith[]` after federation is configured, so that my workloads automatically receive SVIDs capable of authenticating against federated trust domains without understanding the underlying SPIRE federation mechanics.
 
@@ -47,7 +47,7 @@ Organizations deploying workloads across multiple OpenShift clusters need secure
 1. Enable declarative federation configuration through SpireServer CR API
 2. Automate federation endpoint exposure (Service, Route creation)
 3. Support both `https_spiffe` and `https_web` bundle endpoint profiles
-4. Support federation across N clusters (configurable limit)
+4. Support federation across up to 50 clusters (fixed maximum)
 5. Provide clear validation and error messages for federation misconfiguration
 6. Document the manual trust bundle bootstrapping process
 7. Ensure federation configuration is included in StatefulSet pod spec for proper restarts on configuration changes
@@ -55,7 +55,7 @@ Organizations deploying workloads across multiple OpenShift clusters need secure
 ### Non-Goals
 
 1. **Automatic trust bundle bootstrapping** - Initial trust bundle exchange cannot be fully automated without compromising security. Users must manually bootstrap trust bundles.
-2. **Federation with unlimited clusters** - We impose a configurable limit to prevent performance degradation.
+2. **Federation with unlimited clusters** - We impose a fixed maximum of 50 federated trust domains to prevent performance degradation.
 3. **Automatic ClusterFederatedTrustDomain creation** - Users must create `ClusterFederatedTrustDomain` resources on each cluster for each federation relationship to enable automatic bundle rotation and initial trust bundle exchange.
 4. **Custom CA certificate management for https_web profile** - For `https_web` profile, users must provide valid certificates via Secrets or use ACME.
 5. **Dynamic trust domain changes** - Changing trust domains in federated clusters requires recreating the federation from scratch. This is a SPIRE limitation, not an operator limitation. This is not supported as part of this enhancement proposal.
@@ -332,14 +332,15 @@ type FederatesWithConfig struct {
 
 ```
 
-**Validation Rules (via CEL or webhook):**
+**Validation Rules (via CEL and controller):**
 
-1. If `federation.bundleEndpoint.profile == "https_web"`, then `federation.bundleEndpoint.httpsWeb` must be set
-2. If `httpsWeb` is set, exactly one of `acme` or `servingCert` must be specified (mutually exclusive)
-3. If `federatesWith[*].bundleEndpointProfile == "https_spiffe"`, then `endpointSpiffeId` must be set
-4. `federatesWith` array length must not exceed N (cluster limit)
-5. `federatesWith[*].trustDomain` must not equal `spec.trustDomain` (cannot federate with self)
-6. `federatesWith[*].bundleEndpointUrl` must be valid HTTPS URL
+1. Federation configuration cannot be removed once set (enforced by CEL on SpireServer).
+2. If `federation.bundleEndpoint.profile == "https_web"`, then `federation.bundleEndpoint.httpsWeb` must be set
+3. If `httpsWeb` is set, exactly one of `acme` or `servingCert` must be specified (mutually exclusive)
+4. If `federatesWith[*].bundleEndpointProfile == "https_spiffe"`, then `endpointSpiffeId` must be set
+5. `federatesWith` array length must not exceed 50
+6. `federatesWith[*].trustDomain` must not equal `spec.trustDomain` (cannot federate with self)
+7. `federatesWith[*].bundleEndpointUrl` must be valid HTTPS URL
 
 ### Topology Considerations
 
@@ -391,10 +392,14 @@ Example generated `server.conf` with federation:
 }
 ```
 
+#### ClusterFederatedTrustDomain vs spec.federation.federatesWith
+
+Configuring both `spec.federation.federatesWith` and `ClusterFederatedTrustDomain` are not mandatory. Either one alone can be used with an important caveat for `https_spiffe` profile. Using only `spec.federation.federates_with` should work for `https_web` without any extra bootstrap. For `https_spiffe`, `spec.federation.federates_with` does not provide a way to bootstrap the initial bundle; you must supply it via the API (e.g. `ClusterFederatedTrustDomain` with `trustDomainBundle`) or by pre-loading the bundle into the datastore. Both of them are given as part of Zero Trust Workload Identity Manger operator, so that one can act as a backup for the other. If `spire-controller-manager` is down or misconfigured, the relationship defined in the `spec.federation.federates_with` section will still make the federation work. Both ultimately configure the same SPIRE behavior- which foreign trust domains to pull bundles from and how to reach them.ClusterFederatedTrustDomain is recommended because it does not require the Spire server to restart.
+
 #### Constraints and Limitations
 
-1. **Maximum Federated Clusters**: Default limit of N (configurable) clusters to prevent performance issues.
-2. **Trust Bundle Bootstrapping**: Cannot be automated. Users MUST manually bootstrap trust bundles by creating `clusterFederatedTrustDomain`
+1. **Maximum Federated Clusters**: Maximum of 50 federated trust domains (fixed limit enforced by API and controller validation).
+2. **Trust Bundle Bootstrapping**: Cannot be automated. Users MUST manually bootstrap trust bundles (e.g. by creating ClusterFederatedTrustDomain with `trustDomainBundle`).
 3. **Certificate Management for https_web**: Users are responsible for providing valid certificates via Secrets or configuring ACME correctly. Invalid certificates will cause federation to fail.
 4. **Route Termination Constraints**:
     - **https_spiffe**: MUST use passthrough route. Reencrypt will fail due to: (a) client validation expecting SPIFFE ID in URI SAN which router certificates lack, (b) client trusting only SPIRE CA not OpenShift ingress operator CA, and (c) frequent SPIRE CA rotation (~20h) making destinationCACertificate maintenance impossible.
@@ -408,7 +413,7 @@ Example generated `server.conf` with federation:
 |------|--------|------------|
 | **Misconfigured federation breaks cross-cluster communication** | High - workloads cannot communicate across clusters | - Comprehensive validation at API admission time<br>- Clear status conditions showing federation configuration validation<br>- Detailed documentation and examples<br>- E2E tests for common scenarios |
 | **Manual trust bundle bootstrapping is error-prone** | High - federation won't work without correct bootstrapping | - Detailed step-by-step documentation<br>|
-| **Too many federated clusters cause performance degradation** | Medium - SPIRE server becomes slow or unstable | - Enforce maximum limit <br>- Document performance characteristics<br>- Test with maximum number of clusters |
+| **Too many federated clusters cause performance degradation** | Medium - SPIRE server becomes slow or unstable | - Enforce maximum limit of 50 clusters<br>- Document performance characteristics<br>- Test with maximum number of clusters |
 
 ### Drawbacks
 
