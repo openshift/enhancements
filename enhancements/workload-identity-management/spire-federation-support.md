@@ -352,6 +352,8 @@ Full federation support. This is the primary use case.
 
 #### Single-node Deployments or MicroShift
 
+#### OpenShift Kubernetes Engine
+
 ### Implementation Details/Notes/Constraints
 
 #### Operator Code Changes
