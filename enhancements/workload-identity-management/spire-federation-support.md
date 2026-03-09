@@ -26,9 +26,11 @@ Organizations deploying workloads across multiple OpenShift clusters need secure
 
 ### User Stories
 
-* As an OpenShift cluster administrator, I want to enable SPIRE federation by setting `spec.federation.bundleEndpoint` in the SpireServer CR, so that the operator automatically creates a Service (port 8443) and Route exposing the federation endpoint.
+* As an OpenShift cluster administrator, I want to enable SPIRE federation by setting `spec.federation` in the SpireServer CR, SpireServer is able to federate trust bundle with configured peer server endpoints.
 
-* As an OpenShift cluster administrator, I want to specify federated trust domains in `spec.federation.federatesWith[]` with `bundleEndpointUrl` and `endpointSpiffeId`, so that the operator generates the SPIRE `server.conf` with `federation.federates_with` configuration and triggers StatefulSet rolling updates.
+* As an OpenShift cluster administrator, I want to enable sharing of trust bundle over an endpoint as `spec.federation.bundleEndpoint` in the SpireServer CR, so that the operator automatically creates a Service (port 8443) and Route to expose a secure bundle endpoint.
+
+* As an OpenShift cluster administrator, I want to be able to specify federation endpoints, so that SPIRE Server is able to find the trust bundles for other trust domains.
 
 * As an OpenShift security engineer, I want to choose between `https_spiffe` (default, SPIFFE authentication) and `https_web` (Web PKI) profiles for `spec.federation.bundleEndpoint.profile`, so that I can align federation security with organizational certificate policies and authentication requirements.
 
