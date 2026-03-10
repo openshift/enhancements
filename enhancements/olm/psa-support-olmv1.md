@@ -21,7 +21,7 @@ see-also:
   - https://docs.google.com/document/d/1vNcjHB01Yhtar8h2TnHq9c3utzuflxfbZUVDjjaw3AI
 ---
 
-# PSA Support for OLMv1
+# PSA Support for registry+v1 bundles in OLMv1
 
 ## Summary
 
