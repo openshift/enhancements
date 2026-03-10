@@ -3,6 +3,7 @@ approvers:
   - adambkaplan
   - ashcrow
   - bear-redhat
+  - benluddy
   - bn222
   - bparees
   - bradmwilliams
@@ -65,12 +66,9 @@ approvers:
   - shawn-hurley
   - yuqi-zhang
   - sjenning
-  - soltysh
   - sosiouxme
   - spadgett
   - stbenjam
-  - stevekuznetsov
-  - stlaz
   - stleerh
   - sudhaponnaganti
   - suleymanakbas91
