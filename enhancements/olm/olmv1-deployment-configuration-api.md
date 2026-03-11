@@ -310,6 +310,7 @@ This strategy provides the best of both worlds: runtime stability with a clear, 
 - More testing including upgrade and downgrade scenarios
 - Sufficient time for feedback from Tech Preview users
 - Production deployment validation
+- Robust testing that would verify expected migration scenarios from OLMv0 to OLMv1.
 - End-user documentation including best practices and examples for common scenarios
 - Address any issues found during Tech Preview
 
@@ -340,7 +341,7 @@ This enhancement does not introduce new API extensions (webhooks, finalizers, ag
 - Resource limits are too restrictive for actual operator requirements, causing operator to crash
 
 #### OCP Teams Likely to be Called Upon in Case of Escalation
-1. OLM Team (primary)
-2. Layered Product Team
+1. Layered Product Teams (primary)
+2. OLM Team 
 
 ## Support Procedures
