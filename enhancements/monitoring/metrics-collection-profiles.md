@@ -197,7 +197,9 @@ The goal is to support 3 profiles:
 - `Full` (same as today)
 - `Minimal` (only collect metrics necessary for recording rules, alerts,
   dashboards, HPA, VPA and telemetry)
-- `Telemetry` (only collect metrics that are required for telemetry)
+- `Telemetry` (only collect metrics that are required for [telemetry])
+
+[telemetry]: https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/support/remote-health-monitoring-with-connected-clusters
 
 Note that the profile names are PascalCased in this KEP, but at this time,
 only camelCase is supported in CMO. However, since Kubernetes enums are
@@ -239,12 +241,7 @@ metadata:
   namespace: openshift-monitoring
 spec:
   endpoints:
-  - bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
-    interval: 30s
-    port: https
-    scheme: https
-    tlsConfig:
-      <...>
+  - <...>
   jobLabel: k8s-app
   selector:
     matchLabels:
@@ -260,12 +257,7 @@ metadata:
   namespace: openshift-monitoring
 spec:
   endpoints:
-  - bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
-    interval: 30s
-    port: https
-    scheme: https
-    tlsConfig:
-      <...>
+  - <...>
   jobLabel: k8s-app
   selector:
     matchLabels:
@@ -285,12 +277,7 @@ metadata:
   namespace: openshift-monitoring
 spec:
   endpoints:
-  - bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
-    interval: 30s
-    port: https
-    scheme: https
-    tlsConfig:
-      <...>
+  - <...>
   jobLabel: k8s-app
   selector:
     matchLabels:
