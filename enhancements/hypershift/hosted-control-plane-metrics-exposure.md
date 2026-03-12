@@ -7,13 +7,14 @@ reviewers:
   - "@sjenning"
   - "@simonpasquier"
   - "@muraee"
+  - "@jan--f"
 approvers:
   - "@enxebre"
   - "@sjenning"
 api-approvers:
   - None
 creation-date: 2026-02-16
-last-updated: 2026-02-23
+last-updated: 2026-02-25
 tracking-link:
   - https://issues.redhat.com/browse/OCPSTRAT-1852
 see-also:
@@ -27,7 +28,7 @@ see-also:
 This enhancement proposes exposing hosted control plane metrics to the data plane
 (guest cluster) in HyperShift. A new metrics proxy deployment in the control plane
 namespace discovers all pods for each control plane component, scrapes them in
-parallel, injects a `source_pod` label for pod-level attribution, and serves the
+parallel, injects a `pod` label for pod-level attribution, and serves the
 merged metrics via a route. The guest cluster's platform Prometheus scrapes these
 metrics through a metrics forwarder pod and PodMonitor, making control plane
 metrics visible in the guest cluster's monitoring stack.
@@ -47,10 +48,11 @@ metrics visible in the guest cluster's monitoring stack.
 - **HCP** - HostedControlPlane. The custom resource representing a hosted control
   plane on the management cluster.
 - **Metrics proxy** - A new component proposed in this enhancement. A custom
-  Go binary that authenticates requests via TokenReview, resolves pod endpoints
-  via the endpoint resolver, fans out scrape requests to all pods, injects a
-  `source_pod` label into each metric, and serves the merged response. The
-  metrics proxy has no management cluster RBAC.
+  Go binary that authenticates requests via mTLS client certificate
+  verification, resolves pod endpoints via the endpoint resolver, fans out
+  scrape requests to all pods, injects labels into each metric to match
+  standalone OCP conventions, and serves the merged response. The metrics
+  proxy has no management cluster RBAC.
 - **Endpoint resolver** - A new component proposed in this enhancement. A
   lightweight deployment in the HCP namespace that watches Pods (selected
   by label selectors derived from each component's ServiceMonitor or
@@ -85,10 +87,11 @@ This enhancement closes that gap.
   monitoring UI and queryable via PromQL without any additional setup, regardless
   of whether my cluster is self-managed or hosted.
 
-- As a **hosted cluster user**, I want to define PrometheusRule alerts on
-  control plane metrics (e.g. high API server error rate, etcd leader changes)
-  the same way I would on a standalone cluster, so that my existing alerting
-  workflows work without modification.
+- As a **hosted cluster user**, I want to define alerts on control plane
+  metrics (e.g. high API server error rate, etcd leader changes) using
+  `AlertingRule` custom resources or user-defined monitoring, the same way I
+  would on a standalone cluster, so that my existing alerting workflows work
+  without modification.
 
 - As an **SRE**, I want a single mechanism for exposing control plane metrics to
   the data plane that works across all HyperShift deployment models (self-managed
@@ -111,7 +114,7 @@ This enhancement closes that gap.
   so that CMO's Prometheus can scrape the exposed metrics without manual
   configuration.
 - Authenticate requests from the data plane to the metrics endpoint using
-  ServiceAccount tokens validated via TokenReview.
+  mTLS client certificate authentication.
 - Follow existing HyperShift patterns for route exposure (similar to ignition
   server, konnectivity server, and OAuth server).
 
@@ -139,8 +142,9 @@ The solution introduces a new **metrics proxy** deployment in each hosted contro
 plane namespace on the management cluster. The metrics proxy is a custom Go
 binary that handles authentication, metrics fan-out, label injection, and
 response merging. For each control plane component, it resolves all backing
-pod endpoints, scrapes them in parallel, injects a `source_pod` label into
-every metric to identify the originating pod, and serves the merged response.
+pod endpoints, scrapes them in parallel, injects labels (including `pod` for
+pod-level attribution) into every metric to match standalone OCP conventions,
+and serves the merged response.
 A route exposes the proxy to the data plane. On the guest cluster side, a
 metrics forwarder pod and PodMonitor are automatically created to enable the
 platform Prometheus to scrape the metrics route.
@@ -199,18 +203,16 @@ graph TD
 
         pm["PodMonitor<br/>(per-component paths)"]
         prom["Platform Prometheus"]
-        sa["ServiceAccount<br/>prometheus-k8s"]
-        hosted_kas["Hosted kube-apiserver"]
+        clientcert["metrics-client-certs<br/>Secret (client cert)"]
         ca["metrics-proxy-serving-ca<br/>ConfigMap"]
 
         pm -. "configures" .-> prom
-        sa -. "bearer token" .-> prom
+        clientcert -. "mTLS client cert" .-> prom
         ca -. "TLS verification" .-> prom
-        prom -- "TLS + bearer token" --> fwd
+        prom -- "mTLS" --> fwd
     end
 
-    fwd -- "TCP proxy<br/>(end-to-end TLS)" --> route
-    proxy -. "TokenReview" .-> hosted_kas
+    fwd -- "TCP proxy<br/>(end-to-end mTLS)" --> route
 ```
 
 ### Components
@@ -253,8 +255,9 @@ proxy ConfigMap to include the new component paths. See
 [Component Discovery](#component-discovery) for details on how this works.
 
 For each request, the metrics proxy:
-1. Validates the bearer token via TokenReview against the hosted kube-apiserver.
-   Rejects unauthenticated or unauthorized requests with 401/403.
+1. Validates the client certificate during the TLS handshake against the
+   `cluster-signer-ca` CA bundle. Rejects connections with missing, invalid,
+   or untrusted client certificates.
 2. Queries the endpoint resolver (see
    [Endpoint Resolver Deployment](#6-endpoint-resolver-deployment)) to
    discover all pod IPs and names for the component.
@@ -298,52 +301,56 @@ certificate authority.
 #### 2. Authentication and Authorization
 
 Requests from the data plane Prometheus to the metrics proxy are authenticated
-using **bearer token authentication** with a ServiceAccount token from the guest
-cluster. Authentication is handled directly by the metrics proxy as the first
-step of request processing.
+using **mTLS client certificate authentication**. Authentication is handled
+directly by the metrics proxy as part of the TLS handshake.
 
 The authentication flow:
 
-1. The existing `prometheus-k8s` ServiceAccount in the guest cluster's
-   `openshift-monitoring` namespace is used. This is the ServiceAccount that
-   CMO's Prometheus already runs under, so no new ServiceAccount is needed.
-2. The platform Prometheus is configured (via the PodMonitor's
-   `bearerTokenFile` field, set to
-   `/var/run/secrets/kubernetes.io/serviceaccount/token`) to attach this
-   ServiceAccount's token to each scrape request to the metrics forwarder.
-3. A request arrives at the metrics proxy. The proxy extracts the
-   `Authorization: Bearer <token>` header.
-4. The proxy performs a **TokenReview** against the hosted kube-apiserver to
-   validate the token. Since the proxy runs in the HCP namespace on the
-   management cluster, it has direct access to the hosted kube-apiserver via
-   its in-cluster service address.
-5. If the TokenReview confirms the token belongs to an authorized ServiceAccount
-   (e.g. `system:serviceaccount:openshift-monitoring:prometheus-k8s`), the proxy
-   proceeds with pod discovery, fan-out scraping, and response merging.
-6. If the token is missing, invalid, or belongs to an unauthorized identity, the
-   proxy returns a 401 or 403 response immediately.
+1. The guest cluster's CMO includes an embedded CSR controller (from
+   `library-go`) that automatically creates a `metrics-client-certs` Secret in
+   the `openshift-monitoring` namespace. The controller generates a private key
+   and submits a `CertificateSigningRequest` to the hosted kube-apiserver with
+   subject `system:serviceaccount:openshift-monitoring:prometheus-k8s` and
+   signer `kubernetes.io/kube-apiserver-client`. The CSR is auto-approved by the
+   hosted cluster's `cluster-policy-controller`, and the signed certificate and
+   key are stored in the Secret. The certificate is automatically rotated by the
+   CSR controller when it reaches 20-25% remaining lifetime.
+2. The `metrics-client-certs` Secret is already mounted into the Prometheus pod
+   at `/etc/prometheus/secrets/metrics-client-certs/` (containing `tls.crt` and
+   `tls.key`). The PodMonitor leverages CMO's `tls-client-certificate-auth`
+   scrape class, which automatically injects the correct cert/key file paths
+   into the scrape configuration without HyperShift needing to reference them
+   directly.
+3. On the management cluster side, the corresponding CA that signed the client
+   certificate (`kube-csr-signer`) is stored as the `cluster-signer-ca` Secret
+   in the HCP namespace. This Secret is created and reconciled by the
+   control-plane-operator via `ReconcileKubeCSRSigner()`. The metrics proxy
+   mounts this Secret's `ca.crt` and uses it as the client CA for TLS
+   verification.
+4. When a TLS connection is established, the metrics proxy requires a client
+   certificate and verifies it against the mounted `cluster-signer-ca` CA
+   bundle. Optionally, the proxy can further verify that the certificate's
+   Subject CN matches
+   `system:serviceaccount:openshift-monitoring:prometheus-k8s`.
+5. If the client certificate is valid, the proxy proceeds with pod discovery,
+   fan-out scraping, and response merging.
+6. If the client certificate is missing, invalid, expired, or not signed by the
+   expected CA, the TLS handshake fails and the connection is rejected.
 
-This approach leverages the existing guest cluster identity infrastructure without
-introducing new credential types. The TokenReview call is made against the
-co-located kube-apiserver, so it does not cross network boundaries.
+This approach has several advantages over bearer token + TokenReview:
 
-**TokenReview caching**: TokenReview is called on every scrape request. With
-10 component paths at a 30-second scrape interval, this results in
-approximately 20 TokenReview calls per minute per hosted cluster. Since the
-`prometheus-k8s` ServiceAccount uses bound tokens with a known expiry
-(typically 1 hour), the validation result can be safely cached. The metrics
-proxy caches successful TokenReview results with a short TTL (5 minutes) keyed
-by a hash of the bearer token. Cache entries are invalidated when the TTL
-expires or the token changes. This reduces TokenReview calls from ~20/min to
-roughly 1 every 5 minutes per unique token.
-
-**KAS unavailability**: If the hosted kube-apiserver is unavailable and the
-proxy cannot perform a TokenReview (and no valid cache entry exists), the proxy
-returns HTTP 503 (Service Unavailable) with a `Retry-After` header. This
-signals to Prometheus that the failure is transient and avoids blocking
-indefinitely. The proxy's readiness probe also checks connectivity to the
-hosted kube-apiserver, so prolonged KAS unavailability causes the proxy pod to
-become not-ready, preventing the route from receiving traffic.
+- **No kube-apiserver dependency for authentication**: The proxy verifies the
+  client certificate locally against a mounted CA bundle, without making
+  TokenReview calls to the hosted kube-apiserver. This eliminates authentication
+  load on the API server and avoids the need for caching.
+- **Works when kube-apiserver is unavailable**: Since authentication is purely
+  certificate-based, the proxy can continue to serve metrics even if the hosted
+  kube-apiserver is temporarily unavailable. Only the endpoint resolver (which
+  watches Pods) depends on the management cluster API server.
+- **Reuses existing infrastructure**: The `metrics-client-certs` Secret and its
+  CSR-based lifecycle are already managed by CMO. The `cluster-signer-ca` Secret
+  already exists in the HCP namespace. No new certificate infrastructure is
+  required.
 
 #### 3. Route
 
@@ -446,24 +453,24 @@ path. Each endpoint configures:
 - `scheme: https` -- Prometheus initiates a TLS connection to the forwarder
   pod. Since the forwarder is a TCP proxy, this TLS connection passes
   through end-to-end to the metrics proxy, which terminates it.
-- `tlsConfig.ca` -- references the `metrics-proxy-serving-ca` ConfigMap in
-  the `openshift-monitoring` namespace (synced by the HCCO from the HCP's
-  CA). This allows Prometheus to verify the metrics proxy's serving
-  certificate. The CA is referenced by ConfigMap name (not by file path),
-  since this is a custom CA not already mounted into the Prometheus pod.
-  This follows the same pattern used by ServiceMonitors like
-  `monitor-network` in `openshift-multus`, except those reference CAs
-  already available to Prometheus via `caFile` paths.
+- `scrapeClass: tls-client-certificate-auth` -- uses the CMO-defined scrape
+  class that automatically injects the client certificate and key from the
+  `metrics-client-certs` Secret, as well as the CA file for server
+  verification. This means the PodMonitor does not need to explicitly
+  reference these credentials. The client certificate is sent during the
+  TLS handshake and forwarded transparently by the TCP proxy to the metrics
+  proxy, which verifies it against the `cluster-signer-ca` CA bundle.
 - `tlsConfig.serverName` -- set to the metrics proxy route hostname. This
   is needed for both SNI routing (so the OpenShift router directs the
   connection to the correct backend) and certificate verification (so
   Prometheus checks the cert against the route hostname, not the forwarder
   pod IP).
-- `bearerTokenFile` -- set to
-  `/var/run/secrets/kubernetes.io/serviceaccount/token`, which is the
-  `prometheus-k8s` ServiceAccount token already mounted into the Prometheus
-  pod. This token is sent inside the TLS tunnel and forwarded transparently
-  by the TCP proxy to the metrics proxy, which validates it via TokenReview.
+- `honorLabels: true` -- instructs Prometheus to keep labels from the
+  scraped metrics as-is, rather than prefixing them with `exported_`. Since
+  the metrics proxy is a custom proxy that injects authoritative labels
+  (analogous to kube-state-metrics), the proxy-injected labels should take
+  precedence over Prometheus's target labels. This eliminates the need for
+  `metricRelabelings` rules to undo the `exported_` prefixing.
 
 ```yaml
 apiVersion: monitoring.coreos.com/v1
@@ -472,6 +479,7 @@ metadata:
   name: control-plane-metrics
   namespace: openshift-monitoring
 spec:
+  scrapeClass: tls-client-certificate-auth
   selector:
     matchLabels:
       app: control-plane-metrics-forwarder
@@ -479,101 +487,63 @@ spec:
     - port: metrics
       path: /metrics/kube-apiserver
       scheme: https
-      bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+      honorLabels: true
       tlsConfig: &tlsConfig
-        ca:
-          configMap:
-            name: metrics-proxy-serving-ca
-            key: ca.crt
         serverName: <metrics-proxy-route-hostname>
-      metricRelabelings: &relabeling
-        # The metrics proxy injects labels like pod, namespace, job, service,
-        # endpoint, instance into the metric samples to match standalone OCP
-        # conventions. Prometheus prefixes these with "exported_" when they
-        # conflict with target labels from the PodMonitor. The relabeling
-        # below restores the proxy-injected values as the authoritative labels.
-        - sourceLabels: [exported_pod]
-          targetLabel: pod
-          action: replace
-        - sourceLabels: [exported_namespace]
-          targetLabel: namespace
-          action: replace
-        - sourceLabels: [exported_instance]
-          targetLabel: instance
-          action: replace
-        - sourceLabels: [exported_job]
-          targetLabel: job
-          action: replace
-        - sourceLabels: [exported_service]
-          targetLabel: service
-          action: replace
-        - sourceLabels: [exported_endpoint]
-          targetLabel: endpoint
-          action: replace
-        - action: labeldrop
-          regex: exported_(.+)
     - port: metrics
       path: /metrics/etcd
       scheme: https
-      bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+      honorLabels: true
       tlsConfig: *tlsConfig
-      metricRelabelings: *relabeling
     - port: metrics
       path: /metrics/kube-controller-manager
       scheme: https
-      bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+      honorLabels: true
       tlsConfig: *tlsConfig
-      metricRelabelings: *relabeling
     - port: metrics
       path: /metrics/openshift-apiserver
       scheme: https
-      bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+      honorLabels: true
       tlsConfig: *tlsConfig
-      metricRelabelings: *relabeling
     - port: metrics
       path: /metrics/openshift-controller-manager
       scheme: https
-      bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+      honorLabels: true
       tlsConfig: *tlsConfig
-      metricRelabelings: *relabeling
     - port: metrics
       path: /metrics/cluster-version-operator
       scheme: https
-      bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+      honorLabels: true
       tlsConfig: *tlsConfig
-      metricRelabelings: *relabeling
     - port: metrics
       path: /metrics/olm-operator
       scheme: https
-      bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+      honorLabels: true
       tlsConfig: *tlsConfig
-      metricRelabelings: *relabeling
     - port: metrics
       path: /metrics/catalog-operator
       scheme: https
-      bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+      honorLabels: true
       tlsConfig: *tlsConfig
-      metricRelabelings: *relabeling
     - port: metrics
       path: /metrics/openshift-route-controller-manager
       scheme: https
-      bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+      honorLabels: true
       tlsConfig: *tlsConfig
-      metricRelabelings: *relabeling
     - port: metrics
       path: /metrics/cluster-node-tuning-operator
       scheme: https
-      bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+      honorLabels: true
       tlsConfig: *tlsConfig
-      metricRelabelings: *relabeling
 ```
 
 The guest cluster's platform Prometheus discovers the PodMonitor and opens
 a TLS connection to the forwarder pod for each scrape. The forwarder
 TCP-proxies the connection to the metrics proxy route. The metrics proxy
-terminates TLS, authenticates the bearer token via TokenReview, fans out to
-the backing pods, injects `source_pod` labels, and returns the merged
-response through the same connection.
+terminates TLS, verifies the client certificate against the `cluster-signer-ca`
+CA bundle, fans out to
+the backing pods, injects labels to match standalone OCP conventions, and
+returns the merged response through the same connection.
 
 The HCCO is responsible for creating the following resources in the guest
 cluster's `openshift-monitoring` namespace:
@@ -583,13 +553,11 @@ cluster's `openshift-monitoring` namespace:
   hostname as the TCP backend.
 - A **`metrics-proxy-serving-ca` ConfigMap** containing the HCP's CA
   certificate. This is synced from the HCP namespace on the management
-  cluster. Prometheus uses this CA (referenced by name in the PodMonitor's
-  `tlsConfig.ca.configMap`) to verify the metrics proxy's serving
-  certificate end-to-end through the TCP proxy.
+  cluster.
 - The PodMonitor targeting the forwarder pod, with `scheme: https`,
-  `tlsConfig` referencing the CA ConfigMap by name and `serverName` set to
-  the metrics proxy route hostname, and `bearerTokenFile` pointing to the
-  `prometheus-k8s` ServiceAccount token.
+  `honorLabels: true`, `scrapeClass: tls-client-certificate-auth` (which
+  injects the client certificate, key, and CA for server verification),
+  and `serverName` set to the metrics proxy route hostname.
 
 #### 5. Control Plane Operator Changes
 
@@ -775,8 +743,8 @@ action is required from any user.
 3. The control-plane-operator generates the proxy configuration with the
    component-to-service mapping for all control plane components, including
    the endpoint resolver's URL and CA.
-4. The metrics proxy is configured to authorize the existing `prometheus-k8s`
-   ServiceAccount from the guest cluster's `openshift-monitoring` namespace.
+4. The metrics proxy is configured with the `cluster-signer-ca` CA bundle to
+   verify client certificates from the guest cluster's Prometheus.
 5. The hosted-cluster-config-operator deploys the metrics forwarder pod
    (HAProxy) in the guest cluster's `openshift-monitoring` namespace,
    configured to forward requests to the metrics proxy route hostname.
@@ -786,10 +754,10 @@ action is required from any user.
 7. The guest cluster's platform Prometheus discovers the PodMonitor and begins
    scraping the forwarder pod on each component path.
 8. For each scrape, the forwarder TCP-proxies the connection to the metrics
-   proxy route. The metrics proxy terminates TLS, authenticates the request,
+   proxy route. The metrics proxy terminates TLS, verifies the client certificate,
    queries the endpoint resolver to discover pod IPs (resolved via pod
    label selectors), fans out to all pods for the component, injects
-   `source_pod` labels, and returns the merged response.
+   labels to match standalone OCP conventions, and returns the merged response.
 9. Control plane metrics become available in the guest cluster's Prometheus and
    are visible in the OpenShift Console monitoring UI.
 
@@ -841,10 +809,10 @@ in both OCP and OKE.
 
 The metrics proxy is a single Go binary that handles the full request lifecycle:
 
-1. **TLS termination**: Serves HTTPS using its serving certificate.
-2. **Authentication**: Extracts the bearer token, performs a TokenReview against
-   the hosted kube-apiserver, and verifies the identity matches an authorized
-   ServiceAccount. Rejects unauthorized requests with 401/403.
+1. **TLS termination and authentication**: Serves HTTPS using its serving
+   certificate. Requires and verifies client certificates against the
+   `cluster-signer-ca` CA bundle during the TLS handshake. Rejects
+   connections with missing or untrusted client certificates.
 3. **Pod discovery**: Maps the URL path to a control plane component and queries
    the endpoint resolver to discover all pod IPs and names for that
    component. The metrics proxy has no direct access to the management
@@ -867,9 +835,9 @@ The metrics proxy is a single Go binary that handles the full request lifecycle:
 6. **Merge and response**: Combines all labeled metric families from all pods
    into a single response and serializes it back to Prometheus exposition format.
 
-Configuration (hosted kube-apiserver endpoint, authorized ServiceAccounts,
-per-component upstream details, port details, endpoint resolver URL and CA)
-is provided as a ConfigMap generated by the control-plane-operator.
+Configuration (client CA path, per-component upstream details, port details,
+endpoint resolver URL and CA) is provided as a ConfigMap generated by the
+control-plane-operator.
 
 #### 6. Endpoint Resolver Deployment
 
@@ -1048,52 +1016,25 @@ Prometheus produces in a standalone OCP cluster for the same component:
   `-metrics` suffix (`olm-operator-metrics`, `catalog-operator-metrics`)
   because the ServiceMonitors target separate metrics services.
 
-#### Relabeling on the Guest Cluster
+#### Label Handling on the Guest Cluster
 
 Because the PodMonitor targets the metrics forwarder pod, Prometheus
 automatically adds target labels (`pod`, `namespace`, `instance`, `job`, etc.)
 that describe the forwarder, not the control plane components. These target
-labels would conflict with the labels injected by the metrics proxy.
+labels would normally conflict with the labels injected by the metrics proxy.
 
-The PodMonitor uses `metricRelabelings` to resolve this. Prometheus prefixes
-conflicting metric labels with `exported_` (e.g. the proxy-injected `pod`
-becomes `exported_pod` while the target's `pod` label takes precedence). The
-relabeling configuration restores the proxy-injected values as the authoritative
-labels and drops the forwarder's target labels:
+The PodMonitor uses `honorLabels: true` to resolve this. With `honorLabels`
+enabled, Prometheus keeps the labels from the scraped metrics as-is and drops
+its own conflicting target labels. Since the metrics proxy is a custom proxy
+(analogous to kube-state-metrics) that injects authoritative labels, this is
+the correct behavior. The proxy-injected labels (`pod`, `namespace`, `job`,
+`service`, `endpoint`, `instance`) take precedence over the target labels
+that describe the forwarder pod itself (e.g. `namespace="openshift-monitoring"`,
+`pod="control-plane-metrics-forwarder-..."`).
 
-```yaml
-metricRelabelings:
-  # Restore proxy-injected labels as authoritative
-  - sourceLabels: [exported_pod]
-    targetLabel: pod
-    action: replace
-  - sourceLabels: [exported_namespace]
-    targetLabel: namespace
-    action: replace
-  - sourceLabels: [exported_instance]
-    targetLabel: instance
-    action: replace
-  - sourceLabels: [exported_job]
-    targetLabel: job
-    action: replace
-  - sourceLabels: [exported_service]
-    targetLabel: service
-    action: replace
-  - sourceLabels: [exported_endpoint]
-    targetLabel: endpoint
-    action: replace
-  # Drop all remaining exported_ prefixed labels
-  - action: labeldrop
-    regex: exported_(.+)
-```
-
-These relabelings ensure that labels like `job="etcd"`,
-`namespace="openshift-etcd"`, and `service="etcd"` (as injected by the
-metrics proxy) take precedence over the target labels that describe the
-forwarder pod itself (e.g. `namespace="openshift-monitoring"`,
-`pod="control-plane-metrics-forwarder-..."`). The same relabeling
-configuration is applied to all `podMetricsEndpoints` entries in the
-PodMonitor.
+This approach eliminates the need for `metricRelabelings` rules to undo
+Prometheus's `exported_` prefixing, resulting in a simpler PodMonitor
+configuration.
 
 #### Error Handling for Pod Scraping
 
@@ -1239,20 +1180,19 @@ change in the control-plane-operator is needed.
 ### Risks and Mitigations
 
 **Risk**: Exposing control plane metrics over a route increases the attack
-surface. An attacker who obtains a valid ServiceAccount token from the guest
-cluster could scrape control plane metrics.
+surface. An attacker who obtains a valid client certificate could scrape
+control plane metrics.
 
-**Mitigation**: The bearer token is validated via TokenReview against the guest
-cluster's API server, and only tokens from the `prometheus-k8s` ServiceAccount
-(in `openshift-monitoring` namespace) are authorized. This ServiceAccount is
-managed by CMO and not accessible to unprivileged guest cluster users.
-Additionally, the route uses passthrough TLS, so all traffic is encrypted.
-The metrics proxy itself has no management cluster RBAC — pod endpoint
-discovery is delegated to the endpoint resolver (see
+**Mitigation**: The metrics proxy requires mTLS — only clients presenting a
+certificate signed by the hosted cluster's `kube-csr-signer` CA are accepted.
+The `metrics-client-certs` Secret is managed by CMO's embedded CSR controller
+and is not accessible to unprivileged guest cluster users. Additionally, the
+route uses passthrough TLS, so all traffic is encrypted. The metrics proxy
+itself has no management cluster RBAC — pod endpoint discovery is delegated
+to the endpoint resolver (see
 [Endpoint Resolver Deployment](#6-endpoint-resolver-deployment)), which
 only has read access to Pods in the HCP namespace. Even if the proxy
-were compromised via a stolen token, the attacker would gain no
-management cluster API access.
+were compromised, the attacker would gain no management cluster API access.
 
 **Risk**: The proxy introduces a new component that could fail, making control
 plane metrics unavailable to the guest cluster.
@@ -1338,7 +1278,7 @@ Rejected because:
 - Metrics from different pods of the same component would be indistinguishable,
   making it impossible to correlate metrics to specific pods for debugging.
 - A custom proxy that discovers all pod endpoints, scrapes each one, and injects
-  a `source_pod` label solves this problem at the cost of additional code.
+  a `pod` label solves this problem at the cost of additional code.
 
 ### Single merged metrics endpoint
 
@@ -1376,14 +1316,28 @@ Rejected because:
 - The ScrapeConfig CRD is not available in OCP. CMO does not ship a version of
   prometheus-operator that includes this CRD.
 
+### Bearer token with TokenReview
+
+Use ServiceAccount bearer tokens validated via TokenReview against the hosted
+kube-apiserver instead of mTLS client certificate authentication.
+
+Rejected because:
+- TokenReview adds load to the hosted kube-apiserver (~20 calls/min per hosted
+  cluster at default scrape intervals), requiring caching to mitigate.
+- Authentication fails when the hosted kube-apiserver is unavailable, even
+  though the metrics proxy could otherwise continue serving.
+- mTLS reuses the existing `metrics-client-certs` infrastructure (managed by
+  CMO's CSR controller) and the `cluster-signer-ca` CA (already in the HCP
+  namespace), requiring no API server interaction for authentication.
+
 ### Guest cluster ServiceAccount token with static validation
 
-Use a shared secret or static token instead of ServiceAccount token + TokenReview.
+Use a shared secret or static token instead of mTLS or TokenReview.
 
 Rejected because:
 - Static tokens do not expire and are harder to rotate.
-- ServiceAccount tokens integrate with the existing Kubernetes identity system.
-- TokenReview provides standard Kubernetes authentication with audit trail.
+- mTLS client certificates integrate with the existing Kubernetes CSR
+  infrastructure and are automatically rotated by CMO.
 
 ## Open Questions
 
@@ -1420,11 +1374,13 @@ Rejected because:
   - Control plane metrics (e.g. `apiserver_request_total`,
     `etcd_server_leader_changes_seen_total`) are queryable from the guest
     cluster's Prometheus.
-  - Metrics contain `source_pod` labels identifying the originating pod.
+  - Metrics contain the expected labels (`pod`, `job`, `namespace`, `service`,
+    `endpoint`, `instance`) matching standalone OCP conventions.
   - Metrics appear in the guest cluster's OpenShift Console monitoring UI.
-- **Authentication tests**: Verify that unauthenticated requests and requests
-  with invalid tokens are rejected by the metrics proxy. Verify that only the
-  designated ServiceAccount token is accepted.
+- **Authentication tests**: Verify that requests without a client certificate
+  and requests with untrusted client certificates are rejected by the metrics
+  proxy. Verify that only certificates signed by the `cluster-signer-ca` CA
+  are accepted.
 
 ## Graduation Criteria
 
@@ -1432,7 +1388,7 @@ Rejected because:
 
 - Metrics proxy deployed and functional for all control plane components.
 - Metrics forwarder and PodMonitor auto-created on guest cluster.
-- Bearer token authentication working via TokenReview.
+- mTLS client certificate authentication working.
 - Basic e2e test coverage.
 - Documentation for the feature and its architecture.
 
@@ -1495,8 +1451,9 @@ N/A. No API extensions are introduced.
     `curl -k https://<metrics-proxy-route>/metrics/kube-apiserver`.
   - Verify the forwarder can reach the route: check HAProxy logs for
     connection errors.
-  - Verify the ServiceAccount token is valid: check TokenReview responses in
-    the kube-apiserver audit logs.
+  - Verify the client certificate is valid and not expired: check the
+    `metrics-client-certs` Secret in `openshift-monitoring` and verify it
+    is signed by the `cluster-signer-ca` CA.
   - Verify the PodMonitor exists on the guest cluster:
     `oc get podmonitors -n openshift-monitoring`.
 
