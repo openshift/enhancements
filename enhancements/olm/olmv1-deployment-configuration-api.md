@@ -117,6 +117,10 @@ For single-node OpenShift (SNO) deployments, deployment configuration can be use
 
 For MicroShift, this enhancement applies to any operators that are installed via OLMv1. The deployment configuration provides the same customization capabilities, though node selector and affinity configuration may have limited utility in single-node scenarios.
 
+#### OpenShift Kubernetes Engine
+
+No additional considerations are necessary for the OpenShift Kubernetes Engine beyond that required by Standalone Clusters.
+
 ### Implementation Details/Notes/Constraints
 
 #### registry+v1 Bundle Configuration Schema Design
@@ -313,6 +317,8 @@ This strategy provides the best of both worlds: runtime stability with a clear, 
 - Robust testing that would verify expected migration scenarios from OLMv0 to OLMv1.
 - End-user documentation including best practices and examples for common scenarios
 - Address any issues found during Tech Preview
+
+### Removing a deprecated feature
 
 ## Upgrade / Downgrade Strategy
 
