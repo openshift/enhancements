@@ -4,6 +4,7 @@ authors:
   - oceanc80
   - perdasilva
   - anbhatta
+  - tshort
 reviewers:
   - joelanford
 approvers:
@@ -11,7 +12,8 @@ approvers:
 api-approvers:
   - everettraven
 creation-date: 2025-12-30
-last-updated: 2025-12-30
+last-updated: 2026-03-13
+status: implementable
 tracking-link:
   - https://issues.redhat.com/browse/OCPSTRAT-2305
 ---
@@ -135,7 +137,7 @@ type DeploymentConfig = v1alpha1.SubscriptionConfig
 
 Example inline configuration structure:
 
-```yaml
+```json
 {
   "watchNamespace": "my-namespace",
   "deploymentConfig": {
@@ -293,6 +295,11 @@ To prevent the DeploymentConfig from becoming stale as new Kubernetes volume typ
 
 This strategy provides the best of both worlds: runtime stability with a clear, automated path to stay current with Kubernetes API evolution. While the initial implementation uses a static snapshot, the build-time tooling ensures we have an established, low-effort mechanism to refresh the schema when needed, without requiring manual schema authoring or complex runtime generation.
 
+### Investigate Alternative Methods of Validation
+
+The method to validate the `deploymentConfig` is via a JSON schema derived from the OpenAPI specification of the Deployment and Pod APIs; this is based on the OLMv0 implementation. It has been suggested that instead, internal validation via functions like `ValidatePodSpec` be used. The OpenAPI schema may be more or less strict that using internal validation.
+
+The net result of the current method (OpenAPI JSON schema) is that the more strict of the validations (either OpenAPI schema or API server) will prevail. This could mean that errors occur at different layers in the stack.
 
 ## Test Plan
 
@@ -320,13 +327,29 @@ This strategy provides the best of both worlds: runtime stability with a clear, 
 
 ### Removing a deprecated feature
 
+This section does not apply as it is not removing a deprecated feature.
+
 ## Upgrade / Downgrade Strategy
+
+The `deploymentConfig` is defined generically and verified via the OpenAPI-derived JSON schema based on the Deployment and Pod APIs.
 
 ### Upgrade
 
+The `deploymentConfig` field is optional. When upgrading to an OpenShift version that introduces this field, the empty field is ignored.
+
+If the Kubernetes definition of the Deployment or Pod APIs changes incompatibly between versions, then that may cause propagation of incorrect deployment configuration or failure to propagate the deplpoyment confguraton. Thus, it may be necessary for the user to update the provided `deploymentConfig` to be compatible with the new JSON schema.
+
 ### Downgrade
 
+The `deploymentConfig` field is optional. When downgrading to an OpenShift version that does not contain this field, the presence of the field will cause an error. Thus, it is inadvisable to downgrade a cluster that uses `deploymentConfig` in any ClusterExtensions.
+
+It may be necessary to update the provided `deploymentConfig` to be compatible with the old JSON schema, if the Kubernetes definition of Deployment or Pod has changed between versions.
+
 ## Version Skew Strategy
+
+The use of the `deploymentConfig` field is dependent on the Deployment and Pod APIs. It *is* verified by the JSON schema based on OpenAPI definitions. Given Kubetnetes compatibility guarantees, this means that the configuration should be compatible until the next major Kubernetes version where APIs (or portions thereof) may be deprecated or removed.
+
+If a newer version of the OpenAPI JSON schema is used on an older Kubernetes cluster, then the API server may reject the `deploymentConfig`. This may require the contents of the `deploymentConfig` contents to be updated. Or it may mean that the fields are passed to the deployment but are ignored by the API server.
 
 ## Operational Aspects of API Extensions
 
@@ -351,3 +374,12 @@ This enhancement does not introduce new API extensions (webhooks, finalizers, ag
 2. OLM Team 
 
 ## Support Procedures
+
+- If deployment is not updated with provided configuration:
+  - Is feature enabled?
+  - Examine ClusterExtension status.
+  - Examine ClusterExtensionRevision (if implemented) status.
+  - Examine logs for related messages and errors.
+  - Examine resultant deployment; how much of the deployment config is present?
+  - Examine the JSON schema verification to ensure valid deployment config.
+- Remove items from the deployment config until deployment contains the configuration.
