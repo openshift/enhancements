@@ -2,6 +2,7 @@
 title: adaptable-topology
 authors:
   - "@jaypoulz"
+  - "@jeff-roche"
 reviewers:
   - "@tjungblu, for cluster-etcd-operator"
   - "@joelanford, for OLM"
@@ -26,7 +27,7 @@ approvers:
 api-approvers:
   - TBD
 creation-date: 2025-12-10
-last-updated: 2025-12-10
+last-updated: 2026-03-13
 tracking-link:
   - https://issues.redhat.com/browse/OCPEDGE-2280
 see-also:
@@ -49,6 +50,10 @@ superseded-by: []
 **Control Plane Topology** - The cluster-topology mode describing how control-plane nodes are deployed and managed (SingleReplica, DualReplica, HighlyAvailable, HighlyAvailableArbiter, or Adaptable). Control-plane nodes are nodes labeled with `node-role.kubernetes.io/control-plane` or `node-role.kubernetes.io/master`.
 
 **Infrastructure Topology** - The cluster-topology mode describing how infrastructure workloads are distributed (SingleReplica, HighlyAvailable, or Adaptable). When there are no worker nodes, control-plane nodes serve as workers.
+
+**Cluster Administrator** - A human user responsible for managing an existing cluster, including Day 2 operations such as topology transitions and node scaling.
+
+**Cluster Creator** - A human user responsible for deploying a new cluster, including preparing the install-config and running the installer.
 
 **Topology Transition** - A Day 2 operation that changes the values of controlPlaneTopology and infrastructureTopology in the cluster's Infrastructure config. Adaptable topology proposes allowing this as a one-way transition from existing topology modes to Adaptable.
 
@@ -198,7 +203,7 @@ This happens without cluster reconfiguration.
 5. The cluster installs with behavior matching the effective topology for the initial control-plane, arbiter, and worker node counts
 6. After installation completes, the cluster is ready to scale by adding or removing nodes
 
-*Note: The `adaptableTopology` flag is optional and defaults to `false`. Future releases may default to `true` once the feature matures.*
+*Note: The `adaptableTopology` flag is optional and defaults to `false`. Adaptable is intended to become the default topology mode in a future release once the feature reaches GA and has proven stable in production.*
 
 #### Transitioning an Existing Cluster to Adaptable Topology
 
@@ -236,6 +241,25 @@ This happens without cluster reconfiguration.
    - CEO coordinates two etcd instances to atomically leave the cluster together
    - The cluster continues operating with a single etcd instance
    - Other operators adjust their behavior to match SingleReplica control-plane topology
+
+##### Behavior at Two Control-Plane Nodes (Without AQR)
+
+When scaling from one to two control-plane nodes:
+
+1. The new control-plane node joins the cluster and receives control-plane labels
+2. The kube-apiserver, kube-controller-manager, and kube-scheduler start on the
+   new node via static pods managed by the kubelet
+3. The kube-apiserver on the new node connects to the existing single etcd instance
+   on the original control-plane node
+4. CEO does **not** start an etcd instance on the new node — a single etcd
+   instance continues running
+5. Leader elections for kube-controller-manager and kube-scheduler now include
+   both nodes, providing redundancy for those components
+6. The effective controlPlaneTopology behavior remains SingleReplica
+7. The cluster cannot tolerate the loss of the node running etcd
+
+This state is designed to be transient. Users should continue adding a third
+control-plane node to achieve full high availability with etcd quorum.
 
 ##### Scaling Worker Nodes
 
@@ -413,6 +437,24 @@ MicroShift would benefit from operators having an adaptable topology mode
 that handles topology changes via node updates.
 A follow-up enhancement will address MicroShift to SNO transitions,
 which may leverage Adaptable topology at transition time.
+
+#### Cluster Autoscaler Interaction
+
+The cluster-autoscaler-operator references `ControlPlaneTopology` and
+may add or remove worker nodes based on workload demand. When Adaptable
+topology is active, autoscaler-driven worker node changes will trigger
+infrastructure topology behavior changes at the threshold boundaries
+(1-to-2 and 2-to-1 workers).
+
+This is expected and correct behavior — the infrastructure topology
+should reflect actual cluster capacity. However, operators must handle
+rapid transitions gracefully. If the autoscaler frequently scales worker
+nodes across the threshold boundary (e.g., between 1 and 2 workers),
+operators should avoid thrashing by using the library-go utilities, which
+will provide debouncing or hysteresis for threshold notifications.
+
+Control-plane nodes are not affected by the cluster autoscaler, as it
+does not manage control-plane node scaling.
 
 ### Implementation Details/Notes/Constraints
 
@@ -606,7 +648,7 @@ A new `oc adm topology transition` command will be added to facilitate safe topo
 - Scanning of installed operators for compatibility declarations
 - Blocking on incompatible operators (error state)
 - Warnings for operators with unknown compatibility
-- `--force` flag to bypass blocks (unsupported, development only)
+- `--force` flag to bypass compatibility blocks — requires interactive confirmation acknowledging the cluster will be in an unsupported state. A cluster-scoped event is posted when `--force` is used to enable detection in support cases.
 - Confirmation prompts before applying one-way transitions
 
 #### Core Operator Changes
@@ -631,6 +673,8 @@ The console will be updated to:
 - Display operator compatibility status for Adaptable topology
 - Provide a marketplace filter to show only operators that support Adaptable topology
 - Restart with Adaptable topology set when the transition occurs
+
+> **Note:** Detailed console UX design (e.g., where compatibility status is surfaced, marketplace filter behavior, and any topology transition workflow in the console) is pending review with the console team.
 
 #### Platform Support Constraints
 
@@ -778,8 +822,11 @@ transitions, and scaling operations.
 
 Transitions to Adaptable topology are one-way.
 Clusters cannot transition back to fixed topology modes.
-This design simplifies implementation but means users must be certain
-before transitioning.
+Reverting from Adaptable to a fixed topology would require every operator
+that adapted to dynamic node-count awareness to safely converge back to
+a static configuration — a complex matrix of state transitions that
+significantly increases the risk of operator conflicts and undefined behavior.
+Users must be certain before transitioning.
 Mistakes require cluster redeployment.
 
 #### Coordination Across Teams
@@ -841,6 +888,12 @@ for different source topologies.
 
 ## Open Questions [optional]
 
+> **Reviewer input requested on the following critical items:**
+>
+> - **#4 — Operator default behavior on unknown topologies** (Operators / OLM): Should operators default to SingleReplica or HighlyAvailable when encountering Adaptable topology before they are updated?
+> - **#8 — etcd atomic member transitions** (cluster-etcd-operator): Can we guarantee both learner promotions happen together (or neither happens) during 1→3 scaling?
+> - **#10 — ValidatingAdmissionPolicy enforcement** (API / Node): Are the proposed CEL expressions sufficient to enforce paired topology field updates, one-way transitions, and valid transition targets?
+
 ### Operators (Core Payload)
 
 1. **Core Operators Affected by Topology**: Which core operators have unique behavior based on controlPlaneTopology and infrastructureTopology values today?
@@ -851,9 +904,15 @@ for different source topologies.
 
 ### Operators (Optional & 3rd-Party)
 
-3. **Self-Certification Process**: How can optional and 3rd-party operators self-certify Adaptable topology support? One approach: remain healthy while the AdaptableTopology suite scales nodes.
+3. **Self-Certification Process**: How can optional and 3rd-party operators self-certify Adaptable topology support? 
+    a. One approach: remain healthy while the AdaptableTopology suite scales nodes.
 
-4. **Unknown Topology Behavior**: How do operators behave on unknown topologies? Most likely run in HighlyAvailable mode (default), but SingleReplica would be safer.
+4. **Unknown Topology Behavior**: How do operators behave on unknown topologies? 
+    a. One approach: Operators run in HighlyAvailable mode (current default?)
+    b. Our Preferred approach: Operators run in SingleReplica mode as default (potentially safer)
+        - We will need to figure out which OLM operators matter here for validation
+        - What OLM operators are referencing topology specifically
+        - Cluster/Core operators would need to switch to SNO by default (and we can audit for this)
 
 ### Testing
 
@@ -866,12 +925,37 @@ for different source topologies.
 7. **etcd Safety Enforcement**: Can CEO enforce etcd safety for 1↔3 node transitions? DualReplica offloads this to pacemaker. Do we need something similar?
 
 8. **Atomic Member Changes**: Can we guarantee both learner promotions happen together (or neither happens)?
+    a. Is this feasible?
+    b. Ideas for potential changes:
+        - Have etcd do a dry run to validate both learners are promotion-ready and then run the promotion
+        - Introduce a new etcd command that allows you to provide a list of nodes to promote together
 
 9. **Preventing Unsafe Transitions**: What other mechanisms are needed to prevent unsafe etcd transitions?
 
 ### Infrastructure Config & API Updates
 
 10. **Paired Field Updates**: Is a ValidatingAdmissionPolicy sufficient to enforce that controlPlaneTopology and infrastructureTopology are always set together?
+
+    **Proposed CEL Expressions:**
+
+    a. **Paired updates** — if either topology field changes, both must have the same value:
+    ```cel
+    !(object.status.controlPlaneTopology != oldObject.status.controlPlaneTopology ||
+      object.status.infrastructureTopology != oldObject.status.infrastructureTopology) ||
+    object.status.controlPlaneTopology == object.status.infrastructureTopology
+    ```
+
+    b. **One-way transition to Adaptable** — once set to Adaptable, cannot revert:
+    ```cel
+    !(oldObject.status.controlPlaneTopology == "Adaptable") ||
+    object.status.controlPlaneTopology == "Adaptable"
+    ```
+
+    c. **Only Adaptable transitions allowed** — fixed modes cannot transition to other fixed modes:
+    ```cel
+    object.status.controlPlaneTopology == oldObject.status.controlPlaneTopology ||
+    object.status.controlPlaneTopology == "Adaptable"
+    ```
 
 11. **Existing Policy Changes**: Do existing ValidatingAdmissionPolicies need changes to update the Infrastructure config?
 
@@ -934,9 +1018,9 @@ Standard QE testing scenarios will include:
 
 ### Dev Preview -> Tech Preview
 
-- All core operators updated to support Adaptable topology with dynamic node count awareness
+- Critical-path operators updated to support Adaptable topology with dynamic node count awareness (at minimum: etcd, ingress, console, kube-apiserver, authentication)
 - AdaptableTopology test suite validates scaling behavior
-- Tests verify all core operators have compatibility annotations
+- Tests verify critical-path operators have compatibility annotations
 - Tests verify cluster stability during node scaling operations
 - Installer supports `adaptableTopology` flag in install-config with validation
 - Console displays compatibility status and provides marketplace filtering
@@ -946,6 +1030,8 @@ Standard QE testing scenarios will include:
 
 ### Tech Preview -> GA
 
+- All 30 in-payload core operators updated to support Adaptable topology (see [Initial Topology Audit](#initial-topology-audit))
+- Tests verify all core operators have compatibility annotations
 - Full test coverage including upgrades (y-stream and z-stream)
 - [Monitoring operator updates and backhaul SLI telemetry](#monitoring-operator-and-telemetry)
 - [SLOs documented and validated](#service-level-objectives)
@@ -974,9 +1060,25 @@ The feature gate ensures Adaptable topology is only active in supported releases
 
 ### Downgrades
 
-Standard OpenShift downgrade procedures apply.
-Downgrading to releases without Adaptable topology support requires redeployment.
-The feature gate protects against usage in unsupported releases.
+**Z-stream downgrades** (within a minor version that supports Adaptable topology):
+Standard downgrade procedures apply. The Adaptable topology setting is preserved.
+Operators in the downgraded version must still support Adaptable topology since
+it is gated by the same feature set within a minor version.
+
+**Y-stream downgrades** (to a minor version without Adaptable topology support):
+The CVO will evaluate the feature gate during downgrade. If Adaptable topology
+is set and the target release does not include the `AdaptableTopology` feature gate
+in its feature set, the downgrade behavior depends on the CVO's feature gate
+handling:
+
+- If the CVO blocks downgrades with active feature-gated features, the downgrade
+  will be rejected. The administrator must redeploy to move to the older version.
+- If the CVO allows the downgrade, operators in the target release will not
+  recognize the `Adaptable` topology value. Operator behavior in this state is
+  undefined and the cluster is unsupported.
+
+Cluster administrators should not downgrade across minor versions when
+Adaptable topology is active. Redeployment is the supported path.
 
 ## Version Skew Strategy
 
@@ -1055,14 +1157,41 @@ There are no unique operational concerns.
 
 ### Recovery Procedures
 
-**Rollback from Failed Transition:**
-- Transitions to Adaptable topology are one-way and cannot be rolled back
-- Recovery requires cluster redeployment
+**Topology Transition Failure Modes:**
 
-**Recovering from etcd Scaling Failure:**
-- Follow standard etcd disaster recovery procedures
-- CEO should handle scaling automatically; manual intervention indicates a bug
-- File a bug in OCPBUGS project with cluster-etcd-operator component
+The topology transition itself is a metadata update to the Infrastructure config.
+It either succeeds or fails atomically via the Kubernetes API. There is no partial
+failure state for the transition itself.
+
+Post-transition issues arise when operators respond to the new topology:
+
+| Failure Mode | Impact | Recovery |
+| ------------ | ------ | -------- |
+| Operator crashes on topology change | Operator restarts via deployment controller | Investigate operator logs; file bug against the operator component |
+| Operator uses incorrect replica count | Workload disruption | Manually scale the affected deployment; file bug |
+| etcd scaling failure during node addition | etcd unhealthy | Follow standard etcd disaster recovery; CEO should self-heal |
+| Incompatible OLM operator misbehaves | Operator-specific impact | Update, replace, or remove the operator |
+
+**Break-Glass Procedure:**
+
+If the cluster is in a degraded state after transition and operator-level fixes
+are insufficient, an administrator can patch the Infrastructure config to restore
+the previous topology values. This is unsupported and may cause additional
+operator disruption:
+
+```bash
+oc patch infrastructure cluster --type=merge --subresource=status \
+  -p '{"status":{"controlPlaneTopology":"SingleReplica","infrastructureTopology":"SingleReplica"}}'
+```
+
+This requires temporarily disabling the ValidatingAdmissionPolicy.
+This procedure should only be used as a last resort and should be followed
+by a support case.
+
+**Full Recovery:**
+
+If the cluster cannot be recovered to a healthy state, redeployment is required.
+Workload backup and restore procedures should be followed.
 
 ## Infrastructure Needed [optional]
 
