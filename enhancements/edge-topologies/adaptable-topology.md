@@ -23,9 +23,10 @@ reviewers:
   - "@damdo, for cloud-credential-operator"
   - "@jerpeter, for OpenShift architecture"
 approvers:
-  - TBD
+  - "@jerpeter, for OpenShift architecture"
+  - "@joelanford, for OLM"
 api-approvers:
-  - TBD
+  - "@joelspeed, for API and infrastructure config"
 creation-date: 2025-12-10
 last-updated: 2026-03-13
 tracking-link:
@@ -455,6 +456,21 @@ will provide debouncing or hysteresis for threshold notifications.
 
 Control-plane nodes are not affected by the cluster autoscaler, as it
 does not manage control-plane node scaling.
+
+#### OpenShift Kubernetes Engine
+
+This proposal does not depend on features excluded from the OpenShift
+Kubernetes Engine (OKE) product offering. Adaptable topology modifies
+core infrastructure components — the Infrastructure API, installer,
+cluster-etcd-operator, library-go, and other in-payload operators — all
+of which are included in OKE. The OLM operator compatibility annotations
+apply equally to OKE clusters, as OLM is part of the OKE offering.
+
+OKE clusters that use Adaptable topology will benefit from the same
+scaling capabilities as OCP clusters. Since OKE excludes developer-facing
+services (Builds, Pipelines, Serverless, Service Mesh) rather than
+infrastructure components, there are no additional considerations or
+limitations for OKE deployments.
 
 ### Implementation Details/Notes/Constraints
 
