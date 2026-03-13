@@ -297,7 +297,7 @@ This strategy provides the best of both worlds: runtime stability with a clear, 
 
 ### Investigate Alternative Methods of Validation
 
-The method to validate the `deploymentConfig` is via a JSON schema derived from the OpenAPI specification of the Deployment and Pod APIs; this is based on the OLMv0 implementation. It has been suggested that instead, internal validation via functions like `ValidatePodSpec`. The OpenAPI schema may be more or less strict that using internal validation.
+The method to validate the `deploymentConfig` is via a JSON schema derived from the OpenAPI specification of the Deployment and Pod APIs; this is based on the OLMv0 implementation. It has been suggested that instead, internal validation via functions like `ValidatePodSpec` be used. The OpenAPI schema may be more or less strict that using internal validation.
 
 The net result of the current method (OpenAPI JSON schema) is that the more strict of the validations (either OpenAPI schema or API server) will prevail. This could mean that errors occur at different layers in the stack.
 
