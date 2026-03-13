@@ -349,7 +349,7 @@ It may be necessary to update the provided `deploymentConfig` to be compatible w
 
 The use of the `deploymentConfig` field is dependent on the Deployment and Pod APIs. It *is* verified by the JSON schema based on OpenAPI definitions. Given Kubetnetes compatibility guarantees, this means that the configuration should be compatible until the next major Kubernetes version where APIs (or portions thereof) may be deprecated or removed.
 
-If an a newer version of the OpenAPI JSON schema is used on an older Kubernetes cluster, then the API server may reject the `deploymentConfig`. This may require the contents of the `deploymentConfig` contents to be updated. Or it may mean that the fields are passed to the deployment but are ignored by the API server.
+If a newer version of the OpenAPI JSON schema is used on an older Kubernetes cluster, then the API server may reject the `deploymentConfig`. This may require the contents of the `deploymentConfig` contents to be updated. Or it may mean that the fields are passed to the deployment but are ignored by the API server.
 
 ## Operational Aspects of API Extensions
 
