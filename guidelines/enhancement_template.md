@@ -1,13 +1,13 @@
 ---
 title: neat-enhancement-idea
 authors:
-  - TBD
+  - "@author"
 reviewers: # Include a comment about what domain expertise a reviewer is expected to bring and what area of the enhancement you expect them to focus on. For example: - "@networkguru, for networking aspects, please look at IP bootstrapping aspect"
-  - TBD
+  - "@reviewer"
 approvers: # This should be a single approver. The role of the approver is to raise important questions, ensure the enhancement receives reviews from all applicable areas/SMEs, and determine when consensus is achieved such that the EP can move forward to implementation.  Having multiple approvers makes it difficult to determine who is responsible for the actual approval. Team leads and staff engineers often make good approvers.
-  - TBD
+  - "@approver"
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None". Once your EP is published, ask in #forum-api-review to be assigned an API approver.
-  - TBD
+  - "@api-approver"
 creation-date: yyyy-mm-dd
 last-updated: yyyy-mm-dd
 status: provisional|implementable|implemented|deferred|rejected|withdrawn|replaced|informational
