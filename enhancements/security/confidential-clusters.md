@@ -401,7 +401,17 @@ The following steps are to be taken to make cocl-operator fit OpenShift
 To make Confidential Cluster Operator a first citizen in the Openshift
 echosystem, interfaces are written in Go and generated with OpenShift tools.
 
-When the operator is built, the interfaces are converted to Rust. COPY FROM Jakob
+When the operator is built, the interfaces are converted from Go to Rust.
+
+* API and CRD generation is implemented in Go
+* CRDs and RBACs are created by kubebuilder from the go struct
+* Validation and constraints are defined in the generated manifests
+  like a regular Go operator
+* CoCl operator uses https://github.com/kube-rs/kopium to translate the
+  CRD to Rust structs
+* In the future, CEL or other guard from kube-rs may be used
+* Go API can be used to generate Go clients for all APIs
+
 
 
 ### Topology Considerations
