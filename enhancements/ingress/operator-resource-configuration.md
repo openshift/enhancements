@@ -95,12 +95,12 @@ Acceptance Criteria:
 ### Goals
 
 - Allow configuration of resource limits for ingress router pods (HAProxy containers)
-- Add feature to v1 API protected by a feature gate for simplicity
+- Add field to the `operator.openshift.io/v1` IngressController API protected by a feature gate for simplicity
 - Maintain backward compatibility with existing IngressController v1 API
 - Use feature gate for Tech Preview period, then promote to Default feature set for GA
 - Enable router pods to achieve Guaranteed QoS class
 - Provide sensible defaults that work for most deployments
-- Support configuration for router container and sidecar containers (logs, metrics)
+- Support configuration for router container and logs sidecar container
 
 ### Non-Goals
 
@@ -225,13 +225,13 @@ type IngressControllerSpec struct {
     //
     // +optional
     // +openshift:enable:FeatureGate=IngressRouterResourceLimits
-    Resources RouterResourceRequirements `json:"resources,omitzero"`
+    Resources *ResourceRequirements `json:"resources,omitempty"`
 }
 
 // +kubebuilder:validation:MinProperties=1
-// RouterResourceRequirements defines resource requirements for ingress router pod containers.
-// At least one of routerContainer, metricsContainer, or logsContainer must be set.
-type RouterResourceRequirements struct {
+// ResourceRequirements defines resource requirements for ingress router pod containers.
+// At least one of routerContainer or logsContainer must be set.
+type ResourceRequirements struct {
     // routerContainer specifies resource requirements (requests and limits) for the
     // router (HAProxy) container in router pods.
     //
@@ -242,14 +242,6 @@ type RouterResourceRequirements struct {
     // +optional
     RouterContainer *corev1.ResourceRequirements `json:"routerContainer,omitempty"`
 
-    // metricsContainer specifies resource requirements for the metrics sidecar
-    // container in router pods.
-    //
-    // If not specified, uses Kubernetes default behavior (no requests or limits).
-    //
-    // +optional
-    MetricsContainer *corev1.ResourceRequirements `json:"metricsContainer,omitempty"`
-    
     // logsContainer specifies resource requirements for the logs sidecar container
     // in router pods (if logs sidecar is enabled).
     //
@@ -300,7 +292,7 @@ spec:
   replicas: 3
   domain: apps.example.com
   
-  # Configure resources for router and metrics containers
+  # Configure resources for router and logs containers
   resources:
     routerContainer:
       requests:
@@ -309,7 +301,7 @@ spec:
       limits:
         cpu: 1000m
         memory: 1Gi
-    metricsContainer:
+    logsContainer:
       requests:
         cpu: 50m
         memory: 64Mi
@@ -426,6 +418,10 @@ causing ingress traffic disruptions
 - Monitor router pod health metrics
 - Provide example configurations for common scenarios (low/medium/high traffic)
 - CPU throttling and memory pressure metrics available via Prometheus
+- Align with patterns used by other operators that expose resource configuration:
+  - Keep defaults conservative and documented
+  - Warn (not block) on risky values
+  - Provide operator metrics/alerts and runbooks for tuning
 
 **Likelihood**: Medium
 
@@ -440,33 +436,6 @@ causing ingress traffic disruptions
 - Field is simply ignored if not understood by tools
 - No breaking changes to existing functionality
 - Standard Kubernetes resource requirements types used
-
-**Likelihood**: Low
-
-#### Risk: Router pod rolling restart causes brief traffic disruption
-
-**Impact**: Configuration changes trigger rolling restart of router pods, potential 
-brief connection disruptions during pod replacement
-
-**Mitigation**:
-- Document that changes trigger rolling restart (expected Kubernetes behavior)
-- Rolling restart minimizes impact - only one pod restarted at a time
-- Connection draining allows graceful termination of existing connections
-- Load balancer redistributes traffic to remaining healthy pods
-- Changes to router resources are not expected to be frequent operations
-- Recommended to perform during maintenance windows for production systems
-
-**Likelihood**: High (by design), **Severity**: Low to Medium (depends on traffic patterns)
-
-#### Risk: Resource configuration drift
-
-**Impact**: Manual changes to router pod deployment could be overwritten by operator reconciliation
-
-**Mitigation**:
-- Operator reconciliation loop detects and corrects drift automatically
-- Document that configuration must be via IngressController CR, not direct deployment edits
-- Events generated when drift is detected and corrected
-- Router deployments are managed resources - manual changes not supported
 
 **Likelihood**: Low
 
