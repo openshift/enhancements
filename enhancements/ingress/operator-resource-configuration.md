@@ -337,13 +337,20 @@ In Hypershift environments:
 Standard behavior - configuration applies to router pod deployments in the 
 `openshift-ingress` namespace managed by the IngressController.
 
-#### Single-node Deployments
+#### Single-node Deployments or MicroShift
 
 Particularly beneficial for single-node OpenShift (SNO) deployments where:
 - Resource constraints are tighter
 - Setting appropriate limits helps prevent resource contention for router pods
 - Guaranteed QoS class improves stability for critical ingress infrastructure
 - Single router replica benefits from predictable resource allocation
+
+#### OpenShift Kubernetes Engine
+
+This enhancement applies to OpenShift Kubernetes Engine (OKE) the same way as
+standard OpenShift Container Platform. The IngressController API and router pod
+resource configuration are part of the core ingress functionality included in
+OKE. No features excluded from OKE are required.
 
 ### Implementation Details/Notes/Constraints
 
@@ -446,8 +453,6 @@ causing ingress traffic disruptions
 3. **Testing complexity**: Must test upgrade scenarios and feature gate behavior
 4. **Potential for misconfiguration**: Users may set inappropriate resource values affecting router stability
 
-## Design Details
-
 ### Open Questions
 
 1. **Q**: Should we support auto-scaling (VPA) for router pods in the future?
@@ -459,9 +464,9 @@ causing ingress traffic disruptions
 3. **Q**: Should this apply to all IngressControllers or only the default?
    - **A**: API supports any IngressController, including custom IngressControllers
 
-### Test Plan
+## Test Plan
 
-#### Unit Tests
+### Unit Tests
 
 - **Feature gate handling**: Behavior with gate enabled/disabled
 - **Controller reconciliation logic**: Mock router deployment updates with resources field
@@ -470,13 +475,13 @@ causing ingress traffic disruptions
 
 Coverage target: >80% for new code
 
-#### Integration Tests
+### Integration Tests
 
 - **API server integration**: v1 API field recognition when feature gate enabled
 - **Controller watches**: IngressController changes trigger router deployment reconciliation
 - **Feature gate integration**: Verify feature gate controls field recognition
 
-#### E2E Tests
+### E2E Tests
 
 - **Create IngressController with resources field**
   - Verify router deployment is updated with correct resource limits
@@ -501,13 +506,13 @@ Coverage target: >80% for new code
   - Upgrade from version without feature to version with feature
   - Verify existing IngressControllers continue working unchanged
   - Enable feature gate and verify resources field works
-  
+
 - **Downgrade scenario tests**
   - Downgrade from version with feature to version without
   - Verify graceful degradation (resources field ignored)
   - Verify router pods continue with default configuration
 
-#### Manual Testing
+### Manual Testing
 
 - Test in resource-constrained environments (e.g., single-node)
 - Verify QoS class changes as expected (Burstable → Guaranteed)
@@ -517,9 +522,9 @@ Coverage target: >80% for new code
 - Monitor router performance metrics (latency, throughput) with different resource configs
 - Test traffic handling during resource limit OOM scenarios
 
-### Graduation Criteria
+## Graduation Criteria
 
-#### Dev Preview -> Tech Preview (feature gated v1 API)
+### Dev Preview -> Tech Preview
 
 - [x] Feature implemented behind feature gate
 - [x] Unit and integration tests passing
@@ -527,7 +532,7 @@ Coverage target: >80% for new code
 - [x] Documentation published in OpenShift docs
 - [x] Enhancement proposal approved
 
-#### Tech Preview -> GA (promote feature gate to Default)
+### Tech Preview -> GA
 
 This section describes criteria for graduating from Tech Preview (feature gate in 
 TechPreviewNoUpgrade) to GA (feature gate in Default) in the same release development 
@@ -544,13 +549,13 @@ Tech Preview and graduate to GA within the same release.
 cycle if Tech Preview period shows no issues. If significant issues are discovered, address 
 them and consider promotion in the next release.
 
-#### Removing a deprecated feature
+### Removing a deprecated feature
 
 N/A - this is a new feature
 
-### Upgrade / Downgrade Strategy
+## Upgrade / Downgrade Strategy
 
-#### Upgrade
+### Upgrade
 
 **From version without feature → version with feature:**
 
@@ -564,7 +569,7 @@ N/A - this is a new feature
 
 **User action optional**: Enable feature gate and use new `resources` field to configure router pod resource limits
 
-#### Downgrade
+### Downgrade
 
 **From version with feature → version without feature:**
 
@@ -578,16 +583,16 @@ N/A - this is a new feature
 **User impact**: Loss of custom router resource limits configured via the feature-gated 
 field; reverts to hardcoded defaults
 
-#### Version Skew
+### Version Skew
 
 Supported version skew follows standard OpenShift practices:
 - API server and operator may be one minor version apart during upgrades
 - v1 API compatibility maintained across all versions
 - Feature gate status synchronized across components
 
-### Version Skew Strategy
+## Version Skew Strategy
 
-#### Operator and API Server Skew
+### Operator and API Server Skew
 
 During cluster upgrades, the API server may be updated before or after the ingress-operator:
 
@@ -603,9 +608,9 @@ During cluster upgrades, the API server may be updated before or after the ingre
 
 **Maximum skew**: 1 minor version (OpenShift standard)
 
-### Operational Aspects of API Extensions
+## Operational Aspects of API Extensions
 
-#### Failure Modes
+### Failure Modes
 
 1. **Invalid resource values**: 
    - Rejected by Kubernetes validation
@@ -629,7 +634,7 @@ During cluster upgrades, the API server may be updated before or after the ingre
    - Falls back to hardcoded defaults
    - No traffic impact
 
-#### Support Procedures
+## Support Procedures
 
 Standard OpenShift support procedures apply:
 
@@ -679,7 +684,7 @@ oc get featuregate cluster -o yaml | grep IngressRouterResourceLimits
 - TBD: Feature available in Tech Preview (target: OpenShift 4.X)
 - TBD: Promotion to GA (target: OpenShift 4.Y, ~2 releases after Tech Preview)
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Alternative 1: Configuration via ConfigMap
 
