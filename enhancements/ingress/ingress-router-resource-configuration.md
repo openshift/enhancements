@@ -5,9 +5,9 @@ authors:
 reviewers:
   - "@miciah"
 approvers:
-  - TBD
+  - "@alebedev87"
 api-approvers:
-  - TBD
+  - "@JoelSpeed"
 creation-date: 2025-10-27
 last-updated: 2026-01-12
 tracking-link:
