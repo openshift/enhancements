@@ -12,7 +12,6 @@ reviewers:
   - "@hasbro17" # etcd team, etcd certificate configuration and rotation
   - "@dusk125"  # etcd team, etcd certificate configuration and rotation
   - "@p0lyn0mial" # authentication team, service-ca and client certificate management
-#  - TBD # security team, PKI architecture and certificate lifecycle management
 approvers:
   - "@sjenning" # staff engineer with PKI and security expertise
 api-approvers:
@@ -877,10 +876,10 @@ When upgrading from a version without this feature to a version with it:
 1. The PKI CRD is installed during upgrade
 2. A PKI resource is automatically created with `spec.certificateManagement.mode: Unmanaged`
 3. With `spec.certificateManagement.mode: Unmanaged`, operators use their existing hardcoded defaults, ensuring zero behavior change
-5. Existing certificates continue to function unchanged
-6. Certificate rotation uses existing defaults until the PKI resource is updated
-7. Administrators can update the PKI resource post-upgrade to `spec.certificateManagement.mode: Default` or `spec.certificateManagement.mode: Custom` with configuration
-8. New parameters apply on the next rotation cycle after PKI resource is updated
+4. Existing certificates continue to function unchanged
+5. Certificate rotation uses existing defaults until the PKI resource is updated
+6. Administrators can update the PKI resource post-upgrade to `spec.certificateManagement.mode: Default` or `spec.certificateManagement.mode: Custom` with configuration
+7. New parameters apply on the next rotation cycle after PKI resource is updated
 
 This approach ensures zero disruption during upgrade and preserves backward compatibility.
 
@@ -1073,16 +1072,15 @@ However, there are some considerations:
 
 **Scenario: Invalid PKI configuration was applied and certificates are failing**
 
-1. If PKI resource update was recent (< 1 hour), use kubectl rollback:
-   ```bash
-   # This may not work if validation prevented the change
-   oc rollout undo pki cluster
-   ```
-
-2. Otherwise, manually edit PKI resource to valid configuration:
+1. Edit the PKI resource to fix or revert the configuration:
    ```bash
    oc edit pki cluster
-   # Remove or fix invalid configuration
+   # Remove or fix invalid configuration, or set mode to Default
+   ```
+
+2. Alternatively, patch the PKI resource to revert to platform defaults:
+   ```bash
+   oc patch pki cluster --type merge -p '{"spec":{"certificateManagement":{"mode":"Default"}}}'
    ```
 
 3. Wait for natural certificate rotation, or force rotation by deleting certificate secrets:
@@ -1175,16 +1173,21 @@ The infrastructure needed includes:
 
 These CA certificates directly sign serving or client certificates. OpenShift uses a flat PKI topology rather than a hierarchical CA model.
 
+Certificate names use a `component.certname` dot-separated naming convention, where the component prefix identifies the managing operator.
+
 | Certificate Name | Description | Managed By |
 |------------------|-------------|------------|
-| `kube-apiserver-localhost-signer` | Signs kube-apiserver localhost serving certificates | kube-apiserver-operator |
-| `kube-apiserver-service-network-signer` | Signs kube-apiserver service network serving certificates | kube-apiserver-operator |
-| `kube-apiserver-lb-signer` | Signs kube-apiserver load balancer serving certificates | kube-apiserver-operator |
-| `kube-apiserver-to-kubelet-signer` | Signs kube-apiserver to kubelet client certificates | kube-apiserver-operator |
-| `aggregator-signer` | Signs aggregator client certificates for API server extension | kube-apiserver-operator |
-| `etcd-signer` | Signs etcd peer and client certificates | etcd-operator |
-| `etcd-metrics-signer` | Signs etcd metrics serving certificates | etcd-operator |
-| `service-ca` | Signs service serving certificates | service-ca-operator |
+| `kube-apiserver.aggregator-front-proxy-signer` | Signs aggregator client certificates for API server extension | kube-apiserver-operator |
+| `kube-apiserver.control-plane-client-signer` | Signs control plane client certificates | kube-apiserver-operator |
+| `kube-apiserver.kubelet-client-signer` | Signs kube-apiserver to kubelet client certificates | kube-apiserver-operator |
+| `kube-apiserver.loadbalancer-serving-signer` | Signs kube-apiserver load balancer serving certificates | kube-apiserver-operator |
+| `kube-apiserver.localhost-recovery-serving-signer` | Signs kube-apiserver localhost recovery serving certificates | kube-apiserver-operator |
+| `kube-apiserver.localhost-serving-signer` | Signs kube-apiserver localhost serving certificates | kube-apiserver-operator |
+| `kube-apiserver.node-system-admin-signer` | Signs node system admin client certificates | kube-apiserver-operator |
+| `kube-apiserver.service-network-serving-signer` | Signs kube-apiserver service network serving certificates | kube-apiserver-operator |
+| `etcd.signer` | Signs etcd peer and client certificates | etcd-operator |
+| `etcd.metrics-signer` | Signs etcd metrics serving certificates | etcd-operator |
+| `service-ca.signer` | Signs service serving certificates | service-ca-operator |
 
 #### Serving Certificates (Category: Serving)
 
@@ -1192,13 +1195,14 @@ Serving certificates present server identity during TLS handshakes.
 
 | Certificate Name | Description | Managed By |
 |------------------|-------------|------------|
-| `kube-apiserver-localhost-server` | Localhost SNI endpoint | kube-apiserver-operator |
-| `kube-apiserver-service-network-server` | Service network SNI endpoint | kube-apiserver-operator |
-| `kube-apiserver-lb-server` | External load balancer SNI endpoint | kube-apiserver-operator |
-| `kube-apiserver-internal-lb-server` | Internal load balancer SNI endpoint | kube-apiserver-operator |
-| `etcd-peer-server` | etcd peer communication | etcd-operator |
-| `etcd-server` | etcd client connections | etcd-operator |
-| `etcd-metrics-server` | etcd metrics endpoint | etcd-operator |
+| `kube-apiserver.external-loadbalancer-serving` | External load balancer SNI endpoint | kube-apiserver-operator |
+| `kube-apiserver.internal-loadbalancer-serving` | Internal load balancer SNI endpoint | kube-apiserver-operator |
+| `kube-apiserver.localhost-recovery-serving` | Localhost recovery SNI endpoint | kube-apiserver-operator |
+| `kube-apiserver.localhost-serving` | Localhost SNI endpoint | kube-apiserver-operator |
+| `kube-apiserver.service-network-serving` | Service network SNI endpoint | kube-apiserver-operator |
+| `etcd.peer-serving` | etcd peer communication | etcd-operator |
+| `etcd.serving` | etcd client connections | etcd-operator |
+| `etcd.metrics-serving` | etcd metrics endpoint | etcd-operator |
 
 #### Client Certificates (Category: Client)
 
@@ -1206,10 +1210,15 @@ Client certificates authenticate clients to servers.
 
 | Certificate Name | Description | Managed By |
 |------------------|-------------|------------|
-| `kube-apiserver-to-kubelet-client` | API server authentication to kubelet | kube-apiserver-operator |
-| `aggregator-client` | API server aggregation proxy | kube-apiserver-operator |
+| `kube-apiserver.aggregator-front-proxy-client` | API server aggregation proxy | kube-apiserver-operator |
+| `kube-apiserver.check-endpoints-client` | Check endpoints client certificate | kube-apiserver-operator |
+| `kube-apiserver.control-plane-node-admin-client` | Control plane node admin client certificate | kube-apiserver-operator |
+| `kube-apiserver.kube-controller-manager-client` | Kube controller manager client certificate | kube-apiserver-operator |
+| `kube-apiserver.kube-scheduler-client` | Kube scheduler client certificate | kube-apiserver-operator |
+| `kube-apiserver.kubelet-client` | API server authentication to kubelet | kube-apiserver-operator |
+| `kube-apiserver.node-system-admin-client` | Node system admin client certificate | kube-apiserver-operator |
 
-**Note:** These names will be available for use in `namedCertificates` once named certificate overrides are implemented. Operators will register these names dynamically via `PKICertificateDefinition` resources. Additional certificates may be registered by other operators as they adopt the PKI configuration API.
+**Note:** These names will be available for use in `namedCertificates` once named certificate overrides are implemented. Operators will register these names dynamically via `PKICertificateDefinition` resources. Additional certificates may be registered by other operators as they adopt the PKI configuration API. Certificate names for etcd-operator and service-ca-operator will be finalized in their respective implementation PRs.
 
 ### Additional Certificate Configuration Options
 
