@@ -201,7 +201,7 @@ The Technology Preview (TP) release will have a feature gate named `NetworkObser
 
 ```
 $ openshift-install create install-config
-$ openshift-install create manifests`
+$ openshift-install create manifests
 ```
 
 Now create a file named **99-feature-gate.yml** in the **manifests** directory with the following:
