@@ -17,7 +17,7 @@ approvers:
 api-approvers:
   - "@jotak"
   - "@dave-tucker"
-  - {api-team}
+  - "{api-team}"
 creation-date: 2025-09-30
 last-updated: 2026-02-25
 tracking-link:
