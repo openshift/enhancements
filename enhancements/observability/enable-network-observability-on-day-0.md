@@ -11,13 +11,14 @@ reviewers:
   - "@jan--f"
   - "@abhat"
   - "@simonpasquier"
+  - "@everettraven"
 approvers:
   - "@jotak"
   - "@dave-tucker"
 api-approvers:
   - "@jotak"
   - "@dave-tucker"
-  - "{api-team}"
+  - "@everettraven"
 creation-date: 2025-09-30
 last-updated: 2026-02-25
 tracking-link:
