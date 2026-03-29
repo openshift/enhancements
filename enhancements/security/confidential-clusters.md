@@ -194,6 +194,7 @@ components:
   * Allow nodes to be marked as confidential. This is specific per cloud
     provider and per Hardware manufacturer.
   * Request/Instruct cloud providers to run nodes as CVMs.
+  * Mark clusters as confidential (status field)
 
 * Installer
   * Allow users to specify they want to run OpenShift as a Confidential Cluster
@@ -305,7 +306,7 @@ nodes to attest to the cluster using new version of RHCOS.
 1. The cluster administrator verifies that all control plane nodes are
    configured to use the external Trustee instance as fallback in the Clevis
    Trustee PIN configuration.
-1. Cluster shutdown
+1. Cluster graceful shutdown
 1. Before restarting any node, the Trustee instance must be made available at
    the domain or IP configured above.
 1. The cluster administrator restarts the control plane nodes which attests
@@ -354,6 +355,12 @@ be added to
 * **Core Payload**: add Confidential Cluster Operator to Core Payload
   * It needs to be available during cluster installation
   * To be running iff the confidential-cluster CVO capability is enabled
+
+* **Confidential Cluster Status**: add a 'status' field in the infrastructure
+  object that tells readers if the cluster is confidential or not.
+  * If a migration from non-confidential to confidential cluster is
+    allowed/wanted -- currently not -- then a spec struct is needed too
+    and a controller that listens on spec changes
 
 #### Additional CRDs used by the Confidential Cluster Operator
 
