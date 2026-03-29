@@ -293,6 +293,10 @@ The cluster administrator flow should not change when adding new nodes to the
 cluster. The Confidential Cluster Operator will perform the necessary
 configuration to allow new nodes to join the cluster.
 
+For more information about the implementation, see
+subsection "Adding a new node to the cluster"
+of section "Implementation Details/Notes/Constraints" below.
+
 ##### Cluster update
 
 The cluster administrator flow should not change when updating a cluster. The
