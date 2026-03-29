@@ -242,6 +242,7 @@ components:
   * Measure Ignition config in a PCR value, before parsing it
 
 * Machine Config Operator
+  * Support bootc based OS images (not use rpm-ostree anymore)
   * Ensure that MachineConfigs are only served to attested nodes
   * Option: Store MachineConfigs as Trustee resources, stop serving configs via
     the MCS
