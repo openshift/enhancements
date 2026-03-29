@@ -719,6 +719,7 @@ FCOS/RHCOS and general Image Mode / bootc testing.
 
 - End to end tests
 - Documentation
+- Security audit
 
 ### Removing a deprecated feature
 N/A
