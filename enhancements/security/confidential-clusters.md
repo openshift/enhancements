@@ -351,6 +351,7 @@ be added to
 * **Ignition spec changes**: The Ignition configuration specification will be
   extended to support:
   * configuring the Clevis trustee pin
+    * See ignition PR#2145 <https://github.com/coreos/ignition/pull/2145>
   * enable fetching remote config after remote attestation
 
 * **OpenShift CVO**: add a capability for confidential cluster
