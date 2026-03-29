@@ -409,10 +409,12 @@ The following steps are to be taken to make cocl-operator fit OpenShift
   * APIs and CRDs are to be written in Go
   * When the operator is built, the APIs/CRDs are translated to Rust
   * The system openssl library is to be used
+  * The operator is to be built on Konflux
+  * Container images go thourgh CVE scanning
 
 #### Integration with Openshift tooling
 To make Confidential Cluster Operator a first citizen in the Openshift
-echosystem, interfaces are written in Go and generated with OpenShift tools.
+ecosystem, interfaces are written in Go and generated with OpenShift tools.
 
 When the operator is built, the interfaces are converted from Go to Rust.
 
