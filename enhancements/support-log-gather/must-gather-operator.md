@@ -11,7 +11,7 @@ approvers:
 api-approvers:
   - "@Prashanth684"
 creation-date: 2025-08-14
-last-updated: 2025-10-14
+last-updated: 2026-03-27
 status: implementable
 see-also:
   - "/enhancements/oc/must-gather.md"
@@ -26,6 +26,8 @@ tracking-link:
 ## Summary
 
 The Must Gather Operator is an OLM-installable operator deployed on an OpenShift cluster that closely integrates with the must-gather tool. This enhancement describes how the operator provides a user-configurable interface (a new CustomResource) to gather data, diagnostic information from a cluster using must-gather and upload it to a Red Hat support case.
+
+The operator can pass optional gather settings to the must-gather image—for example, when `additionalConfig.skipRotatedPodLogs` is set to true, the operator sets `MUST_GATHER_SKIP_ROTATED_POD_LOGS=True` on the gather container so the default collection omits `oc adm inspect --rotated-pod-logs` on the paths covered by the [must-gather image](https://github.com/openshift/must-gather) (via `get_log_collection_args()` / `rotated_pod_logs_arg` in `collection-scripts/common.sh`). When the field is omitted, null, or false, behavior matches today’s default (rotated pod logs are collected).
 
 ## Motivation
 
@@ -76,6 +78,7 @@ The operator leverages the existing must-gather image format and `/usr/bin/gathe
    - User (with appropriate permissions) creates a `MustGather` CustomResource
    - User provides a reference to the service account to be used for the collection Job
    - User provides a reference to the secret to be used to authenticate to sftp.access.redhat.com
+   - Optionally, user sets `spec.additionalConfig` (for example `audit: true` or `skipRotatedPodLogs: true`); when `skipRotatedPodLogs` is true, the operator injects `MUST_GATHER_SKIP_ROTATED_POD_LOGS=True` into the gather container environment
 
    - Operator creates a Kubernetes Job that has 2 containers: gather, upload
    - The gather pod runs the specific platform must-gather image
@@ -117,8 +120,8 @@ type MustGatherSpec struct {
     // +optional
     ServiceAccountRef corev1.LocalObjectReference `json:"serviceAccountRef,omitempty"`
 
-    // additionalConfig contains extra parameters used to customize the gather process,
-    // currently enabling audit logs is the only supported field.
+    // additionalConfig contains extra parameters used to customize the gather process
+    // (for example audit logs, or skipping rotated pod logs in the must-gather image).
     // +optional
     AdditionalConfig *AdditionalConfig `json:"additionalConfig,omitempty"`
 
@@ -153,6 +156,13 @@ type AdditionalConfig struct {
     // See documentation for further information.
     // +kubebuilder:default:=false
     Audit bool `json:"audit,omitempty"`
+
+    // SkipRotatedPodLogs, when non-nil and true, causes the operator to set the environment variable
+    // MUST_GATHER_SKIP_ROTATED_POD_LOGS=True on the gather container. The must-gather
+    // image interprets only that exact value; it omits --rotated-pod-logs for covered
+    // oc adm inspect invocations. When nil or false, rotated pod logs are collected as today.
+    // +optional
+    SkipRotatedPodLogs *bool `json:"skipRotatedPodLogs,omitempty"`
 } 
 
 // UploadType is a specific method for uploading to a target.
@@ -255,10 +265,17 @@ type MustGatherStatus struct {
    - Local hostPath emptyDir for output storage
    - ServiceAccount with necessary RBAC permissions that are necessary for the [gather script](https://github.com/openshift/must-gather/blob/release-4.20/collection-scripts/gather) to succeed.
 
-2. **Data Flow**:
+2. **Rotated pod logs (must-gather image contract)**:
+   - The default must-gather image collects historical pod log files via `oc adm inspect --rotated-pod-logs` on its main inspect paths, which can increase archive size and collection time.
+   - When `MustGather.spec.additionalConfig.skipRotatedPodLogs` is non-nil and true, the operator sets `MUST_GATHER_SKIP_ROTATED_POD_LOGS=True` on the **gather** container only. The must-gather image treats only that exact string as enabling the skip; any other value or an unset variable preserves default collection.
+   - This does not change other “rotated” artifacts gathered by separate scripts (for example node-copied audit logs); scope matches the must-gather image’s `oc adm inspect` usage.
+
+3. **Data Flow**:
    - Each gather container writes to `/must-gather/<image-name>/`
    - The upload container creates a compressed tar archive before uploading via SFTP
    - PVC is removed once the pod gets recycled
+
+4. **Environment propagation**: Gather-container environment for this feature must use the literal `True` value for `MUST_GATHER_SKIP_ROTATED_POD_LOGS` when `SkipRotatedPodLogs` is non-nil and true, so behavior stays aligned with the must-gather image (values such as `true` or `1` are not recognized for skip).
 
 ### Implementation
 
@@ -401,6 +418,7 @@ Additionally, Kubernetes garbage collection will also automatically delete the C
 
 1. <https://github.com/openshift/must-gather-operator/> was previously maintained by OSD SREs
 2. Outdated old fork <https://github.com/redhat-cop/must-gather-operator> that still installs on OpenShift from the Community Catalog
+3. Optional skip for rotated pod logs: must-gather image implements `MUST_GATHER_SKIP_ROTATED_POD_LOGS=True` (strict string) via `get_log_collection_args()` / `rotated_pod_logs_arg` in `collection-scripts/common.sh`, consumed by `gather` and `gather_vsphere`. The operator exposes `MustGather.spec.additionalConfig.skipRotatedPodLogs` and maps it to that environment variable on the gather Job.
 
 ## Alternatives (Not Implemented)
 
