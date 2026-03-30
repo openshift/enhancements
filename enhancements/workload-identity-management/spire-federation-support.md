@@ -55,7 +55,7 @@ Organizations deploying workloads across multiple OpenShift clusters need secure
 ### Non-Goals
 
 1. **Automatic trust bundle bootstrapping** - Initial trust bundle exchange cannot be fully automated without compromising security. Users must manually bootstrap trust bundles.
-2. **Federation with unlimited clusters** - We impose a fixed maximum of 50 federated trust domains to prevent performance degradation.
+2. **Federation with unlimited clusters** - A maximum of 50 federated trust domains is supported as of today until performance validations are completed.
 3. **Automatic ClusterFederatedTrustDomain creation** - Users must create `ClusterFederatedTrustDomain` resources on each cluster for each federation relationship to enable automatic bundle rotation and initial trust bundle exchange.
 4. **Custom CA certificate management for https_web profile** - For `https_web` profile, users must provide valid certificates via Secrets or use ACME.
 5. **Dynamic trust domain changes** - Changing trust domains in federated clusters requires recreating the federation from scratch. This is a SPIRE limitation, not an operator limitation. This is not supported as part of this enhancement proposal.
@@ -428,13 +428,16 @@ The solution can incur performance overhead, increase troubleshooting complexity
 
 ## Open Questions
 
-1. **Should we support dynamic trust domain changes?**
+1. **Should operator support dynamic trust domain changes?**
    - Current proposal: No, requires complete re-federation.
-   - Question: Should we detect and provide better guidance when trust domain changes?
+   - Question: Should operator detect and provide better guidance when trust domain changes?
+   - Current proposal: No, operator will reconcile any updates and restart the operand spire server.
+   
 
-2. **Should we support automatic failover if a federated cluster becomes unavailable?**
-   - Should operator surface this information in status?
-   - Should we add health checks for federated endpoints?
+2. **Should operator support automatic failover if a federated cluster becomes unavailable?**
+   - Should operator surface this information in status? Operator will not be able to monitor operands external to cluster and is out-of-scope as of today.
+   - Should operator add health checks for federated endpoints? The operator may not be aware of health check endpoints of the remote clusters. 
+   
 
 ## Test Plan
 
