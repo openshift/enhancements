@@ -42,7 +42,7 @@ The default router in OpenShift, an IngressController object managed by the Clus
 
 AWS [announced support for Security Groups when deploying an NLB in August 2023][nlb-supports-sg], but the CCM for AWS (within kubernetes/cloud-provider-aws) does not currently implement the feature of automatically creating and managing security groups for `Service` resources type-LoadBalancer using NLBs. While the [AWS Load Balancer Controller (ALBC/LBC)][aws-lbc] project already supports deploying security groups for NLBs, this enhancement focuses on adding minimal, opt-in support to the existing CCM to address immediate customer needs without a full migration to the LBC. This approach aims to provide the necessary functionality without requiring significant changes in other OpenShift components like the Ingress Controller, installer, ROSA, etc.
 
-Using a Network Load Balancer is a recommended network-based Load Balancer by AWS, and attaching a Security Group to an NLB is a security best practice. NLBs also do not support attaching security groups after they are created.
+Using a Network Load Balancer, as opposed to a Classic Load Balancer, is the recommended way to do network-based load balancing by AWS, and attaching a Security Group to a NLB is a security best practice. NLBs initially created without an associated Security Group do not support Security Group association after creation.
 
 [nlb-supports-sg]: https://aws.amazon.com/about-aws/whats-new/2023/08/network-load-balancer-supports-security-groups/
 [aws-lbc]: https://kubernetes-sigs.github.io/aws-load-balancer-controller/latest/
@@ -55,7 +55,7 @@ Using a Network Load Balancer is a recommended network-based Load Balancer by AW
 
 - As a Developer, I want to deploy a Service type-LoadBalancer NLB with security groups managed by controller (CCM), so that the ingress rules can be automatically updated according to the Service ports, and all resources removed without user intervention following best practice and keeping similar resource management as Classic Load Balancer (CLB).
 
-- As an OpenShift developer of Cluster Ingress Operator (CIO), I want to the CCM to manage the life cycle of Security Group resource when creating a `Service` type-LoadBalancer NLB, so that it:
+- As an OpenShift developer of Cluster Ingress Operator (CIO), I want the CCM to manage the life cycle of Security Group resource when creating a `Service` type-LoadBalancer NLB, so that it:
   - a) decreases the amount of provider-specific changes on CIO;
   - b) decreases the amount of maintained code/projects by the team (e.g., ALBC);
   - c) enhances new configurations to the Ingress Controller when using NLB;
@@ -80,14 +80,19 @@ Proposed Phases:
 
 **Phase 2: OpenShift defaults to Security Group when Service type-LoadBalancer is NLB**
 
-- OpenShift Cluster Cloud Controller Manager Operator (CCCMO) must enforce cloud-provider configuration on AWS CCM to manage Security Group when Service type-LoadBalancer NLB.
-- Ensure the configuration is added for all variants: self-managed, ROSA HCP and Classic.
+a. Self-Managed and ROSA Classic: OpenShift Cluster Cloud Controller Manager Operator (CCCMO) must enforce cloud-provider configuration on AWS CCM to manage Security Group when Service type-LoadBalancer NLB.
+
+b. ROSA HCP: The HyperShift Control Plane Operator must enforce the cloud-provider configuration in the CCM's cloud-config ConfigMap to enable managed Security Groups when creating Service type-LoadBalancer NLB resources in hosted clusters.
 
 **Phase 3: CCM support BYO SG (Bring Your Own Security Group) Annotation when Service type-LoadBalanacer NLB**
 
-- Introduce Annotations to CCM to allow BYO SG to Service type-LoadBalancer NLB to opt-out the global `Managed` security group configuration.
-    - The annotation must follow the same standard as ALBC. Must be optional.
-    - (TBD if it is required) An annotation to allow managing backend rules must be added to prevent manual changes by the user. Must be opt-out by default
+- Introduce Annotation to CCM to allow BYO SG to Service type-LoadBalancer NLB to opt-out the global `Managed` security group configuration.
+    - The annotation must follow the same standard as ALBC (`service.beta.kubernetes.io/aws-load-balancer-security-groups`). Must be optional.
+    - The annotation must support on Create and Update the Load Balancer.
+    - When update, the managed security group must be recycled
+    - As OCPSTRAT-1553 asks for support of ingress controller on ROSA HCP, the installer will not be covered by this phase.
+    - The BYO security group annotation's security group resources must have precedence over the managed security group (opt-out feature).
+    - Backend security group rule management (similar to ALBC's `service.beta.kubernetes.io/aws-load-balancer-manage-backend-security-group-rules`) is deferred to a future phase and not included in the initial implementation scope.
 
 ### Non-Goals
 
@@ -124,15 +129,29 @@ Change summary:
 
 **Phase 2: Default OpenShift to use SG when creating Service type-LoadBalancer NLB**
 
-Update CCCMO to update the cloud-config to enforce Security Group configuration of Service type-loadBalancer by default on OpenShift.
-Goals:
+Enable managed Security Groups by default for NLB services across all OpenShift deployment models. This phase has two sub-phases due to architectural differences:
+
+**Phase 2a - Self-Managed and ROSA Classic:**
+Update CCCMO (Cluster Cloud Controller Manager Operator) to enforce Security Group configuration in the cloud-config for Service type-LoadBalancer NLB by default.
 
 - OpenShift/cloud-provider-AWS (CCM):
   - Synchronize with upstream feature to OpenShift code base
   - Ensure upstream tests are inherited to the OpenShift core test framework
 - Cluster Cloud Controller Manager Operator (CCCMO):
-  - Enforce default configuration to manage security groups on NLB
-- Validate TP on OpenShift offerings: self-managed, ROSA Classic, ROSA Managed
+  - Implement `setOpenShiftDefaults` function to enforce `NLBSecurityGroupMode = Managed` in cloud-config
+  - Guard configuration enforcement with the `AWSServiceLBNetworkSecurityGroup` feature gate
+- Validate Tech Preview on OpenShift offerings: self-managed, ROSA Classic
+- Promote from Tech Preview to GA
+
+**Phase 2b - ROSA HCP (HyperShift):**
+Update the HyperShift Control Plane Operator to enforce Security Group configuration for NLB services in hosted clusters.
+
+- Implement feature on Hypershift
+- HyperShift Control Plane Operator:
+  - Modify AWS CCM config adapter to read `AWSServiceLBNetworkSecurityGroup` feature gate from `HostedControlPlane.Spec.Configuration.FeatureGate`
+  - When feature gate is enabled, set `NLBSecurityGroupMode = Managed` in the cloud-config ConfigMap
+  - Implement cluster-scoped feature gate evaluation (not global) to support different configurations across hosted clusters
+- Validate feature on ROSA HCP
 
 **Phase 3: CCM support BYO SG Annotation when Service type-LoadBalanacer NLB**
 
@@ -184,17 +203,29 @@ platform:
         - When the Service is deleted, the CCM will also delete the associated Security Group, ensuring proper cleanup.
     - Manages the Security Group life cycle (updates delete) - similar existing CLB flow.
 
-**OpenShift Managed**
+**OpenShift Managed - ROSA Classic**
 
-ROSA Classic and ROSA HCP must inherit CCCMO and CCM defaults to SG.
+ROSA Classic follows the same workflow as self-managed OpenShift since it uses CCCMO:
 
-- 1. User
-- 2. `rosa` CLI. ROSA controllers/backend must enable the use of NLB (default flow)
-- 3. CCCMO same behavior as self-managed
-- 4. CIO same behavior as self-managed
-- 5. CCM same behavior as self-managed
+- 1. User: Creates ROSA Classic cluster via `rosa` CLI
+- 2. ROSA Backend: Provisions cluster with NLB enabled for default Ingress Controller (default flow)
+- 3. CCCMO: Enforces `NLBSecurityGroupMode = Managed` in cloud-config (same behavior as self-managed, when feature gate is enabled)
+- 4. CIO: Creates Service type-LoadBalancer with NLB annotations (same behavior as self-managed)
+- 5. CCM: Creates NLB with managed Security Group (same behavior as self-managed)
 
-#### Phase 3 - BYO SG
+**OpenShift Managed - ROSA HCP (HyperShift)**
+
+ROSA HCP has a different architecture and does not use CCCMO:
+
+- 1. User: Creates ROSA HCP cluster via `rosa` CLI
+- 2. ROSA Backend: Provisions hosted cluster with NLB enabled for default Ingress Controller (default flow)
+- 3. HyperShift Control Plane Operator (CPO):
+    - Reads `AWSServiceLBNetworkSecurityGroup` feature gate from HostedControlPlane resource
+    - When enabled, sets `NLBSecurityGroupMode = Managed` in cloud-config ConfigMap for the hosted cluster's CCM
+- 4. CIO (in hosted cluster): Creates Service type-LoadBalancer with NLB annotations (same behavior as self-managed)
+- 5. CCM (in hosted cluster): Creates NLB with managed Security Group (same behavior as self-managed)
+
+#### Phase 3 - BYO (user-provided) Security Group to NLB
 
 Brownfield on standalone Services:
 
@@ -261,18 +292,30 @@ func setOpenShiftDefaults(cfg *awsconfig.CloudConfig) {
 
 #### ROSA Classic
 
-- No changes required as ROSA Classic as CCCMO is global within the cluster, and Classic enables NLB by default in the existing flow.
-
-#### Hypershift/ROSA HCP
-
-- No changes required as ROSA Classic as CCCMO is global within the cluster, and HCP enables NLB by default in the existing flow.
+ROSA Classic follows the same implementation path as self-managed OpenShift clusters:
+- Uses CCCMO (Cluster Cloud Controller Manager Operator) to manage CCM configuration
+- The `setOpenShiftDefaults` function in CCCMO enforces `NLBSecurityGroupMode = Managed` in the cloud-config
+- ROSA Classic already defaults to NLB for the default Ingress Controller, so this feature will automatically apply when the feature gate is enabled
+- No additional ROSA-specific code changes are required beyond the CCCMO implementation
 
 ### Topology Considerations
 
 #### Hypershift / Hosted Control Planes
 
-- The flow using self-manage core controllers and defaulting to NLB is already a core piece of HyperShift.
-- TODO: we need to figure out if hypershift won't override or change the cloud-config in the lifecycle of the workload cluster.
+HyperShift (ROSA HCP) requires a different implementation approach compared to standalone clusters and ROSA Classic because it does not use CCCMO. In HyperShift architecture:
+
+- The control plane runs in a management cluster and is managed by the HyperShift Control Plane Operator (CPO)
+- The CPO directly manages the cloud-config ConfigMap for the AWS Cloud Controller Manager in the hosted control plane namespace
+- The cloud-config is generated and updated by the CPO's AWS Cloud Controller Manager component reconciler (`control-plane-operator/controllers/hostedcontrolplane/v2/cloud_controller_manager/aws/`)
+- Feature gate configuration is read from `HostedControlPlane.Spec.Configuration.FeatureGate` instead of a global feature gate
+
+Implementation approach for Phase 2b:
+
+1. The CPO's AWS CCM config adapter (`adaptConfig` function) must check if the `AWSServiceLBNetworkSecurityGroup` feature gate is enabled in the HostedControlPlane's configuration
+2. When enabled, the adapter must set `NLBSecurityGroupMode` to `Managed` in the cloud-config ConfigMap
+3. This ensures that hosted clusters with the appropriate feature gate configuration will automatically provision Security Groups for NLB services
+
+This approach aligns with HyperShift's architecture where cluster-specific configurations are derived from the HostedControlPlane resource rather than global settings, enabling different hosted clusters on the same management cluster to have different feature gate configurations.
 
 #### Standalone Clusters
 
@@ -282,20 +325,33 @@ All changes are proposed initially and exclusively for Standalone clusters.
 
 #### Single-node Deployments or MicroShift
 
-> TODO: The following statements must be validated, and if we'll need to test on those deployment types.
+Single-Node OpenShift (SNO) and MicroShift deployments on AWS will inherit this feature automatically when the `AWSServiceLBNetworkSecurityGroup` feature gate is enabled. There are no deployment-specific restrictions or special configurations required. The feature behavior is identical to multi-node clusters:
 
-N/A. SNO or MicroShift created on AWS must inherit this feature when feature gate is enabled, there is not restriction or specific configuration for this deployment.
+- SNO deployments using NLB for the default Ingress Controller will get managed Security Groups when the feature gate is enabled
+- The CCCMO implementation applies uniformly across deployment sizes
+- Testing should include SNO deployments to validate the feature works correctly in single-node configurations
 
 
 ### Implementation Details/Notes/Constraints
 
 - The initial implementation will focus on creating a single Security Group per NLB.
 - Egress rules management in CCM needs careful consideration to avoid overly permissive rules. The initial implementation should restrict egress to the necessary ports and protocols for communication with the backend pods (traffic ports and health check ports) within the cluster's VPC.
+- **Limitation - Custom Ingress Rules**: The managed Security Group feature in Phase 1 and Phase 2 does not provide the ability to customize ingress rules based on source IP CIDR ranges. The Security Group will allow traffic from all sources (0.0.0.0/0) on the ports defined in the Service specification. Users requiring selective traffic filtering by source IP will need to use the BYO (Bring Your Own) Security Group feature described in Phase 3, or wait for a potential future enhancement that could leverage `Service.spec.loadBalancerSourceRanges` or `IngressController.spec.endpointPublishingStrategy.loadBalancer.allowedSourceRanges` to configure custom ingress rules on managed Security Groups.
 
-TODO review the following items:
+**Additional Implementation Notes:**
 
-- The Security Group naming convention should be consistent and informative, following the same naming convention of AWS Load Balancer Controller (LBC).
-- Proper IAM permissions for the CCM's service account will be required to allow it to create, describe, and delete Security Groups in AWS. This needs to be documented as a prerequisite.
+- **Security Group Naming Convention**: The Security Group naming must follow the ALBC convention: `k8s-<sanitizedServiceNamespace>-<sanitizedServiceName>-<uuid>`. This ensures consistency and allows users familiar with ALBC to easily identify managed Security Groups.
+- **IAM Permissions**: The CCM's service account requires additional IAM permissions to create, describe, modify, and delete Security Groups. The required permissions include:
+  - `ec2:CreateSecurityGroup`
+  - `ec2:DeleteSecurityGroup`
+  - `ec2:DescribeSecurityGroups`
+  - `ec2:AuthorizeSecurityGroupIngress`
+  - `ec2:RevokeSecurityGroupIngress`
+  - `ec2:AuthorizeSecurityGroupEgress`
+  - `ec2:RevokeSecurityGroupEgress`
+  - `ec2:CreateTags` (for tagging Security Groups)
+
+  These permissions must be documented as prerequisites and will need to be added to the CCM service account IAM role for both self-managed clusters and ROSA deployments.
 
 
 ### Risks and Mitigations
