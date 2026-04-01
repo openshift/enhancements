@@ -161,10 +161,8 @@ Goals:
 - kubernetes/CCM (upstream) - Service type-LoadBalancer controller:
   - Enable (or introduce) annotation BYO SG on NLB provisioning (parity with ALBC)
     - [service.beta.kubernetes.io/aws-load-balancer-security-groups][an-sg]
-    - (TBD) [service.beta.kubernetes.io/aws-load-balancer-manage-backend-security-group-rules][an-be]
-  - Enable backend rules management annotation when BYO SG on NLB provisioning (parity with ALBC)
-- Validate TP on OpenShift offerings: self-managed, ROSA Classic, ROSA Managed
-
+- Validate and document the existing annotation [service.beta.kubernetes.io/aws-load-balancer-manage-backend-security-group-rules][an-be] on OpenShift self-managed
+- Validate on OpenShift offerings: self-managed, ROSA Classic, ROSA Managed (brownfield)
 
 [an-sg]: https://kubernetes-sigs.github.io/aws-load-balancer-controller/latest/guide/service/annotations/#security-groups
 [an-be]: https://kubernetes-sigs.github.io/aws-load-balancer-controller/latest/guide/service/annotations/#manage-backend-sg-rules
@@ -336,7 +334,9 @@ Single-Node OpenShift (SNO) and MicroShift deployments on AWS will inherit this 
 
 - The initial implementation will focus on creating a single Security Group per NLB.
 - Egress rules management in CCM needs careful consideration to avoid overly permissive rules. The initial implementation should restrict egress to the necessary ports and protocols for communication with the backend pods (traffic ports and health check ports) within the cluster's VPC.
-- **Limitation - Custom Ingress Rules**: The managed Security Group feature in Phase 1 and Phase 2 does not provide the ability to customize ingress rules based on source IP CIDR ranges. The Security Group will allow traffic from all sources (0.0.0.0/0) on the ports defined in the Service specification. Users requiring selective traffic filtering by source IP will need to use the BYO (Bring Your Own) Security Group feature described in Phase 3, or wait for a potential future enhancement that could leverage `Service.spec.loadBalancerSourceRanges` or `IngressController.spec.endpointPublishingStrategy.loadBalancer.allowedSourceRanges` to configure custom ingress rules on managed Security Groups.
+- **Custom Ingress Rules**: The managed Security Group feature in Phase 1 and Phase 2 provides the ability to customize ingress rules based on source IP CIDR ranges. The Security Group will allow traffic from all sources (0.0.0.0/0) on the ports defined in the Service specification by default, althrough if users requiring selective traffic filtering, they can:
+  - use the existing configuration `Service.spec.loadBalancerSourceRanges` or `IngressController.spec.endpointPublishingStrategy.loadBalancer.allowedSourceRanges` to customize ingress rules on managed Security Groups, or use the annotation `service.beta.kubernetes.io/load-balancer-source-ranges`, both are [exposed by cloud-provider helper method `GetLoadBalancerSourceRanges()`](https://github.com/kubernetes/cloud-provider/blob/2e08bbe9b7f1623207c046a892270baf27599b84/service/helpers/helper.go#L61-L83), following the precedence presented here.
+  - use the BYO (Bring Your Own) Security Group feature described in Phase 3 to fully manage the resource.
 
 **Additional Implementation Notes:**
 
@@ -384,7 +384,7 @@ Here is an overall effort:
 
 ### **Day-2 operations to switch the default router to use Service managed by ALBC/LBC**:
 
-This would require users to manually deploy and configure ALBC after cluster installation, which does not meet the requirement for an opt-in during initial cluster deployment.
+This would require users to manually deploy and configure AAWS LBC (external) after cluster installation, which does not meet the requirement for an opt-in during initial cluster deployment.
 
 ### ***Making ALBC a module to Cloud Controller Manager**
 
@@ -396,13 +396,6 @@ AWS Load Balancer Controller, a dedicated project apart of CCM, provides many fe
 - Q: Is it required to create a KEP to the CCM changes?
 
     A: [No][a1]. But we will need to document the feature in the CCM repo.
-
-- Q: Does CCM require to recreate the NLB when configuration is updated (e.g., `Unmanaged`)?
-
-- Q: Does CCM require to recreate the NLB when configuration is added?
-
-- Q: [Can we reduce the number of rules in the backend SG provided by installer/CAPA][q1]?
-
 
 
 [a1]: https://github.com/openshift/enhancements/pull/1802#discussion_r2101097973
@@ -426,9 +419,12 @@ AWS Load Balancer Controller, a dedicated project apart of CCM, provides many fe
 
 N/A. This feature will be introduced as Tech Preview .
 
-### Tech Preview -> GA
+### Tech Preview -> GA (Self-managed, Phase 2a)
 
 The E2E tests should be consistently passing, and a PR will be created to enable the feature gate by default.
+
+The E2E rules is under [Feature Gate e2e test rules](https://github.com/openshift/api?tab=readme-ov-file#defining-featuregate-e2e-tests), which requires at minimum 5 tests to exercise the feature in this gate, with a safe period defined in the API repository.
+
 
 ### Removing a deprecated feature
 
