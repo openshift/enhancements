@@ -177,7 +177,7 @@ To enable the apiservers to access the KMS plugin, the `/var/run/kmsplugin` dire
    kind: APIServer
    spec:
      encryption:
-       type: KMSv2
+       type: KMS
       # Vault API specific fields
    ```
 
@@ -189,7 +189,7 @@ To enable the apiservers to access the KMS plugin, the `/var/run/kmsplugin` dire
      name: encryption-key-kube-apiserver-1
      namespace: openshift-config-managed
      annotations:
-       encryption.apiserver.operator.openshift.io/mode: "KMSv2"
+       encryption.apiserver.operator.openshift.io/mode: "KMS"
    type: Opaque
    data:
      kms-ec-config: <base64-encoded kms-config>
@@ -512,7 +512,7 @@ No special handling required.
 - Detection: `EncryptionMigrationControllerProgressing=True`
 
 **Configuration Updates During Migration:**
-- # TODO: Fix incorrect configurations. For instance there is a typo in transit-key (which triggers a new key), how cluster-admin can fix it
+- When a migration-triggering field is misconfigured (e.g., typo in transit-key), the resulting encryption key is deployed but non-functional, and the system cannot recover because the key must complete its cycle. To prevent this, keyController runs pre-flight checks before generating a new encryption key: a pod with the KMS plugin is deployed to verify status and encrypt/decrypt capability. A new encryption key is only generated after pre-flight checks succeed.
 - Older KMS plugins (read-only providers) cannot be updated; only the active (write) provider can be changed
 
 **Non-Migration Update Fallback:**
