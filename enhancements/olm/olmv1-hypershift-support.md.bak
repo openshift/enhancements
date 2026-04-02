@@ -1,0 +1,966 @@
+---
+title: olmv1-hypershift-support
+authors:
+  - "@jkeister"
+reviewers:
+  - "@joelanford, OLM architecture and operator-controller integration"
+  - "@jparrill, HyperShift component integration patterns"
+  - "@pedjak, catalogd architecture and multi-kubeconfig support"
+approvers:
+  - "@joelanford"
+api-approvers:
+  - None
+creation-date: 2026-03-26
+last-updated: 2026-03-26
+status: provisional
+tracking-link:
+  - https://issues.redhat.com/browse/OLM-XXXX
+see-also: []
+replaces: []
+superseded-by: []
+---
+
+# OLMv1 HyperShift Support
+
+## Summary
+
+This enhancement proposes HyperShift support for OLMv1 components (operator-controller and catalogd), enabling hosted clusters to manage operator catalogs and install operators independently. Two architectural approaches are viable: **Control Plane Placement** (catalogd runs in management cluster, aligned with default `olmCatalogPlacement: management`) and **Data Plane Placement** (catalogd runs on hosted cluster worker nodes, aligned with `olmCatalogPlacement: guest`). Both approaches use the existing ClusterCatalog CRD, store catalog resources in the hosted cluster's API server, and provide per-hosted-cluster isolation with version-aligned catalogd instances. The key implementation changes include adding `--kubeconfig` flag support to catalogd and operator-controller, integrating components into HyperShift's control plane framework, and provisioning version-specific default catalogs for each hosted cluster.
+
+## Motivation
+
+HyperShift enables cost-efficient multi-tenancy by running multiple hosted cluster control planes in a shared management cluster. Currently, OLMv1 (operator-controller and catalogd) does not support HyperShift deployments, preventing hosted cluster administrators from managing operator catalogs and installing operators using the OLMv1 architecture. This enhancement enables hosted clusters to use OLMv1 with the same user experience as standalone OpenShift clusters, while maintaining isolation between tenants and supporting version-specific operator catalogs.
+
+### User Stories
+
+* As a hosted cluster administrator, I want to create custom ClusterCatalog resources in my hosted cluster so that I can install operators from private or ISV catalogs specific to my environment.
+
+* As a hosted cluster administrator, I want to install operators from both default OpenShift catalogs and my custom catalogs so that I can deploy the applications my business requires without needing access to the management cluster.
+
+* As a platform engineer managing HyperShift, I want each hosted cluster to have version-aligned catalogd instances so that operators packaged for OpenShift 4.15.1 are served to 4.15.1 clusters and operators for 4.15.3 are served to 4.15.3 clusters, even when patch versions differ.
+
+* As a platform engineer, I want hosted clusters to be isolated from each other so that one tenant's catalog configurations and operator installations cannot affect another tenant's cluster.
+
+* As an operator developer, I want my operators packaged for OLMv1 to work identically in HyperShift environments and standalone OpenShift clusters so that I can support both deployment models without code changes.
+
+### Goals
+
+- Enable hosted cluster administrators to create ClusterCatalog resources in their hosted cluster API for custom operator catalogs.
+- Provision version-specific default ClusterCatalogs (e.g., redhat-operators, certified-operators) automatically for each hosted cluster matching their OCP version.
+- Support operator installation from both default and custom catalogs via ClusterExtension resources in hosted clusters.
+- Maintain complete isolation between hosted clusters - catalog configurations and operator installations cannot cross tenant boundaries.
+- Ensure catalogd version exactly matches the hosted cluster's OCP version, including patch-level differences (e.g., 4.15.1 vs 4.15.3).
+- Provide a user experience for hosted cluster administrators that is indistinguishable from standalone OpenShift clusters.
+- Require minimal code changes to operator-controller and catalogd (only `--kubeconfig` flag support).
+
+### Non-Goals
+
+- Sharing a single catalogd instance across multiple hosted clusters (rejected due to version skew and isolation requirements).
+- Creating new namespace-scoped catalog APIs (reuse existing cluster-scoped ClusterCatalog CRD).
+- Supporting catalog discovery from management cluster API by operator-controller (all catalogs stored in hosted cluster API).
+- Modifying the behavior of existing ClusterCatalog or ClusterExtension APIs.
+- Supporting OLMv0 (legacy OLM) in HyperShift environments (this enhancement is OLMv1-specific).
+
+## Proposal
+
+This proposal enables OLMv1 support in HyperShift by deploying catalogd and operator-controller as control plane components that watch each hosted cluster's API server. Two architectural approaches are viable, each with distinct trade-offs:
+
+### Approach 1: Control Plane Placement (`olmCatalogPlacement: management`)
+- **catalogd location**: Runs in management cluster (`clusters-{name}` namespace)
+- **Alignment**: Matches HyperShift default for OLM v0 (90%+ of deployments)
+- **Access**: Requires external Route for console-operator to access catalogs
+- **Benefits**: Simplest deployment, aligns with default HyperShift patterns
+- **Trade-off**: External Route exposure required
+
+### Approach 2: Data Plane Placement (`olmCatalogPlacement: guest`)
+- **catalogd location**: Runs on worker nodes (`openshift-catalogd` namespace)
+- **Alignment**: Matches OLM v0 guest placement pattern
+- **Access**: No external exposure needed, console-operator uses cluster-local service
+- **Benefits**: Best console-operator UX, no external exposure, minimal latency
+- **Trade-off**: Requires Konnectivity sidecar for operator-controller, uses worker node resources
+
+### Common Characteristics (Both Approaches)
+
+Both approaches share the following design principles:
+
+- **ClusterCatalog storage**: All ClusterCatalogs (default and custom) stored in hosted cluster's API server
+- **Single catalogd instance**: Each hosted cluster gets its own catalogd serving both default and custom catalogs
+- **Version alignment**: catalogd version matches hosted cluster's OCP version (including patch level)
+- **Identical UX**: operator-controller and console-operator work identically to standalone clusters
+- **No API changes**: Reuses existing ClusterCatalog and ClusterExtension APIs without modification
+
+### Key Implementation Changes
+
+1. **Multi-kubeconfig support**: Add `--kubeconfig` flag to catalogd and operator-controller to watch hosted cluster API
+2. **HyperShift component integration**: Register catalogd and operator-controller as HyperShift control plane components
+3. **Shared kubeconfig injection utility**: Reusable function to mount admin kubeconfig and configure both components
+4. **Default catalog provisioning**: Platform creates version-specific ClusterCatalogs in hosted cluster API during cluster creation
+
+### Workflow Description
+
+**hosted cluster administrator** is a user with admin access to a hosted cluster's API server, but not the management cluster.
+
+#### Workflow 1: Installing an operator from a default catalog
+
+1. The hosted cluster administrator connects to their hosted cluster using the provided kubeconfig:
+   ```bash
+   export KUBECONFIG=~/hosted-cluster.kubeconfig
+   ```
+
+2. The administrator lists available ClusterCatalogs and sees platform-provided defaults:
+   ```bash
+   kubectl get clustercatalogs
+   # NAME                AGE   STATUS
+   # redhat-operators    10m   Ready
+   # certified-operators 10m   Ready
+   ```
+
+3. The administrator creates a ClusterExtension to install an operator:
+   ```bash
+   kubectl apply -f - <<EOF
+   apiVersion: olm.operatorframework.io/v1
+   kind: ClusterExtension
+   metadata:
+     name: prometheus-operator
+   spec:
+     source:
+       catalog:
+         packageName: prometheus
+   EOF
+   ```
+
+4. The operator-controller (running in the management cluster but watching the hosted cluster API) sees the new ClusterExtension, resolves the bundle from catalogd, and creates the operator deployment in the hosted cluster.
+
+5. The administrator verifies the operator is installed:
+   ```bash
+   kubectl get clusterextensions
+   # NAME                  STATUS
+   # prometheus-operator   Installed
+   ```
+
+#### Workflow 2: Creating a custom catalog
+
+1. The hosted cluster administrator creates a ClusterCatalog for their custom catalog:
+   ```bash
+   kubectl apply -f - <<EOF
+   apiVersion: olm.operatorframework.io/v1
+   kind: ClusterCatalog
+   metadata:
+     name: my-custom-catalog
+   spec:
+     source:
+       type: Image
+       image:
+         ref: quay.io/myorg/custom-catalog:v1.0
+   EOF
+   ```
+
+2. The catalogd instance (running either in management cluster or on worker nodes depending on chosen approach) sees the new ClusterCatalog, pulls the image, and serves the catalog content.
+
+3. The administrator installs operators from their custom catalog using the same ClusterExtension workflow as above, optionally using catalog selectors to target specific catalogs.
+
+**Note**: From the hosted cluster administrator's perspective, this workflow is identical to managing operators on a standalone OpenShift cluster. They have no visibility into the management cluster or where catalogd is physically running.
+
+### API Extensions
+
+**None**. This enhancement reuses the existing OLMv1 APIs without modification:
+
+- **ClusterCatalog** (cluster-scoped): Existing API for defining operator catalogs. No changes to API behavior.
+- **ClusterExtension** (cluster-scoped): Existing API for installing operators. No changes to API behavior.
+
+The only behavioral change is in **where** these resources are stored:
+- In standalone clusters: ClusterCatalog/ClusterExtension stored in the cluster's own API server
+- In HyperShift: ClusterCatalog/ClusterExtension stored in the **hosted cluster's** API server (not the management cluster's API server)
+
+This storage location difference is transparent to users and requires no API modifications. Both catalogd and operator-controller are configured via `--kubeconfig` flag to watch the appropriate API server.
+
+### Topology Considerations
+
+#### Hypershift / Hosted Control Planes
+
+This enhancement is **HyperShift-specific** and introduces OLMv1 support for hosted control plane environments.
+
+**Impact on management cluster components:**
+- **Approach 1 (Control Plane Placement)**: Adds catalogd and operator-controller deployments to each hosted control plane namespace (`clusters-{name}`). Resource overhead: ~200-300Mi memory per hosted cluster.
+- **Approach 2 (Data Plane Placement)**: Adds only operator-controller to hosted control plane namespace. operator-controller requires Konnectivity sidecar to access catalogd on worker nodes.
+
+**Impact on split components:**
+- **catalogd**: Runs in management cluster (Approach 1) OR on hosted cluster worker nodes (Approach 2)
+- **operator-controller**: Always runs in management cluster, watches hosted cluster API via kubeconfig
+- **Installed operators**: Always run on hosted cluster worker nodes (data plane)
+
+**Key architectural principle**: Control plane components (catalogd, operator-controller) watch the hosted cluster's API server but are physically deployed in the management cluster (Approach 1) or split between management and worker nodes (Approach 2).
+
+#### Standalone Clusters
+
+This enhancement does **not** affect standalone OpenShift clusters. Standalone clusters continue to use the existing OLMv1 deployment model with catalogd and operator-controller running in the cluster itself.
+
+#### Single-node Deployments or MicroShift
+
+**Not applicable**. HyperShift is not supported on SNO or MicroShift deployments. This enhancement has no impact on these topologies.
+
+#### OpenShift Kubernetes Engine
+
+**Not applicable**. OKE does not include HyperShift capabilities. If OKE includes OLMv1 components, they would use the standalone cluster deployment model.
+
+### Implementation Details/Notes/Constraints
+
+#### Approach 1: Control Plane Placement - Detailed Design
+
+**Component Deployment:**
+```
+Management Cluster
+└── clusters-customer1 namespace (hosted control plane)
+    ├── kube-apiserver pod (hosted cluster API server)
+    │   └── Contains all ClusterCatalogs (default + custom)
+    ├── catalogd deployment
+    │   ├── Args: --kubeconfig=/var/run/secrets/kubeconfig/kubeconfig
+    │   └── Watches hosted cluster API, serves catalogs at catalogd.clusters-customer1.svc:8443
+    ├── catalogd Route (external)
+    │   └── https://catalogd-customer1.apps.mgmt-cluster.example.com
+    └── operator-controller deployment
+        ├── Args: --kubeconfig=/var/run/secrets/kubeconfig/kubeconfig
+        └── Accesses catalogd via local service (same namespace)
+
+Hosted Cluster Worker Nodes
+└── console-operator
+    └── Accesses catalogd via external Route
+```
+
+**Access Patterns:**
+- operator-controller → catalogd: Internal service call (`catalogd.clusters-customer1.svc:8443`, <5ms latency)
+- console-operator → catalogd: External Route (`https://catalogd-customer1.apps.mgmt-cluster.example.com`, +20-50ms latency)
+
+**Strengths:**
+- Aligns with default `olmCatalogPlacement: management` (90%+ of HyperShift deployments)
+- Simplest deployment model (single namespace, standard HyperShift pattern)
+- No worker node resource consumption
+
+**Weaknesses:**
+- Requires external Route exposure for catalog content
+- console-operator has external dependency with additional latency
+
+#### Approach 2: Data Plane Placement - Detailed Design
+
+**Component Deployment:**
+```
+Management Cluster
+└── clusters-customer1 namespace (hosted control plane)
+    ├── kube-apiserver pod (hosted cluster API server)
+    │   └── Contains all ClusterCatalogs (default + custom)
+    └── operator-controller deployment
+        ├── Sidecar: konnectivity-socks5-proxy
+        ├── Env: HTTP_PROXY=socks5://localhost:8090
+        └── Accesses catalogd via Konnectivity tunnel
+
+Hosted Cluster Worker Nodes
+├── catalogd deployment (openshift-catalogd namespace)
+│   └── Serves catalogs at catalogd.openshift-catalogd.svc:8443
+├── console-operator
+│   └── Accesses catalogd via cluster-local service
+└── konnectivity-agent
+    └── Tunnel to management cluster
+```
+
+**Access Patterns:**
+- operator-controller → catalogd: Via Konnectivity proxy (management → worker nodes)
+- console-operator → catalogd: Cluster-local service call (`catalogd.openshift-catalogd.svc:8443`, <5ms latency)
+
+**Strengths:**
+- No external Route exposure required
+- Best console-operator UX (cluster-local access, minimal latency)
+- Aligns with OLM v0 `olmCatalogPlacement: guest` pattern
+
+**Weaknesses:**
+- Requires Konnectivity sidecar configuration for operator-controller
+- Consumes ~200Mi of worker node resources per hosted cluster
+- More complex deployment (requires CVO integration or catalogd-operator)
+
+#### Comparison Table
+
+| Aspect | Approach 1 (Control Plane) | Approach 2 (Data Plane) |
+|--------|---------------------------|------------------------|
+| **catalogd Location** | Management cluster namespace | Worker nodes |
+| **Default Alignment** | ✅ Yes (`management`) | ⚠️ Requires `guest` config |
+| **External Exposure** | ⚠️ Route required | ✅ None |
+| **console-operator Latency** | +20-50ms (external) | <5ms (cluster-local) |
+| **operator-controller Complexity** | ✅ Simple (direct service) | ⚠️ Konnectivity sidecar |
+| **Management Cluster Resources** | ~200-300Mi per HC | ✅ Minimal |
+| **Worker Node Resources** | ✅ None | ~200Mi per HC |
+| **Deployment Complexity** | ✅ Standard HyperShift | ⚠️ CVO integration needed |
+
+#### Shared Implementation Components
+
+Both approaches share the following implementation elements:
+
+**1. Multi-kubeconfig Support**
+
+Add `--kubeconfig` flag to both catalogd and operator-controller:
+
+```go
+// cmd/catalogd/main.go and cmd/operator-controller/main.go
+flags.StringVar(&cfg.kubeconfig, "kubeconfig", "",
+    "Path to kubeconfig for API server access. Uses in-cluster config if empty.")
+
+// Build client config
+var clientConfig *rest.Config
+if cfg.kubeconfig != "" {
+    clientConfig, err = clientcmd.BuildConfigFromFlags("", cfg.kubeconfig)
+} else {
+    clientConfig, err = rest.InClusterConfig()
+}
+```
+
+**2. Shared Kubeconfig Injection Utility**
+
+HyperShift component integration uses a shared utility to inject kubeconfig configuration:
+
+```go
+// /control-plane-operator/controllers/hostedcontrolplane/v2/olm/util.go
+func InjectHostedClusterKubeconfig(
+    ctx component.WorkloadContext,
+    deployment *appsv1.Deployment,
+) error {
+    // Add admin-kubeconfig volume
+    hostedKubeconfigVolume := corev1.Volume{
+        Name: "hosted-kubeconfig",
+        VolumeSource: corev1.VolumeSource{
+            Secret: &corev1.SecretVolumeSource{
+                SecretName: "admin-kubeconfig",
+            },
+        },
+    }
+    deployment.Spec.Template.Spec.Volumes = append(
+        deployment.Spec.Template.Spec.Volumes,
+        hostedKubeconfigVolume,
+    )
+
+    // Add volume mount and flags to all containers
+    for i := range deployment.Spec.Template.Spec.Containers {
+        container := &deployment.Spec.Template.Spec.Containers[i]
+
+        container.VolumeMounts = append(container.VolumeMounts,
+            corev1.VolumeMount{
+                Name:      "hosted-kubeconfig",
+                MountPath: "/var/run/secrets/kubeconfig",
+                ReadOnly:  true,
+            },
+        )
+
+        container.Args = append(container.Args,
+            "--kubeconfig=/var/run/secrets/kubeconfig/kubeconfig",
+            "--system-namespace="+ctx.HCP.Namespace,
+        )
+    }
+
+    return nil
+}
+```
+
+**3. Default Catalog Provisioning**
+
+The HyperShift control plane operator provisions version-specific ClusterCatalogs:
+
+```go
+// Extract OCP version from hosted cluster release image
+version := extractVersionFromRelease(hostedCluster.Spec.ReleaseImage)
+
+// Create default ClusterCatalogs in hosted cluster API
+defaultCatalogs := []struct {
+    name  string
+    image string
+}{
+    {"redhat-operators", fmt.Sprintf("registry.redhat.io/redhat/redhat-operator-index:v%s", version)},
+    {"certified-operators", fmt.Sprintf("registry.redhat.io/redhat/certified-operator-index:v%s", version)},
+}
+
+for _, catalog := range defaultCatalogs {
+    // Create ClusterCatalog resource in hosted cluster API server
+    createClusterCatalog(ctx, hostedClusterClient, catalog.name, catalog.image)
+}
+```
+
+**4. Per-Hosted-Cluster catalogd Instances**
+
+Each hosted cluster gets its own catalogd instance, ensuring:
+- catalogd version matches hosted cluster OCP version (including patch level)
+- Complete isolation - no shared state between hosted clusters
+- Version-specific catalog content (4.15.1 catalogs different from 4.15.3)
+
+This per-HC model is required because:
+- Different hosted clusters may run different OCP versions (4.15 vs 4.16)
+- Even within the same minor version, patch versions may have different catalogd controller versions
+- Custom catalogs are tenant-specific and must be isolated
+
+### Risks and Mitigations
+
+**Risk 1: catalogd as Single Point of Failure per Hosted Cluster**
+
+*Impact*: If catalogd fails, catalog access is broken for that hosted cluster.
+
+*Mitigation*:
+- catalogd is a mature, stable component with minimal failure modes
+- Standard Kubernetes health checks and restart policies apply
+- Failure only affects one hosted cluster (complete isolation)
+- Could run multiple replicas if needed for high availability
+- catalogd failure does not affect already-installed operators
+
+**Risk 2: External Route Exposure (Approach 1 Only)**
+
+*Impact*: Catalog content is publicly accessible via external Route, potential security concern.
+
+*Mitigation*:
+- Catalog content is read-only metadata, not executable code
+- Standard OpenShift Route authentication/authorization can be applied
+- Approach 2 eliminates this risk entirely (no external exposure)
+- Organizations with strict no-external-exposure policies should choose Approach 2
+
+**Risk 3: Per-Hosted-Cluster Resource Overhead**
+
+*Impact*: Running separate catalogd instances per hosted cluster increases resource footprint vs. a hypothetical shared model.
+
+*Mitigation*:
+- Default catalogs use minimal resources (~50-100Mi memory per instance)
+- Trade-off accepted for perfect version alignment and isolation
+- For 100 hosted clusters: ~5-10Gi additional memory total (acceptable in large management clusters)
+- Approach 2 shifts this cost to worker nodes (customer infrastructure)
+
+**Risk 4: Version-to-Catalog-Image Mapping Accuracy**
+
+*Impact*: Incorrect catalog image version could be provisioned for a hosted cluster's OCP version.
+
+*Mitigation*:
+- Version extraction from release image is deterministic
+- Use well-defined naming convention for catalog images (e.g., `v4.15.1`)
+- Validate catalog image exists before creating ClusterCatalog
+- E2E tests validate correct catalog images for each OCP version
+- Clear error messages if catalog image cannot be determined or pulled
+
+**Risk 5: Kubeconfig Secret Management**
+
+*Impact*: catalogd and operator-controller require access to hosted cluster admin kubeconfig.
+
+*Mitigation*:
+- Leverage HyperShift's existing kubeconfig secret management
+- Use hosted cluster admin kubeconfig (already managed by HyperShift)
+- Standard Kubernetes secret rotation procedures apply
+- Secrets scoped per hosted control plane namespace
+
+**Security Review**: OLM team (@joelanford) and HyperShift team (@jparrill)
+
+**UX Review**: Console team for catalog browsing UX, hosted cluster admin workflows reviewed by HyperShift PM
+
+### Drawbacks
+
+**Resource Overhead**: Per-hosted-cluster catalogd instances consume more resources than a hypothetical shared catalogd model. For 100 hosted clusters, this adds ~5-10Gi of memory overhead. However, this trade-off is necessary for version alignment and tenant isolation.
+
+**Two Architectural Approaches**: Offering two viable approaches (Control Plane vs Data Plane placement) may create confusion about which to choose. However, clear decision criteria are provided, and Approach 1 aligns with the HyperShift default (`olmCatalogPlacement: management`), making it the natural choice for most deployments.
+
+**External Route Requirement (Approach 1)**: Console-operator requires external Route access to catalogd, which adds latency (+20-50ms) and introduces external dependencies. Organizations uncomfortable with this can choose Approach 2.
+
+**Worker Node Resources (Approach 2)**: Deploying catalogd on worker nodes consumes ~200Mi per hosted cluster from customer-owned infrastructure, which may be undesirable for cost-sensitive environments.
+
+**Maintenance Burden**: Supporting both approaches requires maintaining two deployment patterns in HyperShift. However, the shared implementation components (`InjectHostedClusterKubeconfig` utility) minimize code duplication.
+
+**Upstream Divergence**: The `--kubeconfig` flag is an OpenShift-specific addition to upstream operator-controller and catalogd. These changes will be proposed upstream, but if not accepted, will need to be maintained as downstream patches.
+
+## Alternatives (Not Implemented)
+
+### Alternative 1: Single Centralized catalogd
+
+**Description**: One catalogd instance in the management cluster watches all hosted cluster API servers.
+
+**Pros**:
+- Single component to manage
+- Centralized metrics and monitoring
+
+**Cons**:
+- Requires credentials for all hosted cluster APIs (complex secret management)
+- Single point of failure affects all tenants
+- Scaling bottleneck with many hosted clusters
+- Complex tenant filtering logic required
+- Version skew problem: cannot serve different catalog versions to different clusters
+
+**Rejection Reason**: Scaling, security, and version alignment concerns make this approach non-viable.
+
+### Alternative 2: Direct Multi-Backend Support in operator-controller
+
+**Description**: Modify operator-controller to have built-in multi-catalogd client logic.
+
+**Pros**:
+- No proxy component needed
+- Direct communication reduces network hops
+
+**Cons**:
+- Requires significant operator-controller code changes
+- Breaks the "indistinguishable from single-cluster" design goal
+- Each component (operator-controller, console-operator) needs custom multi-backend logic
+- Upstream changes difficult to justify for downstream-only use case
+
+**Rejection Reason**: Violates the design requirement of minimal code changes and identical UX to standalone clusters.
+
+### Alternative 3: Namespace-Scoped Catalog CRD
+
+**Description**: Create a new namespace-scoped Catalog CRD alongside the existing cluster-scoped ClusterCatalog.
+
+**Pros**:
+- Clean API model with native Kubernetes multi-tenancy
+- Easier to scope catalogs per namespace
+
+**Cons**:
+- Requires new CRD and API version
+- operator-controller needs federated client to query multiple namespaces
+- Doesn't meet "indistinguishable from single-cluster" requirement
+- Breaks compatibility with existing ClusterCatalog-based workflows
+- Complex migration path for existing catalogs
+
+**Rejection Reason**: Rejected based on desire to reuse existing APIs without modification.
+
+### Alternative 4: Version-Specific Shared catalogd with Dual Instances
+
+**Description**: Run shared catalogd per OCP version in `olmv1-system-{version}` namespaces for DEFAULT catalogs, plus per-HC catalogd for CUSTOM catalogs.
+
+**Example**:
+```
+Management Cluster
+├── olmv1-system-4-17-1 namespace
+│   └── catalogd (serves DEFAULT catalogs for all 4.17.1 clusters)
+└── clusters-customer1 namespace
+    └── catalogd-custom (serves CUSTOM catalogs for customer1)
+```
+
+**Pros**:
+- Resource efficiency for defaults (multiple HCs share catalogd)
+- Deduplication of catalog image unpacking
+
+**Cons**:
+- **Dual catalogd instances required**: One shared + one per-HC
+- **Complex routing**: operator-controller must route based on catalog type
+- **console-operator aggregation**: Must query TWO endpoints (default + custom)
+- **Different Status.URLs**: Defaults point to `olmv1-system-*`, customs to `clusters-*`
+- **Prohibitive complexity**: Doubles failure modes, latency, debugging difficulty
+- **Shared failure blast radius**: Shared catalogd affects all HCs at that version
+
+**Rejection Reason**: console-operator complexity and dual-catalogd requirement defeat the resource efficiency goals. Approach 1 and 2 provide simpler, more maintainable solutions.
+
+### Alternative 5: ClusterCatalog Mirroring Controller
+
+**Description**: Create a controller that mirrors management cluster ClusterCatalogs into each hosted cluster API as read-only references.
+
+**Pros**:
+- operator-controller discovers all catalogs from single API
+- Simple routing logic
+
+**Cons**:
+- **Version skew problem**: Cannot handle hosted clusters running different OpenShift versions
+- Requires version-aware mirroring logic
+- Adds mirroring controller component
+- Duplicate ClusterCatalog resources increase management overhead
+- Potential name collisions between mirrored and custom catalogs
+
+**Rejection Reason**: Doesn't solve version skew elegantly; per-HC catalogd instances provide cleaner version alignment.
+
+## Open Questions [optional]
+
+None. The design is complete enough to begin implementation.
+
+## Test Plan
+
+### Unit Tests
+
+**operator-controller and catalogd repositories**:
+- Test `--kubeconfig` flag parsing and client configuration
+- Test fallback to in-cluster config when `--kubeconfig` is empty
+- Mock external API server connections
+- Validate ClusterCatalog and ClusterExtension reconciliation with external API server
+
+**HyperShift repository**:
+- Test `InjectHostedClusterKubeconfig` utility function
+- Test catalogd and operator-controller component registration
+- Test default catalog provisioning logic
+- Test version-to-catalog-image mapping
+
+### Integration Tests
+
+**operator-framework repositories**:
+- Test catalogd watching external API server with real kubeconfig
+- Test operator-controller installing operators with catalogs from external API
+- Test ClusterCatalog status updates written to external API server
+- Test operator installation into target cluster (not controller's own cluster)
+
+### End-to-End Tests
+
+**HyperShift CI environment**:
+- Deploy management cluster with HyperShift operators
+- Create hosted cluster with specific OCP version (e.g., 4.15.1)
+- Verify default ClusterCatalogs automatically provisioned in hosted cluster API
+- Verify catalogd version matches hosted cluster OCP version
+- Create custom ClusterCatalog in hosted cluster
+- Install operator from default catalog via ClusterExtension
+- Install operator from custom catalog via ClusterExtension
+- Verify operators run on hosted cluster worker nodes
+- Verify console-operator can browse catalogs (Route or service depending on approach)
+
+**Version Skew Testing**:
+- Deploy two hosted clusters with different minor versions (4.15 vs 4.16)
+- Deploy two hosted clusters with different patch versions (4.15.1 vs 4.15.3)
+- Verify each cluster gets correct catalogd version
+- Verify each cluster gets correct default catalog images
+- Verify catalogs remain isolated between clusters
+
+**Upgrade Testing**:
+- Upgrade hosted cluster from 4.15.1 to 4.15.3
+- Verify catalogd gets updated to match new version
+- Verify default catalogs get updated to match new version
+- Verify custom catalogs remain functional
+- Verify installed operators continue functioning
+
+### Approach-Specific Testing
+
+**Approach 1 (Control Plane Placement)**:
+- Verify catalogd Route is created and accessible
+- Verify console-operator can access catalogs via external Route
+- Test Route certificate management
+- Test external DNS resolution
+
+**Approach 2 (Data Plane Placement)**:
+- Verify catalogd deployed to `openshift-catalogd` namespace on worker nodes
+- Verify operator-controller Konnectivity sidecar configuration
+- Verify operator-controller can access catalogd via proxy
+- Test Konnectivity tunnel failure scenarios
+
+### Performance Testing
+
+- Catalog resolution time with 100+ hosted clusters
+- Memory usage per catalogd instance
+- operator-controller catalog list performance
+- console-operator catalog browsing latency (both approaches)
+
+## Graduation Criteria
+
+### Dev Preview -> Tech Preview
+
+- **Functionality**:
+  - Multi-kubeconfig support implemented in operator-controller and catalogd
+  - One architectural approach (likely Approach 1) fully functional in HyperShift
+  - Hosted clusters can create custom ClusterCatalogs
+  - Hosted clusters can install operators from default and custom catalogs
+  - Default catalogs provisioned automatically with version alignment
+
+- **Testing**:
+  - Unit tests for multi-kubeconfig support
+  - Integration tests for external API server access
+  - E2E tests in HyperShift CI with multiple hosted clusters
+  - Version skew testing (different minor and patch versions)
+
+- **Documentation**:
+  - HyperShift operator documentation for OLMv1 configuration
+  - Hosted cluster admin guide for creating catalogs and installing operators
+  - Decision guide for choosing architectural approach
+  - Known limitations documented
+
+- **Metrics and Monitoring**:
+  - catalogd health metrics exposed
+  - operator-controller catalog resolution metrics
+  - Per-hosted-cluster catalog status observable
+
+- **Feedback**:
+  - Gather feedback from internal HyperShift users
+  - Validate with at least 2 early adopter environments
+
+### Tech Preview -> GA
+
+- **Comprehensive Testing**:
+  - Both architectural approaches tested and supported
+  - Upgrade/downgrade testing across OCP versions
+  - Scale testing with 100+ hosted clusters
+  - Performance benchmarks established
+  - Destructive testing (catalogd failures, network issues, etc.)
+
+- **Production Validation**:
+  - Deployed in managed OpenShift service-based offerings
+  - Sufficient time for feedback (at least one OCP release cycle)
+  - Security audit completed
+  - At least 10 production deployments with diverse workloads
+
+- **Operational Readiness**:
+  - SLOs defined for catalog availability and operator installation time
+  - Symptoms-based alerts for catalogd health and catalog resolution failures
+  - Runbooks for common failure scenarios
+  - Support procedures documented
+
+- **Documentation**:
+  - User-facing documentation in openshift-docs
+  - Architecture documentation for both approaches
+  - Troubleshooting guide
+  - Migration guide from OLM v0 (if applicable)
+
+- **Availability**:
+  - Available by default in HyperShift deployments
+  - Both architectural approaches supported and documented
+  - Clear default recommendation (likely Approach 1)
+
+### Removing a deprecated feature
+
+Not applicable - this is a new feature, not replacing an existing one.
+
+## Upgrade / Downgrade Strategy
+
+### Hosted Cluster Upgrades
+
+When a hosted cluster is upgraded (e.g., 4.15.1 → 4.15.3 or 4.15 → 4.16):
+
+1. **HyperShift Control Plane Operator** updates the hosted control plane components, including catalogd and operator-controller deployments
+2. **catalogd version** is updated to match the new OCP version
+3. **Default ClusterCatalog images** are updated to match the new OCP version (e.g., `redhat-operator-index:v4.15.3`)
+4. **Custom ClusterCatalogs** remain unchanged (tenant-managed)
+5. **Installed operators** continue running; operator upgrades are independent of cluster upgrades
+
+**Availability during upgrade**:
+- catalogd rolling update ensures catalog availability
+- operator-controller rolling update ensures ClusterExtension reconciliation continues
+- Installed operators are not affected by OLMv1 component upgrades
+- ClusterCatalog and ClusterExtension resources remain available via hosted cluster API
+
+**Version skew handling**:
+- During catalogd pod rollout, both old and new versions may be running briefly
+- operator-controller continues to function with either catalogd version
+- No user-visible impact; catalog endpoints remain accessible
+
+### Management Cluster Upgrades
+
+When the management cluster is upgraded:
+
+- **Hosted cluster control planes** are not automatically upgraded
+- **catalogd and operator-controller** versions remain tied to their hosted cluster's OCP version, not management cluster version
+- HyperShift control plane operator manages lifecycle independently per hosted cluster
+
+### Downgrade Strategy
+
+**Hosted Cluster Downgrade** (e.g., 4.15.3 → 4.15.1):
+
+Standard HyperShift downgrade procedures apply:
+1. HyperShift control plane operator rolls back catalogd and operator-controller to earlier versions
+2. Default ClusterCatalog images roll back to earlier versions
+3. Custom ClusterCatalogs remain unchanged
+4. Installed operators continue running
+
+**Manual cleanup** (if necessary):
+- ClusterExtensions installed with bundles only available in newer catalog may need to be deleted
+- No automatic pruning of ClusterCatalog or ClusterExtension resources
+
+**Limitations**:
+- Cannot downgrade across architectural approaches (Approach 1 ↔ Approach 2) without recreating hosted cluster
+- Operators installed during newer version may not be available in older catalog
+
+## Version Skew Strategy
+
+### Per-Hosted-Cluster Isolation Prevents Version Skew Issues
+
+The per-hosted-cluster catalogd model inherently handles version skew:
+
+**Scenario 1: Different Minor Versions**
+- Management cluster hosts HC1 (4.15) and HC2 (4.16)
+- HC1 gets catalogd v0.10.x with `redhat-operator-index:v4.15`
+- HC2 gets catalogd v0.11.x with `redhat-operator-index:v4.16`
+- No shared state; each cluster has version-aligned components
+
+**Scenario 2: Different Patch Versions**
+- Management cluster hosts HC1 (4.15.1) and HC2 (4.15.3)
+- HC1 gets catalogd v0.10.0 with `redhat-operator-index:v4.15.1`
+- HC2 gets catalogd v0.10.2 with `redhat-operator-index:v4.15.3`
+- Patch-level differences in catalogd controller handled correctly
+
+**Scenario 3: During Hosted Cluster Upgrade**
+- HC1 upgrading from 4.15.1 → 4.15.3
+- Old catalogd pod (v0.10.0) and new catalogd pod (v0.10.2) coexist briefly during rolling update
+- operator-controller compatible with both versions (watches same ClusterCatalog API)
+- No user-visible impact
+
+### Component Version Skew Guarantees
+
+**catalogd ↔ operator-controller**:
+- Compatible within same OCP minor version (4.15.x)
+- Both components watch same ClusterCatalog CRD API
+- ClusterCatalog.Status.URLs.Base field remains stable across versions
+
+**operator-controller ↔ console-operator**:
+- console-operator reads ClusterCatalog.Status.URLs.Base
+- HTTP API contract between console-operator and catalogd remains stable
+- No direct communication between operator-controller and console-operator
+
+**catalogd ↔ ClusterCatalog CRD**:
+- ClusterCatalog API is stable (v1)
+- No breaking changes expected in catalogd's API contract
+
+### Test Plan Coverage
+
+Version skew testing includes:
+- Multiple hosted clusters with different minor versions (4.15, 4.16)
+- Multiple hosted clusters with different patch versions (4.15.1, 4.15.3)
+- Hosted cluster upgrade scenarios (catalogd rolling update)
+- Management cluster upgrade with mixed hosted cluster versions
+
+## Operational Aspects of API Extensions
+
+**Not applicable**. This enhancement does not introduce new API extensions (CRDs, webhooks, aggregated API servers, or finalizers).
+
+The enhancement reuses existing OLMv1 APIs:
+- **ClusterCatalog** (existing cluster-scoped CRD)
+- **ClusterExtension** (existing cluster-scoped CRD)
+
+No modifications are made to these APIs. The only difference is the API server where these resources are stored (hosted cluster API server vs standalone cluster's own API server), which is transparent to the API behavior.
+
+## Support Procedures
+
+### Detecting Failure Modes
+
+**Symptom**: Hosted cluster admin cannot create ClusterCatalog resources
+
+**Detection**:
+```bash
+# From hosted cluster
+kubectl get clustercatalogs
+# Error: connection refused or timeout
+
+# Check catalogd pod in management cluster
+kubectl -n clusters-<hc-name> get pods -l app=catalogd
+kubectl -n clusters-<hc-name> logs deployment/catalogd
+```
+
+**Likely causes**:
+- catalogd pod not running in hosted control plane namespace
+- Kubeconfig secret missing or invalid
+- Network connectivity issues between catalogd and hosted API server
+
+**Resolution**:
+- Verify catalogd deployment exists and is healthy
+- Check admin-kubeconfig secret exists in hosted control plane namespace
+- Verify catalogd can reach hosted cluster API server
+
+---
+
+**Symptom**: Operators fail to install (ClusterExtension stuck in pending)
+
+**Detection**:
+```bash
+# From hosted cluster
+kubectl get clusterextensions
+kubectl describe clusterextension <name>
+
+# Check operator-controller logs in management cluster
+kubectl -n clusters-<hc-name> logs deployment/operator-controller
+```
+
+**Likely causes**:
+- catalogd not serving catalog content
+- operator-controller cannot reach catalogd
+- Bundle resolution failure
+
+**Resolution**:
+- Verify catalogd is running and ClusterCatalogs show Status: Ready
+- Check operator-controller can access catalogd service (Approach 1) or via Konnectivity (Approach 2)
+- Review operator-controller logs for bundle resolution errors
+
+---
+
+**Symptom**: Console cannot browse operator catalogs (Approach 1 only)
+
+**Detection**:
+- Console UI shows "catalog unavailable" or loading errors
+- Browser developer tools show HTTP errors to catalogd Route
+
+**Likely causes**:
+- catalogd Route not created or misconfigured
+- External DNS not resolving catalogd Route
+- catalogd service not routing to catalogd pods
+
+**Resolution**:
+- Verify Route exists: `kubectl -n clusters-<hc-name> get route`
+- Test Route accessibility: `curl https://catalogd-<hc-name>.apps.mgmt-cluster.example.com`
+- Check catalogd service endpoints: `kubectl -n clusters-<hc-name> get endpoints catalogd`
+
+---
+
+**Symptom**: Version mismatch - wrong catalog content served
+
+**Detection**:
+```bash
+# From hosted cluster
+kubectl get clustercatalogs redhat-operators -o yaml
+# Check .spec.source.image.ref version matches cluster version
+
+# Check hosted cluster version
+kubectl get hostedcluster <hc-name> -o jsonpath='{.spec.release.image}'
+```
+
+**Likely causes**:
+- HyperShift control plane operator did not update default ClusterCatalogs during upgrade
+- Incorrect catalog image version mapping
+
+**Resolution**:
+- Verify catalog image version matches hosted cluster OCP version
+- Check HyperShift control plane operator logs for default catalog provisioning errors
+- Manually update ClusterCatalog image if necessary (platform managed, but can be corrected)
+
+### Graceful Degradation
+
+**catalogd failure**:
+- **Existing operators**: Continue running (no impact)
+- **New ClusterCatalog creation**: Fails (cannot unpack catalog)
+- **New operator installation**: Fails (cannot resolve bundles)
+- **Console catalog browsing**: Fails (cannot fetch catalog content)
+- **Recovery**: When catalogd restarts, reconciles all ClusterCatalogs and resumes serving
+
+**operator-controller failure**:
+- **Existing operators**: Continue running (no impact)
+- **ClusterExtension reconciliation**: Paused
+- **New operator installation**: Queued until operator-controller recovers
+- **Recovery**: When operator-controller restarts, reconciles pending ClusterExtensions
+
+**Network connectivity loss** (Approach 2 only - Konnectivity tunnel down):
+- **operator-controller → catalogd**: operator-controller cannot fetch catalog content
+- **Impact**: New operator installations fail
+- **Console catalog browsing**: Unaffected (cluster-local service)
+- **Recovery**: Automatic when Konnectivity tunnel re-establishes
+
+## Infrastructure Needed [optional]
+
+### CI/CD Infrastructure
+
+**HyperShift CI Environment**:
+- Test clusters capable of hosting multiple hosted clusters simultaneously
+- Support for different OCP versions (e.g., 4.15, 4.16) to test version skew
+- Network configuration supporting both external Routes (Approach 1) and Konnectivity (Approach 2)
+
+**Test Catalog Images**:
+- Version-specific test catalog images for multiple OCP versions
+- Hosted in CI-accessible registry
+- Minimal catalog content (2-3 test operators) for fast testing
+
+**Test Operator Bundles**:
+- Sample operators packaged for OLMv1 (ClusterExtension compatible)
+- Hosted in CI-accessible registry
+- Simple operators with minimal resource requirements for fast installation
+
+### Development Infrastructure
+
+**No new repositories required**. Changes will be made to existing repositories:
+- `openshift/operator-framework-operator-controller` (downstream fork of upstream operator-controller)
+- `openshift/hypershift` (HyperShift control plane operator)
+- `openshift/api` (if any API changes needed, though currently not expected)
+
+### Documentation Infrastructure
+
+**OpenShift Docs Updates**:
+- New section in HyperShift documentation for OLMv1 configuration
+- Hosted cluster administrator guide for operator installation
+- Architecture decision guide for platform engineers
+
+### Monitoring/Alerting Infrastructure
+
+**Metrics Collection**:
+- Standard Prometheus/Grafana stack in HyperShift environments
+- Per-hosted-cluster catalogd metrics namespacing
+- operator-controller metrics differentiated per hosted cluster
+
+No additional infrastructure beyond standard HyperShift monitoring stack.
