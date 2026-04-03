@@ -229,6 +229,12 @@ This happens without cluster reconfiguration.
 
 **cluster administrator** is managing a cluster already running Adaptable topology.
 
+**Non-functional constraint**: There is no availability guarantee during topology
+transitions. Scaling control-plane or worker nodes is an explicit operational
+action, and users should treat it as a maintenance window. The cluster is
+expected to be fully available before and after the transition, but not
+necessarily during.
+
 ##### Scaling Control-Plane Nodes
 
 1. The cluster administrator adds a new control-plane node to the cluster
@@ -261,6 +267,15 @@ When scaling from one to two control-plane nodes:
 
 This state is designed to be transient. Users should continue adding a third
 control-plane node to achieve full high availability with etcd quorum.
+
+##### Compact Clusters (Dual-Role Nodes)
+
+Scaling from SNO to three control-plane nodes with no dedicated worker nodes is
+a supported transition path. In this configuration, control-plane nodes also
+serve as workers — effectively forming a compact cluster. Infrastructure
+operators treat this as the 0-worker case: workloads are scheduled on
+control-plane nodes and infrastructure topology behavior follows the
+control-plane node count thresholds.
 
 ##### Scaling Worker Nodes
 
