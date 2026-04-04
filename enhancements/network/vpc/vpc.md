@@ -170,9 +170,16 @@ must be consistent wherever the application is deployed.
 ### Goals
 
 - Define the VPC API and the VPC controller that translates VPC
-  intent into lower-level OVN-Kubernetes constructs.
-- Define vpc-CLI and console click options which will act as the user
-  interface to modelling VPCs
+  intent into lower-level OVN-Kubernetes constructs. The VPC API will
+  remain in `v1beta1` — the primary user-facing interfaces for the
+  initial delivery are the **CLI plugin** and **OpenShift Console plugin**.
+  Users should not need to hand-craft VPC YAML; the CLI and console
+  are the intended entry points.
+- Provide a **CLI plugin** (`oc vpc`) for creating, managing, and
+  inspecting VPCs from the command line.
+- Provide an **OpenShift Console plugin** that adds a dedicated VPC
+  management page for visual creation and monitoring of VPCs, subnets,
+  and their status.
 - Support VPCs on single as well as multiple clusters on baremetal environments
 - VPC features (for definitions see [Introduction](#introduction)):
   - subnets (public,private,isolated,vpn)
@@ -203,6 +210,8 @@ must be consistent wherever the application is deployed.
   IPAM allocator to automatically carve out subnet CIDRs from the VPC's
   address space — similar to how AWS VPCs define an overarching CIDR from
   which subnets are allocated.
+- Graduate the VPC API from `v1beta1` to `v1` once the API surface has
+  stabilized through CLI/Console usage and community feedback.
 
 ### Non-Goals
 
@@ -733,34 +742,117 @@ section.
 
 ### Workflow Description
 
-Explain how the user will use the feature. Be detailed and explicit.
-Describe all of the actors, their roles, and the APIs or interfaces
-involved. Define a starting state and then list the steps that the
-user would need to go through to trigger the feature described in the
-enhancement. Optionally add a
-[mermaid](https://github.com/mermaid-js/mermaid#readme) sequence
-diagram.
+Users interact with VPCs through three interfaces. The **CLI plugin** and
+**OpenShift Console plugin** are the primary entry points — they abstract
+the underlying CRD mechanics so users never need to hand-craft YAML. The
+**VPC API** (`v1beta1`) is available for automation and GitOps workflows but
+is not the intended day-to-day interface.
 
-Use sub-sections to explain variations, such as for error handling,
-failure recovery, or alternative outcomes.
+**Actors:**
 
-For example:
+- **Network administrator**: responsible for defining VPCs, subnets, and
+  security policies. Uses CLI or Console.
+- **Application developer**: deploys workloads into VPC subnets (namespaces).
+  Does not create VPCs directly — uses the namespaces provisioned by the
+  network administrator.
+- **VPC controller**: the automated reconciler that translates VPC intent
+  into OVN-Kubernetes resources.
 
-**cluster creator** is a human user responsible for deploying a
-cluster.
+#### Workflow 1: CLI (`oc vpc`)
 
-**application administrator** is a human user responsible for
-deploying an application in a cluster.
+The `oc vpc` plugin provides imperative commands for VPC lifecycle
+management. It is distributed as an `oc` CLI plugin (a standalone binary
+in the user's `$PATH`).
 
-1. The cluster creator sits down at their keyboard...
-2. ...
-3. The cluster creator sees that their cluster is ready to receive
-   applications, and gives the application administrator their
-   credentials.
+**TBD — Decide during reviews:** Since VPC is a standard CRD, `oc get vpc`
+and `oc describe vpc` work natively. The plugin commands (`oc vpc get`,
+`oc vpc describe`) overlap with these. Two options: (A) **lean plugin** —
+only ship commands that add value over native `oc` (`create`, `add-subnet`,
+`remove-subnet`, `describe` with enriched output) and let users use
+`oc get vpc` for listing; or (B) **full plugin** — ship all commands as
+the VPC-aware versions with richer, aggregated output, accepting the overlap.
 
-See
-https://github.com/openshift/enhancements/blob/master/enhancements/workload-partitioning/management-workload-partitioning.md#high-level-end-to-end-workflow
-and https://github.com/openshift/enhancements/blob/master/enhancements/agent-installer/automated-workflow-for-agent-based-installer.md for more detailed examples.
+```text
+# Create a VPC
+$ oc vpc create production
+
+# Add subnets
+$ oc vpc add-subnet production web-a \
+    --cidr 10.0.1.0/24 \
+    --type Public \
+    --availability-zone region=us-east,zone=rack-a
+
+$ oc vpc add-subnet production app-a \
+    --cidr 10.0.10.0/24 \
+    --type Private
+
+# List VPCs and their subnets
+$ oc vpc get
+NAME          SUBNETS   STATUS
+production    2         Ready
+
+$ oc vpc describe production
+Name:       production
+Subnets:
+  web-a     10.0.1.0/24    Public     rack-a    Ready
+  app-a     10.0.10.0/24   Private    (all)     Ready
+
+# Remove a subnet (drains workloads, deletes namespace + UDN)
+$ oc vpc remove-subnet production web-a
+
+# Delete a VPC
+$ oc vpc delete production
+```
+
+Each CLI command translates to a VPC CR mutation — `oc vpc create`
+creates the CR, `oc vpc add-subnet` patches `spec.subnets`, and so on.
+The CLI reads back `.status` to show health and readiness.
+
+#### Workflow 2: OpenShift Console
+
+The Console plugin adds a **VPC management page** under Networking in the
+OpenShift Console. It provides:
+
+1. **VPC list view**: table of all VPCs with subnet count, status, and
+   quick actions (create, delete).
+2. **VPC detail view**: visual representation of the VPC showing:
+   - All subnets with their CIDRs, types, and AZ assignments
+   - Status of each subnet (namespace + UDN health)
+   - Links to the underlying namespaces for workload management
+3. **Create VPC wizard**: step-by-step form to create a VPC and define
+   subnets with CIDR, type, and optional AZ pinning. Validates CIDR
+   conflicts and naming constraints before submission.
+4. **Add subnet**: form to add a new subnet to an existing VPC.
+
+The Console plugin is implemented as an OpenShift
+[dynamic plugin](https://docs.openshift.com/container-platform/latest/web_console/dynamic-plug-ins.html)
+— a separate container that registers with the console at runtime. It does
+not require changes to the core console codebase and can be deployed
+independently (including on non-OCP clusters like KIND for development).
+
+#### Workflow 3: Direct API (YAML / GitOps)
+
+For automation, CI/CD pipelines, and GitOps workflows, users can create VPC
+resources directly:
+
+```bash
+$ kubectl apply -f production-vpc.yaml
+$ oc get vpc
+NAME          AGE
+production    5s
+```
+
+Since VPC is a standard CRD, `oc get vpc`, `oc describe vpc production`,
+and `oc edit vpc production` all work natively — the `oc vpc` plugin adds
+higher-level ergonomics (e.g. `oc vpc describe` aggregates subnet health
+from underlying resources, `oc vpc add-subnet` handles the patch) but is
+not required for basic CRUD.
+
+The VPC controller watches for VPC CR changes and reconciles the underlying
+resources. This workflow is identical to the CLI workflow in terms of what
+the controller does — the difference is the user authors YAML instead of
+using imperative commands. The API spec is defined in
+[API Extensions](#api-extensions).
 
 ### API Extensions
 
@@ -1487,6 +1579,115 @@ programmed as follows depending on the gateway mode:
   ```
   OVN handles forwarding matching traffic to the specified next-hops before
   the default SNAT/egress path.
+
+#### CLI Plugin (`oc vpc`)
+
+The CLI is implemented as an [oc plugin](https://docs.openshift.com/container-platform/latest/cli_reference/openshift_cli/extending-cli-plugins.html)
+— a standalone Go binary named `oc-vpc` that lives in the user's `$PATH`.
+It will be hosted in a new repository under the `ovn-kubernetes` GitHub
+organization (e.g. `ovn-org/ovn-kubernetes-vpc-cli`).
+
+**Architecture:**
+
+```text
+┌──────────────────────────────────────────────────┐
+│  oc vpc create / add-subnet / get / describe     │
+│  (oc-vpc binary — oc CLI plugin)                 │
+├──────────────────────────────────────────────────┤
+│  client-go / dynamic client                      │
+│  Reads/writes VPC CRs via Kubernetes API         │
+├──────────────────────────────────────────────────┤
+│  Kubernetes API Server                           │
+│  (VPC CRD registered)                            │
+├──────────────────────────────────────────────────┤
+│  VPC Controller                                  │
+│  (reconciles VPC CR → namespaces, UDNs, etc.)    │
+└──────────────────────────────────────────────────┘
+```
+
+**Commands:**
+
+| Command | Description |
+|---|---|
+| `oc vpc create <name>` | Create an empty VPC |
+| `oc vpc delete <name>` | Delete a VPC and all its subnets (namespaces + UDNs) |
+| `oc vpc get` | List all VPCs with subnet count and status |
+| `oc vpc describe <name>` | Show VPC details: subnets, CIDRs, types, AZs, status |
+| `oc vpc add-subnet <vpc> <subnet>` | Add a subnet to a VPC. Flags: `--cidr`, `--type`, `--availability-zone` |
+| `oc vpc remove-subnet <vpc> <subnet>` | Remove a subnet from a VPC |
+
+**Implementation notes:**
+
+- The binary uses `client-go` with a dynamic client to read/write VPC CRs.
+  No generated typed client is required for the initial implementation.
+- `oc vpc create` creates a minimal VPC CR with an empty `subnets` list.
+  `oc vpc add-subnet` patches `spec.subnets` to append a new entry.
+- `oc vpc describe` reads the VPC CR's `.status.conditions` and the status
+  of each rendered namespace/UDN to show aggregate health.
+- The `--availability-zone` flag accepts a comma-separated list of
+  `key=value` pairs parsed into the `AvailabilityZone` struct. For example:
+  `--availability-zone cluster:region=us-east,node:zone=rack-a` sets
+  `clusterSelector.matchLabels` and `nodeSelector` respectively.
+- The plugin is distributed via `krew` and as a standalone download from
+  the repository's release artifacts.
+
+#### Console Plugin
+
+The Console plugin adds a VPC management page to the OpenShift Console.
+It is implemented as an OpenShift
+[dynamic plugin](https://docs.openshift.com/container-platform/latest/web_console/dynamic-plug-ins.html)
+— a separate container image that registers extensions at runtime. It will
+be hosted in a new repository under the `ovn-kubernetes` GitHub organization
+(e.g. `ovn-org/ovn-kubernetes-vpc-console`).
+
+**Architecture:**
+
+```text
+┌───────────────────────────────────────────────────┐
+│  OpenShift Console (or standalone console on KIND) │
+├───────────────────────────────────────────────────┤
+│  VPC Console Plugin (dynamic plugin)              │
+│  - React + PatternFly                             │
+│  - Registers under Networking → VPCs              │
+│  - Uses console-dynamic-plugin-sdk                │
+├───────────────────────────────────────────────────┤
+│  Kubernetes API (via console proxy)               │
+│  - Watches/creates VPC CRs                        │
+│  - Reads namespace + UDN status                   │
+└───────────────────────────────────────────────────┘
+```
+
+**Pages and features:**
+
+| Page | Description |
+|---|---|
+| **VPC List** | Table of all VPCs showing name, subnet count, status. Actions: Create, Delete. |
+| **VPC Detail** | Subnet table with CIDR, type, AZ, and status per subnet. Links to namespaces. Topology diagram showing subnets and their connectivity (public → RA, private → SNAT, isolated → no routes). |
+| **Create VPC** | Wizard: name the VPC → add subnets (CIDR, type, optional AZ) → review → create. CIDR validation (overlap detection, address family checks) runs client-side before submission. |
+| **Add Subnet** | Modal form on the VPC detail page to add a subnet to an existing VPC. |
+
+**Implementation notes:**
+
+- Built with **React**, **PatternFly** (OpenShift's design system), and the
+  `@openshift-console/dynamic-plugin-sdk`.
+- The plugin registers a new navigation item under **Networking → VPCs**
+  using the `console.navigation/href` extension.
+- VPC list and detail pages use the SDK's `useK8sWatchResource` hook to
+  watch VPC CRs in real time.
+- The Create VPC wizard uses a multi-step form (PatternFly Wizard
+  component) that builds the VPC CR in memory and submits it via
+  `k8sCreate` from the SDK.
+- The topology diagram on the detail page uses PatternFly's topology
+  library to render subnets as nodes and their connectivity type
+  (public/private/isolated) as edges with annotations.
+- **Deployment on KIND**: The plugin can run as a standalone container on
+  any Kubernetes cluster (including KIND) by deploying the plugin's
+  Deployment + Service and registering a `ConsolePlugin` CR. A bridge-mode
+  or standalone console instance (using `bridge` binary or the
+  `openshift/console` container image) serves the UI.
+- **Deployment on OpenShift**: The plugin is deployed as a standard
+  `ConsolePlugin` resource. The console discovers and loads it
+  automatically.
 
 ### Dependencies
 
