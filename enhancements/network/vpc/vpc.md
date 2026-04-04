@@ -12,17 +12,13 @@ approvers:
   - knobunc
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None". Once your EP is published, ask in #forum-api-review to be assigned an API approver.
   - TBD
-creation-date: yyyy-mm-dd
-last-updated: yyyy-mm-dd
+creation-date: 2026-04-07
+last-updated: 2026-04-07
 status: implementable
 tracking-link: https://issues.redhat.com/browse/OCPSTRAT-2845
   - TBD
 see-also:
   - "/enhancements/this-other-neat-thing.md"
-replaces:
-  - "/enhancements/that-less-than-great-idea.md"
-superseded-by:
-  - "/enhancements/our-past-effort.md"
 ---
 
 # Virtual Private Cloud (VPC)
@@ -49,42 +45,168 @@ follow wherever the network is present.
 
 ### User Stories
 
-* As a Red Hat OpenShift customer, I want to extend my User Defined Networks
-  between OpenShift clusters so that I can deploy distributed applications
-  (e.g. CockroachDB) that require cross-cluster network connectivity.
+#### Infrastructure Networking
 
-* As a cluster administrator, I want to define a VPC with subnets, routing,
-  and security policies in a single resource so that I do not have to
-  individually create and wire together C(UDN)s, CNCs, RouteAdvertisements,
-  EgressIPs, and NetworkPolicies.
+A VPC is a networking construct — it defines an isolated address space with
+subnets, routing, and gateways. It exists in AWS, VMware NSX, Azure, and GCP
+independently of any workload orchestrator. Kubernetes CRDs are an
+implementation detail — the mechanism through which OVN-Kubernetes realizes
+VPC intent.
 
-* As a cluster administrator, I want the VPC controller to synchronize network
-  configuration between clusters so that custom routes, network policies,
-  and VPN connections are rendered wherever the network is present.
+* As a network engineer, I want to define VPCs using familiar networking
+  concepts (CIDR blocks, subnets, public/private/isolated connectivity, NAT,
+  route tables) without needing to learn Kubernetes-specific primitives, so
+  that I can design and operate the network using the same mental model I use
+  for AWS or on-prem infrastructure.
+
+* As an infrastructure architect, I want the VPC to be the network boundary
+  for any workload type — containers, VMs, or future runtimes — so that the
+  network design is decoupled from the workload orchestration layer and
+  survives platform evolution.
+
+![Infrastructure Networking: same VPC model across platforms](images/infrastructure-networking.png)
+
+#### User Experience
+
+Today an admin must create 6-8 individual resources (C(UDN), CNC,
+RouteAdvertisements, EgressIP, NetworkPolicy, AdminNetworkPolicy) and wire
+them together with correct labels. The VPC is the single input point.
+
+* As a cluster administrator, I want to define a VPC — its address space,
+  subnets, connectivity classes, and policies — in a single resource, so that
+  the controller creates and manages all underlying networking primitives on
+  my behalf.
 
 * As an application developer, I want to deploy workloads into a namespace
-  that belongs to a VPC subnet without needing to understand the underlying
-  networking primitives.
+  belonging to a VPC subnet without learning OVN-Kubernetes internals
+  (C(UDN)s, CNCs, EgressIPs, RouteAdvertisements).
+
+* As a cluster admin, I want intra-VPC routing to be automatic so that I do
+  not have to manually wire connectivity between every pair of subnets in
+  the same VPC.
+
+![User Experience: single VPC input vs. manual wiring](images/user-experience.png)
+
+Imagine if the admin needs to deal with 100s or 1000s of CRDs cross clusters!
+Versus a controller takes care of programming the required constructs.
+
+#### Sovereign Cloud and Regulated Industries
+
+[Sovereign cloud](https://redhat.com/en/resources/elements-of-cloud-sovereignty-overview)
+mandates data residency, deterministic network egress, and
+isolation within national/regional boundaries. A VPC provides the network
+isolation boundary that maps to a regulatory domain — all traffic, routing,
+and policies are scoped to a well-defined perimeter.
+
+* As a sovereign cloud operator, I want to define an isolated network boundary
+  (VPC) per regulatory domain so that all workload traffic, egress paths, and
+  security policies are confined within that boundary and auditable as a single
+  unit.
+
+* As a platform admin in a regulated industry (finance, healthcare,
+  government), I want network isolation enforced at the VPC level — not just
+  namespace-level NetworkPolicy — so that I can demonstrate to auditors that
+  tenant networks are architecturally separated, not just policy-separated.
+
+* As a sovereign cloud operator, I want to define custom routes per VPC
+  (e.g. force all egress through an in-region inspection appliance, or route
+  to on-prem endpoints within the regulatory boundary) so that I have
+  deterministic control over traffic.
+
+![Sovereign Cloud: VPC as regulatory boundary](images/sovereign-cloud.png)
+
+#### VMware Migration
+
+End Users migrating from VMware (vSphere + NSX) expect network constructs
+they already understand: isolated network segments, per-tenant subnets, NAT
+gateways, firewall rules. The VPC maps directly to the NSX VPC / vSphere
+portgroup model, providing a familiar landing zone for migrated VMs running
+on OpenShift Virtualization (KubeVirt).
+
+* As an infrastructure team migrating from VMware vSphere + NSX, I want to
+  recreate my existing network segments (portgroups, NAT, firewall rules) as
+  VPC subnets on OpenShift Virtualization, so that migrated VMs retain
+  equivalent network isolation and connectivity without redesigning the network
+  from scratch.
+
+* As a VM owner migrating to OpenShift Virtualization, I want my VM to land
+  in a VPC subnet with the same connectivity class (public,
+  private, isolated) it had in VMware, so that the migration is transparent
+  to applications.
+
+![VMware Migration: NSX to OpenShift VPC mapping](images/vmware-migration.png)
+
+#### Multi-Tenancy
+
+UDNs provide per-namespace network isolation. VPC adds what UDN alone cannot:
+a grouping boundary that spans multiple subnets, automatic routing between
+subnets in the same tenant, unified address space management, and declarative
+control over how each subnet reaches the outside world.
+
+* As a platform team serving multiple tenants, I want each tenant to get a
+  VPC with its own address space and subnets, so that tenant isolation is
+  enforced at the network boundary — not just by NetworkPolicy rules that
+  can be misconfigured.
+
+![Multi-Tenancy: VPC boundary vs. policy-only isolation](images/multi-tenancy.png)
+
+#### Multi-Cluster / Distributed Applications
+
+Distributed databases (CockroachDB, YugabyteDB) and service meshes require
+network connectivity that spans cluster boundaries. The network — and
+everything that influences its behaviour (policies, routes, connectivity) —
+must be consistent wherever the application is deployed.
+
+* As an OpenShift customer, I want to extend my VPC across clusters so that
+  distributed applications (e.g. CockroachDB) can communicate over a shared
+  network with consistent policies.
+
+* As a cluster admin managing multiple clusters, I want to define my network
+  intent once and have it rendered on every cluster where the VPC is present,
+  rather than manually replicating configuration across clusters.
+
+![Multi-Cluster: VPC spanning clusters with CockroachDB](images/multi-cluster.png)
 
 ### Goals
 
-- Define the VPC CRD and the VPC controller that translates VPC
+- Define the VPC API and the VPC controller that translates VPC
   intent into lower-level OVN-Kubernetes constructs.
-- Support heterogeneous subnets (Layer2/Layer3, Geneve/EVPN)
-  within a single VPC.
-- Provide automatic intra-VPC routing between all subnets.
-- Enable VPC peering via extended ClusterNetworkConnect.
-- Support multi-cluster VPC extension: synchronize networks, policies, and
-  routes across clusters.
-- Preserve backward compatibility: existing bare C(UDN) and CNC workflows
-  continue to work without a VPC.
+- Define vpc-CLI and console click options which will act as the user
+  interface to modelling VPCs
+- Support VPCs on single as well as multiple clusters on baremetal environments
+- VPC features (for definitions see [Introduction](#introduction)):
+  - subnets (public,private,isolated,vpn)
+  - route tables
+  - internet and NAT gateways
+  - security groups and NACLs
+- Design implementation constructs in OVN-Kubernetes where required
+  - Preserve backward compatibility of existing OVN-Kubernetes APIs
+- VPCs are modelled assuming EVPN as the transport fabric.
+
+### Future Goals
+
+- Support VPCs on single as well as multiple clusters on cloud environments
+- VPC features (for definitions see [Introduction](#introduction)):
+  - route server
+  - vpn connections
+  - vpc peering
+  - transit gateway
+- Add support for VPCs on other types of transport like GENEVE or pure BGP or
+  other OVN encap types.
+- Sophisticated SNAT for Private subnets via EgressIP. The initial
+  implementation uses node IPs for outbound NAT to reduce complexity. A
+  future iteration will introduce EgressIP-based SNAT to provide dedicated,
+  stable egress addresses per subnet — enabling firewall allowlisting,
+  audit trails, and per-AZ egress affinity.
+- VPC-level `cidrBlocks` with automatic subnet CIDR allocation. Instead of
+  users specifying a CIDR per subnet, a VPC-level CIDR block would allow the
+  IPAM allocator to automatically carve out subnet CIDRs from the VPC's
+  address space — similar to how AWS VPCs define an overarching CIDR from
+  which subnets are allocated.
 
 ### Non-Goals
 
-- Transit Gateway modeling (cloud-provider specific).
-- VPN connection management (out of scope for initial delivery).
-- Replacing or modifying the existing OVN-Kubernetes C(UDN)/CNC APIs -- the
-  VPC controller builds on top of them.
+N/A
 
 ## Introduction
 
@@ -97,10 +219,21 @@ in both public and private clouds:
   Amazon's VPC provides an isolated section of the AWS cloud with user-defined
   IP ranges, subnets across Availability Zones, route tables, internet and NAT
   gateways, security groups, and VPC peering.
+- [Google Cloud VPC](https://cloud.google.com/vpc/docs/overview) --
+  A global VPC spanning all regions with regional subnets, firewall rules,
+  routes, Cloud VPN / Cloud Interconnect for hybrid connectivity, and VPC
+  peering for cross-project communication.
+- [Azure Virtual Network (VNet)](https://learn.microsoft.com/en-us/azure/virtual-network/virtual-networks-overview) --
+  The foundational private network in Azure, with user-defined address spaces,
+  subnets, Network Security Groups, route tables, VNet peering, and VPN / 
+  ExpressRoute gateways for on-premises connectivity.
 - [VMware NSX VPC](https://techdocs.broadcom.com/us/en/vmware-cis/nsx/vmware-nsx/4-2/administration-guide/nsx-multi-tenancy/nsx-virtual-private-clouds.html) --
   NSX VPCs provide a self-service multi-tenant networking model with independent
   routing domains, Layer 2 subnets, Tier-0/VRF gateway connectivity, DHCP, and
-  IP address management.
+  IP address management. At the vSphere layer, VMs attach to networks via
+  [distributed portgroups](https://techdocs.broadcom.com/us/en/vmware-cis/vsphere/vsphere/8-0/vsphere-networking-8-0/basic-networking-with-vnetwork-distributed-switches/dvport-groups.html)
+  which define per-port VLAN, security, and traffic shaping policies on a
+  distributed virtual switch.
 
 The following subsections define the core constructs that make up a VPC.
 
@@ -199,259 +332,364 @@ See: [AWS Transit Gateway](https://docs.aws.amazon.com/vpc/latest/tgw/what-is-tr
 We plan to take a bottom-up approach at solving this for a single-cluster
 first, and then extrapolating that for multi-cluster scenarios.
 
+### Assumptions
+
+- The physical network must support EVPN (BGP peering between cluster nodes
+  and the fabric) as an infrastructure prerequisite.
+- Each VPC subnet is modelled as a **flat Layer 2 network** spanning the requested
+  availability zone.
+- Pod/VM IPs are allocated from the subnet's CIDR as a flat pool, not carved
+  into per-node slices.
+- Layer 3 topologies and Geneve overlay may be supported in the future but are
+  not in scope for the initial implementation.
+
 ### Single Cluster
 
 In a single cluster, a VPC is an isolation boundary that groups one or more
-subnets (UDNs/CUDNs) into a logically isolated network with its own address
-space, automatic intra-VPC routing, and well-defined points of external
-connectivity.
+subnets into a logically isolated network with its own address space,
+automatic intra-VPC routing, and well-defined points of external connectivity.
 
 ```
-                      ┌──────────────────────────────────────────────────────────┐
-                      │              CNC (VPC Peering)                           │
-                      │    vpcSelector: {peer-group: prod-staging}               │
-                      │    connectSubnets: [{cidr: 192.168.0.0/16, /24}]         │
-                      │    connectivity: [PodNetwork, ClusterIPServiceNetwork]   │
-                      └───────────────────────┬──────────────────────────────────┘
-                                              │
-                            ┌─────────────────┴──────────────────┐
-                            │ selects VPCs by label              │
-                            ▼                                    ▼
-          ┌──────────────────────────────┐    ┌──────────────────────────────┐
-          │  VPC: production             │    │  VPC: staging                │
-          │  labels:                     │    │  labels:                     │
-          │    peer-group: prod-staging  │    │    peer-group: prod-staging  │
-          │  cidrBlocks: [10.0.0.0/16]   │    │  cidrBlocks: [10.1.0.0/16]   │
-          │  subnets: [web(Public),      │    │  subnets: [app]              │
-          │    app(Private),             │    │                              │
-          │    db(Isolated),             │    │                              │
-          │    mgmt(VPNOnly),            │    │                              │
-          │    vm-network(Private)]      │    │                              │
-          │                              │    │                              │
-          │  ┌─────────────────────┐     │    │  ┌─────────────────────┐     │
-          │  │ Intra-VPC routing:  │     │    │  │ Intra-VPC routing:  │     │
-          │  │ automatic "local"   │     │    │  │ automatic "local"   │     │
-          │  │ route between all   │     │    │  │ route between all   │     │
-          │  │ member subnets      │     │    │  │ member subnets      │     │
-          │  └─────────────────────┘     │    │  └─────────────────────┘     │
-          └──┬──────┬──────┬──────┬──────┬─────┘    └──────┬───────────────────────┘
-             │      │      │      │      │                 │
-    creates  │      │      │      │      │ C(UDN)s         │ creates C(UDN)s
-             ▼      ▼      ▼      ▼      ▼                 ▼
-          ┌──────┐┌──────┐┌──────┐┌──────┐┌──────────┐  ┌─────────┐
-          │C(UDN)││C(UDN)││C(UDN)││C(UDN)││ C(UDN)   │  │ C(UDN)  │
-          │prod- ││prod- ││prod- ││prod- ││ prod-vm  │  │ staging │
-          │web   ││app   ││db    ││mgmt  ││ -network │  │ -app    │
-          │      ││      ││      ││      ││          │  │         │
-          │Public││Privat││Isolat││VPN   ││ Private  │  │ Private │
-          │L3    ││L3    ││L3    ││L3    ││ L2       │  │ L3      │
-          │Genev ││Genev ││Genev ││Genev ││ EVPN     │  │ Geneve  │
-          │/24   ││/24   ││/24   ││/24   ││ /24      │  │ /24     │
-          └──┬───┘└──┬───┘└──┬───┘└──┬───┘└────┬─────┘  └────┬────┘
-             │       │       │       │         │              │
-             ▼       ▼       ▼       ▼         ▼              ▼
-          ns's    ns's    ns's    ns's     ns's          ns's
-          (via namespaceSelector)                   (via namespaceSelector)
+  ┌───────────────────────────────────┐       ┌──────────────────────────┐
+  │  VPC: production                  │       │  VPC: staging            │
+  │  cidrBlocks: [10.0.0.0/16]        │       │  cidrBlocks: [10.1.0.0/16]
+  │                                   │       │                          │
+  │  subnets:                         │       │  subnets:                │
+  │    web-a  (Public,  10.0.1.0/24)  │       │    app (Private,         │
+  │    web-b  (Public,  10.0.2.0/24)  │       │         10.1.0.0/24)     │
+  │    app-a  (Private, 10.0.10.0/24) │       │                          │
+  │    app-b  (Private, 10.0.11.0/24) │       └──────────┬───────────────┘
+  │    db-a   (Isolated,10.0.20.0/24) │                  │
+  │    db-b   (Isolated,10.0.21.0/24) │                  │ creates
+  └──┬────┬────┬────┬────┬────┬───────┘                  │ ns + UDN
+     │    │    │    │    │    │                           ▼
+     │    │    │    │    │    │ creates          ┌───────────────┐
+     │    │    │    │    │    │ ns + UDN         │ns: staging-app│
+     ▼    ▼    ▼    ▼    ▼    ▼                  │UDN: app       │
+  ┌─────┐┌─────┐┌─────┐┌─────┐┌─────┐┌─────┐     │Private        │
+  │ns:  ││ns:  ││ns:  ││ns:  ││ns:  ││ns:  │     │L2 UDN EVPN    │
+  │prod-││prod-││prod-││prod-││prod-││prod-│     │/24            │
+  │web-a││web-b││app-a││app-b││db-a ││db-b │     └───────────────┘
+  │     ││     ││     ││     ││     ││     │
+  │UDN: ││UDN: ││UDN: ││UDN: ││UDN: ││UDN: │
+  │web-a││web-b││app-a││app-b││db-a ││db-b │
+  │     ││     ││     ││     ││     ││     │
+  │Pub. ││Pub. ││Priv.││Priv.││Isol.││Isol.│
+  │L2   ││L2   ││L2   ││L2   ││L2   ││L2   │
+  │EVPN ││EVPN ││EVPN ││EVPN ││EVPN ││EVPN │
+  │/24  ││/24  ││/24  ││/24  ││/24  ││/24  │
+  │+ RA ││+ RA ││+SNAT││+SNAT││     ││     │
+  └─────┘└─────┘└─────┘└─────┘└─────┘└─────┘
 
-     ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
-     Resources created by the VPC controller based on connectivity:
-
-     connectivity: Public  ──►  RouteAdvertisements (BGP export)
-     connectivity: Private ──►  EgressIP (outbound NAT / SNAT)
-     connectivity: Isolated ─►  (none — no external routes)
-     connectivity: VPNOnly ──►  IPsec north-south encryption
-
-     Additional CRDs applied per-VPC or per-subnet:
-
-     ┌─────────────────────┐  ┌──────────────────────────────────┐
-     │  RouteTable (new)   │  │  NetworkPolicy                   │
-     │  Custom routes per  │  │  Security Groups                 │
-     │  VPC: programs VRF  │  │  (per-namespace, stateful)       │
-     │  (LGW) or GR (SGW)  │  └──────────────────────────────────┘
-     └─────────────────────┘  ┌──────────────────────────────────┐
-                              │  AdminNetworkPolicy              │
-                              │  NACLs equivalent                │
-                              │  (cluster-scoped, ordered rules) │
-                              └──────────────────────────────────┘
+  Intra-VPC routing: automatic "local" route between all member
+  subnets except "Isolated" ones. No manual wiring required.
 ```
 
-The following table maps VPC constructs across AWS, OVN-Kubernetes, and VMware NSX:
+The following table maps VPC constructs across AWS, OVN-Kubernetes, and
+VMware NSX. The OVN-Kubernetes column shows what the VPC controller creates
+for each construct. Items marked *(future)* are not in scope for the initial
+implementation (see [Goals](#goals) and [Future Goals](#future-goals)).
 
-| Feature | AWS VPCs | OVN-Kubernetes | VMware NSX |
+| Feature | AWS VPCs | VMware NSX | OpenShift (OVN-Kubernetes) |
 |---|---|---|---|
-| **Tenancy** | AWS Account | Namespace (multiple namespaces for C(UDN)) | NSX Project (Tenant) |
-| **Workload Attachment** | Subnet | K8s Namespace | Subnet |
-| **Fixed CIDR** | Yes | N/A (same as multiple subnets, see below) | Yes (expanded to a set of IP Blocks) |
-| **Multiple Subnets** | Yes | VPC defines subnets; each becomes a C(UDN) | Yes |
-| **Public Subnets** | Yes | `connectivity: Public` — RouteAdvertisements (BGP) | Yes |
-| **Private Subnets** | Yes | `connectivity: Private` — EgressIP (outbound NAT) | Yes |
-| **Isolated Subnets** | Yes | `connectivity: Isolated` — no external routes | Yes |
-| **VPN-Only Subnets** | Yes | `connectivity: VPNOnly` — north-south IPsec | N/A (VPN setup/routing on Tier-0 gateway) |
-| **Route Tables** | Yes | RouteTable CRD (new) - programs VRF in LGW and GR in SGW | Yes (via Tier-0 gateway) |
-| **Route Server** | Yes | No. Fail-over applicable for multi-cluster but low priority | Yes (via Tier-0 gateway) |
-| **Internet Gateway** | Yes | EgressIPs | Yes (via Tier-0 gateway) |
-| **NAT Gateway** | Yes | EgressIPs + VPC egress configuration | Yes (via Tier-0 gateway) |
-| **Security Groups** | Yes | NetworkPolicy | Yes |
-| **VPC Peering** | Yes | ClusterNetworkConnect (extended with `vpcSelector`) | Yes (via inter-VRF routing) |
-| **VPN Connections** | Yes | No | Yes |
-| **Transit Gateway** | Yes | No. Cloud-provider specific, not planned to model | Yes (via Tier-0 gateway) |
+| **Tenancy** | AWS Account | NSX Project (Tenant) | Namespace (1:1 with subnet) |
+| **Workload Attachment** | Subnet | NSX Segment (L2) / Subnet (L3) | K8s Namespace/UDN (EVPN L2 only) |
+| **Fixed CIDR** | VPC CIDR block | IP Blocks allocated per VPC | *(future)* — VPC-level `cidrBlocks` with automatic subnet allocation from that range |
+| **Multiple Subnets** | Yes | NSX Segments within a VPC | VPC defines subnets; each subnet specifies its own CIDR, becomes a ns + UDN (L2 EVPN) |
+| **Public Subnets** | Subnet + IGW + Route + Public IP | Subnet type: Public — routed to external via Tier-0/Tier-1 | ns + UDN (L2 EVPN) + RouteAdvertisements (RA) |
+| **Private Subnets** | Subnet + NAT GW + Route | Subnet type: Private — SNAT via Tier-0/Tier-1 gateway | ns + UDN (L2 EVPN) + nodeIP SNAT |
+| **Isolated Subnets** | Subnet (no routes to IGW/NAT) | Subnet type: Isolated — no uplink, intra-VPC only | ns + UDN (L2 EVPN) with no nodeIP SNAT |
+| **VPN-Only Subnets** | Subnet + VPN GW + Route | N/A — VPN handled at Tier-0 gateway level | ns + UDN (L2 EVPN) + IPsec north-south |
+| **Internet Gateway** | IGW resource + route entry | Tier-0 gateway uplink to physical network | RouteAdvertisements (BGP export) |
+| **NAT Gateway** | NAT GW + EIP + route entry | SNAT rule on Tier-0/Tier-1 gateway | Node IP SNAT (EgressIP in future) |
+| **Route Tables** | Route table + route entries | Static routes on Tier-0/Tier-1 gateway | RouteTable CRD (TBD) — custom static routes |
+| **Security Groups** | Stateful, per-instance | Distributed Firewall (DFW) rules + Security Groups | NetworkPolicy / AdminNetworkPolicy (stateful ACLs) |
+| **NACLs** | Stateless, per-subnet, ordered | Gateway Firewall rules on Tier-0/Tier-1 | NetworkPolicy / AdminNetworkPolicy (stateless ACLs) |
+| **Route Server** | Yes | BGP peering on Tier-0 gateway | *(future)* |
+| **VPC Peering** | Peering connection + routes | Inter-VPC routing via Transit / inter-VRF | *(future)* — CNC with `vpcSelector`? |
+| **VPN Connections** | VPN GW + tunnel config | IPsec VPN service on Tier-0 gateway | *(future)* |
+| **Transit Gateway** | Hub-and-spoke router | Tier-0 gateway (hub-and-spoke topology) | *(future)* |
 
 ### Multiple Clusters
 
 In a multi-cluster deployment, the VPC must span cluster boundaries so that
-subnets, policies, routes, and peering relationships are rendered on every
+subnets, gateway, route tables, security groups are rendered on every
 cluster where the VPC is present. The proposed model is **hub-spoke**.
 
 ```
-     ┌───────────────────────────────────────────────────┐
-     │                  Hub Cluster                      │
-     │                                                   │
-     │   VPC: production                                 │
-     │     cidrBlocks: [10.0.0.0/16]                     │
-     │     subnets:                                      │
-     │     - public:  10.0.1.0/24  L3 Geneve              │
-     │     - private: 10.0.10.0/24 L3 Geneve             │
-     │     - vm-net:  10.0.100.0/24 L2 EVPN              │
-     │                                                   │
-     │   NetworkPolicy, AdminNetworkPolicy,              │
-     │   RouteTable, RouteAdvertisements                 │
-     │                                                   │
-     │   ┌─────────────────────────────────────────┐     │
-     │   │       VPC Controller (hub)              │     │
-     │   │  - Watches VPC + associated resources   │     │
-     │   │  - Does IPAM (per-cluster allocations)  │     │
-     │   │  - Renders C(UDN)s locally              │     │
-     │   │  - NO API access to spokes              │     │
-     │   └──────────┬──────────────────┬───────────┘     │
-     └──────────────┼──────────────────┼─────────────────┘
-                    │                  │
-        sync spec   │                  │  sync spec
-        + policies  │                  │  + policies
-        (transport  │                  │  (transport
-         decoupled) │                  │   decoupled)
-                    ▼                  ▼
-     ┌──────────────────────┐  ┌──────────────────────┐
-     │   Spoke Cluster A    │  │   Spoke Cluster B    │
-     │                      │  │                      │
-     │ VPC Controller (spoke)│  │ VPC Controller (spoke)│
-     │  - Reads synced spec │  │  - Reads synced spec │
-     │  - Creates C(UDN)s   │  │  - Creates C(UDN)s   │
-     │  - Applies policies  │  │  - Applies policies  │
-     │  - Self-heals        │  │  - Self-heals        │
-     │                      │  │                      │
-     │  C(UDN)s:            │  │  C(UDN)s:            │
-     │  - prod-public       │  │  - prod-public       │
-     │  - prod-private      │  │  - prod-private      │
-     │  - prod-vm-net       │  │  - prod-vm-net       │
-     │                      │  │                      │
-     │  NetworkPolicy, ANP  │  │  NetworkPolicy, ANP  │
-     │  RouteTable, RA      │  │  RouteTable, RA      │
-     └──────────────────────┘  └──────────────────────┘
+  ┌────────────────────────────────────────────────────────────┐
+  │                      Hub Cluster                           │
+  │                                                            │
+  │  VPC: production                                           │
+  │    subnets:                                                │
+  │    - web-a  (Public,  10.0.1.0/24)                         │
+  │    - web-b  (Public,  10.0.2.0/24)                         │
+  │    - app-a  (Private, 10.0.10.0/24)                        │
+  │    - app-b  (Private, 10.0.11.0/24)                        │
+  │    - db-a   (Isolated,10.0.20.0/24)                        │
+  │    - db-b   (Isolated,10.0.21.0/24)                        │
+  │                                                            │
+  │  NetworkPolicy, AdminNetworkPolicy, RouteTable,            │
+  │  RouteAdvertisements                                       │
+  │                                                            │
+  │  ┌──────────────────────────────────────────────────┐      │
+  │  │  VPC Controller                                  │      │
+  │  │  - Watches VPC + associated resources            │      │
+  │  │  - Renders ns + UDNs, policies, RA               │      │
+  │  │    for hub and all spokes                        │      │
+  │  │  - Applies rendered resources to spokes          │      │
+  │  │    via spoke kubeconfig (direct API access)      │      │
+  │  └────────┬─────────────────────────┬───────────────┘      │
+  │           │                         │                      │
+  │  ┌────────┴───────────────┐         │                      │
+  │  │ ovnkube-cluster-manager│         │                      │
+  │  │ ovnkube-controller     │         │                      │
+  │  │  - Renders UDNs locally│         │                      │
+  │  │  - Programs OVN flows  │         │                      │
+  │  └────────────────────────┘         │                      │
+  └─────────────────────────────────────┘──────────────────────┘
+                          │             │
+           apply via      │             │  apply via
+           kubeconfig     │             │  kubeconfig
+           (UDNs, RA,     │             │  (UDNs, RA,
+            policies)     │             │   policies)
+                          ▼             ▼
+  ┌─────────────────────────────┐  ┌─────────────────────────────┐
+  │     Spoke Cluster A         │  │     Spoke Cluster B         │
+  │                             │  │                             │
+  │  Rendered resources applied │  │  Rendered resources applied │
+  │  directly by hub controller │  │  directly by hub controller │
+  │                             │  │                             │
+  │  ┌────────────────────────┐ │  │  ┌────────────────────────┐ │
+  │  │ ovnkube-cluster-manager│ │  │  │ ovnkube-cluster-manager│ │
+  │  │ ovnkube-controller     │ │  │  │ ovnkube-controller     │ │
+  │  │  - Renders UDNs        │ │  │  │  - Renders UDNs        │ │
+  │  │  - Programs OVN flows  │ │  │  │  - Programs OVN flows  │ │
+  │  └────────────────────────┘ │  │  └────────────────────────┘ │
+  │                             │  │                             │
+  │  UDNs:                      │  │  UDNs:                      │
+  │  - production-web-a         │  │  - production-web-a         │
+  │  - production-web-b         │  │  - production-web-b         │
+  │  - production-app-a         │  │  - production-app-a         │
+  │  - production-app-b         │  │  - production-app-b         │
+  │  - production-db-a          │  │  - production-db-a          │
+  │  - production-db-b          │  │  - production-db-b          │
+  │                             │  │                             │
+  │  NetworkPolicy, ANP         │  │  NetworkPolicy, ANP         │
+  │  RouteTable, RouteAdvert.   │  │  RouteTable, RouteAdvert.   │
+  └─────────────────────────────┘  └─────────────────────────────┘
 ```
+
+**Pros and cons of hub-only rendering:**
+
+| | |
+|---|---|
+| **Pro: Simpler spoke footprint** | No VPC-specific controller to deploy, upgrade, or monitor on spokes. Spokes run standard ovnkube only. |
+| **Pro: Single point of logic** | All VPC-to-resource translation happens in one place. Easier to debug, audit, and upgrade. |
+| **Pro: Easier upgrades** | Upgrade VPC controller once on the hub, not across N spokes. |
+| **Con: Hub is single management point** | If the hub goes down, no new VPC changes reach spokes. Existing resources continue to work (ovnkube operates independently) but drift cannot be corrected until the hub recovers. |
+| **Con: Hub must know per-cluster details** | The hub renders cluster-specific resources and holds kubeconfig secrets for every spoke. This grows in complexity as clusters diverge. |
+| **Con: No domain-aware self-healing on spokes** | If a resource is deleted on a spoke, recovery depends on the hub controller's reconciliation loop detecting drift, not a local VPC-aware controller. |
+
+See [Alternative: Hub-Spoke with VPC Controller on Spokes](#alternative-hub-spoke-with-vpc-controller-on-spokes-multi-cluster)
+for the alternative approach where spokes run their own VPC controller.
 
 #### How it works
 
-1. **Single source of truth**: The VPC resource and all associated resources
-   (NetworkPolicy, AdminNetworkPolicy, RouteTable, RouteAdvertisements) are
+1. **Single source of truth**: The VPC resource and all associated high-level
+   constructs (security groups, NACLs, route tables, subnet definitions) are
    defined on the **hub cluster**. This is the only place users create or
    modify VPC configuration.
 
-2. **Hub does IPAM**: The VPC controller on the hub allocates non-overlapping
-   per-cluster CIDR slices for each subnet and writes the allocations into the
-   VPC spec (or an associated status/allocation resource).
+2. **External IPAM**: OVN-Kubernetes's built-in IPAM is disabled for VPC
+   subnets. An external, pluggable IPAM controller manages each subnet's CIDR
+   as a flat pool and assigns IPs to pods directly via annotations. See
+   [IPAM](#ipam) for details.
 
-3. **Hub renders locally**: On the hub cluster, the VPC controller creates the
-   local C(UDN)s, intra-VPC routing, and associated resources exactly as in
-   the single-cluster model, using the hub's CIDR allocation.
+3. **Hub renders and applies all resources**: The VPC controller on the hub
+   renders the full set of resources for each cluster — namespaces, UDNs
+   (L2 EVPN), RouteAdvertisements (Public), NetworkPolicies,
+   AdminNetworkPolicies, and RouteTables. For the hub itself, resources are
+   created directly via the local API. For spokes, the hub controller holds
+   a **kubeconfig secret per spoke cluster** and applies rendered resources
+   directly to each spoke's API server (`CreateOrUpdate` / `Delete`).
 
-4. **Spec synced to spokes**: The VPC spec (with per-cluster IPAM allocations)
-   and associated policy/route resources are synced to each spoke cluster. The
-   sync transport is decoupled from the VPC controller. The hub does not need
-   API access to spoke clusters.
+![Multi-Cluster: VPC spanning clusters](images/multi-cluster-details.png)
 
-   **TODO**: Determine the sync mechanism. Evaluate whether the templating/binding
-   model is necessary or whether the VPC controller should sync its own resolved
-   spec directly. The following alternatives are under consideration:
+4. **Spokes receive standard Kubernetes resources**: Spoke clusters see only
+   plain Kubernetes resources (UDN, RouteAdvertisements, NetworkPolicy, etc.)
+   applied by the hub. They do not need to understand the VPC abstraction.
 
-   - **VPC controller syncs resolved spec directly**: The hub controller does
-     IPAM, writes a fully-resolved per-cluster VPC spec (no placeholders), and
-     syncs it to each spoke via a lightweight mechanism (e.g. git, shared config
-     store, sync agent). The spoke VPC controller reads the resolved spec and
-     renders C(UDN)s/policies locally. Simple, self-contained, no dependency on
-     a templating system. Best fit if VPC is the primary multi-cluster use case.
+   **TBD — Decide during reviews:** The multi-cluster client implementation
+   for the VPC controller has two options:
 
-   - **VPC controller generates templates and bindings**: The hub controller
-     generates a VPC template (with placeholders like `{{ .clusterCIDR }}`) and
-     per-cluster binding objects that provide IPAM allocations. The
-     [templating/binding system](https://gist.github.com/skitt/c534dba0292b5533df7495de322dcd25)
-     handles sync and instantiation on spokes. Reuses shared infrastructure --
-     the same system can sync bare NetworkPolicies and UDNs independently of
-     VPCs. Adds indirection (template → binding → instantiated resource) and a
-     dependency on the templating CRDs/controllers.
+   - **Option A: Hypershift style (manual client management).** The VPC
+     controller manually builds a `controller-runtime` `client.Client` per
+     spoke from kubeconfig secrets stored on the hub — the same pattern used
+     by Hypershift's `control-plane-operator`. The controller owns client
+     caching, kubeconfig rotation, and unreachable-cluster handling. This is
+     battle-tested (Hypershift since OCP 4.10+) but requires more
+     boilerplate.
 
-   - **Hybrid: VPC syncs spec, templating handles policies**: The VPC controller
-     syncs its own spec directly (for C(UDN) creation on spokes), but uses the
-     templating/binding system for resources that genuinely vary per cluster
-     (e.g. NetworkPolicies with cluster-specific IP blocks). Avoids building
-     two full sync mechanisms while keeping the VPC sync path simple for the
-     common case.
+   - **Option B: [multicluster-runtime](https://github.com/multicluster-runtime/multicluster-runtime)
+     library.** A SIG-Multicluster-blessed extension to `controller-runtime`
+     (`sigs.k8s.io/multicluster-runtime`) that provides dynamic fleet
+     discovery via a `Provider` interface, automatic per-cluster client
+     lifecycle management, and built-in sharding across controller replicas
+     (Rendezvous Hashing). The VPC controller writes a standard reconciler
+     and the library routes it to the correct spoke client. Less boilerplate,
+     but a newer dependency (v0.23.x, 2026).
 
-5. **Spoke controller renders and self-heals**: Each spoke cluster runs its
-   own VPC controller instance. It reads the synced VPC spec, creates the
-   corresponding C(UDN)s, NetworkPolicies, AdminNetworkPolicies, RouteTables,
-   and RouteAdvertisements locally using its allocated CIDR slice. If any
-   resource is accidentally deleted or drifts, the spoke controller recreates
-   it from the synced spec. The spoke controller never modifies the VPC spec
-   -- it only renders.
+   - **Option C: [ACM ManifestWork](https://open-cluster-management.io/docs/concepts/work-distribution/manifestwork/).**
+     The hub VPC controller creates `ManifestWork` resources in each spoke's
+     cluster namespace on the hub. A work agent running on each spoke watches
+     its ManifestWork and applies the embedded manifests locally. The spoke
+     agent reports per-resource status back to the hub via `resourceStatus`
+     and `FeedbackRules`, giving built-in observability. However, this
+     requires ACM / Open Cluster Management to be deployed and a work agent
+     on every spoke — adding an infrastructure dependency not all deployments
+     will have.
 
-6. **Hub going down does not break spokes**: Since each spoke has a local copy
-   of the VPC spec and its own controller, existing rendering continues
-   uninterrupted. Only new VPC changes are delayed until the hub recovers.
+   | | Hypershift style | multicluster-runtime | ACM ManifestWork |
+   |---|---|---|---|
+   | Cluster discovery | Manual (watch kubeconfig secrets) | Automatic via Provider | ACM ManagedCluster / Placement |
+   | Client lifecycle | Controller manages | Library manages | Work agent on spoke manages |
+   | Kubeconfig rotation | Controller handles | Provider handles | ACM handles |
+   | Sharding | Not built in (single leader) | Built in (Rendezvous Hashing) | N/A (spoke agent pulls) |
+   | Status feedback | Controller reads back from spoke | Controller reads back from spoke | Built-in (resourceStatus, FeedbackRules) |
+   | Hub-to-spoke model | Hub pushes (direct API) | Hub pushes (direct API) | Spoke pulls from hub |
+   | Maturity | Battle-tested in Hypershift | Newer, SIG-blessed | Mature (ACM GA) |
+   | Dependency | controller-runtime only | + multicluster-runtime | ACM + work agent on every spoke |
 
-7. **Cross-cluster connectivity**: The C(UDN)s on each cluster are connected
-   via the underlying OVN-Kubernetes inter-cluster networking (e.g. EVPN or
-   similar cross-cluster fabric). The VPC controller ensures the same subnets
+5. **ovnkube handles the rest on spokes**: Once the rendered UDN, policy, and
+   route resources land on a spoke cluster, ovnkube-cluster-manager and
+   ovnkube-controller process them as normal — no VPC-specific logic needed.
+
+6. **Cross-cluster connectivity**: The UDNs on each cluster are connected via
+   the underlying EVPN fabric. The VPC controller ensures the same subnets
    exist on each cluster so that workloads like CockroachDB can communicate
-   across cluster boundaries on the same network.
+   across cluster boundaries on the same network with real, routable pod IPs.
 
-#### IPAM across clusters
+7. **Status and observability**: The VPC controller on the hub reads the
+   status of rendered resources on each spoke (via the same client used to
+   apply them) and aggregates per-cluster health into the VPC `.status`.
+   This gives users a single pane of glass — the VPC resource on the hub
+   reflects whether subnets, policies, and routes are healthy across all
+   clusters. Errors (unreachable spoke, failed UDN reconciliation, policy
+   rejection) are surfaced as conditions on the VPC status.
 
-The VPC's `cidrBlocks` define the global address space. When rendering subnets
-across multiple clusters, the VPC controller on the hub is responsible for
-allocating non-overlapping per-cluster portions of each subnet's CIDR so that
-pod IPs are globally unique across all clusters in the VPC.
+#### IPAM
 
-For example, a subnet with CIDR 10.0.1.0/24 across three clusters:
+IP address management for VPC subnets is handled by an **external IPAM
+controller**, not by OVN-Kubernetes's built-in IPAM. OVN-K IPAM is turned
+off for VPC subnets.
 
-- Cluster A: 10.0.1.0/26 (64 addresses)
-- Cluster B: 10.0.1.64/26 (64 addresses)
-- Cluster C: 10.0.1.128/26 (64 addresses)
+**How it works:**
 
-The per-cluster allocation is recorded on the hub and pushed to each spoke as
-part of the VPC spec sync. Each spoke's VPC controller uses its allocated
-slice when creating the local C(UDN), ensuring no overlap. Pods communicate
-with their real IPs across clusters without NAT -- important for applications
-like CockroachDB that require stable, routable pod addresses.
+- Each VPC has a pluggable IPAM plugin. The plugin holds one flat allocator
+  per subnet.
+- The allocator manages the full subnet CIDR as a single flat pool — IPs are
+  handed out individually on demand, not pre-partitioned per cluster or per
+  node. This avoids the address space wastage that comes with hard-splitting
+  CIDRs across clusters.
+- When a pod is scheduled, the external IPAM assigns an IP from the
+  appropriate subnet pool and **annotates the pod directly**. OVN-K reads the
+  annotation and programs the datapath accordingly.
+- In multi-cluster deployments, the same IPAM instance (or a coordinated set
+  of instances) serves all clusters from the same flat pool, ensuring global
+  uniqueness without per-cluster CIDR splits.
 
-#### What gets synchronized
+**Reference implementation:**
 
-| Resource | Synchronized? | Notes |
-|---|---|---|
-| VPC spec (subnets, CIDRs) | Yes | Hub → spokes; spoke controller creates C(UDN)s |
-| NetworkPolicy | Yes | Rendered on every cluster where VPC subnets exist |
-| AdminNetworkPolicy | Yes | Cluster-scoped policies synced to all spokes |
-| RouteTable | Yes | Custom routes rendered on each cluster |
-| RouteAdvertisements | Yes | BGP export config for public subnets |
-| EgressIP | Cluster-specific | Each cluster may have different egress IPs |
-| VPC peering (CNC) | Hub-managed | Peering between VPCs coordinated from hub |
+A lightweight reference IPAM implementation ships with the VPC controller —
+similar in spirit to a static DHCP server. It is simple, stateless-friendly,
+and scales well across clusters. Users can replace it with their own IPAM
+(e.g. Infoblox, NetBox, or a custom allocator) by implementing the plugin
+interface.
+
+**Example:** A Private subnet `app-a` with CIDR `10.0.10.0/24` spanning two
+clusters:
+
+- Pod on Cluster A gets `10.0.10.3` (assigned by IPAM, annotated on pod)
+- Pod on Cluster B gets `10.0.10.4` (assigned by IPAM, annotated on pod)
+- No per-cluster CIDR split — both draw from the same `/24` pool
+
+Pods communicate with their real IPs across clusters without NAT — important
+for applications like CockroachDB that require stable, routable pod addresses.
+
+#### Availability Zones and Subnet Pinning
+
+In AWS, each subnet resides in a single Availability Zone. We support the
+same model: each VPC subnet can optionally be tied to an Availability Zone
+via the `availabilityZone` field — a nested struct (following the same
+pattern as ANP's `NamespacedPod`) that groups cluster and node selection
+together. If omitted, the subnet spans all clusters and all nodes (no AZ
+pinning).
+
+The `AvailabilityZone` struct contains two selectors:
+- **`clusterSelector`** (required within the struct): selects which
+  cluster(s) the subnet is placed on in multi-cluster deployments.
+- **`nodeSelector`** (optional): selects which nodes within each target
+  cluster the subnet's UDN is scheduled to. This pins the subnet to a
+  failure domain. If empty, the entire cluster is the AZ.
+
+The existing Kubernetes label `topology.kubernetes.io/zone` is the natural
+fit for `nodeSelector` — users label their nodes with zone values (e.g.
+`rack-a`, `rack-b`) and the subnet's `nodeSelector` matches on that. We may
+also provide well-known VPC zone labels (e.g. `vpc.k8s.ovn.org/zone=az-1`)
+for environments where the Kubernetes topology label is not set or where a
+VPC-specific zone model is preferred. Ultimately, the choice of label is up
+to each user/deployment.
+
+For example, the `production` VPC might have:
+- `web-a` → `availabilityZone: { clusterSelector: region=us-east, nodeSelector: zone=rack-a }`
+- `web-b` → `availabilityZone: { clusterSelector: region=us-east, nodeSelector: zone=rack-b }`
+
+This gives AWS-like zone-aware subnet placement for high availability.
+
+**How it works — three layers of pinning:**
+
+1. **Cluster selection** (`clusterSelector`): In multi-cluster deployments,
+   the hub VPC controller determines which spoke clusters a subnet is placed
+   on. The hub maintains a cluster inventory — either label-bearing cluster
+   objects or kubeconfig secrets with labels (e.g.
+   `topology.kubernetes.io/region=us-east`). The subnet's `clusterSelector`
+   filters against these labels and the hub only creates the namespace + UDN
+   on matching clusters. If using
+   [multicluster-runtime](https://github.com/multicluster-runtime/multicluster-runtime),
+   the library's Provider interface handles cluster discovery and the
+   `clusterSelector` maps to the Provider's cluster filtering.
+
+2. **Node selection** (`nodeSelector`): Within each cluster, the VPC
+   controller sets a node selector on the subnet's namespace to ensure all
+   pods schedule on AZ nodes. Two mechanisms are available:
+   - **OpenShift project node selector**: The annotation
+     `openshift.io/node-selector: topology.kubernetes.io/zone=rack-a` on the
+     namespace. This is the
+     [OpenShift project node selector](https://docs.redhat.com/en/documentation/openshift_container_platform/latest/html/nodes/controlling-pod-placement-onto-nodes-scheduling#nodes-scheduler-node-selectors-project_nodes-scheduler-node-selectors)
+     feature.
+   - **PodNodeSelector admission plugin** (upstream Kubernetes): The
+     annotation `scheduler.alpha.kubernetes.io/node-selector` on the
+     namespace injects a `nodeSelector` into every pod created in it.
+
+   Either way, the result is the same: pods in the subnet namespace only
+   schedule on nodes matching the AZ label.
+
+3. **Dynamic UDN Node Allocation**: With
+   [OKEP-5552](https://ovn-kubernetes.io/okeps/okep-5552-dynamic-udn-node-allocation/)
+   enabled, OVN-Kubernetes only renders the UDN on nodes where pods actually
+   exist. Combined with the namespace node selector, this means the UDN is
+   only configured on AZ nodes — no wasted VTEP/VNI resources, OVN switches,
+   or VRFs on irrelevant nodes. This is a natural complement to subnet
+   pinning and significantly improves scale when many subnets are pinned to
+   different AZs.
 
 ### Approach
 
 We propose introducing a new **VPC** CRD (cluster-scoped) and a new
 **VPC controller** implemented in a new repository under the
-ovn-kubernetes organization. The VPC controller runs as a separate daemonset,
-deployed and managed by the Cluster Network Operator (CNO). It acts as a
-translation layer: it watches VPC resources and automatically creates and
+ovn-kubernetes organization. It acts as a translation layer:
+it watches VPC resources and automatically creates and
 reconciles the underlying OVN-Kubernetes CRDs needed to realize the VPC. In
 multi-cluster deployments, the operator also synchronizes network
 configuration, policies, and routes across clusters.
@@ -484,7 +722,7 @@ resources, none of which users need to create or manage directly:
 | VPC peering | CNC (existing, extended with `vpcSelector`) | Transit fabric between VPCs |
 | Custom routes | RouteTable (new) | Programs VRF (LGW) or GR (SGW) |
 | Public subnets | RouteAdvertisements (existing) | BGP export |
-| NAT / IGW | EgressIP (existing) | Outbound SNAT |
+| NAT / IGW | Node IP SNAT; EgressIP *(future)* | Outbound SNAT |
 | Security groups | NetworkPolicy (existing) | Stateful pod-level firewall |
 | NACLs | AdminNetworkPolicy (existing) | Cluster-scoped ordered rules |
 
@@ -530,8 +768,7 @@ This enhancement introduces the following API extensions:
 
 #### VPC CRD (new)
 
-A cluster-scoped CRD that defines an isolated network boundary. Its controller
-handles CIDR governance, intra-VPC routing, and status aggregation.
+A multi-cluster-scoped CRD that defines an isolated network boundary.
 
 ```go
 // VPC defines an isolated network boundary that groups one or more
@@ -558,17 +795,6 @@ type VPC struct {
 
 // VPCSpec defines the desired state of a VPC.
 type VPCSpec struct {
-	// cidrBlocks defines the address space for this VPC. Every subnet's
-	// CIDR must fall within one of these blocks. The list is mutable:
-	// secondary CIDR blocks can be appended after creation to expand
-	// the VPC's address space. A CIDR block cannot be removed while
-	// any subnet references addresses within it.
-	//
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:MinItems=1
-	// +required
-	CIDRBlocks []CIDR `json:"cidrBlocks"`
-
 	// subnets defines the subnets within this VPC. The VPC controller
 	// creates a ClusterUserDefinedNetwork for each entry. Subnets
 	// within the same VPC can have different topologies and transports.
@@ -579,65 +805,58 @@ type VPCSpec struct {
 	Subnets []VPCSubnet `json:"subnets"`
 }
 
+// SubnetType defines the external connectivity class of a VPC subnet.
+// +kubebuilder:validation:Enum=Public;Private;Isolated;VPNOnly
+type SubnetType string
+
+const (
+	SubnetTypePublic   SubnetType = "Public"
+	SubnetTypePrivate  SubnetType = "Private"
+	SubnetTypeIsolated SubnetType = "Isolated"
+	SubnetTypeVPNOnly  SubnetType = "VPNOnly"
+)
+
 // VPCSubnet defines a subnet within the VPC. The VPC controller creates
-// a UDN or CUDN from this definition depending on the scope.
+// a namespace and a UDN (L2 EVPN) from this definition.
+// Each subnet maps 1:1 to a single namespace.
 type VPCSubnet struct {
-	// name is the subnet name. The resulting network resource is named
+	// name is the subnet name. The resulting namespace and UDN are named
 	// "<vpc-name>-<subnet-name>".
+	//
+	// TODO: determine max length constraints — Kubernetes metadata.name
+	// is limited to 253 characters (DNS subdomain) and namespace names
+	// to 63 characters (DNS label). The combined "<vpc-name>-<subnet-name>"
+	// must respect these limits. Consider CEL validation to limit vpc name
+  // and subnet name equally.
 	//
 	// +kubebuilder:validation:Required
 	// +required
 	Name string `json:"name"`
 
-	// scope determines whether the controller creates a
-	// ClusterUserDefinedNetwork (Cluster) or a UserDefinedNetwork
-	// (Namespace). Defaults to Cluster.
-	//
-	// +optional
-	// +kubebuilder:default=Cluster
-	// +kubebuilder:validation:Enum=Cluster;Namespace
-	Scope NetworkScope `json:"scope,omitempty"`
-
-	// namespace is the target namespace for the UDN when scope is
-	// Namespace. Ignored when scope is Cluster.
-	//
-	// +optional
-	Namespace string `json:"namespace,omitempty"`
-
-	// cidr is the pod CIDR for this subnet. Must fall within one of
-	// the VPC's cidrBlocks.
+	// cidrs defines the IP address range(s) for this subnet.
+	// At most two CIDRs may be specified: one IPv4 and one IPv6
+	// for dual-stack. If a single CIDR is provided, the subnet is
+	// single-stack (v4 or v6).
 	//
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=2
+	// +listType=atomic
 	// +required
-	CIDR CIDR `json:"cidr"`
-
-	// topology is the network topology for this subnet.
 	//
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Enum=Layer2;Layer3
-	// +required
-	Topology NetworkTopology `json:"topology"`
+	// +kubebuilder:validation:XValidation:rule="self.size() <= 1 || (self.exists(c, c.contains(':')) && self.exists(c, !c.contains(':')))",message="when two CIDRs are specified they must be from different address families (one IPv4, one IPv6)"
+	CIDRs []CIDR `json:"cidrs"`
 
-	// hostSubnet is the per-node prefix length (Layer3 only).
-	// +optional
-	HostSubnet int32 `json:"hostSubnet,omitempty"`
-
-	// transport is the encapsulation mode for this subnet.
-	// Defaults to Geneve if not specified.
-	//
-	// +optional
-	// +kubebuilder:validation:Enum=Geneve;EVPN
-	Transport *TransportMode `json:"transport,omitempty"`
-
-	// connectivity defines the external connectivity class of this subnet.
-	// This determines what the VPC controller provisions beyond the C(UDN):
+	// type defines the subnet type which determines its external
+	// connectivity and the resources the VPC controller provisions:
 	//
 	// - Public: externally reachable. Controller creates RouteAdvertisements
 	//   (BGP) to export subnet routes to the physical network.
-	// - Private: no direct external reachability. Controller creates EgressIP
-	//   for outbound NAT so pods can reach external destinations.
+	// - Private: no direct external reachability. Outbound traffic is SNATed
+	//   using node IPs so pods can reach external destinations. (EgressIP-based
+	//   SNAT with dedicated egress addresses is a future goal.)
 	// - Isolated: no routes outside the VPC. No RouteAdvertisements, no
-	//   EgressIP. Traffic is confined to intra-VPC routing only.
+	//   EgressIP. No intra-VPC routing. Traffic is confined to the subnet.
 	// - VPNOnly: traffic exits the VPC exclusively through a VPN connection.
 	//   No internet-facing routes. Controller configures IPsec or similar
 	//   north-south encryption for this subnet's traffic.
@@ -647,21 +866,51 @@ type VPCSubnet struct {
 	// +optional
 	// +kubebuilder:default=Private
 	// +kubebuilder:validation:Enum=Public;Private;Isolated;VPNOnly
-	Connectivity SubnetConnectivity `json:"connectivity,omitempty"`
+	Type SubnetType `json:"type,omitempty"`
 
-	// namespaceSelector determines which namespaces are attached
-	// to this subnet. Used when scope is Cluster (CUDN).
+	// availabilityZone optionally pins this subnet to a specific
+	// failure domain. It selects which clusters and which nodes
+	// within those clusters the subnet is placed on.
+	//
+	// If omitted, the subnet spans all clusters and all nodes
+	// (no AZ pinning).
 	//
 	// +optional
-	NamespaceSelector *metav1.LabelSelector `json:"namespaceSelector,omitempty"`
+	AvailabilityZone *AvailabilityZone `json:"availabilityZone,omitempty"`
+}
+
+// AvailabilityZone selects the failure domain for a VPC subnet.
+// It follows the nested selector pattern used by AdminNetworkPolicy
+// (e.g. NamespacedPod groups namespaceSelector + podSelector).
+type AvailabilityZone struct {
+	// clusterSelector selects which clusters this subnet is placed on
+	// in multi-cluster deployments. The hub VPC controller matches
+	// these labels against its cluster inventory (label-bearing cluster
+	// objects or kubeconfig secrets). Only clusters whose labels satisfy
+	// the selector receive the namespace + UDN for this subnet.
+	//
+	// +kubebuilder:validation:Required
+	// +required
+	ClusterSelector metav1.LabelSelector `json:"clusterSelector"`
+
+	// nodeSelector optionally restricts the subnet to nodes matching
+	// these labels within each target cluster. The VPC controller
+	// translates this into a namespace node selector (via the OpenShift
+	// project node-selector annotation or the PodNodeSelector admission
+	// plugin) so that all pods in the subnet schedule only on matching
+	// nodes.
+	//
+	// The typical use is AZ pinning — e.g.
+	// { "topology.kubernetes.io/zone": "rack-a" }.
+	//
+	// If empty or omitted, the subnet spans all nodes in the cluster.
+	//
+	// +optional
+	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
 }
 
 // VPCStatus defines the observed state of a VPC.
 type VPCStatus struct {
-	// subnets reports the status of each subnet in the VPC.
-	// +optional
-	Subnets []VPCSubnetStatus `json:"subnets,omitempty"`
-
 	// conditions reports the status of VPC operations.
 	// +patchMergeKey=type
 	// +patchStrategy=merge
@@ -669,167 +918,151 @@ type VPCStatus struct {
 	// +listMapKey=type
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
-
-type VPCSubnetStatus struct {
-	// name is the subnet name.
-	Name string `json:"name"`
-
-	// networkName is the name of the UDN or CUDN created for this subnet.
-	NetworkName string `json:"networkName"`
-
-	// scope is Cluster (CUDN) or Namespace (UDN).
-	Scope string `json:"scope"`
-
-	// cidr is the pod CIDR of the subnet.
-	CIDR string `json:"cidr"`
-
-	// topology is the subnet's network topology.
-	Topology string `json:"topology"`
-
-	// ready indicates whether the underlying UDN/CUDN is ready.
-	Ready bool `json:"ready"`
-}
 ```
 
 Example:
 
 ```yaml
-apiVersion: k8s.ovn.org/v1
+apiVersion: k8s.ovn.org/v1beta1
 kind: VPC
 metadata:
   name: production
-  labels:
-    peer-group: prod-staging
 spec:
-  cidrBlocks:
-  - 10.0.0.0/16
   subnets:
-  - name: web
-    cidr: 10.0.1.0/24
-    topology: Layer3
-    hostSubnet: 26
-    connectivity: Public
-    namespaceSelector:
-      matchLabels:
-        subnet: prod-web
-  - name: app
-    cidr: 10.0.10.0/24
-    topology: Layer3
-    hostSubnet: 26
-    connectivity: Private
-    namespaceSelector:
-      matchLabels:
-        subnet: prod-app
-  - name: db
-    cidr: 10.0.20.0/24
-    topology: Layer3
-    hostSubnet: 26
-    connectivity: Isolated
-    namespaceSelector:
-      matchLabels:
-        subnet: prod-db
-  - name: mgmt
-    cidr: 10.0.30.0/24
-    topology: Layer3
-    hostSubnet: 26
-    connectivity: VPNOnly
-    namespaceSelector:
-      matchLabels:
-        subnet: prod-mgmt
-  - name: vm-network
-    cidr: 10.0.100.0/24
-    topology: Layer2
-    transport: EVPN
-    connectivity: Private
-    namespaceSelector:
-      matchLabels:
-        subnet: prod-vm
+  - name: web-a
+    cidrs:
+    - 10.0.1.0/24
+    type: Public
+    availabilityZone:
+      clusterSelector:
+        matchLabels:
+          topology.kubernetes.io/region: us-east
+      nodeSelector:
+        topology.kubernetes.io/zone: rack-a
+  - name: web-b
+    cidrs:
+    - 10.0.2.0/24
+    type: Public
+    availabilityZone:
+      clusterSelector:
+        matchLabels:
+          topology.kubernetes.io/region: us-east
+  - name: app-a
+    cidrs:
+    - 10.0.10.0/24
+    type: Private
+  - name: app-b
+    cidrs:
+    - 10.0.11.0/24
+    type: Private
+  - name: db-a
+    cidrs:
+    - 10.0.20.0/24
+    type: Isolated
+  - name: db-b
+    cidrs:
+    - 10.0.21.0/24
+    type: Isolated
 ```
 
-The VPC controller creates five C(UDN)s from this: `production-web`,
-`production-app`, `production-db`, `production-mgmt`, and
-`production-vm-network`. Each gets the appropriate topology, transport, and
-namespaceSelector. The `connectivity` field drives what additional resources
-the controller creates:
+The VPC controller creates six namespaces and UDNs (L2 EVPN) from this:
+`production-web-a`, `production-web-b`, `production-app-a`,
+`production-app-b`, `production-db-a`, and `production-db-b`.
+The `type` field drives what additional resources the controller creates
+per subnet:
 
-- **production-web** (Public): RouteAdvertisements for BGP export
-- **production-app** (Private): EgressIP for outbound NAT
-- **production-db** (Isolated): no external routing at all
-- **production-mgmt** (VPNOnly): IPsec north-south encryption
-- **production-vm-network** (Private): EgressIP for outbound NAT
+- **production-web-a**, **production-web-b** (Public): RouteAdvertisements for BGP export
+- **production-app-a**, **production-app-b** (Private): node IP SNAT for outbound traffic
+- **production-db-a**, **production-db-b** (Isolated): no external routing, no intra-VPC routing
 
-Automatic intra-VPC routing is established between all five subnets, and all
-CIDRs are validated against 10.0.0.0/16.
+#### Subnet Immutability
 
-#### ClusterNetworkConnect (existing, extended)
+A subnet's CIDR is immutable once created. The underlying UDN spec in
+OVN-Kubernetes does not support CIDR changes after creation, and this
+constraint propagates to the VPC API. This matches AWS behavior — an AWS
+subnet cannot be resized; you delete it and create a new one with a
+different CIDR.
 
-CNC is extended with a `vpcSelector` field to enable VPC-to-VPC peering.
-The existing `networkSelectors`, `connectSubnets`, and `connectivity` fields
-are unchanged.
+The VPC spec itself is mutable as a container:
 
-```yaml
-apiVersion: k8s.ovn.org/v1
-kind: ClusterNetworkConnect
-metadata:
-  name: prod-staging-peering
-spec:
-  # NEW: select VPCs to peer
-  vpcSelector:
-    matchLabels:
-      peer-group: prod-staging
-  connectSubnets:
-  - cidr: 192.168.0.0/16
-    networkPrefix: 24
-  connectivity:
-  - PodNetwork
-  - ClusterIPServiceNetwork
-```
+- **Add subnets**: Append new entries to `spec.subnets`. The VPC controller
+  creates the namespace + UDN.
+- **Remove subnets**: Remove entries from `spec.subnets`. The VPC controller
+  deletes the namespace + UDN (and all workloads in that namespace).
+- **Reorder subnets**: No effect — subnets are keyed by `name`, not position.
 
-The VPCs carry the matching label:
+To "resize" a subnet, the workflow is: drain workloads, remove the subnet,
+add a new subnet with the desired CIDR, redeploy workloads. This is
+identical to the AWS workflow.
 
-```yaml
-apiVersion: k8s.ovn.org/v1
-kind: VPC
-metadata:
-  name: production
-  labels:
-    peer-group: prod-staging
-spec:
-  cidrBlocks: ["10.0.0.0/16"]
-  networkSelector:
-    matchLabels:
-      vpc: production
----
-apiVersion: k8s.ovn.org/v1
-kind: VPC
-metadata:
-  name: staging
-  labels:
-    peer-group: prod-staging
-spec:
-  cidrBlocks: ["10.1.0.0/16"]
-  networkSelector:
-    matchLabels:
-      vpc: staging
-```
+This immutability constraint is also one of the reasons a new VPC CRD was
+chosen over reusing CUDN directly — the VPC acts as a mutable container of
+immutable subnets, allowing day-2 expansion (adding new subnets, appending
+CIDR blocks in the future) without mutating individual network objects.
 
-CNC's `connectSubnets` provides the transit CIDR for inter-VPC routing. This
-is the purpose `connectSubnets` was designed for: providing the interconnect
-plumbing between otherwise isolated networks.
+The `type` field (Public/Private/Isolated/VPNOnly) is also immutable after
+creation. Switching types would change the resources the controller provisions
+(e.g. adding or removing RouteAdvertisements, SNAT configuration) and has
+traffic-disruptive side effects. To change a subnet's type, delete it and
+recreate it — same as changing the CIDR.
 
 #### RouteTable CRD (new)
 
-**TBD.** The common default-route patterns (route to IGW, route to NAT GW)
-are handled by the `connectivity` field — the VPC controller creates
-RouteAdvertisements or EgressIP as needed, with no explicit route entries.
-The routing infrastructure (per-C(UDN) VRF in LGW, Gateway Router in SGW)
-already exists. What's missing is a user-facing API to inject **custom static
-routes** into those routers (e.g. routes to on-prem networks, peered VPC
-gateways, traffic engineering overrides). The scope and API of this CRD need
-further design work. It isn't clear if we really need this CRD or not.
+The common default-route patterns (route to IGW, route to NAT GW) are
+handled by the `type` field — the VPC controller creates RouteAdvertisements
+or node IP SNAT as needed, with no explicit route entries. The routing
+infrastructure (per-UDN VRF in LGW, Gateway Router in SGW) already exists.
 
-Fill in the operational impact of these API Extensions in the "Operational Aspects
-of API Extensions" section.
+A new **RouteTable CRD** will replace the existing
+[`AdminPolicyBasedExternalRoute`](https://ovn-kubernetes.io/api-reference/admin-epbr-api-spec/)
+(APBR / Multiple External Gateways) API, which is limited to egress-only
+external gateway hops on the cluster default network. The RouteTable CRD
+will:
+
+- Support both **egress and ingress** custom routes (APBR is egress-only).
+- Work on **UDNs**, not just the cluster default network.
+- Use a `networkSelector` (like RouteAdvertisements) to select which UDNs
+  the routes apply to.
+- Allow injection of custom static routes into the per-UDN VRF (LGW) or
+  GR (SGW) — e.g. routes to on-prem networks, peered VPC gateways, traffic
+  engineering overrides.
+
+An example YAML for this:
+
+```yaml
+apiVersion: k8s.ovn.org/v1beta1
+kind: RouteTable
+metadata:
+  name: production-custom-routes
+  labels:
+    vpc.k8s.ovn.org/name: production
+spec:
+  networkSelector:
+    matchLabels:
+      vpc.k8s.ovn.org/name: production
+      vpc.k8s.ovn.org/type: Private
+  routes:
+  - destination: 172.16.0.0/12
+    nextHop: 10.0.10.1
+    description: "Route to on-prem data center"
+  - destination: 10.1.0.0/16
+    nextHop: 10.0.10.254
+    description: "Route to peered VPC gateway"
+  - destinationRef:
+      kind: CIDRGroup
+      name: corporate-networks
+    nextHop: 10.0.10.1
+    description: "Route to all corporate CIDRs (resolved from CIDRGroup)"
+  - destinationRef:
+      kind: CIDRGroup
+      name: partner-vpn-endpoints
+    nextHop: 10.0.10.254
+    description: "Route to partner VPN endpoints (resolved from CIDRGroup)"
+```
+
+See the [Implementation Details: Route Table](#route-table-custom-routes)
+section for more details. The scope and API of this CRD need further design
+work in a dedicated OKEP.
 
 ### Topology Considerations
 
@@ -869,276 +1102,103 @@ comparison of OKE and OCP in the product documentation](https://docs.redhat.com/
 This section will break down the implementation of
 every single VPC resource/construct:
 
-#### Subnets (C(UDN)s)
+#### Subnets (UDNs)
 
-In AWS, a subnet is a range of IP addresses within a VPC, pinned to a single
-Availability Zone. Key properties of the
-[AWS::EC2::Subnet](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-ec2-subnet.html)
-resource:
+See [Introduction: Subnets](#subnets) for the general concept.
+Each VPC subnet maps to a namespace + UDN (L2 EVPN). The L3
+and localnet type topologies in the UDN world along with L2
+GENEVE type topology and BGP no-overlay topology will not be
+supported via VPCs or revealed to the users.
 
-1. **VpcId** — the VPC the subnet belongs to.
-2. **CidrBlock** — the IPv4 CIDR for the subnet. Must fall within the VPC's
-   CIDR. Immutable (change requires replacement).
-3. **AvailabilityZone** — the AZ the subnet resides in. Immutable.
-4. **MapPublicIpOnLaunch** — whether instances get a public IP automatically.
+**OVN-Kubernetes mapping:**
 
-A subnet is not inherently "public" or "private" — that behaviour comes from
-its route table (see Internet Gateway and NAT Gateway sections below). The
-subnet itself is just a CIDR range in an AZ.
-
-**OVN-Kubernetes mapping: C(UDN)**
-
-In OVN-Kubernetes, a subnet maps to a ClusterUserDefinedNetwork (CUDN) or
-UserDefinedNetwork (UDN), collectively referred to as C(UDN):
-
-| AWS Subnet property | C(UDN) equivalent |
+| AWS Subnet property | UDN equivalent |
 |---|---|
-| VpcId (parent VPC) | VPC controller creates the C(UDN) — ownership tracked via `vpc.k8s.ovn.org/name` label |
-| CidrBlock | `spec.network.layer3.subnets[].cidr` (L3) or `spec.network.layer2.subnets[]` (L2) |
+| VpcId (parent VPC) | VPC controller creates the namespace + UDN — ownership tracked via `vpc.k8s.ovn.org/name` label |
+| CidrBlock | `spec.network.layer2.subnets[]` |
 | AvailabilityZone | See Open Questions — `topology.kubernetes.io/zone` node labels on bare metal |
-| MapPublicIpOnLaunch | Not applicable — determined by `connectivity` field on the VPC subnet |
-| Immutable CIDR | Same — C(UDN) CIDR is immutable once created |
-| Route table association | Determined by `connectivity` field; controller creates ancillary resources |
+| MapPublicIpOnLaunch | Not applicable — determined by `type` field on the VPC subnet |
+| Immutable CIDR | Same — UDN CIDR is immutable once created |
+| Route table association | Determined by `type` field; controller creates ancillary resources |
 
-**Key differences from AWS:**
+**Key difference from AWS:** In AWS, a subnet's external connectivity is
+determined by what you put in its route table (IGW route = public, NAT GW
+route = private, nothing = isolated). In the VPC CRD, this is captured
+declaratively by the `type` field, and the VPC controller creates the
+appropriate resources:
 
-- **Topology choice.** AWS subnets are always L3. C(UDN)s support both Layer2
-  and Layer3 topologies within the same VPC.
-- **Transport choice.** C(UDN)s can use Geneve (overlay) or EVPN. AWS manages
-  the underlay transparently.
-- **Scope.** A C(UDN) can be cluster-scoped (CUDN, spans namespaces via
-  `namespaceSelector`) or namespace-scoped (UDN). AWS subnets are always
-  VPC-scoped.
-- **Connectivity is declarative.** In AWS, a subnet's external connectivity
-  is determined by what you put in its route table (IGW route = public, NAT GW
-  route = private, nothing = isolated). In the VPC CRD, this is captured by the
-  `connectivity` field, and the VPC controller creates the right resources:
-
-| `connectivity` | External reachability | Controller creates |
+| `type` | External reachability | Controller creates |
 |---|---|---|
 | **Public** | Externally routable — subnet routes advertised via BGP | RouteAdvertisements (see Internet Gateway section) |
-| **Private** | Outbound only — pods can reach external destinations | EgressIP (see NAT Gateway section) |
-| **Isolated** | None — traffic confined to intra-VPC routing | (nothing) |
+| **Private** | Outbound only — pods can reach external destinations | Node IP SNAT (EgressIP in future) |
+| **Isolated** | None — no external routes, no intra-VPC routing | (nothing) |
 | **VPNOnly** | VPN only — traffic exits via encrypted tunnel | IPsec north-south encryption |
 
-All subnets regardless of connectivity class get automatic **intra-VPC routing**
-between each other.
+All non-Isolated subnets get automatic **intra-VPC routing** between each other.
 
-Using the `production` VPC from the API Extensions example above, the VPC
-controller creates the following resources. All C(UDN)s are named
-`<vpc-name>-<subnet-name>` and labeled with `vpc.k8s.ovn.org/name: production`
-for ownership tracking.
+**EVPN Transport and VTEP:**
 
-```yaml
-# ── 1. Public subnet: production-web ──────────────────────────
-# C(UDN): L3 Geneve, externally routable via RouteAdvertisements
-apiVersion: k8s.ovn.org/v1
-kind: ClusterUserDefinedNetwork
-metadata:
-  name: production-web
-  labels:
-    vpc.k8s.ovn.org/name: production
-    vpc.k8s.ovn.org/subnet: web
-    vpc.k8s.ovn.org/connectivity: Public
-spec:
-  namespaceSelector:
-    matchLabels:
-      subnet: prod-web
-  network:
-    topology: Layer3
-    layer3:
-      role: Primary
-      subnets:
-      - cidr: 10.0.1.0/24
-        hostSubnet: 26
----
-# RouteAdvertisements: export pod routes to the physical network
-apiVersion: k8s.ovn.org/v1
-kind: RouteAdvertisements
-metadata:
-  name: production-web
-  labels:
-    vpc.k8s.ovn.org/name: production
-    vpc.k8s.ovn.org/subnet: web
-spec:
-  advertisements:
-  - advertisementType: PodNetwork
-  networkSelector:
-    matchLabels:
-      vpc.k8s.ovn.org/name: production
-      vpc.k8s.ovn.org/subnet: web
-  nodeSelector:
-    matchLabels: {}
----
-# ── 2. Private subnet: production-app ─────────────────────────
-# C(UDN): L3 Geneve (default), outbound NAT via EgressIP
-apiVersion: k8s.ovn.org/v1
-kind: ClusterUserDefinedNetwork
-metadata:
-  name: production-app
-  labels:
-    vpc.k8s.ovn.org/name: production
-    vpc.k8s.ovn.org/subnet: app
-    vpc.k8s.ovn.org/connectivity: Private
-spec:
-  namespaceSelector:
-    matchLabels:
-      subnet: prod-app
-  network:
-    topology: Layer3
-    layer3:
-      role: Primary
-      subnets:
-      - cidr: 10.0.10.0/24
-        hostSubnet: 26
----
-# EgressIP: outbound SNAT for pods in the private subnet
-apiVersion: k8s.ovn.org/v1
-kind: EgressIP
-metadata:
-  name: production-app
-  labels:
-    vpc.k8s.ovn.org/name: production
-    vpc.k8s.ovn.org/subnet: app
-spec:
-  egressIPs:
-  - 192.168.1.100
-  namespaceSelector:
-    matchLabels:
-      subnet: prod-app
----
-# ── 3. Isolated subnet: production-db ─────────────────────────
-# C(UDN): L3 Geneve, no external routes whatsoever
-apiVersion: k8s.ovn.org/v1
-kind: ClusterUserDefinedNetwork
-metadata:
-  name: production-db
-  labels:
-    vpc.k8s.ovn.org/name: production
-    vpc.k8s.ovn.org/subnet: db
-    vpc.k8s.ovn.org/connectivity: Isolated
-spec:
-  namespaceSelector:
-    matchLabels:
-      subnet: prod-db
-  network:
-    topology: Layer3
-    layer3:
-      role: Primary
-      subnets:
-      - cidr: 10.0.20.0/24
-        hostSubnet: 26
-# No RouteAdvertisements, no EgressIP.
-# Only intra-VPC routes are programmed.
----
-# ── 4. VPNOnly subnet: production-mgmt ────────────────────────
-# C(UDN): L3 Geneve, traffic exits exclusively via IPsec tunnel
-apiVersion: k8s.ovn.org/v1
-kind: ClusterUserDefinedNetwork
-metadata:
-  name: production-mgmt
-  labels:
-    vpc.k8s.ovn.org/name: production
-    vpc.k8s.ovn.org/subnet: mgmt
-    vpc.k8s.ovn.org/connectivity: VPNOnly
-spec:
-  namespaceSelector:
-    matchLabels:
-      subnet: prod-mgmt
-  network:
-    topology: Layer3
-    layer3:
-      role: Primary
-      subnets:
-      - cidr: 10.0.30.0/24
-        hostSubnet: 26
-# VPC controller configures IPsec north-south encryption for
-# this subnet. The exact IPsec CRD / configuration is TBD but
-# the controller ensures that all egress from this subnet
-# traverses an encrypted tunnel to a configured VPN endpoint.
----
-# ── 5. Private L2 subnet: production-vm-network ───────────────
-# C(UDN): L2 EVPN, outbound NAT via EgressIP
-apiVersion: k8s.ovn.org/v1
-kind: ClusterUserDefinedNetwork
-metadata:
-  name: production-vm-network
-  labels:
-    vpc.k8s.ovn.org/name: production
-    vpc.k8s.ovn.org/subnet: vm-network
-    vpc.k8s.ovn.org/connectivity: Private
-spec:
-  namespaceSelector:
-    matchLabels:
-      subnet: prod-vm
-  network:
-    topology: Layer2
-    layer2:
-      role: Primary
-      subnets:
-      - "10.0.100.0/24"
-    transport: EVPN
----
-# EgressIP: outbound SNAT for VMs in the L2 subnet
-apiVersion: k8s.ovn.org/v1
-kind: EgressIP
-metadata:
-  name: production-vm-network
-  labels:
-    vpc.k8s.ovn.org/name: production
-    vpc.k8s.ovn.org/subnet: vm-network
-spec:
-  egressIPs:
-  - 192.168.1.101
-  namespaceSelector:
-    matchLabels:
-      subnet: prod-vm
-```
+All VPC subnets use EVPN as the transport (`transport: EVPN`). The VPC
+controller creates (or reuses) a single shared
+[VTEP](https://ovn-kubernetes.io/okeps/okep-5088-evpn/#vtep-crd) CR in
+**unmanaged mode** using the node CIDR — node IPs serve as VTEP IPs, so no
+additional loopback IP allocation is required. Each subnet UDN references
+this shared VTEP.
 
-In addition to the per-subnet resources above, the VPC controller programs
-**intra-VPC routes** between all five subnets so that:
-- `10.0.1.0/24` (web) ↔ `10.0.10.0/24` (app) ↔ `10.0.20.0/24` (db) ↔ `10.0.30.0/24` (mgmt) ↔ `10.0.100.0/24` (vm-network)
+**TODO**: The single shared VTEP design means all VPCs share the same VNI
+namespace. With SVD (Single VXLAN Device), FRR maps VNIs to VLANs on a
+single bridge, capping at ~4094 MAC+IP VRFs per node. For large deployments
+with many VPCs and subnets, a per-VPC VTEP design (using dedicated managed
+loopback CIDRs) or multiple SVD bridge/VTEP pairs may be needed. Determine
+the right approach during implementation.
 
-are all reachable from each other within the VPC, regardless of their
-connectivity class or topology. The `connectivity` field only governs external
-(north-south) reachability; east-west traffic within the VPC is always permitted.
+**macVRF and ipVRF per subnet type:**
 
-#### VPC Controller Responsibilities
+Every VPC subnet gets a `macVRF` (L2 stretch via EVPN VXLAN). The `ipVRF`
+(L3 routing domain, EVPN Type 5 IP prefix routes) is only added for subnets
+that need external routability:
 
-The VPC controller runs as a separate daemonset deployed by CNO. Its source
-lives in a new repository under the ovn-kubernetes organization. It watches
-VPC resources and performs:
+| Subnet type | macVRF | ipVRF | North-south behavior |
+|---|---|---|---|
+| **Public** | Yes (L2 stretch, unique VNI) | Yes (exports Type 5 routes for pod CIDRs, imports external routes) | Bidirectional — external entities reach pods via Type 5 routes advertised by RouteAdvertisements |
+| **Private** | Yes (L2 stretch, unique VNI) | No | Outbound only — north-south via UDN's own OVN routing + node IP SNAT. No routes exported to EVPN fabric. |
+| **Isolated** | Yes (L2 stretch, unique VNI) | No | None — no external routes, no SNAT |
 
-1. **CIDR governance**: The controller validates that each subnet's CIDR falls
-   within the VPC's `cidrBlocks`. If validation fails, the controller reports
-   a condition on the VPC status and does not create the C(UDN) for the
-   offending subnet.
+A macVRF is purely Layer 2 — it has no concept of IP routing, no route
+import/export, no default gateway. External reachability requires an ipVRF
+which advertises Type 5 (IP prefix) routes and can import routes from the
+spine/fabric. For Public subnets, the RouteAdvertisements CRD triggers the
+RA controller to generate FRR-K8S configuration that activates the ipVRF
+with `advertise ipv4 unicast` under `address-family l2vpn evpn`.
 
-2. **C(UDN) lifecycle**: For each subnet in the VPC spec, the controller creates
-   the corresponding UDN or CUDN (based on the subnet's `scope` field) and
-   manages its lifecycle -- creating, updating, and deleting C(UDN)s as subnets
-   are added or removed from the VPC.
+**New capability required:** The current
+[EVPN OKEP](https://ovn-kubernetes.io/okeps/okep-5088-evpn/) requires a
+RouteAdvertisements CR for EVPN to function — the RA controller is what
+generates the FRR-K8S configuration that activates EVPN on the node. This
+means there is no way today to enable EVPN east-west (macVRF) without also
+advertising IP routes (ipVRF / Type 5). This requires extending the RA
+controller (or the UDN API) to support an **east-west-only EVPN mode** that
+configures FRR for macVRF advertisement (Type 2/3 routes) without ipVRF
+(no Type 5 routes). This is a prerequisite for VPC support:
 
-3. **Connectivity provisioning**: Based on each subnet's `connectivity` class,
-   the controller creates the appropriate ancillary resources:
-   - `Public`: RouteAdvertisements for BGP export to the physical network.
-   - `Private`: EgressIP for outbound SNAT.
-   - `Isolated`: no external routes (controller ensures no RouteAdvertisements
-     or EgressIP exist for this subnet).
-   - `VPNOnly`: IPsec north-south encryption configuration.
+- **Private subnets**: east-west-only EVPN (macVRF), north-south via
+  UDN's own OVN north-south routing + node IP SNAT for outbound.
+- **Isolated subnets**: east-west-only EVPN (macVRF), all north-south
+  disabled — no SNAT, pure L2 stretch only.
 
-4. **Intra-VPC routing**: For all subnets in the VPC, the controller sets up
-   bidirectional routes between their OVN logical routers. This is the
-   equivalent of the implicit "local" route in AWS VPCs, where all subnets
-   in the same VPC can reach each other without any explicit configuration.
+Using the `production` VPC from the [API Extensions](#api-extensions) section, the VPC
+controller creates a namespace and UDN for each subnet. Each is named
+`<vpc-name>-<subnet-name>` and labeled with `vpc.k8s.ovn.org/name` and
+`vpc.k8s.ovn.org/type` for ownership tracking and selector-based matching.
 
-5. **Status aggregation**: The controller reports which subnets are in the VPC,
-   their C(UDN) names, CIDRs, topologies, and readiness.
+See the [Internet Gateway](#internet-gateway-public-subnets) and
+[NAT Gateway](#nat-gateway-private-subnets) sections below for the concrete
+UDN YAML examples for Public and Private subnets respectively.
 
-6. **Secondary CIDR validation**: When `cidrBlocks` is expanded (secondary CIDRs
-   appended), the controller re-evaluates any previously rejected subnets and
-   accepts those that now fall within the updated address space. Conversely,
-   a CIDR block cannot be removed while any subnet references addresses within it.
+For all non-Isolated subnets, the VPC controller also programs **intra-VPC
+routes** so that subnets within the same VPC can reach each other. The `type`
+field only governs external (north-south) reachability; east-west traffic
+within the VPC is always permitted.
 
 #### Internet Gateway (Public Subnets)
 
@@ -1173,36 +1233,70 @@ network, making pods directly routable from outside the cluster:
 | Internet Gateway (bidirectional internet) | RouteAdvertisements — BGP announces pod CIDRs to the physical fabric |
 | Public IP (1:1 NAT) | Pod IP is the routable IP — no NAT needed when routes are advertised |
 | Route `0.0.0.0/0 → IGW` | Physical network has return routes to pod CIDRs via BGP |
-| IGW is VPC-scoped (one per VPC) | RouteAdvertisements is per-subnet (one per public C(UDN)) |
+| IGW is VPC-scoped (one per VPC) | RouteAdvertisements can be VPC-scoped — a single resource with `networkSelector` matching all public UDNs in the VPC |
 
-For a VPC public subnet with `connectivity: Public`, the VPC controller
-creates:
+For a VPC with public subnets, the VPC controller creates a namespace and
+UDN for each public subnet, plus a single RouteAdvertisements that selects
+all of them:
+
+```yaml
+# Public subnet UDN: production-web-a
+# macVRF (L2 stretch) + ipVRF (Type 5 routes for external reachability)
+apiVersion: k8s.ovn.org/v1
+kind: UserDefinedNetwork
+metadata:
+  name: web-a
+  namespace: production-web-a
+  labels:
+    vpc.k8s.ovn.org/name: production
+    vpc.k8s.ovn.org/subnet: web-a
+    vpc.k8s.ovn.org/type: Public
+spec:
+  topology: Layer2
+  layer2:
+    role: Primary
+    subnets:
+    - "10.0.1.0/24"
+  transport: EVPN
+  evpnConfiguration:
+    vtep: vpc-vtep
+    macVRF:
+      vni: 100
+    ipVRF:
+      vni: 101
+```
+
+The VPC controller creates one such UDN per public subnet (`web-a`, `web-b`,
+etc.), all labeled with `vpc.k8s.ovn.org/type: Public`. A single
+RouteAdvertisements resource selects all of them via `networkSelector`:
 
 ```yaml
 apiVersion: k8s.ovn.org/v1
 kind: RouteAdvertisements
 metadata:
-  name: production-web
+  name: production-public
   labels:
     vpc.k8s.ovn.org/name: production
-    vpc.k8s.ovn.org/subnet: web
 spec:
   advertisements:
   - advertisementType: PodNetwork
   networkSelector:
     matchLabels:
       vpc.k8s.ovn.org/name: production
-      vpc.k8s.ovn.org/subnet: web
+      vpc.k8s.ovn.org/type: Public
   nodeSelector:
     matchLabels: {}
 ```
 
-Once applied, the physical network learns routes to `10.0.1.0/24` (the
-public subnet's CIDR) via BGP peering with the cluster nodes. External hosts
-can reach pods directly by their pod IPs, and pods can reach external hosts —
-bidirectional, just like an AWS IGW.
+This single resource covers all public subnets in the VPC (e.g. `web-a`,
+`web-b`). When a new public subnet is added, the VPC controller labels its
+UDN with `vpc.k8s.ovn.org/type: Public` and the existing RouteAdvertisements
+automatically picks it up — no new RA resource needed. The physical network
+learns routes to each public subnet's CIDR via BGP peering with the cluster
+nodes. External hosts can reach pods directly by their pod IPs, and pods can
+reach external hosts — bidirectional, just like an AWS IGW.
 
-**Differences from AWS:**
+**Comparisions with AWS:**
 
 - **No separate gateway resource.** There is no "IGW appliance" to create
   and attach. RouteAdvertisements configures the cluster's BGP speakers to
@@ -1210,9 +1304,10 @@ bidirectional, just like an AWS IGW.
 - **No public IP allocation.** In AWS each instance needs a public IP that
   the IGW maps 1:1. With BGP route advertisement the pod IP itself is
   routable on the physical network — no NAT, no public IP allocation.
-- **Per-subnet, not per-VPC.** In AWS one IGW covers the whole VPC. In
-  OVN-K, RouteAdvertisements is created per public subnet, giving
-  fine-grained control over which subnets are externally reachable.
+- **VPC-scoped, like AWS.** A single RouteAdvertisements resource with a
+  `networkSelector` matching `vpc.k8s.ovn.org/type: Public` covers all
+  public subnets in the VPC — mirroring the one-IGW-per-VPC model. Per-subnet
+  RouteAdvertisements are also possible if finer control is needed.
 - **Depends on physical network.** BGP peering must be configured between
   the cluster nodes and the physical fabric (ToR switches). This is an
   infrastructure prerequisite that has no AWS equivalent (AWS manages the
@@ -1238,72 +1333,104 @@ The NAT Gateway itself has AZ affinity — it is placed in a specific
 Availability Zone's public subnet, and traffic from private instances in that
 AZ routes to the local NAT Gateway.
 
-**OVN-Kubernetes mapping: EgressIP**
+**OVN-Kubernetes mapping: Node IP SNAT (EgressIP in future)**
 
-In OVN-Kubernetes, the EgressIP resource collapses all three AWS resources
-into one:
+Private subnets use **macVRF-only EVPN** — east-west traffic (pod-to-pod
+within the subnet across nodes) travels over the EVPN L2 stretch, while
+north-south traffic (pod-to-internet) is handled entirely by OVN, not
+the EVPN fabric:
 
-| AWS Resource | EgressIP equivalent |
-|---|---|
-| Elastic IP (static public IP) | `spec.egressIPs: ["192.168.1.100"]` |
-| NAT Gateway (SNAT engine) | OVN performs SNAT on the node hosting the EgressIP |
-| NAT Gateway AZ placement | Node labels (`k8s.ovn.org/egress-assignable`) on nodes in a specific rack / failure domain (e.g. `topology.kubernetes.io/zone=rack-a`) |
-| Route `0.0.0.0/0 → NAT GW` | Implicit — OVN-K automatically routes egress traffic through the EgressIP node |
-| `namespaceSelector` (which private subnet uses this NAT) | `spec.namespaceSelector` matching the private subnet's namespaces |
+```
+East-west (within subnet, across nodes):
+  pod ──► OVN logical switch ──► macVRF (EVPN VXLAN) ──► remote node ──► pod
 
-For a VPC private subnet with `connectivity: Private`, the VPC controller
-creates:
-
-```yaml
-apiVersion: k8s.ovn.org/v1
-kind: EgressIP
-metadata:
-  name: production-app
-  labels:
-    vpc.k8s.ovn.org/name: production
-    vpc.k8s.ovn.org/subnet: app
-spec:
-  egressIPs:
-  - 192.168.1.100
-  namespaceSelector:
-    matchLabels:
-      subnet: prod-app
+North-south (outbound to internet):
+  pod ──► OVN logical switch ──► OVN logical router ──► ovn-k8s-mpx
+      ──► UDN's Linux VRF ──► SNAT to node IP ──► internet
 ```
 
-The EgressIP is assigned to a node labeled `k8s.ovn.org/egress-assignable`.
-If the subnet is zone-pinned (see Open Questions), the VPC controller can
-constrain the EgressIP to nodes in the same failure domain, mirroring how
-AWS places a NAT Gateway in a specific AZ's public subnet.
+No ipVRF is configured — no Type 5 routes are advertised, so external
+entities cannot route traffic into the subnet. The subnet is not visible
+on the EVPN fabric at L3. Outbound traffic exits via OVN's default egress
+path: the packet traverses the UDN's own OVN logical router, exits via
+ovn-k8s-mpx into the UDN's Linux VRF, and is SNATed to the node's IP.
 
-**Differences from AWS:**
+| AWS Resource | OVN-K equivalent (initial) | OVN-K equivalent (future: EgressIP) |
+|---|---|---|
+| Elastic IP (static public IP) | Node IP (not stable across reschedule) | `spec.egressIPs: ["192.168.1.100"]` |
+| NAT Gateway (SNAT engine) | OVN SNAT to node IP via UDN's own routing | OVN SNAT on EgressIP-hosting node |
+| NAT Gateway AZ placement | Determined by pod scheduling | Node labels (`k8s.ovn.org/egress-assignable`, `topology.kubernetes.io/zone`) |
+| Route `0.0.0.0/0 → NAT GW` | Implicit — OVN default egress via UDN's routing | Implicit — OVN-K routes via EgressIP node |
 
-- **No separate gateway resource.** EgressIP is both the EIP and the NAT
-  engine. There is no intermediate hop through a "public subnet" — SNAT
-  happens directly on the node.
-- **No explicit route.** The `0.0.0.0/0` default route is implicit in
-  OVN-K's EgressIP implementation rather than being a discrete route table
-  entry. If explicit routing is desired, the RouteTable CRD can be used.
-- **Simpler day-2.** Changing the egress IP or moving it to a different node
-  is a single edit to the EgressIP resource; in AWS you would recreate the
-  NAT Gateway and update the route.
+For a VPC private subnet with `type: Private`, the VPC controller creates
+a namespace and UDN (macVRF only, no ipVRF):
+
+```yaml
+# Private subnet UDN: production-app-a
+# macVRF only (L2 stretch). No ipVRF — north-south via UDN's own OVN routing + node IP SNAT.
+# Requires east-west-only EVPN mode (see Subnets section).
+apiVersion: k8s.ovn.org/v1
+kind: UserDefinedNetwork
+metadata:
+  name: app-a
+  namespace: production-app-a
+  labels:
+    vpc.k8s.ovn.org/name: production
+    vpc.k8s.ovn.org/subnet: app-a
+    vpc.k8s.ovn.org/type: Private
+spec:
+  topology: Layer2
+  layer2:
+    role: Primary
+    subnets:
+    - "10.0.10.0/24"
+  transport: EVPN
+  evpnConfiguration:
+    vtep: vpc-vtep
+    macVRF:
+      vni: 200
+```
+
+Outbound traffic from pods in this subnet is SNATed using the node's IP
+address — this is OVN-Kubernetes's default egress behavior. No additional
+resource (RouteAdvertisements, EgressIP) is needed for the initial
+implementation — the VPC controller only creates the namespace and UDN.
+
+**Future: EgressIP-based SNAT.** A future iteration will introduce EgressIP
+resources for private subnets to provide dedicated, stable egress addresses
+(see [Future Goals](#future-goals)). This would allow firewall allowlisting,
+audit trails, and per-AZ egress affinity — mirroring how AWS places a NAT
+Gateway with a dedicated Elastic IP in a specific AZ.
+
+**Comparisons with AWS:**
+
+- **No separate gateway resource.** Node IP SNAT via the UDN's own OVN
+  routing (and future EgressIP) replaces the entire NAT Gateway construct.
+  There is no intermediate hop through a "public subnet" — SNAT happens
+  on the node.
+- **No explicit route.** The north-south path through the UDN's logical
+  router and Linux VRF is implicit in OVN-K rather than being a discrete
+  route table entry.
+- **Simpler day-2.** No NAT Gateway to create, place in an AZ, and wire
+  into route tables. The VPC `type: Private` declaration handles everything.
 
 #### Route Table (Custom Routes)
 
-In AWS, a [route table](https://docs.aws.amazon.com/vpc/latest/userguide/VPC_Route_Tables.html)
-is the central mechanism that determines subnet connectivity. The default route
-(`0.0.0.0/0 → igw` or `0.0.0.0/0 → nat-gw`) is what makes a subnet public or
-private.
+See [Introduction: Route Tables](#route-tables) for the general concept.
+In AWS, a route table is the central mechanism that determines subnet
+connectivity. The default route (`0.0.0.0/0 → igw` or `0.0.0.0/0 → nat-gw`)
+is what makes a subnet public or private.
 
-In our model, this is **not necessary**. The `connectivity` field on the VPC
-subnet replaces the default-route patterns that dominate AWS route tables:
+In our model, the AWS default-route pattern is **not necessary**. The `type`
+field on the VPC subnet replaces the default-route patterns that dominate AWS route tables:
 
-- `connectivity: Public` → RouteAdvertisements (no route to an IGW — BGP
-  advertises pod routes directly)
-- `connectivity: Private` → EgressIP (no route to a NAT GW — OVN performs
-  SNAT internally)
-- `connectivity: Isolated` → nothing (traffic stays in the VPC by default)
+- `type: Public` → RouteAdvertisements (no route to an IGW — BGP advertises
+  pod routes directly)
+- `type: Private` → Node IP SNAT (no route to a NAT GW — OVN performs SNAT
+  internally; EgressIP in future)
+- `type: Isolated` → nothing (traffic stays in the subnet by default)
 
-The routing infrastructure already exists — every C(UDN) gets an OVN logical
+The routing infrastructure already exists — every UDN gets an OVN logical
 router (Linux VRF in LGW mode, Gateway Router in SGW mode). What doesn't
 exist today is a user-facing API to program **custom route entries** into
 those routers for advanced use cases:
@@ -1312,90 +1439,173 @@ those routers for advanced use cases:
 - Routes to peered VPC gateways
 - Traffic engineering overrides
 
-**TODO**: Determine the scope and API for a RouteTable CRD. Since the common
-default-route patterns are already handled by `connectivity`, the RouteTable
-CRD would be narrowly focused on custom/advanced static routes injected into
-the existing per-C(UDN) VRF (LGW) or GR (SGW). This needs further design work.
+The closest existing construct is
+[`AdminPolicyBasedExternalRoute`](https://ovn-kubernetes.io/api-reference/admin-epbr-api-spec/)
+(Multiple External Gateways / ICNI2,
+[OCP docs](https://docs.redhat.com/en/documentation/openshift_container_platform/4.19/html/ovn-kubernetes_network_plugin/configuring-secondary-external-gateway)),
+which allows admins to define static or dynamic next-hop gateways for egress
+traffic from selected namespaces. However, APBR is limited to the cluster
+default network (not supported on UDNs per the
+[UDN OKEP](https://ovn-kubernetes.io/okeps/okep-5193-user-defined-networks/))
+and only configures external gateway hops — not arbitrary static routes
+within a VRF.
+
+A new **RouteTable CRD** is needed to replace and generalize APBR for VPC
+subnets. It would support custom static routes (e.g. `172.16.0.0/12` via
+next-hop, routes to peered VPC gateways, traffic engineering overrides)
+injected into the per-UDN VRF (LGW) or GR (SGW). Since the common
+default-route patterns (public → RouteAdvertisements, private → node IP
+SNAT) are already handled by the `type` field, the RouteTable CRD is
+narrowly focused on advanced/custom routes beyond the defaults. Like
+RouteAdvertisements, the RouteTable CRD should use a `networkSelector` to
+select which UDNs (subnets) the routes apply to — allowing a single
+RouteTable to target all subnets in a VPC or a specific subset. This needs
+further design work in a dedicated OKEP.
+
+**Implementation:** Using the RouteTable YAML from the
+[API Extensions](#routetable-crd-new) section as an example, the routes
+`172.16.0.0/12 via 10.0.10.1` and `10.1.0.0/16 via 10.0.10.254` would be
+programmed as follows depending on the gateway mode:
+
+- **Local Gateway Mode (LGW):** Routes are installed as `ip route` entries
+  in the UDN's Linux VRF. For every node where the selected UDNs are
+  present, the controller adds:
+  ```
+  ip route add 172.16.0.0/12 via 10.0.10.1 vrf production-app-a
+  ip route add 10.1.0.0/16 via 10.0.10.254 vrf production-app-a
+  ```
+  Traffic from pods in the Private subnets hitting these prefixes is routed
+  through the VRF to the specified next-hops instead of taking the default
+  egress path.
+
+- **Shared Gateway Mode (SGW):** Routes are installed as OVN logical router
+  static routes on the UDN's Gateway Router (GR). For each selected UDN,
+  the controller creates:
+  ```
+  ovn-nbctl lr-route-add GR-production-app-a 172.16.0.0/12 10.0.10.1
+  ovn-nbctl lr-route-add GR-production-app-a 10.1.0.0/16 10.0.10.254
+  ```
+  OVN handles forwarding matching traffic to the specified next-hops before
+  the default SNAT/egress path.
+
+### Dependencies
+
+This enhancement is an overarching design that defines the VPC abstraction
+and controller. It does not implement all underlying networking primitives
+from scratch — instead, it depends on several smaller OKEPs and features in
+OVN-Kubernetes that provide the building blocks. Some of these already exist,
+some are in progress, and some will need to be proposed as part of VPC
+enablement.
+
+| OKEP | Description | Status |
+|---|---|---|
+| [OKEP-5193](https://ovn-kubernetes.io/okeps/okep-5193-user-defined-networks/) | User Defined Networks — namespace-scoped and cluster-scoped UDN CRDs, per-UDN VRF, north-south routing | Implemented |
+| [OKEP-5088](https://ovn-kubernetes.io/okeps/okep-5088-evpn/) | EVPN support — macVRF/ipVRF, VTEP CRD, `transport: EVPN`, FRR-K8S integration | In progress |
+| TBD | East-west-only EVPN mode — activate macVRF (Type 2/3 routes) without ipVRF (no Type 5). Required for Private/Isolated subnets. | New — to be proposed |
+| TBD | External IPAM plugin interface — disable OVN-K IPAM, pod annotation-based IP allocation | New — to be proposed |
+| TBD | RouteTable CRD — custom static routes programmed into per-UDN VRF (LGW) or GR (SGW); replacement of AdminPolicyBasedExternalRoutes | New — to be proposed |
+| TBD | RouteAdvertisements + EVPN transport support for namespace-scoped UDNs (not just CUDNs) | New — to be proposed |
+| TBD | EVPN support for `RoutingViaHost=false` (shared gateway mode) | New — to be proposed |
+| TBD | Add support for (Cluster)AdminNetworkPolicies to UDNs | New — to be proposed |
+| TBD | Add support for DNS to UDNs | New — to be proposed |
+
+#### Services / Load Balancers
+
+In OVN-Kubernetes, each UDN already gets its own ClusterIP service allocator
+— services created in a namespace bound to a UDN are only reachable within
+that UDN's network. For VPCs, this maps naturally: a service is bound to a
+subnet (namespace + UDN) and therefore bound to the VPC.
+
+The service CIDR and pod CIDR come from the same subnet CIDR — the subnet's
+address space is split between a pool for pod IPs and a pool for service
+ClusterIPs.
+
+**TODO**: Define how the subnet CIDR split between pod IPs and service IPs
+is configured in the VPC API. Determine if the split ratio is fixed, user
+configurable, or derived from the subnet size.
+
+**TODO**: Determine how LoadBalancer and NodePort services work across VPC
+subnets — e.g. whether a LoadBalancer IP is scoped to a single subnet or
+the entire VPC.
+
+**TODO**: Determine how services are expressed at the VPC API level. Today,
+users create Kubernetes Service resources directly in namespaces. In the VPC
+model, each subnet is a namespace — so services are implicitly scoped to a
+subnet. But does the VPC need a higher-level abstraction? Options include:
+- No VPC-level abstraction — users create Services directly in subnet
+  namespaces as they do today. The VPC controller is not involved in
+  service lifecycle.
+- A VPC-level service concept that allows defining a service once and
+  having it accessible across multiple subnets within the VPC (similar to
+  how AWS VPC endpoints expose services across subnets).
+- VPC-level defaults for service configuration (e.g. default service type,
+  external traffic policy) applied to all subnets.
+
+#### Security Groups / Network ACLs
+
+NetworkPolicy is scoped to the subnet (namespace + UDN) — policies within a
+subnet apply to pods in that subnet. The peers in a NetworkPolicy can
+reference pods in other subnets within the same VPC.
+
+For VPC-level policies (applying across all subnets in a VPC),
+AdminNetworkPolicy (ANP), BaselineAdminNetworkPolicy (BANP), and
+ClusterNetworkPolicy (CNP) are used. These cluster-scoped policies can
+select namespaces by VPC labels (e.g. `vpc.k8s.ovn.org/name: production`)
+to apply consistent security posture across the entire VPC.
+
+**Templating for policy at scale:** Defining per-subnet NetworkPolicies
+manually is tedious when a VPC has many subnets. Two new CRDs are under
+consideration — TemplatedNetworkPolicy and TemplatedClusterNetworkPolicy —
+that use CEL expressions or webhook-based template resolution to
+auto-generate policies per subnet from a single template. For example, a
+template could express "allow ingress from all Public subnets in this VPC to
+all Private subnets" and the controller would expand it into concrete
+NetworkPolicy resources for each subnet pair.
+
+**TODO**: Design the templating CRDs (TemplatedNetworkPolicy,
+TemplatedClusterNetworkPolicy). Determine if CEL-based inline resolution is
+sufficient or if webhook-based remote procedure calls are needed for complex
+template expansion.
+
+**TODO**: Define how the VPC controller maps the high-level "security
+groups" and "NACLs" concepts from the VPC API into the underlying
+NetworkPolicy / ANP / BANP / CNP resources.
+
+**TODO**: Determine how security groups are expressed at the VPC API level.
+If users must manually create NetworkPolicy / ANP resources, the single
+unified input point value proposition of the VPC is undermined — users would
+still need to understand Kubernetes policy primitives. Options include:
+- A `securityGroups` field inline in the VPC spec (or a SecurityGroup CRD
+  that references VPC subnets) where users express rules in AWS-like
+  terms (protocol, port, source/destination CIDR or group reference), and
+  the VPC controller translates them into NetworkPolicy / ANP.
+- Declarative defaults — the VPC controller auto-creates baseline policies
+  per subnet type (e.g. Public subnets allow inbound from EVPN fabric,
+  Private subnets deny all inbound, Isolated subnets deny all traffic
+  except intra-subnet) so users get sane defaults without writing any
+  policies.
+
+#### DNS
+
+In the OpenStack world, each tenant network has its own DNS. The VPC model
+follows the same pattern: each UDN (subnet) gets its own **CoreDNS
+instance** (or a CoreDNS configuration scoped to that UDN). Within a VPC,
+multiple DNS instances coexist — one per subnet.
+
+This enables per-subnet DNS resolution where pods in a subnet resolve
+service names to ClusterIPs allocated on their own UDN, not the cluster
+default network.
+
+**TODO**: Design the per-UDN CoreDNS deployment model. Determine whether
+the VPC controller deploys CoreDNS per subnet, per VPC, or extends the
+existing cluster CoreDNS with per-UDN configuration (e.g. server blocks
+or plugins).
+
+**TODO**: Determine how cross-subnet DNS resolution works within a VPC —
+e.g. can a pod in `web-a` resolve a service name in `app-a` if they are in
+the same VPC?
 
 #### Day-2: Expanding the VPC Address Space
-
-Like AWS secondary VPC CIDRs, the VPC's `cidrBlocks` list is mutable and
-can be appended to after creation. This enables the VPC to grow without
-recreating it.
-
-```yaml
-# Day 0: VPC created with initial /24
-apiVersion: k8s.ovn.org/v1
-kind: VPC
-metadata:
-  name: production
-spec:
-  cidrBlocks:
-  - 10.0.0.0/24
-  networkSelector:
-    matchLabels:
-      vpc: production
----
-# C(UDN) created within that range
-apiVersion: k8s.ovn.org/v1
-kind: ClusterUserDefinedNetwork
-metadata:
-  name: prod-web
-  labels:
-    vpc: production
-spec:
-  namespaceSelector:
-    matchLabels:
-      subnet: prod-web
-  network:
-    topology: Layer3
-    layer3:
-      role: Primary
-      subnets:
-      - cidr: 10.0.0.0/26
-        hostSubnet: 28
-```
-
-```yaml
-# Day 2: address space exhausted, add secondary CIDR
-apiVersion: k8s.ovn.org/v1
-kind: VPC
-metadata:
-  name: production
-spec:
-  cidrBlocks:
-  - 10.0.0.0/24        # original
-  - 10.0.1.0/24        # secondary, appended
-  networkSelector:
-    matchLabels:
-      vpc: production
----
-# New subnet in the secondary range now passes validation
-apiVersion: k8s.ovn.org/v1
-kind: ClusterUserDefinedNetwork
-metadata:
-  name: prod-backend
-  labels:
-    vpc: production
-spec:
-  namespaceSelector:
-    matchLabels:
-      subnet: prod-backend
-  network:
-    topology: Layer3
-    layer3:
-      role: Primary
-      subnets:
-      - cidr: 10.0.1.0/26
-        hostSubnet: 28
-```
-
-Mutability rules:
-- **Append**: New CIDR blocks can be added at any time.
-- **Remove**: A CIDR block can only be removed if no subnet has pod CIDRs
-  within it. The controller enforces this via a validating webhook.
-- **Modify**: Existing CIDR entries are immutable. To resize, remove the old
-  (if unused) and add a new one.
 
 ### Risks and Mitigations
 
@@ -1581,9 +1791,9 @@ spec:
    into the C(UDN)'s `vpc` stanza. A dedicated thin CRD is the natural extraction point
    and avoids bloating the C(UDN) API.
 
-### Approach
+### User Experience
 
-### Alternative A: VPC CRD Without a Translation Controller
+#### Alternative: VPC CRD Without a Translation Controller
 
 In this model, the VPC CRD exists as a passive grouping/governance resource,
 but there is no dedicated VPC controller that translates VPC intent into the
@@ -1648,48 +1858,72 @@ the user experience mirrors the simplicity of cloud VPC operations. In
 multi-cluster deployments, the operator also synchronizes this configuration
 across clusters.
 
-### Alternative B: Hub Pushes Rendered Resources Directly (multi-cluster)
+### Multi-Cluster
 
-In this model, the VPC controller runs **only on the hub**. The hub does IPAM,
-renders the C(UDN)s, policies, routes, and pushes the fully rendered resources
-directly to each spoke cluster via the spoke's Kubernetes API. Spokes have no
-VPC controller -- just standard OVN-Kubernetes reacting to the resources the
-hub created.
+#### Alternative A: Hub-Spoke with VPC Controller on Spokes
+
+In this model, the VPC controller runs on both the hub and every spoke cluster.
+The hub does IPAM and syncs a compact VPC *spec* (not rendered resources) to
+spokes. Each spoke's VPC controller reads the synced spec and locally renders
+the UDNs, policies, and routes.
 
 ```
-  Hub VPC Controller
-    │
-    ├─ API access ──► Spoke A (creates C(UDN)s, policies directly)
-    └─ API access ──► Spoke B (creates C(UDN)s, policies directly)
+  ┌───────────────────────────────────────┐
+  │            Hub Cluster                │
+  │                                       │
+  │  VPC Controller (hub)                 │
+  │  - Watches VPC + resources            │
+  │  - Does IPAM                          │
+  │  - Renders locally                    │
+  │  - Syncs VPC spec to spokes           │
+  │  - NO API access to spokes            │
+  └──────────┬────────────────┬───────────┘
+             │ sync spec      │ sync spec
+             ▼                ▼
+  ┌────────────────────┐  ┌────────────────────┐
+  │  Spoke Cluster A   │  │  Spoke Cluster B   │
+  │                    │  │                    │
+  │ VPC Controller     │  │ VPC Controller     │
+  │  (spoke)           │  │  (spoke)           │
+  │  - Reads spec      │  │  - Reads spec      │
+  │  - Creates UDNs    │  │  - Creates UDNs    │
+  │  - Applies policies│  │  - Applies policies│
+  │  - Self-heals      │  │  - Self-heals      │
+  │                    │  │                    │
+  │ ovnkube-cluster-mgr│  │ ovnkube-cluster-mgr│
+  │ ovnkube-controller │  │ ovnkube-controller │
+  └────────────────────┘  └────────────────────┘
 ```
 
 **Pros:**
-- Simpler spoke: no new component beyond existing OVN-Kubernetes.
-- Single controller to debug -- all logic is on the hub.
+- **Self-healing with domain knowledge.** Spoke controllers can recreate
+  resources from the VPC spec if they are deleted or drift, without waiting
+  for the hub.
+- **Hub goes down, spokes keep working.** Each spoke has a local copy of the
+  spec and its own controller. Existing rendering continues uninterrupted.
+- **Smaller sync payload.** Only a compact VPC spec is synced, not N rendered
+  resource YAMLs per cluster.
+- **Local adaptation.** Spoke controllers can make cluster-specific decisions
+  (different node labels, AZ topology) without the hub needing to know.
 
 **Why this was not selected:**
 
-1. **Hub needs API access to every spoke.** The hub controller must hold
-   kubeconfig/credentials for each spoke cluster. This is a security concern
-   (credentials for N clusters stored in one place) and an operational burden
-   (credential rotation, RBAC management across clusters).
+1. **Extra controller on every spoke.** Deploying, upgrading, and monitoring
+   a VPC-specific controller on every spoke cluster adds operational overhead
+   that grows with cluster count.
 
-2. **No self-healing on spokes.** If a C(UDN) or policy is accidentally deleted
-   on a spoke, nothing recreates it until the hub's reconciliation loop
-   notices and pushes again. If the hub is down, the spoke has no way to
-   recover.
+2. **Version skew risk.** Hub and spoke controllers must agree on VPC spec
+   semantics. Upgrading requires coordination across all clusters.
 
-3. **Hub is a single point of failure.** If the hub goes down, no spoke can
-   receive updates and drift cannot be corrected. In the selected model,
-   spokes continue self-healing from their local copy of the VPC spec.
+3. **Redundant logic.** The same VPC-to-resource translation code runs on
+   every spoke, doing identical work that the hub could do once.
 
-4. **Tight coupling.** The hub must understand spoke API versions, handle
-   transient connectivity failures to each spoke, and manage remote resource
-   lifecycle (create, update, delete). This makes the hub controller
-   significantly more complex than one that only manages local resources and
-   syncs a spec.
+4. **Unnecessary for initial scope.** The VPC-to-UDN translation is
+   mechanical (L2 EVPN, 1:1 namespace mapping). There is no complex local
+   reasoning that justifies a domain-specific controller on each spoke.
+   Standard sync mechanisms (ACM, ArgoCD) provide adequate reconciliation.
 
-### Alternative C: Replicated Model (multi-cluster)
+#### Alternative B: Replicated Model
 
 In this model, the VPC CRD exists on every cluster independently. Each cluster
 has its own copy of the VPC resource, and a synchronization mechanism (e.g.
@@ -1738,7 +1972,7 @@ across clusters.
    (all of them? one and wait for sync?). The hub-spoke model provides a
    clear answer: always modify on the hub.
 
-### Alternative D: Federated Model (multi-cluster)
+#### Alternative C: Federated Model
 
 In this model, the VPC does not live on any OpenShift cluster. Instead, it is
 defined on an external federation control plane (e.g. Open Cluster Management
@@ -1791,36 +2025,52 @@ federation mechanism distributes the VPC to member clusters.
    "a few OpenShift clusters" without OCM or similar tooling. The hub-spoke
    model works out of the box -- designate any cluster as the hub.
 
+### IPAM
+
+#### Alternative: Hub-Managed Hard-Split CIDR IPAM
+
+In this model, the VPC controller on the hub pre-partitions each subnet's
+CIDR into non-overlapping per-cluster slices. Each cluster receives a fixed
+portion of the address space.
+
+For example, a subnet with CIDR `10.0.1.0/24` across three clusters:
+
+- Cluster A: `10.0.1.0/26` (64 addresses)
+- Cluster B: `10.0.1.64/26` (64 addresses)
+- Cluster C: `10.0.1.128/26` (64 addresses)
+
+The per-cluster allocation is recorded on the hub and pushed to each spoke
+as part of the rendered UDN. Each cluster's UDN uses only its allocated
+slice.
+
+**Pros:**
+- Simple to implement — static prefix splitting.
+- No external IPAM dependency — the VPC controller handles everything.
+- Each cluster is self-contained for IP allocation once it has its slice.
+
+**Why this was not selected:**
+
+1. **Address space wastage.** Pre-splitting forces equal (or estimated)
+   allocation. A cluster using 5 IPs out of a /26 (64 addresses) wastes
+   59 addresses. With many clusters and subnets, this adds up quickly.
+
+2. **Inflexible scaling.** Adding a new cluster requires re-partitioning
+   the CIDR, which may require shrinking existing allocations (disruptive)
+   or reserving headroom upfront (more waste).
+
+3. **Not flat.** The L2 EVPN model supports flat addressing where any IP
+   in the subnet can be assigned to any pod on any node in any cluster.
+   Hard-splitting breaks this property unnecessarily.
+
+4. **OVN-K IPAM coupling.** This model relies on OVN-K's built-in IPAM
+   to allocate within each cluster's slice, which is designed for per-node
+   L3 subnetting, not flat L2 pools.
+
+The selected approach uses an external flat IPAM controller that allocates
+individual IPs from the full subnet pool on demand, avoiding all of these
+issues. See [IPAM](#ipam).
+
 ## Open Questions [optional]
-
-1. **Subnet pinning to failure domains / zones**: In AWS, a subnet must reside
-   in a single Availability Zone. On bare metal, nodes can be labeled with
-   failure domains (e.g. `topology.kubernetes.io/zone=rack-a`). Should the VPC
-   subnet spec include a `nodeSelector` or zone field so that the resulting
-   C(UDN) is pinned to specific nodes? This would enable AWS-like zone-aware
-   subnet placement (e.g. `public-a` on rack-a, `public-b` on rack-b) for
-   high availability. **TODO**: Determine whether this should be a VPC-level
-   concern or left to the C(UDN) / scheduler.
-
-2. **What does an Availability Zone mean on bare metal?** In AWS, AZs are
-   first-class constructs that govern subnet placement, NAT Gateway affinity,
-   and fault isolation. On bare metal there is no built-in AZ — the closest
-   equivalent is node labels such as `topology.kubernetes.io/zone=rack-a`.
-   If we adopt this model:
-   - A "zone" is a set of nodes sharing a `topology.kubernetes.io/zone` label.
-   - Subnet pinning (question 1) would use this label to bind a C(UDN) to a
-     zone.
-   - NAT Gateway (EgressIP) affinity would follow the same label — the VPC
-     controller creates the EgressIP with node affinity matching the subnet's
-     zone, mirroring how AWS places a NAT Gateway in a specific AZ's public
-     subnet.
-   - The VPC controller could validate that the zone label exists on at least
-     one node before accepting a zone-pinned subnet.
-
-   **TODO**: Decide whether to formalize a "VPC zone" concept backed by
-   `topology.kubernetes.io/zone` labels, or leave zone mapping as an
-   out-of-band convention. This affects subnet placement, EgressIP affinity,
-   and future HA patterns (e.g. one NAT Gateway per zone).
 
 ## Test Plan
 
