@@ -27,7 +27,10 @@ tracking-link:
 
 The Must Gather Operator is an OLM-installable operator deployed on an OpenShift cluster that closely integrates with the must-gather tool. This enhancement describes how the operator provides a user-configurable interface (a new CustomResource) to gather data, diagnostic information from a cluster using must-gather and upload it to a Red Hat support case.
 
-Gather behavior is configured under `spec.gatherSpec`: `audit` toggles audit log collection, and optional `command` / `args` override the gather container entrypoint and arguments. For optional skip of rotated pod logs, set `gatherSpec.command` to `/bin/bash`, `-c`, and a third element that is the shell command line passed to `-c`: a per-invocation environment assignment plus `gather`, i.e. `REDUCE_LOGS=skip_rotated_logs gather`. This omits `oc adm inspect --rotated-pod-logs` on the paths covered by the [must-gather image](https://github.com/openshift/must-gather). When those overrides are not used, behavior matches today’s default (rotated pod logs are collected).
+Gather behavior is configured under `spec.gatherSpec`:
+
+- `audit` controls audit log collection; `command` / `args` optionally override the gather container.
+- Specific environement variables can be used under `command` to achieve optimizations in must-gather collection. (See example CR below)
 
 ## Motivation
 
@@ -78,7 +81,7 @@ The operator leverages the existing must-gather image format and `/usr/bin/gathe
    - User (with appropriate permissions) creates a `MustGather` CustomResource
    - User sets `spec.serviceAccountName` for the ServiceAccount that runs the collection Job
    - User provides a reference to the secret to be used to authenticate to sftp.access.redhat.com
-   - Optionally, user sets `spec.gatherSpec` (`command` for the gather container); to skip rotated pod logs, use `gatherSpec.command` with `/bin/bash`, `-c`, and a third element that runs `gather` with `REDUCE_LOGS=skip_rotated_logs` set for that invocation only (see example below)
+   - Optionally, user sets `spec.gatherSpec` to customize the gather container; to skip rotated pod logs, set the `REDUCE_LOGS` environment for `gather` as shown in the example CR below
 
    - Operator creates a Kubernetes Job that has 2 containers: gather, upload
    - The gather pod runs the specific platform must-gather image
