@@ -78,6 +78,9 @@ the cluster.
   reduce the attack surface of my OpenShift cluster and comply with
   security policies that require DNS isolation.
 
+* As a **cluster administrator**, I want to deploy proof-of-concept (POC)
+  clusters without sitewide DNS changes.
+
 * As a **security engineer**, I want to ensure that DNS queries to the
   on-prem CoreDNS instances can only originate from within the cluster
   nodes or internal networks so that I can prevent DNS-based reconnaissance
@@ -131,7 +134,7 @@ the cluster.
 
 This enhancement proposes to block external access to CoreDNS running on
 bare metal nodes by default. When the BlockExternalDNSAccess feature gate
-is enabled (initially DevPreviewNoUpgrade), external access is blocked by
+is enabled (initially Tech Preview), external access is blocked by
 default. This provides a secure-by-default approach that requires
 administrators to explicitly opt-in to allow external access if needed for
 specific use cases (e.g., external monitoring).
@@ -174,27 +177,6 @@ metal node. This could be implemented via:
   nodes)
 - Node Firewall Operator may not be available in all environments
 
-### Approach 2: CoreDNS ACL Plugin
-
-Configure on-prem CoreDNS with an ACL (Access Control List) plugin or
-similar mechanism to reject DNS queries from external sources based on
-source IP addresses.
-
-**Pros**:
-- Application-level control that's easier to reason about
-- Centrally managed through CoreDNS configuration
-- No dependency on node-level firewall mechanisms
-- Easier to debug (CoreDNS logs show rejected queries)
-- More portable across different platforms and OS versions
-
-**Cons**:
-- Traffic still reaches CoreDNS process (not blocked at network layer)
-- Performance overhead of checking ACLs for every DNS query
-- Requires modifying CoreDNS configuration which adds complexity
-- ACL configuration needs to be maintained and synchronized with cluster
-  network changes
-- Potential vulnerabilities in CoreDNS could be exploited before ACL check
-
 ### Proposed Implementation Path
 
 This enhancement proposes starting with **Approach 1 (Node-Level Firewall
@@ -230,7 +212,7 @@ steps:
    - Use cluster-level annotations or labels
    - MCO-based configuration override mechanism
 
-Alternative Approach 2 (CoreDNS ACL) remains a viable fallback if
+The alternative approach 1 (CoreDNS ACL) remains a viable fallback if
 node-level firewall management proves too complex or problematic.
 
 ### Workflow Description
@@ -247,7 +229,7 @@ metal nodes.
 
 #### Workflow: Enabling External Access Blocking (Default Secure Behavior)
 
-1. The cluster administrator enables the DevPreviewNoUpgrade feature set
+1. The cluster administrator enables the Tech Preview feature set
    on the cluster to activate the BlockExternalDNSAccess feature gate.
 
 2. When the feature gate is enabled, the system automatically applies the
@@ -380,7 +362,7 @@ The implementation requires the following components and changes:
 1. **Feature gate creation**: A new feature gate `BlockExternalDNSAccess`
    must be added to https://github.com/openshift/api/blob/master/features/
    features.go with:
-   - Initial feature set: DevPreviewNoUpgrade
+   - Initial feature set: Tech Preview
    - Jira component: Networking / DNS (or potentially Baremetal)
    - Contact person (bnemec)
 
@@ -435,7 +417,7 @@ systems that rely on querying on-prem CoreDNS from outside the cluster.
   secure-by-default behavior when enabling the feature gate
 - Provide clear instructions on how to disable the feature gate or apply
   override configuration (if available) if external access is required
-- Start with DevPreviewNoUpgrade to gather feedback from early adopters
+- Start with Tech Preview to gather feedback from early adopters
   about any disruption scenarios
 - Include prominent warnings in release notes and feature gate
   documentation
@@ -448,8 +430,7 @@ cases in network topology or node IP address changes.
 configurations (IPv4, IPv6, dual stack). Provide clear documentation on how
 to verify firewall rules are working correctly and how to debug DNS access
 issues. Include instructions on checking firewall rules via SSH to nodes.
-Start with DevPreviewNoUpgrade to gather feedback before promoting to Tech
-Preview or GA.
+Start with Tech Preview to gather feedback before promoting to GA.
 
 **Risk**: Firewall rule deployment via MachineConfig may cause node reboots
 on bare metal nodes, potentially disrupting workloads during initial
@@ -504,9 +485,30 @@ allow specific external IPs if needed in future iterations.
 - MachineConfig deployment may cause node reboots, impacting workload
   availability during initial feature enablement
 
-## Alternatives (Not Implemented)
+## Alternatives
 
-### Alternative 1: Use NetworkPolicies
+### Alternative 1: CoreDNS ACL Plugin
+
+Configure on-prem CoreDNS with an ACL (Access Control List) plugin or
+similar mechanism to reject DNS queries from external sources based on
+source IP addresses.
+
+**Pros**:
+- Application-level control that's easier to reason about
+- Centrally managed through CoreDNS configuration
+- No dependency on node-level firewall mechanisms
+- Easier to debug (CoreDNS logs show rejected queries)
+- More portable across different platforms and OS versions
+
+**Cons**:
+- Traffic still reaches CoreDNS process (not blocked at network layer)
+- Performance overhead of checking ACLs for every DNS query
+- Requires modifying CoreDNS configuration which adds complexity
+- ACL configuration needs to be maintained and synchronized with cluster
+  network changes
+- Potential vulnerabilities in CoreDNS could be exploited before ACL check
+
+### Alternative 2: Use NetworkPolicies (Not viable)
 
 Use Kubernetes NetworkPolicies to block external access to CoreDNS.
 
@@ -528,7 +530,7 @@ Use Kubernetes NetworkPolicies to block external access to CoreDNS.
 CoreDNS running on the host network. NetworkPolicies only control traffic
 to pods, not to host-network services.
 
-### Alternative 2: Do Not Expose On-Premises CoreDNS Externally
+### Alternative 3: Do Not Expose On-Premises CoreDNS Externally (Not viable)
 
 Simply document that on-prem CoreDNS should not be exposed externally
 and leave it to cluster administrators to ensure proper network
@@ -621,7 +623,7 @@ For detailed test labeling conventions, see dev-guide/test-conventions.md.
 ## Graduation Criteria
 
 This enhancement follows the standard OpenShift feature graduation path:
-DevPreviewNoUpgrade -> TechPreviewNoUpgrade -> Default (GA).
+TechPreviewNoUpgrade -> Default (GA).
 
 ### Dev Preview -> Tech Preview
 
