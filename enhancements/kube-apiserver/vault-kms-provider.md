@@ -75,6 +75,26 @@ a KMS provider. The API changes will be gated by the new `ManagedKMSProvider`
 feature gate, but the implementation of the operators that act on this
 configuration is out of scope for this enhancement.
 
+### Workflow Description
+
+This enhancement is API-only and does not introduce any runtime workflows. The
+workflow consists solely of:
+
+1. **Cluster administrator** creates necessary resources in the `openshift-config` namespace:
+   - Secret containing Vault AppRole credentials (roleID and secretID)
+   - Optional ConfigMap containing custom CA certificate bundle for Vault TLS verification
+
+2. **Cluster administrator** configures the APIServer resource with Vault KMS settings:
+   - Sets `spec.encryption.type: ManagedKMS`
+   - Provides `spec.encryption.kms.type: Vault` with full Vault configuration
+
+3. **API server** validates the configuration against OpenAPI schema and CEL validation rules
+
+4. **Configuration is stored** but has no runtime effect (no operators act on it yet)
+
+Future enhancements will add operator workflows to deploy and manage Vault KMS
+plugins based on this configuration.
+
 ### API Extensions
 
 We propose extending the existing `KMSConfig` type in the APIServer
@@ -85,12 +105,10 @@ configuration.
 #### Feature Gates
 
 This enhancement introduces a new feature gate `ManagedKMSProvider` to control
-access to Vault KMS provider configuration in the APIServer API. This gate
-works in conjunction with the `KMSEncryption` feature gate from
-[kms-encryption-foundations.md](./kms-encryption-foundations.md).
-
-Additionally, this enhancement proposes removing the
-`KMSEncryptionProvider` feature gate, which is superseded by `KMSEncryption`.
+access to Vault KMS provider configuration in the APIServer API.
+Additionally, this enhancement proposes removing the `KMSEncryptionProvider`
+feature gate, which is superseded by `KMSEncryption`, as well as the
+`AWSConfig` in `KMSConfig`, which is managed by the `KMSEncryptionProvider` gate.
 
 **ManagedKMSProvider:**
 
@@ -140,6 +158,7 @@ plugins based on API configuration (plugin deployment and lifecycle management
 functionality is implemented):
 
 1. The unmanaged `KMS` encryption type will be deprecated and eventually removed
+   sometime before the KMS feature goes GA
 2. The `ManagedKMS` encryption type will be renamed to `KMS` to become the
    standard KMS implementation
 3. Internal CI/CD tests, QE environments, and dev clusters using `type: KMS`
@@ -163,6 +182,7 @@ This enhancement proposes:
   `features/features.go`
 - Updating API validation annotations to use only `KMSEncryption` (not
   `KMSEncryptionProvider`)
+- Removing the `AWSConfig` type from APIServer config
 
 Since `KMSEncryptionProvider` is in `TechPreviewNoUpgrade` and has never been
 functional, this removal has no customer impact.
@@ -178,7 +198,7 @@ parameters might be subject to change.
 The API enforces the following validation limits on VaultKMSConfig fields, with
 improved error messages using XValidation to provide actionable feedback:
 
-- **vaultKMSPluginImage** (75-512 chars): Minimum of 75 characters accounts for
+- **kmsPluginImage** (75-512 chars): Minimum of 75 characters accounts for
   the shortest possible digest reference (`r/i@sha256:` + 64 hex characters).
   Maximum of 512 characters follows common Kubernetes practice for container
   image references and accommodates long registry hostnames and deep repository paths.
@@ -206,7 +226,7 @@ improved error messages using XValidation to provide actionable feedback:
 ```go
 // VaultKMSConfig defines the KMS plugin configuration specific to Vault KMS
 type VaultKMSConfig struct {
-    // vaultKMSPluginImage specifies the container image for the HashiCorp Vault KMS plugin.
+    // kmsPluginImage specifies the container image for the HashiCorp Vault KMS plugin.
     // The image must be specified using a digest reference (not a tag).
     //
     // Consult the OpenShift documentation for compatible plugin versions with your cluster version,
@@ -218,11 +238,11 @@ type VaultKMSConfig struct {
     // The minimum length is 75 characters (e.g., "r/i@sha256:" + 64 hex characters).
     // The maximum length is 512 characters to accommodate long registry names and repository paths.
     //
-    // +kubebuilder:validation:XValidation:rule="self.matches('^([a-zA-Z0-9\\-\\.]+)(:[0-9]+)?/[a-zA-Z0-9\\-\\./]+@sha256:[a-f0-9]{64}$')",message="vaultKMSPluginImage must be a valid image reference with a SHA256 digest (e.g., 'registry.example.com/vault-plugin@sha256:0123...abcd'). Use '@sha256:<64-character-hex-digest>' instead of image tags like ':latest' or ':v1.0.0'."
+    // +kubebuilder:validation:XValidation:rule="self.matches('^([a-zA-Z0-9\\-\\.]+)(:[0-9]+)?/[a-zA-Z0-9\\-\\./]+@sha256:[a-f0-9]{64}$')",message="kmsPluginImage must be a valid image reference with a SHA256 digest (e.g., 'registry.example.com/vault-plugin@sha256:0123...abcd'). Use '@sha256:<64-character-hex-digest>' instead of image tags like ':latest' or ':v1.0.0'."
     // +kubebuilder:validation:MinLength=75
     // +kubebuilder:validation:MaxLength=512
     // +required
-    VaultKMSPluginImage string `json:"vaultKMSPluginImage,omitempty"`
+    KMSPluginImage string `json:"kmsPluginImage,omitempty"`
 
 	// vaultAddress specifies the address of the HashiCorp Vault instance.
 	// The value must be a valid URL with scheme (http:// or https://) and can be up to 512 characters.
@@ -290,8 +310,10 @@ type VaultKMSConfig struct {
     //   - "roleID": The AppRole Role ID
     //   - "secretID": The AppRole Secret ID
     //
+    // The namespace for the secret referenced by approleSecretRef is openshift-config.
+    //
     // +required
-    ApproleSecretRef corev1.LocalObjectReference `json:"approleSecretRef,omitempty"`
+    ApproleSecretRef SecretNameReference `json:"approleSecretRef,omitempty"`
 
     // transitMount specifies the mount path of the Vault Transit engine.
     // The value can be between 1 and 128 characters.
@@ -463,7 +485,7 @@ spec:
         approleSecretRef:
           name: vault-approle
         # Note: you must use digest reference
-        vaultKMSPluginImage: registry.redhat.io/hashicorp/vault-kms-plugin@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
+        kmsPluginImage: registry.redhat.io/hashicorp/vault-kms-plugin@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
         transitKey: kubernetes-encryption
 
         # optional
@@ -520,7 +542,7 @@ appropriate registry and reference the mirrored location:
 ```yaml
 # Mirror the image to your registry, then reference it
 vault:
-  vaultKMSPluginImage: mirror.registry.example.com/hashicorp/vault-kms-plugin@sha256:abc123...
+  kmsPluginImage: mirror.registry.example.com/hashicorp/vault-kms-plugin@sha256:abc123...
 ```
 
 Alternatively, use `ImageDigestMirrorSet` to transparently redirect image pulls
@@ -550,6 +572,12 @@ The Vault KMS provider API can be configured on SNO and MicroShift deployments.
 Future enhancements that add operator-managed plugin deployment will need to
 consider SNO resource constraints.
 
+#### OpenShift Kubernetes Engine
+
+This enhancement applies to OpenShift Kubernetes Engine (OKE). The API changes
+are available in OKE as it shares the same API types. Since this is an API-only
+enhancement with no runtime components, there are no OKE-specific considerations.
+
 ### Implementation Details/Notes/Constraints
 
 This enhancement is API-only. It adds new fields to the `config.openshift.io/v1`
@@ -563,7 +591,7 @@ until future enhancements implement the operator-managed plugin deployment.
 
 **Risk: Malicious or compromised KMS plugin image**
 
-Users can specify arbitrary container images via the `vaultKMSPluginImage`
+Users can specify arbitrary container images via the `kmsPluginImage`
 field. A malicious or compromised image could:
 - Access encryption keys and decrypt sensitive cluster data
 - Exfiltrate secrets and credentials from the control plane
@@ -613,6 +641,50 @@ AppRole credentials stored in Secrets could be accessed by users with elevated p
 - Users must implement Vault policies limiting AppRole permissions
 - Future: Consider more secure authentication methods
 
+### Drawbacks
+
+**Increased API complexity:**
+Adding Vault-specific configuration to the core `config.openshift.io/v1` API
+increases the surface area of the cluster configuration API. The VaultKMSConfig
+struct adds 9 new fields, increasing the cognitive load for users and the
+maintenance burden for the API.
+
+*Overcome by:* The Vault configuration follows the same union type pattern used
+throughout OpenShift for provider-specific configurations (e.g., OAuth identity
+providers support GitHub, GitLab, Google, LDAP with provider-specific fields).
+Feature gates ensure the Vault fields are only visible when explicitly enabled.
+
+**Vendor-specific API in core config:**
+Embedding HashiCorp Vault-specific fields (like `approleSecretRef`,
+`transitMount`, `transitKey`) directly in the OpenShift core API creates a tight
+coupling to a specific third-party product.
+
+*Overcome by:* OpenShift already integrates third-party services via
+provider-specific API fields (OAuth providers, cloud platforms, DNS providers).
+The union type design with `KMSProviderType` discriminator keeps provider
+configurations isolated. Alternative KMS providers can be added in the future
+without affecting Vault configurations.
+
+**Security risk from user-provided images:**
+Allowing users to specify arbitrary container images for the KMS plugin creates
+a potential attack vector. A malicious image could compromise encryption keys or
+exfiltrate secrets from the control plane.
+
+*Overcome by:* Digest-only image references prevent tag mutation attacks.
+Feature gate keeps this in Tech Preview until image signature verification is
+implemented. Documentation emphasizes security implications and the requirement
+to trust image sources.
+
+**Limited authentication flexibility:**
+Supporting only AppRole authentication for Vault limits integration options for
+users who have standardized on other Vault auth methods (Kubernetes, JWT, TLS
+certificates).
+
+*Overcome by:* AppRole is Vault's recommended authentication method for
+applications and provides good security/usability balance. The API design allows
+for additional auth methods to be added in future API versions as optional
+fields alongside AppRole if there is demand.
+
 ## Alternatives (Not Implemented)
 
 ### Hardcoded Registry with Digest-Only Image Field
@@ -624,7 +696,7 @@ OpenShift would hardcode the registry path in the kube-apiserver operator code.
 **Example configuration (not implemented)**
 ```yaml
 vault:
-  vaultKMSPluginImageDigest: sha256:abc123...
+  kmsPluginImageDigest: sha256:abc123...
   # Operator would construct: registry.redhat.io/hashicorp/vault-kms-plugin@sha256:abc123...
 ```
 
@@ -643,7 +715,7 @@ vault:
 
 **Chosen approach:**
 The implemented design uses a full image reference field
-(`vaultKMSPluginImage`) that accepts any registry, requiring only that the
+(`kmsPluginImage`) that accepts any registry, requiring only that the
 image be specified via digest. This approach:
 - Works with any registry where HashiCorp publishes images
 - Does not depend on specific Red Hat/HashiCorp publishing agreements
@@ -729,7 +801,7 @@ configuration being rejected by API validation, which is the expected behavior.
 N/A - No runtime components to monitor. API validation metrics are already
 covered by standard API server metrics.
 
-### Support Procedures
+## Support Procedures
 
 **Invalid configuration:**
 If a user reports that their Vault KMS configuration is rejected:
