@@ -95,16 +95,10 @@ Storing all related data in a single secret ensures consistency and leverages ex
 The keyID is appended to the UDS path (`unix:///var/run/kmsplugin/kms-{keyID}.sock`) to ensure uniqueness among providers, enabling KMS-to-KMS migrations with multiple concurrent plugins.
 
 **Key changes in library-go:**
-1. Add KMS mode constant to encryption state types
-2. Track KMS configuration in encryption key secrets
-3. Manage encryption key secrets with KMS configuration (actual keys are stored externally in KMS provider)
-4. Detect configuration changes to trigger migration
-5. Reuse existing migration controller (no changes needed)
-6. Split KMS configuration into kms-encryption-config, kms-provider-config, kms-secret-data, and kms-configmap-data (Tech Preview v2)
-7. Copy kms-provider-config, kms-secret-data, and kms-configmap-data with keyID suffix to encryption-configuration secrets (Tech Preview v2)
-8. Field-level comparison to distinguish migration-requiring vs. in-place changes (Tech Preview v2)
-9. Credential secret and ConfigMap validation with degraded status reporting (Tech Preview v2)
-10. Periodic sync of referenced Secrets and ConfigMaps to all active key secrets (Tech Preview v2)
+1. Add KMS mode constant and track KMS configuration in encryption key secrets
+2. Split configuration into kms-encryption-config, kms-provider-config, kms-secret-data, and kms-configmap-data; copy with keyID suffix to encryption-configuration secrets (Tech Preview v2)
+3. Field-level comparison, credential/ConfigMap validation, and periodic sync of referenced resources to all active key secrets (Tech Preview v2)
+4. Reuse existing migration controller (no changes needed)
 
 ### Workflow Description
 
