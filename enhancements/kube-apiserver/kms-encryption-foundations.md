@@ -41,19 +41,36 @@ KMS support enables integration with external key management systems where encry
 
 ### Goals
 
+**Tech Preview v1 — Goals:**
 - Support KMS v2 as a new encryption mode in existing encryption controllers
-- Seamless migration between encryption modes (aescbc ↔ KMS, KMS ↔ KMS)
 - Provider-agnostic implementation with minimal provider-specific code
+- Migration between identity ↔ KMS
+
+**Tech Preview v2 — Goals:**
+- Split KMS configuration into kms-encryption-config, kms-provider-config, kms-secret-data, and kms-configmap-data
+- Seamless migration between encryption modes (aescbc ↔ KMS, KMS ↔ KMS)
+- Field-level comparison to distinguish migration-requiring vs. in-place changes
+- Pre-flight checks before generating new encryption keys
+- Credential/ConfigMap validation with degraded status reporting
+- Periodic sync of referenced Secrets and ConfigMaps to all active key secrets
+- KMS plugin deployment/lifecycle management (covered by a separate EP)
+- API field definitions for KMS provider configuration in APIServer resource (covered by a [separate EP](https://github.com/openshift/enhancements/pull/1954))
+
+**Tech Preview v3 — Goals:**
+- Report current KMS encryption status to platform users (e.g., active KMS plugins, migration progress)
+- Automatic `key_id` rotation detection
+- KMS plugin health checks
 - Feature parity with existing modes (monitoring, migration, key rotation)
+- Removal of unused KMS plugins from EncryptionConfiguration after migration completes
+- Support updating the KMS timeout field via `unsupportedConfigOverrides`
+
+**GA — Goals:**
+- Failure mode coverage: loss of access to KMS service, lost encryption keys, loss of credentials
 
 ### Non-Goals
 
 - Implementing KMS plugins (provided by upstream Kubernetes/vendors)
-- KMS plugin deployment/lifecycle management (covered by a separate EP)
-- KMS plugin health checks (GA)
 - Recovery from KMS key loss
-- Automatic `key_id` rotation detection (GA)
-- API field definitions for KMS provider configuration in APIServer resource (covered by a separate EP)
 
 ## Proposal
 
@@ -69,22 +86,13 @@ Encryption controllers use the static endpoint in EncryptionConfiguration. KMS-t
 Users specify plugin-specific configuration for managed KMS provider types (e.g. Vault) via the APIServer resource (API fields covered by a separate EP).
 Encryption controllers split the KMS configuration API into multiple parts stored atomically in encryption key secrets:
 
-1. `kms-config` — fields for EncryptionConfiguration (apiVersion, name, endpoint, timeout)
-2. `kms-sidecar-config` — provider-specific fields for sidecar containers (image, vault-address, listen-address, transit-mount, transit-key, etc.)
-3. `kms-credentials` — credential data fetched from referenced secrets (e.g., approle credentials from `openshift-config` namespace)
-4. `kms-configmap-data` — ConfigMap data needed by KMS plugins (e.g., CA bundles)
+1. `kms-encryption-config` — structured Kubernetes KMS v2 provider configuration used to generate the EncryptionConfiguration provider entry (apiVersion: v2, name, endpoint, timeout)
+2. `kms-provider-config` — serialized `KMSConfig` resource ([config.openshift.io/v1](https://github.com/openshift/api/blob/master/config/v1/types_kmsencryption.go)), giving consumers access to provider-specific configuration (image, vault-address, transit-mount, transit-key, etc.)
+3. `kms-secret-data` — content of the referenced Secret (e.g., approle credentials)
+4. `kms-configmap-data` — content of the referenced ConfigMap (e.g., CA bundles)
 
-Storing all in the same secret avoids race conditions where EncryptionConfiguration references a KMS plugin whose sidecar configuration or credentials are not yet available.
-
-The keyID is appended to the UDS path (`unix:///var/run/kmsplugin/kms-{keyID}.sock`) to ensure uniqueness among providers. The UDS path is the sole configuration shared between kms-config and kms-sidecar-config.
-
-keyController performs field-level comparison to determine whether a change requires migration or can be applied in-place:
-- Migration-triggering fields (affect KEK): vault-address, vault-namespace, transit-key, transit-mount
-- In-place fields (container spec only): e.g., image
-
-keyController validates referenced credential secrets. If missing, the controller goes degraded and no changes are propagated.
-
-keyController periodically watches the content of referenced Secrets and ConfigMaps and keeps all active key secrets up to date — not just the latest write key. When referenced data changes (e.g., credential rotation), keyController updates the corresponding encryption key secrets without triggering key rotation or data migration.
+Storing all related data in a single secret ensures consistency and leverages existing revisioning and cleanup mechanisms.
+The keyID is appended to the UDS path (`unix:///var/run/kmsplugin/kms-{keyID}.sock`) to ensure uniqueness among providers, enabling KMS-to-KMS migrations with multiple concurrent plugins.
 
 **Key changes in library-go:**
 1. Add KMS mode constant to encryption state types
@@ -92,8 +100,8 @@ keyController periodically watches the content of referenced Secrets and ConfigM
 3. Manage encryption key secrets with KMS configuration (actual keys are stored externally in KMS provider)
 4. Detect configuration changes to trigger migration
 5. Reuse existing migration controller (no changes needed)
-6. Split KMS configuration into kms-config, kms-sidecar-config, kms-credentials, and kms-configmap-data (Tech Preview v2)
-7. Copy kms-sidecar-config, kms-credentials, and kms-configmap-data with keyID suffix to encryption-configuration secrets (Tech Preview v2)
+6. Split KMS configuration into kms-encryption-config, kms-provider-config, kms-secret-data, and kms-configmap-data (Tech Preview v2)
+7. Copy kms-provider-config, kms-secret-data, and kms-configmap-data with keyID suffix to encryption-configuration secrets (Tech Preview v2)
 8. Field-level comparison to distinguish migration-requiring vs. in-place changes (Tech Preview v2)
 9. Credential secret and ConfigMap validation with degraded status reporting (Tech Preview v2)
 10. Periodic sync of referenced Secrets and ConfigMaps to all active key secrets (Tech Preview v2)
@@ -113,11 +121,11 @@ keyController periodically watches the content of referenced Secrets and ConfigM
 #### Encryption Controllers
 
 **keyController** manages encryption key lifecycle. Creates encryption key secrets in `openshift-config-managed` namespace. For KMS mode, creates secrets storing KMS configuration.
-For Tech Preview v2, also splits configuration into `kms-config`, `kms-sidecar-config`, `kms-credentials`, and `kms-configmap-data`, performs field-level comparison, validates credential secrets, and periodically syncs referenced Secrets/ConfigMaps to all active key secrets.
+For Tech Preview v2, also splits configuration into `kms-encryption-config`, `kms-provider-config`, `kms-secret-data`, and `kms-configmap-data`, performs field-level comparison, validates credential secrets, and periodically syncs referenced Secrets/ConfigMaps to all active key secrets.
 
 **stateController** generates EncryptionConfiguration for API server consumption. Implements distributed state machine ensuring all API servers converge to same revision.
 For KMS mode, generates EncryptionConfiguration using the KMS configuration.
-For Tech Preview v2, also copies `kms-sidecar-config`, `kms-credentials`, and `kms-configmap-data` with keyID suffix (e.g., `kms-sidecar-config-1`, `kms-credentials-1`, `kms-configmap-data-1`) to the encryption-configuration secret.
+For Tech Preview v2, also copies `kms-provider-config`, `kms-secret-data`, and `kms-configmap-data` with keyID suffix (e.g., `kms-provider-config-1`, `kms-secret-data-1`, `kms-configmap-data-1`) to the encryption-configuration secret.
 
 **migrationController** orchestrates resource re-encryption. Marks resources as migrated after rewriting in etcd. Works with all encryption modes including KMS.
 
@@ -149,10 +157,10 @@ To enable the apiservers to access the KMS plugin, the `/var/run/kmsplugin` dire
      annotations:
        encryption.apiserver.operator.openshift.io/mode: "KMS"
    data:
-     encryption.apiserver.operator.openshift.io-key: "<base64-encoded-kms-config>"
+     encryption.apiserver.operator.openshift.io-key: "<base64-encoded-kms-encryption-config>"
      # Contains base64-encoded structured data with KMS configuration:
      # - Tech Preview v1: Static endpoint path (unix:///var/run/kmsplugin/kms.sock)
-     # - Tech Preview v2: kms-ec-config and kms-sidecar-config (see Tech Preview v2 section below)
+     # - Tech Preview v2: kms-encryption-config and kms-provider-config (see Tech Preview v2 section below)
    ```
 
 4. stateController generates EncryptionConfiguration using the endpoint:
@@ -186,7 +194,7 @@ To enable the apiservers to access the KMS plugin, the `/var/run/kmsplugin` dire
       # Vault API specific fields
    ```
 
-2. keyController detects the configuration, splits it into `kms-config` and `kms-sidecar-config`, and creates an encryption key secret:
+2. keyController detects the configuration, splits it into `kms-encryption-config`, `kms-provider-config`, `kms-secret-data`, and `kms-configmap-data`, and creates an encryption key secret:
    ```yaml
    apiVersion: v1
    kind: Secret
@@ -197,13 +205,13 @@ To enable the apiservers to access the KMS plugin, the `/var/run/kmsplugin` dire
        encryption.apiserver.operator.openshift.io/mode: "KMS"
    type: Opaque
    data:
-     kms-ec-config: <base64-encoded kms-config>
-     kms-sidecar-config: <base64-encoded sidecar container config>
-     kms-credentials: <base64-encoded credential data>
+     kms-encryption-config: <base64-encoded kms-encryption-config>
+     kms-provider-config: <base64-encoded sidecar container config>
+     kms-secret-data: <base64-encoded credential data>
      kms-configmap-data: <base64-encoded configmap data>
    ```
 
-3. stateController uses `kms-ec-config` to generate the EncryptionConfiguration (with keyID in the endpoint and provider name):
+3. stateController uses `kms-encryption-config` to generate the EncryptionConfiguration (with keyID in the endpoint and provider name):
    ```yaml
    apiVersion: apiserver.config.k8s.io/v1
    kind: EncryptionConfiguration
@@ -218,7 +226,7 @@ To enable the apiservers to access the KMS plugin, the `/var/run/kmsplugin` dire
              timeout: 10s
    ```
 
-4. stateController copies `kms-sidecar-config`, `kms-credentials`, and `kms-configmap-data` with keyID suffix to the encryption-configuration secret:
+4. stateController copies `kms-provider-config`, `kms-secret-data`, and `kms-configmap-data` with keyID suffix to the encryption-configuration secret:
    ```yaml
    apiVersion: v1
    kind: Secret
@@ -228,8 +236,8 @@ To enable the apiservers to access the KMS plugin, the `/var/run/kmsplugin` dire
    type: Opaque
    data:
      encryption-config: <EncryptionConfiguration>
-     kms-sidecar-config-1: <base64-encoded sidecar config for keyID 1>
-     kms-credentials-1: <base64-encoded credentials for keyID 1>
+     kms-provider-config-1: <base64-encoded sidecar config for keyID 1>
+     kms-secret-data-1: <base64-encoded credentials for keyID 1>
      kms-configmap-data-1: <base64-encoded configmap data for keyID 1>
    ```
 
@@ -266,7 +274,7 @@ resources:
           timeout: 10s
 ```
 
-stateController copies kms-sidecar-config, kms-credentials, and kms-configmap-data from both encryption key secrets into the encryption-configuration secret:
+stateController copies kms-provider-config, kms-secret-data, and kms-configmap-data from both encryption key secrets into the encryption-configuration secret:
 
 ```yaml
 apiVersion: v1
@@ -276,10 +284,10 @@ metadata:
   namespace: openshift-kube-apiserver
 data:
   encryption-config: <EncryptionConfiguration>
-  kms-sidecar-config-1: <base64-encoded sidecar config for keyID 1>
-  kms-sidecar-config-2: <base64-encoded sidecar config for keyID 2>
-  kms-credentials-1: <base64-encoded credentials for keyID 1>
-  kms-credentials-2: <base64-encoded credentials for keyID 2>
+  kms-provider-config-1: <base64-encoded sidecar config for keyID 1>
+  kms-provider-config-2: <base64-encoded sidecar config for keyID 2>
+  kms-secret-data-1: <base64-encoded credentials for keyID 1>
+  kms-secret-data-2: <base64-encoded credentials for keyID 2>
   kms-configmap-data-1: <base64-encoded configmap data for keyID 1>
   kms-configmap-data-2: <base64-encoded configmap data for keyID 2>
 ```
@@ -291,7 +299,7 @@ Both providers run as separate sidecar containers with different unix domain soc
 Fields that only affect the container spec (e.g., image for CVE fixes) do not change the KEK:
 
 1. keyController updates the existing encryption key secret in-place. No new secret is created.
-2. stateController detects the change and triggers a new revision with the updated `kms-sidecar-config`.
+2. stateController detects the change and triggers a new revision with the updated `kms-provider-config`.
 
 Only the active provider receives the update. Older providers retain their original sidecar configuration as fallback.
 
@@ -382,7 +390,7 @@ and deploy KMS plugins at the hardcoded endpoint `unix:///var/run/kmsplugin/kms.
 
 **Tech Preview V2**
 
-API changes for Tech Preview v2 are covered by a separate EP. This EP assumes the API exists and describes only the encryption controller-side implementation. The API provides provider-specific fields (image, vault-address, vault-namespace, transit-key, transit-mount, etc.) that keyController splits into `kms-config` and `kms-sidecar-config`.
+API changes for Tech Preview v2 are covered by a separate EP. This EP assumes the API exists and describes only the encryption controller-side implementation. The API provides provider-specific fields (image, vault-address, vault-namespace, transit-key, transit-mount, etc.) that keyController splits into `kms-encryption-config` and `kms-provider-config`.
 
 ### Topology Considerations
 
@@ -409,7 +417,7 @@ This feature does not depend on the features that are excluded from the OKE prod
 
 ### Implementation Details/Notes/Constraints
 
-- `kms-config`, `kms-sidecar-config`, `kms-credentials`, and `kms-configmap-data` are stored in the same encryption key secret for atomicity
+- `kms-encryption-config`, `kms-provider-config`, `kms-secret-data`, and `kms-configmap-data` are stored in the same encryption key secret for atomicity
 - keyController uses provider-specific field-level comparison (not simple equality) to determine migration necessity
 - UDS path convention: `unix:///var/run/kmsplugin/kms-{keyID}.sock` — keyID appended for uniqueness
 
@@ -468,7 +476,7 @@ None
 
 ### Tech Preview v1 -> Tech Preview v2
 
-- KMS configuration splitting into kms-config and kms-sidecar-config with atomic storage in encryption key secrets
+- KMS configuration splitting into kms-encryption-config and kms-provider-config with atomic storage in encryption key secrets
 - Multiple concurrent KMS providers during migration with UDS path isolation
 - Field-level comparison for migration-requiring vs. in-place configuration changes
 - Credential secret validation with degraded status reporting
