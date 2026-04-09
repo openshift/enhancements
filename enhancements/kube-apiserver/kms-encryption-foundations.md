@@ -470,18 +470,26 @@ None
 
 ### Tech Preview v1 -> Tech Preview v2
 
-- KMS configuration splitting into kms-encryption-config and kms-provider-config with atomic storage in encryption key secrets
+- KMS configuration splitting into kms-encryption-config, kms-provider-config, kms-secret-data, and kms-configmap-data with atomic storage in encryption key secrets
 - Multiple concurrent KMS providers during migration with UDS path isolation
 - Field-level comparison for migration-requiring vs. in-place configuration changes
-- Credential secret validation with degraded status reporting
+- Pre-flight checks before generating new encryption keys
+- Credential/ConfigMap validation with degraded status reporting
+- Periodic sync of referenced Secrets and ConfigMaps to all active key secrets
 - All migration scenarios validated (KMS-to-KMS, KMS-to-static, KMS-to-identity-to-KMS)
+
+### Tech Preview v2 -> Tech Preview v3
+
+- Report current KMS encryption status to platform users (e.g., active KMS plugins, migration progress)
+- Automatic `key_id` rotation detection
+- KMS plugin health checks
+- Feature parity with existing modes (monitoring, migration, key rotation)
+- Removal of unused KMS plugins from EncryptionConfiguration after migration completes
+- Support updating the KMS timeout field via `unsupportedConfigOverrides`
 
 ### Tech Preview -> GA
 
-- Full support for key rotation, with automated data re-encryption
-- Health check preconditions (block operations when plugin unhealthy)
-- Failure mode coverage: loss of access to KMS service (detection + mitigation)
-- Failure mode coverage: lost encryption keys (detection + mitigation)
+- Failure mode coverage: loss of access to KMS service
 - Comprehensive integration and E2E test coverage
 - Production validation in multiple environments
 
