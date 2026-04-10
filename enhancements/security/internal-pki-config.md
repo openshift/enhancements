@@ -1187,7 +1187,11 @@ Certificate names use a `component.certname` dot-separated naming convention, wh
 | `kube-apiserver.service-network-serving-signer` | Signs kube-apiserver service network serving certificates | kube-apiserver-operator |
 | `etcd.signer` | Signs etcd peer and client certificates | etcd-operator |
 | `etcd.metrics-signer` | Signs etcd metrics serving certificates | etcd-operator |
-| `service-ca.signer` | Signs service serving certificates | service-ca-operator |
+| `service-ca.service-serving-signer` | Signs service serving certificates | service-ca-operator |
+| `machine-config-operator.machine-config-server-signer` | Signs MCS serving certificate (installer root-ca) | machine-config-operator |
+| `installer.admin-kubeconfig-signer` | Signs admin kubeconfig client certificates (10yr, Day-1 only) | installer |
+| `installer.kubelet-csr-signer` | Signs kubelet CSR certificates (Day-1 only) | installer |
+| `installer.kubelet-bootstrap-kubeconfig-signer` | Signs kubelet bootstrap kubeconfig certificates (10yr, Day-1 only) | installer |
 
 #### Serving Certificates (Category: Serving)
 
@@ -1203,6 +1207,9 @@ Serving certificates present server identity during TLS handshakes.
 | `etcd.peer-serving` | etcd peer communication | etcd-operator |
 | `etcd.serving` | etcd client connections | etcd-operator |
 | `etcd.metrics-serving` | etcd metrics endpoint | etcd-operator |
+| `service-ca.service-serving` | Service serving certificates (on-demand) | service-ca-operator |
+| `machine-config-operator.machine-config-server-serving` | MCS TLS serving certificate | machine-config-operator |
+| `installer.ingress-router-initial` | Initial ingress router serving certificate (Day-1 only) | installer |
 
 #### Client Certificates (Category: Client)
 
@@ -1217,8 +1224,11 @@ Client certificates authenticate clients to servers.
 | `kube-apiserver.kube-scheduler-client` | Kube scheduler client certificate | kube-apiserver-operator |
 | `kube-apiserver.kubelet-client` | API server authentication to kubelet | kube-apiserver-operator |
 | `kube-apiserver.node-system-admin-client` | Node system admin client certificate | kube-apiserver-operator |
+| `installer.kubelet-client` | Kubelet bootstrap client certificate (Day-1 only) | installer |
+| `installer.admin-kubeconfig-client` | Admin kubeconfig client certificate (peer: server+client auth, Day-1 only) | installer |
+| `installer.journal-gateway` | Journal gateway certificate (peer: server+client auth, Day-1 only) | installer |
 
-**Note:** These names will be available for use in `namedCertificates` once named certificate overrides are implemented. Operators will register these names dynamically via `PKICertificateDefinition` resources. Additional certificates may be registered by other operators as they adopt the PKI configuration API. Certificate names for etcd-operator and service-ca-operator will be finalized in their respective implementation PRs.
+**Note:** These names will be available for use in `namedCertificates` once named certificate overrides are implemented.
 
 ### Additional Certificate Configuration Options
 
