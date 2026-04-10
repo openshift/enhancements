@@ -448,6 +448,7 @@ Key operators to update:
 - `service-ca-operator` - Service CA and service serving certificates (see special note below)
 - `machine-config-operator` - Kubelet certificates
 - `cluster-authentication-operator` - OAuth server certificates
+- `cluster-monitoring-operator` - Thanos GRPC TLS certificates
 
 **Special Case: service-ca-operator**
 
@@ -1187,8 +1188,12 @@ Certificate names use a `component.certname` dot-separated naming convention, wh
 | `kube-apiserver.service-network-serving-signer` | Signs kube-apiserver service network serving certificates | kube-apiserver-operator |
 | `etcd.signer` | Signs etcd peer and client certificates | etcd-operator |
 | `etcd.metrics-signer` | Signs etcd metrics serving certificates | etcd-operator |
+| `kube-controller-manager.csr-signer-signer` | Signs CSR signer certificates | kube-controller-manager-operator |
+| `kube-controller-manager.csr-signer` | Signs kubelet CSR certificates | kube-controller-manager-operator |
 | `service-ca.service-serving-signer` | Signs service serving certificates | service-ca-operator |
-| `machine-config-operator.machine-config-server-signer` | Signs MCS serving certificate (installer root-ca) | machine-config-operator |
+| `network.signer` | Signs OperatorPKI peer certificates | cluster-network-operator |
+| `machine-config.machine-config-server-signer` | Signs MCS serving certificate (installer root-ca) | machine-config-operator |
+| `monitoring.grpc-tls-signer` | Signs Thanos GRPC TLS client and server certificates | cluster-monitoring-operator |
 | `installer.admin-kubeconfig-signer` | Signs admin kubeconfig client certificates (10yr, Day-1 only) | installer |
 | `installer.kubelet-csr-signer` | Signs kubelet CSR certificates (Day-1 only) | installer |
 | `installer.kubelet-bootstrap-kubeconfig-signer` | Signs kubelet bootstrap kubeconfig certificates (10yr, Day-1 only) | installer |
@@ -1204,11 +1209,11 @@ Serving certificates present server identity during TLS handshakes.
 | `kube-apiserver.localhost-recovery-serving` | Localhost recovery SNI endpoint | kube-apiserver-operator |
 | `kube-apiserver.localhost-serving` | Localhost SNI endpoint | kube-apiserver-operator |
 | `kube-apiserver.service-network-serving` | Service network SNI endpoint | kube-apiserver-operator |
-| `etcd.peer-serving` | etcd peer communication | etcd-operator |
 | `etcd.serving` | etcd client connections | etcd-operator |
 | `etcd.metrics-serving` | etcd metrics endpoint | etcd-operator |
 | `service-ca.service-serving` | Service serving certificates (on-demand) | service-ca-operator |
-| `machine-config-operator.machine-config-server-serving` | MCS TLS serving certificate | machine-config-operator |
+| `machine-config.machine-config-server-serving` | MCS TLS serving certificate | machine-config-operator |
+| `monitoring.grpc-tls-serving` | Prometheus GRPC server certificate | cluster-monitoring-operator |
 | `installer.ingress-router-initial` | Initial ingress router serving certificate (Day-1 only) | installer |
 
 #### Client Certificates (Category: Client)
@@ -1224,9 +1229,19 @@ Client certificates authenticate clients to servers.
 | `kube-apiserver.kube-scheduler-client` | Kube scheduler client certificate | kube-apiserver-operator |
 | `kube-apiserver.kubelet-client` | API server authentication to kubelet | kube-apiserver-operator |
 | `kube-apiserver.node-system-admin-client` | Node system admin client certificate | kube-apiserver-operator |
+| `monitoring.grpc-tls-client` | Thanos querier GRPC client certificate | cluster-monitoring-operator |
 | `installer.kubelet-client` | Kubelet bootstrap client certificate (Day-1 only) | installer |
-| `installer.admin-kubeconfig-client` | Admin kubeconfig client certificate (peer: server+client auth, Day-1 only) | installer |
-| `installer.journal-gateway` | Journal gateway certificate (peer: server+client auth, Day-1 only) | installer |
+
+#### Peer Certificates (Category: Peer)
+
+Peer certificates authenticate both as client and server (dual ExtKeyUsage: ClientAuth + ServerAuth). PKI profile resolution uses the stronger of the serving and client key configurations.
+
+| Certificate Name | Description | Managed By |
+|------------------|-------------|------------|
+| `etcd.peer-serving` | etcd peer communication | etcd-operator |
+| `network.peer` | OperatorPKI peer certificate (server+client auth) | cluster-network-operator |
+| `installer.admin-kubeconfig-client` | Admin kubeconfig certificate (Day-1 only) | installer |
+| `installer.journal-gateway` | Journal gateway certificate (Day-1 only) | installer |
 
 **Note:** These names will be available for use in `namedCertificates` once named certificate overrides are implemented.
 
