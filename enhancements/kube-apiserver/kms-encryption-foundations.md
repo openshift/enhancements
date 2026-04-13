@@ -72,7 +72,7 @@ KMS support enables integration with external key management systems where encry
 ### Non-Goals
 
 - Implementing KMS plugins (provided by upstream Kubernetes/vendors)
-- Recovery from KMS key loss (if the key is deleted externally, recovery is equivalent to bootstrapping the cluster from scratch)
+- Recovery from KMS key loss (see [KMS Key Loss Considerations](#kms-key-loss-considerations) for details)
 
 ## Proposal
 
@@ -438,6 +438,18 @@ This feature does not depend on the features that are excluded from the OKE prod
 **Risk: Configuration Change During Write Key Promotion (Tech Preview v2)**
 - **Impact:** Conflict with in-progress state machine
 - **Mitigation:** keyController blocks new encryption key generation during promotion
+
+#### KMS Key Loss Considerations
+
+If the KMS key (the KEK used to encrypt the cluster seed, which Kubernetes then uses to generate DEKs for encrypting cluster data) is deleted externally, all encrypted resources in etcd become unreadable.
+
+Recovery from this situation would require deleting all resources that we are unable to decode and then recreating them from scratch. This process is costly and complex to implement (for example, all certificates would need to be reissued, the etcd cluster rebuilt, etc.), and is comparable in effort to implementing a full re-bootstrap. Additionally, the recovery flow would need to be covered by CI tests to catch potential regressions.
+
+Moreover, the platform itself would not be able to recreate resources required by user workloads, since only users have the necessary knowledge about them. In practice, this means users must have their own mechanisms for restoring these resources.
+
+On the Vault side, the key is stored in Vault's Transit secrets engine. By default, keys in Transit have `deletion_allowed` set to `false`. A Vault administrator would need to explicitly change this setting to `true` in order to allow key deletion. In general, standard best practices should be followed. This includes enforcing least-privilege access to sensitive API endpoints, such as those used for key deletion or key configuration updates. It is also recommended to periodically back up keys, so they can be restored if needed.
+
+For these reasons, recovery from KMS key loss is a non-goal of this enhancement.
 
 ### Drawbacks
 
