@@ -90,8 +90,8 @@ Encryption controllers split the KMS configuration API into multiple parts store
 
 1. `kms-encryption-config` — structured Kubernetes KMS v2 provider configuration used to generate the EncryptionConfiguration provider entry (apiVersion: v2, name, endpoint, timeout)
 2. `kms-provider-config` — serialized `KMSConfig` resource ([config.openshift.io/v1](https://github.com/openshift/api/blob/master/config/v1/types_kmsencryption.go)), giving consumers access to provider-specific configuration (image, vault-address, transit-mount, transit-key, etc.)
-3. `kms-secret-data` — content of the referenced Secret (e.g., approle credentials)
-4. `kms-configmap-data` — content of the referenced ConfigMap (e.g., CA bundles)
+3. `kms-secret-data` — content of the referenced Secret (e.g., approle credentials). The exact mechanism and content are still under experimentation; this EP will be updated once finalized.
+4. `kms-configmap-data` — content of the referenced ConfigMap (e.g., CA bundles). The exact mechanism and content are still under experimentation; this EP will be updated once finalized.
 
 Storing all related data in a single secret avoids race conditions caused by reading live, independently changing configuration.
 In kas-o, the targetConfigController operates on live data and may generate a manifest based on the current sidecar configuration. However, this configuration can change before the RevisionController creates a revision. 
