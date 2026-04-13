@@ -60,17 +60,19 @@ KMS support enables integration with external key management systems where encry
 - Report current KMS encryption status to platform users (e.g., active KMS plugins, migration progress)
 - Automatic `key_id` rotation detection
 - KMS plugin health checks
-- Feature parity with existing modes (monitoring, migration, key rotation)
 - Removal of unused KMS plugins from EncryptionConfiguration after migration completes
 - Support updating the KMS timeout field via `unsupportedConfigOverrides`
 
 **GA — Goals:**
-- Failure mode coverage: loss of access to KMS service, lost encryption keys, loss of credentials
+- Failure mode coverage (detection + mitigation for each):
+  - Misconfiguration of the KMS plugin
+  - Loss of access to the KMS service
+  - Loss of credentials
 
 ### Non-Goals
 
 - Implementing KMS plugins (provided by upstream Kubernetes/vendors)
-- Recovery from KMS key loss
+- Recovery from KMS key loss (if the key is deleted externally, recovery is equivalent to bootstrapping the cluster from scratch)
 
 ## Proposal
 
@@ -91,7 +93,11 @@ Encryption controllers split the KMS configuration API into multiple parts store
 3. `kms-secret-data` — content of the referenced Secret (e.g., approle credentials)
 4. `kms-configmap-data` — content of the referenced ConfigMap (e.g., CA bundles)
 
-Storing all related data in a single secret ensures consistency and leverages existing revisioning and cleanup mechanisms.
+Storing all related data in a single secret avoids race conditions caused by reading live, independently changing configuration.
+In kas-o, the targetConfigController operates on live data and may generate a manifest based on the current sidecar configuration. However, this configuration can change before the RevisionController creates a revision. 
+As a result, the generated manifest may no longer match the actual configuration state at the time the revision is created. Keeping all dependent configuration in a single secret ensures consistency and guarantees that both controllers operate on the same, atomic snapshot of data.
+
+Additionally, consolidating the data in a single secret leverages existing revisioning and cleanup mechanisms.
 The keyID is appended to the UDS path (`unix:///var/run/kmsplugin/kms-{keyID}.sock`) to ensure uniqueness among providers, enabling KMS-to-KMS migrations with multiple concurrent plugins.
 
 **Key changes in library-go:**
@@ -115,7 +121,7 @@ The keyID is appended to the UDS path (`unix:///var/run/kmsplugin/kms-{keyID}.so
 #### Encryption Controllers
 
 **keyController** manages encryption key lifecycle. Creates encryption key secrets in `openshift-config-managed` namespace. For KMS mode, creates secrets storing KMS configuration.
-For Tech Preview v2, also splits configuration into `kms-encryption-config`, `kms-provider-config`, `kms-secret-data`, and `kms-configmap-data`, performs field-level comparison, validates credential secrets, and periodically syncs referenced Secrets/ConfigMaps to all active key secrets.
+For Tech Preview v2, also propagates updates from the API configuration, splits configuration into `kms-encryption-config`, `kms-provider-config`, `kms-secret-data`, and `kms-configmap-data`, performs field-level comparison, validates credential secrets, and periodically syncs referenced Secrets/ConfigMaps to all active key secrets.
 
 **stateController** generates EncryptionConfiguration for API server consumption. Implements distributed state machine ensuring all API servers converge to same revision.
 For KMS mode, generates EncryptionConfiguration using the KMS configuration.
@@ -241,11 +247,11 @@ To enable the apiservers to access the KMS plugin, the `/var/run/kmsplugin` dire
 
 7. conditionController updates status conditions: `EncryptionInProgress`, then `EncryptionCompleted`.
 
-There are no preconditions for enabling KMS for the first time.
+For first-time KMS enablement, keyController runs pre-flight checks by deploying a pod with the KMS plugin to verify status and encrypt/decrypt capability before generating the first encryption key.
 
 #### Variation: Updates Requiring Migration (Tech Preview v2)
 
-If a field affecting the KEK is changed (**vault-address**, **vault-namespace**, **transit-key**, **transit-mount**), keyController creates a new encryption key secret with the next keyID.
+If a field affecting the KEK is changed (**vault-address**, **vault-namespace**, **transit-key**, **transit-mount**), keyController creates a new encryption key secret with the next keyID (see [Preconditions for Configuration Changes](#preconditions-for-configuration-changes-tech-preview-v2) for invariants and pre-flight checks that apply before a new key is generated).
 
 stateController generates an EncryptionConfiguration with both providers — new as write key, old as read key:
 
@@ -480,7 +486,7 @@ None
 
 ### Tech Preview v2 -> Tech Preview v3
 
-- Report current KMS encryption status to platform users (e.g., active KMS plugins, migration progress)
+- Report current KMS encryption status to platform users (e.g., active KMS plugins)
 - Automatic `key_id` rotation detection
 - KMS plugin health checks
 - Feature parity with existing modes (monitoring, migration, key rotation)
