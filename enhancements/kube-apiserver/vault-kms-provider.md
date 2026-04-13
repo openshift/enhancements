@@ -27,53 +27,52 @@ superseded-by: []
 ## Summary
 
 Extend the OpenShift APIServer configuration API to support HashiCorp Vault as
-a KMS provider type. This enhancement introduces the `ManagedKMSProvider`
-feature gate, the `ManagedKMS` encryption type, and adds Vault-specific
-configuration fields (VaultKMSConfig) to the KMSConfig API, allowing the Vault
-KMS provider to be configured declaratively alongside the existing AWS KMS
-provider.
+a KMS provider. This enhancement introduces the `VaultKMSPlugin` feature
+gate and adds Vault-specific configuration fields to the KMSConfig API,
+allowing the Vault KMS plugin to be configured declaratively.
 
-The `ManagedKMS` encryption type distinguishes operator-managed KMS deployments
-from the unmanaged `KMS` type (Tech Preview v1) where users manually deploy
-plugins. This allows the API changes to land independently of the library-go
-implementation. Eventually, the unmanaged `KMS` type will be removed and
-`ManagedKMS` will be renamed to `KMS`.
+When the `VaultKMSPlugin` feature gate is enabled, the existing `KMS`
+encryption type is extended to support a `kms` configuration field with
+provider-specific settings. This evolves the KMS encryption type from the basic
+implementation (where plugins are manually deployed) to a fully managed
+implementation where operators deploy and manage the Vault KMS plugin based on
+API configuration.
 
 ## Motivation
 
 ### User Stories
 
-- As a cluster admin, I need to configure Vault as a KMS provider via the APIServer resource
-- As a cluster admin with Vault Enterprise, I need to specify which Vault namespace to use
-- As a cluster admin in a disconnected environment, I need to specify the Vault KMS plugin image from my internal registry
-- As a cluster admin with a private CA, I need to provide a custom CA bundle for Vault TLS connections
+- As a cluster admin, I want to configure Vault as a KMS provider in OCP so
+  that I can encrypt resources using Vault Enterprise
+- As a cluster admin using a multi-tenant Vault Enterprise, I need to specify
+  which Vault namespace to use in OCP encryption config
+- As a cluster admin with a private CA, I need to provide a custom CA bundle
+  for Vault TLS connections
 
 ### Goals
 
-* Introduce the `ManagedKMSProvider` feature gate to control access to
-  operator-managed KMS provider configuration
+* Introduce the `VaultKMSPlugin` feature gate to enable declarative
+  configuration for operator-managed KMS plugin
 * Extend the `KMSConfig` API type to support Vault as a provider type
-* Define Vault-specific configuration fields (VaultKMSConfig)
+* Define the structure for KMS plugin lifecycle management (details will be
+  added in future iterations)
+* Remove AWS api from KMSConfig (it's not functional and we have no current
+  plan to support it)
+* Remove `KMSEncryptionProvider` feature gate (it gates the AWS fields in the
+  KMSConfig)
 
 ### Non-Goals
 
-The following are explicitly out of scope for this enhancement and will be
-covered by separate future enhancements:
+The following are explicitly out of scope for this enhancement:
 
-* Deploying and managing Vault KMS plugin workloads (operators managing plugin
-  pods/containers)
 * **Image signature verification and security validation** of user-provided KMS
   plugin images (critical security enhancement planned for future work)
-* Pre-flight validation and compatibility checks for KMS plugin images
-* Plugin lifecycle management (updates, health monitoring, etc.)
-* End-to-end functional implementation (this enhancement provides API only)
 
 ## Proposal
 
-This enhancement proposes adding API support for configuring HashiCorp Vault as
-a KMS provider. The API changes will be gated by the new `ManagedKMSProvider`
-feature gate, but the implementation of the operators that act on this
-configuration is out of scope for this enhancement.
+This enhancement proposes adding API support for configuring OCP to encrypt
+resources using HashiCorp Vault Enterprise via the Vault KMS plugin. The API
+changes will be gated by the new `VaultKMSPlugin` feature gate.
 
 ### Workflow Description
 
@@ -85,7 +84,7 @@ workflow consists solely of:
    - Optional ConfigMap containing custom CA certificate bundle for Vault TLS verification
 
 2. **Cluster administrator** configures the APIServer resource with Vault KMS settings:
-   - Sets `spec.encryption.type: ManagedKMS`
+   - Sets `spec.encryption.type: KMS`
    - Provides `spec.encryption.kms.type: Vault` with full Vault configuration
 
 3. **API server** validates the configuration against OpenAPI schema and CEL validation rules
@@ -104,16 +103,16 @@ configuration.
 
 #### Feature Gates
 
-This enhancement introduces a new feature gate `ManagedKMSProvider` to control
-access to Vault KMS provider configuration in the APIServer API.
+This enhancement introduces a new feature gate `VaultKMSPlugin` to control
+access to Vault KMS plugin configuration in the APIServer API.
 Additionally, this enhancement proposes removing the `KMSEncryptionProvider`
 feature gate, which is superseded by `KMSEncryption`, as well as the
 `AWSConfig` in `KMSConfig`, which is managed by the `KMSEncryptionProvider` gate.
 
-**ManagedKMSProvider:**
+**VaultKMSPlugin:**
 
 ```go
-FeatureGateManagedKMSProviders = newFeatureGate("ManagedKMSProvider").
+FeatureGateVaultKMSPlugin = newFeatureGate("VaultKMSPlugin").
     reportProblemsToJiraComponent("kube-apiserver").
     contactPerson("fmissi").
     productScope(ocpSpecific).
@@ -123,53 +122,25 @@ FeatureGateManagedKMSProviders = newFeatureGate("ManagedKMSProvider").
 ```
 
 When enabled, this gate allows:
+- The `kms` field in the `APIServerEncryption` struct
 - The `Vault` value in the `KMSProviderType` enum
 - The `vault` field in the `KMSConfig` struct
 
-The gate is named "ManagedKMSProvider" because it represents the overall
-capability for OpenShift-managed KMS provider deployments, which is the end
-goal across multiple enhancements. While this enhancement only adds the Vault
-API configuration, future work may add other managed provider types. The
-complete OpenShift-managed deployment functionality will be gated under this
-same feature gate.
+**Relationship to KMSEncryption:**
 
-**Relationship to KMSEncryption and the ManagedKMS Encryption Type:**
+The `KMSEncryption` feature gate (from kms-encryption-foundations) enables the
+`encryption.type: KMS` value and provides foundational KMS mode implementation
+in library-go encryption controllers.
 
-This enhancement introduces the `ManagedKMS` encryption type to distinguish
-operator-managed KMS deployments (where operators deploy and configure KMS
-plugins based on API configuration) from the unmanaged KMS mode (where users
-manually deploy plugins at a static socket path).
+The `VaultKMSPlugin` feature gate extends the KMS encryption type by adding:
+- The `kms` field in `APIServerEncryption` for plugin-specific configuration
+- Support for Vault KMS plugin
+- Operator-managed Vault KMS plugin lifecycle (deployment, health monitoring, updates)
 
-The `KMSEncryption` feature gate (from kms-encryption-foundations) provides:
-- The `encryption.type: KMS` support (unmanaged KMS - Tech Preview v1)
-- Foundational KMS mode implementation in library-go encryption controllers
-  (hardcoded static endpoint)
-
-The `ManagedKMSProvider` feature gate (this enhancement) provides:
-- The `encryption.type: ManagedKMS` support (operator-managed KMS - Tech Preview v2)
-- The `kms` field in APIServerEncryption with provider-specific configuration
-- Vault as a KMS provider type
-
-**Migration Path:**
-
-The `KMS` encryption type (unmanaged) is intended as a temporary
-implementation for Tech Preview v1. Once operators can deploy and manage KMS
-plugins based on API configuration (plugin deployment and lifecycle management
-functionality is implemented):
-
-1. The unmanaged `KMS` encryption type will be deprecated and eventually removed
-   sometime before the KMS feature goes GA
-2. The `ManagedKMS` encryption type will be renamed to `KMS` to become the
-   standard KMS implementation
-3. Internal CI/CD tests, QE environments, and dev clusters using `type: KMS`
-   (unmanaged) will need to migrate to `type: ManagedKMS` (managed) before the
-   removal
-
-Since both features are in `TechPreviewNoUpgrade`, there will be no production
-customer impact. This allows the API changes in this enhancement to land
-independently of the library-go implementation changes in
-[PR #1960](https://github.com/openshift/enhancements/pull/1960), while
-providing a clear migration path for internal test infrastructure
+When `VaultKMSPlugin` is enabled, users can specify `encryption.type: KMS`
+with the `kms` field to configure Vault KMS. The previous basic KMS
+implementation (without the `kms` field) remains available for backward
+compatibility during the Tech Preview phase but will be deprecated before GA.
 
 **Removing KMSEncryptionProvider:**
 
@@ -210,18 +181,23 @@ improved error messages using XValidation to provide actionable feedback:
   Sufficient for typical Vault server addresses with scheme, hostname, port,
   and optional short path. Uses XValidation to provide a clear error message
   when the URL scheme is missing.
-- **vaultNamespace** (no limit): Vault Enterprise has [no hard limit](https://developer.hashicorp.com/vault/docs/internals/limits)
-  on namespace paths (limited only by storage backend). We do not impose an
-  artificial limit to avoid restricting valid Vault configurations.
-- **tlsServerName** (1-253 chars): [RFC 1035](https://www.rfc-editor.org/rfc/rfc1035)
+- **vaultNamespace** (1-4096 chars): While Vault Enterprise has [no hard limit](https://developer.hashicorp.com/vault/docs/internals/limits)
+  on namespace paths, we enforce a maximum of 4096 characters (matching Unix PATH_MAX)
+  to prevent configuration errors and ensure compatibility with OpenShift's storage backend.
+  This limit accommodates any reasonable namespace hierarchy while providing defense in depth.
+- **tls.caBundle**: Optional reference to a ConfigMap containing CA certificates for
+  TLS verification. Follows the standard OpenShift pattern for CA bundle references.
+- **tls.serverName** (1-253 chars): [RFC 1035](https://www.rfc-editor.org/rfc/rfc1035)
   defines DNS FQDN maximum as 253 characters (255 octets minus 2 for encoding).
   This is the correct standard limit for hostnames.
-- **transitMount** (no limit, default "transit"): Vault has [no explicit limit](https://developer.hashicorp.com/vault/docs/internals/limits)
-  on mount paths (constrained by storage entry size). We do not impose an
-  artificial limit to allow any mount path that Vault accepts.
-- **transitKey** (no limit): Vault Transit key names have [no documented hard limit](https://developer.hashicorp.com/vault/docs/internals/limits).
-  We do not impose an artificial limit to allow any key naming convention that
-  Vault accepts.
+- **transitMount** (1-1024 chars, default "transit"): While Vault has [no explicit limit](https://developer.hashicorp.com/vault/docs/internals/limits)
+  on mount paths, we enforce a maximum of 1024 characters as a reasonable upper bound
+  for mount path configurations. This prevents configuration errors and ensures
+  compatibility with OpenShift's storage backend while supporting any legitimate mount path.
+- **transitKey** (1-512 chars): While Vault Transit key names have [no documented hard limit](https://developer.hashicorp.com/vault/docs/internals/limits),
+  we enforce a maximum of 512 characters as a reasonable upper bound for key identifiers.
+  This prevents configuration errors and ensures compatibility with OpenShift's storage
+  backend while supporting any legitimate key naming convention.
 
 ```go
 // VaultKMSConfig defines the KMS plugin configuration specific to Vault KMS
@@ -256,18 +232,58 @@ type VaultKMSConfig struct {
 
     // vaultNamespace specifies the Vault namespace where the Transit secrets engine is mounted.
     // This is only applicable for Vault Enterprise installations.
-    // The value can be between 1 and 256 characters.
+    // The value can be between 1 and 4096 characters.
     // When this field is not set, no namespace is used.
     //
+    // +kubebuilder:validation:MinLength=1
+    // +kubebuilder:validation:MaxLength=4096
     // +optional
     VaultNamespace string `json:"vaultNamespace,omitempty"`
 
-    // tlsCA is a reference to a ConfigMap in the openshift-config namespace containing
+    // tls contains the TLS configuration for connecting to the Vault server.
+    // When this field is not set, system default TLS settings are used.
+    // +optional
+    TLS *VaultTLSConfig `json:"tls,omitempty"`
+
+    // approleSecretRef references a secret in the openshift-config namespace containing
+    // the AppRole credentials used to authenticate with Vault.
+    // The secret must contain the following keys:
+    //   - "roleID": The AppRole Role ID
+    //   - "secretID": The AppRole Secret ID
+    //
+    // The namespace for the secret referenced by approleSecretRef is openshift-config.
+    //
+    // +required
+    ApproleSecretRef SecretNameReference `json:"approleSecretRef,omitempty"`
+
+    // transitMount specifies the mount path of the Vault Transit engine.
+    // The value can be between 1 and 1024 characters.
+    // When this field is not set, it defaults to "transit".
+    //
+    // +kubebuilder:validation:MinLength=1
+    // +kubebuilder:validation:MaxLength=1024
+    // +kubebuilder:default="transit"
+    // +optional
+    TransitMount string `json:"transitMount,omitempty"`
+
+    // transitKey specifies the name of the encryption key in Vault's Transit engine.
+    // This key is used to encrypt and decrypt data.
+    // The value must be between 1 and 512 characters.
+    //
+    // +kubebuilder:validation:MinLength=1
+    // +kubebuilder:validation:MaxLength=512
+    // +required
+    TransitKey string `json:"transitKey,omitempty"`
+}
+
+// VaultTLSConfig contains TLS configuration for connecting to Vault.
+type VaultTLSConfig struct {
+    // caBundle references a ConfigMap in the openshift-config namespace containing
     // the CA certificate bundle used to verify the TLS connection to the Vault server.
     // The ConfigMap must contain the CA bundle in the key "ca-bundle.crt".
     // When this field is not set, the system's trusted CA certificates are used.
     //
-    // The namespace for the ConfigMap referenced by tlsCA is openshift-config.
+    // The namespace for the ConfigMap is openshift-config.
     //
     // Example ConfigMap:
     //   apiVersion: v1
@@ -282,100 +298,38 @@ type VaultKMSConfig struct {
     //       -----END CERTIFICATE-----
     //
     // +optional
-    TLSCA ConfigMapNameReference `json:"tlsCA,omitempty"`
+    CABundle ConfigMapNameReference `json:"caBundle,omitempty"`
 
-    // tlsServerName specifies the Server Name Indication (SNI) to use when connecting to Vault via TLS.
+    // serverName specifies the Server Name Indication (SNI) to use when connecting to Vault via TLS.
     // This is useful when the Vault server's hostname doesn't match its TLS certificate.
-    // When this field is not set, no SNI value is sent during the TLS connection.
+    // When this field is not set, the hostname from vaultAddress is used for SNI.
     //
     // +kubebuilder:validation:MaxLength=253
     // +kubebuilder:validation:MinLength=1
     // +optional
-    TLSServerName string `json:"tlsServerName,omitempty"`
-
-    // tlsVerify controls whether the KMS plugin verifies the Vault server's TLS certificate.
-    // Valid values are:
-    // - "Verify": (default) TLS certificate verification is enabled. This is the secure option and should be used in production.
-    // - "SkipVerify": TLS certificate verification is skipped. This option is insecure and should only be used in development or testing environments.
-    // When this field is not set, it defaults to "Verify".
-    //
-    // +kubebuilder:validation:Enum=Verify;SkipVerify
-    // +default="Verify"
-    // +optional
-    TLSVerify VaultTLSVerifyMode `json:"tlsVerify,omitempty"`
-
-    // approleSecretRef references a secret in the openshift-config namespace containing
-    // the AppRole credentials used to authenticate with Vault.
-    // The secret must contain the following keys:
-    //   - "roleID": The AppRole Role ID
-    //   - "secretID": The AppRole Secret ID
-    //
-    // The namespace for the secret referenced by approleSecretRef is openshift-config.
-    //
-    // +required
-    ApproleSecretRef SecretNameReference `json:"approleSecretRef,omitempty"`
-
-    // transitMount specifies the mount path of the Vault Transit engine.
-    // The value can be between 1 and 128 characters.
-    // When this field is not set, it defaults to "transit".
-    //
-    // +kubebuilder:default="transit"
-    // +optional
-    TransitMount string `json:"transitMount,omitempty"`
-
-    // transitKey specifies the name of the encryption key in Vault's Transit engine.
-    // This key is used to encrypt and decrypt data.
-    // The value must be between 1 and 128 characters.
-    //
-    // +required
-    TransitKey string `json:"transitKey,omitempty"`
+    ServerName string `json:"serverName,omitempty"`
 }
-
-// VaultTLSVerifyMode defines the TLS certificate verification mode for Vault connections
-type VaultTLSVerifyMode string
-
-const (
-    // VaultTLSVerify enables TLS certificate verification (secure, recommended for production)
-    VaultTLSVerify VaultTLSVerifyMode = "Verify"
-
-    // VaultTLSSkipVerify disables TLS certificate verification (insecure, only for development/testing)
-    VaultTLSSkipVerify VaultTLSVerifyMode = "SkipVerify"
-)
 ```
 
-#### EncryptionType Extension
+#### APIServerEncryption Extension
 
-The `EncryptionType` enum is extended to include the `ManagedKMS` value:
+When the `VaultKMSPlugin` feature gate is enabled, the `kms` field becomes
+available in the `APIServerEncryption` type for provider-specific configuration.
 
-```diff
- type EncryptionType string
-
- const (
-     EncryptionTypeIdentity EncryptionType = "identity"
-     EncryptionTypeAESCBC   EncryptionType = "aescbc"
-     EncryptionTypeAESGCM   EncryptionType = "aesgcm"
--    EncryptionTypeKMS      EncryptionType = "KMS"
-+    EncryptionTypeKMS      EncryptionType = "KMS"        // Simple/unmanaged KMS (Tech Preview v1)
-+    EncryptionTypeManagedKMS EncryptionType = "ManagedKMS" // Operator-managed KMS (Tech Preview v2+)
- )
-```
-
-The feature gate validation is updated to allow `ManagedKMS` when the `ManagedKMSProvider` gate is enabled:
+The `kms` field is required when `type: KMS` and `VaultKMSPlugin` is enabled:
 
 ```diff
- // APIServerEncryption validation
--// +openshift:validation:FeatureGateAwareEnum:featureGate="",enum="";identity;aescbc;aesgcm
--// +openshift:validation:FeatureGateAwareEnum:featureGate=KMSEncryption,enum="";identity;aescbc;aesgcm;KMS
-+// +openshift:validation:FeatureGateAwareEnum:featureGate="",enum="";identity;aescbc;aesgcm
-+// +openshift:validation:FeatureGateAwareEnum:featureGate=KMSEncryption,enum="";identity;aescbc;aesgcm;KMS
-+// +openshift:validation:FeatureGateAwareEnum:featureGate=ManagedKMSProvider,enum="";identity;aescbc;aesgcm;ManagedKMS
-```
-
-Additionally, the `kms` field is required when `type: ManagedKMS`:
-
-```diff
- // APIServerEncryption validation
-+// +openshift:validation:FeatureGateAwareXValidation:featureGate=ManagedKMSProvider,rule="has(self.type) && self.type == 'ManagedKMS' ?  has(self.kms) : !has(self.kms)",message="kms config is required when encryption type is ManagedKMS, and forbidden otherwise"
+ // APIServerEncryption type
++// +openshift:validation:FeatureGateAwareXValidation:featureGate=VaultKMSPlugin,rule="has(self.type) && self.type == 'KMS' ?  has(self.kms) : !has(self.kms)",message="when encryption type is KMS, the kms field must be set with Vault KMS plugin configuration. Ensure the VaultKMSPlugin feature gate is enabled."
+ type APIServerEncryption struct {
+     Type EncryptionType `json:"type,omitempty"`
++
++    // kms defines the configuration needed to run the KMS provider plugin
++    // +openshift:enable:FeatureGate=VaultKMSPlugin
++    // +unionMember
++    // +optional
++    KMS *KMSConfig `json:"kms,omitempty"`
+ }
 ```
 
 #### KMSConfig Extension
@@ -383,13 +337,13 @@ Additionally, the `kms` field is required when `type: ManagedKMS`:
 The `KMSConfig` type is extended to include the Vault provider:
 
 ```diff
-+// +openshift:validation:FeatureGateAwareXValidation:featureGate=ManagedKMSProvider,rule="has(self.type) && self.type == 'Vault' ?  (has(self.vault) && self.vault.vaultAddress != \"\") : !has(self.vault)",message="vault config is required when kms provider type is Vault, and forbidden otherwise"
++// +openshift:validation:FeatureGateAwareXValidation:featureGate=VaultKMSPlugin,rule="has(self.type) && self.type == 'Vault' ? has(self.vault) : !has(self.vault)",message="vault config is required when kms provider type is Vault, and forbidden otherwise"
  type KMSConfig struct {
      // type defines the kind of platform for the KMS provider.
 -    // Available provider types are AWS only.
 +    // Valid values are:
 +    // - "AWS": Amazon Web Services KMS (always available)
-+    // - "Vault": HashiCorp Vault KMS (available when ManagedKMSProvider feature gate is enabled)
++    // - "Vault": HashiCorp Vault KMS (available when VaultKMSPlugin feature gate is enabled)
      //
      // +unionDiscriminator
      // +required
@@ -404,15 +358,15 @@ The `KMSConfig` type is extended to include the Vault provider:
      // +optional
      AWS *AWSKMSConfig `json:"aws,omitempty"`
 +
-+    // vault defines the key config for using a HashiCorp Vault KMS instance
-+    // for encryption. The Vault KMS instance is managed by the user outside
-+    // the purview of the control plane.
++    // vault defines the configuration for the Vault KMS plugin.
++    // The plugin connects to a Vault Enterprise server that is managed
++    // by the user outside the purview of the control plane.
 +    // This field must be set when type is Vault, and must be unset otherwise.
 +    //
-+    // +openshift:enable:FeatureGate=ManagedKMSProvider
++    // +openshift:enable:FeatureGate=VaultKMSPlugin
 +    // +unionMember
 +    // +optional
-+    Vault VaultKMSConfig `json:"vault,omitempty,omitzero"`
++    Vault *VaultKMSConfig `json:"vault,omitempty"`
  }
 ```
 
@@ -420,7 +374,7 @@ The `KMSProviderType` enum is also extended:
 
 ```diff
 +// +openshift:validation:FeatureGateAwareEnum:featureGate="",enum=AWS
-+// +openshift:validation:FeatureGateAwareEnum:featureGate=ManagedKMSProvider,enum=AWS;Vault
++// +openshift:validation:FeatureGateAwareEnum:featureGate=VaultKMSPlugin,enum=AWS;Vault
  type KMSProviderType string
 
  const (
@@ -435,7 +389,7 @@ The `KMSProviderType` enum is also extended:
 #### Example Configuration
 
 **Prerequisites:**
-- The `ManagedKMSProvider` feature gate must be enabled (available in `TechPreviewNoUpgrade` feature set)
+- The `VaultKMSPlugin` feature gate must be enabled (available in `TechPreviewNoUpgrade` feature set)
 
 First, create the required resources in the `openshift-config` namespace.
 
@@ -477,7 +431,7 @@ metadata:
   name: cluster
 spec:
   encryption:
-    type: ManagedKMS
+    type: KMS
     kms:
       type: Vault
       vault:
@@ -485,16 +439,17 @@ spec:
         approleSecretRef:
           name: vault-approle
         # Note: you must use digest reference
-        kmsPluginImage: registry.redhat.io/hashicorp/vault-kms-plugin@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
+        kmsPluginImage: registry.redhat.io/hashicorp/vault-kms-plugin@sha256:a1b2c3d4e5f67890abcdef1234567890fedcba0987654321abcdef1234567890
         transitKey: kubernetes-encryption
 
         # optional
         vaultNamespace: admin/kubernetes
 
-        # optional
-        tlsCA:
-          name: vault-ca-bundle
-        tlsServerName: vault.internal.example.com
+        # optional: TLS configuration
+        tls:
+          caBundle:
+            name: vault-ca-bundle
+          serverName: vault.internal.example.com
 
         # optional: Custom Transit mount (defaults to "transit")
         transitMount: transit
@@ -548,6 +503,44 @@ vault:
 Alternatively, use `ImageDigestMirrorSet` to transparently redirect image pulls
 to your mirror registry.
 
+### KMS Plugin Lifecycle Management
+
+This section outlines the operational aspects of deploying and managing Vault
+KMS plugins based on the API configuration. Implementation details will be
+determined in future iterations.
+
+#### Plugin Deployment
+
+How the kube-apiserver operator deploys Vault KMS plugin pods based on the API
+configuration.
+
+*Implementation details to be determined in future iterations.*
+
+#### Configuration Management
+
+How the operator translates the APIServer Vault KMS configuration into plugin
+configuration and manages Secret/ConfigMap propagation.
+
+*Implementation details to be determined in future iterations.*
+
+#### Health Monitoring
+
+Health checking, status reporting, and observability for KMS plugins.
+
+*Implementation details to be determined in future iterations.*
+
+#### Plugin Updates
+
+Handling image digest changes and plugin version updates.
+
+*Implementation details to be determined in future iterations.*
+
+#### Failure Handling
+
+Plugin pod failures, Vault connectivity issues, and fallback behavior.
+
+*Implementation details to be determined in future iterations.*
+
 ### Topology Considerations
 
 #### Hypershift / Hosted Control Planes
@@ -560,32 +553,25 @@ unification is out of scope for this enhancement.
 
 #### Standalone Clusters
 
-This enhancement applies to standalone clusters. No additional components are
-deployed - this enhancement only adds API fields and validation.
+This enhancement applies to standalone clusters.
 
 #### Single-node Deployments or MicroShift
 
-This enhancement only adds API validation logic. There are no new controllers,
-pods, or background processes.
+The Vault KMS plugin configuration can be set on SNO and MicroShift deployments.
 
-The Vault KMS provider API can be configured on SNO and MicroShift deployments.
-Future enhancements that add operator-managed plugin deployment will need to
-consider SNO resource constraints.
+We will go into more details when we update this enhancement with Vault KMS
+plugin lifecycle management.
 
 #### OpenShift Kubernetes Engine
 
 This enhancement applies to OpenShift Kubernetes Engine (OKE). The API changes
-are available in OKE as it shares the same API types. Since this is an API-only
-enhancement with no runtime components, there are no OKE-specific considerations.
+are available in OKE as it shares the same API types.
+
+We will go into more details when we update this enhancement with Vault KMS
+plugin lifecycle management.
 
 ### Implementation Details/Notes/Constraints
 
-This enhancement is API-only. It adds new fields to the `config.openshift.io/v1`
-API types with kubebuilder validation markers. No controllers, operators, or
-runtime components are implemented.
-
-Users can configure the API, but no operators will act on the configuration
-until future enhancements implement the operator-managed plugin deployment.
 
 ### Risks and Mitigations
 
@@ -646,7 +632,8 @@ AppRole credentials stored in Secrets could be accessed by users with elevated p
 **Increased API complexity:**
 Adding Vault-specific configuration to the core `config.openshift.io/v1` API
 increases the surface area of the cluster configuration API. The VaultKMSConfig
-struct adds 9 new fields, increasing the cognitive load for users and the
+struct adds 7 top-level fields (with an additional nested VaultTLSConfig type
+containing 2 fields), increasing the cognitive load for users and the
 maintenance burden for the API.
 
 *Overcome by:* The Vault configuration follows the same union type pattern used
@@ -724,19 +711,18 @@ image be specified via digest. This approach:
 ## Test Plan
 
 **API Validation Tests:**
-- Verify that `ManagedKMS` encryption type is rejected when `ManagedKMSProvider` feature gate is disabled
-- Verify that `kms.vault` configuration is rejected when `ManagedKMSProvider` feature gate is disabled
-- Verify that `kms` field is required when `type: ManagedKMS` and `ManagedKMSProvider` gate is enabled
-- Verify field validation (character limits, regex patterns, required fields)
+- Verify that the `kms` field is rejected when `VaultKMSPlugin` feature gate is disabled
+- Verify that `kms.vault` configuration is rejected when `VaultKMSPlugin` feature gate is disabled
+- Verify that `kms` field is required when `type: KMS` and `VaultKMSPlugin` gate is enabled
+- Verify field validation (character limits, regex patterns, required fields) for Vault KMS configuration
 
-**Migration from Unmanaged KMS Tests:**
+**Integration with Existing KMS Tests:**
 
-Existing CI/CD tests using the unmanaged `KMS` encryption type (from
-kms-encryption-foundations) will need to be updated:
+Existing CI/CD tests using the basic `KMS` encryption type (from
+kms-encryption-foundations) will need to be updated to use the `kms` field:
 
-1. **Update test fixtures**: Change `type: KMS` to `type: ManagedKMS` and add appropriate `kms` configuration
-2. **Add migration test**: Verify that changing from `type: KMS` to `type: ManagedKMS` triggers re-encryption
-3. **Update QE test scenarios**: Ensure QE test environments use `ManagedKMS` with proper Vault configuration
+1. **Update test fixtures**: Add `kms` configuration with Vault provider settings
+2. **Update QE test scenarios**: Ensure QE test environments properly configure the `kms` field
 
 ## Graduation Criteria
 
@@ -756,32 +742,25 @@ N/A
 **Downgrade:**
 N/A
 
-**Migration from Unmanaged to Managed KMS:**
+**Evolution of KMS Encryption Type:**
+
+This enhancement extends the existing `KMS` encryption type (enabled by the
+`KMSEncryption` feature gate) by adding provider-specific configuration when the
+`VaultKMSPlugin` feature gate is enabled.
 
 Since both features are in `TechPreviewNoUpgrade`, there are no production
-customer deployments using the unmanaged `KMS` encryption type. The migration
-impact is limited to:
+customer deployments. The impact is limited to internal test environments:
 
-- **Internal CI/CD tests**: Automated tests using the unmanaged `KMS` type will
-  need to be updated to use `ManagedKMS` with appropriate configuration
-- **QE test environments**: Quality engineering test clusters will need to
-  migrate their test scenarios
-- **Development environments**: Developer clusters testing KMS functionality
+- **Internal CI/CD tests**: Tests using basic KMS will continue to work
+- **QE test environments**: Can adopt the new `kms` field configuration
+- **Development environments**: Can test Vault KMS with full configuration
 
-For these internal test environments, the migration steps are:
+For internal environments migrating to use the `kms` field:
 
 1. Deploy the necessary configuration resources (Secrets, ConfigMaps) in
    `openshift-config`
-2. Update the APIServer resource to change `type: KMS` to `type: ManagedKMS`
-   and add the `kms` configuration
-3. The encryption controllers will detect the mode change and trigger
-   re-encryption
-4. Wait for migration to complete
-
-When the unmanaged `KMS` type is eventually removed and `ManagedKMS` is renamed
-to `KMS`, there will be no customer impact since both features will
-have graduated together and customers will only see the final `KMS` type with
-managed deployment.
+2. Update the APIServer resource to add the `kms` configuration (keeping `type: KMS`)
+3. The encryption controllers will configure the KMS plugin based on the API settings
 
 
 ## Version Skew Strategy
@@ -807,7 +786,7 @@ covered by standard API server metrics.
 If a user reports that their Vault KMS configuration is rejected:
 1. Check API validation errors in the APIServer resource status or `oc` output
 2. Verify all required fields are present and within validation limits
-3. Verify the `ManagedKMSProviders` feature gate is enabled
+3. Verify the `VaultKMSPlugin` feature gate is enabled
 
 **Configuration accepted but encryption not working:**
 This is expected - the API-only enhancement accepts configuration but does not
