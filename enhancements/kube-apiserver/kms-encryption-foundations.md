@@ -90,8 +90,24 @@ Encryption controllers split the KMS configuration API into multiple parts store
 
 1. `kms-encryption-config` — structured Kubernetes KMS v2 provider configuration used to generate the EncryptionConfiguration provider entry (apiVersion: v2, name, endpoint, timeout)
 2. `kms-provider-config` — serialized `KMSConfig` resource ([config.openshift.io/v1](https://github.com/openshift/api/blob/master/config/v1/types_kmsencryption.go)), giving consumers access to provider-specific configuration (image, vault-address, transit-mount, transit-key, etc.)
-3. `kms-secret-data` — content of the referenced Secret (e.g., approle credentials). The exact mechanism and content are still under experimentation; this EP will be updated once finalized.
-4. `kms-configmap-data` — content of the referenced ConfigMap (e.g., CA bundles). The exact mechanism and content are still under experimentation; this EP will be updated once finalized.
+3. `kms-secret-{key}-{keyID}` — individual keys from the referenced Secret are stored as separate entries (e.g., `kms-secret-id-1`, `kms-secret-login-1`, `kms-secret-password-1` for Vault approle credentials)
+4. `kms-configmap-{key}-{keyID}` — individual keys from the referenced ConfigMap are stored as separate entries (e.g., `kms-configmap-ca-1` for CA bundles)
+
+   For example, an encryption-configuration secret with this layout:
+   ```yaml
+   apiVersion: v1
+   kind: Secret
+   metadata:
+     name: encryption-config-kube-apiserver-9
+   data:
+     kms-provider-config-1: |
+       address: bar
+       ...
+     kms-secret-id-1: VALUE
+     kms-secret-login-1: VALUE
+     kms-secret-password-1: VALUE
+     kms-configmap-ca-1: VALUE
+   ```
 
 Storing all related data in a single secret avoids race conditions caused by reading live, independently changing configuration.
 In kas-o, the targetConfigController operates on live data and may generate a manifest based on the current sidecar configuration. However, this configuration can change before the RevisionController creates a revision. 
