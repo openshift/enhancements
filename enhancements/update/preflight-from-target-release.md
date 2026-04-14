@@ -79,7 +79,7 @@ Success criteria:
 - Administrators can run `oc adm upgrade --mode=preflight --to=<version>` to check compatibility.
 - Administrators can cancel preflight checks using `oc adm upgrade --clear-preflight`.
 - Preflight results appear in ClusterVersion `status` alongside other conditional update risks.
-- Preflight results are automatically cleared after cluster upgrades to prevent stale data confusion.
+- Preflight results are automatically cleared when cluster upgrades is accepted to prevent stale data confusion.
 - Partial or failed preflight results are clearly marked to distinguish from complete assessments.
 - Component maintainers can write compatibility checks into the target release, without backporting logic to earlier releases.
 
@@ -105,11 +105,12 @@ The aggressive timeline reflects the strategic importance of skip-level updates 
 
 ### Non-Goals
 
-* **Operator-level preflight framework**: This enhancement focuses on cluster-level preflight orchestration.
-    Individual operator preflight implementations are out of scope (those would be developed separately by component teams).
-    * For the initial enhancement, even the cluster-level interface between the target-release CVO and the target-release operators is out of scope.
-      We need rapid agreement on the interface between the user and the cluster-managing CVO, and between the cluster-managing CVO and the target-release CVO to set a solid launch pad in the initial release.
-      The details of the interface bewtween the target-release CVO and target-release operators can be deferred to the target release, and we have more time to plan that out.
+* **Operator-level preflight framework**: This enhancement focuses on cluster-level preflight orchestration through the CVO.
+  The following are explicitly out of scope for this initial enhancement:
+  * **Individual operator preflight implementation details**: How component operators implement their specific preflight checks internally will be developed separately by component teams in future releases.
+  * **Target-release CVO to target-release operator interface**: The contract for how the target-release CVO communicates with target-release operators to collect preflight results is deferred to the target release implementation.
+    This enhancement defines only the interfaces needed in the launching release: user-to-ClusterVersion API and current-CVO-to-target-CVO communication.
+    The target-release-specific interfaces can be designed with more lead time and do not block the initial rollout.
 * **Automatic remediation**: Preflight checks identify risks but do not automatically fix configuration issues.
     Remediation remains a manual administrative task.
 * **Performance impact analysis**: This enhancement identifies compatibility risks but does not assess performance impact or resource consumption changes in target releases.
@@ -119,9 +120,9 @@ The aggressive timeline reflects the strategic importance of skip-level updates 
 * **Managed OpenShift integration**: For the 4.22 tech-preview, integration with managed OpenShift service workflows and customer isolation requirements is out of scope due to time constraints.
     This includes testing integration with managed service update automation and ensuring preflight checks do not access sensitive managed service configurations.
 * **External plugins**: This enhancement does not give cluster admins the ability to plug in additional checks specific to a given target version.
-    They retain the ability to:
-    * [Create `critical` platform alerts][create-platform-alert] which [existing checks will surface pre-update][recommend-critical-alert].
-    * [Create a custom ClusterOperator with an `Upgradeable=False` condition][ClusterOperator-Upgradeable] which existing logic will propagate through to major and minor updates (`Upgradeable` does not block patch updates from x.y.z to x.y.z').
+  They retain the ability to:
+  * [Create `critical` platform alerts][create-platform-alert] which [existing checks will surface pre-update][recommend-critical-alert].
+  * [Create a custom ClusterOperator with an `Upgradeable=False` condition][ClusterOperator-Upgradeable] which existing logic will propagate through to major and minor updates (`Upgradeable` does not block patch updates from x.y.z to x.y.z').
 
 ## Proposal
 
@@ -208,7 +209,7 @@ oc adm upgrade --to=5.2.0
 # 5. Monitor upgrade progress
 oc adm upgrade status
 
-# 6. Verify completion - preflight results automatically cleared
+# 6. Verify cleanup - preflight results automatically cleared when upgrade is accepted
 oc get clusterversion version -o yaml  # conditionalUpdateRisks now empty
 ```
 
@@ -371,7 +372,28 @@ This command provides a user-friendly alternative to manual patch operations, si
 ```bash
 oc adm upgrade --status-preflight
 ```
-Enhanced to display preflight execution status when active, including target version and completion progress.
+Displays **preflight execution status** when active, including:
+- **Target version** being evaluated
+- **Execution status** (in progress, completed, failed)
+- **Completion progress** for multi-component checks
+
+**Example output:**
+```
+Preflight Status: Running (target: 5.2.0)
+Progress: 4 of 7 operators checked
+Estimated completion: 2 minutes remaining
+```
+
+**Viewing discovered risks**: Preflight-discovered risks are displayed through existing commands:
+```bash
+# View all conditional update risks (including preflight results)
+oc adm upgrade recommend
+
+# View detailed risk information in ClusterVersion status
+oc get clusterversion version -o yaml
+```
+
+This approach leverages existing risk display patterns from the accepted-risks framework rather than duplicating risk presentation logic.
 
 #### Evaluating preflight checks
 
@@ -732,7 +754,7 @@ func filterRisksForTargetVersion(risks []Risk, targetVersion string) []Risk {
 
 **Implementation approach**:
 1. **Hook integration**: Add preflight cleanup to the existing CVO code path that sets `Progressing=True` when accepting non-preflight updates
-2. **Cleanup scope**: Remove all `conditionalUpdateRisks` entries with `reason: PreflightValidation`
+2. **Cleanup scope**: Remove all `conditionalUpdateRisks` entries with message prefix `"Preflight="` (all preflight-generated results regardless of condition reason)
 3. **Timing**: Cleanup occurs when CVO sets `Progressing=True` and starts reconciling the new target release's manifests
 4. **Logging**: Cleanup actions are logged for audit purposes: "Cleared N preflight results following upgrade acceptance for version X.Y.Z"
 
@@ -763,14 +785,8 @@ func (c *ClusterVersionOperator) syncUpdate(update DesiredUpdate) error {
         }
     }
     // ... continue with manifest reconciliation ...
-
-    if completed {
-        // Clear preflight results when marking upgrade complete
-        if err := c.clearPreflightResults(); err != nil {
-            log.Errorf("Failed to clear preflight results after upgrade completion: %v", err)
-            // Continue - don't fail upgrade completion due to cleanup issues
-        }
-    }
+    return nil
+}
 
     // ... rest of existing logic ...
 }
@@ -1095,7 +1111,7 @@ Since we are proceeding directly to Tech Preview, these criteria are incorporate
 
 **API Stability:**
 - `ClusterVersion.spec.desiredUpdate.mode` API extension approved and implemented
-- Integration with existing `conditionalUpdateRisks` API established with automatic cleanup after cluster upgrades
+- Integration with existing `conditionalUpdateRisks` API established with automatic cleanup when cluster upgrades is accepted
 - `oc adm upgrade` command integration stable for Tech Preview usage, including `--mode=preflight`, `--clear-preflight`, and enhanced `--status-preflight` commands
 
 **Documentation and Testing:**
