@@ -26,7 +26,7 @@ superseded-by: []
 ## Summary
 
 This enhancement enables cross-cluster Pod-to-Pod,
-Pod-to-Service (IP), and Pod-to-Service (DNS)
+Pod-to-Service (ClusterIP), and Pod-to-Service (DNS)
 communication between independent MicroShift instances.
 C2CC uses OVN static routes for overlay-to-underlay
 routing, Linux kernel policy routing for host-level
