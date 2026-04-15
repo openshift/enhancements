@@ -159,7 +159,7 @@ MicroShift clusters.
    # Cluster A config
    c2cc:
      remoteClusters:
-       - nextHop: "192.168.122.181"
+       - nextHop: "192.168.122.101"
          clusterNetwork: 
             - "10.45.0.0/16"
          serviceNetwork: 
@@ -167,15 +167,54 @@ MicroShift clusters.
          domain: "cluster-b.remote"
    ```
 
-4. The user restarts MicroShift.
+   ```yaml
+   # Cluster B config
+   c2cc:
+     remoteClusters:
+       - nextHop: "192.168.122.100"
+         clusterNetwork:
+            - "10.42.0.0/16"
+         serviceNetwork:
+            - "10.43.0.0/16"
+         domain: "cluster-a.remote"
+   ```
 
-5. MicroShift validates the configuration. If validation
+4. On each host, the user configures the firewall to
+   allow cross-cluster traffic. The remote cluster's pod
+   and service CIDRs must be added to the trusted zone,
+   along with the remote host IP:
+
+   ```bash
+   # On Cluster A — trust Cluster B's networks and host
+   sudo firewall-cmd --permanent --zone=trusted \
+     --add-source=10.45.0.0/16
+   sudo firewall-cmd --permanent --zone=trusted \
+     --add-source=10.46.0.0/16
+   sudo firewall-cmd --permanent --zone=trusted \
+     --add-source=192.168.122.101/32
+   sudo firewall-cmd --reload
+   ```
+
+   ```bash
+   # On Cluster B — trust Cluster A's networks and host
+   sudo firewall-cmd --permanent --zone=trusted \
+     --add-source=10.42.0.0/16
+   sudo firewall-cmd --permanent --zone=trusted \
+     --add-source=10.43.0.0/16
+   sudo firewall-cmd --permanent --zone=trusted \
+     --add-source=192.168.122.100/32
+   sudo firewall-cmd --reload
+   ```
+
+5. The user restarts MicroShift on each host.
+
+6. MicroShift validates the configuration. If validation
    fails, MicroShift logs errors and does not start.
 
-6. The C2CC controller reconciles OVN routes, SNAT
+7. The C2CC controller reconciles OVN routes, SNAT
    policies, kernel routes, and CoreDNS config.
 
-7. The user verifies connectivity:
+8. The user verifies connectivity:
    ```bash
    oc get c2ccstatus
    ```
