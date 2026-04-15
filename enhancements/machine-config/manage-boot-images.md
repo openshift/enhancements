@@ -69,7 +69,7 @@ This is also a soft pre-requisite for both dual-stream RHEL support in OpenShift
 
 The MCO will take over management of the boot image references and the stub Ignition configuration. The installer is still responsible for creating the `MachineSet` at cluster bring-up, but once cluster installation is complete the MCO will ensure that boot images are in sync with the latest payload. From the user standpoint, this should cause less compatibility issues as nodes will no longer need to pivot to a substantially different version of RHCOS during node scaleup.
 
-This should not interfere with existing workflows such as Hive and ArgoCD. As this is an opt-in mechanism, the cluster admin will be protected against such scenarios of accidental "reconciliation" and for additional safety, the MSBIC will also ensure that machinesets that have a valid OwnerReference will be excluded from boot image updates. We will work with affected teams to transition them to the new workflow before we turn this feature on by default.
+This should not interfere with existing workflows such as Hive and ArgoCD. As this is an opt-in mechanism, the cluster admin will be protected against such scenarios of accidental "reconciliation" and for additional safety, the Boot Image Controller (BIC) will also ensure that machinesets that have a valid OwnerReference will be excluded from boot image updates. We will work with affected teams to transition them to the new workflow before we turn this feature on by default.
 
 ### Non-Goals
 
@@ -81,28 +81,28 @@ This should not interfere with existing workflows such as Hive and ArgoCD. As th
 
 __Overview__
 
-- The `machine-config-controller`(MCC) pod will gain a new sub-controller `machine_set_boot_image_controller`(MSBIC) that monitors `MachineSet` changes and the `coreos-bootimages` [ConfigMap](https://github.com/openshift/installer/pull/4760) changes.
-- Before processing a MachineSet, the MSBIC will check if the following conditions are satisfied:
+- The `machine-config-controller`(MCC) pod will gain a new sub-controller `boot-image-controller`(BIC) that monitors `MachineSet` changes and the `coreos-bootimages` [ConfigMap](https://github.com/openshift/installer/pull/4760) changes.
+- Before processing a MachineSet, the BIC will check if the following conditions are satisfied:
   - The cluster and/or the machineset is opted-in to boot image updates. This is done at the operator level, via the `MachineConfiguration` API object.
   - The `machineset` does not have a valid owner reference. Having a valid owner reference typically indicates that the `MachineSet` is managed by another workflow, and that updates to it are likely going to cause thrashing. 
   - The golden configmap is verified to be in sync with the current version of the MCO. The MCO will update("stamp") the golden configmap with version of the new MCO image after at least 1 master node has successfully completed an update to the new OCP image. This helps prevent `machinesets` being updated too soon at the end of a cluster upgrade, before the MCO itself has updated and has had a chance to roll out the new OCP image to the cluster.
 
-  If any of the above checks fail, the MSBIC will exit out of the sync.
-- Based on platform and architecture type, the MSBIC will check if the boot images referenced in the `providerSpec` field of the `MachineSet` is the same as the one in the ConfigMap. Each platform(gcp, aws...and so on) does this differently, so this part of the implementation will have to be special cased. The ConfigMap is considered to be the golden set of bootimage values, i.e. they will never go out of date. If it is not a match, the `providerSpec` field is cloned and updated with the new boot image reference.
+  If any of the above checks fail, the BIC will exit out of the sync.
+- Based on platform and architecture type, the BIC will check if the boot images referenced in the `providerSpec` field of the `MachineSet` is the same as the one in the ConfigMap. Each platform(gcp, aws...and so on) does this differently, so this part of the implementation will have to be special cased. The ConfigMap is considered to be the golden set of bootimage values, i.e. they will never go out of date. If it is not a match, the `providerSpec` field is cloned and updated with the new boot image reference.
 - Next, it will check if the stub Ignition secret referenced within the `providerSpec` field of the `MachineSet` is of the spec 3 format. If it is not of the spec 3 format, it will attempt to upgrade it to spec 3.
-- Finally, the MSBIC will attempt to patch the `MachineSet` if an update is required.
+- Finally, the BIC will attempt to patch the `MachineSet` if an update is required.
 
 #### Error & Alert Mechanism
 
-MSBIC sync failures may be caused by multiple reasons:
+BIC sync failures may be caused by multiple reasons:
 - The `coreos-bootimages` ConfigMap is unavailable or in an incorrect format. This will likely happen if a user manually edits the ConfigMap, overriding the CVO.
 - The stub Ignition referenced in the `MachineSet` could not be upgraded to the spec 3 format. This will only happen when a user has heavily customized their Ignition stub, which is quite rare(and unsupported potentially). Resolving this will need manual intervention and this will be explained in the documentation.
 - Patching the `MachineSet` fails. This indicates a temporary API server blip, or larger RBAC issues.
-- The same `MachineSet` is patched multiple times to the same boot image. This indicates that there is at least one external actor actively stomping on the value applied by the MSBIC.
+- The same `MachineSet` is patched multiple times to the same boot image. This indicates that there is at least one external actor actively stomping on the value applied by the BIC.
 
-An error condition will be applied on the operator level `MachineConfiguration` object when the sync failures of a given `MachineSet` exceed a threshold amount for a period of time. The condition will include information regarding the sync failures and the logs of the MSBIC can be checked for additional details.
+An error condition will be applied on the operator level `MachineConfiguration` object when the sync failures of a given `MachineSet` exceed a threshold amount for a period of time. The condition will include information regarding the sync failures and the logs of the BIC can be checked for additional details.
 
-Note: In the future, patches to `MachineSets` will be prevented when they are not authoritative [#1465](https://github.com/openshift/enhancements/pull/1465). This will need to be accounted for within the logic of the MSBIC.
+Note: In the future, patches to `MachineSets` will be prevented when they are not authoritative [#1465](https://github.com/openshift/enhancements/pull/1465). This will need to be accounted for within the logic of the BIC.
 
 ### Workflow Description
 
@@ -116,7 +116,7 @@ Any form factor using the MCO and `MachineSets` will be impacted by this proposa
 - Standalone OpenShift: Yes, this is the main target form factor.
 - microshift: No, as it does [not](https://github.com/openshift/microshift/blob/main/docs/contributor/enabled_apis.md) use `MachineSets`.
 - Hypershift: No, Hypershift does not have this issue.
-- Hive: Hive manages `MachineSets` via `MachinePools`. The MachinePool controller generates the `MachineSets` manifests (by invoking vendored installer code) which include the `providerSpec`. Once a `MachineSet` has been created on the spoke, the only things that will be reconciled on it are replicas, labels, and taints - [unless a backdoor is enabled](https://github.com/openshift/hive/blob/0d5507f91935701146f3615c990941f24bd42fe1/pkg/constants/constants.go#L518). If the `providerSpec` ever goes out of sync, a warning will be logged by the MachinePool controller but otherwise this discrepancy is ignored. In such cases, the MSBIC will not have any issue reconciling the `providerSpec` to the correct boot image. However, if the backdoor is enabled, both the MSBIC and the MachinePool Controller will attempt to reconcile the `providerSpec` field, causing churn. The Hive team has [updated the comment](https://github.com/openshift/hive/pull/2596/files) on the backdoor annotation to indicate that it is mutually exclusive with this feature.
+- Hive: Hive manages `MachineSets` via `MachinePools`. The MachinePool controller generates the `MachineSets` manifests (by invoking vendored installer code) which include the `providerSpec`. Once a `MachineSet` has been created on the spoke, the only things that will be reconciled on it are replicas, labels, and taints - [unless a backdoor is enabled](https://github.com/openshift/hive/blob/0d5507f91935701146f3615c990941f24bd42fe1/pkg/constants/constants.go#L518). If the `providerSpec` ever goes out of sync, a warning will be logged by the MachinePool controller but otherwise this discrepancy is ignored. In such cases, the BIC will not have any issue reconciling the `providerSpec` to the correct boot image. However, if the backdoor is enabled, both the BIC and the MachinePool Controller will attempt to reconcile the `providerSpec` field, causing churn. The Hive team has [updated the comment](https://github.com/openshift/hive/pull/2596/files) on the backdoor annotation to indicate that it is mutually exclusive with this feature.
 
 ##### Supported platforms
 
@@ -310,9 +310,8 @@ As can be seen, the bootimage becomes part of an `InfrastructureMachineTemplate`
 It is important to note that InfrastructureMachineTemplate is different per platform and is immutable. This will prevent an update in place style approach and would mean that the template would need to be cloned, updated during the clone, and then the MachineSet updated. This is somewhat similar to the approach used in the current MAPI PoC of cloning the `providerSpec` object, updating it and then patching the `MachineSet`. The `bootstrap` object is platform agnostic, making it somewhat simpler to update. 
 
 Based on the observation above, here is a rough outline of what CAPI support would require:
-- CAPI backed MachineSet detection, so the MSBIC knows when to invoke the CAPI path.
+- CAPI backed MachineSet detection, so the BIC knows when to invoke the CAPI path.
 - If a boot image update is required, create a new `InfrastructureMachineTemplate` by cloning the existing and updating the boot image reference within. The name of the new `InfrastructureMachineTemplate` object will be generated by hashing the template content. This is consistent with the current CAPI approach to naming new objects.
-- Updating the Ignition stub in `bootstrap.dataSecretName` to the managed stub secret(`*-managed`) if needed.
 - CAPI backed MachineSet patching. Once patching is successfully completed, the original `InfrastructureMachineTemplate` can be garbage collected. 
 
 When [MachineDeployments](https://cluster-api.sigs.k8s.io/developer/architecture/controllers/machine-deployment#machinedeployment) are introduced into CAPI, this mechanism will need to be updated to reconcile them as well. `MachineDeployments` manage a fleet of `MachineSets`, and this can be checked via the `OwnerReference` field in the `MachineSet` object. In the long term, `MachineDeployments` and `MachineSets` are expected to co-exist so this feature will need to account for both cases. 
@@ -450,7 +449,7 @@ The above example partially selects CAPI MachineSets and all MAPI Machinesets. P
 It is also important to note that if a user opts out of the feature after having some machine resources updated, the opted out resources will retain the boot images that
 they were last updated to by this feature. There is no rollback to cluster install values, i.e. the original boot images that the resources started on before they were enrolled for updates. Opting out a machine resource simply means that the machine resources will no longer have updated boot images values.
 
-An Success/Failure condition will be applied on the MachineConfiguration object by the MSBIC. This will require [some rework](https://github.com/openshift/api/pull/1789) of the `MachineConfigurationStatus` field before new condition types can be added to this object. The condition type names are still TBD, but could be as simple as `MSBICReconciled` and `MSBICFailed`. 
+The BIC also reports `BootImageUpdateProgressing` and `BootImageUpdateDegraded` conditions on the `MachineConfiguration` object to communicate reconciliation status.
 
 A [ValidatingAdmissionPolicy](https://kubernetes.io/docs/reference/access-authn-authz/validating-admission-policy/) will be implemented via an MCO manifest that will restrict updating the `ManagedBootImages` object to only supported platforms(initially, just GCP). This will be updated as we phase in support for other platforms. Here is a sample policy that would do this:
 
@@ -695,7 +694,7 @@ type BootImageHistoryList struct {
 }
 
 ```
-There will be one instance of this per machine management resource(which can be a MachineSet[MAPI or CAPI], MachineDeployment...etc). It will be named the in the following format: `$(name)-$(resource)`. The MSBIC is responsible for creating and updating this CR when a boot image update takes place. This CR will exist in the same namespace as the resource.
+There will be one instance of this per machine management resource(which can be a MachineSet[MAPI or CAPI], MachineDeployment...etc). It will be named the in the following format: `$(name)-$(resource)`. The BIC is responsible for creating and updating this CR when a boot image update takes place. This CR will exist in the same namespace as the resource.
 
 YAML Example for a MAPI backed machineset scenario:
 ```
@@ -828,7 +827,7 @@ Some combination of the following mechanisms should be implemented to alert user
 
 #### Proactive
 Add a new field in the `MachineConfiguration` object for configuration of the skew enforcement mechanism. More details about this can be found in the [API extensions section](#skew-enforcement). This field will store the OCP version of the cluster's current boot image and allows for easy comparison against the skew limit described in the release payload.
-  - For machineset backed clusters, this would be updated by the MSBIC after it successfully updates boot images for all machine resources in the cluster. 
+  - For machineset backed clusters, this would be updated by the BIC after it successfully updates boot images for all machine resources in the cluster. 
   - For non-machineset backed clusters, this would be updated by the cluster admin to indicate the last manually updated bootimage. The cluster admin would need to update this API object every few releases, when the RHEL minor on which the RHCOS container is built on changes (e.g. 9.6->9.8). 
 
 The cluster admin may also choose to opt-out of skew management via this field, acknowledging that their scaling ability may be limited.
