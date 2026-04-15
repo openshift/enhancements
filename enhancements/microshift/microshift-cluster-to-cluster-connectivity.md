@@ -274,8 +274,6 @@ N/A
   via `libovsdb/cmd/modelgen` or handwritten (importing the 
   model package would import many other ovn-kubernetes packages)
 - Route ownership via ExternalIDs (`microshift-c2cc` owner tag)
-- Adaptive reconciliation time (start quick until first success,
-  then slow down)
 
 **SNAT Bypass**: Three-layer approach to preserve pod
 source IPs end-to-end:
