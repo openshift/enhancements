@@ -15,7 +15,7 @@ approvers:
 api-approvers:
   - "@JoelSpeed"
 creation-date: 2024-05-29
-last-updated: 2024-07-30
+last-updated: 2026-03-11
 tracking-link:
   - https://issues.redhat.com/browse/OCPSTRAT-1245
 see-also:
@@ -171,6 +171,8 @@ unmanaged: true
 ##### Installer callers
 
 Hive, the assisted installer, and other actors who create install-configs will need to learn to set `OPENSHIFT_INSTALL_EXPERIMENTAL_DISABLE_IMAGE_POLICY` if they wish to test unsigned releases that enable the feature-gate.
+
+The assisted installer set up `OPENSHIFT_INSTALL_EXPERIMENTAL_DISABLE_IMAGE_POLICY` propagation in [OCPBUGS-78190][].
 
 #### Cincinnati graph data
 
@@ -685,6 +687,7 @@ For now, we're expecting the only folks who need this knob will be Red-Hat-inter
 [OCP-Dockerfile]: https://github.com/openshift/cluster-update-keys/blob/c0641e083d1bbe7d6f78e7e0c98c6d56a8b89d24/Dockerfile.rhel
 [OCP-manifest]: https://github.com/openshift/cluster-update-keys/blob/c0641e083d1bbe7d6f78e7e0c98c6d56a8b89d24/manifests.rhel/0000_90_cluster-update-keys_configmap.yaml
 [OCP-signatures]: https://mirror.openshift.com/pub/openshift-v4/signatures/openshift/release/
+[OCPBUGS-78190]: https://issues.redhat.com/browse/OCPBUGS-78190
 [OCPNODE-2333]: https://issues.redhat.com/browse/OCPNODE-2333
 [OKD-Dockerfile]: https://github.com/openshift/cluster-update-keys/blob/c0641e083d1bbe7d6f78e7e0c98c6d56a8b89d24/Dockerfile
 [OKD-manifest]: https://github.com/openshift/cluster-update-keys/blob/c0641e083d1bbe7d6f78e7e0c98c6d56a8b89d24/manifests/0000_90_cluster-update-keys_configmap.yaml
