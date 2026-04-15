@@ -935,43 +935,37 @@ Some points to note:
 
 ### Enforcement of bootimage skew
 
-There should be some mechanism that will alert the user when a cluster's bootimage are out of date. To allow for this, the `coreos-bootimages` configmap will gain a new field, which will store the boot image required for upgrading to the next y stream release.
+There should be some mechanism that will alert the user when a cluster's bootimages are out of date. Generally speaking, we would like to keep the minimum required bootimage version aligned to the RHEL version we are shipping in the payload and constant for a given release's z stream. For example, a 9.6 bootimage will be allowed until 9.8 is shipped via RHCOS. We would like to keep this customizable, such that any major breaking changes outside of RHEL major/minor can still be enforced as a one-off.
 
-Generally speaking, we would like to keep the minimum required bootimage version aligned to the RHEL version we are shipping in the payload and constant for a given release's z stream. For example, a 9.6 bootimage will be allowed until 9.8 is shipped via RHCOS. We would like to keep this customizable, such that any major breaking changes outside of RHEL major/minor can still be enforced as a one-off.
+A new field in the `MachineConfiguration` object configures the skew enforcement mechanism. More details about this can be found in the [API extensions section](#skew-enforcement). This field stores the OCP version of the cluster's current boot image and allows for easy comparison against the skew limit described in the release payload. The mechanism operates in three modes:
+  - **Automatic**: The MCO will automatically update boot images and manage the skew in this mode. This mode cannot be directly set by the user and is self selected by the MCO when certain conditions are met: (i) the platform supports automatic boot image management (ii) the user hasn't disabled boot image updates.
+  - **Manual**: The cluster admin is expected to update boot images and self report the current bootimage in the aforementioned field. The cluster admin would need to update this API object every few releases, when the RHEL minor on which the RHCOS container is built on changes (e.g. 9.6->9.8).
+  - **None**: The cluster admin may choose to opt-out of skew management via this field, acknowledging that their scaling ability may be limited. When disabled, the MCO will propagate a Prometheus alert to warn the user that scaling ability may be affected.
 
-#### Enforcement options
+During the first run of this mechanism, the MCO will use the OCP version from install time (derived from the [`clusterversion`](https://github.com/openshift/enhancements/blob/master/enhancements/update/clusterversion-history-pruning.md) object) to determine the boot image of the cluster. The following flowchart indicates the initial mode determination flow:
 
-Some combination of the following mechanisms should be implemented to alert users, particularly non-machineset backed scaled environments. The options generally fall under proactive enforcement (require users to either update or acknowledge risk before upgrading to a new version) vs. reactive enforcement (only fail when a non-compliant bootimage is being used to scale into the cluster).
+```mermaid
+flowchart TD
+    A[Operator sync loop] --> B{Is the skew API spec set?}   
+    B --> |No|C{Can the MCO manage boot images for this cluster?}
+    B --> |Yes|G[Reflect skew API spec to status]
+    G --> E[Done]   
+    C --> |No|D[Is this a baremetal cluster that uses the machine-os-images to provision new machines?]
+    D --> |No|J[Set skew API status to Manual]
+    D --> |Yes|I[Set skew API status to None]
+    C --> |Yes|F[Set skew API status to Automatic]
+    J --> E
+    F --> E
+    I --> E
+```
+> Baremetal clusters installed after 4.10 have automatically managed boot images. See [mco#5768](https://github.com/openshift/machine-config-operator/pull/5768) for additional info.
 
-#### Proactive
-Add a new field in the `MachineConfiguration` object for configuration of the skew enforcement mechanism. More details about this can be found in the [API extensions section](#skew-enforcement). This field will store the OCP version of the cluster's current boot image and allows for easy comparison against the skew limit described in the release payload.
-  - For machineset backed clusters, this would be updated by the BIC after it successfully updates boot images for all machine resources in the cluster. 
-  - For non-machineset backed clusters, this would be updated by the cluster admin to indicate the last manually updated bootimage. The cluster admin would need to update this API object every few releases, when the RHEL minor on which the RHCOS container is built on changes (e.g. 9.6->9.8). 
-
-The cluster admin may also choose to opt-out of skew management via this field, acknowledging that their scaling ability may be limited.
-
-This object can then be monitored to enforce skew limits. If the skew is determined to be too large, the MCO can update its `ClusterOperator` object with an `Upgradeable=False` condition, along with remediation steps in the `Condition` message. This will signal to the CVO that the cluster is not suitable for an upgrade to the next y stream release.
+The skew enforcement field can then be monitored to enforce skew limits. If the skew is determined to be too large, the MCO can update its `ClusterOperator` object with an `Upgradeable=False` condition, along with remediation steps in the `Condition` message. This will signal to the CVO that the cluster is not suitable for an upgrade to the next y stream release.
 
 To remediate, the cluster admin would then have to do one of the following:
-- Turn on boot image updates if it is a machineset backed cluster.
+- Turn on boot image updates if it is a cluster that supports automatic updates.
 - Manually update the boot image and update the skew enforcement object if it is a non machineset backed cluster.
-- Opt-out of skew enforcement altogether, giving up scaling ability.
-
-A potential problem here is that the way boot images are stored in the machineset is lossy. In certain platforms, there is no way to recover the boot image metadata from the MachineSet. This is most likely to happen the first time the MCO attempts to do skew enforcement on a cluster that has never had boot image updates. In such cases, the MCO will use the OCP version from install time(derived from the [`clusterversion`](https://github.com/openshift/enhancements/blob/master/enhancements/update/clusterversion-history-pruning.md) object) to determine skew instead. 
-
-#### Reactive
-1. Have the MCS reject new ignition requests if the aformentioned object indicates that the cluster's bootimages are out of date. The MCS would then signal to the cluster admin that scale-up is not available until the skew has been resolved. Raising the alarm from the MCS at the cluster level will help prevent additional noise for the cluster infra team, and make apparent that the scaling failure was intentional. The MCS will also attempt to serve an Ignition config that writes a message to `/etc/issue` explaining that the bootimage is too old, which will be visible from the node's console.
-2. Add a service to be shipped via RHCOS/MCO templates, which will do a check on incoming OS container image vs currently booted RHCOS version. This runs on firstboot right after the MCD pulls the new image, and will prevent the node to rebase to the updated image if the drift is too far. This would cover environments that do not use the MCS such as [installing via ISO on bare metal](https://docs.redhat.com/en/documentation/openshift_container_platform/4.18/html/installing_on_bare_metal/user-provisioned-infrastructure#installation-user-infra-machines-iso_installing-bare-metal).
-
-RHEL major versions will no longer be cross-compatible. i.e. if you wish to have a RHEL10 machineconfigpool, you must use a RHEL10 bootimage.
-
-### Drawbacks
-
-TBD, based on the open questions below.
-
-## Design Details
-
-### Open Questions
+- Opt-out of skew enforcement altogether, acknowledging that scaling ability may be affected.
 
 ### Test Plan
 
