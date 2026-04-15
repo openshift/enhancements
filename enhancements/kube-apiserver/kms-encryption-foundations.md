@@ -54,7 +54,7 @@ KMS support enables integration with external key management systems where encry
 - Credential/ConfigMap validation with degraded status reporting
 - Periodic sync of referenced Secrets and ConfigMaps to all active key secrets
 - KMS plugin deployment/lifecycle management (see [KMS Plugin Lifecycle Management](#kms-plugin-lifecycle-management-tech-preview-v2))
-- API field definitions for KMS provider configuration in APIServer resource (covered by a [separate EP](https://github.com/openshift/enhancements/pull/1954))
+- API field definitions for KMS provider configuration in APIServer resource
 
 **Tech Preview v3 — Goals:**
 - Report current KMS encryption status to platform users (e.g., active KMS plugins, migration progress)
@@ -73,6 +73,7 @@ KMS support enables integration with external key management systems where encry
 
 - Implementing KMS plugins (provided by upstream Kubernetes/vendors)
 - Recovery from KMS key loss (see [KMS Key Loss Considerations](#kms-key-loss-considerations) for details)
+- Allowing cluster admins to configure which resources they want to encrypt
 
 ## Proposal
 
@@ -85,7 +86,7 @@ Encryption controllers use the static endpoint in EncryptionConfiguration. KMS-t
 
 **Tech Preview v2 (Managed Plugin Lifecycle):**
 
-Users specify plugin-specific configuration for managed KMS provider types (e.g. Vault) via the APIServer resource (API fields covered by a separate EP).
+Users specify plugin-specific configuration for managed KMS provider types (e.g. Vault) via the APIServer resource.
 Encryption controllers split the KMS configuration API into multiple parts stored atomically in encryption key secrets:
 
 1. `kms-encryption-config` — structured Kubernetes KMS v2 provider configuration used to generate the EncryptionConfiguration provider entry (apiVersion: v2, name, endpoint, timeout)
@@ -201,14 +202,30 @@ To enable the apiservers to access the KMS plugin, the `/var/run/kmsplugin` dire
 
 #### Steps for Enabling KMS Encryption (Tech Preview v2)
 
-1. Cluster admin configures KMS provider in the APIServer resource (API fields covered by a separate EP):
+1. Cluster admin configures KMS provider in the APIServer resource with Vault-specific configuration:
    ```yaml
    apiVersion: config.openshift.io/v1
    kind: APIServer
    spec:
      encryption:
        type: KMS
-      # Vault API specific fields
+       kms:
+         type: Vault
+         vault:
+           kmsPluginImage: registry.example.com/vault-plugin@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+           vaultAddress: https://vault.example.com:8200
+           vaultNamespace: my-namespace
+           tls:
+             caBundle:
+               name: vault-ca-bundle  # ConfigMap in openshift-config namespace
+             serverName: vault.example.com
+           authentication:
+             type: AppRole
+             appRole:
+               secret:
+                 name: vault-approle # Secret in openshift-config namespace with roleID and secretID keys
+           transitMount: transit
+           transitKey: my-encryption-key
    ```
 
 2. keyController detects the configuration, splits it into `kms-encryption-config`, `kms-provider-config`, `kms-secret-data`, and `kms-configmap-data`, and creates an encryption key secret:
@@ -441,7 +458,28 @@ and deploy KMS plugins at the hardcoded endpoint `unix:///var/run/kmsplugin/kms.
 
 **Tech Preview V2**
 
-API changes for Tech Preview v2 are covered by a separate EP. This EP assumes the API exists and describes only the encryption controller-side implementation. The API provides provider-specific fields (image, vault-address, vault-namespace, transit-key, transit-mount, etc.) that keyController splits into `kms-encryption-config` and `kms-provider-config`.
+In Tech Preview v2 we propose to extend the existing `KMSConfig`, adding
+support to OCP-managed Vault KMS Plugin. The Vault KMS Plugin communicates
+with Vault Enterprise to encrypt and decrypt resources. Users are expected to
+fully configure and support Vault Enterprise themselves. OCP is responsible for
+deploying and managing the Vault KMS Plugin.
+
+Vault KMS Plugin configuration documentation can be found [here](https://github.com/hashicorp/web-unified-docs/blob/ab6191e4856b52a59a87fe0f17703671a7317ec6/content/vault/v1.21.x/content/docs/deploy/kubernetes/kms/configuration.mdx)
+
+The `KMSConfig` currently supports configuring an AWS KMS Plugin through a union
+discriminator. Since there is no current backing support for AWS, and no clients
+using this API, we propose the removal of the `AWSKMSProvider` type and the
+related `AWSKMSConfig`. We also propose removing the unused
+`KMSEncryptionProvider` feature gate. We propose to keep the union
+discriminator in preparation for future requests to support other KMS Plugins.
+
+We propose to extend `KMSConfig` with `VaultKMSConfig`, also adding
+`VaultKMSProvider` as new `KMSProviderType`.
+We propose that the existing `KMSEncryption` feature gate be extended to include
+the Vault KMS Plugin API.
+
+The full structure of the proposed Vault KMS Plugin configuration API can be
+found in [this pull request](https://github.com/openshift/api/pull/2805).
 
 ### Topology Considerations
 
