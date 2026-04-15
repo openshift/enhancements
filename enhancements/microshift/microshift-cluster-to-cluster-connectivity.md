@@ -270,10 +270,30 @@ N/A
 **Route Manager Controller**:
 - Persistent libovsdb NBDB connection with reconnect
   and full resync on DB wipe
-- Small OVN NB models: either generated from `ovn-nb.ovsschema`
-  via `libovsdb/cmd/modelgen` or handwritten (importing the 
-  model package would import many other ovn-kubernetes packages)
-- Route ownership via ExternalIDs (`microshift-c2cc` owner tag)
+- Small OVN NB models: either generated from
+  `ovn-nb.ovsschema` via `libovsdb/cmd/modelgen` or
+  handwritten (importing the model package would import
+  many other ovn-kubernetes packages)
+- Route ownership via ExternalIDs (`microshift-c2cc`
+  owner tag)
+- Event-driven reconciliation with periodic fallback:
+  the controller subscribes to change notifications for
+  each managed subsystem and reconciles immediately when
+  external modifications are detected (e.g., OVN-K
+  flushing nftables chains, routes being deleted). A
+  periodic fallback ticker covers subsystems without
+  event APIs (IP rules) and acts as a safety net.
+  Subscriptions used:
+  - OVN routes: libovsdb `Monitor()` on the
+    `LogicalRouterStaticRoute` table
+  - Linux kernel routes: `netlink.RouteSubscribe()`
+    for table 200
+  - nftables rules: netlink `NFNLGRP_NFTABLES`
+    subscription for chain flush detection
+  - Node annotation: Kubernetes `Watch()` on the local
+    Node object
+  - IP rules: no subscription API available — covered
+    by periodic fallback
 
 **SNAT Bypass**: Three-layer approach to preserve pod
 source IPs end-to-end:
@@ -284,8 +304,12 @@ source IPs end-to-end:
    this, OVN-K masquerades all outbound pod traffic to
    the node's underlay IP, destroying the original pod
    source before it even leaves the host. Rules are
-   tagged with a `c2cc-no-masq` comment and
-   re-reconciled if OVN-K recreates the chain.
+   tagged with a `c2cc-no-masq` comment. OVN-K flushes
+   this chain on startup and during its own
+   reconciliation, destroying all external rules. C2CC
+   detects this via nftables netlink event subscription
+   (`NFNLGRP_NFTABLES`) and re-inserts rules
+   immediately.
 2. **Node annotation** (cooperative API) — sets
    `k8s.ovn.org/node-ingress-snat-exclude-subnets`
    on the Node object. OVN-K reads this annotation
@@ -458,8 +482,14 @@ The C2CCStatus CRD is status-only — no webhooks or
 finalizers. Updated on each reconciliation cycle.
 
 **Failure modes:**
-- NBDB connection lost: retries with backoff, status
-  reports unhealthy.
+- NBDB connection lost: libovsdb reconnects
+  automatically, monitor subscription triggers full
+  resync on reconnect, status reports unhealthy until
+  recovery.
+- OVN-K restart / nftables flush: detected via netlink
+  event subscription, rules re-inserted within seconds.
+- Kernel route deletion: detected via
+  `RouteSubscribe()`, routes re-created immediately.
 - Kernel route failure: OVN routes exist but traffic
   cannot exit overlay, status reports degraded.
 - CoreDNS failure: IP connectivity works but DNS does
