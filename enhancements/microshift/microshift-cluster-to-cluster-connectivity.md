@@ -25,8 +25,8 @@ superseded-by: []
 
 ## Summary
 
-This enhancement enables cross-cluster Pod-to-Pod,
-Pod-to-Service (ClusterIP), and Pod-to-Service (DNS)
+This enhancement enables cross-cluster Pod-to-Pod
+and Pod-to-Service (ClusterIP and headless, via DNS)
 communication between independent MicroShift instances.
 C2CC uses OVN static routes for overlay-to-underlay
 routing, Linux kernel policy routing for host-level
@@ -70,9 +70,10 @@ directly through the MicroShift config file.
 
 ### Goals
 
-1. Pod-to-Pod, Pod-to-Service (ClusterIP), and
-   Pod-to-Service (DNS) communication between MicroShift
-   clusters with non-overlapping CIDRs.
+1. Pod-to-Pod, Pod-to-Service (ClusterIP via DNS),
+   and Pod-to-Service (headless via DNS) communication
+   between MicroShift clusters with non-overlapping
+   CIDRs.
 2. Declarative configuration via the MicroShift config
    file with validation.
 3. Source pod IP preservation by bypassing SNAT for
@@ -415,9 +416,14 @@ partial connectivity. The status CR reports the failure.
 Requires multi-VM test infrastructure: two VMs
 with independent MicroShift configs.
 
-**Functional**: Pod-to-Pod, Pod-to-Service (IP and DNS)
-in both directions; IPv4, IPv6, dual-stack; config
-removal cleanup.
+**Functional**: Pod-to-Pod (IP), Pod-to-ClusterIP-Service
+(DNS), and Pod-to-Headless-Service (DNS) in both
+directions; IPv4, IPv6, dual-stack; config removal
+cleanup. All cross-cluster service access is via DNS
+(`<svc>.<ns>.svc.<remote-domain>`). ClusterIP Services
+exercise the service routing path (table 201); headless
+Services (`clusterIP: None`) resolve directly to pod IPs,
+exercising the pod routing path (table 200).
 
 **Resilience**: MicroShift restart, host reboot, network
 loss, OVN-K restart, firewall reload, OVN NB DB wipe.
