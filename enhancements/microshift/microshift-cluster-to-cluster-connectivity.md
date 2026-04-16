@@ -357,6 +357,19 @@ measured from probe RTT (min, max, avg, stddev over a
 rolling window). The controller removes the probe pod
 when C2CC config is removed.
 
+**Default NetworkPolicy — nextHop IP block**: The
+controller deploys a NetworkPolicy that denies ingress
+from each remote cluster's nextHop IP (the remote
+node's underlay address). Legitimate cross-cluster pod
+traffic always carries pod source IPs (via SNAT bypass);
+the nextHop IP should never be the source of
+pod-to-pod communication. This prevents a rogue
+process on the remote node from accessing local pods
+directly and ensures that if SNAT bypass temporarily
+fails (e.g., during OVN-K restart), traffic is dropped
+rather than admitted with the wrong source IP —
+fail-closed rather than fail-open.
+
 ### Risks and Mitigations
 
 **No mutual authentication**: Any host reachable at the
