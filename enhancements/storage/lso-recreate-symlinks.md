@@ -10,7 +10,7 @@ approvers:
 api-approvers:
   - "None"
 creation-date: 2025-11-06
-last-updated: 2026-01-20
+last-updated: 2026-04-16
 tracking-link:
   - "https://issues.redhat.com/browse/STOR-2682"
 see-also:
@@ -121,6 +121,9 @@ const (
 type LocalVolumeDeviceLinkSpec struct {
 	// PersistentVolumeName is the name of the persistent volume linked to the device
 	PersistentVolumeName string `json:"persistentVolumeName"`
+	// nodeName is the name of the OpenShift node on which this
+	// LocalVolumeDeviceLink object exists
+	NodeName string `json:"nodeName"`
 	// Policy of the device link
 	Policy LocalVolumeDeviceLinkPolicy `json:"policy"`
 }
@@ -181,6 +184,9 @@ Diskmaker will use the following selection criteria when choosing the preferred 
 4. There is no other symlink in `/mnt/local-storage/<storageclass>` pointing to this by-id target.
 
 Diskmaker will keep the link name and only change the link target. For example, if a PV has an existing symlink `/mnt/local-storage/localblock/scsi-0NVME_MODEL_abcde` pointing to `/dev/disk/by-id/scsi-0NVME_MODEL_abcde`, but there is a by-id link `/dev/disk/by-id/scsi-2ace42e0035eabcde`, setting the device link policy to `PreferredLinkTarget` will cause diskmaker to replace `/mnt/local-storage/localblock/scsi-0NVME_MODEL_abcde` with a new symlink pointing to `/dev/disk/by-id/scsi-2ace42e0035eabcde`.
+
+For cases when a PersistentVolume disappears, e.g. during the volume wipe and re-creation, LocalVolumeDeviceLink object has `spec.nodeName`, so the diskmaker can identify what LocalVolumeDeviceLink belongs to which node.
+If the PV was always present, the diskmaker could technically resolve PV `spec.nodeAffinity` to find the node, but it has proven to be error prone during PV re-creation.
 
 Ceph Bluestore (and therefore ODF) does not automatically create by-uuid symlinks on the node. See [Bug 2414811](https://bugzilla.redhat.com/show_bug.cgi?id=2414811). However, diskmaker will still record the UUID from `ceph-volume raw list /dev/xyz --format=json` in `localVolumeDeviceLink.status.filesystemUUID` to help with support procedures.
 
