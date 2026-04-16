@@ -456,6 +456,13 @@ directly from Cluster A's host to a pod on Cluster B
 — should be rejected (traffic from hosts should not
 reach remote pods).
 
+**Networking Regression**: Run existing MicroShift
+networking test suites (networking smoke, DNS, router)
+against a C2CC-configured cluster to verify that C2CC's
+extra OVN routes, ip rules, nftables rules, and node
+annotations do not break normal single-cluster
+networking.
+
 **Resilience**: MicroShift restart, host reboot, network
 loss, OVN-K restart, firewall reload, OVN NB DB wipe.
 
