@@ -375,7 +375,12 @@ fail-closed rather than fail-open.
 **No mutual authentication**: Any host reachable at the
 configured nextHop is implicitly trusted. IPSec
 documentation will be provided for encryption and
-authentication.
+authentication. For IPSec-only enforcement, users
+should configure Libreswan shunt policies
+(`failureshunt=drop`, `negotiationshunt=drop`) to
+prevent plaintext fallback, and optionally add nftables
+`meta ipsec missing` rules to drop non-ESP traffic for
+remote CIDRs at the kernel level.
 
 **IPSec MTU overhead**: IPSec encapsulation reduces the
 effective MTU, which can cause packet drops. MTU
@@ -447,7 +452,11 @@ a NetworkPolicy denies ingress from Cluster A's pod
 CIDR. This validates end-to-end SNAT bypass — without
 source IP preservation, the remote cluster would see
 the node IP and pod-level NetworkPolicies would not
-match.
+match. Also verify that the default nextHop IP block
+NetworkPolicy (deployed by the controller) denies
+traffic sourced from the remote node's underlay IP:
+curl directly from Cluster A's host to a pod on
+Cluster B — should be rejected.
 
 **Resilience**: MicroShift restart, host reboot, network
 loss, OVN-K restart, firewall reload, OVN NB DB wipe.
@@ -459,7 +468,13 @@ reconciliation cycles.
 domain isolation.
 
 **IPSec**: Libreswan setup, ESP verification, MTU
-validation with double encapsulation.
+validation with double encapsulation, plaintext
+rejection (verify traffic is dropped — not sent in
+plaintext — when IPSec SAs are absent and enforcement
+policies are configured), host-to-pod rejection (curl
+directly from Cluster A's host to a pod on Cluster B
+— should be rejected as the traffic bypasses the IPSec
+tunnel).
 
 **Upgrade**: Verify C2CC connectivity survives a
 MicroShift upgrade on one or both clusters.
