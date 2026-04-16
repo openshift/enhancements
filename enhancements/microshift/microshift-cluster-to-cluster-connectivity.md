@@ -182,30 +182,31 @@ MicroShift clusters.
 
 4. On each host, the user configures the firewall to
    allow cross-cluster traffic. The remote cluster's pod
-   and service CIDRs must be added to the trusted zone,
-   along with the remote host IP:
+   and service CIDRs must be added to the trusted zone:
 
    ```bash
-   # On Cluster A — trust Cluster B's networks and host
+   # On Cluster A — trust Cluster B's pod and service CIDRs
    sudo firewall-cmd --permanent --zone=trusted \
      --add-source=10.45.0.0/16
    sudo firewall-cmd --permanent --zone=trusted \
      --add-source=10.46.0.0/16
-   sudo firewall-cmd --permanent --zone=trusted \
-     --add-source=192.168.122.101/32
    sudo firewall-cmd --reload
    ```
 
    ```bash
-   # On Cluster B — trust Cluster A's networks and host
+   # On Cluster B — trust Cluster A's pod and service CIDRs
    sudo firewall-cmd --permanent --zone=trusted \
      --add-source=10.42.0.0/16
    sudo firewall-cmd --permanent --zone=trusted \
      --add-source=10.43.0.0/16
-   sudo firewall-cmd --permanent --zone=trusted \
-     --add-source=192.168.122.100/32
    sudo firewall-cmd --reload
    ```
+
+   Note: do not add the remote host IP to the trusted
+   zone unless IPSec is configured (IPSec IKE negotiation
+   requires host-to-host UDP 500/4500 traffic). Omitting
+   the host IP prevents host-originated traffic from
+   reaching remote pods at the firewall level.
 
 5. The user restarts MicroShift on each host.
 
@@ -357,30 +358,28 @@ measured from probe RTT (min, max, avg, stddev over a
 rolling window). The controller removes the probe pod
 when C2CC config is removed.
 
-**Default NetworkPolicy — nextHop IP block**: The
-controller deploys a NetworkPolicy that denies ingress
-from each remote cluster's nextHop IP (the remote
-node's underlay address). Legitimate cross-cluster pod
-traffic always carries pod source IPs (via SNAT bypass);
-the nextHop IP should never be the source of
-pod-to-pod communication. This prevents a rogue
-process on the remote node from accessing local pods
-directly and ensures that if SNAT bypass temporarily
-fails (e.g., during OVN-K restart), traffic is dropped
-rather than admitted with the wrong source IP —
-fail-closed rather than fail-open.
+**Host-to-Pod traffic prevention**: C2CC is designed
+for pod-to-pod and pod-to-service communication only.
+Traffic originating from a host (whether the configured
+nextHop or any other host on the subnet) should not
+reach pods on a remote cluster. The controller makes a
+best-effort to prevent this by deploying default
+NetworkPolicies and by recommending firewall
+configurations that trust only remote pod and service
+CIDRs, not host IPs. Since C2CC preserves source pod
+IPs end-to-end via SNAT bypass, NetworkPolicies can
+reliably distinguish pod traffic from host traffic.
 
 ### Risks and Mitigations
 
 **No mutual authentication**: Any host reachable at the
 configured nextHop is implicitly trusted. IPSec
 documentation will be provided for encryption and
-authentication. For IPSec-only enforcement, users
-should configure Libreswan shunt policies
-(`failureshunt=drop`, `negotiationshunt=drop`) to
-prevent plaintext fallback, and optionally add nftables
-`meta ipsec missing` rules to drop non-ESP traffic for
-remote CIDRs at the kernel level.
+authentication. For IPSec-only enforcement,
+documentation will cover Libreswan shunt policies
+(`failureshunt=drop`, `negotiationshunt=drop`) and
+nftables `meta ipsec missing` rules to prevent
+plaintext traffic.
 
 **IPSec MTU overhead**: IPSec encapsulation reduces the
 effective MTU, which can cause packet drops. MTU
@@ -452,11 +451,10 @@ a NetworkPolicy denies ingress from Cluster A's pod
 CIDR. This validates end-to-end SNAT bypass — without
 source IP preservation, the remote cluster would see
 the node IP and pod-level NetworkPolicies would not
-match. Also verify that the default nextHop IP block
-NetworkPolicy (deployed by the controller) denies
-traffic sourced from the remote node's underlay IP:
-curl directly from Cluster A's host to a pod on
-Cluster B — should be rejected.
+match. Also verify host-to-pod prevention: curl
+directly from Cluster A's host to a pod on Cluster B
+— should be rejected (traffic from hosts should not
+reach remote pods).
 
 **Resilience**: MicroShift restart, host reboot, network
 loss, OVN-K restart, firewall reload, OVN NB DB wipe.
