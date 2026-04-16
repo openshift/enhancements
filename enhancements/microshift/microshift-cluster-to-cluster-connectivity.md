@@ -425,6 +425,17 @@ exercise the service routing path (table 201); headless
 Services (`clusterIP: None`) resolve directly to pod IPs,
 exercising the pod routing path (table 200).
 
+**NetworkPolicy**: Verify that NetworkPolicies on the
+remote cluster can enforce access control based on
+cross-cluster source pod IPs. A pod from Cluster A
+should be able to reach a pod in a namespace where
+ingress is allowed but be blocked in a namespace where
+a NetworkPolicy denies ingress from Cluster A's pod
+CIDR. This validates end-to-end SNAT bypass — without
+source IP preservation, the remote cluster would see
+the node IP and pod-level NetworkPolicies would not
+match.
+
 **Resilience**: MicroShift restart, host reboot, network
 loss, OVN-K restart, firewall reload, OVN NB DB wipe.
 
