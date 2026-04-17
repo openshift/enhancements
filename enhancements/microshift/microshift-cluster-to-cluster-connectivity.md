@@ -342,7 +342,15 @@ cluster sources.
 
 **CoreDNS Integration**: Per-remote-cluster server
 block with domain rewrite and forwarding to the remote
-DNS IP (10th IP in service CIDR).
+DNS IP (10th IP in service CIDR) such as:
+```
+other-cluster.local:5353 {
+    bufsize 1232
+    errors
+    rewrite name suffix .other-cluster.local .cluster.local answer auto
+    forward . 10.46.0.10:53
+}
+```
 
 **Healthcheck Pod**: The C2CC controller deploys a
 lightweight probe Pod in a dedicated namespace when 
