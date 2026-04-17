@@ -428,8 +428,8 @@ partial connectivity. The status CR reports the failure.
 2. **Healthcheck pod discovery**: How does the local
    probe pod discover the remote probe pod's IP? DNS
    is not reliable for this since the user will be
-   able to override CoreDNS configuration completely.
-   Maybe we can hardcode Cluster IP like the CoreDNS?
+   able to override CoreDNS configuration completely
+   (see OCPSTRAT-2998). Maybe we can hardcode Cluster IP like the CoreDNS?
 
 3. **Routing table ID**: Are tables 200 and 201 safe to hardcode,
    or should they be configurable to avoid conflicts with
