@@ -28,7 +28,7 @@ approvers:
 api-approvers:
   - "@joelspeed, for API and infrastructure config"
 creation-date: 2025-12-10
-last-updated: 2026-03-13
+last-updated: 2026-04-20
 tracking-link:
   - https://issues.redhat.com/browse/OCPEDGE-2280
 see-also:
@@ -66,7 +66,8 @@ The controlPlaneTopology responds to control-plane and arbiter node counts.
 The infrastructureTopology responds to worker node counts.
 Clusters can install with Adaptable topology or transition to it from
 selected topologies as a one-way Day 2 operation.
-The initial implementation supports SingleReplica-to-Adaptable transitions.
+The initial implementation supports SingleReplica-to-Adaptable transitions
+on `platform: none` clusters.
 Future stages will add AutomaticQuorumRecovery (AQR) for DualReplica
 behavior on two-node configurations.
 
@@ -177,14 +178,17 @@ The cluster-etcd-operator (CEO) maintains quorum safety through
 topology transitions.
 In Adaptable topology without AQR,
 there is no quorum safety when fewer than 3 control-plane nodes are present.
-A single etcd instance runs whether the cluster has one or
-two control-plane nodes.
 
 When scaling up to 3 control-plane nodes,
-CEO starts two learner etcd instances on the nodes not running etcd.
-CEO then coordinates an atomic transition to promote both learners together.
+CEO adds etcd members sequentially — the same approach used during
+cluster bootstrapping (1→2→3 members).
+Each new node joins as a learner and is promoted to a voting member
+before the next is added.
+The 2-member state (quorum=2) is transient; losing either member
+during this window is fatal.
 When scaling down below 3 control-plane nodes,
-CEO coordinates two etcd instances to leave together, leaving a single instance.
+CEO removes etcd members sequentially, transitioning through the
+2-member state before reaching a single instance.
 
 When nodes are added or removed,
 operators detect the change through the Infrastructure config and adjust
@@ -241,32 +245,68 @@ necessarily during.
 2. The node joins the cluster and receives the control-plane labels
 3. Operators watching the Infrastructure config detect the node count change
 4. When crossing the 2→3 control-plane node threshold:
-   - CEO initiates the etcd scaling process, starting learner instances on the two control-plane nodes not running etcd
-   - CEO coordinates an atomic transition to promote both learner instances together
+   - CEO adds etcd members sequentially, following the cluster bootstrap pattern (1→2→3 members)
+   - Each new node joins as a learner and is promoted to a voting member before the next is added
+   - The 2-member state is transient — quorum requires both members, so losing either is fatal during this window
    - Other operators adjust their behavior to match HighlyAvailable control-plane topology
 5. When scaling down and crossing the 3→2 control-plane node threshold:
-   - CEO coordinates two etcd instances to atomically leave the cluster together
-   - The cluster continues operating with a single etcd instance
+   - CEO removes etcd members sequentially, transitioning through the 2-member state
+   - The cluster continues operating with a single etcd instance once removal completes
    - Other operators adjust their behavior to match SingleReplica control-plane topology
 
 ##### Behavior at Two Control-Plane Nodes (Without AQR)
 
-When scaling from one to two control-plane nodes:
+When scaling from one to two control-plane nodes, etcd scales sequentially
+following the same pattern as cluster bootstrapping:
 
 1. The new control-plane node joins the cluster and receives control-plane labels
 2. The kube-apiserver, kube-controller-manager, and kube-scheduler start on the
    new node via static pods managed by the kubelet
-3. The kube-apiserver on the new node connects to the existing single etcd instance
-   on the original control-plane node
-4. CEO does **not** start an etcd instance on the new node — a single etcd
-   instance continues running
+3. CEO adds an etcd learner on the new node, then promotes it to a voting member
+4. The cluster now has 2 etcd voting members with quorum=2 —
+   losing either member is fatal
 5. Leader elections for kube-controller-manager and kube-scheduler now include
    both nodes, providing redundancy for those components
 6. The effective controlPlaneTopology behavior remains SingleReplica
-7. The cluster cannot tolerate the loss of the node running etcd
+7. There is no availability guarantee in this state
 
-This state is designed to be transient. Users should continue adding a third
-control-plane node to achieve full high availability with etcd quorum.
+This is the same transient state that occurs during cluster bootstrapping
+and is a well-exercised code path.
+
+The two-node control-plane state is unsupported without AQR.
+CLI tooling will enforce that scale-up operations target 3 control-plane
+nodes. If scale-up fails partway through (e.g., the second node fails to
+join), CEO will attempt to roll back to a single etcd member rather than
+leaving the cluster in the 2-member state.
+
+##### Behavior at Three Control-Plane Nodes
+
+The full 1→3 etcd scaling sequence follows the cluster bootstrap pattern:
+
+1. Starting state: 1 etcd voting member (quorum=1)
+2. CEO adds an etcd learner on the second control-plane node
+3. The learner syncs data from the existing voter via snapshot transfer
+4. CEO promotes the learner to a voting member — the cluster now has
+   2 voting members (quorum=2)
+5. CEO adds an etcd learner on the third control-plane node
+6. The learner syncs data from an existing voter
+7. CEO promotes the learner to a voting member — the cluster now has
+   3 voting members (quorum=2)
+8. The cluster can now tolerate the loss of one control-plane node
+
+This is a sequential process, not atomic. The 2-member state in steps
+4–5 is the primary risk window — quorum requires both members, so losing
+either is fatal. This window is minimized by proceeding to step 5
+immediately after promotion.
+
+The 3→1 scale-down sequence reverses this process:
+
+1. Starting state: 3 etcd voting members (quorum=2)
+2. CEO removes one etcd member — 2 members remain (quorum=2)
+3. CEO removes the second etcd member — 1 member remains (quorum=1)
+4. The cluster operates with a single etcd instance
+
+The 2-member state in steps 2–3 carries the same risk as scale-up.
 
 ##### Compact Clusters (Dual-Role Nodes)
 
@@ -313,6 +353,30 @@ A ValidatingAdmissionPolicy will enforce that when either field is set to
 `Adaptable`, both must be set to `Adaptable` together.
 This prevents invalid configurations where control-plane and infrastructure
 topologies are out of sync.
+
+##### Node Count Status Field
+
+A new `controlPlaneNodeCount` field will be added to the Infrastructure
+status to surface the current control-plane node count:
+
+```go
+type InfrastructureStatus struct {
+    // ... existing fields ...
+
+    // controlPlaneNodeCount is the number of control-plane nodes
+    // currently present in the cluster. This field is maintained
+    // automatically and provides operators with a single source of
+    // truth for node count without requiring direct node list permissions.
+    // +optional
+    ControlPlaneNodeCount *int32 `json:"controlPlaneNodeCount,omitempty"`
+}
+```
+
+This allows operators to read the current node count from the
+Infrastructure object rather than requiring each operator to watch
+node objects directly. This reduces the number of watches across
+operators and avoids granting node list permissions to operators
+that don't otherwise need them.
 
 #### Shared Utilities in library-go
 
@@ -503,7 +567,7 @@ The following components require updates to support Adaptable topology:
 | [library-go](#shared-utilities-in-library-go) | Shared utilities for feature gate checks, topology change subscriptions, node count watching, and threshold detection |
 | [Core Operators](#core-operator-changes) | Node count awareness, dynamic replica/placement adjustments via library-go subscriptions |
 | [All Operators](#operator-compatibility-annotations) | Add compatibility annotation to ClusterOperator resources |
-| [cluster-etcd-operator](#how-adaptable-topology-works) | Enhanced scaling logic for 2↔3 node transitions |
+| [cluster-etcd-operator](#how-adaptable-topology-works) | Sequential etcd scaling for node transitions (bootstrap pattern) |
 | [cluster-monitoring-operator](#monitoring-operator-and-telemetry) | Collect and backhaul SLI telemetry for feature adoption and transition metrics |
 | [OLM](#operator-compatibility-annotations) | Operator compatibility annotation support and filtering |
 | [Console](#console-changes) | Operator compatibility display, marketplace filtering, restart with Adaptable topology |
@@ -575,7 +639,7 @@ This section provides quick navigation to relevant content for each reviewing te
 - [Core Operator Changes](#core-operator-changes) - CEO and control plane operator changes
 - [oc CLI Changes](#oc-cli-changes) - CLI tooling for topology transitions
 - [Open Questions - Control Plane](#control-plane-cluster-etcd-operator) - Questions for etcd team
-- [Risks - etcd Data Loss](#risk-etcd-data-loss-if-transitions-are-not-atomic) - Atomic transition requirements
+- [Risks - Quorum Loss](#risk-quorum-loss-during-two-member-transient-state) - Sequential scaling risks
 - [Test Plan - etcd quorum management](#post-transition-tests) - Testing etcd scaling
 - [Service Level Objectives](#service-level-objectives) - SLOs for etcd operations
 - [Operational Aspects](#operational-aspects-of-api-extensions) - Control plane operational considerations
@@ -682,13 +746,29 @@ A new `oc adm topology transition` command will be added to facilitate safe topo
 - `--force` flag to bypass compatibility blocks — requires interactive confirmation acknowledging the cluster will be in an unsupported state. A cluster-scoped event is posted when `--force` is used to enable detection in support cases.
 - Confirmation prompts before applying one-way transitions
 
+A `oc adm topology scale-down` command will orchestrate safe control-plane
+scale-down. The exact interface is under design; one example:
+
+```bash
+oc adm topology scale-down --remove-nodes=<node-b>,<node-c>
+```
+
+This command would:
+1. Validate the specified nodes and that the remaining node count is valid
+2. Cordon the departing nodes
+3. Coordinate with CEO to remove etcd members sequentially
+4. Confirm completion and advise the user to remove the departing nodes
+
+Without this command, manually removing control-plane nodes enters an
+unsupported transient state. Users who do so must recover manually.
+
 #### Core Operator Changes
 
 The following core operators require updates to support Adaptable topology. All will invoke library-go subscription functions and adjust behavior based on node counts:
 
 | Operator | Specific Changes |
 |----------|------------------|
-| cluster-etcd-operator | Enhanced scaling logic for 2↔3 node transitions (see [How Adaptable Topology Works](#how-adaptable-topology-works)) |
+| cluster-etcd-operator | Sequential etcd scaling following bootstrap pattern (see [How Adaptable Topology Works](#how-adaptable-topology-works)) |
 | cluster-authentication-operator | Adjust minimum kube-apiserver replica count checks based on node counts |
 | cluster-ingress-operator | Adjust ingress controller replica counts and placement based on node counts |
 | cluster-monitoring-operator | Adjust monitoring component replica counts and placement based on node counts |
@@ -709,10 +789,14 @@ The console will be updated to:
 
 #### Platform Support Constraints
 
-`platform: none` is supported for all node configurations.
+The initial implementation targets `platform: none` clusters.
+On `platform: none`, the user is responsible for managing their own
+load balancing configuration (VIPs, DNS) when scaling beyond a single node.
 
-`platform: baremetal` requires coordination with the Bare Metal Networking
-team to disable keepalived networking for single-node clusters.
+`platform: baremetal` support is planned for a subsequent phase pending
+resolution of keepalived networking for single-node clusters.
+This requires coordination with the Bare Metal Networking team to disable
+keepalived networking for SNO deployments.
 If this cannot be resolved, `platform: baremetal` support will be limited to
 clusters with 2 or more nodes.
 
@@ -794,17 +878,26 @@ since DualReplica is an existing topology mode.
 - Future AQR implementation will enable DualReplica behavior for
   2-node configurations
 
-#### Risk: etcd Data Loss If Transitions Are Not Atomic
+#### Risk: Quorum Loss During Two-Member Transient State
 
-**Risk**: If CEO cannot make 1→3 or 3→1 etcd member transitions truly atomic,
-data loss or corruption could occur.
+**Risk**: During sequential etcd scaling (1→2→3 or 3→2→1), the cluster
+passes through a 2-member state where quorum=2. Losing either member
+during this window causes quorum loss. Quorum loss alone does not cause
+data loss — that requires split-brain, which only occurs if someone
+forces a new cluster on both sides after quorum is lost.
 
 **Mitigation**:
-- CEO will coordinate atomic transitions when adding or removing
-  two members simultaneously
-- Learner instances are used before promoting members
-- Extensive testing of atomic transition scenarios in CI
-- If atomicity cannot be guaranteed, the feature will be blocked until resolved
+- The 2-member state is transient and follows the same sequential pattern
+  used during cluster bootstrapping — a well-exercised code path
+- Learner instances are used before promoting members to minimize
+  the promotion window
+- No availability guarantee during transitions; users should treat
+  scaling operations as a maintenance window
+- CEO will attempt rollback to the previous state if scaling fails
+  (e.g., rollback to 1 member if the 1→2→3 scale-up fails partway through)
+- Future iterations may explore admitting two learners simultaneously
+  and promoting only when both are ready, eliminating the 2-member
+  voting window entirely
 
 #### Risk: Forced Transitions May Leave Clusters in Unsupported States
 
@@ -922,7 +1015,6 @@ for different source topologies.
 > **Reviewer input requested on the following critical items:**
 >
 > - **#4 — Operator default behavior on unknown topologies** (Operators / OLM): Should operators default to SingleReplica or HighlyAvailable when encountering Adaptable topology before they are updated?
-> - **#8 — etcd atomic member transitions** (cluster-etcd-operator): Can we guarantee both learner promotions happen together (or neither happens) during 1→3 scaling?
 > - **#10 — ValidatingAdmissionPolicy enforcement** (API / Node): Are the proposed CEL expressions sufficient to enforce paired topology field updates, one-way transitions, and valid transition targets?
 
 ### Operators (Core Payload)
@@ -955,11 +1047,13 @@ for different source topologies.
 
 7. **etcd Safety Enforcement**: Can CEO enforce etcd safety for 1↔3 node transitions? DualReplica offloads this to pacemaker. Do we need something similar?
 
-8. **Atomic Member Changes**: Can we guarantee both learner promotions happen together (or neither happens)?
-    a. Is this feasible?
-    b. Ideas for potential changes:
-        - Have etcd do a dry run to validate both learners are promotion-ready and then run the promotion
-        - Introduce a new etcd command that allows you to provide a list of nodes to promote together
+8. **~~Atomic Member Changes~~**: ~~Can we guarantee both learner promotions happen together (or neither happens)?~~
+
+   **Resolved**: Sequential member admission (the bootstrap pattern) is adopted
+   for the first iteration. The 2-member transient state (quorum=2) is accepted
+   as the same risk profile as cluster bootstrapping — a well-exercised code path.
+   Future iterations may explore admitting two learners simultaneously and
+   promoting only when both are ready to eliminate the 2-member voting window.
 
 9. **Preventing Unsafe Transitions**: What other mechanisms are needed to prevent unsafe etcd transitions?
 
