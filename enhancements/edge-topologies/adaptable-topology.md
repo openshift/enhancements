@@ -137,6 +137,8 @@ as nodes are added or removed, allowing growth without redeployment.
   (e.g., transitioning based on application requirements rather than node count)
 * Supporting topology transitions for HyperShift clusters
 * Implementing topology transitions for MicroShift deployments
+* Scaling down control-plane or worker nodes
+  (scale-down support may be addressed in a future enhancement)
 
 ## Proposal
 
@@ -186,11 +188,8 @@ Each new node joins as a learner and is promoted to a voting member
 before the next is added.
 The 2-member state (quorum=2) is transient; losing either member
 during this window is fatal.
-When scaling down below 3 control-plane nodes,
-CEO removes etcd members sequentially, transitioning through the
-2-member state before reaching a single instance.
 
-When nodes are added or removed,
+When nodes are added,
 operators detect the change through the Infrastructure config and adjust
 their deployment strategies, replica counts, and placement policies.
 This happens without cluster reconfiguration.
@@ -206,7 +205,7 @@ This happens without cluster reconfiguration.
 3. The cluster creator runs `openshift-install create cluster` to complete the installation
 4. The installer validates the configuration and sets both `controlPlaneTopology` and `infrastructureTopology` to `Adaptable` in the Infrastructure config
 5. The cluster installs with behavior matching the effective topology for the initial control-plane, arbiter, and worker node counts
-6. After installation completes, the cluster is ready to scale by adding or removing nodes
+6. After installation completes, the cluster is ready to scale by adding nodes
 
 *Note: The `adaptableTopology` flag is optional and defaults to `false`. Adaptable is intended to become the default topology mode in a future release once the feature reaches GA and has proven stable in production.*
 
@@ -227,14 +226,14 @@ This happens without cluster reconfiguration.
 8. Upon confirmation, the CLI updates both `controlPlaneTopology` and `infrastructureTopology` fields to `Adaptable` in the Infrastructure config
 9. The API validates that both fields are being set to `Adaptable` together (enforced by ValidatingAdmissionPolicy)
 10. The cluster transitions to Adaptable topology, maintaining current effective behavior based on existing node count
-11. The cluster is now ready to scale by adding or removing nodes
+11. The cluster is now ready to scale by adding nodes
 
 #### Scaling a Cluster Running Adaptable Topology
 
 **cluster administrator** is managing a cluster already running Adaptable topology.
 
 **Non-functional constraint**: There is no availability guarantee during topology
-transitions. Scaling control-plane or worker nodes is an explicit operational
+transitions. Scaling control-plane nodes is an explicit operational
 action, and users should treat it as a maintenance window. The cluster is
 expected to be fully available before and after the transition, but not
 necessarily during.
@@ -249,10 +248,8 @@ necessarily during.
    - Each new node joins as a learner and is promoted to a voting member before the next is added
    - The 2-member state is transient — quorum requires both members, so losing either is fatal during this window
    - Other operators adjust their behavior to match HighlyAvailable control-plane topology
-5. When scaling down and crossing the 3→2 control-plane node threshold:
-   - CEO removes etcd members sequentially, transitioning through the 2-member state
-   - The cluster continues operating with a single etcd instance once removal completes
-   - Other operators adjust their behavior to match SingleReplica control-plane topology
+
+*Note: Scaling down control-plane nodes is not supported in this enhancement. See [Future Considerations — Scale-Down Operations](#scale-down-operations) for planned work.*
 
 ##### Behavior at Two Control-Plane Nodes (Without AQR)
 
@@ -299,15 +296,6 @@ This is a sequential process, not atomic. The 2-member state in steps
 either is fatal. This window is minimized by proceeding to step 5
 immediately after promotion.
 
-The 3→1 scale-down sequence reverses this process:
-
-1. Starting state: 3 etcd voting members (quorum=2)
-2. CEO removes one etcd member — 2 members remain (quorum=2)
-3. CEO removes the second etcd member — 1 member remains (quorum=1)
-4. The cluster operates with a single etcd instance
-
-The 2-member state in steps 2–3 carries the same risk as scale-up.
-
 ##### Compact Clusters (Dual-Role Nodes)
 
 Scaling from SNO to three control-plane nodes with no dedicated worker nodes is
@@ -319,16 +307,13 @@ control-plane node count thresholds.
 
 ##### Scaling Worker Nodes
 
-1. The cluster administrator adds or removes worker nodes
+1. The cluster administrator adds worker nodes
 2. Infrastructure operators detect the worker node count change
 3. When crossing the 1→2 worker node threshold:
    - Infrastructure operators adjust their behavior to match HighlyAvailable infrastructure topology
    - Replica counts and placement strategies are updated accordingly
-4. When scaling down and crossing the 2→1 worker node threshold:
-   - Infrastructure operators adjust their behavior to match SingleReplica infrastructure topology
-5. Special case when crossing the 1→0 worker node threshold:
-   - Infrastructure operators switch to scheduling on control-plane nodes
-   - Some operators may increase replica counts since control-plane nodes are now eligible for infrastructure workloads
+
+*Note: Scaling down worker nodes is not supported in this enhancement. See [Future Considerations — Scale-Down Operations](#scale-down-operations) for planned work.*
 
 ### API Extensions
 
@@ -749,22 +734,6 @@ A new `oc adm topology transition` command will be added to facilitate safe topo
 - `--force` flag to bypass compatibility blocks — requires interactive confirmation acknowledging the cluster will be in an unsupported state. A cluster-scoped event is posted when `--force` is used to enable detection in support cases.
 - Confirmation prompts before applying one-way transitions
 
-A `oc adm topology scale-down` command will orchestrate safe control-plane
-scale-down. The exact interface is under design; one example:
-
-```bash
-oc adm topology scale-down --remove-nodes=<node-b>,<node-c>
-```
-
-This command would:
-1. Validate the specified nodes and that the remaining node count is valid
-2. Cordon the departing nodes
-3. Coordinate with CEO to remove etcd members sequentially
-4. Confirm completion and advise the user to remove the departing nodes
-
-Without this command, manually removing control-plane nodes enters an
-unsupported transient state. Users who do so must recover manually.
-
 #### Core Operator Changes
 
 The following core operators require updates to support Adaptable topology. All will invoke library-go subscription functions and adjust behavior based on node counts:
@@ -883,7 +852,7 @@ since DualReplica is an existing topology mode.
 
 #### Risk: Quorum Loss During Two-Member Transient State
 
-**Risk**: During sequential etcd scaling (1→2→3 or 3→2→1), the cluster
+**Risk**: During sequential etcd scaling (1→2→3), the cluster
 passes through a 2-member state where quorum=2. Losing either member
 during this window causes quorum loss. Quorum loss alone does not cause
 data loss — that requires split-brain, which only occurs if someone
@@ -1013,6 +982,93 @@ The one-way transition model simplifies testing.
 We only test transitions into Adaptable topology and can stagger support
 for different source topologies.
 
+## Future Considerations
+
+### Scale-Down Operations
+
+Scaling down control-plane and worker nodes is planned for a future enhancement.
+This section documents the anticipated design to inform reviewers and
+future implementors.
+
+#### Control-Plane Scale-Down (3→1)
+
+The 3→1 scale-down sequence reverses the scale-up process:
+
+1. Starting state: 3 etcd voting members (quorum=2)
+2. CEO removes one etcd member — 2 members remain (quorum=2)
+3. CEO removes the second etcd member — 1 member remains (quorum=1)
+4. The cluster operates with a single etcd instance
+
+The 2-member state in steps 2–3 carries the same quorum loss risk
+as scale-up — losing either member during this window is fatal.
+
+When crossing the 3→2 control-plane node threshold:
+- CEO removes etcd members sequentially, transitioning through the 2-member state
+- The cluster continues operating with a single etcd instance once removal completes
+- Other operators adjust their behavior to match SingleReplica control-plane topology
+
+#### Worker Node Scale-Down
+
+When scaling down and crossing the 2→1 worker node threshold:
+- Infrastructure operators adjust their behavior to match SingleReplica
+  infrastructure topology
+
+When crossing the 1→0 worker node threshold:
+- Infrastructure operators switch to scheduling on control-plane nodes
+- Some operators may increase replica counts since control-plane nodes
+  are now eligible for infrastructure workloads
+
+#### CLI Tooling for Scale-Down
+
+A `oc adm topology scale-down` command is anticipated to orchestrate
+safe control-plane scale-down. The exact interface is under design;
+one example:
+
+```bash
+oc adm topology scale-down --remove-nodes=<node-b>,<node-c>
+```
+
+This command would:
+1. Validate the specified nodes and that the remaining node count is valid
+2. Cordon the departing nodes
+3. Coordinate with CEO to remove etcd members sequentially
+4. Confirm completion and advise the user to remove the departing nodes
+
+Without this command, manually removing control-plane nodes enters an
+unsupported transient state. Users who do so must recover manually.
+
+### Control-Plane Performance Validation During Scaling
+
+When scaling control-plane nodes, a future enhancement should validate
+that new nodes meet performance requirements before promoting them to
+full cluster participants. This mirrors the approach taken by the
+assisted installer during cluster bootstrapping, where nodes are
+validated for disk performance, network latency, and resource capacity
+before proceeding with installation.
+
+During scale-up operations, CEO could integrate pre-promotion checks
+similar to the assisted installer's host validation flow:
+
+- **Disk I/O performance**: Verify etcd storage meets minimum IOPS and
+  fsync latency thresholds before adding the node as an etcd member.
+  Slow disks degrade etcd performance cluster-wide.
+- **Network latency**: Validate round-trip latency between the new node
+  and existing control-plane nodes stays within etcd's recommended
+  bounds. High latency causes leader election instability and
+  increased commit times.
+- **Resource capacity**: Confirm the node has sufficient CPU and memory
+  to run control-plane workloads without resource pressure.
+
+These validations would occur after the node joins the cluster but
+before CEO begins etcd member addition. If a node fails validation,
+the scaling operation would be blocked with a clear diagnostic rather
+than proceeding and degrading cluster health.
+
+This is particularly important for Adaptable topology because nodes
+may be added opportunistically in edge environments where hardware
+quality varies. The assisted installer's validation logic provides a
+proven reference implementation for these checks.
+
 ## Open Questions [optional]
 
 > **Reviewer input requested on the following critical items:**
@@ -1119,10 +1175,8 @@ The `AdaptableTopology` test suite contains pre-transition and post-transition t
 | Test | Description |
 | ---- | ----------- |
 | Scale 1→2→3 control-plane nodes | Verify cluster behavior crosses thresholds correctly when adding control-plane nodes |
-| Scale 3→2→1 control-plane nodes | Verify cluster behavior crosses thresholds correctly when removing control-plane nodes |
 | Scale 0→1→2 worker nodes | Verify infrastructure topology adjusts correctly when adding worker nodes |
-| Scale 2→1→0 worker nodes | Verify infrastructure topology adjusts correctly when removing worker nodes |
-| etcd quorum management | Verify CEO correctly manages etcd scaling at the 2→3 and 3→2 control-plane thresholds |
+| etcd quorum management | Verify CEO correctly manages etcd scaling at the 1→2→3 control-plane thresholds |
 | SLO validation tests | Verify all [Service Level Objectives](#service-level-objectives) are met during transitions and scaling operations |
 
 ### QE Testing
