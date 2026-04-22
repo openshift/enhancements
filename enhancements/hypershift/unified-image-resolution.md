@@ -538,6 +538,20 @@ GA stages. The refactoring is complete when:
 3. The linter is integrated into `make lint`.
 4. OCPBUGS-83564 is verified resolved.
 
+### Dev Preview -> Tech Preview
+
+Not applicable. This is an internal refactoring with no
+feature gate.
+
+### Tech Preview -> GA
+
+Not applicable. This is an internal refactoring with no
+feature gate.
+
+### Removing a deprecated feature
+
+Not applicable.
+
 ## Upgrade / Downgrade Strategy
 
 This enhancement changes internal implementation only. There
