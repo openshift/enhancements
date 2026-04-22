@@ -28,7 +28,7 @@ select specific HAProxy versions for IngressControllers, decoupling HAProxy
 version upgrades from OpenShift cluster upgrades. This allows administrators
 to test new HAProxy versions independently before deploying them to
 production workloads, reducing the risk of application outages during
-cluster upgrades.
+cluster upgrades. The feature will be available starting with OpenShift 5.0.
 
 ## Motivation
 
@@ -71,14 +71,18 @@ consistency and track version adoption across the cluster.
 
 - Enable cluster administrators to select HAProxy versions for individual
   IngressControllers independently of OpenShift cluster version
-- Support preservation of HAProxy versions from the current OpenShift
-  release and up to 2 previous releases to facilitate LTS-to-LTS migrations
+- Support exactly 3 distinct HAProxy versions simultaneously: the current
+  OpenShift release and the 2 previous minor releases (e.g., OCP 5.1, 5.0,
+  4.22), provided they are actively supported by Red Hat
+- Provide a 1:1 mapping from OCP version to HAProxy version (e.g.,
+  `haproxyVersion: "OCP-4.22"` always uses the specific HAProxy version that
+  shipped with OCP 4.22)
 - Allow testing new HAProxy versions on dedicated IngressControllers before
   production deployment
 - Maintain compatibility with dynamic HAProxy compilation and required
   dependencies (pcre, openssl, FIPS libraries)
-- Default to latest available HAProxy version when no explicit version is
-  selected
+- Default to the HAProxy version from the current OpenShift release when no
+  explicit version is selected
 
 ### Non-Goals
 
@@ -86,9 +90,14 @@ consistency and track version adoption across the cluster.
   clusters
 - Allowing selection of arbitrary HAProxy versions not shipped with
   supported OpenShift releases
+- Allowing selection of specific HAProxy version numbers (e.g., "2.8.5") -
+  only OCP version references are supported (e.g., "OCP-4.22")
 - Providing version selection for other ingress components beyond HAProxy
   itself (router code, templates, etc.)
-- Supporting more than 3 distinct HAProxy versions simultaneously
+- Supporting more or fewer than exactly 3 distinct HAProxy versions
+  simultaneously (except for OCP 5.0 which supports 2)
+- Supporting OCP versions older than current minus 2 (e.g., on OCP 5.1,
+  cannot select OCP-4.21 or older)
 
 ## Proposal
 
@@ -104,9 +113,16 @@ specific OpenShift release. The ingress-controller-operator will manage the
 deployment of the appropriate HAProxy binary and its dependencies (pcre,
 openssl, FIPS libraries) to support the selected version.
 
-Up to 3 distinct HAProxy versions will be supported simultaneously,
-allowing administrators to migrate from one LTS OpenShift version to the
-next while preserving HAProxy versions during the transition period.
+Exactly 3 distinct HAProxy versions will be supported simultaneously
+(current OCP version, previous minor version, and two versions back),
+allowing administrators to migrate across OpenShift versions while
+preserving HAProxy versions during the transition period. Each OCP version
+has a 1:1 mapping to a specific HAProxy version. The feature begins with
+OCP 5.0.
+
+**Exception**: OCP 5.0 will support only 2 versions (5.0 and 4.22) as it is
+the first release where this feature becomes available. Starting with OCP
+5.1, exactly 3 versions will be supported (e.g., 5.1, 5.0, and 4.22).
 
 ### Workflow Description
 
@@ -119,7 +135,7 @@ OpenShift cluster infrastructure and upgrades.
    identifies the HAProxy version shipped with the new release.
 2. The cluster administrator creates or updates an IngressController resource,
    specifying the desired HAProxy version in the new API field (e.g.,
-   `haproxyVersion: "OCP-4.21"` or `haproxyVersion: "Current"`).
+   `haproxyVersion: "OCP-5.0"` or `haproxyVersion: "Current"`).
 3. The ingress-controller-operator validates the requested version is
    available and supported.
 4. The operator updates the IngressController deployment to use the
@@ -143,13 +159,13 @@ OpenShift cluster infrastructure and upgrades.
 #### Upgrading OpenShift with HAProxy Version Control
 
 1. The cluster administrator initiates an OpenShift cluster upgrade from
-   version 4.21 to 4.22.
+   version 5.0 to 5.1.
 2. For IngressControllers with `haproxyVersion: "Current"`, the operator
-   automatically upgrades to the HAProxy version from OpenShift 4.22.
-3. For IngressControllers with `haproxyVersion: "OCP-4.21"`, the operator
-   preserves the HAProxy version from OpenShift 4.21.
+   automatically upgrades to the HAProxy version from OpenShift 5.1.
+3. For IngressControllers with `haproxyVersion: "OCP-5.0"`, the operator
+   preserves the HAProxy version from OpenShift 5.0.
 4. The cluster administrator validates production applications on
-   IngressControllers running HAProxy from OpenShift 4.21.
+   IngressControllers running HAProxy from OpenShift 5.0.
 5. The cluster administrator gradually updates production IngressControllers
    to use newer HAProxy versions after validation.
 
@@ -181,23 +197,48 @@ This enhancement modifies the existing IngressController CRD
 (`operator.openshift.io/v1`) to add a new optional field for specifying
 the HAProxy version.
 
-The proposed API field:
+The proposed API fields for the IngressController spec:
 
 ```go
 // HAProxyVersion specifies which HAProxy version to use for this
 // IngressController. Valid values are:
-// - "Current" (default): Use the latest HAProxy version available in this
-//   OpenShift release
+// - "Current" (default): Use the HAProxy version from the current OpenShift
+//   release (the most recent version available)
 // - "OCP-X.Y": Use the HAProxy version from OpenShift release X.Y
 //
-// Supports the current OpenShift release and up to 2 prior releases,
-// starting from "OCP-4.23".
+// Each OpenShift version has a 1:1 mapping to a specific HAProxy version.
+// Exactly 3 versions are supported: the current OpenShift release and the 2
+// prior minor releases, provided they are actively supported by Red Hat.
 //
 // +optional
 // +kubebuilder:default="Current"
+// +kubebuilder:validation:Pattern=`^(Current|OCP-[0-9]+\.[0-9]+)$`
 // +openshift:enable:FeatureGate=SelectableHAProxyVersion
 HAProxyVersion string `json:"haproxyVersion,omitempty"`
 ```
+
+The proposed API fields for the IngressController status:
+
+```go
+// EffectiveHAProxyVersion reports the OCP version determining the HAProxy
+// version currently in use by this IngressController. This reflects the
+// resolved value of the spec.haproxyVersion field.
+//
+// Examples:
+// - "OCP-5.0": Using HAProxy from OpenShift 5.0
+// - "OCP-4.22": Using HAProxy from OpenShift 4.22
+//
+// The actual HAProxy binary version number is available through HAProxy's
+// own metrics.
+//
+// +optional
+EffectiveHAProxyVersion string `json:"effectiveHAProxyVersion,omitempty"`
+```
+
+The validation pattern `^(Current|OCP-[0-9]+\.[0-9]+)$` ensures that only
+"Current" or properly formatted "OCP-X.Y" values (e.g., "OCP-5.0",
+"OCP-4.22") are accepted. Additional validation logic in the operator will
+verify that the specified OCP version is available and supported.
 
 The field will be gated behind the `SelectableHAProxyVersion` feature gate
 and will only appear in the CRD when the feature gate is enabled.
@@ -238,9 +279,268 @@ extended to support it.
 This enhancement works with OpenShift Kubernetes Engine (OKE) as it relies
 on standard IngressController resources which are available in OKE.
 
+### Implementation Proposals
+
+This section presents three distinct approaches for packaging, distributing, and
+isolating multiple HAProxy versions. Each proposal addresses the challenge of
+managing multiple HAProxy binaries with their dynamic dependencies (pcre,
+openssl, FIPS libraries) in different ways.
+
+#### Proposal 1: Multiple HAProxy Versions in Single Router Image
+
+This proposal packages all supported HAProxy versions (up to 3) within the
+existing router container image. Each HAProxy version is installed with its
+complete set of direct dependencies (pcre, openssl, FIPS libraries) and
+indirect dependencies (libc and other system libraries), ensuring complete
+isolation and compatibility. Isolation is achieved through one of three
+sub-approaches.
+
+**Directory Structure Example**:
+```
+/usr/local/haproxy/
+  4.22/
+    bin/haproxy
+    lib/libpcre.so.1
+    lib/libssl.so.3
+    lib/libc.so.6           # libc and other system libraries
+    lib/...                 # additional system libraries
+    lib64/ossl-modules/fips.so
+  5.0/
+    bin/haproxy
+    lib/libpcre.so.1
+    lib/libssl.so.3
+    lib/libc.so.6           # libc and other system libraries
+    lib/...                 # additional system libraries
+    lib64/ossl-modules/fips.so
+  5.1/
+    bin/haproxy
+    lib/libpcre.so.1
+    lib/libssl.so.3
+    lib/libc.so.6           # libc and other system libraries
+    lib/...                 # additional system libraries
+    lib64/ossl-modules/fips.so
+```
+
+**Sub-Proposal 1.a: chroot Isolation**
+
+Start HAProxy using `chroot` to isolate each version's file system view. Each
+HAProxy version directory contains its required direct dependencies (pcre,
+openssl, FIPS modules), indirect dependencies (libc and other system
+libraries), and a complete directory structure for HAProxy operation,
+including configuration files, certificates, and runtime state.
+
+**Directory Structure Example**:
+```
+/usr/local/haproxy/4.22/
+  bin/haproxy
+  lib/libpcre.so.1
+  lib/libc.so.6           # libc and other system libraries
+  lib/...                 # additional system libraries
+  lib64/libssl.so.3
+  lib64/ossl-modules/fips.so
+  var/lib/haproxy/conf/haproxy.config
+  var/lib/haproxy/certs/
+  var/lib/haproxy/run/admin.sock
+```
+
+The router process runs inside the chroot environment and manages all
+HAProxy-related files (configuration, certificates from Secrets, admin socket)
+directly within the chroot filesystem.
+
+Advantages:
+- Strong isolation between HAProxy versions
+- No environment variable conflicts
+- Clear separation of dependencies
+- Router and HAProxy both run in isolated environment
+
+Disadvantages:
+- Requires complete directory structure for each version
+- Router process must run within chroot environment
+- Requires privileged container permissions for chroot operation
+- Potential compatibility issues with older libraries (from older OCP versions)
+  running on newer kernels, particularly for FIPS libraries
+
+**Sub-Proposal 1.b: Environment Variable Isolation**
+
+Use `LD_LIBRARY_PATH` to point to version-specific library directories and
+`OPENSSL_MODULES` to specify the correct FIPS module location. The router
+entrypoint script sets these variables before executing the appropriate HAProxy
+binary.
+
+Example startup:
+```bash
+export LD_LIBRARY_PATH="/usr/local/haproxy/5.0/lib:/usr/local/haproxy/5.0/lib64"
+export OPENSSL_MODULES="/usr/local/haproxy/5.0/lib64/ossl-modules"
+/usr/local/haproxy/5.0/bin/haproxy -f /var/lib/haproxy/conf/haproxy.config
+```
+
+Advantages:
+- Simpler implementation than chroot
+- No special permissions required
+- Straightforward library path management
+
+Disadvantages:
+- Environment variables affect entire process
+- Potential conflicts if libraries are not fully isolated
+- Requires careful ordering of library paths
+- Possible conflict between the library loader (from the OS) and the libc
+  version being loaded (from the dynamic HAProxy dependencies)
+
+**Sub-Proposal 1.c: Manual Library Loader Invocation**
+
+Directly invoke a version-specific dynamic linker with `--library-path` to
+specify version-specific library directories. Each HAProxy version includes
+its own copy of the dynamic linker (ld-linux) alongside its other libraries,
+avoiding dependency issues between the linker and the libc version. This
+provides explicit control over library resolution without relying on
+environment variables. HAProxy does not use `dlopen()` for dynamic
+dependencies, so this approach handles all required library loading.
+
+**Directory Structure Addition**:
+```
+/usr/local/haproxy/5.0/
+  bin/haproxy
+  lib/ld-linux-x86-64.so.2  # dynamic linker copied for this version
+  lib/libpcre.so.1
+  lib/libssl.so.3
+  lib/libc.so.6
+  lib64/ossl-modules/fips.so
+```
+
+Example startup:
+```bash
+/usr/local/haproxy/5.0/lib/ld-linux-x86-64.so.2 \
+  --library-path /usr/local/haproxy/5.0/lib:/usr/local/haproxy/5.0/lib64 \
+  /usr/local/haproxy/5.0/bin/haproxy \
+  -f /var/lib/haproxy/conf/haproxy.config
+```
+
+Advantages:
+- Most explicit control over library loading
+- No pollution of environment variables
+- Can override RPATH/RUNPATH embedded in binaries
+- Compatible with HAProxy's library loading model
+- Dynamic linker and libc versions match, avoiding incompatibilities
+
+Disadvantages:
+- Platform-specific (loader filename differs across architectures)
+- More complex command line
+- FIPS compliance verification needed for this approach
+- Each version must include its own copy of the dynamic linker
+- Running process is the library loader, not haproxy
+
+**Common Advantages for Proposal 1**:
+- Single container image to manage
+- No changes to pod structure
+- Straightforward deployment model
+- All versions available immediately
+
+**Common Disadvantages for Proposal 1**:
+- Complexity in the library isolation
+- Requires special handling if using new features from a newer HAProxy
+  version, not available on an older one
+- Larger image size (multiple HAProxy binaries and dependencies)
+- All versions consume image storage even when unused (no deduplication of
+  identical libraries across versions)
+- Image rebuilds required to update any HAProxy version
+
+#### Proposal 2: External HAProxy Images with Sidecar Deployment
+
+This proposal deploys HAProxy as a separate sidecar container alongside the
+main router container. Each supported HAProxy version is packaged in its own
+dedicated container image. One HAProxy sidecar image is built per OCP version,
+with a 1:1 mapping between OCP version and HAProxy version.
+
+**Pod Structure**:
+```yaml
+spec:
+  initContainers:
+  - name: init-router-config
+    image: registry.redhat.io/openshift4/ose-haproxy-router:v5.0
+    # Run script to copy static files (error pages) and templates to shared volume
+    command: ["/usr/local/bin/init-haproxy-files.sh"]
+    volumeMounts:
+    - name: haproxy-shared
+      mountPath: /mnt/shared
+  containers:
+  - name: router
+    image: registry.redhat.io/openshift4/ose-haproxy-router:v5.0
+    # Router logic, template rendering, route watching
+    volumeMounts:
+    - name: haproxy-shared
+      mountPath: /var/lib/haproxy
+  - name: haproxy
+    image: registry.redhat.io/openshift4/ose-haproxy:4.22
+    # HAProxy binary with its dependencies
+    volumeMounts:
+    - name: haproxy-shared
+      mountPath: /var/lib/haproxy
+  volumes:
+  - name: haproxy-shared
+    emptyDir: {}
+```
+
+The init container runs from the router image and executes a shell script to
+copy static files (error pages, scripts) and HAProxy configuration templates
+from the router image filesystem to the shared emptyDir volume. The router
+container generates HAProxy configuration and writes it to the shared volume.
+The router communicates with HAProxy through the HAProxy admin socket (also
+on the shared volume) to trigger configuration reloads and manage the HAProxy
+process.
+
+Advantages:
+- Clean separation of concerns (router logic vs HAProxy runtime)
+- Smaller individual images
+- Independent versioning and updates
+- No library isolation complexity
+- Only selected version image is pulled
+- HAProxy image can be updated independently
+
+Disadvantages:
+- Requires pod structure changes (init container + sidecar)
+- Minimal additional container overhead
+- Requires special handling if using new features from a newer HAProxy
+  version, not available on an older one
+- Init container needed for static files and initial configuration
+- Operator must maintain mapping from OCP version to HAProxy sidecar image
+- More complex startup sequence
+
+#### Proposal 3: Distinct Router Images per HAProxy Version
+
+This proposal creates completely separate router images for each supported
+HAProxy version. Each image contains the router code and a single embedded
+HAProxy version with its dependencies. All images are built together from the
+same source during each OCP release, with only the embedded HAProxy binary
+differing. Images are tagged by the target OCP version.
+
+The router and HAProxy evolve together within each image as a complete unit.
+The ingress-controller-operator selects the appropriate image based on the
+`haproxyVersion` field. Router code bug fixes are applied to all supported
+images using the same backport strategy used for patch releases across OCP
+versions.
+
+Previous OCP releases provide the router images to newer releases (e.g., the
+5.0 and 4.22 router images provide the HAProxy binaries for the ocp5.0 and
+ocp4.22 images). See Open Questions for details on the feasibility of this
+approach.
+
+Advantages:
+- Simplest runtime model (single container, single HAProxy)
+- No library isolation complexity
+- Smallest individual image sizes
+- Clear image-to-version mapping
+- Easiest to troubleshoot
+- Router and HAProxy evolve together within each image
+
+Disadvantages:
+- Router code duplicated across all images
+- More complex build and release pipeline
+- Bug fixes must be applied to all supported images
+
 ### Implementation Details/Notes/Constraints
 
-The implementation requires the following high-level code changes:
+The implementation requires selecting one of the proposals above and making the
+following high-level code changes:
 
 1. **API Changes**: Add the `haproxyVersion` field to the IngressController
    CRD in the `openshift/api` repository, gated behind the
@@ -254,25 +554,36 @@ The implementation requires the following high-level code changes:
 
 3. **Operator Logic**: Update the ingress-controller-operator to:
    - Read and validate the `haproxyVersion` field
-   - Determine which HAProxy binary and dependencies to use
+   - Determine which HAProxy binary and dependencies to use based on the
+     selected implementation proposal
+   - Map the OCP version to the appropriate haproxy path (proposal 1) or
+     container image (proposals 2 and 3) reference
    - Update the router deployment with the appropriate image or version
      references
-   - Report the active HAProxy version in the IngressController status
+   - Report the effective HAProxy version in a new IngressController status
+     field (e.g., `status.effectiveHAProxyVersion: "OCP-4.22"`) showing the
+     OCP version that determines the HAProxy version in use
+   - HAProxy's own version number is available through HAProxy's built-in
+     metrics
 
-4. **HAProxy Binary Management**: Since HAProxy is compiled dynamically, the
-   implementation must:
-   - Package multiple HAProxy versions with their dependencies (pcre,
-     openssl, FIPS libraries) in the router image, in a dedicated HAProxy
-     image, or as separate artifacts
-   - Ensure the correct dynamic libraries are available for each version
-     if installed in the same image
+4. **HAProxy Binary Management**: The selected implementation proposal
+   (Proposal 1, 2, or 3 from the Implementation Proposals section) determines
+   how HAProxy binaries and their dependencies are packaged and distributed.
+   All proposals must:
+   - Ensure the correct direct dependencies (pcre, openssl, FIPS libraries)
+     and indirect dependencies (libc and other system libraries) are available
+     for each HAProxy version
+   - For Proposal 1: include all dependencies in version-specific directories
+     to ensure complete isolation
    - Maintain compatibility matrices for HAProxy versions and their
      dependencies
 
 5. **Version Validation**: Implement validation to ensure:
-   - Only supported OpenShift release versions can be specified
-   - Maximum of 3 distinct versions are maintained
-   - Requested versions are available in the current cluster
+   - Only supported OpenShift release versions can be specified (current and
+     2 previous minor versions)
+   - Only "Current" or "OCP-X.Y" format is accepted
+   - Requested OCP versions are available in the current cluster
+   - Exactly 3 versions are provided (except OCP 5.0 which provides 2)
 
 6. **Upgrade/Downgrade Handling**: Implement logic to handle cluster
    upgrades and downgrades according to the specified version policy:
@@ -287,13 +598,14 @@ The implementation requires the following high-level code changes:
 
 ### Risks and Mitigations
 
-**Risk 1**: Supporting multiple HAProxy versions increases the image size and
-complexity of the router image.
+**Risk 1**: Supporting multiple HAProxy versions increases the image size and/or
+complexity depending on the implementation proposal.
 
-**Mitigation**: Limit support to 3 distinct versions. Consider using
-separate container images or layers for different HAProxy versions to
-optimize storage. Monitor image size and establish clear deprecation
-policies.
+**Mitigation**: Limit support to 3 distinct versions. The impact varies by
+proposal: Proposal 1 increases single image size but simplifies deployment;
+Proposal 2 minimizes individual image sizes but adds inter-container
+complexity; Proposal 3 creates multiple images but with the simplest runtime
+model. Monitor image size and establish clear deprecation policies.
 
 **Risk 2**: Administrators may select outdated HAProxy versions with known
 security vulnerabilities.
@@ -304,11 +616,14 @@ older versions. Consider implementing alerts when versions reach
 end-of-support.
 
 **Risk 3**: Dependency conflicts between HAProxy versions and their required
-libraries (pcre, openssl, FIPS).
+libraries (pcre, openssl, FIPS), including potential incompatibilities when
+running older libraries from previous OCP releases on newer kernels.
 
-**Mitigation**: Thoroughly test each supported version with its
-dependencies. Package dependencies alongside HAProxy binaries to ensure
-compatibility. Implement robust validation during version selection.
+**Mitigation**: Thoroughly test each supported version with its dependencies
+on each supported kernel version. Package dependencies alongside HAProxy
+binaries to ensure compatibility. Implement robust validation during version
+selection. Document tested library/kernel combinations and known
+incompatibilities.
 
 **Risk 4**: Complexity in troubleshooting when different IngressControllers
 run different HAProxy versions.
@@ -321,8 +636,12 @@ Include version information in support bundles.
 
 This enhancement introduces additional complexity to the ingress subsystem:
 - Increased maintenance burden for supporting multiple HAProxy versions
-- Larger router images or more complex packaging mechanisms
-- Additional testing required for version compatibility matrices
+- Implementation complexity varies by proposal: Proposal 1 increases image
+  size and library isolation complexity; Proposal 2 introduces pod structure
+  changes and inter-container communication; Proposal 3 multiplies build
+  pipeline complexity
+- Additional testing required for version compatibility matrices across all
+  proposals
 - Potential for configuration drift across IngressControllers
 
 However, these drawbacks are outweighed by the operational benefits of
@@ -363,15 +682,93 @@ OpenShift release.
 
 ## Open Questions [optional]
 
-1. What is the exact mechanism for packaging and distributing multiple
-   HAProxy versions and their dependencies? Should they be included in the
-   router image or distributed separately?
+1. Which implementation proposal (1, 2, or 3) should be selected for the
+   initial implementation? The choice impacts image size, operational
+   complexity, and maintainability. See the Implementation Proposals section
+   for detailed trade-offs.
 
-2. How to pin an HAProxy version from OpenShift 4.22 before migrating to 4.23
-   or 5.0?
+2. How to pin an HAProxy version from OpenShift 4.22 before migrating to 5.0
+   or 5.1?
 
 3. What telemetry should be collected to track HAProxy version adoption and
    identify potential issues with specific versions?
+
+4. **FIPS compliance and validation**: How do FIPS requirements impact each
+   implementation proposal?
+   - How is FIPS mode validated for each HAProxy version?
+   - What are the certification implications of running FIPS-validated
+     libraries from older OCP releases on newer kernels?
+
+5. **Version to image mapping**: For Proposals 1 and 2, how does the operator
+   maintain the mapping from `haproxyVersion: "OCP-X.Y"` to the actual haproxy
+   path or container image reference?
+   - Is the mapping hardcoded in the operator?
+   - Stored in an API resource?
+   - When is this mapping validated (reconcile time vs cluster upgrade time)?
+
+6. **HAProxy version deprecation and continuous support window**: How should
+   we handle HAProxy version support when OCP versions go end-of-life?
+   - Example timeline:
+     - Day 0: OCP 5.0 releases, supports HAProxy from 5.0 and 4.22
+     - Day 90: OCP 5.1 releases, supports HAProxy from 5.1, 5.0, and 4.22
+     - Day 180: OCP 4.21 goes EOL (but 4.22, 5.0, 5.1 are still supported)
+   - On Day 180, if a cluster is running OCP 5.0 with `haproxyVersion:
+     "OCP-4.21"`, should the IngressController:
+     - Continue running with OCP 4.21's HAProxy?
+     - Set a warning/degraded condition?
+     - Be forcibly upgraded to a supported version?
+   - Does the support matrix update when an OCP version goes EOL, even for
+     clusters not yet upgraded to the next version?
+   - How do we communicate the support lifecycle to administrators?
+
+7. **Library compatibility across kernel versions**: For Proposal 1
+   (particularly 1.a chroot, but applies to all sub-proposals), what are the
+   risks of running older dynamic libraries (pcre, openssl, FIPS modules from
+   OCP 4.22) on a newer kernel (from OCP 5.1)?
+   - Are there known incompatibilities between specific library/kernel
+     version combinations?
+   - How do we validate compatibility during testing?
+   - Should we document supported/tested combinations?
+
+8. **Proposal 3 image sourcing**: For Proposals 2 and 3, when building OCP 5.1
+   with three distinct images (containing HAProxy from 5.1, 5.0, and 4.22),
+   how are the older image versions obtained?
+   - Can previous OCP releases (5.0 and 4.22) provide their router or HAProxy
+     images?
+   - What actions are needed to make this approach feasible?
+
+9. **HAProxy version correlation and visibility**: The IngressController
+   status shows the OCP version (e.g., `status.effectiveHAProxyVersion:
+   "OCP-5.0"`) and HAProxy exposes its own version number in metrics.
+   - Do administrators need an explicit mapping table (OCP version → HAProxy
+     version number) in documentation?
+   - Should the actual HAProxy version number appear in logs, events, or
+     additional status fields?
+
+10. **Version support criteria for 5.x releases with 4.x availability**: Once
+    OCP 4.23 and newer 4.x versions start releasing (after OCP 5.0 and 5.x are
+    available), what should be the criteria for supported HAProxy versions?
+    - How does the "current and 2 previous minor versions" rule apply across
+      major version boundaries?
+    - Should 5.x releases support HAProxy versions from 4.x releases, or only
+      from 5.x releases?
+    - Example: If OCP 5.2 and OCP 4.25 are both actively supported, should
+      OCP 5.2 allow `haproxyVersion: "OCP-4.25"`?
+    - Should there be separate support tracks for 4.x and 5.x?
+
+11. **HAProxy version pinning during initial feature adoption**: Since OCP 5.0
+    is the first release where the `haproxyVersion` field becomes available,
+    how should administrators pin to OCP 4.22's HAProxy version when upgrading
+    from OCP 4.22 to OCP 5.0?
+    - During the upgrade from 4.22 to 5.0, what should be the default behavior
+      since `haproxyVersion` is not set?
+      - Does it default to "Current" (5.0's HAProxy), forcing an upgrade?
+      - Defaults to "Current" and also pre-populate the API to "OCP-4.22"?
+      - Or should it default to OCP-4.22 exceptionally on 5.0, changing the
+        default to "Current" only on newer versions?
+    - Is there a migration window or grace period where administrators can
+      change the API field before the routers are updated?
+    - How do we document this bootstrapping scenario for the first adopters?
 
 ## Test Plan
 
@@ -402,6 +799,8 @@ Tests must cover:
 - Multiple IngressControllers with different HAProxy versions
 - Validation that routes work correctly with different HAProxy versions
 - Performance and resource consumption with multiple versions
+- HAProxy configuration reload functionality across all implementation
+  proposals (all proposals support seamless reload via admin socket API)
 
 **Negative Tests**:
 - Attempting to use unsupported/unavailable versions
@@ -419,7 +818,8 @@ Tests must cover:
 - Tests running on all supported platforms: AWS (HA/Single), Azure (HA),
   GCP (HA), vSphere (HA), Baremetal (HA with IPv4/IPv6/Dual)
 
-**Tech Preview**:
+### Dev Preview -> Tech Preview
+
 - Ability to select and use different HAProxy versions end-to-end
 - End user documentation covering use cases and migration strategies
 - API stability with no planned breaking changes
@@ -428,7 +828,8 @@ Tests must cover:
 - Metrics exposed for HAProxy version tracking
 - Alerts defined for version compatibility issues
 
-**Tech Preview -> GA**:
+### Tech Preview -> GA
+
 - Extensive testing including upgrade, downgrade, and scale scenarios
 - At least one full release cycle in Tech Preview
 - Available by default with `haproxyVersion: "Current"` behavior
@@ -460,6 +861,15 @@ When upgrading an OpenShift cluster:
 
 No changes to existing IngressController configurations are required during
 upgrades. The default behavior (using the latest HAProxy) is preserved.
+
+**Special Case - Upgrading to OCP 5.0 (First Release with Feature)**:
+
+When upgrading from OCP 4.22 (or earlier) to OCP 5.0, the `haproxyVersion`
+field does not exist in the source release. The behavior during this
+bootstrapping scenario is addressed in Open Question #11. Administrators who
+want to preserve OCP 4.22's HAProxy version during the upgrade to 5.0 may
+need to set `haproxyVersion: "OCP-4.22"` on OCP 5.0 before or immediately
+after the upgrade, depending on the final resolution of this question.
 
 **Downgrades**:
 
@@ -594,8 +1004,21 @@ the current default HAProxy version without requiring manual intervention.
 
 ## Infrastructure Needed [optional]
 
-Potential infrastructure needs:
-- Storage for multiple HAProxy binaries and dependencies in container
-  images or artifact repositories
+Potential infrastructure needs (varies by implementation proposal):
+
+**All Proposals**:
 - CI infrastructure to test all supported HAProxy versions across platforms
 - Build pipeline updates to compile and package multiple HAProxy versions
+
+**Proposal 1 (Single Image)**:
+- Additional storage for larger router images containing multiple HAProxy
+  versions
+
+**Proposal 2 (Sidecar)**:
+- Separate container image registry entries for HAProxy sidecar images
+- Storage for multiple HAProxy sidecar images
+
+**Proposal 3 (Distinct Router Images)**:
+- Multiple container image registry entries (one per HAProxy version)
+- Build pipeline capable of producing parallel router images
+- Storage for multiple complete router images
