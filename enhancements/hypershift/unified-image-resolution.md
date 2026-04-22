@@ -30,7 +30,7 @@ superseded-by:
 Refactor HyperShift's registry override and image resolution
 code into a single `support/imageresolution/` package with a
 unified `ImageResolver` interface. Today this logic is
-scattered across four packages with twelve types, two
+scattered across four packages with roughly fifteen types, two
 separate override mechanisms (`--registry-overrides` and
 ICSP/IDMS) implemented through different code paths, and no
 mechanical enforcement of abstraction boundaries. The result
@@ -244,9 +244,13 @@ Key considerations:
   plane operators (control-plane-operator) all construct
   their own `ImageResolver` from their respective CLI flags.
 - Override configuration is propagated from management
-  cluster to hosted control plane via the CPO deployment
-  args (`--registry-overrides`) and the HCP spec
-  (`ImageContentSources`), same as today.
+  cluster to hosted control plane via three mechanisms,
+  all unchanged:
+  - `--registry-overrides` CLI flag on CPO deployment
+  - `OPENSHIFT_IMG_OVERRIDES` env var on CPO, HCCO,
+    and ignition-server deployments (carries ICSP/IDMS
+    mirrors)
+  - `ImageContentSources` field on the HCP spec
 - Non-OpenShift management clusters (AKS) benefit most from
   this change, as consistent `--registry-overrides`
   application is the primary bug fix.
@@ -306,13 +310,135 @@ type ResolverConfig struct {
 }
 ```
 
-`Resolve()` applies overrides in a defined order:
+**`Resolve()` semantics:**
+
+Resolution applies overrides in a defined order:
 
 1. CLI `--registry-overrides` (prefix replacement, always
    succeeds, no network I/O)
 2. ICSP/IDMS mirrors (try mirrors in order, verify
    availability with timeout)
 3. If no overrides match, return the original reference
+
+Error handling: `Resolve()` never returns an error for
+override matching failures. If all ICSP/IDMS mirrors are
+unavailable, it falls through to the original reference
+(preserving existing behavior). Errors are reserved for
+malformed input references. Mirror failures are logged
+but not propagated.
+
+Override precedence: CLI overrides are applied first as
+a simple string prefix replacement on the input
+reference. The result is then checked against ICSP/IDMS
+mirrors. This means CLI overrides and ICSP/IDMS compose
+— CLI overrides transform the reference, then ICSP/IDMS
+may further redirect the result.
+
+Matching strategy: The unified implementation uses
+structured `DockerImageReference` parsing with three
+match strategies (root registry, namespace, exact
+repository), replacing the naive `strings.Replace` used
+by the current `RegistryMirrorProviderDecorator`. This
+is a behavioral improvement — structured matching is
+more correct and is already used by `SeekOverride()`.
+
+**`Config()` serialization helpers:**
+
+```go
+// RegistryOverridesFlag serializes CLI overrides to
+// the --registry-overrides format: "src1=dst1,src2=dst2"
+func (c ResolverConfig) RegistryOverridesFlag() string
+
+// ImageRegistryMirrorsEnvVar serializes ICSP/IDMS
+// overrides to the OPENSHIFT_IMG_OVERRIDES env var
+// format used by child operator deployments.
+func (c ResolverConfig) ImageRegistryMirrorsEnvVar() string
+```
+
+#### Management Cluster vs Data Plane Resolution
+
+The CPO constructs two separate release providers with
+different override configurations:
+
+- **Control-plane provider** — uses `--registry-overrides`
+  (CLI overrides for management-cluster-resident
+  components)
+- **User/data-plane provider** — does NOT use
+  `--registry-overrides` (data-plane components must
+  use pullspecs reachable by worker nodes, not
+  management-cluster-specific mirrors)
+
+Both providers share ICSP/IDMS mirrors (which apply to
+both management and data plane). The new design handles
+this by constructing two `ImageResolver` instances with
+different `ResolverConfig` values:
+
+```go
+// CPO main.go
+cpResolver := imageresolution.NewResolver(
+    imageresolution.ResolverConfig{
+        RegistryOverrides:   registryOverrides,
+        ImageRegistryMirrors: mirrors,
+    })
+userResolver := imageresolution.NewResolver(
+    imageresolution.ResolverConfig{
+        RegistryOverrides:   nil, // No CLI overrides
+        ImageRegistryMirrors: mirrors,
+    })
+
+cpReleaseProvider := imageresolution.NewReleaseProvider(
+    cpResolver, fetcher)
+userReleaseProvider := imageresolution.NewReleaseProvider(
+    userResolver, fetcher)
+```
+
+This preserves the existing invariant: management-cluster
+overrides must never leak to the data plane. An
+integration test verifying this invariant is included in
+the test plan.
+
+#### Dynamic ICSP/IDMS Refresh
+
+The current `CommonRegistryProvider.Reconcile()` in
+`globalconfig` periodically refreshes ICSP/IDMS mirrors
+from the management cluster by mutating provider state
+at runtime. The new design handles this through a
+`ConfigSource` interface:
+
+```go
+// ConfigSource provides dynamic resolver configuration
+// that can be refreshed from the management cluster.
+type ConfigSource interface {
+    // Current returns the current ResolverConfig.
+    Current(ctx context.Context) (ResolverConfig, error)
+}
+```
+
+The `ImageResolver` implementation calls
+`ConfigSource.Current()` on each `Resolve()` invocation
+to pick up ICSP/IDMS changes. The `ConfigSource`
+implementation caches the management cluster state and
+refreshes it on a configurable interval.
+
+For operators that don't need dynamic refresh (CPO,
+ignition-server, karpenter — they get config via CLI
+flags at startup), a `StaticConfigSource` wraps an
+immutable `ResolverConfig`.
+
+For the HyperShift operator, a
+`ManagementClusterConfigSource` fetches ICSP/IDMS from
+the management cluster, merges with CLI overrides, and
+caches the result with a refresh interval.
+
+```go
+// HO main.go
+configSource := imageresolution.NewManagementClusterConfigSource(
+    mgmtClient,
+    opts.RegistryOverrides,
+    30*time.Second, // refresh interval
+)
+resolver := imageresolution.NewDynamicResolver(configSource)
+```
 
 #### Testability
 
@@ -331,7 +457,14 @@ logic running.
 
 All caches accept TTL as a constructor parameter, enabling
 zero-TTL caches in tests for uncached behavior and
-pre-populated caches for cache-hit paths.
+pre-populated caches for cache-hit paths. All caches are
+instance-level (not global variables), so each resolver
+and provider instance has its own independent cache
+state. This eliminates the current global cache problem
+in `imagemetadata.go` where `mirrorCache`,
+`imageMetadataCache`, `manifestsCache`, and
+`digestCache` are package-level variables that make
+testing non-deterministic.
 
 #### Type Migration
 
@@ -344,17 +477,40 @@ pre-populated caches for cache-hit paths.
 | `CachedProvider` | `releaseinfo` | unexported | Generalized |
 | `RegistryMirrorProviderDecorator` | `releaseinfo` | -- | Deleted |
 | `ProviderWithOpenShiftImageRegistryOverridesDecorator` | `releaseinfo` | -- | Deleted |
+| `StaticProviderDecorator` | `releaseinfo` | -- | Kept separate (image overrides, not registry) |
 | `ReleaseImageProvider` | `imageprovider` | **kept** | Consumer interface |
 | `SimpleReleaseImageProvider` | `imageprovider` | `ComponentProvider` | Rebuilt |
 | `ImageMetadataProvider` | `util` | **kept** | Consumer interface |
 | `RegistryClientImageMetadataProvider` | `util` | `MetadataProvider` | Rebuilt |
+| `MirrorAvailabilityCache` | `util` | unexported | Instance-level in `cache.go` |
+| `RegistryProvider` | `globalconfig` | -- | Deleted (replaced by `ConfigSource`) |
+| `CommonRegistryProvider` | `globalconfig` | -- | Deleted (replaced by `ManagementClusterConfigSource`) |
 
-Net reduction: 12 types across 4 packages to 6 types in 1
-package plus 2 preserved consumer interfaces.
+**Functions consolidated:**
+- `ConvertImageRegistryOverrideStringToMap()` from
+  `util/util.go` -> `config.go`
+- `ConvertRegistryOverridesToCommandLineFlag()` from
+  `util/util.go` -> `ResolverConfig.RegistryOverridesFlag()`
+- `ConvertOpenShiftImageRegistryOverridesToCommandLineFlag()`
+  from `util/util.go` ->
+  `ResolverConfig.ImageRegistryMirrorsEnvVar()`
+- `SeekOverride()` / `GetRegistryOverrides()` from
+  `util/imagemetadata.go` -> `ImageResolver.Resolve()`
+- `NewCommonRegistryProvider()` from
+  `globalconfig/imagecontentsource.go` ->
+  `NewDynamicResolver()` / `NewManagementClusterConfigSource()`
+
+Note: `StaticProviderDecorator` (used for `--image-overrides`
+in CPO and HCCO) is a separate concern from registry
+resolution. It overlays specific component images and is
+not part of this refactoring.
+
+Net reduction: ~15 types across 4 packages to ~7 types
+in 1 package plus 2 preserved consumer interfaces.
 
 #### Linter Rules
 
-The `go/analysis` analyzer flags three categories:
+The `go/analysis` analyzer flags four categories:
 
 1. **Raw override map parameters** outside
    `imageresolution/` — function parameters or struct
@@ -368,6 +524,16 @@ The `go/analysis` analyzer flags three categories:
    `imageresolution/` — `strings.Replace` calls in
    contexts suggesting image/registry manipulation
    (heuristic, variable-name-based).
+4. **Override getter method calls** outside
+   `imageresolution/` — calls to
+   `GetRegistryOverrides()`,
+   `GetOpenShiftImageRegistryOverrides()`, or
+   `GetMirroredReleaseImage()` on provider interfaces.
+   These methods are the primary mechanism by which
+   override configuration leaks out of the release
+   provider into other code. In the new architecture,
+   `ImageResolver.Config()` is the single approved way
+   to obtain override configuration.
 
 Test files and the `imageresolution/` package itself are
 allowlisted.
@@ -383,21 +549,33 @@ logic from the decorator chain and `SeekOverride()` into
 `ImageResolver.Resolve()`. Full unit test coverage. No
 callers yet.
 
-**PR 2: Wire operator entrypoints.** Update all four
-operator `main.go` files to construct the new resolver and
-providers. Create adapter constructors so controllers see
-no API change. Both old and new code may coexist briefly
-for parity verification.
+**PR 2: Wire operator entrypoints and test fakes.**
+Update all four operator `main.go` files to construct the
+new resolver and providers. Create adapter constructors
+so controllers see no API change. Update
+`releaseinfo/fake/fake.go` and test infrastructure
+(referenced by 42+ test files) to work with the new
+types. Both old and new code may coexist briefly for
+parity verification.
 
 **PR 3: Migrate remaining consumers.** Move
-`support/catalogs/images.go`, ICSP/IDMS config fetching,
-and HC controller override propagation to use the new
-package.
+`support/catalogs/images.go` to use
+`ImageResolver.Config()` for registry discovery (not
+`Resolve()` — see Catalog Images section below). Move
+ICSP/IDMS config fetching to
+`ManagementClusterConfigSource`. Move HC controller
+override propagation to use
+`resolver.Config().RegistryOverridesFlag()` and
+`resolver.Config().ImageRegistryMirrorsEnvVar()`.
+Consolidate `OPENSHIFT_IMG_OVERRIDES` env var
+serialization/deserialization utilities.
 
 **PR 4: Delete old code + add linter.** Remove the
-decorator chain, interface tower, `SeekOverride()`, and
-related utilities. Add the `go/analysis` linter to
-`make lint`.
+decorator chain, interface tower, `SeekOverride()`,
+`GetRegistryOverrides()`,
+`GetOpenShiftImageRegistryOverrides()`,
+`CommonRegistryProvider`, and related utilities. Add the
+`go/analysis` linter to `make lint`.
 
 ### Risks and Mitigations
 
@@ -420,6 +598,19 @@ Mitigation: The consumer API is preserved, so controllers
 don't change. The blast radius is confined to
 infrastructure code in `support/` and operator `main.go`
 files. Each PR is independently revertible.
+
+**Risk: Management-cluster overrides leaking to data
+plane.** The CPO constructs two release providers: one
+with CLI overrides (control plane) and one without (user/
+data plane). Getting this wrong silently propagates
+management-cluster-specific pullspecs to worker nodes.
+
+Mitigation: The dual-resolver pattern is explicit in the
+design. An integration test verifies that
+`userReleaseProvider` output does NOT contain
+management-cluster override prefixes. This is the
+highest-risk behavioral invariant and gets dedicated test
+coverage.
 
 **Risk: Linter false positives.**
 Rule 3 (string replacement heuristic) may flag legitimate
@@ -472,18 +663,61 @@ This was rejected as over-engineered. The actual problem
 has two override sources and three consumers. A pipeline
 abstraction adds indirection without proportional benefit.
 
+#### Catalog Images
+
+`support/catalogs/images.go` uses ICSP/IDMS overrides
+differently from standard image resolution. It does not
+resolve a known pullspec; instead it uses override
+configuration to discover which registries to probe when
+constructing OLM catalog image URLs from scratch (e.g.,
+finding mirrors for `registry.redhat.io`).
+
+This is a different usage pattern from
+`Resolve(existingRef)`. Catalog image construction uses
+`ImageResolver.Config()` to obtain the override maps,
+then performs its own registry discovery logic. It does
+not call `Resolve()`. The linter allowlists this
+specific usage of `Config()` in the catalogs package.
+
+#### Controller Struct Field Types
+
+The HC controller and HCP controller currently declare
+their release provider fields using the interface type
+`releaseinfo.ProviderWithOpenShiftImageRegistryOverrides`
+(not the base `Provider`), because they call
+`GetRegistryOverrides()` and
+`GetOpenShiftImageRegistryOverrides()` for serialization.
+Once these getter methods move to
+`ImageResolver.Config()`, these controller fields change
+to accept the simpler provider interface plus a separate
+`ImageResolver` field. This is a controller struct type
+change but not a consumer API change — the methods
+controllers call (`GetImage()`, `ImageMetadata()`) are
+unchanged.
+
+#### `RegistryProvider` Interface Elimination
+
+The `globalconfig.RegistryProvider` interface (providing
+`GetMetadataProvider()`, `GetReleaseProvider()`, and
+`Reconcile()`) is eliminated. The mermaid diagram above
+shows `main.go` constructing providers directly. The
+`Reconcile()` lifecycle is replaced by
+`ManagementClusterConfigSource` with its refresh
+interval.
+
 ## Open Questions
 
-1. Should the `support/catalogs/images.go` catalog image
-   resolution also go through `ImageResolver`, or does it
-   have unique requirements that warrant a separate path?
-   Initial analysis suggests it can use `ImageResolver`
-   directly.
-
-2. What is the right granularity for linter rule 3
+1. What is the right granularity for linter rule 3
    (string replacement heuristic)? This may need tuning
    after the initial implementation based on false
    positive rates.
+
+2. Should `ManagementClusterConfigSource` refresh on a
+   fixed interval, or should it be triggered by
+   informer events on ICSP/IDMS resources? The current
+   `Reconcile()` pattern runs on every HC reconciliation.
+   A fixed interval is simpler but may be slower to pick
+   up changes.
 
 ## Test Plan
 
@@ -507,8 +741,18 @@ interfaces:
   access.
 - **`MetadataProvider`**: Tests for image reference
   resolution before fetch, caching, and error propagation.
+- **Dual-resolver invariant**: Test that a
+  `ReleaseProvider` constructed with a no-CLI-overrides
+  resolver returns component images without
+  management-cluster override prefixes, even when
+  ICSP/IDMS mirrors are configured. This verifies the
+  management-cluster vs data-plane separation.
+- **`ConfigSource` refresh**: Tests for
+  `ManagementClusterConfigSource` returning updated
+  config after ICSP/IDMS changes on the management
+  cluster.
 - **Linter**: Tests using `analysistest.Run()` with
-  testdata fixtures covering all three flag categories
+  testdata fixtures covering all four flag categories
   and allowlist behavior.
 
 ### Integration Tests
@@ -572,8 +816,9 @@ This is safe because:
 
 - The override configuration is serialized to child
   operator deployments via CLI flags
-  (`--registry-overrides`) and HCP spec
-  (`ImageContentSources`), both of which are unchanged.
+  (`--registry-overrides`), env vars
+  (`OPENSHIFT_IMG_OVERRIDES`), and HCP spec
+  (`ImageContentSources`), all of which are unchanged.
 - Each operator constructs its own `ImageResolver` from
   its own flags. There is no shared runtime state between
   operators for image resolution.
