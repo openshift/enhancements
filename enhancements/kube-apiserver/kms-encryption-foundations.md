@@ -11,7 +11,7 @@ approvers:
 api-approvers:
   - "@JoelSpeed"
 creation-date: 2025-12-03
-last-updated: 2026-03-17
+last-updated: 2026-04-23
 tracking-link:
   - "https://redhat.atlassian.net/browse/CNTRLPLANE-243"
 see-also:
@@ -53,7 +53,7 @@ KMS support enables integration with external key management systems where encry
 - Pre-flight checks before generating new encryption keys
 - Credential/ConfigMap validation with degraded status reporting
 - Periodic sync of referenced Secrets and ConfigMaps to all active key secrets
-- KMS plugin deployment/lifecycle management (covered by a separate EP)
+- KMS plugin deployment/lifecycle management (see [KMS Plugin Lifecycle Management](#kms-plugin-lifecycle-management-tech-preview-v2))
 - API field definitions for KMS provider configuration in APIServer resource (covered by a [separate EP](https://github.com/openshift/enhancements/pull/1954))
 
 **Tech Preview v3 — Goals:**
@@ -120,7 +120,8 @@ The keyID is appended to the UDS path (`unix:///var/run/kmsplugin/kms-{keyID}.so
 1. Add KMS mode constant and track KMS configuration in encryption key secrets
 2. Split configuration into kms-encryption-config, kms-provider-config, kms-secret-data, and kms-configmap-data; copy with keyID suffix to encryption-configuration secrets (Tech Preview v2)
 3. Field-level comparison, credential/ConfigMap validation, and periodic sync of referenced resources to all active key secrets (Tech Preview v2)
-4. Reuse existing migration controller (no changes needed)
+4. Sidecar injection into API server pod specs from the encryption-configuration secret (Tech Preview v2)
+5. Reuse existing migration controller (no changes needed)
 
 ### Workflow Description
 
@@ -257,7 +258,7 @@ To enable the apiservers to access the KMS plugin, the `/var/run/kmsplugin` dire
      kms-configmap-data-1: <base64-encoded configmap data for keyID 1>
    ```
 
-5. The encryption-configuration secret is revisioned, triggering a new rollout. The respective operator configures sidecars accordingly.
+5. The encryption-configuration secret is revisioned, triggering a new rollout. The respective operator configures sidecars accordingly (see [KMS Plugin Lifecycle Management](#kms-plugin-lifecycle-management-tech-preview-v2)).
 
 6. migrationController initiates re-encryption (no code changes - works with any mode).
 
@@ -381,6 +382,40 @@ Both KMS providers run as separate sidecar containers without deduplication, mai
 #### Variation: KMS Key Rotation
 
 When a KMS plugin rotates its `key_id` (KEK), this triggers neither a new encryption key secret nor a new revision. The mechanism for detecting and handling `key_id` rotation is under evaluation and not covered in this enhancement.
+
+### KMS Plugin Lifecycle Management (Tech Preview v2)
+
+In Tech Preview v1, users manually deploy KMS plugins as static pods on each control plane node, communicating with the API server via a `hostPath` volume at `/var/run/kmsplugin`.
+Tech Preview v2 replaces this with managed sidecar containers running in the same pod as the API server, using an `emptyDir` volume shared between the API server container and the sidecar(s).
+
+#### Configuration Flow
+
+Provider-specific configuration (container image, Vault address, transit key, etc.) reaches the encryption-configuration secret through the [encryption controller pipeline described above](#encryption-controllers). The API server operator then reads it and injects sidecar containers into the API server pod spec.
+
+For kube-apiserver-operator, a revision post-check done in the RevisionController validates the revisioned `encryption-config` Secret against the revisioned `kube-apiserver-pod` ConfigMap in `openshift-kube-apiserver`. A revision is not marked ready until they are consistent, preventing inconsistent rollouts caused by races between `targetConfigController` and `RevisionController`. The other operators do not need this check because their workload sync controllers update the pod spec and encryption configuration in a single reconciliation loop.
+
+#### Sidecar Injection
+
+The sidecar injection logic is implemented in library-go and operates on a `pod.PodSpec`. Each API server operator calls it from the controller that manages its API server pod definition:
+
+- **cluster-kube-apiserver-operator** calls it from `targetConfigController`, which builds the static pod definition stored in a ConfigMap.
+- **cluster-openshift-apiserver-operator** and **cluster-authentication-operator** call it from their workload sync controllers, which reconcile the Deployment that runs their aggregated API server.
+
+When KMS is enabled, the injection reads the encryption-configuration secret, extracts the KMS provider entries and their corresponding `kms-provider-config-{keyID}`, and for each active provider: 
+
+1. Builds a sidecar container using a provider-specific builder.
+2. Appends it to the pod spec.
+3. Adds a shared `emptyDir` volume mounted at `/var/run/kmsplugin` in both the API server container and the sidecar(s).
+
+#### Provider Abstraction
+
+Each KMS provider type has a sidecar builder that constructs the container spec from the provider configuration, credentials, and KMS endpoint. Currently, Vault is the only implemented provider. Adding a new provider requires implementing a sidecar builder and adding its configuration fields to the provider config union.
+
+Credentials and ConfigMap data (`kms-secret-{key}-{keyID}` and `kms-configmap-{key}-{keyID}`) are carried automatically by the encryption controllers through the encryption-configuration secret, so the sidecar builder can consume them without additional plumbing.
+
+#### Multiple Concurrent Sidecars
+
+During KMS-to-KMS migration, the encryption-configuration secret contains provider configs for all active keys. The operator creates a separate sidecar for each key, listening on its own unix domain socket (e.g., `kms-1.sock`, `kms-2.sock`).
 
 ### User Stories
 
@@ -510,6 +545,7 @@ None
 - Pre-flight checks before generating new encryption keys
 - Credential/ConfigMap validation with degraded status reporting
 - Periodic sync of referenced Secrets and ConfigMaps to all active key secrets
+- KMS plugin sidecar lifecycle management via library-go injection into API server pod specs
 - All migration scenarios validated (KMS-to-KMS, KMS-to-static, KMS-to-identity-to-KMS)
 
 ### Tech Preview v2 -> Tech Preview v3
