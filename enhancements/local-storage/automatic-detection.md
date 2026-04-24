@@ -18,7 +18,7 @@ approvers:
   - "@hekumar"
   - "@chuffman"
 creation-date: 2020-01-21
-last-updated: 2020-03-25
+last-updated: 2026-04-16
 status: implementable
 ---
 
@@ -396,6 +396,9 @@ type LocalVolumeSetSpec struct {
 	// DeviceInclusionSpec is the filtration rule for including a device in the device discovery
 	// +optional
 	DeviceInclusionSpec *DeviceInclusionSpec `json:"deviceInclusionSpec"`
+	// DeviceExclusionSpec is the filtration rule for excluding a device in the device discovery
+	// +optional
+	DeviceExclusionSpec *DeviceExclusionSpec `json:"deviceExclusionSpec,omitempty"`
 }
 
 // DeviceMechanicalProperty holds the device's mechanical spec. It can be rotational or nonRotational
@@ -419,6 +422,18 @@ const (
 	// Part represents a device-type of partion
 	Partition DeviceType = "Partition"
 )
+
+// DeviceExclusionSpec holds the exclusion filter spec
+type DeviceExclusionSpec struct {
+	// DeviceNameFilter is a list of glob patterns. Devices whose kernel name (KName) matches
+	// any of these patterns are excluded from automatic provisioning.
+	// Glob patterns follow filepath.Match syntax: '?' matches any single non-separator character,
+	// '*' matches any sequence of non-separator characters.
+	// Example: ["rbd*"] excludes all rbd0, rbd1, etc.
+	// +optional
+	// +kubebuilder:validation:MaxItems=64
+	DeviceNameFilter []string `json:"deviceNameFilter,omitempty"`
+}
 
 type DeviceInclusionSpec struct {
 	// Devices is the list of devices that should be used for automatic detection.
@@ -468,6 +483,7 @@ type LocalVolumeSetStatus struct {
   - assign diskmaker daemonset to the selected nodes.
   - there will be one daemonset for each `LocalVolumeSet` CR.
 - The diskmaker daemon will find devices that match the disovery policy and symlink them into the directory that the local-static-provisioner is watching.
+- If a `DeviceExclusionSpec` is configured, after applying inclusion filters, each candidate device's kernel name (KName) is checked against the `deviceNameFilter` glob patterns. If any pattern matches, the device is excluded from provisioning.
 
 #### Note: There is a chance of race condition and duplicate creation of PVs
 - If two `LocalVolumeSet` CR targets same nodes with overlapping inclusion filter.
@@ -542,6 +558,39 @@ spec:
     vendors:
       - ATA
       - ST2000LM
+status:
+  conditions:
+  - lastTransitionTime: "2020-03-17T09:33:43Z"
+    status: "True"
+    type: Available
+  totalProvisionedDeviceCount: 5
+```
+
+Example of `LocalVolumeSet` CR with device name exclusion filter:
+
+```yaml
+apiVersion: local.storage.openshift.io/v1alpha1
+kind: LocalVolumeSet
+metadata:
+  name: example-autodetect-with-exclusion
+spec:
+  nodeSelector:
+    nodeSelectorTerms:
+      - matchExpressions:
+          - key: kubernetes.io/hostname
+            operator: In
+            values:
+              - worker-0
+              - worker-1
+  storageClassName: example-storageclass
+  volumeMode: Block
+  deviceInclusionSpec:
+    deviceTypes:
+      - RawDisk
+  deviceExclusionSpec:
+    deviceNameFilter:
+      - "rbd*"
+      - "nbd*"
 status:
   conditions:
   - lastTransitionTime: "2020-03-17T09:33:43Z"
