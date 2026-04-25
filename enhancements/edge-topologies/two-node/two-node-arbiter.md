@@ -1,5 +1,5 @@
 ---
-title: arbiter-clusters
+title: two-node-arbiter
 authors:
   - "@eggfoobar"
 reviewers:
