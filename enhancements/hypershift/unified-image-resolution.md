@@ -72,9 +72,9 @@ Replace the current scattered image resolution implementation with a single `sup
 
 1. **`ImageResolver`** — A core interface with a single `Resolve(ctx, ref) (string, error)` method that applies both CLI overrides and ICSP/IDMS mirror policies to any image reference. A `Config()` method provides the serializable configuration for propagation to child operator deployments.
 
-2. **`ReleaseProvider`** — Replaces the decorator chain (`ProviderWithOpenShiftImageRegistryOverridesDecorator` -> `RegistryMirrorProviderDecorator` -> `CachedProvider` -> `RegistryClientProvider`). Fetches release payloads from resolved locations and resolves every component image through the shared `ImageResolver`.
+2. **`ReleaseInfoProvider`** — Replaces the decorator chain (`ProviderWithOpenShiftImageRegistryOverridesDecorator` -> `RegistryMirrorProviderDecorator` -> `CachedProvider` -> `RegistryClientProvider`) and absorbs `StaticProviderDecorator` (`--image-overrides`). Fetches release payloads from resolved locations, resolves every component image through the shared `ImageResolver`, and applies any `--image-overrides` as a final step before caching. Implements `releaseinfo.Provider`.
 
-3. **`ComponentProvider`** — Replaces `SimpleReleaseImageProvider`. A pure lookup table over an already-resolved `ReleaseImage`. Implements the existing `imageprovider.ReleaseImageProvider` interface.
+3. **`ComponentProvider`** — Replaces `SimpleReleaseImageProvider`. A pure lookup table over an already-resolved `ReleaseImage` from `ReleaseInfoProvider`. Implements the existing `imageprovider.ReleaseImageProvider` interface.
 
 4. **`MetadataProvider`** — Replaces `RegistryClientImageMetadataProvider`. Resolves image references through the shared `ImageResolver` before fetching metadata. Implements the existing `util.ImageMetadataProvider` interface.
 
@@ -96,20 +96,20 @@ sequenceDiagram
     participant Main as operator main.go
     participant Config as NewResolverConfig
     participant Resolver as ImageResolver
-    participant Release as ReleaseProvider
+    participant Release as ReleaseInfoProvider
     participant Metadata as MetadataProvider
     participant Controller as Controllers
 
     Main->>Config: CLI flags + mgmt client
     Config-->>Main: ResolverConfig
     Main->>Resolver: NewResolver(cfg)
-    Main->>Release: NewReleaseProvider(resolver)
+    Main->>Release: NewReleaseInfoProvider(resolver)
     Main->>Metadata: NewMetadataProvider(resolver)
     Main->>Controller: inject providers
     Controller->>Release: Lookup(pullSpec)
     Release->>Resolver: Resolve(pullSpec)
     Resolver-->>Release: resolved pullSpec
-    Release-->>Controller: ReleaseImage (all refs resolved)
+    Release-->>Controller: ReleaseImage (all refs resolved, image overrides applied)
     Controller->>Metadata: ImageMetadata(ref)
     Metadata->>Resolver: Resolve(ref)
     Resolver-->>Metadata: resolved ref
@@ -228,8 +228,8 @@ userResolver := imageresolution.NewResolver(
         ImageRegistryMirrors: mirrors,
     })
 
-cpReleaseProvider := imageresolution.NewReleaseProvider(cpResolver, fetcher)
-userReleaseProvider := imageresolution.NewReleaseProvider(userResolver, fetcher)
+cpReleaseProvider := imageresolution.NewReleaseInfoProvider(cpResolver, fetcher)
+userReleaseProvider := imageresolution.NewReleaseInfoProvider(userResolver, fetcher)
 ```
 
 This preserves the existing invariant: management-cluster overrides must never leak to the data plane. An integration test verifying this invariant is included in the test plan.
@@ -280,14 +280,14 @@ All caches accept TTL as a constructor parameter, enabling zero-TTL caches in te
 
 | Old Type | Old Package | New Type | Fate |
 |---|---|---|---|
-| `Provider` | `releaseinfo` | `ReleaseProvider` | Rebuilt |
+| `Provider` | `releaseinfo` | `ReleaseInfoProvider` | Rebuilt |
 | `ProviderWithRegistryOverrides` | `releaseinfo` | -- | Deleted |
 | `ProviderWithOpenShiftImageRegistryOverrides` | `releaseinfo` | -- | Deleted |
 | `RegistryClientProvider` | `releaseinfo` | unexported | Internalized |
 | `CachedProvider` | `releaseinfo` | unexported | Generalized |
 | `RegistryMirrorProviderDecorator` | `releaseinfo` | -- | Deleted |
 | `ProviderWithOpenShiftImageRegistryOverridesDecorator` | `releaseinfo` | -- | Deleted |
-| `StaticProviderDecorator` | `releaseinfo` | -- | Kept separate (image overrides, not registry) |
+| `StaticProviderDecorator` | `releaseinfo` | -- | Absorbed into `ReleaseInfoProvider` |
 | `ReleaseImageProvider` | `imageprovider` | **kept** | Consumer interface |
 | `SimpleReleaseImageProvider` | `imageprovider` | `ComponentProvider` | Rebuilt |
 | `ImageMetadataProvider` | `util` | **kept** | Consumer interface |
@@ -303,9 +303,9 @@ All caches accept TTL as a constructor parameter, enabling zero-TTL caches in te
 - `SeekOverride()` / `GetRegistryOverrides()` from `util/imagemetadata.go` -> `ImageResolver.Resolve()`
 - `NewCommonRegistryProvider()` from `globalconfig/imagecontentsource.go` -> `NewDynamicResolver()` / `NewManagementClusterConfigSource()`
 
-Note: `StaticProviderDecorator` (used for `--image-overrides` in CPO and HCCO) is a separate concern from registry resolution. It overlays specific component images and is not part of this refactoring.
+Note: `StaticProviderDecorator` (used for `--image-overrides` in CPO and HCCO) is absorbed into `ReleaseInfoProvider`. The `--image-overrides` overlay is applied as a final step after release payload fetch and registry resolution, before caching. This keeps all image resolution — both registry-level and component-level — in a single package.
 
-Net reduction: ~15 types across 4 packages to ~7 types in 1 package plus 2 preserved consumer interfaces.
+Net reduction: ~16 types across 4 packages to ~7 types in 1 package plus 2 preserved consumer interfaces.
 
 #### Linter Rules
 
@@ -397,10 +397,10 @@ The `globalconfig.RegistryProvider` interface (providing `GetMetadataProvider()`
 All components are unit-testable through injected interfaces:
 
 - **`ImageResolver.Resolve()`**: Tests covering CLI override matching, ICSP/IDMS mirror failover, combined CLI + ICSP/IDMS behavior, digest and tag preservation, and no-match passthrough.
-- **`ReleaseProvider.Lookup()`**: Tests for release pullspec resolution, component image resolution, caching behavior, and error propagation.
+- **`ReleaseInfoProvider.Lookup()`**: Tests for release pullspec resolution, component image resolution, `--image-overrides` application, caching behavior, and error propagation.
 - **`ComponentProvider`**: Tests for successful lookups, missing image tracking, version and component image map access.
 - **`MetadataProvider`**: Tests for image reference resolution before fetch, caching, and error propagation.
-- **Dual-resolver invariant**: Test that a `ReleaseProvider` constructed with a no-CLI-overrides resolver returns component images without management-cluster override prefixes, even when ICSP/IDMS mirrors are configured. This verifies the management-cluster vs data-plane separation.
+- **Dual-resolver invariant**: Test that a `ReleaseInfoProvider` constructed with a no-CLI-overrides resolver returns component images without management-cluster override prefixes, even when ICSP/IDMS mirrors are configured. This verifies the management-cluster vs data-plane separation.
 - **`ConfigSource` refresh**: Tests for `ManagementClusterConfigSource` returning updated config after ICSP/IDMS changes on the management cluster.
 - **Linter**: Tests using `analysistest.Run()` with testdata fixtures covering all four flag categories and allowlist behavior.
 
