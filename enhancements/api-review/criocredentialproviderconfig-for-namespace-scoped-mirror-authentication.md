@@ -9,7 +9,7 @@ approvers: # A single approver is preferred, the role of the approver is to rais
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
   - "@saschagrunert"
 creation-date: 2025-10-13
-last-updated: 2025-11-05
+last-updated: 2026-04-27
 tracking-link: 
   - https://issues.redhat.com/browse/OCPNODE-3633
 ---
@@ -20,7 +20,7 @@ tracking-link:
 
 This enhancement addresses an OpenShift limitation when using CRI-O with namespace-scoped mirror registry authentication. Currently, clusters using private mirror registries are forced to use global pull secrets, breaking security isolation between projects. The solution proposed by the enhancement leverages kubelet's existing [CredentialProviderConfig](https://kubernetes.io/docs/reference/config-api/kubelet-credentialprovider.v1/) API, its [image credential provider](https://kubernetes.io/docs/tasks/administer-cluster/kubelet-credential-provider/) plugin mechanism, and the [`crio-credential-provider`](https://github.com/cri-o/crio-credential-provider) binary to enable Pods to pull images from mirrored registries using namespace-scoped secrets, without requiring global pull secrets.
 
-The enhancement introduces a cluster-wide `CRIOCredentialProviderConfig` CRD that specifies source registries triggering `crio-credential-provider` execution. When Pods reference images from these registries, the credential provider resolves mirror configurations, discovers namespace-scoped secrets, and generates short-lived authentication files for CRI-O consumption. This maintains credential isolation between namespaces while preserving existing mirror configuration methods.
+The enhancement introduces a cluster-wide singleton `CRIOCredentialProviderConfig` CRD (named "cluster") that specifies source registries triggering `crio-credential-provider` execution. The CR is shipped as an empty default. When Pods reference images from these registries, the credential provider resolves mirror configurations, discovers namespace-scoped secrets, and generates short-lived authentication files for CRI-O consumption. This maintains credential isolation between namespaces while preserving existing mirror configuration methods.
 
 ## Motivation
 
@@ -41,7 +41,7 @@ As a Cluster Administrator, I want to:
 
 Configure mirror registry pull secrets at the namespace level, reference them in the Pod spec, and have my Pods pull from configured mirrors with proper authentication, so that I can maintain security isolation between projects without exposing secrets in a global pull secret.
 
-With this new feature, the user can create a cluster-wide `CRIOCredentialProviderConfig` object that defines which source registries should trigger the `crio-credential-provider` execution, the `crio-credential-provider` will provide the appropriate credentials based on the Pod's namespace.
+With this new feature, the user can edit the pre-existing singleton `CRIOCredentialProviderConfig` to define which source registries should trigger the `crio-credential-provider` execution, the `crio-credential-provider` will provide the appropriate credentials based on the Pod's namespace.
 
 ### Goals
 
@@ -73,17 +73,19 @@ This proposal introduces a namespace-scoped mirror registry authentication solut
 
 Component Changes & Interactions
 
-1. Add cluster-wide `CRIOCredentialProviderConfig` CRD to OpenShift API
+1. Add cluster-wide singleton `CRIOCredentialProviderConfig` CRD to OpenShift API
 
-    - Introduces a new cluster-wide CRD that serves as user-facing configuration interface
+    - Introduces a new cluster-wide CRD that serves as user-facing configuration interface, enforced as a singleton named "cluster". The CR is shipped as an empty default with an empty `spec: {}`. Users edit the existing "cluster" resource to add `matchImages` entries rather than creating new CR instances
 
     - Specifies source registries that trigger `crio-credential-provider` execution
 
 2. Machine Config Operator container runtime config controller
 
-    - Extends the container runtime config controller to manage the `CRIOCredentialProviderConfig` objects
+    - Extends the container runtime config controller to manage the `CRIOCredentialProviderConfig` object
 
-    - Generates and rolls out the `CRIOCredentialProviderConfig` to [CredentialProviderConfig](https://kubernetes.io/docs/reference/config-api/kubelet-config.v1/#kubelet-config-k8s-io-v1-CredentialProviderConfig) file to all cluster nodes 
+    - Generates and rolls out the `CRIOCredentialProviderConfig` to [CredentialProviderConfig](https://kubernetes.io/docs/reference/config-api/kubelet-config.v1/#kubelet-config-k8s-io-v1-CredentialProviderConfig) file to all cluster nodes via `97-<pool>-generated-credentialproviderconfig` MachineConfig objects
+
+    - For non-cloud platforms, a daemon reload is required to reload the systemd service files before restarting kubelet. The node disruption policy includes a `DaemonReload` action for the drop-in file path, followed by a kubelet restart
 
     - Triggers kubelet restarts to make new configurations effective
 
@@ -169,7 +171,8 @@ subjects:
 4. Cluster Admin configures cluster-wide `CRIOCredentialProviderConfig` object specifying source registries that should trigger `crio-credential-provider`
 
 ```yaml
-# CRIOCredentialProviderConfig.yaml
+# Edit the existing CRIOCredentialProviderConfig singleton
+# oc edit criocredentialproviderconfig cluster
 apiVersion: config.openshift.io/v1alpha1
 kind: CRIOCredentialProviderConfig
 metadata:
@@ -181,12 +184,44 @@ spec:
 
 Machine Config Operator Container Runtime Config Controller:
 
-- Container Runtime Config Controller watches for `CRIOCredentialProviderConfig` changes and updates `CredentialProviderConfig` file `/etc/kubernetes/credential-providers/<platform>-credential-provider.yaml` with `crio-credential-provider` configuration to all nodes
+- Container Runtime Config Controller watches for `CRIOCredentialProviderConfig` changes and creates/updates `97-<pool>-generated-credentialproviderconfig` MachineConfig objects
 
-- Machine Config Operator restarts kubelet to make the new CredentialProviderConfig settings effective
+- For cloud platforms (AWS, GCP, Azure): merges the `crio-credential-provider` entry into the existing platform-specific `CredentialProviderConfig` file `/etc/kubernetes/credential-providers/<platform>-credential-provider.yaml`
+
+- For non-cloud platforms: creates a generic credential provider config file at `/etc/kubernetes/credential-providers/generic-credential-provider.yaml` and a systemd drop-in unit at `/etc/systemd/system/kubelet.service.d/40-kubelet-crio-image-credential-provider.conf`
+
+- Machine Config Operator restarts kubelet / daemon reload to make the new CredentialProviderConfig settings effective
+
+**Cloud platform example** (e.g., `/etc/kubernetes/credential-providers/ecr-credential-provider.yaml` on AWS):
 
 ```yaml
-# example /etc/kubernetes/credential-providers/ecr-credential-provider.yaml
+apiVersion: kubelet.config.k8s.io/v1
+kind: CredentialProviderConfig
+providers:
+  # existing ecr-credential-provider config on nodes
+  - name: ecr-credential-provider
+    matchImages:
+      - "*.dkr.ecr.*.amazonaws.com"
+      - "*.dkr.ecr.*.amazonaws.com.cn"
+      - "*.dkr.ecr-fips.*.amazonaws.com"
+      - "*.dkr.ecr.us-iso-east-1.c2s.ic.gov"
+      - "*.dkr.ecr.us-isob-east-1.sc2s.sgov.gov"
+    defaultCacheDuration: "12h"
+    apiVersion: credentialprovider.kubelet.k8s.io/v1
+  - name: crio-credential-provider
+    matchImages:
+      - "docker.io"
+    defaultCacheDuration: "1s"
+    apiVersion: credentialprovider.kubelet.k8s.io/v1
+    tokenAttributes:
+      serviceAccountTokenAudience: https://kubernetes.default.svc
+      cacheType: "Token"
+      requireServiceAccount: false
+```
+
+**Non-cloud platform example** (e.g., `/etc/kubernetes/credential-providers/generic-credential-provider.yaml` on bare-metal/vSphere/etc.):
+
+```yaml
 apiVersion: kubelet.config.k8s.io/v1
 kind: CredentialProviderConfig
 providers:
@@ -199,16 +234,14 @@ providers:
       serviceAccountTokenAudience: https://kubernetes.default.svc
       cacheType: "Token"
       requireServiceAccount: false
-  # existing ecr-credential-provider config on nodes
-  - name: ecr-credential-provider
-    matchImages:
-      - "*.dkr.ecr.*.amazonaws.com"
-      - "*.dkr.ecr.*.amazonaws.com.cn"
-      - "*.dkr.ecr-fips.*.amazonaws.com"
-      - "*.dkr.ecr.us-iso-east-1.c2s.ic.gov"
-      - "*.dkr.ecr.us-isob-east-1.sc2s.sgov.gov"
-    defaultCacheDuration: "12h"
-    apiVersion: credentialprovider.kubelet.k8s.io/v1
+```
+
+With the accompanying systemd drop-in unit (`/etc/systemd/system/kubelet.service.d/40-kubelet-crio-image-credential-provider.conf`):
+
+```ini
+[Service]
+# Prepends the credential provider flags to the existing Kubelet arguments
+Environment="KUBELET_CRIO_IMAGE_CREDENTIAL_PROVIDER_FLAGS=--image-credential-provider-bin-dir=/usr/libexec/kubelet-image-credential-provider-plugins --image-credential-provider-config=/etc/kubernetes/credential-providers/generic-credential-provider.yaml"
 ```
 
 ##### Step 2: Application Deployment
@@ -266,79 +299,142 @@ This enhancement introduces the following `CRIOCredentialProviderConfig` CRD:
 
 - Scope: Cluster-scoped
 
+- Singleton: only a single instance named "cluster" is allowed
+
 - Purpose: Configures which source registries trigger `crio-credential-provider` execution
 
 - Status Reporting
 
-  Condition Type: `Validated` reflects configuration validation state
+  Condition Types:
 
-  Failure States:
+    - `Validated`: reflects configuration validation state
+
+    - `MachineConfigRendered`: indicates whether the configuration has been successfully rendered into a MachineConfig object
+
+  Condition Reasons:
 
     - ReasonValidationFailed: Complete validation failure
 
     - ReasonConfigurationPartiallyApplied: Partial application with ignored conflicting entries
 
+    - ReasonMachineConfigRenderingSucceeded: MachineConfig was successfully created/updated
+
+    - ReasonMachineConfigRenderingFailed: MachineConfig creation/update failed
+
 ```go
-// CRIOCredentialProviderConfig is the schema for the CRI-O credential provider configuration API
+// CRIOCredentialProviderConfig holds cluster-wide singleton resource configurations for CRI-O credential provider,
+// the name of this instance is "cluster".
+//
+// The resource is a singleton named "cluster".
+//
+// Compatibility level 4: No compatibility is provided, the API can change at any point for any reason.
+// +kubebuilder:object:root=true
+// +kubebuilder:resource:path=criocredentialproviderconfigs,scope=Cluster
+// +kubebuilder:subresource:status
+// +openshift:enable:FeatureGate=CRIOCredentialProviderConfig
+// +kubebuilder:validation:XValidation:rule="self.metadata.name == 'cluster'",message="criocredentialproviderconfig is a singleton, .metadata.name must be 'cluster'"
 type CRIOCredentialProviderConfig struct {
-	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
+	metav1.TypeMeta `json:",inline"`
 
-	// Spec defines the desired behavior of the CRIOCredentialProviderConfig
-	Spec CRIOCredentialProviderConfigSpec `json:"spec,omitempty"`
+	// metadata is the standard object's metadata.
+	// +optional
+	metav1.ObjectMeta `json:"metadata,omitzero"`
 
-  // Status represents the current state of the CRIOCredentialProviderConfig
-	Status CRIOCredentialProviderConfigStatus `json:"status,omitempty"`
+	// spec defines the desired configuration of the CRI-O Credential Provider.
+	// This field is required and must be provided when creating the resource.
+	// +required
+	Spec *CRIOCredentialProviderConfigSpec `json:"spec,omitempty,omitzero"`
+
+	// status represents the current state of the CRIOCredentialProviderConfig.
+	// +optional
+	Status CRIOCredentialProviderConfigStatus `json:"status,omitzero,omitempty"`
 }
 
-// CRIOCredentialProviderConfigSpec defines the desired state of CRIOCredentialProviderConfig
+// CRIOCredentialProviderConfigSpec defines the desired configuration of the CRI-O Credential Provider.
+// +kubebuilder:validation:MinProperties=0
 type CRIOCredentialProviderConfigSpec struct {
-	// MatchImages defines a list of source registry patterns that should trigger
-	// CRI-O credential provider execution. Patterns follow the standard
-	// kubelet credential provider matching rules.
-	// 
+	// matchImages is a list of string patterns used to determine whether
+	// the CRI-O credential provider should be invoked for a given image.
+	// This field is optional, the items of the list must contain between 1 and 50 entries.
+	// The list is treated as a set, so duplicate entries are not allowed.
+	//
+	// Each entry in matchImages is a pattern which can optionally contain a port and a path.
+	// Wildcards ('*') are supported for full subdomain labels.
+	// A global wildcard '*' (matching any domain) is not allowed.
+	//
 	// Examples:
 	// - "docker.io"
-	// - "*.example.io" 
+	// - "*.example.io"
 	// - "quay.io"
 	// - "registry.example.com:5000"
 	//
-	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=50
-	// +kubebuilder:validation:Required
-	MatchImages []string `json:"matchImages"`
+	// +kubebuilder:validation:MinItems=1
+	// +listType=set
+	// +optional
+	MatchImages []MatchImage `json:"matchImages,omitempty"`
 }
 
+// MatchImage is a string pattern used to match container image registry addresses.
+// It must be a valid fully qualified domain name with optional wildcard, port, and path.
+// The maximum length is 512 characters.
+//
+// +kubebuilder:validation:MaxLength=512
+// +kubebuilder:validation:MinLength=1
+// +kubebuilder:validation:XValidation:rule="self != '*'",message="global wildcard '*' is not allowed"
+// +kubebuilder:validation:XValidation:rule=`self.matches('^((\\*|[a-z0-9]([a-z0-9-]*[a-z0-9])?)(\\.(\\*|[a-z0-9]([a-z0-9-]*[a-z0-9])?))*)(:[0-9]+)?(/[-a-z0-9._/]*)?$')`,message="invalid matchImages value, must be a valid fully qualified domain name in lowercase with optional wildcard, port, and path"
+type MatchImage string
+
 // CRIOCredentialProviderConfigStatus defines the observed state of CRIOCredentialProviderConfig
+// +kubebuilder:validation:MinProperties=1
 type CRIOCredentialProviderConfigStatus struct {
-	// Conditions represent the latest available observations of the configuration state
+	// conditions represent the latest available observations of the configuration state.
 	// +optional
-	// +patchMergeKey=type
-	// +patchStrategy=merge
+	// +kubebuilder:validation:MaxItems=16
+	// +kubebuilder:validation:MinItems=1
 	// +listType=map
 	// +listMapKey=type
-	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // Condition types
 const (
-	// ConditionTypeValidated indicates whether the configuration is failed, or partially valid
-	ConditionTypeValidated  = "Validated"
+	// ConditionTypeValidated indicates whether the configuration is valid
+	ConditionTypeValidated = "Validated"
+
+	// ConditionTypeMachineConfigRendered indicates whether the configuration
+	// has been successfully rendered into a MachineConfig object
+	ConditionTypeMachineConfigRendered = "MachineConfigRendered"
 )
 
 // Condition reasons
 const (
 	// ReasonValidationFailed indicates the MatchImages configuration contains invalid patterns
 	ReasonValidationFailed = "ValidationFailed"
-	
+
 	// ReasonConfigurationPartiallyApplied indicates some matchImage entries were ignored due to conflicts
 	ReasonConfigurationPartiallyApplied = "ConfigurationPartiallyApplied"
+
+	// ReasonMachineConfigRenderingSucceeded indicates the MachineConfig was successfully created/updated
+	ReasonMachineConfigRenderingSucceeded = "MachineConfigRenderingSucceeded"
+
+	// ReasonMachineConfigRenderingFailed indicates the MachineConfig creation/update failed
+	ReasonMachineConfigRenderingFailed = "MachineConfigRenderingFailed"
 )
 ```
 
 #### Example Usage
 
 ```yaml
+# The CR is shipped with an empty spec as a default:
+apiVersion: config.openshift.io/v1alpha1
+kind: CRIOCredentialProviderConfig
+metadata:
+  name: cluster
+spec: {}
+
+# Users edit the existing "cluster" resource to add matchImages:
+# oc edit criocredentialproviderconfig cluster
 apiVersion: config.openshift.io/v1alpha1
 kind: CRIOCredentialProviderConfig
 metadata:
@@ -357,6 +453,7 @@ The `CRIOCredentialProviderConfig` CR is rolled out by the Machine Config Operat
 
 - `apiVersion`: credentialprovider.kubelet.k8s.io/v1
 
+- `defaultCacheDuration`: 1s
 - `tokenAttributes`: with fixed audience and settings
 
 ```yaml
@@ -370,6 +467,7 @@ providers:
       - "quay.io"
       - "registry.example.com:5000"
     apiVersion: credentialprovider.kubelet.k8s.io/v1
+    defaultCacheDuration: 1s
     tokenAttributes:
       serviceAccountTokenAudience: https://kubernetes.default.svc
       cacheType: "Token" 
@@ -409,9 +507,7 @@ The Container Runtime Config controller will be extended to watch for `CRIOCrede
 
 - validate the `matchImages` field to ensure no conflicts with existing non-CRI-O credential providers. ignores conflicting registries and adds logs to CR's status condition. Validation requirements should remain consistent with, or more restrictive than, kubelet [validateCredentialProviderConfig()](https://github.com/kubernetes/kubernetes/blob/1bafa63caf6557d13b0da39f58396595ca50863e/pkg/credentialprovider/plugin/config.go#L146)
 
-- retrieving which platform the node is running on (AWS, Azure, GCP, etc.) to determine the appropriate [CredentialProviderConfig file path](https://github.com/openshift/machine-config-operator/blob/c6faace50b71d89f694e9f3a8ee7a6635ac36f7c/pkg/controller/template/render.go#L458C2-L458C30): `/etc/kubernetes/credential-providers/<platform>-credential-provider.yaml`
-
-- create/update the machine config to merge the generated configuration into the existing CredentialProviderConfig file:
+- retrieve which platform the node is running on (AWS, Azure, GCP, etc.) to determine the appropriate CredentialProviderConfig file path:
   
   - [`gcr`](https://github.com/openshift/machine-config-operator/blob/main/templates/common/gcp/files/etc-kubernetes-credential-providers-gcr-credential-provider.yaml)
 
@@ -419,9 +515,15 @@ The Container Runtime Config controller will be extended to watch for `CRIOCrede
 
   - [`acr`](https://github.com/openshift/machine-config-operator/blob/main/templates/common/azure/files/etc-kubernetes-credential-providers-acr-credential-provider.yaml)
 
-- clean up associated MachineConfig objects upon deletion of all CRIOCredentialProviderConfig instances
+  - Non-cloud platforms (bare-metal, vSphere, None, etc.): creates a new file at `/etc/kubernetes/credential-providers/generic-credential-provider.yaml` and generates a systemd drop-in unit at `/etc/systemd/system/kubelet.service.d/40-kubelet-crio-image-credential-provider.conf`
 
-- trigger kubelet restarts to ensure new settings take effect on each configuration update
+- create/update `97-<pool>-generated-credentialproviderconfig` MachineConfig objects for each MachineConfigPool
+
+- trigger kubelet restarts to ensure new settings take effect on each configuration update for cloud platforms
+
+- for non-cloud platforms, the node disruption policy includes a daemon reload followed by a kubelet service restart.
+
+- update the CR's status conditions (`MachineConfigRendered`, `Validated`) to reflect the outcome of each sync operation
 
 #### CRI-O Credential Provider integration and auth file generation details
 
@@ -499,10 +601,10 @@ N/A
 
 ## Upgrade / Downgrade Strategy
 
-New CRD `CRIOCredentialProviderConfig` and `crio-credential-provider` binary deployed automatically during cluster upgrade. Existing workloads continue uninterrupted during upgrade. Feature remains inactive until user creates a `CRIOCredentialProviderConfig` CR.
+New CRD `CRIOCredentialProviderConfig` and `crio-credential-provider` binary deployed automatically during cluster upgrade. Existing workloads continue uninterrupted during upgrade. Feature remains inactive until the user edits the "cluster" CR to add `matchImages` entries.
 Backward compatibility is maintained with existing mirror pulling process.
 
-During a downgrade, the CRD and the `crio-credential-provider` support will be removed. The downgrade process should include deleting any `CRIOCredentialProviderConfig` CR instances and then allowing the CRD to be removed.
+During a downgrade, the CRD and the `crio-credential-provider` support will be removed. The downgrade process should include removing the `matchImages` from the singleton "cluster" CR.
 
 ## Version Skew Strategy
 
@@ -525,21 +627,23 @@ Automated CI testing every release follow the requirements of API GA. The Node t
 
 ### Detection of Failure Modes
 
-#### CRIOCredentialProviderConfig CR created failures:
+#### CRIOCredentialProviderConfig CR update failures:
 
-- CR creation/update rejected by API server with validation errors
+- CR update rejected by API server with validation errors
 
-- Invalid matchImages patterns prevent configuration acceptance 
+- Attempting to create a second instance (non-"cluster" name) is rejected by CEL validation
 
 
 #### Container Runtime Config Controller / Machine Config Operator (MCO) Failures:
 - Nodes not updating with `CredentialProviderConfig` file
 
-- Generated MachineConfig missing or invalid
+- Generated `97-<pool>-generated-credentialproviderconfig` MachineConfig missing or invalid
 
 - Kubelet not restarting, configuration not taking effect
 
-- Diagnosis: Check machine config controller logs, contents of the generated MachineConfigs
+- On non-cloud platforms: systemd drop-in unit not created or daemon reload failing
+
+- Diagnosis: Check machine config controller logs, contents of the generated MachineConfigs, CR status conditions (`MachineConfigRendered`, `Validated`).
 
 #### `crio-credential-provider` Failures
 
