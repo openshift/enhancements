@@ -129,8 +129,11 @@ inspecting individual resources in the guest cluster.
 1. Management of the creation and renewal of encryption keys --
    keys are managed externally (by the ARO RP or user).
 
-2. Automatic key rotation scheduling -- rotation is triggered by
-   spec changes, not on a schedule.
+2. Automatic key rotation scheduling or detection of
+   cloud-provider-initiated rotation where the key identifier
+   is unchanged (e.g., AWS KMS automatic rotation behind the
+   same ARN). See "Cloud-Provider-Initiated Key Rotation" in
+   Implementation Details for per-provider analysis.
 
 3. Performance tuning for specific cluster sizes --
    `StorageVersionMigration` handles pagination natively.
@@ -622,6 +625,45 @@ fingerprint on each reconciliation:
   unreadable before re-encryption completes. The AESCBC
   `SecretRef` in status points to the same secret, so both
   active and backup would read the overwritten data.
+
+#### Cloud-Provider-Initiated Key Rotation
+
+Cloud KMS providers support automatic key rotation at the
+provider level. The behavior varies by provider and determines
+whether re-encryption is triggered:
+
+**Azure Key Vault**: The HyperShift API requires an explicit
+`keyVersion` in `AzureKMSKey`. When Azure auto-rotates a key
+(creates a new version), KAS continues using the version pinned
+in the spec — nothing changes transparently. The user must
+update `keyVersion` in the spec to use the new version, which
+changes the fingerprint and triggers re-encryption. Azure
+cloud-initiated rotation is therefore always detectable via a
+spec change.
+
+**AWS KMS**: Automatic key rotation creates new backing key
+material behind the same CMK ARN. KAS continues referencing the
+same ARN, and AWS transparently handles decryption using the
+correct key material version (the version is embedded in the
+ciphertext metadata). Since the ARN does not change, the
+fingerprint remains the same and re-encryption is **not**
+automatically triggered. However, this is safe: old data
+remains readable through the same ARN, and new writes
+automatically use the latest key material. If compliance
+requires explicit re-encryption after AWS-initiated rotation,
+the user can trigger it manually (e.g., by toggling a
+spec field). For manual AWS key rotation (new CMK = new ARN),
+the ARN changes and re-encryption is triggered normally.
+
+**IBM Cloud KMS**: The `CRKID` and `KeyVersion` fields are
+explicit in the spec. Cloud-initiated rotation that changes
+these values requires a spec update, which triggers
+re-encryption. IBM Cloud's `KeyList`-based API naturally
+supports tracking multiple key versions.
+
+**AESCBC**: Keys are Kubernetes secrets managed by the user.
+There is no cloud-initiated rotation. The user must create a
+new secret and update the `activeKey.name` reference.
 
 It then compares the computed fingerprint against one derived
 from `hcp.Status.SecretEncryption.ActiveKey`:
