@@ -3,7 +3,7 @@ title: etcd-sharding-by-resource-kind
 authors:
   - "@jhjaggars"
 reviewers:
-  - "@enxebre, for CPO v2 framework and HCP architecture"
+  - "@enxebre, for CPO component framework and HCP architecture"
   - "@sjenning, for etcd and control plane scalability"
   - "@csrwng, for HCP lifecycle and API design"
 approvers:
@@ -27,7 +27,7 @@ superseded-by: []
 This enhancement adds etcd sharding by Kubernetes resource kind to HyperShift,
 enabling hosted clusters to distribute resources across multiple independent etcd
 deployments for improved scalability and performance. Each etcd shard is registered
-as an independent `ControlPlaneComponent` within the control-plane-operator (CPO) v2 component framework,
+as an independent `ControlPlaneComponent` within the control-plane-operator (CPO) component framework,
 inheriting all framework features automatically. Kube-apiserver (KAS) is configured with
 `--etcd-servers-overrides` to route resources to the appropriate shard.
 
@@ -91,10 +91,10 @@ management cluster nodes with high-performance storage.
 1. Add declarative etcd sharding configuration to the HostedCluster/HostedControlPlane API,
    allowing users to define multiple etcd shards, map resource kinds to shards, and configure
    per-shard settings.
-2. Implement sharded etcd using the v2 framework by registering each shard as an independent
+2. Implement sharded etcd using the CPO component framework by registering each shard as an independent
    `ControlPlaneComponent`, inheriting all framework features (priority class, node
    isolation, topology spread, etc.) without behavioral gaps.
-3. Extend the v2 component framework minimally to support etcd shard components without
+3. Extend the CPO component framework minimally to support etcd shard components without
    breaking any existing single-instance components.
 4. Preserve backward compatibility: existing `StatefulSet/etcd` and
    `ControlPlaneComponent/etcd` names must not change for single-shard deployments.
@@ -113,9 +113,8 @@ management cluster nodes with high-performance storage.
 4. Mutating the shard list after cluster creation (adding, removing, or reordering shards).
 5. Auto-sharding based on resource usage patterns.
 6. Per-shard Grafana dashboards (can be added later).
-7. Per-shard backup orchestration (external tooling can use the
-   `hypershift.openshift.io/etcd-data-policy.{shard-name}` annotation to determine
-   which shards to back up).
+7. Per-shard backup orchestration (backup tooling backs up all PVC-backed
+   shards; per-shard opt-out can be added later if needed).
 8. Routing openshift-apiserver or oauth-apiserver managed resources to specific shards
    (these aggregated API servers only support a single etcd endpoint via
    `storageConfig.urls`, not per-resource overrides like KAS `--etcd-servers-overrides`).
@@ -123,11 +122,11 @@ management cluster nodes with high-performance storage.
 ## Proposal
 
 Each etcd shard is registered as an independent `ControlPlaneComponent` using the same
-`NewStatefulSetComponent` builder that all other v2 components use. A single-shard HCP
+`NewStatefulSetComponent` builder that all other CPO components use. A single-shard HCP
 registers only the existing `etcd` component; a multi-shard HCP additionally registers
 `etcd-events`, `etcd-leases`, etc.
 
-The CPO v2 component framework maps each registered component to exactly one workload
+The CPO component framework maps each registered component to exactly one workload
 object with its own `ControlPlaneComponent` CR, status tracking, and lifecycle management.
 This ensures every shard automatically inherits all framework features — priority class
 assignment, control plane node isolation, colocation affinity, multi-zone topology spread,
@@ -139,7 +138,9 @@ components (including platform-specific cloud controller managers) are registere
 unconditionally and use predicates to skip reconciliation at runtime. Shard components
 are instead registered conditionally because the number of components varies per HCP
 spec. Shard immutability ensures the component list does not need to change after
-startup. This approach was explicitly preferred by maintainers over alternatives that
+startup. On CPO restart, the shard list is re-read from the HCP spec and all
+components are re-registered, converging to the correct state idempotently.
+This approach was explicitly preferred by maintainers over alternatives that
 would manage multiple workloads within a single component.
 
 ### Workflow Description
@@ -155,7 +156,7 @@ sequenceDiagram
     participant PO as Platform Operator
     participant HO as HyperShift Operator
     participant CPO as Control Plane Operator
-    participant FW as v2 Framework
+    participant FW as CPO Framework
     participant KAS as kube-apiserver
     participant SRE as SRE
 
@@ -174,15 +175,15 @@ sequenceDiagram
     SRE->>SRE: Prometheus alerts<br/>with per-shard job labels
 ```
 
-1. The platform operator authors an etcd sharding configuration file specifying shard
-   names, resource prefixes, data policies, and storage settings.
-2. The platform operator creates a HostedCluster via
-   `hypershift create cluster --etcd-sharding-config <file>`, which embeds the shard
-   configuration into `spec.etcd.managed.shards`.
+1. The service consumer configures etcd sharding in the HostedCluster
+   `spec.etcd.managed.shards` field, specifying shard names, resource prefixes,
+   data policies, and storage settings. For self-hosted (MCE) deployments, the
+   `hcp` CLI provides a convenience flag:
+   `hcp create cluster --etcd-sharding-config <file>`.
 3. The HyperShift operator validates the shard configuration at admission time via CEL
    rules (prefix format, uniqueness, default shard presence, name constraints).
 4. The control-plane-operator (CPO) starts and reads the HCP spec. For each shard in
-   `EffectiveShards()`, it registers a v2 framework component (`etcd`, `etcd-events`,
+   `EffectiveShards()`, it registers a CPO component (`etcd`, `etcd-events`,
    `etcd-leases`, etc.).
 5. The framework reconciles each shard component independently — creating StatefulSets,
    Services, ServiceMonitors, PDBs, and defrag RBAC resources with shard-specific names.
@@ -230,11 +231,6 @@ This enhancement adds the following types to the `hypershift.openshift.io/v1beta
   `ManagedEtcdStorageSpec` because `EmptyDir` is only valid for sharded
   configurations — the top-level `ManagedEtcdSpec.Storage` continues to support
   only `PersistentVolume`
-- **`hypershift.openshift.io/etcd-data-policy.{shard-name}` annotation** — set on
-  the HostedCluster CR to signal whether a shard's data should be included in
-  backup/restore procedures. Values: `Backup` (default for PVC shards) or `NoBackup`.
-  Propagated by the HyperShift operator to the HCP and by the CPO to the shard's
-  StatefulSet and PVCs
 - **`EtcdShardSchedulingSpec`** — per-shard pod placement with `NodeSelector` and
   `Tolerations`
 - **`Shards []ManagedEtcdShardSpec`** — added to `ManagedEtcdSpec`
@@ -257,50 +253,46 @@ No new CRDs, webhooks, or aggregated API servers are introduced. The existing
 ```go
 // ManagedEtcdShardSpec defines the configuration for a single etcd shard
 // within a managed etcd deployment.
-// Per-field immutability allows future API evolution without breaking
-// existing objects (following the GCPWorkloadIdentityConfig pattern).
 type ManagedEtcdShardSpec struct {
     // name is a unique identifier for this shard. It is used to derive
     // resource names (e.g., StatefulSet "etcd-{name}", Service
-    // "etcd-client-{name}"). The name "default" is a convention used
-    // in examples but is not reserved or special — the catch-all shard
-    // is identified by having resourcePrefixes containing "/".
+    // "etcd-client-{name}").
     // +required
     // +immutable
     // +kubebuilder:validation:MinLength=1
     // +kubebuilder:validation:MaxLength=48
     // +kubebuilder:validation:XValidation:rule="self.matches('^[a-z][a-z0-9-]*$')",message="name must be lowercase alphanumeric with hyphens, starting with a letter"
     // +kubebuilder:validation:XValidation:rule="self == oldSelf",message="name is immutable"
-    Name string `json:"name"`
+    Name string `json:"name,omitempty"`
 
     // resourcePrefixes is the list of resource type prefixes routed to this
     // shard. Entries use the KAS --etcd-servers-overrides key format:
-    // "/" for the default catch-all, "/events#" for core group resources,
-    // "coordination.k8s.io/leases#" for named API group resources.
+    // "/events#" for core group resources, "coordination.k8s.io/leases#"
+    // for named API group resources. The default catch-all "/" prefix is
+    // not permitted — the default shard is configured via the top-level
+    // storage and scheduling fields.
     // +required
     // +immutable
     // +kubebuilder:validation:MinItems=1
     // +kubebuilder:validation:MaxItems=20
+    // +kubebuilder:validation:items:MinLength=1
     // +kubebuilder:validation:items:MaxLength=253
     // +listType=set
     // +kubebuilder:validation:XValidation:rule="self == oldSelf",message="resourcePrefixes are immutable"
-    ResourcePrefixes []string `json:"resourcePrefixes"`
+    ResourcePrefixes []string `json:"resourcePrefixes,omitempty"`
 
-    // storage configures the storage backend for this shard. Uses
-    // ManagedEtcdShardStorageSpec (not ManagedEtcdStorageSpec) because
-    // per-shard storage supports EmptyDir, which is not valid on the
-    // top-level ManagedEtcdSpec.Storage.
+    // storage configures the storage backend for this shard.
     // If not specified, the shard inherits PersistentVolume storage from
-    // the parent ManagedEtcdSpec.Storage. PVC size and etcd backend quota
-    // are always inherited; only storageClassName can be overridden per
-    // shard. EmptyDir sizeLimit is derived from the parent PVC size.
+    // the parent ManagedEtcdSpec.Storage.
     // +optional
     // +immutable
     // +kubebuilder:validation:XValidation:rule="!has(oldSelf) || self == oldSelf",message="storage is immutable"
-    Storage *ManagedEtcdShardStorageSpec `json:"storage,omitempty"`
+    Storage ManagedEtcdShardStorageSpec `json:"storage,omitzero,omitempty"`
 
     // replicas is the number of etcd replicas for this shard. Must be 1 or 3.
-    // If not specified, defaults to 3 for HA deployments.
+    // If specified, overrides controllerAvailabilityPolicy for this shard.
+    // If not specified, defaults to 3 for HA deployments or 1 for
+    // SingleReplica, following controllerAvailabilityPolicy.
     // +optional
     // +immutable
     // +kubebuilder:validation:Enum=1;3
@@ -310,41 +302,33 @@ type ManagedEtcdShardSpec struct {
     // scheduling configures per-shard pod placement constraints. These
     // constraints are merged with the framework's control plane node
     // isolation settings (nodeSelector, tolerations, topology spread).
-    // Use this to place shards on management cluster nodes with specific
-    // storage or performance characteristics.
     // +optional
-    // +immutable
-    // +kubebuilder:validation:XValidation:rule="!has(oldSelf) || self == oldSelf",message="scheduling is immutable"
-    Scheduling *EtcdShardSchedulingSpec `json:"scheduling,omitempty"`
+    // +kubebuilder:validation:MinProperties=1
+    Scheduling EtcdShardSchedulingSpec `json:"scheduling,omitzero,omitempty"`
 }
 
 // EtcdShardSchedulingSpec configures pod placement for a single etcd shard.
-// All constraints are merged with the v2 framework's default control plane
-// node isolation (nodeSelector, tolerations, and topology spread). The
-// framework's selectors and tolerations are always applied; per-shard
-// scheduling adds additional constraints on top.
 type EtcdShardSchedulingSpec struct {
     // nodeSelector constrains this shard's pods to nodes matching the
     // specified labels, in addition to the framework's control plane node
-    // selector. For example, setting "storage-tier": "nvme" targets nodes
-    // with local NVMe storage within the control plane node pool.
+    // selector.
     // +optional
+    // +kubebuilder:validation:MinProperties=1
     // +kubebuilder:validation:MaxProperties=16
     NodeSelector map[string]string `json:"nodeSelector,omitempty"`
 
     // tolerations allows this shard's pods to schedule on nodes with
     // matching taints, in addition to the framework's control plane
-    // tolerations. Use this to place shards on dedicated tainted node
-    // pools in the management cluster.
+    // tolerations.
     // +optional
     // +listType=atomic
+    // +kubebuilder:validation:MinItems=1
     // +kubebuilder:validation:MaxItems=16
     Tolerations []corev1.Toleration `json:"tolerations,omitempty"`
 }
 
 // UnmanagedEtcdShardSpec defines the configuration for a single etcd shard
 // within an unmanaged (externally operated) etcd deployment.
-// Per-field immutability follows the same pattern as ManagedEtcdShardSpec.
 type UnmanagedEtcdShardSpec struct {
     // name is a unique identifier for this shard.
     // +required
@@ -353,7 +337,7 @@ type UnmanagedEtcdShardSpec struct {
     // +kubebuilder:validation:MaxLength=48
     // +kubebuilder:validation:XValidation:rule="self.matches('^[a-z][a-z0-9-]*$')",message="name must be lowercase alphanumeric with hyphens, starting with a letter"
     // +kubebuilder:validation:XValidation:rule="self == oldSelf",message="name is immutable"
-    Name string `json:"name"`
+    Name string `json:"name,omitempty"`
 
     // resourcePrefixes is the list of resource type prefixes routed to this
     // shard. Uses the same format as ManagedEtcdShardSpec.ResourcePrefixes.
@@ -361,25 +345,26 @@ type UnmanagedEtcdShardSpec struct {
     // +immutable
     // +kubebuilder:validation:MinItems=1
     // +kubebuilder:validation:MaxItems=20
+    // +kubebuilder:validation:items:MinLength=1
     // +kubebuilder:validation:items:MaxLength=253
     // +listType=set
     // +kubebuilder:validation:XValidation:rule="self == oldSelf",message="resourcePrefixes are immutable"
-    ResourcePrefixes []string `json:"resourcePrefixes"`
+    ResourcePrefixes []string `json:"resourcePrefixes,omitempty"`
 
     // endpoint is the full etcd client endpoint URL for this shard.
     // +required
     // +immutable
+    // +kubebuilder:validation:MinLength=1
     // +kubebuilder:validation:MaxLength=255
     // +kubebuilder:validation:XValidation:rule="self.startsWith('https://')",message="endpoint must use HTTPS (start with 'https://')"
     // +kubebuilder:validation:XValidation:rule="self == oldSelf",message="endpoint is immutable"
-    Endpoint string `json:"endpoint"`
+    Endpoint string `json:"endpoint,omitempty"`
 
     // tls specifies TLS configuration for this shard's HTTPS endpoint.
-    // Uses the existing EtcdTLSConfig type (contains clientSecret reference).
     // +required
     // +immutable
     // +kubebuilder:validation:XValidation:rule="self == oldSelf",message="tls is immutable"
-    TLS EtcdTLSConfig `json:"tls"`
+    TLS EtcdTLSConfig `json:"tls,omitzero"`
 }
 ```
 
@@ -388,10 +373,10 @@ type UnmanagedEtcdShardSpec struct {
 The `Shards` field is added to both `ManagedEtcdSpec` and `UnmanagedEtcdSpec`:
 
 ```go
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.shards) || has(self.shards)",message="shards cannot be removed once configured"
 type ManagedEtcdSpec struct {
-    // storage configures the storage backend for the default etcd shard.
-    // When shards are configured, non-default shards may override this
-    // with their own ManagedEtcdShardStorageSpec.
+    // storage specifies how etcd data is persisted.
+    // +required
     Storage ManagedEtcdStorageSpec `json:"storage"`
 
     // scheduling configures pod placement for the default etcd shard.
@@ -399,13 +384,13 @@ type ManagedEtcdSpec struct {
     // node isolation settings.
     // +optional
     // +openshift:enable:FeatureGate=EtcdSharding
-    Scheduling *EtcdShardSchedulingSpec `json:"scheduling,omitempty"`
+    // +kubebuilder:validation:MinProperties=1
+    Scheduling EtcdShardSchedulingSpec `json:"scheduling,omitzero,omitempty"`
 
     // shards defines additional etcd shards for resource-level routing.
     // The existing storage and scheduling fields above configure
     // the default shard (catch-all for all resources not explicitly
-    // routed). Default shard replicas are controlled by
-    // controllerAvailabilityPolicy, not a per-shard field. Entries in this list define non-default shards,
+    // routed). Entries in this list define non-default shards,
     // each deployed as an independent StatefulSet and ControlPlaneComponent.
     // A shard with resourcePrefixes containing "/" is rejected — the
     // default shard is always configured via the fields above.
@@ -414,12 +399,15 @@ type ManagedEtcdSpec struct {
     // +openshift:enable:FeatureGate=EtcdSharding
     // +listType=map
     // +listMapKey=name
+    // +kubebuilder:validation:MinItems=1
     // +kubebuilder:validation:MaxItems=10
     // +kubebuilder:validation:XValidation:rule="self.all(s, !s.resourcePrefixes.exists(p, p == '/'))",message="shards must not contain the default '/' prefix — the default shard is configured via the top-level storage and scheduling fields"
+    // +kubebuilder:validation:XValidation:rule="self.all(s1, self.all(s2, s1.name == s2.name || !s1.resourcePrefixes.exists(p, s2.resourcePrefixes.exists(q, p == q))))",message="resource prefixes must not overlap across shards"
     // +kubebuilder:validation:XValidation:rule="!has(oldSelf) || self.size() == oldSelf.size()",message="shards cannot be added or removed after creation"
     Shards []ManagedEtcdShardSpec `json:"shards,omitempty"`
 }
 
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.shards) || has(self.shards)",message="shards cannot be removed once configured"
 type UnmanagedEtcdSpec struct {
     Endpoint string         `json:"endpoint"`
     TLS      EtcdTLSConfig  `json:"tls"`
@@ -428,8 +416,7 @@ type UnmanagedEtcdSpec struct {
     // The top-level endpoint and tls fields define the default shard
     // (the catch-all for all resources not explicitly routed). Entries
     // in this list define non-default shards, each with its own endpoint
-    // and TLS configuration. The CPO configures --etcd-servers from the
-    // top-level endpoint and --etcd-servers-overrides from these shards.
+    // and TLS configuration.
     // A shard with resourcePrefixes containing "/" is rejected — the
     // default shard is always the top-level endpoint.
     // Immutable after creation.
@@ -437,8 +424,10 @@ type UnmanagedEtcdSpec struct {
     // +openshift:enable:FeatureGate=EtcdSharding
     // +listType=map
     // +listMapKey=name
+    // +kubebuilder:validation:MinItems=1
     // +kubebuilder:validation:MaxItems=10
     // +kubebuilder:validation:XValidation:rule="self.all(s, !s.resourcePrefixes.exists(p, p == '/'))",message="shards must not contain the default '/' prefix — the top-level endpoint is the default shard"
+    // +kubebuilder:validation:XValidation:rule="self.all(s1, self.all(s2, s1.name == s2.name || !s1.resourcePrefixes.exists(p, s2.resourcePrefixes.exists(q, p == q))))",message="resource prefixes must not overlap across shards"
     // +kubebuilder:validation:XValidation:rule="!has(oldSelf) || self.size() == oldSelf.size()",message="shards cannot be added or removed after creation"
     Shards []UnmanagedEtcdShardSpec `json:"shards,omitempty"`
 }
@@ -459,54 +448,32 @@ in the `api/` module.
 count are independent choices, giving operators flexibility to match each shard's
 configuration to its workload characteristics.
 
-**Data policy is expressed via a well-known annotation on the HostedCluster CR,**
-not a typed API field. The annotation
-`hypershift.openshift.io/etcd-data-policy.{shard-name}` accepts values `Backup`
-or `NoBackup`. The HyperShift operator propagates it to the HCP, and the CPO
-propagates it to the shard's StatefulSet and PVCs. PVC-backed shards default to
-`Backup` if no annotation is present. Backup tooling reads the annotation on PVCs
-to decide which shards to include in backup/restore procedures. `NoBackup` means
-the data is regenerable and does not warrant backup. EmptyDir shards have no PVCs,
-so the annotation is not applicable.
+**Backup policy is determined by storage type.** All PVC-backed shards are included
+in backup/restore procedures. EmptyDir shards have no PVCs and are not backed up.
+No per-shard opt-out is provided in the initial implementation; if needed, a typed
+API field can be added in a future enhancement.
 
 #### Common Configurations
 
-**PersistentVolume + data-policy: Backup (default)**
+**PersistentVolume (default shard and PVC-backed non-default shards)**
 
-The standard configuration for shards holding critical cluster state. Data is written to
-persistent disk, survives pod and node restarts, and is included in backup/restore
-procedures for disaster recovery and cluster migration.
+Data is written to persistent disk, survives pod and node restarts, and is included
+in backup/restore procedures for disaster recovery and cluster migration.
 
-*Use case:* The default shard (`/`) containing pods, deployments, secrets, configmaps,
-and all other core Kubernetes resources. This is the only configuration appropriate for
-data that cannot be regenerated.
+*Use case — default shard:* The default shard (`/`) containing pods, deployments,
+secrets, configmaps, and all other core Kubernetes resources.
 
-**PersistentVolume + data-policy: NoBackup**
-
-Data is written to persistent disk but is not included in backup/restore procedures.
-This provides two benefits over tmpfs without the cost of backup:
-
-1. *Avoids memory pressure* — PVC storage does not compete with the etcd process or
-   other control plane pods for node RAM. For shards with non-trivial data volume,
-   this prevents OOM conditions on management cluster nodes.
-2. *Survives full-cluster restarts* — if all replicas go down simultaneously (node
-   maintenance, cordon+drain, management cluster upgrade), data recovers from disk.
-   tmpfs-backed shards would lose all data, forcing all clients to rebuild state
-   concurrently. For leases, PVC means clients don't all race to re-acquire
-   simultaneously after a full restart.
-
-Neither benefit requires backup. The data is not worth preserving across disaster
-recovery or migration scenarios — it can be regenerated — but keeping it on disk
-improves operational stability during normal lifecycle events.
-
-*Use case:* Leases shard. Lease data is high-churn, regenerable, and not needed for
-disaster recovery (DR), but benefits from surviving full-cluster restarts gracefully.
+*Use case — leases shard:* Lease data is high-churn and regenerable, but PVC storage
+avoids memory pressure and survives full-cluster restarts gracefully. Clients don't
+all race to re-acquire leases simultaneously after a full restart. While the data is
+not critical for DR, PVC-backed leases shards are still included in backup for
+simplicity.
 
 **EmptyDir (tmpfs)**
 
 Data is stored in memory only. Maximum write throughput, no PVC provisioning, no
 storage costs. Data is lost on any pod restart and must be regenerated by the system.
-Backup is never applicable — there is no persistent state to back up.
+Not backed up — there is no persistent state.
 
 *Use case:* Events shard. Events are inherently ephemeral, continuously generated by
 the system, and have built-in TTL expiration. Losing events on restart has no impact
@@ -514,15 +481,14 @@ on cluster functionality.
 
 #### Configuration Matrix
 
-| Storage Type | data-policy annotation | Survives pod restart | Survives full-cluster restart | DR/Migration | Memory pressure |
-| --- | --- | --- | --- | --- | --- |
-| PVC | `Backup` (default) | Yes | Yes | Yes | None (disk) |
-| PVC | `NoBackup` | Yes | Yes | No | None (disk) |
-| EmptyDir | N/A (no PVCs) | No | No | No | Uses node RAM |
+| Storage Type | Survives pod restart | Survives full-cluster restart | DR/Migration | Memory pressure |
+| --- | --- | --- | --- | --- |
+| PVC | Yes | Yes | Yes (backed up) | None (disk) |
+| EmptyDir | No | No | No | Uses node RAM |
 
 The existing `ManagedEtcdStorageSpec` is **unchanged** by this enhancement — it
 continues to support only `PersistentVolume`. Per-shard storage uses a new
-`ManagedEtcdShardStorageSpec` type that adds `EmptyDir` and `DataPolicy`:
+`ManagedEtcdShardStorageSpec` type that adds `EmptyDir`:
 
 ```go
 // ManagedEtcdShardStorageSpec configures storage for a single etcd shard.
@@ -546,30 +512,24 @@ continues to support only `PersistentVolume`. Per-shard storage uses a new
 // avoids the same misconfiguration risk as undersized PVCs: a sizeLimit
 // lower than the etcd quota would cause filesystem-full errors (ENOSPC)
 // before etcd's clean quota alarm fires.
+// +kubebuilder:validation:XValidation:rule="self.type != 'EmptyDir' || !has(self.storageClassName)",message="storageClassName is not valid for EmptyDir storage"
 type ManagedEtcdShardStorageSpec struct {
-    // type is the storage backend type. PersistentVolume uses a PVC;
-    // EmptyDir uses tmpfs (memory-backed, data lost on pod restart).
-    // The sizeLimit for EmptyDir is derived from the parent
-    // ManagedEtcdSpec.Storage PVC size — it is not user-configurable.
+    // type is the kind of storage implementation to use for this shard.
+    // PersistentVolume uses PVCs; EmptyDir uses ephemeral node storage.
     // +required
     // +immutable
     // +unionDiscriminator
-    // +kubebuilder:validation:Enum=PersistentVolume;EmptyDir
-    // +kubebuilder:validation:XValidation:rule="self == oldSelf",message="storage type is immutable"
-    Type ManagedEtcdStorageType `json:"type"`
+    Type ManagedEtcdShardStorageType `json:"type,omitempty"`
 
-    // storageClassName overrides the storage class for this shard's PVCs.
-    // Use this to target different I/O tiers (e.g., gp3-iops-3000 vs gp3)
-    // or different local volume pools on bare metal. If not specified,
-    // the shard inherits the storageClassName from the parent
-    // ManagedEtcdSpec.Storage.PersistentVolume. PVC size and etcd backend
-    // quota are always inherited from the parent — they are not
-    // configurable per shard.
-    // Only applicable when type is PersistentVolume.
+    // storageClassName overrides the StorageClass for this shard's PVCs.
+    // Only valid when type is PersistentVolume. If not specified, the
+    // parent ManagedEtcdSpec's storageClassName is used.
     // +optional
     // +immutable
+    // +kubebuilder:validation:MinLength=1
+    // +kubebuilder:validation:MaxLength=255
     // +kubebuilder:validation:XValidation:rule="!has(oldSelf) || self == oldSelf",message="storageClassName is immutable"
-    StorageClassName *string `json:"storageClassName,omitempty"`
+    StorageClassName string `json:"storageClassName,omitempty"`
 }
 ```
 
@@ -638,24 +598,26 @@ top-level `Replicas`/`Scheduling` fields, which apply only to the default shard.
   ```go
   type ManagedEtcdShardSpec struct {
       // +kubebuilder:validation:XValidation:rule="self == oldSelf",message="name is immutable"
-      Name string `json:"name"`
+      Name string `json:"name,omitempty"`
 
       // +kubebuilder:validation:XValidation:rule="self == oldSelf",message="resourcePrefixes are immutable"
-      ResourcePrefixes []string `json:"resourcePrefixes"`
+      ResourcePrefixes []string `json:"resourcePrefixes,omitempty"`
 
       // +kubebuilder:validation:XValidation:rule="!has(oldSelf) || self == oldSelf",message="storage is immutable"
-      Storage *ManagedEtcdShardStorageSpec `json:"storage,omitempty"`
+      Storage ManagedEtcdShardStorageSpec `json:"storage,omitzero,omitempty"`
 
       // +kubebuilder:validation:XValidation:rule="!has(oldSelf) || self == oldSelf",message="replicas is immutable"
       Replicas *int32 `json:"replicas,omitempty"`
 
-      // +kubebuilder:validation:XValidation:rule="!has(oldSelf) || self == oldSelf",message="scheduling is immutable"
-      Scheduling *EtcdShardSchedulingSpec `json:"scheduling,omitempty"`
+      Scheduling EtcdShardSchedulingSpec `json:"scheduling,omitzero,omitempty"`
   }
   ```
 
-  The same per-field pattern applies to `UnmanagedEtcdShardSpec` fields (`Name`,
-  `ResourcePrefixes`, `Endpoint`, `TLS`).
+  Scheduling is intentionally mutable — changing pod placement does not require
+  data migration, so operators can adjust shard placement after creation.
+
+  The same per-field immutability pattern applies to `UnmanagedEtcdShardSpec` fields
+  (`Name`, `ResourcePrefixes`, `Endpoint`, `TLS`).
 
 - Validate replica count: must be 1 or 3 on `ManagedEtcdShardSpec.Replicas`
   (non-default shards only; the default shard uses `controllerAvailabilityPolicy`)
@@ -710,9 +672,8 @@ spec:
 
       # Non-default shards — only overrides
       shards:
-      # PVC, no backup — leases survive restarts, ok to recreate
+      # PVC — leases survive restarts, ok to regenerate after DR
       # Inherits PVC size (8Gi) and quota from the parent storage config.
-      # data-policy annotation set to NoBackup on the HostedCluster.
       - name: leases
         resourcePrefixes:
         - "coordination.k8s.io/leases#"
@@ -803,8 +764,18 @@ if hcp.Spec.Etcd.ManagementType == hyperv1.Managed && hcp.Spec.Etcd.Managed != n
 ```
 
 Each shard component uses `WithAssetDir("etcd")` to load manifests from the shared
-`assets/etcd/` directory, with per-manifest adapt functions that rename objects and
-update selectors for the shard:
+`assets/etcd/` directory. Asset YAMLs use Go templates (`{{ .Name }}`) in place of
+hardcoded `etcd` in resource names, labels, and selectors. For the default `etcd`
+component, `{{ .Name }}` renders to `etcd` — unchanged behavior. For shards, it
+renders to the shard's component name (e.g., `etcd-events`, `etcd-leases`).
+
+The framework renders templates at load time via a `TemplatedProvider` that wraps the
+existing `WorkloadProvider`. Both workload and non-workload manifests pass through
+the same rendering path, so `update()`, `delete()`, and `reconcileComponentStatus()`
+all get correctly-named objects. This eliminates per-manifest rename adapt functions
+entirely — no `adaptClientServiceForShard`, `adaptDiscoveryServiceForShard`,
+`adaptPDBForShard`, etc. When a new manifest is added to `assets/etcd/`, it only
+needs `{{ .Name }}` in the right places — no Go code change required.
 
 ```go
 func NewShardComponent(shard hyperv1.ManagedEtcdShardSpec) component.ControlPlaneComponent {
@@ -815,59 +786,53 @@ func NewShardComponent(shard hyperv1.ManagedEtcdShardSpec) component.ControlPlan
             return adaptStatefulSetForShard(ctx, sts, shard)
         }).
         WithPredicate(isManagedETCD).
-        WithManifestAdapter("service.yaml",
-            component.WithAdaptFunction(adaptClientServiceForShard(shard)),
-        ).
-        WithManifestAdapter("discovery-service.yaml",
-            component.WithAdaptFunction(adaptDiscoveryServiceForShard(shard)),
-        ).
-        WithManifestAdapter("servicemonitor.yaml",
-            component.WithAdaptFunction(adaptServiceMonitorForShard(shard)),
-        ).
+        WithManifestAdapter("servicemonitor.yaml").
         WithManifestAdapter("pdb.yaml",
-            component.WithAdaptFunction(adaptPDBForShard(shard)),
+            component.AdaptPodDisruptionBudget(),
         ).
         WithManifestAdapter("defrag-role.yaml",
             component.WithPredicate(defragControllerPredicate),
-            component.WithAdaptFunction(adaptDefragRBACForShard(shard)),
         ).
         WithManifestAdapter("defrag-rolebinding.yaml",
             component.WithPredicate(defragControllerPredicate),
-            component.WithAdaptFunction(adaptDefragRBACForShard(shard)),
         ).
         WithManifestAdapter("defrag-serviceaccount.yaml",
             component.WithPredicate(defragControllerPredicate),
-            component.WithAdaptFunction(adaptDefragRBACForShard(shard)),
         ).
         Build()
 }
 ```
 
+The only adapt functions that remain are those with real etcd domain logic:
+`adaptStatefulSetForShard` (rewriting `spec.serviceName`, peer URLs, init container
+args, storage type switching, and scheduling merge). Defrag manifests retain their
+predicates but no longer need rename adapters — the template handles naming.
+
+**Defrag controller:** The defrag controller runs as a sidecar inside each etcd pod,
+connecting to `localhost:2379` and discovering cluster members via the etcd member
+list API. Each shard's StatefulSet gets its own defrag sidecar that operates only
+on that shard's members. No changes to the defrag controller are needed — only
+the RBAC resources (Role, RoleBinding, ServiceAccount) need shard-specific names,
+which the template rendering handles.
+
 #### Framework Extensions
 
-**`EtcdLike` interface** — Added to `ComponentOptions` for runtime identification of
-etcd shard components. Used in three framework locations:
+**Etcd component prefix check** — The four framework locations that currently use
+`name == "etcd"` checks are changed to `strings.HasPrefix(name, "etcd")` to cover
+all shard components (`etcd`, `etcd-events`, `etcd-leases`, etc.). Where the
+existing code uses set membership rather than direct comparison (e.g.,
+`checkDependencies`), the set lookup is replaced with prefix-based iteration:
 
-1. `checkDependencies()` — excludes etcd-like components from automatic KAS dependency
-2. `priorityClass()` — returns `hypershift-etcd` for etcd-like components
-3. `DefaultReplicas()` — returns 3 for HA etcd-like components
-4. `setDefaults()` — sets FSGroup for etcd-like components (required for PVC permissions)
+1. `checkDependencies()` — excludes etcd components from automatic KAS dependency
+2. `priorityClass()` — returns `hypershift-etcd` for etcd components
+3. `DefaultReplicas()` — returns 3 for HA etcd components
+4. `setDefaults()` — sets FSGroup for etcd components (required for PVC permissions)
 
-**`WithAssetDir()` builder method** — Decouples asset directory from component name.
-Adds an `assetDir` field to `controlPlaneWorkload[T]` and updates all call sites in
-`controlplane-component.go` (`ForEachManifest` in `update()` and `delete()`,
-`LoadManifest` in `reconcileWorkload()`, asset references in `reconcileComponentStatus()`)
-to use `c.assetDirName()` instead of `c.name`. The `WorkloadProvider` interface's
-`LoadManifest` method is updated to accept the resolved asset directory name.
-
-**Note on `EtcdLike` tradeoff:** The alternative to this interface is threading a "do
-not depend on KAS" declaration through every component that shouldn't have a KAS
-dependency, which is the majority of components. `EtcdLike` is simpler — it identifies
-the small set of components that need special handling (KAS dependency exclusion,
-priority class, replica defaults, FSGroup) rather than annotating every other component.
-The long-term fix is builder methods (`WithPriorityClass()`, `WithDefaultReplicas()`)
-that let components declare these settings at registration time, but `EtcdLike` is an
-acceptable short-term approach given the small number of etcd-like components.
+This requires no interface changes, no builder additions, and no boilerplate on
+existing components. The long-term fix is builder methods (`WithPriorityClass()`,
+`WithDefaultReplicas()`) that let components declare these settings at registration
+time, but the prefix check is the smallest change that works correctly for the
+initial implementation.
 
 #### Shard-Aware StatefulSet Adaptation
 
@@ -884,10 +849,12 @@ KAS `wait-for-etcd`), `adaptStatefulSetForShard()` overwrites these values:
 **Storage adaptation based on `Storage.Type`:** When `Storage.Type` is `EmptyDir`, the
 adapt function removes `volumeClaimTemplates` and replaces it with an inline `emptyDir`
 volume with `medium: Memory` and `sizeLimit` derived from the parent
-`ManagedEtcdSpec.Storage.PersistentVolume.Size` (defaulting to 8Gi). When `Storage.Type`
-is `PersistentVolume`, the existing `volumeClaimTemplates` are preserved with size and
-quota inherited from the parent, and `storageClassName` optionally overridden from the
-shard's `Storage.StorageClassName`.
+`ManagedEtcdSpec.Storage.PersistentVolume.Size` (defaulting to 8Gi). The container's
+memory limit is set to match the `sizeLimit` so the pod can use the full tmpfs
+allocation without being OOM-killed. When `Storage.Type` is `PersistentVolume`, the
+existing `volumeClaimTemplates` are preserved with size and quota inherited from the
+parent, and `storageClassName` optionally overridden from the shard's
+`Storage.StorageClassName`.
 
 **Scheduling adaptation from `Scheduling`:** When `Scheduling` is set, the adapt
 function merges the shard's `NodeSelector` labels into the pod template's existing
@@ -909,7 +876,12 @@ URLs and TLS credentials.
 - `--etcd-servers-overrides` contains entries for non-default shards using their
   in-cluster service URLs
 - TLS credentials are generated by the PKI controller
-- `wait-for-etcd` init container checks DNS resolution for all shard client services
+- The KAS deployment adapt function extends the `wait-for-etcd` init container to
+  check DNS resolution for all shard client services. The existing init container
+  runs `nslookup etcd-client.$(POD_NAMESPACE).svc` in a loop. The adapt function
+  has access to the shard list from the HCP spec and appends one `nslookup` check
+  per shard service name (e.g., `etcd-client-events`, `etcd-client-leases`) to the
+  same shell script
 
 **Unmanaged etcd:**
 - `--etcd-servers` points to the default shard's external endpoint from
@@ -1054,9 +1026,9 @@ on that node.
 
 | Shard | Storage | Rationale |
 | --- | --- | --- |
-| Default (`/`) | PVC, data-policy `Backup` | Critical cluster state, moderate I/O, requires DR |
+| Default (`/`) | PVC | Critical cluster state, moderate I/O, requires DR |
 | Events (`/events#`) | EmptyDir | Highest I/O, inherently ephemeral, eliminates disk I/O bottleneck |
-| Leases (`coordination.k8s.io/leases#`) | PVC, data-policy `NoBackup` | Low I/O, survives full-cluster restarts, no DR value |
+| Leases (`coordination.k8s.io/leases#`) | PVC | Low I/O, survives full-cluster restarts, regenerable after DR |
 
 For cloud management clusters requiring maximum density, use instance types with
 dedicated (not burst) EBS bandwidth (e.g., m5.2xlarge at 593 MBps sustained,
@@ -1119,8 +1091,10 @@ volume provisioner allocates distinct physical disks per PV. See
    registered unconditionally and use predicates at reconcile time. Shard immutability
    ensures the component list does not need to change after startup.
 
-2. **`EtcdLike` interface is etcd-specific.** If a future non-etcd component needs similar
-   runtime KAS exclusion, a more general mechanism may be needed.
+2. **Prefix check is convention-based.** The `strings.HasPrefix(name, "etcd")` check
+   assumes no future non-etcd component will have a name starting with "etcd". A
+   naming collision would be caught immediately (wrong priority class, unexpected
+   replica count), but the long-term fix is builder methods for explicit opt-in.
 
 3. **No single parent CR.** No aggregated `ControlPlaneComponent/etcd` CR reflecting all
    shards' combined health. Operators must inspect individual shard CRs.
@@ -1132,10 +1106,10 @@ volume provisioner allocates distinct physical disks per PV. See
 
 ### Alternative A: Standalone Sharding Package
 
-Introduce a new `etcd/` package outside the v2 framework that hand-rolls per-shard
+Introduce a new `etcd/` package outside the CPO component framework that hand-rolls per-shard
 `StatefulSet`, `Service`, `ServiceMonitor`, and `PodDisruptionBudget` objects.
 
-**Why rejected:** Bypasses the v2 framework, requiring manual reimplementation of
+**Why rejected:** Bypasses the CPO component framework, requiring manual reimplementation of
 priority class, node isolation, colocation affinity, topology spread, config hash
 annotations, scale-to-zero, restart propagation, and PDB semantics.
 
@@ -1147,12 +1121,17 @@ Extend `controlPlaneWorkload[T]` to carry a set of named instances and loop in
 **Why rejected:** Requires changing the `adapt` function signature — a package-wide
 breaking change affecting all ~40 registered components.
 
-### Alternative C: Template-Based Asset Loading
+### Alternative C: Full Template-Based Asset Loading
 
-Make asset loading instance-aware with template directories.
+Make asset loading fully instance-aware with per-shard template directories and
+template-driven reconcile loops.
 
-**Why rejected:** Framework `Reconcile()` still reconciles one workload. Framework
-features must still be reimplemented manually.
+**Why rejected as a full alternative:** Framework `Reconcile()` still reconciles one
+workload. Framework features must still be reimplemented manually. However, a
+narrower form of template rendering *is* adopted in the chosen approach — Go
+templates in shared asset YAMLs handle resource naming (`{{ .Name }}`), eliminating
+per-manifest rename adapt functions while keeping the framework's existing reconcile
+loop and lifecycle management intact.
 
 ### Alternative D: CompositeComponent
 
@@ -1167,7 +1146,7 @@ conceptual overhead that separate components avoids.
 
 Extend the existing `etcd` component's `Reconcile()` to loop over shards internally.
 
-**Why rejected:** Still requires the same `EtcdLike` framework extension for KAS
+**Why rejected:** Still requires the same framework prefix check for KAS
 dependency exclusion. Produces less maintainable, non-reusable code.
 
 ## Open Questions
@@ -1219,9 +1198,9 @@ label to ensure they only run on clusters where the feature gate is enabled.
 ### Unit Tests
 
 - `support/controlplane-component/status_test.go`: verify `checkDependencies()` excludes
-  KAS for `EtcdLike` components; verify unmanaged-etcd logic is unaffected.
+  KAS for etcd-prefixed components; verify unmanaged-etcd logic is unaffected.
 - `support/controlplane-component/defaults_test.go`: verify `priorityClass()` and
-  `DefaultReplicas()` return etcd values for `EtcdLike` components.
+  `DefaultReplicas()` return etcd values for etcd-prefixed components.
 - `control-plane-operator/controllers/hostedcontrolplane/v2/etcd/`: existing
   `NewStatefulSetComponentTest` harness exercised for each shard variant (`default`,
   `events`, `leases`). Golden fixtures generated per shard name.
@@ -1291,8 +1270,9 @@ endpoint format) are enforced by the CRD schema and do not need envtest coverage
 - Invalid: shard with `"/"` prefix (default shard is the top-level config)
 - Invalid: duplicate prefixes across shards (cross-shard CEL rule)
 - Immutability: shards cannot be added or removed after creation
-- Immutability: shard `name`, `resourcePrefixes`, `replicas`, `storage`,
-  `scheduling` cannot change after creation (per-field CEL rules)
+- Immutability: shard `name`, `resourcePrefixes`, `replicas`, `storage`
+  cannot change after creation (per-field CEL rules)
+- Mutability: shard `scheduling` can be updated after creation
 
 `UnmanagedEtcdShardSpec` CEL validation:
 
@@ -1309,7 +1289,7 @@ endpoint format) are enforced by the CRD schema and do not need envtest coverage
 ### Dev Preview -> Tech Preview
 
 - `EtcdSharding` feature gate defined in `TechPreviewNoUpgrade` feature set.
-- `EtcdLike` interface implemented and merged.
+- Framework prefix check (`strings.HasPrefix(name, "etcd")`) implemented and merged.
 - Etcd shard components registered via `NewShardComponent`.
 - All framework features verified on shard components by unit + integration tests.
 - Single-shard backward compatibility confirmed.
@@ -1346,7 +1326,7 @@ Not applicable. This enhancement does not deprecate or remove any existing featu
 Upgrade is transparent. Existing unsharded HCPs continue to register only the `etcd`
 component via `EffectiveShards()` synthesizing a single default shard. The
 `StatefulSet/etcd` name and `ControlPlaneComponent/etcd` CR are unchanged. The etcd
-component is already a v2 framework component, so no new scheduling hints, priority
+component is already a CPO component, so no new scheduling hints, priority
 classes, or topology rules are applied during upgrade.
 
 Sharding requires creating a new cluster with the shard list specified at creation time.
@@ -1358,10 +1338,13 @@ CPO downgrade is not a supported operational procedure in HyperShift. The HyperS
 team always rolls forward, even in the face of issues. A CPO rollback to a version
 that does not understand shards is not expected to occur in practice.
 
-If a rollback were to happen, unsharded HCPs would be unaffected. Sharded HCPs would
-lose reconciliation of non-default shard components, but existing StatefulSets and
-Services would continue running. KAS would continue to function as long as the shard
-pods remain available.
+If a rollback were to happen, unsharded HCPs would be unaffected. Sharded HCPs
+are incompatible with a pre-sharding CPO: non-default shard components would lose
+reconciliation (no controller watching them), their `ControlPlaneComponent` CR
+conditions would go stale, and if shard pods crash the old CPO would not restart
+them. Existing StatefulSets and Services would continue running only as long as
+the shard pods remain available. This is consistent with HyperShift's forward-only
+operational model.
 
 ## Version Skew Strategy
 
@@ -1457,8 +1440,8 @@ SRE alerts fire per-shard via distinct `job` labels.
 
 | Storage | Resource type | Impact of total shard loss | Recovery |
 | --- | --- | --- | --- |
-| PVC (`Backup`) | Default (`/`) | Critical — all unmapped resources inaccessible | Restore from backup |
-| PVC (`NoBackup`) | Leases | High — leader election stops, controllers/scheduler halt until leases re-acquired | Restart StatefulSet; clients re-acquire leases (thundering herd) |
+| PVC | Default (`/`) | Critical — all unmapped resources inaccessible | Restore from backup |
+| PVC | Leases | High — leader election stops, controllers/scheduler halt until leases re-acquired | Restart StatefulSet; clients re-acquire leases (thundering herd) |
 | EmptyDir | Leases | High — same as PVC, but data must be fully rebuilt | Restart StatefulSet; longer re-acquisition window |
 | EmptyDir | Events | Low — events lost, system regenerates continuously | Restart StatefulSet |
 
@@ -1497,7 +1480,7 @@ Admission-time CEL validation catches format errors only.
 - Shard list mutation after cluster creation
 - Auto-sharding based on resource usage patterns
 - Shard merging and cross-shard transactions
-- Per-shard backup orchestration (external tooling uses the data-policy annotation)
+- Per-shard backup opt-out for PVC-backed shards
 - Routing openshift-apiserver/oauth-apiserver resources to specific shards
 - Framework-level builder methods for priority class and default replicas
 - More than 10 etcd shards per HCP (requires a CRD `MaxItems` increase)
