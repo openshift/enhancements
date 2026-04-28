@@ -395,8 +395,15 @@ requirements will be documented.
 
 **Half-configured state**: If any subsystem (e.g., kernel
 routes) fails while others succeed, the controller
-reverts all changes for that remote cluster to avoid
-partial connectivity. The status CR reports the failure.
+does not roll back the successfully applied changes.
+Because subsystems operate on shared OS resources
+(routing tables, OVN DB, nftables), a failure
+typically indicates a systemic problem rather than a
+peer-specific one, and a rollback would likely fail
+for the same reason. Instead, the controller marks
+the affected remote cluster as degraded in the status
+CR and retries the failed subsystem on the next
+reconciliation cycle (every 15s or upon incoming event).
 
 ### Drawbacks
 
