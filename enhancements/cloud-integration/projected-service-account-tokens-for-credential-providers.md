@@ -94,7 +94,7 @@ KEP-4412 depends on the Kubernetes [TokenRequest API](https://kubernetes.io/docs
 
 For more background, see the [Kubernetes v1.33 blog post](https://kubernetes.io/blog/2025/05/07/kubernetes-v1-33-wi-for-image-pulls/) and [v1.34 beta graduation announcement](https://kubernetes.io/blog/2025/09/03/kubernetes-v1-34-sa-tokens-image-pulls-beta/). OpenShift's existing [bound service account token documentation](https://docs.redhat.com/en/documentation/openshift_container_platform/4.9/html/authentication_and_authorization/bound-service-account-tokens) covers the underlying mechanism.
 
-#### Two paths: keep or remove node identity
+#### Three paths: keep, replace, or bypass node identity
 
 There are two ways to adopt KEP-4412 in OpenShift, with meaningfully different scope and security implications:
 
@@ -118,7 +118,18 @@ This is more work. The ECR plugin already supports this via the `AWS_ECR_ROLE_AR
 
 **ACR and GCR do not have this fallback mechanism today.** ACR hard-fails without annotations; GCR has no KEP-4412 implementation at all. Upstream work is needed to add equivalent environment variable or config-file fallbacks for default identity on Azure and GCP before path 2 is viable on those platforms.
 
-Path 2 is the preferred direction, it addresses the security concerns and unblocks the installer team. But path 1 can ship first as an incremental step while the upstream fallback work for ACR and GCR is in progress.
+Path 2 also requires an OIDC issuer on every cluster. The service account token exchange (e.g. `AssumeRoleWithWebIdentity`) only works if the cloud provider can validate the token against the cluster's OIDC issuer public keys. Today, only clusters in STS / Workload Identity mode have an OIDC issuer. Unless every OCP cluster ships an OIDC issuer regardless of CCO mode, path 2 is limited to managed services (ROSA, ARO) and clusters explicitly configured for STS/WI.
+
+**Path 3: CCO-provisioned static credential via credential provider config**
+- CCO (mint mode) provisions a scoped credential for image pulls (e.g. a GCP service account key, AWS access key pair)
+- MCO templates the credential into the credential provider config (via config file or environment variable)
+- The credential provider uses it directly, no token exchange, no OIDC issuer required, no node identity required
+- CCO manages the credential lifecycle, including rotation (rotation support in mint mode may need additional work)
+- Requires upstream work: credential provider plugins don't currently accept static credentials via config, only IMDS or SA token exchange
+
+This avoids the OIDC issuer prerequisite entirely while still removing node identity. The credential is scoped to image pulls only, and CCO rotation keeps it from being truly long-lived.
+
+Path 1 can ship first as an incremental step while the upstream work for paths 2 and 3 is in progress.
 
 ### CredentialsRequest-provisioned default identity (Path 2 mechanism)
 
