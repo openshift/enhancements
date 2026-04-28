@@ -27,7 +27,9 @@ superseded-by: []
 
 ## Summary
 
-Enable per-workload identity for container image pulls in OpenShift by adopting KEP-4412 (Projected Service Account Tokens for Kubelet Image Credential Providers). Today, all pods on a node share the node's cloud identity (EC2 instance profile, Azure managed identity, or GCP service account) for image pulls, or rely on long-lived pull secrets. KEP-4412 allows the kubelet to project a short-lived service account token and pass it, along with service account annotations, to credential provider plugins, enabling plugins to exchange workload-specific identity for registry credentials. This enhancement covers adopting KEP-4412 across all three cloud credential providers (ECR, ACR, GCR), shipping sensible default configurations via the Machine Config Operator (MCO), and providing a mechanism for cluster administrators to customize the configuration.
+Enable per-workload identity for container image pulls in OpenShift by adopting KEP-4412 (Projected Service Account Tokens for Kubelet Image Credential Providers). Today, all pods on a node share the node's cloud identity (EC2 instance profile, Azure managed identity, or GCP service account) for image pulls, or rely on long-lived pull secrets. KEP-4412 allows the kubelet to project a short-lived service account token and pass it, along with service account annotations, to credential provider plugins, enabling plugins to exchange workload-specific identity for registry credentials.
+
+This enhancement proposes the least work required for OpenShift to adopt KEP-4412: additive enablement across all three cloud credential providers (ECR, ACR, GCR), shipping sensible default configurations via the Machine Config Operator (MCO), and providing a mechanism for cluster administrators to customize the configuration. The adoption is purely additive: workloads that opt in get per-workload identity, everything else continues to work as today. This is also a prerequisite for the longer-term goal of removing install-time node identity provisioning, which is described in this document but scoped as separate follow-on work.
 
 ## Motivation
 
@@ -38,7 +40,7 @@ Currently, image pull credentials in OpenShift come from one of two sources:
 
 Neither approach supports fine-grained, per-workload access control for image pulls. 
 
-KEP-4412 (Kubernetes v1.33 alpha, feature gate `KubeletServiceAccountTokenForCredentialProviders`) solves this by allowing the kubelet to mint a short-lived service account token bound to the pod and pass it to the credential provider plugin, along with filtered annotations from the pod's service account. The plugin can then exchange the token for workload-specific cloud credentials and use those to authenticate to the registry.
+KEP-4412 (Kubernetes v1.33 alpha, solves this by allowing the kubelet to mint a short-lived service account token bound to the pod and pass it to the credential provider plugin, along with filtered annotations from the pod's service account. The plugin can then exchange the token for workload-specific cloud credentials and use those to authenticate to the registry.
 
 ### User Stories
 
@@ -56,14 +58,14 @@ KEP-4412 (Kubernetes v1.33 alpha, feature gate `KubeletServiceAccountTokenForCre
 
 - Enable per-workload identity for image pulls on AWS (ECR), Azure (ACR), and GCP (GCR/Artifact Registry).
 - Ship default `tokenAttributes` configuration for each cloud provider via MCO.
-- Ensure backward compatibility: clusters without the feature gate enabled, or pods without service accounts / annotations, continue to work. Investigate whether CredentialsRequest-provisioned credentials can replace node identity as the fallback default.
+- Ensure backward compatibility: clusters without the feature gate enabled, or pods without service accounts / annotations, continue to work.
 - Provide a supported mechanism for cluster administrators to customize credential provider configuration (annotation keys, audiences, etc.).
 - Work upstream to make annotation keys configurable rather than hardcoded in each plugin, avoiding OpenShift carry patches.
 
 #### Out of scope but enabled by this work
 
-- **Removing install-time pull secrets / node identity from the installer.** KEP-4412 adoption unblocks this by enabling CredentialsRequest-provisioned, day-2 credentials as the default image pull mechanism. The installer work itself is a separate effort but this enhancement is a prerequisite.
-- **Removing the ROSA ACR token refresh shim.** ROSA currently works around the lack of credential provider support by injecting a Python script via MachineConfig as a systemd unit on a 4h timer to fetch ACR tokens. KEP-4412 replaces this with the kubelet's native credential provider framework. See [ARO-24037](https://redhat.atlassian.net/browse/ARO-24037).
+- **Removing install-time node identity from the installer.** KEP-4412 adoption is a prerequisite for this work. See [Removing node identity from install](#removing-node-identity-from-install) for the proposed approach.
+- **Removing the ROSA ECR token refresh shim.** ROSA currently works around the lack of credential provider support by injecting a Python script via MachineConfig as a systemd unit on a 4h timer to fetch ECR tokens. KEP-4412 replaces this with the kubelet's native credential provider framework. See [ARO-24037](https://redhat.atlassian.net/browse/ARO-24037).
 
 ### Non-Goals
 
@@ -79,7 +81,7 @@ The work spans three areas:
 2. **MCO templates** (machine-config-operator): Add `tokenAttributes` to the shipped credential provider configs with sensible defaults per cloud provider.
 3. **Upstream contributions**: Make annotation keys configurable in each plugin to avoid OpenShift carry patches.
 
-Before describing the two adoption paths, the following section covers how the underlying token mechanism works, since the rest of the proposal builds on it.
+The following section covers how the underlying token mechanism works, since the rest of the proposal builds on it.
 
 #### Background: how TokenRequest works
 
@@ -90,52 +92,24 @@ KEP-4412 depends on the Kubernetes [TokenRequest API](https://kubernetes.io/docs
 - **Tokens are short-lived and audience-scoped.** Each token includes an `aud` (audience) claim that tells the consumer (e.g. AWS STS, Microsoft Entra ID) "this token was minted for you." Tokens expire (default 1 hour) and the kubelet rotates them automatically.
 - **No cloud credentials are involved.** The kubelet authenticates to the API server using its own client certificate (set up during node TLS bootstrapping). The API server signs the token with the cluster's OIDC issuer key. The token exchange endpoint (AWS STS, Microsoft Entra ID, or GCP IAM) validates the token against the cluster's OIDC issuer public keys, so no instance profile, managed identity, or GCP service account on the node is needed.
 
-**How does the cloud provider trust these tokens?** OpenShift clusters with Workload Identity / STS mode enabled have an OIDC issuer, a publicly accessible endpoint (hosted on S3, Azure blob storage, or GCS) that publishes the cluster's public signing keys. During cluster install, `ccoctl` (or the installer) registers this OIDC issuer with the cloud provider as a trusted identity provider. When a credential provider plugin presents a service account token to the cloud (e.g. via `AssumeRoleWithWebIdentity`), the cloud fetches the cluster's public keys from the OIDC issuer, verifies the token's signature, and checks that the token's audience and subject match the IAM role's trust policy. This is standard OIDC federation, the same mechanism used by GitHub Actions, GitLab CI, and other external identity providers. The cluster is just another OIDC identity provider from the cloud's perspective.
+**How does the cloud provider trust these tokens?** OpenShift clusters with Workload Identity / STS mode enabled have an OIDC issuer, a publicly accessible endpoint (hosted on S3, Azure blob storage, or GCS) that publishes the cluster's public signing keys. During cluster install, `ccoctl` (or the installer) registers this OIDC issuer with the cloud provider as a trusted identity provider. When a credential provider plugin presents a service account token to the cloud (e.g. via `AssumeRoleWithWebIdentity`), the cloud fetches the cluster's public keys from the OIDC issuer, verifies the token's signature, and checks that the token's audience and subject match the IAM role's trust policy. This is standard OIDC federation — the cluster is just another OIDC identity provider from the cloud's perspective.
 
 For more background, see the [Kubernetes v1.33 blog post](https://kubernetes.io/blog/2025/05/07/kubernetes-v1-33-wi-for-image-pulls/) and [v1.34 beta graduation announcement](https://kubernetes.io/blog/2025/09/03/kubernetes-v1-34-sa-tokens-image-pulls-beta/). OpenShift's existing [bound service account token documentation](https://docs.redhat.com/en/documentation/openshift_container_platform/4.9/html/authentication_and_authorization/bound-service-account-tokens) covers the underlying mechanism.
 
-#### Three paths: keep, replace, or bypass node identity
+#### What KEP-4412 adoption looks like
 
-There are two ways to adopt KEP-4412 in OpenShift, with meaningfully different scope and security implications:
+KEP-4412 adoption is additive. It requires an OIDC issuer (i.e. WI/STS mode clusters, including ROSA and ARO):
 
-**Path 1: Keep node identity as the default fallback**
 - Enable `tokenAttributes` in the MCO-shipped credential provider configs
-- Pods with service account annotations get per-workload identity (the new feature)
-- Pods without annotations fall back to node identity as they do today
-- The installer continues to provision node-level cloud identity at install time
+- To opt in, a cluster administrator annotates a **Kubernetes ServiceAccount object** with the cloud identity to use for image pulls (e.g. an IAM role ARN, an Entra ID client ID). Every pod bound to that service account inherits the identity. The kubelet reads the annotations from the ServiceAccount, mints a short-lived token, and passes both to the credential provider plugin.
+- Pods whose service account has no annotations continue to use their current pull mechanism (node identity or pull secrets)
+- Nothing changes for workloads that don't opt in
 
-This is less work. The per-workload identity feature is available for workloads that opt in, and nothing changes for workloads that don't. But it doesn't address the customer and installer team request to remove install-time node identity provisioning, and every pod on the node still has implicit access to the node's cloud identity.
+This does not by itself remove install-time node identity, but it is a necessary stepping stone. Once KEP-4412 is adopted, the credential provider plugin infrastructure is in place for follow-on work to replace node identity with CCO-provisioned credentials — see [Removing node identity from install](#removing-node-identity-from-install).
 
-**Path 2: Replace node identity with a CredentialsRequest-provisioned default**
-- Enable `tokenAttributes` as above
-- The Cloud Credential Operator provisions a default registry pull identity day-2 (e.g. an IAM role for ECR, a managed identity for ACR, a GCP service account for GCR)
-- The MCO templates that identity into the credential provider config (e.g. via environment variable or config file)
-- Pods with service account annotations get per-workload identity
-- Pods without annotations get the CCO-provisioned default identity via the service account token + environment variable fallback
-- The installer no longer provisions node-level cloud identity for image pulls
+### How it works: ECR reference flow
 
-This is more work. The ECR plugin already supports this via the `AWS_ECR_ROLE_ARN` environment variable fallback: when a service account token is present but no annotation exists, the plugin uses the environment variable as the role ARN and calls `AssumeRoleWithWebIdentity`. The Cloud Credential Operator can provision this role, and the MCO can template its ARN into the credential provider config. No node identity needed.
-
-**ACR and GCR do not have this fallback mechanism today.** ACR hard-fails without annotations; GCR has no KEP-4412 implementation at all. Upstream work is needed to add equivalent environment variable or config-file fallbacks for default identity on Azure and GCP before path 2 is viable on those platforms.
-
-Path 2 also requires an OIDC issuer on every cluster. The service account token exchange (e.g. `AssumeRoleWithWebIdentity`) only works if the cloud provider can validate the token against the cluster's OIDC issuer public keys. Today, only clusters in STS / Workload Identity mode have an OIDC issuer. Unless every OCP cluster ships an OIDC issuer regardless of CCO mode, path 2 is limited to managed services (ROSA, ARO) and clusters explicitly configured for STS/WI.
-
-**Path 3: CCO-provisioned static credential via credential provider config**
-- CCO (mint mode) provisions a scoped credential for image pulls (e.g. a GCP service account key, AWS access key pair)
-- MCO templates the credential into the credential provider config (via config file or environment variable)
-- The credential provider uses it directly, no token exchange, no OIDC issuer required, no node identity required
-- CCO manages the credential lifecycle, including rotation (rotation support in mint mode may need additional work)
-- Requires upstream work: credential provider plugins don't currently accept static credentials via config, only IMDS or SA token exchange
-
-This avoids the OIDC issuer prerequisite entirely while still removing node identity. The credential is scoped to image pulls only, and CCO rotation keeps it from being truly long-lived.
-
-Path 1 can ship first as an incremental step while the upstream work for paths 2 and 3 is in progress.
-
-### CredentialsRequest-provisioned default identity (Path 2 mechanism)
-
-This section details how Path 2 works in practice, using ECR as the reference. The same pattern applies to ACR and GCR once upstream support is in place.
-
-KEP-4412 combined with the existing environment variable fallback in the ECR plugin enables a model where the Cloud Credential Operator provisions the default pull identity day-2, removing it from the install path entirely (see [Background: how TokenRequest works](#background-how-tokenrequest-works) for why no node-level cloud credentials are needed).
+This section shows the full KEP-4412 flow using ECR as the reference. The same pattern applies to ACR and GCR (with differences noted in [Current state of each provider](#current-state-of-each-provider)).
 
 ```mermaid
 sequenceDiagram
@@ -157,7 +131,7 @@ sequenceDiagram
 
     Kubelet->>Plugin: CredentialProviderRequest<br/>{ image, serviceAccountToken,<br/>serviceAccountAnnotations }
 
-    Plugin->>Plugin: Role ARN from annotation<br/>or AWS_ECR_ROLE_ARN env var
+    Plugin->>Plugin: Role ARN from SA annotation
 
     Note over Plugin,STS: No AWS credentials needed.<br/>The SA token IS the credential.
 
@@ -183,39 +157,15 @@ sequenceDiagram
     Kubelet-->>Pod: Container started
 ```
 
-With `tokenAttributes` set and `AWS_ECR_ROLE_ARN` templated by the MCO:
+To grant a workload its own cloud identity for image pulls, a cluster administrator (or their templating/GitOps tooling) annotates the workload's **Kubernetes service account**, not the pod. The kubelet reads annotations from the service account object and passes them to the credential provider plugin, which uses them to determine which cloud identity to assume. The cloud identity referenced by the annotation must already exist and have the appropriate permissions (e.g. an IAM role with ECR pull permissions, or an Entra ID app registration with AcrPull) — provisioned either manually or via a CredentialsRequest. Workloads without these annotations continue to use node identity as they do today.
 
-```yaml
-providers:
-  - name: ecr-credential-provider
-    matchImages:
-      - "*.dkr.ecr.*.amazonaws.com"
-    defaultCacheDuration: "12h"
-    apiVersion: credentialprovider.kubelet.k8s.io/v1
-    env:
-      - name: AWS_ECR_ROLE_ARN
-        value: "<CCO-provisioned-role-arn>"
-    tokenAttributes:
-      serviceAccountTokenAudience: "sts.amazonaws.com"
-      cacheType: "ServiceAccount"
-      requireServiceAccount: false
-      optionalServiceAccountAnnotationKeys:
-        - "eks.amazonaws.com/ecr-role-arn"
-```
-
-To grant a workload its own cloud identity for image pulls, a cluster administrator (or their templating/GitOps tooling) annotates the workload's **Kubernetes service account**, not the pod. The kubelet reads annotations from the service account object and passes them to the credential provider plugin, which uses them to determine which cloud identity to assume. Workloads that don't have these annotations don't need any changes, they automatically get the default identity.
-
-This produces three tiers of access:
 
 | Scenario | Identity used | How |
 |----------|--------------|-----|
 | Pod with service account annotation | Per-workload role from annotation | Service account token + annotation role ARN → `AssumeRoleWithWebIdentity` |
-| Pod with service account, no annotation | CCO-provisioned default role | Service account token + `AWS_ECR_ROLE_ARN` env var → `AssumeRoleWithWebIdentity` |
-| Static pod / no service account | Node identity (instance profile) | No token → plugin returns nil → default AWS credential chain |
+| Pod without annotation | Node identity (instance profile) | No annotation → no token sent → default AWS credential chain |
 
-The CCO-provisioned role's trust policy accepts tokens from any service account in the cluster's OIDC issuer, scoped to ECR pull only, narrower than an instance profile but broader than a per-workload role. Static pods are the only case that still needs node identity, but they typically use the cluster pull secret.
-
-**For ACR and GCR**: the same pattern requires each plugin to support an environment variable or config-file fallback for default identity. ACR currently does not, both annotations are required with no fallback. This is upstream work we need to drive (or carry).
+See [ECR reference implementation](#ecr-reference-implementation) and [ACR reference implementation](#acr-reference-implementation) below for the full kubelet config and service account YAML for each provider.
 
 ### Current state of each provider
 
@@ -348,7 +298,7 @@ MicroShift: TBD
 
 #### OpenShift Kubernetes Engine
 
-Not sure.
+TBD — needs input from OKE team.
 
 ### Implementation Details/Notes/Constraints
 
@@ -452,33 +402,53 @@ This is customer-facing UX — needs good documentation with worked examples sho
 |------|------------|
 | Upstream rejects configurable annotation key proposals | Fall back to OpenShift carry patches (undesirable but functional) |
 | ACR has two auth paths (identity bindings vs standard Workload Identity Federation) and OpenShift only needs one | Ignore the AKS identity bindings path entirely — only the standard `ClientAssertionCredential` path is relevant for OpenShift |
-| Breaking existing image pulls during rollout — clusters upgrading may lose access if node identity is removed before CredentialsRequest fallback is in place | Ship CredentialsRequest-provisioned default identity in the same release as `tokenAttributes` enablement. Pods with any service account (including default) get the CCO-provisioned role via environment variable fallback. Node identity only needed for static pods. |
-| ACR/GCR plugins lack environment variable fallback for default identity (unlike ECR) | Drive upstream work to add default fallback mechanism to ACR and GCR plugins, or carry patches |
+| KEP-4412 only works on WI/STS clusters (requires OIDC issuer) | Document as prerequisite. Per-workload identity is most valuable on clusters already using workload identity. Removing node identity on non-WI clusters is addressed separately via static credential support. |
 
 ### Drawbacks
 
 - Adds complexity to credential provider configuration that most users won't need immediately.
 - Requires upstream contributions across three different cloud provider repos with different maintainer groups and review cadences.
 
+## Removing node identity from install
+
+KEP-4412 adoption (above) enables per-workload identity but does not by itself remove the install-time node identity. This is a related but separate concern, and one that customers and the installer team are asking for.
+
+Today, credential provider plugins only support two credential sources: IMDS (node identity) and SA token exchange (KEP-4412, requires OIDC). Neither allows replacing node identity across all OCP clusters.
+
+The preferred direction is upstream work to allow credential provider plugins to accept a static credential (e.g. a GCP service account key, AWS access key pair) via config file or environment variable. This would allow:
+
+- CCO (mint mode) provisions a scoped credential for image pulls
+- MCO ships a CredentialsRequest declaring the credential requirement, following the same pattern used by other OpenShift operators (e.g. the image-registry operator, the ingress operator)
+- MCO templates the provisioned credential into the credential provider config
+- No token exchange, no OIDC issuer required, no node identity required
+- CCO manages the credential lifecycle, including rotation
+
+This is complementary to KEP-4412: WI/STS clusters get per-workload identity via KEP-4412 AND can remove node identity via static credentials. Non-WI clusters can remove node identity without needing an OIDC issuer.
+
+This requires upstream changes to the credential provider plugins. The upstream work benefits the broader Kubernetes ecosystem, not just OpenShift — any distribution that wants to decouple image pulls from node identity needs the same capability. CCO credential rotation in mint mode may also need additional work.
+
+An alternative approach is to use KEP-4412's token exchange for the default identity as well (see [Alternatives](#alternatives-not-implemented)). This is viable on WI/STS clusters where the ECR plugin already supports an `AWS_ECR_ROLE_ARN` environment variable fallback, but it requires an OIDC issuer on every cluster and does not have equivalent support in the ACR or GCR plugins.
+
 ## Alternatives (Not Implemented)
 
 - **Pull secrets only**: Status quo. Does not meet security requirements for credential rotation and per-workload scoping.
 - **Azure VM-level Managed Identity for ACR**: Attaches a User-Assigned Managed Identity to the VM via MachineSet. Works, but all pods on the node share the same ACR access and it requires manual day-2 MachineConfig/MachineSet patching. KEP-4412 is preferred because it enables per-workload scoping without VM-level identity changes. See [OCPSTRAT-2951](https://redhat.atlassian.net/browse/OCPSTRAT-2951), [OCPCLOUD-2950](https://redhat.atlassian.net/browse/OCPCLOUD-2950), [full analysis](https://docs.google.com/document/d/1EEUoRscXpmFg0r23LcCdjazfzEnQPLvNZ6Dk5K59Mv4/edit?tab=t.0).
+- **Token exchange for default identity (KEP-4412 + CCO)**: On WI/STS clusters, the ECR plugin's `AWS_ECR_ROLE_ARN` environment variable fallback enables using token exchange for pods without annotations, with the CCO provisioning the default role. This produces three tiers: per-workload identity (annotation), CCO-provisioned default (env var fallback), and node identity (static pods only). This is viable on WI/STS clusters and may be pursued in parallel with the static credential approach. ECR already supports this today; ACR and GCR would need equivalent env var fallback support upstream. The limitation is that it requires an OIDC issuer, so it does not cover non-WI clusters.
 
 ## Open Questions
 
-1. **Default identity fallback for ACR and GCR**: The ECR plugin has an environment variable fallback (`AWS_ECR_ROLE_ARN`) that enables a CredentialsRequest-provisioned default identity without node identity. ACR and GCR do not have equivalent fallback mechanisms. What upstream changes are needed to support a CCO-provisioned default identity on Azure and GCP?
+1. **Static credential support in credential providers**: Credential provider plugins currently only support IMDS (node identity) or SA token exchange (KEP-4412). What upstream changes are needed to allow plugins to accept a static credential (service account key, access key pair) via config file or environment variable? This is the key blocker for removing node identity across all OCP clusters (see [Removing node identity from install](#removing-node-identity-from-install)).
 2. **Annotation key convention**: Once annotation keys are configurable upstream, what keys should OpenShift use as defaults? Per-provider (e.g. `openshift.io/ecr-role-arn`) or a single generic annotation?
 3. **MCO override UX**: Is MachineConfig overlay sufficient for admin customization of `tokenAttributes`?
 4. **HyperShift delivery**: How are credential provider configs delivered to guest cluster nodes in HyperShift?
-5. **Pull secret vs credential provider precedence**: The default CredentialProviderConfig uses a wildcard match (e.g. `*.azurecr.io`). If one ACR uses a pull secret and another uses the credential provider, what is the precedence behavior? See [ARO-24037](https://redhat.atlassian.net/browse/ARO-24037).
+5. **Pull secret vs credential provider precedence**: The default CredentialProviderConfig uses a wildcard match (e.g. `*.azurecr.io`). If one ACR uses a pull secret and another uses the credential provider, what is the precedence behavior? Expectation is pull secret takes priority, but needs validation. See [ARO-24037](https://redhat.atlassian.net/browse/ARO-24037).
 6. **Non-managed-identity clusters**: Can clusters not deployed with managed identities (e.g. classic ARO) use this feature? KEP-4412 should enable this since it uses SA tokens rather than VM-level identity, but needs validation. See [ARO-20731](https://redhat.atlassian.net/browse/ARO-20731).
 7. **OIDC issuer prerequisite**: KEP-4412's token exchange requires the cluster to have an OIDC issuer (set up in STS / Workload Identity mode). Is this the default for all OCP clusters, or only for managed services (ROSA, ARO) and clusters explicitly configured for STS/WI? If not universal, this feature only works on clusters with an OIDC issuer, which needs to be documented as a prerequisite.
 8. **Zero egress and credential provider binary availability at boot**: Since RHCOS became layered in 4.19, the credential provider binaries (`ecr-credential-provider`, `acr-credential-provider`, etc.) were moved from the CoreOS layer to the node layer. The CoreOS layer (RHEL 9.6 + components common across all OCP versions) is what's used at initial boot; the node layer (components versioned with each OCP release) is applied afterward. In zero egress environments, this creates a chicken-and-egg problem: pulling the node layer images requires credential providers, but the credential provider binaries aren't available until the node layer is installed. ROSA currently works around this with a Python script on a systemd timer rather than using credential providers at all. This will also affect Azure (ARO) zero egress deployments. How do we solve image pulls at boot time when the credential provider binaries aren't yet on disk? See [ROSA zero egress config](https://gitlab.cee.redhat.com/service/uhc-clusters-service/-/blob/master/configs/zero-egress/zero-egress-config.yaml).
 
 ## Test Plan
 
-TBD. Depending on what path we take.
+TBD — not required until targeted at a release.
 
 ## Graduation Criteria
 
@@ -491,7 +461,7 @@ TBD. Depending on what path we take.
 
 ### Tech Preview -> GA
 
-- Decision on whether GA includes deprecation of install-time node identity provisioning for image pulls, or whether that remains a follow-up
+- Decision on timeline for removing install-time node identity provisioning (separate effort, see [Removing node identity from install](#removing-node-identity-from-install))
 - User-facing documentation in openshift-docs
 
 ### Removing a deprecated feature
@@ -500,7 +470,7 @@ N/A — new feature, nothing being deprecated.
 
 ## Upgrade / Downgrade Strategy
 
-- **Upgrade**: Additive — `tokenAttributes` and the feature gate ship in the same z-release. The CredentialsRequest-provisioned default identity (via environment variable fallback) means upgraded clusters don't silently depend on install-time provisioned node identity. Existing workloads continue to pull images via the CCO-provisioned default role without any service account annotation changes.
+- **Upgrade**: Additive — `tokenAttributes` and the feature gate ship in the same z-release. Existing workloads continue to use their current pull mechanism (node identity or pull secrets) unless explicitly configured with service account annotations.
 - **Downgrade**: Not applicable, OpenShift 4 does not support cluster version downgrade.
 
 ## Version Skew Strategy
