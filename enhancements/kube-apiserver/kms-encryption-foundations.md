@@ -368,16 +368,52 @@ Both KMS providers run as separate sidecar containers without deduplication, mai
 
 **Invariants:**
 1. Once an encryption key is generated, it must propagate through the entire state machine. Each key has a monotonically increasing ID that determines provider ordering in the EncryptionConfiguration.
-2. Once a write key has been used by a single instance, it must be assumed to have encrypted data. The rollout must finish before proceeding to the next key.
+3. Once a write key has been read by a single instance, it must be assumed that it may be used to encrypt data. 
+  Encryption keys for KMS are derived from the API configuration. 
+  Because the configuration can change over time, a new key cannot be generated until the current rollout is fully completed.
 3. The API configuration must resolve to the same encryption key instance.
 
-**Pre-flight checks:** Before generating a new encryption key for migration-triggering changes, keyController deploys a pod with the KMS plugin to verify status and encrypt/decrypt capability. A new encryption key is only generated after pre-flight checks succeed. This prevents deadlocks where a misconfigured key (e.g., typo in transit-key) is deployed but non-functional, and the system cannot recover because the key must complete its cycle.
+**Pre-flight checks:** Before generating a new encryption key for migration-triggering changes, a dedicated controller deploys a pod with the KMS plugin to verify status and encrypt/decrypt capability. A new encryption key is only generated after pre-flight checks succeed. This prevents deadlocks where a misconfigured key (e.g., typo in transit-key) is deployed but non-functional, and the system cannot recover because the key must complete its cycle. See [Pre-flight Checker](#pre-flight-checker-tech-preview-v2) for the detailed mechanism.
 
 **Blocked operations during promotion:** keyController will not generate a new encryption key while the in-progress key is being promoted. If the admin overwrites the configuration (e.g., switches from KMS1 to KMS2 while KMS1 is still rolling out), the new key is not generated. To fix the in-progress configuration, admin must provide the same KMS configuration — this associates the fix with the existing encryption key.
 
 **Recovery from incorrect configuration:**
 - Migration-triggering fields: prevented by pre-flight checks (misconfiguration is caught before key generation).
 - Non-migration fields (e.g., image): admin provides corrected configuration via APIServer resource. A new revision is created; older providers retain their original configuration as fallback.
+
+#### Pre-flight Checker (Tech Preview v2)
+
+The pre-flight checker validates KMS configuration before an encryption key is created. It consists of two parts: a preflight binary that tests the KMS provider end-to-end via the plugin, and a controller that coordinates the check with the key-controller.
+
+##### Preflight Binary
+
+The preflight binary (`kms-preflight`) is shipped in the operator image. It runs on control plane nodes inside a one-shot pod that uses the [KMS plugin lifecycle management](#kms-plugin-lifecycle-management-tech-preview-v2) logic to attach a KMS plugin sidecar based on the current configuration. The binary connects to the plugin via the KMS v2 gRPC API and performs three checks:
+
+1. **Status** — polls until the plugin reports `healthz=ok`.
+2. **Encrypt** — encrypts a random payload.
+3. **Decrypt** — decrypts the ciphertext and verifies the round-trip matches.
+
+The pod uses readiness gates to post check results back to the controller. A ServiceAccount, Role, and RoleBinding are created so the pod can update its own status. These resources are cleaned up when the pod is removed.
+
+After a successful check the preflight pod is kept for a short period (e.g., 1 hour) so that its logs can be inspected, then cleaned up by a subsequent sync.
+
+##### KMS Preflight Controller
+
+Like all other encryption controllers, a `KMSPreflightController` instance runs in each API server operator (cluster-kube-apiserver-operator, cluster-openshift-apiserver-operator, and cluster-authentication-operator). 
+Each instance coordinates with its operator's key-controller using a hash-based handshake protocol:
+
+1. The key-controller computes a hash of the current KMS configuration including the contents of the referenced Secrets/ConfigMaps and sets `EncryptionKMSPreflightRequired` (hash in the message).
+2. The preflight controller reads that hash, deploys the preflight pod, and runs the checks.
+3. On success, the preflight controller sets `EncryptionKMSPreflightSucceeded` (same hash in the message).
+4. The key-controller waits for the two hashes to match before creating an encryption key.
+
+This follows the same pattern as the revision and installer controllers.
+
+**Why the handshake is necessary:**
+
+Without this protocol a race can occur: preflight passes for config A, the key-controller starts creating a key for A, but config changes to B before the key is written. The preflight controller re-runs for B and overwrites status with hash B, leaving the key created for A inconsistent with status.
+
+Each controller writing its own condition prevents this. If the config changes mid-flight, the key-controller posts a new hash and the preflight controller sees the mismatch and re-runs the check.
 
 #### Variation: KMS Key Rotation
 
