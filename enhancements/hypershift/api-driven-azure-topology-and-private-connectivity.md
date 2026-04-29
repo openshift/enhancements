@@ -5,6 +5,7 @@ authors:
 reviewers:
   - "@enxebre"
   - "@csrwng"
+  - "@bennerv"
 approvers:
   - "@enxebre"
 api-approvers:
@@ -49,7 +50,11 @@ variable checks (`MANAGED_SERVICE=ARO-HCP`) plus the
 dual-path approach creates several problems:
 
 1. **No private-only intent:** ARO HCP customers cannot express
-   "this cluster should be private-only" through the API.
+   "this cluster should be private-only" through the API —
+   specifically, there is no way to prevent the API server
+   endpoint from being exposed through the management cluster's
+   shared ingress (public HAProxy). The cluster's own
+   openshift-ingress is not affected by this enhancement.
 2. **Dual decision paths:** The `IsPrivateHCP()` function
    short-circuits on `isAroHCP()` before checking the `Topology`
    field, bypassing the API.
@@ -116,12 +121,7 @@ dual-path approach creates several problems:
    `main.go` controller startup, `dump.go`). These call sites
    correctly use the env var for cluster-wide decisions.
 
-2. Converting the "(c) Out of scope" `IsAroHCP()` call sites
-   listed in the design document (e.g., storage, CCM, CNO,
-   registry operator). These will be addressed in follow-up
-   work.
-
-3. Changing the default topology for Azure clusters. ARO-RP
+2. Changing the default topology for Azure clusters. ARO-RP
    must always set `Topology` explicitly; the existing
    `IsPublicHCP()` behavior of treating `Topology=""` as public
    is preserved.
@@ -150,7 +150,10 @@ The implementation follows a 3-phase migration strategy:
   code with legacy annotation fallback for unmigrated clusters.
 - **Phase 2:** Upstream migration (ARO-RP / Maestro) sets
   `Topology` and `Private.Type=Swift` on all existing clusters.
-- **Phase 3:** Remove legacy fallback paths, annotation usage,
+- **Phase 3:** Once Phase 2 is verified complete across all
+  production clusters (see verification criteria below) and
+  all clusters are running a CPO version that consumes the
+  API fields, remove legacy fallback paths, annotation usage,
   and per-cluster `isAroHCP()` checks from controllers.
 
 ### Workflow Description
@@ -165,12 +168,24 @@ The implementation follows a 3-phase migration strategy:
 - **Shared ingress controller** — the controller configuring
   the management cluster's shared HAProxy for public endpoints.
 
+**CPO rollout considerations:** The CPO version is tied to the
+hosted cluster's OCP release. Phase 1 controller changes ship
+in a new OCP minor version; the management cluster's HO is
+upgraded first (new API types and helpers). Phase 2 can set
+the API fields on all clusters immediately, but the fields
+only become effective once a cluster upgrades to the OCP
+version carrying the updated CPO. Until then, the N-1 CPO
+continues to function via the legacy annotation fallback.
+If clusters cannot be upgraded to the new minor stream in a
+reasonable timeframe, a CPO backport to the previous minor
+version may be needed to unblock Phase 3.
+
 #### Creating a Private ARO HCP Cluster
 
 1. The cluster creator creates a HostedCluster with
    `Topology=Private`, `Private.Type=Swift`, and
    `Private.Swift.PodNetworkInstance=<name>`.
-2. The HyperShift operator validates the HostedCluster spec:
+2. The API server validates the HostedCluster spec via CEL:
    `Private.Type` is required when `Topology` is `Private` or
    `PublicAndPrivate`.
 3. The CPO reconciles the HostedControlPlane:
@@ -194,14 +209,34 @@ The implementation follows a 3-phase migration strategy:
 1. The cluster creator updates `Topology` from
    `PublicAndPrivate` to `Private` on an existing
    HostedCluster.
-2. On the next reconcile, `UseSharedIngress(hcp)` flips to
-   `false`.
-3. The `sharedingress-config-generator` stops including this
-   cluster's backends in the HAProxy config.
+2. The HyperShift operator propagates the `Topology` change
+   to the HostedControlPlane. On the CPO's next reconcile,
+   `UseSharedIngress(hcp)` evaluates to `false`.
+3. The `sharedingress-config-generator` re-evaluates
+   `UseSharedIngressHC()` for this cluster on its next
+   reconcile cycle; the function now returns `false`, so the
+   cluster's backends are excluded from the regenerated
+   HAProxy config.
 4. The `SharedIngressReconciler` converges ExternalDNS records
    (removes public entries).
 5. No node restarts are required — worker nodes always use
    `api.<name>.hypershift.local` as the API server backend.
+6. The cluster creator watches the `PublicEndpointExposed`
+   condition on the HostedCluster to confirm the topology
+   transition is complete (see API section 4 below).
+
+The reverse transition (`Private` → `PublicAndPrivate`) follows
+the same path: the creator updates `Topology`, the HO
+propagates to the HCP, `UseSharedIngress(hcp)` flips to
+`true`, and the config-generator includes the cluster's
+backends in the next HAProxy regeneration. ExternalDNS records
+are created for the public endpoint. Public DNS propagation
+time determines when the endpoint becomes reachable.
+
+**Transition scope:** Only management-plane components are
+affected (shared ingress, ExternalDNS). The HCP router, Swift
+networking, and worker node configuration are
+topology-independent and require no changes during transitions.
 
 ```mermaid
 sequenceDiagram
@@ -214,7 +249,7 @@ sequenceDiagram
 
     Creator->>API: Create HostedCluster<br/>(Topology=Private,<br/>Private.Type=Swift)
     API->>HO: Reconcile HostedCluster
-    HO->>HO: Validate: Private.Type<br/>required for Private topology
+    HO->>HO: CEL validates: Private.Type<br/>required for Private topology
     HO->>CPO: Create HostedControlPlane
     CPO->>CPO: UseSwiftNetworking() = true
     CPO->>CPO: UseSharedIngress() = false
@@ -264,9 +299,19 @@ type AzureSwiftSpec struct {
 }
 ```
 
-The `AzurePrivateSpec` struct gains a new `Swift` union member:
+The `AzurePrivateSpec` struct gains a new `Swift` union member.
+CEL validation rules are defined at the struct level (not on
+the `Type` field) because `has()` requires an object field
+reference. Combined with `omitempty` on `Type`, the
+immutability rule allows setting the type for the first time on
+existing clusters that previously had it unset:
 
 ```go
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.type) || self.type == oldSelf.type",message="type is immutable"
+// +kubebuilder:validation:XValidation:rule="self.type != 'Swift' || !has(self.privateLink)",message="privateLink must not be set when type is Swift"
+// +kubebuilder:validation:XValidation:rule="self.type != 'PrivateLink' || !has(self.swift)",message="swift must not be set when type is PrivateLink"
+// +kubebuilder:validation:XValidation:rule="self.type != 'PrivateLink' || has(self.privateLink)",message="privateLink is required when type is PrivateLink"
+// +kubebuilder:validation:XValidation:rule="self.type != 'Swift' || has(self.swift)",message="swift is required when type is Swift"
 type AzurePrivateSpec struct {
     // +unionDiscriminator
     // +required
@@ -282,18 +327,78 @@ type AzurePrivateSpec struct {
 }
 ```
 
-#### 3. CEL Validation Rules
+At the `AzurePlatformSpec` level, a CEL rule enforces that
+`Private.Type` is set for non-default topologies:
 
-The `AzurePrivateSpec` struct has CEL validation rules at the
-struct level (not on the `Type` field) because `has()` requires
-an object field reference. Combined with `omitempty` on `Type`,
-this allows setting the type on clusters that previously had it
-unset:
+```go
+// +kubebuilder:validation:XValidation:rule="self.topology == '' || has(self.private.type)",message="private.type is required when topology is set"
+type AzurePlatformSpec struct {
+    // ...
+    Topology AzureTopologyType    `json:"topology,omitempty"`
+    Private  AzurePrivateSpec     `json:"private,omitzero"`
+}
+```
 
-- **Immutability:**
-  `!has(oldSelf.type) || self.type == oldSelf.type`
-- **Negative rules:** Forbid wrong union member.
-- **Positive rules:** Require selected union member.
+#### 3. `PublicEndpointExposed` Status Condition
+
+Add a new `PublicEndpointExposed` condition to
+`HostedCluster.Status.Conditions`. This condition tracks
+whether the cluster's API server public endpoint is
+configured and exposed — it reflects configuration state,
+not endpoint health or reachability.
+
+```go
+// PublicEndpointExposed indicates whether public API server
+// endpoints are configured and exposed for this cluster.
+PublicEndpointExposed ConditionType = "PublicEndpointExposed"
+```
+
+**Controller:** The `SharedIngressReconciler` sets this
+condition directly on the HostedCluster during each
+reconcile cycle. The condition is platform-agnostic and can
+be adopted by AWS/GCP endpoint management controllers for
+equivalent signaling.
+
+**Logic:** The `SharedIngressReconciler` sets this condition
+after reconciling the cluster's public endpoint state — not
+based on intent alone, but on the actual converged state:
+
+```go
+if !UseSharedIngressHC(hc) {
+    // Cluster does not use shared ingress (Private topology
+    // or non-Swift). Confirm backends and DNS are removed.
+    if !haProxyBackendsExist(hc) && !externalDNSRecordsExist(hc) {
+        SetCondition(hc, PublicEndpointExposed, False,
+            "TopologyPrivate",
+            "Public backends and ExternalDNS records removed")
+    } else {
+        SetCondition(hc, PublicEndpointExposed, False,
+            "ConvergenceInProgress",
+            "Public endpoint removal in progress")
+    }
+    return
+}
+
+// Cluster uses shared ingress (Swift + PublicAndPrivate).
+// Confirm backends and DNS are configured.
+if haProxyBackendsExist(hc) && externalDNSRecordsExist(hc) {
+    SetCondition(hc, PublicEndpointExposed, True,
+        "SharedIngressConfigured",
+        "Public HAProxy backends and ExternalDNS records active")
+} else {
+    SetCondition(hc, PublicEndpointExposed, True,
+        "ConvergenceInProgress",
+        "Public endpoint configuration in progress")
+}
+```
+
+| Topology | Status | Reason | Description |
+|---|---|---|---|
+| `PublicAndPrivate` (converged) | `True` | `SharedIngressConfigured` | HAProxy backends and ExternalDNS records active |
+| `PublicAndPrivate` (converging) | `True` | `ConvergenceInProgress` | Backends or DNS not yet fully configured |
+| `Private` (converged) | `False` | `TopologyPrivate` | Public backends and DNS records removed |
+| `Private` (converging) | `False` | `ConvergenceInProgress` | Removal in progress |
+| No shared ingress (self-managed Azure, PrivateLink) | Not set | — | Condition only set by controllers managing public endpoint exposure |
 
 #### 4. Behavioral Changes to Existing Resources
 
@@ -405,9 +510,8 @@ functions are fully API-driven.
 
 | Classification | Description |
 |---|---|
-| **(a) Change** | Per-cluster decisions → API-driven |
+| **(a) Change** | Per-cluster decisions → API-driven (visibility, router, shared ingress, infra, CNO, CCM, storage, registry operator) |
 | **(b) Keep** | No HC/HCP available (main.go, dump.go) |
-| **(c) Out of scope** | Has HC/HCP but deferred to follow-up |
 
 See section 9.1 of the design document for the full call site
 classification table.
@@ -426,6 +530,23 @@ classification table.
   `Private.Swift.PodNetworkInstance` on all existing clusters.
 - Continue setting annotation during migration window for
   N-1 CPO compatibility.
+
+**Phase 2 verification:** Phase 2 is complete when no Azure
+HostedClusters remain with an unset `Topology` or missing
+`Private.Type`. Verify across all management clusters:
+
+```sh
+kubectl get hostedclusters -A -o json | jq '
+  [.items[] |
+   select(.spec.platform.type == "Azure") |
+   select(.spec.platform.azure.topology == null
+     or .spec.platform.azure.topology == ""
+     or .spec.platform.azure.private.type == null
+     or .spec.platform.azure.private.type == "") |
+   .metadata.name] | length'
+```
+
+The result must be `0` before proceeding to Phase 3.
 
 **Phase 3 — Cleanup:**
 - Remove per-cluster `isAroHCP()` from controllers.
@@ -447,19 +568,21 @@ after Phase 2 completion.
   a string.
 - **N-1 round-trip risk:** Old code re-serializing an object
   with `Private.Swift` set will drop the field. The annotation
-  remains authoritative during the migration window to
-  mitigate this.
+  is preserved during the migration window as a fallback,
+  allowing the controller to recover the Swift configuration
+  from the annotation when the API field is missing.
 - **CRD schema ordering:** The updated CRD schema must be
-  deployed before or simultaneously with the operator binary.
+  deployed before the operator binary.
 
 #### Annotation Deprecation
 
 The `SwiftPodNetworkInstanceAnnotation` is deprecated but not
 immediately removed. During the migration window:
-- If both annotation and `Private.Swift.PodNetworkInstance`
-  are set, the API field takes precedence.
-- A condition or event warns when the deprecated annotation
-  is detected.
+- The API field takes precedence when set. If the API field is
+  absent (e.g., after an N-1 round-trip drops it), the
+  controller falls back to the annotation.
+- A log warning is emitted when the controller falls back to
+  the annotation, to aid migration tracking.
 - The annotation constant remains in the API module for
   backward compatibility.
 
@@ -477,14 +600,14 @@ provides its own gating. No new feature gate in
 |---|---|
 | Existing ARO HCP clusters have empty `Topology` | Phase 1 legacy fallback in `IsPrivateHCP()` and `UseSwiftNetworking()`; Phase 2 migrates clusters |
 | ARO-RP not updated in sync | Legacy fallback ensures old clusters work; Phase 2 continues setting annotation for N-1 CPO |
-| N-1 round-trip drops `Swift` field | Annotation remains authoritative during migration window |
+| N-1 round-trip drops `Swift` field | Annotation preserved as fallback during migration window |
 | Private cluster endpoints leaked into shared HAProxy | Config-generator filters at HostedCluster level before processing routes (security-critical) |
 | `Private.Type` immutability prevents Swift adoption on existing clusters | Immutability CEL rule uses `!has(oldSelf.type)` at struct level with `omitempty` on Type, allowing first set |
 | CRD schema must be deployed before new operator | Standard operator lifecycle; CRD with `Enum=PrivateLink;Swift` applied before code creating `Type=Swift` |
 
 **Security review:** The shared ingress filtering logic is
-security-critical and should be reviewed by the HyperShift
-security team. The `sharedingress-config-generator` must
+security-critical and should receive dedicated review. The
+`sharedingress-config-generator` must
 filter at the HostedCluster level, not the route level, to
 prevent private cluster endpoints from leaking into the public
 HAProxy configuration.
@@ -611,8 +734,8 @@ coverage requirements.
   clusters on shared ingress.
 - Verified N-1/N+1 compatibility through upgrade/downgrade
   testing.
-- Follow-up Jira ticket created for converting remaining
-  "(c) out of scope" `IsAroHCP()` call sites.
+- All per-cluster `isAroHCP()` call sites converted to
+  API-driven helpers (CNO, CCM, storage, registry operator).
 
 ### Removing a deprecated feature
 
@@ -628,8 +751,7 @@ coverage requirements.
   continue to work via legacy annotation fallback in Phase 1.
 - No cluster configuration changes required on upgrade.
 - The CRD schema with `Enum=PrivateLink;Swift` must be
-  applied before or simultaneously with the new operator
-  binary.
+  applied before the new operator binary.
 
 **Downgrade (N+1 → N):**
 - Clusters created with `Private.Type=Swift` and
