@@ -137,6 +137,16 @@ type LocalVolumeDeviceLinkStatus struct {
 	ValidLinkTargets []string `json:"validLinkTargets,omitempty"`
 	// FilesystemUUID is the UUID of the filesystem found on the device (when available)
 	// +optional
+	// persistentVolumeSymlinkPath is the symlink in /mnt/local-storage directory that points to
+	// the actual local device.
+	// This path is used by corresponding PersistentVolume (PV) object for all operations (e.g. mount).
+	// LSO creates and updates this symlink for the whole lifetime of the PV.
+	// This field is immutable once set, because the path in the corresponding
+	// PV object is immutable too.
+	// +optional
+	// +kubebuilder:validation:MaxLength=4096
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf || oldSelf == ''",message="persistentVolumeSymlinkPath is immutable once set"
+	PersistentVolumeSymlinkPath string `json:"persistentVolumeSymlinkPath,omitempty"`
 	FilesystemUUID string `json:"filesystemUUID,omitempty"`
 	// Conditions is a list of operator conditions
 	Conditions []operatorv1.OperatorCondition `json:"conditions,omitempty"`
@@ -185,7 +195,7 @@ Diskmaker will use the following selection criteria when choosing the preferred 
 
 Diskmaker will keep the link name and only change the link target. For example, if a PV has an existing symlink `/mnt/local-storage/localblock/scsi-0NVME_MODEL_abcde` pointing to `/dev/disk/by-id/scsi-0NVME_MODEL_abcde`, but there is a by-id link `/dev/disk/by-id/scsi-2ace42e0035eabcde`, setting the device link policy to `PreferredLinkTarget` will cause diskmaker to replace `/mnt/local-storage/localblock/scsi-0NVME_MODEL_abcde` with a new symlink pointing to `/dev/disk/by-id/scsi-2ace42e0035eabcde`.
 
-For cases when a PersistentVolume disappears, e.g. during the volume wipe and re-creation, LocalVolumeDeviceLink object has `spec.nodeName`, so the diskmaker can identify what LocalVolumeDeviceLink belongs to which node.
+For cases when a PersistentVolume disappears, e.g. during the volume wipe and re-creation, LocalVolumeDeviceLink object has `spec.nodeName`, so the diskmaker can identify what LocalVolumeDeviceLink belongs to which node, and `persistentVolumeSymlinkPath` that is a path to the symlink under `/mnt/local-storage/<storageclass>`, which is used in PV `spec.local.path`.
 If the PV was always present, the diskmaker could technically resolve PV `spec.nodeAffinity` to find the node, but it has proven to be error prone during PV re-creation.
 
 Ceph Bluestore (and therefore ODF) does not automatically create by-uuid symlinks on the node. See [Bug 2414811](https://bugzilla.redhat.com/show_bug.cgi?id=2414811). However, diskmaker will still record the UUID from `ceph-volume raw list /dev/xyz --format=json` in `localVolumeDeviceLink.status.filesystemUUID` to help with support procedures.
