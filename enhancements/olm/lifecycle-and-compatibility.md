@@ -29,8 +29,8 @@ to carry per-operator support phase, lifecycle timeline, and platform compatibil
 Two new downstream-only components — a lifecycle-controller and a lifecycle-server —
 are deployed to extract and serve this metadata. The lifecycle-controller runs in the
 `openshift-operator-lifecycle-manager` namespace and manages lifecycle-server Deployments
-alongside CatalogSource pods, initially limited to CatalogSources in the
-`openshift-marketplace` namespace. The lifecycle-server exposes an internal HTTPS API
+alongside CatalogSource pods, limited specifically the redhat-operators CatalogSource in the
+`openshift-marketplace` namespace. The lifecycle-server exposes an **internal** HTTPS API
 secured via TokenReview and SubjectAccessReview — callers must present a ServiceAccount
 token with the requisite nonResourceURL RBAC to access lifecycle data. The OpenShift
 Console is extended with a backend proxy endpoint and frontend UI columns ("Cluster
@@ -78,6 +78,8 @@ Without lifecycle visibility, customers risk running unsupported operator config
 4. Changes to existing OLMv0 controllers, Subscription API, or catalog operator code.
 5. OLMv1-specific integration — this enhancement targets OLMv0 exclusively.
 6. Defining the ground truth lifecycle data structure — that is owned by the ProdOps engineering team. However, defining the FBC schema (`io.openshift.operators.lifecycles.v1alpha1`) that carries this data within catalogs is a goal of this enhancement.
+7. Defining a stable, general purpose, and documented lifecycle API. For this EP, all lifecycle data schemas and server APIs are strictly for internal use by the OCP Console
+8. Support for Microshift
 
 ## Proposal
 
@@ -99,7 +101,7 @@ This proposal introduces three sets of changes across three repositories to deli
 
 **console frontend** is the OpenShift Console UI that displays lifecycle information.
 
-1. A catalog curator includes lifecycle metadata (using the `io.openshift.operators.lifecycles.v1alpha1` schema) in the FBC for the redhat-operators catalog during the catalog build process.
+1. The Red Hat catalog pipeline ensures that lifecycle metadata (using the `io.openshift.operators.lifecycles.v1alpha1` schema) is included in the FBC for the Red Hat operator catalogs, validating that it conforms to the schema correctly during the catalog build process.
 2. The lifecycle-controller watches for CatalogSource resources. When it detects a CatalogSource, it creates a lifecycle-server Deployment that mounts the catalog image as an OCI volume.
 3. When the catalog image changes (detected by watching CatalogSource pods), the lifecycle-controller updates the lifecycle-server Deployment to reference the new image.
 4. The lifecycle-server starts, walks the FBC content on its mounted volume, extracts entries matching `io.openshift.operators.lifecycles.*` schemas, and serves them over an HTTPS API.
@@ -121,6 +123,135 @@ This proposal introduces three sets of changes across three repositories to deli
 
 This enhancement does not introduce new CRDs or modify existing Kubernetes API resources.
 
+The lifecycle FBC metadata follows the schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "io.openshift.operators.lifecycles.v1alpha1",
+  "title": "Operator Lifecycle",
+  "description": "Defines the lifecycle phases and platform compatibility for an OpenShift operator package.",
+  "type": "object",
+  "required": ["package", "schema", "versions"],
+  "additionalProperties": false,
+  "properties": {
+    "package": {
+      "type": "string",
+      "description": "The operator package name."
+    },
+    "schema": {
+      "type": "string",
+      "const": "io.openshift.operators.lifecycles.v1alpha1",
+      "description": "Schema identifier for this lifecycle document."
+    },
+    "versions": {
+      "type": "array",
+      "description": "List of operator versions with their lifecycle phases.",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "phases"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The operator version identifier."
+          },
+          "phases": {
+            "type": "array",
+            "description": "List of lifecycle phases for this version.",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["name", "timeBegin", "timeEnd"],
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "The lifecycle phase name.",
+                  "examples": [
+                    "Full support",
+                    "Maintenance support",
+                    "Extended update support",
+                    "Extended update support Term 2",
+                    "Extended life cycle support (ELS) add-on"
+                  ]
+                },
+                "timeBegin": {
+                  "type": "string",
+                  "format": "date",
+                  "description": "Start date of this phase (inclusive)."
+                },
+                "timeEnd": {
+                  "type": "string",
+                  "format": "date",
+                  "description": "End date of this phase (inclusive)."
+                }
+              }
+            }
+          },
+          "platformCompatibility": {
+            "type": "array",
+            "description": "Platforms and their versions that this operator version is compatible with.",
+            "items": {
+              "type": "object",
+              "required": ["name", "versions"],
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "The platform name.",
+                  "examples": ["openshift"]
+                },
+                "versions": {
+                  "type": "array",
+                  "description": "Compatible platform versions.",
+                  "minItems": 1,
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Example:
+
+```yaml
+package: fuse-apicurito
+schema: io.openshift.operators.lifecycles.v1alpha1
+versions:
+- name: "7.13"
+  phases:
+  - name: Maintenance support
+    timeBegin: "2024-06-10"
+    timeEnd: "2024-06-30"
+  - name: Extended life cycle support (ELS) 1
+    timeBegin: "2024-07-01"
+    timeEnd: "2026-06-30"
+  - name: Extended life cycle support (ELS) 2
+    timeBegin: "2026-07-01"
+    timeEnd: "2027-06-30"
+  platformCompatibility:
+  - name: openshift
+    versions:
+    - "4.12"
+    - "4.13"
+    - "4.14"
+    - "4.15"
+    - "4.16"
+    - "4.17"
+    - "4.18"
+    - "4.19"
+    - "4.20"
+```
+
 The lifecycle-server exposes an internal HTTPS API (not exposed outside the cluster):
 
 - **Host**: `https://<catalogSourceName>-lifecycle-server.<catalogSourceNamespace>.svc:8443`
@@ -138,7 +269,8 @@ The console backend adds a proxy endpoint:
 
 #### Hypershift / Hosted Control Planes
 
-Hypershift support is not a goal at this stage. The lifecycle-controller and lifecycle-server run in the same namespace as CatalogSource pods. In HyperShift environments, CatalogSources are typically in the guest cluster, so the lifecycle components would deploy there as well. No special handling is required for the management cluster since these components only interact with CatalogSource resources and do not modify control plane components.
+The lifecycle-controller and lifecycle-server run in the same namespace as CatalogSource pods. In HyperShift environments, marketplace CatalogSources are typically in the host cluster. It's not exactly clear yet what strategy we'll pursue to get this working on HCP. It may lead to architectural changes. The groundwork for this is 
+still ongoing and this enhancement will be updated once we have a clear path.
 
 #### Standalone Clusters
 
@@ -146,9 +278,10 @@ This enhancement is fully relevant and functional on standalone clusters. It is 
 
 #### Single-node Deployments or MicroShift
 
-The lifecycle-controller and lifecycle-server add two additional pods per CatalogSource. On single-node OpenShift (SNO), this represents a modest increase in resource consumption. The lifecycle-server pods include resource requests to ensure appropriate scheduling.
+There is a singleton lifecycle-controller and an additional pod is created per Catalog source. For *this* EP, 
+only the redhat-operators ClusterCatalog is reconciled. Therefore, this EP would introduce two new pods. On single-node OpenShift (SNO), this represents a modest increase in resource consumption. The lifecycle-server pod include resource requests to ensure appropriate scheduling.
 
-This enhancement does not apply to MicroShift, which does not use OLM.
+This enhancement does not apply to MicroShift.
 
 #### OpenShift Kubernetes Engine
 
@@ -220,19 +353,21 @@ The lifecycle-server:
 
 ### Risks and Mitigations
 
-| Risk | Mitigation |
-| :--- | :--- |
-| New components increase operational surface area | The lifecycle-server is designed as a simple, stateless HTTP server with minimal failure modes. The lifecycle-controller can be scaled to zero in an emergency. |
-| Lifecycle metadata may become stale or out-of-sync with PLCC | The ProdOps team is responsible for defining validation and synchronization tooling. Catalog builds will include validated lifecycle metadata. |
-| SSRF via console proxy endpoint | Console backend validates catalog namespace and name inputs against strict regex patterns before forwarding requests. |
-| Catalog image polling timing may cause briefly stale lifecycle data | The lifecycle-controller watches CatalogSource pods and updates the lifecycle-server Deployment when the catalog image changes. A small window of staleness is acceptable since lifecycle metadata changes infrequently. |
-| Additional resource consumption on SNO | Lifecycle-server pods include appropriate resource requests. The pods are lightweight and stateless. |
+| Risk                                                                           | Mitigation                                                                                                                                                                                                                                                                                    |
+|:-------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| New components increase operational surface area                               | The lifecycle-server is designed as a simple, stateless HTTP server with minimal failure modes. The lifecycle-controller can be scaled to zero in an emergency.                                                                                                                               |
+| Lifecycle metadata may become stale or out-of-sync with PLCC                   | The ProdOps team is responsible for defining validation and synchronization tooling. Catalog builds will include validated lifecycle metadata.                                                                                                                                                |
+| SSRF via console proxy endpoint                                                | Console backend validates catalog namespace and name inputs against strict regex patterns before forwarding requests.                                                                                                                                                                         |
+| Catalog image polling timing may cause briefly stale lifecycle data            | The lifecycle-controller watches CatalogSource pods and updates the lifecycle-server Deployment when the catalog image changes. A small window of staleness is acceptable since lifecycle metadata changes infrequently.                                                                      |
+| Additional resource consumption on SNO                                         | Lifecycle-server pods include appropriate resource requests. The pods are lightweight and stateless.                                                                                                                                                                                          |
+| Existing network and disk I/O concerns due to image pulling and data wrangling | The lifecycle-server pods runs on the same node as the CatalogSource pod, and using the OCI image mount to mount the catalog image filesystem directly into the server pod - this mitigates the need to download the same image again and obviates the need to copy FBC bytes into empty dirs |
 
 ### Drawbacks
 
 - This approach introduces a new downstream-only component (lifecycle-controller + lifecycle-server) that serves a single purpose. This is acknowledged as immediate tech debt that will need to be reconciled when OLMv1 matures.
 - The lifecycle-server operates out-of-band from the existing OLM architecture, meaning it duplicates some catalog image handling logic.
 - The long-term desired approach is an OLMv1-centric catalog overhaul that would natively incorporate lifecycle metadata alongside other data model improvements (semver-based upgrade graphs, simplified disconnected mirroring, search facets, etc.). This pragmatic approach was chosen to meet the OCP 5.0 timeline.
+- As it is now, this approach does not work with CatalogSources of grpc type with a custom address, backed by ConfigMaps, or of *internal* type.
 
 ## Alternatives (Not Implemented)
 
@@ -246,6 +381,15 @@ The Console already integrates with OLMv1's catalogd via the `api/v1/all` endpoi
 2. OLMv1 catalogs may diverge from OLMv0 catalogs in the future.
 3. Catalog image poll timing means CatalogSource and ClusterCatalog digests may never agree, potentially showing lifecycle data that is ahead of what OLMv0 can actually install.
 
+### Extend OLMv0 GRPC APIs
+
+Extend the existing OLMv0 catalog pods' gRPC API to include lifecycle metadata end-point
+
+**Rejected because:**
+
+- We'd like to avoid increasing the public API surface for v0 to keep the support surface as low as possible
+- We intend to introduce a more broadly available mechanism for surfacing lifecycle metadata in v1 
+
 ### Extend OLMv0 GetPackage API
 
 Extend the existing OLMv0 catalog pods' GetPackage gRPC API to include lifecycle metadata, and surface it through the Subscription status.
@@ -256,7 +400,7 @@ Extend the existing OLMv0 catalog pods' GetPackage gRPC API to include lifecycle
 - Even a simple implementation carries risk of post-change bugs/regressions in the mature OLMv0 codebase.
 - Syncing from a separate lifecycle database introduces risk that derivative data is out-of-sync.
 
-### OLMv1-centric catalog overhaul
+### OLMv1-centric catalog overhaul / registry+v2
 
 A complete revamp of FBC schemas to natively incorporate lifecycle, compatibility, semver-based upgrade graphs, and other improvements.
 
@@ -269,9 +413,9 @@ A complete revamp of FBC schemas to natively incorporate lifecycle, compatibilit
 
 1. **Pre-releases and Tech Preview versions:** Catalogs include version numbers that don't follow standard semver (e.g. "0.0.0-4.99.0-techpreview"). How should these be handled in lifecycle metadata validation that requires all minor versions to be represented?
 
-2. **Concurrent Lifecycle Phases:** Do we need to account for operators having concurrent lifecycle phases? If so, how should concurrent phases be presented to users?
+2. **Concurrent Lifecycle Phases:** Do we need to account for operators having concurrent lifecycle phases? If so, how should concurrent phases be presented to users? - For this EP this is disallowed.
 
-3. **Source system of record:** Where should product teams directly maintain their lifecycle information — PLCC or FBC?
+3. **Source system of record:** Where should product teams directly maintain their lifecycle information — PLCC or FBC? - For this EP, PLCC.
 
 4. **Console feature flag integration:** What is the correct approach for gating the lifecycle UI in the Console? How should the `OPERATOR_LIFECYCLE_METADATA` feature flag integrate with the feature gate being added for this enhancement? Needs alignment with the Console team.
 
@@ -302,18 +446,17 @@ Testing covers all three components:
 
 - Lifecycle-controller and lifecycle-server deploy successfully
 - Console displays lifecycle and compatibility columns for installed operators
-- At least 10 operators (with representation from all three lifecycle tiers) include lifecycle information that flows from FBC catalog contributions to Console UI views
 - End-to-end functionality verified in connected and disconnected environments
-- End user documentation for the feature
 
 ### Tech Preview -> GA
 
-- Sufficient time for feedback from Tech Preview users
-- 100% of operators in the redhat-operators catalog include lifecycle and compatibility metadata
+- Product Management is happy to go GA with the functionality
+- 50% of operators + some selected operators in the redhat-operators catalog include lifecycle and compatibility metadata
 - Load testing completed to ensure performance thresholds are not violated
 - Upgrade and downgrade testing completed
+- At least 10 operators (with representation from all three lifecycle tiers) include lifecycle information that flows from FBC catalog contributions to Console UI views
 - Telemetry in place to track operator lifecycle status across the fleet
-- User-facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/)
+- User-facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/) - only expected documentation is on the Console side to explain the new columns. No customer facing docs for the lifecycle metadata API, or how the backend works, since they are internal details and not for general user consumption.
 
 ### Removing a deprecated feature
 
@@ -340,6 +483,7 @@ The lifecycle-controller, lifecycle-server, console-operator RBAC, and console c
 - If the lifecycle-server is deployed before the console changes: The server is running but the console does not yet display the columns. No user-visible impact.
 - If the console changes are deployed before the lifecycle-server: The console attempts to fetch lifecycle data, receives errors, and displays "No data" labels. This is the expected fallback behavior.
 - The lifecycle-server is independent of OLMv0 controllers and does not participate in version skew with the catalog operator, subscription controller, or any other OLMv0 component.
+- If the CatalogSource gets updated, the lifecycle-service will update its data as a consequence. If the data is not compatible with what the lifecycle-server and/or console expect the user may see the "No data" label until all component versions are harmonized.
 
 ## Operational Aspects of API Extensions
 
