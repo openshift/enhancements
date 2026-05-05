@@ -370,24 +370,31 @@ when C2CC config is removed.
 for pod-to-pod and pod-to-service communication only.
 Traffic originating from a host (whether the configured
 nextHop or any other host on the subnet) should not
-reach pods on a remote cluster. The controller makes a
-best-effort to prevent this by deploying default
-NetworkPolicies and by recommending firewall
-configurations that trust only remote pod and service
-CIDRs, not host IPs. Since C2CC preserves source pod
-IPs end-to-end via SNAT bypass, NetworkPolicies can
-reliably distinguish pod traffic from host traffic.
+reach pods on a remote cluster. C2CC does not enforce
+this at the application layer — Kubernetes
+NetworkPolicies are namespace-scoped and cannot
+reliably cover all workloads without introducing
+isolation side-effects that break local traffic.
+Instead, host-to-pod prevention is achieved through
+IPSec: when configured with transport or tunnel mode
+between cluster subnets, only authenticated peers can
+exchange traffic, and any unauthenticated host on the
+subnet is rejected at the network layer. The firewall
+configuration also contributes by trusting only remote
+pod and service CIDRs, not host IPs.
 
 ### Risks and Mitigations
 
 **No mutual authentication**: Any host reachable at the
-configured nextHop is implicitly trusted. IPSec
-documentation will be provided for encryption and
-authentication. For IPSec-only enforcement,
-documentation will cover Libreswan shunt policies
+configured nextHop is implicitly trusted. IPSec is
+strongly recommended for production deployments to
+provide both encryption and mutual authentication
+between cluster nodes. Documentation will cover
+Libreswan configuration with shunt policies
 (`failureshunt=drop`, `negotiationshunt=drop`) and
 nftables `meta ipsec missing` rules to prevent
-plaintext traffic.
+plaintext traffic. Without IPSec, any host on the
+subnet can potentially reach pods on the cluster.
 
 **IPSec MTU overhead**: IPSec encapsulation reduces the
 effective MTU, which can cause packet drops. MTU
@@ -466,10 +473,7 @@ a NetworkPolicy denies ingress from Cluster A's pod
 CIDR. This validates end-to-end SNAT bypass — without
 source IP preservation, the remote cluster would see
 the node IP and pod-level NetworkPolicies would not
-match. Also verify host-to-pod prevention: curl
-directly from Cluster A's host to a pod on Cluster B
-— should be rejected (traffic from hosts should not
-reach remote pods).
+match.
 
 **Networking Regression**: Run existing MicroShift
 networking test suites (networking smoke, DNS, router)
@@ -493,8 +497,9 @@ rejection (verify traffic is dropped — not sent in
 plaintext — when IPSec SAs are absent and enforcement
 policies are configured), host-to-pod rejection (curl
 directly from Cluster A's host to a pod on Cluster B
-— should be rejected as the traffic bypasses the IPSec
-tunnel).
+— should be rejected since the host does not have
+IPSec credentials and cannot establish a security
+association with the remote node).
 
 **Upgrade**: Verify C2CC connectivity survives a
 MicroShift upgrade on one or both clusters.
