@@ -97,7 +97,9 @@ dns:
       memory: <resource.Quantity> # optional, default: not set
 ```
 
-By default, the `dns.resources` section is not set, and the current hardcoded defaults are used. When provided, individual fields within `requests` and `limits` are optional - users can set only the values they want to override.
+By default, the `dns.resources` section is not set, and the current hardcoded defaults are used. When provided, individual fields within `requests` and `limits` are optional - users can set only the values they want to override. Unset request fields preserve their defaults via key-by-key merge (e.g., setting only `requests.cpu` preserves the default `memory: 70Mi`). Only `cpu` and `memory` keys are accepted; unsupported keys are rejected during validation.
+
+When limits are set without overriding requests, the default requests (cpu: 50m, memory: 70Mi) are preserved. Note that if a limit is set lower than the corresponding default request (e.g., `limits.cpu: 30m` without overriding `requests.cpu: 50m`), MicroShift will fail to start because validation requires limits >= requests.
 
 ### Topology Considerations
 
@@ -117,13 +119,13 @@ N/A
 
 #### Config struct changes
 
-Add a `Resources` pointer field to the `DNS` struct in `pkg/config/dns.go`:
+Add a `Resources` field to the `DNS` struct in `pkg/config/dns.go`:
 
 ```go
 type DNS struct {
-    BaseDomain string        `json:"baseDomain"`
-    Hosts      HostsConfig   `json:"hosts,omitempty"`
-    Resources  *DNSResources `json:"resources,omitempty"`
+    BaseDomain string       `json:"baseDomain"`
+    Hosts      HostsConfig  `json:"hosts,omitempty"`
+    Resources  DNSResources `json:"resources,omitempty"`
 }
 
 type DNSResources struct {
@@ -132,24 +134,40 @@ type DNSResources struct {
 }
 ```
 
-Using a pointer allows distinguishing between "not set" (nil, use defaults) and "set to empty" (explicit zero resources).
+A value type (not pointer) is used, consistent with other config fields like `HostsConfig`. When not set by the user, the nil maps are detected in `incorporateUserSettings()` and defaults from `dnsDefaults()` are preserved.
 
 #### Config validation
 
 Extend the `DNS.validate()` method in `pkg/config/dns.go`:
 
-- Each value in `Requests` and `Limits` must be parseable by `resource.ParseQuantity()`.
+- Only `cpu` and `memory` keys are accepted in `Requests` and `Limits`. Unsupported keys (e.g., `gpu`) are rejected with a clear error.
+- Each value must be parseable by `resource.ParseQuantity()`.
 - If a resource has both a request and a limit, the limit must be greater than or equal to the request.
 
 #### Config incorporation
 
-Add incorporation logic in `pkg/config/config.go` `incorporateUserSettings()`:
+Add incorporation logic in `pkg/config/config.go` `incorporateUserSettings()` using key-by-key merge to preserve defaults for unset fields:
 
 ```go
-if u.DNS.Resources != nil {
-    c.DNS.Resources = u.DNS.Resources
+if u.DNS.Resources.Requests != nil {
+    if c.DNS.Resources.Requests == nil {
+        c.DNS.Resources.Requests = make(map[string]string)
+    }
+    for k, v := range u.DNS.Resources.Requests {
+        c.DNS.Resources.Requests[k] = v
+    }
+}
+if u.DNS.Resources.Limits != nil {
+    if c.DNS.Resources.Limits == nil {
+        c.DNS.Resources.Limits = make(map[string]string)
+    }
+    for k, v := range u.DNS.Resources.Limits {
+        c.DNS.Resources.Limits[k] = v
+    }
 }
 ```
+
+This ensures that setting only `requests.cpu` preserves the default `requests.memory`.
 
 #### Template rendering
 
@@ -160,7 +178,7 @@ resources:
   requests:
     cpu: {{ .DNSCPURequest }}
     memory: {{ .DNSMemoryRequest }}
-  {{- if or .DNSCPULimit .DNSMemoryLimit }}
+  {{- if .DNSHasLimits }}
   limits:
     {{- if .DNSCPULimit }}
     cpu: {{ .DNSCPULimit }}
@@ -171,28 +189,31 @@ resources:
   {{- end }}
 ```
 
+The `DNSHasLimits` boolean controls whether the limits block is rendered at all. Individual limit values are also conditionally rendered so users can set only cpu or only memory limits.
+
 #### Controller changes
 
-Extend `startDNSController()` in `pkg/components/controllers.go` to pass resource values as extra render parameters, with defaults matching the current hardcoded values:
+Extend `startDNSController()` in `pkg/components/controllers.go` to pass resource values as extra render parameters. Defaults are always populated by `dnsDefaults()`, so the map lookups always return valid values for requests. Nil map access for limits safely returns empty strings, which are falsy in Go templates:
 
 ```go
 extraParams := assets.RenderParams{
     "ClusterIP":        cfg.Network.DNS,
     "HostsEnabled":     cfg.DNS.Hosts.Status == config.HostsStatusEnabled,
-    "DNSCPURequest":    dnsResourceValue(cfg.DNS.Resources, "requests", "cpu", "50m"),
-    "DNSMemoryRequest": dnsResourceValue(cfg.DNS.Resources, "requests", "memory", "70Mi"),
-    "DNSCPULimit":      dnsResourceValue(cfg.DNS.Resources, "limits", "cpu", ""),
-    "DNSMemoryLimit":   dnsResourceValue(cfg.DNS.Resources, "limits", "memory", ""),
+    "DNSCPURequest":    cfg.DNS.Resources.Requests["cpu"],
+    "DNSMemoryRequest": cfg.DNS.Resources.Requests["memory"],
+    "DNSCPULimit":      cfg.DNS.Resources.Limits["cpu"],
+    "DNSMemoryLimit":   cfg.DNS.Resources.Limits["memory"],
+    "DNSHasLimits":     len(cfg.DNS.Resources.Limits) > 0,
 }
 ```
 
 ### Risks and Mitigations
 
-**Risk:** Users configure resources too low, causing CoreDNS to be OOM-killed or throttled.
-**Mitigation:** Document minimum recommended values. MicroShift does not enforce minimum thresholds to allow flexibility on constrained devices.
+**Risk:** Users configure resources too low, causing CoreDNS to be OOM-killed or throttled, making the cluster unable to reach readiness.
+**Mitigation:** Document minimum recommended values. MicroShift does not enforce minimum thresholds to allow flexibility on extremely constrained edge devices. If this becomes a recurring issue, minimum validation can be added in a future release without breaking the API.
 
-**Risk:** Users configure resource limits without requests, leading to unexpected Kubernetes scheduling behavior.
-**Mitigation:** When limits are set without requests, Kubernetes defaults requests to equal limits. Document this behavior.
+**Risk:** Users configure resource limits without overriding requests.
+**Mitigation:** Default requests (cpu: 50m, memory: 70Mi) are always populated by `dnsDefaults()` and preserved via key-by-key merge. The rendered DaemonSet always contains explicit requests, so Kubernetes never needs to apply its default "request equals limit" behavior. Validation ensures limits >= requests, so setting a limit lower than the default request (e.g., `limits.cpu: 30m` without overriding `requests.cpu: 50m`) is rejected at startup with a clear error.
 
 ### Drawbacks
 N/A
@@ -202,15 +223,22 @@ N/A
 ### Unit Tests
 
 - Valid configuration: requests only, limits only, both requests and limits.
-- Invalid configuration: non-parseable quantities, negative values.
+- Invalid configuration: non-parseable quantities (e.g., "abc").
+- Unsupported resource keys (e.g., "gpu") rejected.
 - Validation: limits less than requests.
+- Limit without corresponding request passes validation.
 - Default behavior: no `dns.resources` set, defaults preserved.
+- Partial requests: setting only cpu preserves default memory.
 
 ### Integration Tests (Robot Framework)
 
-- Configure `dns.resources` via drop-in config, restart MicroShift, verify the `dns-default` DaemonSet's `dns` container has the configured resource values.
-- Verify default resources are used when `dns.resources` is not configured.
-- Verify MicroShift fails to start with an invalid resource quantity and produces a clear error in the journal logs.
+- Default resources: verify `dns-default` DaemonSet uses defaults (cpu: 50m, memory: 70Mi) when not configured.
+- Custom resources with requests and limits: configure via drop-in, restart, verify DaemonSet has configured values.
+- Requests only: configure only requests, verify no limits are injected.
+- Partial requests: configure only cpu request, verify memory default is preserved.
+- Invalid resource quantity: set invalid value, verify MicroShift fails to start with clear error in journal.
+- Limit less than request: set limit below request, verify MicroShift fails to start.
+- DNS resolution after resource change: apply custom resources, verify CoreDNS still resolves cluster-local services.
 
 ## Graduation Criteria
 
