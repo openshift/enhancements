@@ -355,18 +355,31 @@ set to `False` with reason `ReEncryptionFailed` and a message
 describing which resource failed.
 
 **Key changes mid-rotation**: The controller is designed to be
-safe without relying on the VAP (see Component 6). When a
-rotation is in progress (`rolloutPhase` is not empty), the
-HCCO continues with the snapshotted `targetKey` and ignores
-subsequent spec changes. Once the current rotation completes
-(`activeKey` updated, `rolloutPhase` cleared), the controller
-detects the new spec key mismatch and starts a fresh rotation.
-This queuing approach is necessary because HyperShift's
-two-sidecar design (see Component 3) limits KMS providers to
-two simultaneous keys — accepting a third key mid-rotation
-would require a sidecar that does not exist. The VAP
-(Component 6) provides a better UX by rejecting the change at
-admission time rather than silently queuing it.
+safe without relying on the VAP (see Component 6). Behavior
+depends on the current rollout phase:
+
+- **During `ReadOnlyDeploy`**: No data has been encrypted with
+  the target key yet — it is only a read-only provider. If the
+  spec's active key changes, the controller updates
+  `status.targetKey` to the new spec key in-place and restarts
+  `ReadOnlyDeploy` with the corrected target. The CPO picks up
+  the new `targetKey` on the next reconcile and generates the
+  updated `EncryptionConfiguration`. This allows immediate
+  correction of wrong-key mistakes without waiting for a full
+  rotation cycle.
+
+- **During `WritePromote` or `Migrating`**: Some KAS replicas
+  may have already written data with the target key. Abandoning
+  it would require keeping 3 keys simultaneously (old active +
+  abandoned target + new key), which violates the two-sidecar
+  constraint. The controller continues with the snapshotted
+  `targetKey` and ignores the spec change. Once the current
+  rotation completes, the controller detects the new mismatch
+  and starts a fresh rotation.
+
+The VAP (Component 6) provides a better UX by rejecting
+mid-rotation changes at admission time with a clear error
+message, rather than silently restarting or queuing them.
 
 **KAS restart during migration**: `StorageVersionMigration` uses
 `continueToken` for resumption. The controller detects stale CRs
@@ -787,14 +800,27 @@ from `hcp.Status.SecretEncryption.ActiveKey`:
   `rolloutPhase=ReadOnlyDeploy`, and begin the two-stage
   rollout.
 
-**Mid-rotation spec changes**: If `rolloutPhase` is not empty
-(a rotation is in progress), the controller continues with the
-snapshotted `targetKey` and ignores the current spec's active
-key. Once the rotation completes (`activeKey` updated,
-`targetKey` and `rolloutPhase` cleared), the controller
-re-computes the fingerprint and detects any new mismatch,
-starting a fresh rotation. This queuing behavior ensures safety
-within the two-sidecar constraint without relying on the VAP.
+**Mid-rotation spec changes**: The controller uses a hybrid
+interrupt/queue strategy depending on the rollout phase:
+
+- **`ReadOnlyDeploy`**: If `fingerprint(spec.activeKey)` ≠
+  `fingerprint(status.targetKey)`, the controller updates
+  `status.targetKey` to the new spec key and restarts
+  `ReadOnlyDeploy`. This is safe because no data has been
+  encrypted with the target key yet — it was only a read-only
+  provider. The corrected key takes effect on the next KAS
+  rollout without completing a full wasted rotation.
+
+- **`WritePromote` or `Migrating`**: The controller continues
+  with the snapshotted `targetKey` and ignores the spec change.
+  Interrupting would require 3 simultaneous keys (old active +
+  abandoned target + new key), violating the two-sidecar
+  constraint. Once the rotation completes, the controller
+  detects the new mismatch and starts a fresh rotation.
+
+This hybrid approach ensures safety without relying on the VAP
+while providing fast correction for the common "wrong key"
+scenario.
 
 **First encryption setup**: A nil status field triggers
 the two-stage rollout, so initial encryption setup is treated
@@ -814,9 +840,17 @@ by `status.secretEncryption.rolloutPhase`:
    `EtcdDataEncryptionUpToDate` condition if present, clear
    `targetKey` and `rolloutPhase` if set, and return.
 
-2. If `rolloutPhase` is not empty, a rotation is in progress —
-   skip to step 4 using the snapshotted `targetKey` (ignore
-   the current spec).
+2. If `rolloutPhase` is not empty, a rotation is in progress:
+   a. If `rolloutPhase == ReadOnlyDeploy` and
+      `fingerprint(spec.activeKey)` ≠
+      `fingerprint(status.targetKey)`: the spec key changed
+      during `ReadOnlyDeploy` — update `status.targetKey` to
+      the spec's active key (restart with corrected target).
+      The CPO picks up the new `targetKey` on the next
+      reconcile. Continue at step 4 (`ReadOnlyDeploy`).
+   b. Otherwise (`WritePromote` or `Migrating`): continue
+      with the snapshotted `targetKey`, ignoring the current
+      spec. Skip to step 4.
 
 3. Compute fingerprints of the spec's active key and the
    status's active key and compare them. If they match,
@@ -1154,11 +1188,13 @@ for the two-stage rollout:
    until all KAS replicas are converged
    (`updatedReplicas == replicas == readyReplicas`).
 3. **Never remove read-keys before migration completes**.
-4. **Queue mid-rotation key changes**: The controller uses the
-   snapshotted `targetKey` for the duration of a rotation,
-   ignoring spec changes. New rotations start only after the
-   current one completes. This is enforced at the controller
-   level and does not depend on the VAP.
+4. **Hybrid interrupt/queue for mid-rotation key changes**:
+   During `ReadOnlyDeploy` (no data encrypted with target key),
+   spec changes update `targetKey` in-place and restart the
+   phase. During `WritePromote` or `Migrating`, spec changes
+   are queued until the current rotation completes. This is
+   enforced at the controller level and does not depend on the
+   VAP.
 5. **Retry failed migrations**: Prune and retry after 5 minutes.
 6. **VAP as UX guard**: The VAP rejects mid-rotation active key
    changes at admission time for better user feedback, but the
@@ -1251,14 +1287,13 @@ incorrectly reporting success.
 completes. HyperShift's two-sidecar design retains only one
 previous key — a rapid v1 -> v2 -> v3 rotation would evict
 v1's sidecar, leaving v1-encrypted data unreadable.
-**Mitigation**: The controller queues mid-rotation key changes
-by continuing with the snapshotted `targetKey` until the
-current rotation completes. This is enforced at the controller
-level (VAP-independent). The VAP provides a better UX by
-rejecting mid-rotation changes at admission time. If a key
-change is applied directly to HCP (bypassing the VAP), the
-controller ignores it until the current rotation completes,
-then picks up the new key.
+**Mitigation**: The controller uses a hybrid approach
+(VAP-independent): during `ReadOnlyDeploy` (no data encrypted
+with the target key yet), spec changes update `targetKey`
+in-place, allowing immediate correction. During `WritePromote`
+or `Migrating`, spec changes are queued until the current
+rotation completes. The VAP provides a better UX by rejecting
+mid-rotation changes at admission time.
 
 **Risk**: Old-key-encrypted data persists in etcd historical
 revisions after re-encryption until etcd compaction runs.
@@ -1453,10 +1488,12 @@ jobs). -->
     and re-creating. Condition message includes elapsed time.
   - When migration fails 3 consecutive times: condition reason
     escalated to `ReEncryptionPersistentFailure`.
-  - Mid-rotation spec change (VAP-independent safety): when
-    `rolloutPhase` is not empty, controller continues with
-    `targetKey`, ignores spec. After completion, detects new
-    mismatch and starts fresh rotation.
+  - Mid-rotation spec change during `ReadOnlyDeploy`:
+    `targetKey` updated in-place to new spec key, phase
+    restarts with corrected target.
+  - Mid-rotation spec change during `WritePromote`/`Migrating`:
+    controller continues with `targetKey`, ignores spec. After
+    completion, detects new mismatch and starts fresh rotation.
   - AESCBC: Only `secrets` resource migrated (1 CR, not 5).
   - KMS: All 5 resources from `KMSEncryptedObjects()` migrated.
 - `StorageVersionMigration` CR naming and annotation logic.
