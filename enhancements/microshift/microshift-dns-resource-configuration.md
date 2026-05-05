@@ -52,7 +52,7 @@ Customers need a supported, persistent way to tune DNS pod resources through the
 1. Configuring resources for the `kube-rbac-proxy` sidecar container in the `dns-default` DaemonSet.
 2. Configuring resources for the `node-resolver` DaemonSet.
 3. Runtime resource updates without restarting MicroShift - a restart is required for resource changes to take effect.
-4. Validating whether the configured resources are sufficient for CoreDNS to function correctly.
+4. Allowing resource requests below the shipped defaults (cpu: 50m, memory: 70Mi).
 
 ## Proposal
 
@@ -142,6 +142,7 @@ Extend the `DNS.validate()` method in `pkg/config/dns.go`:
 
 - Only `cpu` and `memory` keys are accepted in `Requests` and `Limits`. Unsupported keys (e.g., `gpu`) are rejected with a clear error.
 - Each value must be parseable by `resource.ParseQuantity()`.
+- Resource requests must meet minimum thresholds: cpu >= 50m, memory >= 70Mi. These match the shipped defaults and prevent unstable clusters from insufficient DNS resources.
 - If a resource has both a request and a limit, the limit must be greater than or equal to the request.
 
 #### Config incorporation
@@ -210,7 +211,7 @@ extraParams := assets.RenderParams{
 ### Risks and Mitigations
 
 **Risk:** Users configure resources too low, causing CoreDNS to be OOM-killed or throttled, making the cluster unable to reach readiness.
-**Mitigation:** Document minimum recommended values. MicroShift does not enforce minimum thresholds to allow flexibility on extremely constrained edge devices. If this becomes a recurring issue, minimum validation can be added in a future release without breaking the API.
+**Mitigation:** Validation enforces minimum resource requests matching the shipped defaults (cpu: 50m, memory: 70Mi). Requests below these thresholds are rejected at startup. Users can increase resources above the minimums but cannot lower them below proven-stable values.
 
 **Risk:** Users configure resource limits without overriding requests.
 **Mitigation:** Default requests (cpu: 50m, memory: 70Mi) are always populated by `dnsDefaults()` and preserved via key-by-key merge. The rendered DaemonSet always contains explicit requests, so Kubernetes never needs to apply its default "request equals limit" behavior. Validation ensures limits >= requests, so setting a limit lower than the default request (e.g., `limits.cpu: 30m` without overriding `requests.cpu: 50m`) is rejected at startup with a clear error.
