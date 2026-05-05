@@ -237,6 +237,7 @@ N/A
 - Custom resources with requests and limits: configure via drop-in, restart, verify DaemonSet has configured values.
 - Requests only: configure only requests, verify no limits are injected.
 - Partial requests: configure only cpu request, verify memory default is preserved.
+- Limits only: configure only limits without requests, verify default requests (cpu: 50m, memory: 70Mi) are preserved alongside the configured limits.
 - Invalid resource quantity: set invalid value, verify MicroShift fails to start with clear error in journal.
 - Limit less than request: set limit below request, verify MicroShift fails to start.
 - DNS resolution after resource change: apply custom resources, verify CoreDNS still resolves cluster-local services.
