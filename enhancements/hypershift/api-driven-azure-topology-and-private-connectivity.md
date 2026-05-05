@@ -149,7 +149,8 @@ The implementation follows a 3-phase migration strategy:
 - **Phase 1:** API extension + backward-compatible controller
   code with legacy annotation fallback for unmigrated clusters.
 - **Phase 2:** Upstream migration (ARO-RP / Maestro) sets
-  `Topology` and `Private.Type=Swift` on all existing clusters.
+  `Topology=PublicAndPrivate` and `Private.Type=Swift` on all
+  existing clusters.
 - **Phase 3:** Once Phase 2 is verified complete across all
   production clusters (see verification criteria below) and
   all clusters are running a CPO version that consumes the
@@ -169,16 +170,17 @@ The implementation follows a 3-phase migration strategy:
   the management cluster's shared HAProxy for public endpoints.
 
 **CPO rollout considerations:** The CPO version is tied to the
-hosted cluster's OCP release. Phase 1 controller changes ship
-in a new OCP minor version; the management cluster's HO is
-upgraded first (new API types and helpers). Phase 2 can set
-the API fields on all clusters immediately, but the fields
-only become effective once a cluster upgrades to the OCP
-version carrying the updated CPO. Until then, the N-1 CPO
-continues to function via the legacy annotation fallback.
-If clusters cannot be upgraded to the new minor stream in a
-reasonable timeframe, a CPO backport to the previous minor
-version may be needed to unblock Phase 3.
+hosted cluster's OCP release. Phase 1 controller changes are
+developed in 4.23 and backported to 4.22. The management
+cluster's HO is upgraded first (new API types and helpers).
+Phase 2 can set the API fields on all clusters at any time —
+the old CPO ignores unknown fields and continues using the
+annotation fallback. ARO-RP/Maestro should check the HC's
+target OCP version: for clusters targeting 4.22+, set only
+the API fields (no annotation needed); for clusters targeting
+< 4.22, continue setting the annotation for the old CPO.
+Phase 3 cleanup proceeds once all clusters are running
+CPO 4.22+.
 
 #### Creating a Private ARO HCP Cluster
 
@@ -292,19 +294,39 @@ Add a Swift-specific configuration struct to
 `AzurePrivateSpec`:
 
 ```go
+// +kubebuilder:validation:XValidation:rule="self.podNetworkInstance == oldSelf.podNetworkInstance",message="podNetworkInstance is immutable"
 type AzureSwiftSpec struct {
+    // podNetworkInstance is the name of the Azure Swift pod
+    // network instance that provides private connectivity to
+    // the hosted cluster's router pods. This value is assigned
+    // by the management service and must not be changed after
+    // creation — changing it would disrupt Swift networking by
+    // reassigning the router pod's private IP.
+    //
     // +required
     // +kubebuilder:validation:MinLength=1
     PodNetworkInstance string `json:"podNetworkInstance"`
 }
 ```
 
+The immutability rule is on `AzureSwiftSpec` rather than the
+field to prevent unsetting at the parent level. Combined with
+the `Type` immutability rule on `AzurePrivateSpec`, once
+`Private.Type=Swift` is set with a `PodNetworkInstance`, neither
+the type nor the instance name can be changed.
+
 The `AzurePrivateSpec` struct gains a new `Swift` union member.
 CEL validation rules are defined at the struct level (not on
 the `Type` field) because `has()` requires an object field
 reference. Combined with `omitempty` on `Type`, the
 immutability rule allows setting the type for the first time on
-existing clusters that previously had it unset:
+existing clusters that previously had it unset.
+
+**Note:** This is a deliberate validation loosening. The current
+immutability rule prevents setting `Type` on existing clusters
+where it is unset. The new rule relaxes this constraint to
+enable Phase 2 migration — once set, the value remains
+immutable.
 
 ```go
 // +kubebuilder:validation:XValidation:rule="!has(oldSelf.type) || self.type == oldSelf.type",message="type is immutable"
@@ -327,17 +349,15 @@ type AzurePrivateSpec struct {
 }
 ```
 
-At the `AzurePlatformSpec` level, a CEL rule enforces that
-`Private.Type` is set for non-default topologies:
+At the `AzurePlatformSpec` level, an existing CEL rule already
+enforces that `private` is required when topology is
+`Private` or `PublicAndPrivate`, and forbidden otherwise:
 
-```go
-// +kubebuilder:validation:XValidation:rule="self.topology == '' || has(self.private.type)",message="private.type is required when topology is set"
-type AzurePlatformSpec struct {
-    // ...
-    Topology AzureTopologyType    `json:"topology,omitempty"`
-    Private  AzurePrivateSpec     `json:"private,omitzero"`
-}
 ```
+!has(self.topology) || ((self.topology == 'Private' || self.topology == 'PublicAndPrivate') ? has(self.private) : !has(self.private))
+```
+
+No changes to `AzurePlatformSpec`-level validation are needed.
 
 #### 3. `PublicEndpointExposed` Status Condition
 
@@ -480,9 +500,12 @@ functions are fully API-driven.
    consistently with a legacy fallback for unmigrated clusters
    in Phase 1.
 
-2. **`UseSharedIngress()`:** Change from parameterless
-   `isAroHCP()` to per-cluster
-   `UseSwiftNetworking(hcp) && IsPublicHCP(hcp)`.
+2. **`UseSharedIngressHCP(hcp)` / `UseSharedIngressHC(hc)`:**
+   New per-cluster functions replacing per-cluster
+   `isAroHCP()` calls with
+   `UseSwiftNetworking(hcp) && IsPublicHCP(hcp)`. The
+   management-cluster-level `isAroHCP()` in `main.go` is
+   retained (see Non-Goals).
 
 3. **`UseHCPRouter()`:** Replace `IsAroHCP()` with
    `UseSwiftNetworking(hcp)`.
@@ -688,6 +711,12 @@ dev-guide/test-conventions.md:
   `PublicAndPrivate` → `Private` → `PublicAndPrivate`.
 - Test that shared ingress drops routes when topology changes
   to `Private`.
+- **Envtests (API validation):** Test CEL rules with a real
+  API server: verify `Type` immutability allows first-time
+  set but blocks changes, union member positive/negative
+  rules reject invalid combinations, and
+  `self.topology == '' || has(self.private.type)` rejects
+  clusters with `Topology` set but no `Private.Type`.
 
 ### E2E Tests
 
