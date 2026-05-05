@@ -470,6 +470,54 @@ type SecretEncryptionStatus struct {
     // rotation rollout. Empty when no rotation is in progress.
     // +optional
     RolloutPhase EncryptionRolloutPhase `json:"rolloutPhase,omitempty"`
+    // History records completed and interrupted key rotations,
+    // most recent first. Capped at 5 entries; older entries are
+    // pruned on append.
+    // +optional
+    History []EncryptionMigrationHistory `json:"history,omitempty"`
+}
+
+// EncryptionMigrationState indicates the outcome of a key
+// rotation.
+type EncryptionMigrationState string
+
+const (
+    // EncryptionMigrationStateCompleted means all data was
+    // successfully re-encrypted with the target key.
+    EncryptionMigrationStateCompleted EncryptionMigrationState = "Completed"
+    // EncryptionMigrationStateInterrupted means the rotation was
+    // abandoned before data was encrypted with the target key
+    // (e.g., targetKey replaced during ReadOnlyDeploy).
+    EncryptionMigrationStateInterrupted EncryptionMigrationState = "Interrupted"
+)
+
+// EncryptionKeyReference identifies an encryption key by its
+// provider and fingerprint.
+type EncryptionKeyReference struct {
+    // Provider identifies the encryption provider.
+    Provider SecretEncryptionProvider `json:"provider"`
+    // Fingerprint is the hex-encoded SHA-256 hash of the key's
+    // identity fields.
+    Fingerprint string `json:"fingerprint"`
+}
+
+// EncryptionMigrationHistory records a completed or interrupted
+// key rotation for audit and debugging purposes.
+type EncryptionMigrationHistory struct {
+    // From is the key that data was migrated from (the previous
+    // active key).
+    From EncryptionKeyReference `json:"from"`
+    // To is the key that data was migrated to (the target key).
+    To EncryptionKeyReference `json:"to"`
+    // State indicates the outcome of this migration.
+    State EncryptionMigrationState `json:"state"`
+    // StartedTime is when the rotation was initiated
+    // (targetKey first set).
+    StartedTime metav1.Time `json:"startedTime"`
+    // CompletionTime is when the rotation finished. Nil if
+    // interrupted before completion.
+    // +optional
+    CompletionTime *metav1.Time `json:"completionTime,omitempty"`
 }
 
 // SecretEncryptionProvider identifies the encryption provider
@@ -572,6 +620,46 @@ This two-stage approach ensures that during each KAS rolling
 update, all replicas can decrypt data written by any other
 replica — no replica ever encounters a key it cannot read (see
 Workflow Description steps 4-8).
+
+The `History` field provides an audit trail of past rotations,
+recording the source and target key fingerprints, provider
+type, timing, and outcome. History uses fingerprints (not full
+key specs) to keep the status compact. Entries are appended
+when a rotation completes (`Completed`) or when a `targetKey`
+is replaced during `ReadOnlyDeploy` (`Interrupted`). The list
+is capped at 5 entries, most recent first.
+
+Example status after two completed rotations:
+
+```yaml
+status:
+  secretEncryption:
+    activeKey:
+      provider: Azure
+      azure:
+        keyVaultName: my-vault
+        keyName: my-key
+        keyVersion: "v3"
+    history:
+    - from:
+        provider: Azure
+        fingerprint: "a1b2c3..."
+      to:
+        provider: Azure
+        fingerprint: "d4e5f6..."
+      state: Completed
+      startedTime: "2026-04-15T10:00:00Z"
+      completionTime: "2026-04-15T10:08:30Z"
+    - from:
+        provider: Azure
+        fingerprint: "789abc..."
+      to:
+        provider: Azure
+        fingerprint: "a1b2c3..."
+      state: Completed
+      startedTime: "2026-01-10T14:00:00Z"
+      completionTime: "2026-01-10T14:12:15Z"
+```
 
 **Deprecated spec fields:**
 
@@ -844,10 +932,12 @@ by `status.secretEncryption.rolloutPhase`:
    a. If `rolloutPhase == ReadOnlyDeploy` and
       `fingerprint(spec.activeKey)` ≠
       `fingerprint(status.targetKey)`: the spec key changed
-      during `ReadOnlyDeploy` — update `status.targetKey` to
-      the spec's active key (restart with corrected target).
-      The CPO picks up the new `targetKey` on the next
-      reconcile. Continue at step 4 (`ReadOnlyDeploy`).
+      during `ReadOnlyDeploy` — append an `Interrupted`
+      history entry (from=`activeKey`, to=abandoned
+      `targetKey`), update `status.targetKey` to the spec's
+      active key (restart with corrected target). The CPO
+      picks up the new `targetKey` on the next reconcile.
+      Continue at step 4 (`ReadOnlyDeploy`).
    b. Otherwise (`WritePromote` or `Migrating`): continue
       with the snapshotted `targetKey`, ignoring the current
       spec. Skip to step 4.
@@ -888,11 +978,14 @@ by `status.secretEncryption.rolloutPhase`:
    `migrator.EnsureMigration(gr, computedKeyHash)` and track
    finished/failed/in-progress state.
 
-7. If all resources migrated successfully, set
+7. If all resources migrated successfully, append a `Completed`
+   history entry (from=`activeKey`, to=`targetKey`, with
+   `startedTime` and `completionTime`), set
    `hcp.Status.SecretEncryption.ActiveKey` to `TargetKey`,
    clear `TargetKey` and `RolloutPhase`, and set condition
-   `True/ReEncryptionCompleted`. All fields are updated in a
-   single HCP status patch call to ensure atomicity. The
+   `True/ReEncryptionCompleted`. The history list is capped at
+   5 entries (oldest pruned on append). All fields are updated
+   in a single HCP status patch call to ensure atomicity. The
    controller uses `Status().Patch()` with `MergeFrom` (rather
    than `Status().Update()`) to avoid clobbering status fields
    managed by the existing `hcpStatusReconciler`, which also
@@ -1496,6 +1589,14 @@ jobs). -->
     completion, detects new mismatch and starts fresh rotation.
   - AESCBC: Only `secrets` resource migrated (1 CR, not 5).
   - KMS: All 5 resources from `KMSEncryptedObjects()` migrated.
+- Migration history:
+  - `Completed` entry appended on successful rotation with
+    correct `from`/`to` key references and timestamps.
+  - `Interrupted` entry appended when `targetKey` is replaced
+    during `ReadOnlyDeploy`.
+  - History capped at 5 entries, oldest pruned on append.
+  - First rotation (nil `activeKey`): `from.fingerprint` is
+    empty, `from.provider` matches the initial provider.
 - `StorageVersionMigration` CR naming and annotation logic.
 - CPO `adaptSecretEncryptionConfig` and KMS provider changes:
   - `rolloutPhase=ReadOnlyDeploy`: old key=write, new key=read.
