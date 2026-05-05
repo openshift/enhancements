@@ -315,8 +315,9 @@ Both providers run as separate sidecar containers with different unix domain soc
 
 Fields that only affect the container spec (e.g., image for CVE fixes) do not change the KEK:
 
-1. keyController updates the existing encryption key secret in-place. No new secret is created.
-2. stateController detects the change and triggers a new revision with the updated `kms-provider-config`.
+1. keyController runs pre-flight checks to validate the new configuration (see [Pre-flight Checker](#pre-flight-checker-tech-preview-v2)).
+2. keyController updates the existing encryption key secret in-place. No new secret is created.
+3. stateController detects the change and triggers a new revision with the updated `kms-provider-config`.
 
 Only the active provider receives the update. Older providers retain their original sidecar configuration as fallback.
 
@@ -373,17 +374,19 @@ Both KMS providers run as separate sidecar containers without deduplication, mai
   Because the configuration can change over time, a new key cannot be generated until the current rollout is fully completed.
 3. The API configuration must resolve to the same encryption key instance.
 
-**Pre-flight checks:** Before generating a new encryption key for migration-triggering changes, a dedicated controller deploys a pod with the KMS plugin to verify status and encrypt/decrypt capability. A new encryption key is only generated after pre-flight checks succeed. This prevents deadlocks where a misconfigured key (e.g., typo in transit-key) is deployed but non-functional, and the system cannot recover because the key must complete its cycle. See [Pre-flight Checker](#pre-flight-checker-tech-preview-v2) for the detailed mechanism.
+**Pre-flight checks:** Before applying any configuration change, a dedicated controller deploys a pod with the KMS plugin to verify status and encrypt/decrypt capability. Configuration changes are only applied after pre-flight checks succeed. This prevents deadlocks where a misconfigured key (e.g., typo in transit-key) is deployed but non-functional, and the system cannot recover because the key must complete its cycle. See [Pre-flight Checker](#pre-flight-checker-tech-preview-v2) for the detailed mechanism.
 
 **Blocked operations during promotion:** keyController will not generate a new encryption key while the in-progress key is being promoted. If the admin overwrites the configuration (e.g., switches from KMS1 to KMS2 while KMS1 is still rolling out), the new key is not generated. To fix the in-progress configuration, admin must provide the same KMS configuration — this associates the fix with the existing encryption key.
 
 **Recovery from incorrect configuration:**
 - Migration-triggering fields: prevented by pre-flight checks (misconfiguration is caught before key generation).
-- Non-migration fields (e.g., image): admin provides corrected configuration via APIServer resource. A new revision is created; older providers retain their original configuration as fallback.
+- Non-migration fields (e.g., image): prevented by pre-flight checks (misconfiguration is caught before the update is applied). Since no new revision is created, the existing configuration is preserved and the system continues to operate correctly.
 
 #### Pre-flight Checker (Tech Preview v2)
 
-The pre-flight checker validates KMS configuration before an encryption key is created. It consists of two parts: a preflight binary that tests the KMS provider end-to-end via the plugin, and a controller that coordinates the check with the key-controller.
+The pre-flight checker validates KMS configuration before any configuration change is applied. The API allows admins to specify a KMS plugin image reference, and the API may add new fields over time in a backward-compatible way (e.g., a new field that maps to a new plugin flag). A new flag is expected to be supported for a range of image versions (say 1.X+), but we do not control which image version the admin provides: they might set a new field while referencing an older image (e.g., 1.X-2) that does not support the corresponding flag. Rather than maintaining a compatibility matrix between API field sets and image versions, we run the pre-flight checker unconditionally — the cost of an extra pod is acceptable compared to the risk of deploying an incompatible configuration.
+
+The checker consists of two parts: a preflight binary that tests the KMS provider end-to-end via the plugin, and a controller that coordinates the check with the key-controller.
 
 ##### Preflight Binary
 
