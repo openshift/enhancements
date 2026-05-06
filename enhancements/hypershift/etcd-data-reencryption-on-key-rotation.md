@@ -110,10 +110,20 @@ inspecting individual resources in the guest cluster.
 
 1. Guarantee that all existing encrypted etcd data is
    re-encrypted with the currently active encryption key after
-   a key rotation. For KMS, this covers secrets, configmaps,
-   routes, oauthaccesstokens, and oauthauthorizetokens. For
-   AESCBC, this covers secrets (the only resource type AESCBC
-   encrypts).
+   a key rotation. The re-encryption controller creates
+   `StorageVersionMigration` CRs for whatever resource types
+   `KMSEncryptedObjects()` returns (for KMS) or for `secrets`
+   (for AESCBC). Note: KMS sidecars are currently only
+   configured on KAS, so only KAS-served resources (secrets,
+   configmaps) are actually encrypted via KMS today. The
+   remaining resources in `KMSEncryptedObjects()` (routes,
+   oauthaccesstokens, oauthauthorizetokens) are served by
+   the OpenShift API servers, which do not have KMS sidecars
+   — fixing this is out of scope (see Non-Goals). Similarly,
+   AESCBC only encrypting secrets is a known gap in the
+   existing implementation. In both cases, the re-encryption
+   controller will automatically cover additional resources
+   when the upstream encryption scope is expanded.
 
 2. Provide an `EtcdDataEncryptionUpToDate` condition on
    HostedControlPlane and HostedCluster that tracks re-encryption
@@ -145,6 +155,22 @@ inspecting individual resources in the guest cluster.
 4. Removing the `backupKey` fields from the API entirely --
    they are deprecated and ignored, but remain for backward
    compatibility. Full removal is deferred to a future release.
+
+5. Expanding the set of encrypted resource types or adding KMS
+   sidecars to the OpenShift API servers
+   (`openshift-apiserver`, `oauth-apiserver`). Currently, KMS
+   sidecars are only configured on KAS, so only KAS-served
+   resources are encrypted via KMS. AESCBC only encrypting
+   `secrets` (not `configmaps`) is also a known gap. Fixing
+   these upstream issues is separate work; the re-encryption
+   mechanism is designed to automatically cover any newly
+   encrypted resources without changes.
+
+6. Tracking convergence of multiple API server Deployments
+   (openshift-apiserver, oauth-apiserver) during the two-stage
+   rollout. The current design tracks KAS convergence only.
+   When encryption is expanded to other API servers, the
+   convergence check should be extended accordingly.
 
 ## Proposal
 
@@ -1045,12 +1071,25 @@ The encrypted resources depend on the encryption type:
 For KMS (from `support/config/kms.go:KMSEncryptedObjects()`):
 - `secrets`
 - `configmaps`
-- `routes.route.openshift.io`
-- `oauthaccesstokens.oauth.openshift.io`
-- `oauthauthorizetokens.oauth.openshift.io`
+- `routes.route.openshift.io` *
+- `oauthaccesstokens.oauth.openshift.io` *
+- `oauthauthorizetokens.oauth.openshift.io` *
+
+\* These resources are listed in `KMSEncryptedObjects()` but are
+served by the OpenShift API servers, which do not currently have
+KMS sidecars configured. The re-encryption controller creates
+SVMs for all resources returned by `KMSEncryptedObjects()` —
+the SVMs for resources that are not actually encrypted will
+perform no-op write-backs (data passes through unchanged). When
+KMS sidecars are added to the OpenShift API servers, these SVMs
+will automatically perform real re-encryption.
 
 For AESCBC (from `aescbc.go`):
 - `secrets`
+
+Note: AESCBC only encrypting `secrets` (not `configmaps`) is a
+known gap in the existing implementation, not an intentional
+design choice of this enhancement.
 
 #### Component 3: CPO `adaptSecretEncryptionConfig()` Changes
 
