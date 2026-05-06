@@ -840,6 +840,10 @@ topology. It affects:
   `include.release.openshift.io/ibm-cloud-managed` from its
   manifests in the
   `cluster-kube-storage-version-migrator-operator` repo.
+  For existing clusters upgrading from a version where the
+  data-plane operator was present, the CVO in the hosted
+  cluster will garbage-collect the stale resources when the
+  manifests are no longer part of the desired state.
 
 The design follows HyperShift's established pattern: the CPO
 manages KAS Deployment lifecycle (encryption config generation,
@@ -1188,6 +1192,64 @@ For AESCBC (from `aescbc.go`):
 Note: AESCBC only encrypting `secrets` (not `configmaps`) is a
 known gap in the existing implementation, not an intentional
 design choice of this enhancement.
+
+**StorageVersionMigration CR naming**: The
+`KubeStorageVersionMigrator` creates SVMs with deterministic
+names prefixed with `encryption-migration-` (e.g.,
+`encryption-migration-core-secrets`). Conflicts with
+admin-created SVMs are unlikely due to this prefix. If a
+conflict occurs, the controller detects the wrong key
+annotation and recreates the CR.
+
+#### EncryptionConfiguration by Phase
+
+The following shows how the `EncryptionConfiguration` changes
+during a KMS (Azure) key rotation from v2 to v3:
+
+**ReadOnlyDeploy** (old key writes, new key read-only):
+```yaml
+apiVersion: apiserver.config.k8s.io/v1
+kind: EncryptionConfiguration
+resources:
+- resources: [secrets, configmaps]
+  providers:
+  - kms:
+      name: azurekmsactive      # v2 — write provider
+      endpoint: unix:///azurekmsactive.socket
+  - kms:
+      name: azurekmsbackup      # v3 — read-only
+      endpoint: unix:///azurekmsbackup.socket
+  - identity: {}
+```
+
+**WritePromote / Migrating** (new key writes, old key read-only):
+```yaml
+apiVersion: apiserver.config.k8s.io/v1
+kind: EncryptionConfiguration
+resources:
+- resources: [secrets, configmaps]
+  providers:
+  - kms:
+      name: azurekmsactive      # v3 — write provider
+      endpoint: unix:///azurekmsactive.socket
+  - kms:
+      name: azurekmsbackup      # v2 — read-only
+      endpoint: unix:///azurekmsbackup.socket
+  - identity: {}
+```
+
+**Completed** (single key, backup removed):
+```yaml
+apiVersion: apiserver.config.k8s.io/v1
+kind: EncryptionConfiguration
+resources:
+- resources: [secrets, configmaps]
+  providers:
+  - kms:
+      name: azurekmsactive      # v3
+      endpoint: unix:///azurekmsactive.socket
+  - identity: {}
+```
 
 #### Component 3: CPO `adaptSecretEncryptionConfig()` Changes
 
@@ -1702,9 +1764,26 @@ admission control.
    informational and does not gate upgrade preconditions.
 
 2. **Should the `backupKey` fields be removed in a future API
-   version?** They are currently deprecated and ignored. Full
-   removal would simplify the API but requires an API version
-   bump.
+   version?** They are currently deprecated and used as a
+   fallback during upgrade transition. Full removal would
+   simplify the API but requires an API version bump.
+
+#### Forward Compatibility
+
+**Cross-type migration** (e.g., AESCBC → AWS KMS): The status
+types support different providers in `from` and `to` fields of
+history entries, and `activeKey` and `targetKey` can have
+different providers. The two-stage rollout and re-encryption
+mechanism work regardless of whether the provider type changes.
+While cross-type migration is not in scope for this
+enhancement, the design does not preclude it.
+
+**Etcd sharding** (see PR #1979): The re-encryption mechanism
+works through the API server (StorageVersionMigration CRs),
+not direct etcd access. If etcd is sharded by resource kind
+via `--etcd-servers-overrides`, the API server routes
+write-backs to the correct shard transparently. The
+re-encryption controller does not need shard awareness.
 
 ## Test Plan
 
