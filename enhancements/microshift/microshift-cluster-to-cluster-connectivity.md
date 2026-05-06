@@ -158,7 +158,7 @@ MicroShift clusters.
 
    ```yaml
    # Cluster A config
-   c2cc:
+   clusterToCluster:
      remoteClusters:
        - nextHop: "192.168.122.101"
          clusterNetwork: 
@@ -170,7 +170,7 @@ MicroShift clusters.
 
    ```yaml
    # Cluster B config
-   c2cc:
+   clusterToCluster:
      remoteClusters:
        - nextHop: "192.168.122.100"
          clusterNetwork:
