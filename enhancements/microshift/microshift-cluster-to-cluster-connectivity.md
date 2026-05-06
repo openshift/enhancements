@@ -7,7 +7,7 @@ reviewers:
   - "@eslutsky"
   - "@copejon"
   - '@agullon'
-  - 'TBD, Networking Expert'
+  - '@vthapar, Networking Expert'
 approvers:
   - "@jerpeter1"
 api-approvers:
