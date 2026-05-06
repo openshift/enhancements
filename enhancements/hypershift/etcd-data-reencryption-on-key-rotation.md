@@ -153,8 +153,13 @@ inspecting individual resources in the guest cluster.
    `StorageVersionMigration` handles pagination natively.
 
 4. Removing the `backupKey` fields from the API entirely --
-   they are deprecated and ignored, but remain for backward
-   compatibility. Full removal is deferred to a future release.
+   they are deprecated but still functional: `spec.backupKey` is
+   used as a read provider fallback when
+   `status.secretEncryption.activeKey` is not yet initialized
+   (see Upgrade Strategy). Once the status is initialized, the
+   status-driven mechanism takes over and `backupKey` is no
+   longer needed. The fields remain in the API for backward
+   compatibility; full removal is deferred to a future release.
 
 5. Expanding the set of encrypted resource types or adding KMS
    sidecars to the OpenShift API servers
@@ -979,10 +984,16 @@ new secret and update the `activeKey.name` reference.
 It then compares the computed fingerprint against one derived
 from `hcp.Status.SecretEncryption.ActiveKey`:
 
-- **Status field nil**: First key rotation observed. Snapshot
-  the spec's active key into `status.targetKey`, prepend a
-  new history entry with `state=ReadOnlyDeploy`, and begin
-  the two-stage rollout.
+- **Status field nil, no `backupKey` set** (upgrade bootstrap —
+  never rotated): Initialize `status.activeKey` to
+  `spec.activeKey` without triggering re-encryption. No
+  rotation needed.
+- **Status field nil, `backupKey` set** (upgrade with rotation
+  in progress): Data may still be encrypted with the backup
+  key. Snapshot the spec's active key into `status.targetKey`,
+  prepend a history entry with `state=ReadOnlyDeploy`, and
+  begin the two-stage rollout. `spec.backupKey` is used as
+  the read provider during the rollout.
 - **Fingerprints match**: Re-encryption already completed for
   the current key. No action needed.
 - **Fingerprints differ**: New key rotation detected. Snapshot
@@ -1013,10 +1024,13 @@ This hybrid approach ensures safety without relying on the VAP
 while providing fast correction for the common "wrong key"
 scenario.
 
-**First encryption setup**: A nil status field triggers
-the two-stage rollout, so initial encryption setup is treated
-identically to a key rotation — all pre-existing data passes
-through the apiserver's encryption layer.
+**Upgrade bootstrap**: When `status.activeKey` is nil and no
+`backupKey` is set, the CPO initializes `status.activeKey`
+directly without triggering re-encryption. When `backupKey`
+is set, a full re-encryption is triggered to ensure all data
+is encrypted with the current active key before transitioning
+to the status-driven mechanism. See Upgrade Strategy for
+details.
 
 #### Component 2: Rollout Orchestration (CPO Main Reconciler)
 
@@ -1048,10 +1062,18 @@ adapt function), with access to read and write HCP status:
 
 3. Compute fingerprints of the spec's active key and the
    status's active key and compare them. If they match,
-   re-encryption is complete — return (no action needed). If
-   the status field is nil or the fingerprints differ, snapshot
-   the spec's active key into `status.targetKey`, prepend a
-   history entry with `state=ReadOnlyDeploy`, and set condition
+   re-encryption is complete — return (no action needed).
+
+   If `status.activeKey` is nil and no `spec.backupKey` is set
+   (upgrade bootstrap — cluster never rotated), initialize
+   `status.activeKey` to `spec.activeKey` without triggering
+   re-encryption. Return.
+
+   If `status.activeKey` is nil and `spec.backupKey` is set
+   (upgrade with rotation in progress), or if the fingerprints
+   differ (new rotation), snapshot the spec's active key into
+   `status.targetKey`, prepend a history entry with
+   `state=ReadOnlyDeploy`, and set condition
    `False/ReadOnlyRolloutInProgress`.
 
 4. **ReadOnlyDeploy phase**: The adapt function generates the
@@ -1697,6 +1719,10 @@ jobs). -->
     (the supported rotation model).
 - Re-encryption controller reconciliation logic:
   - When no encryption configured: condition not set.
+  - Upgrade bootstrap (status nil, no backupKey): status.activeKey
+    initialized to spec.activeKey, no re-encryption triggered.
+  - Upgrade bootstrap (status nil, backupKey set): re-encryption
+    triggered with backupKey as read provider.
   - When spec key matches status key: no action taken.
   - When status field nil (first encryption setup):
     `targetKey` set, history entry prepended with
@@ -1837,16 +1863,36 @@ N/A -- This is a new feature.
 
 ## Upgrade / Downgrade Strategy
 
-**Upgrade**: Existing clusters with encryption configured are
-unaffected. The `EtcdDataEncryptionUpToDate` condition is only set
-when a key rotation is detected
-(`status.secretEncryption.activeKey` is nil or differs from the
-spec's active key). Clusters that have never rotated keys will not
-see the condition.
+**Upgrade**: On upgrade, the CPO main reconciler handles existing
+clusters based on their current encryption state:
 
-The re-encryption controller is added to the HCCO, which is
-upgraded per-hosted-cluster as part of the normal hosted cluster
-upgrade process. No manual steps are required.
+1. **No encryption configured**: Unaffected. No status fields
+   set, no condition emitted.
+
+2. **Encryption configured, no `backupKey` set** (never
+   rotated): The CPO initializes
+   `status.secretEncryption.activeKey` to `spec.activeKey`
+   without triggering re-encryption or a KAS rollout. This is
+   a status-only update — the cluster is already fully
+   encrypted with the active key. No condition is emitted.
+
+3. **Encryption configured, `backupKey` set** (rotation was in
+   progress or completed before upgrade): Some data may still
+   be encrypted with the backup key. The CPO triggers a full
+   two-stage rollout and re-encryption to ensure all data is
+   encrypted with the current `spec.activeKey`. During the
+   rollout, `spec.backupKey` is used as the read provider
+   (the existing fallback path, since `status.activeKey` is
+   nil). After re-encryption completes,
+   `status.secretEncryption.activeKey` is set and the
+   status-driven mechanism takes over. The `backupKey` field
+   is no longer needed but continues to function as a
+   fallback if status is ever cleared.
+
+The rollout orchestration is added to the CPO main reconciler
+and the re-encryption controller is added to the HCCO, both
+upgraded per-hosted-cluster as part of the normal hosted
+cluster upgrade process. No manual steps are required.
 
 **Downgrade**: Downgrading is not supported in HyperShift.
 No downgrade path is provided for this enhancement.
