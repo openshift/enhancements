@@ -589,33 +589,56 @@ const (
 // types directly, to decouple status serialization from spec
 // type evolution (fields added, renamed, or removed in spec
 // types should not break status compatibility).
+// +k8s:deepcopy-gen=true
+// +kubebuilder:validation:XValidation:rule="has(self.azure) == (self.provider == 'Azure')",message="azure must be set when provider is Azure"
+// +kubebuilder:validation:XValidation:rule="has(self.aws) == (self.provider == 'AWS')",message="aws must be set when provider is AWS"
+// +kubebuilder:validation:XValidation:rule="has(self.ibmCloud) == (self.provider == 'IBMCloud')",message="ibmCloud must be set when provider is IBMCloud"
+// +kubebuilder:validation:XValidation:rule="has(self.aescbc) == (self.provider == 'AESCBC')",message="aescbc must be set when provider is AESCBC"
 type SecretEncryptionKeyStatus struct {
-    // Provider identifies the encryption provider.
+    // provider identifies the encryption provider.
+    // +required
+    // +kubebuilder:validation:Enum=Azure;AWS;IBMCloud;AESCBC
     Provider SecretEncryptionProvider `json:"provider"`
-    // Azure holds the Azure KMS key identity fields.
-    Azure *AzureKMSKeyStatus `json:"azure,omitempty"`
-    // AWS holds the AWS KMS key identity fields.
-    AWS *AWSKMSKeyStatus `json:"aws,omitempty"`
-    // IBMCloud holds the IBM Cloud KMS key identity fields.
-    IBMCloud *IBMCloudKMSKeyStatus `json:"ibmCloud,omitempty"`
-    // AESCBC holds a reference to the AESCBC key secret.
-    AESCBC *AESCBCKeyStatus `json:"aescbc,omitempty"`
+    // azure holds the Azure KMS key identity fields.
+    // +optional
+    Azure AzureKMSKeyStatus `json:"azure,omitempty,omitzero"`
+    // aws holds the AWS KMS key identity fields.
+    // +optional
+    AWS AWSKMSKeyStatus `json:"aws,omitempty,omitzero"`
+    // ibmCloud holds the IBM Cloud KMS key identity fields.
+    // +optional
+    IBMCloud IBMCloudKMSKeyStatus `json:"ibmCloud,omitempty,omitzero"`
+    // aescbc holds a reference to the AESCBC key secret.
+    // +optional
+    AESCBC AESCBCKeyStatus `json:"aescbc,omitempty,omitzero"`
 }
 
 // AzureKMSKeyStatus contains identity fields for an Azure KMS
 // key, sufficient to reconstruct the EncryptionConfiguration
 // read provider.
+// +k8s:deepcopy-gen=true
 type AzureKMSKeyStatus struct {
+    // keyVaultName is the name of the Azure Key Vault.
+    // +required
     KeyVaultName string `json:"keyVaultName"`
-    KeyName      string `json:"keyName"`
-    KeyVersion   string `json:"keyVersion"`
+    // keyName is the name of the key in the vault.
+    // +required
+    KeyName string `json:"keyName"`
+    // keyVersion is the version of the key.
+    // +required
+    KeyVersion string `json:"keyVersion"`
 }
 
 // AWSKMSKeyStatus contains identity fields for an AWS KMS key,
 // sufficient to reconstruct the backup sidecar container
-// arguments for a different region than the current spec.
+// arguments.
+// +k8s:deepcopy-gen=true
 type AWSKMSKeyStatus struct {
-    ARN    string `json:"arn"`
+    // arn is the Amazon Resource Name of the KMS key.
+    // +required
+    ARN string `json:"arn"`
+    // region is the AWS region of the KMS key.
+    // +required
     Region string `json:"region"`
 }
 
@@ -624,22 +647,40 @@ type AWSKMSKeyStatus struct {
 // KP_DATA_JSON entry for the backup key. CorrelationID and
 // URL are included because the IBM Cloud KMS sidecar requires
 // them to initialize the key connection.
+// +k8s:deepcopy-gen=true
 type IBMCloudKMSKeyStatus struct {
-    CRKID         string `json:"crkID"`
-    InstanceID    string `json:"instanceID"`
-    KeyVersion    int32  `json:"keyVersion"`
-    Region        string `json:"region"`
+    // crkID is the Customer Root Key ID.
+    // +required
+    CRKID string `json:"crkID"`
+    // instanceID is the KMS instance ID.
+    // +required
+    InstanceID string `json:"instanceID"`
+    // keyVersion is the key version number.
+    // +required
+    KeyVersion int32 `json:"keyVersion"`
+    // region is the IBM Cloud region.
+    // +required
+    Region string `json:"region"`
+    // correlationID is the correlation ID for the key.
+    // +required
     CorrelationID string `json:"correlationID"`
-    URL           string `json:"url"`
+    // url is the KMS endpoint URL.
+    // +required
+    URL string `json:"url"`
 }
 
 // AESCBCKeyStatus contains a reference to the AESCBC key
 // secret and a SHA-256 hash of its contents for fingerprinting.
+// +k8s:deepcopy-gen=true
 type AESCBCKeyStatus struct {
+    // secretRef is a reference to the secret containing the
+    // AESCBC key.
+    // +required
     SecretRef corev1.LocalObjectReference `json:"secretRef"`
-    // DataHash is the hex-encoded SHA-256 hash of the secret's
+    // dataHash is the hex-encoded SHA-256 hash of the secret's
     // "key" data field at the time re-encryption completed.
-    DataHash  string                      `json:"dataHash"`
+    // +required
+    DataHash string `json:"dataHash"`
 }
 ```
 
