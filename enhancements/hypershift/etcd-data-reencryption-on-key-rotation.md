@@ -604,26 +604,32 @@ const (
 // type evolution (fields added, renamed, or removed in spec
 // types should not break status compatibility).
 // +k8s:deepcopy-gen=true
-// +kubebuilder:validation:XValidation:rule="has(self.azure) == (self.provider == 'Azure')",message="azure must be set when provider is Azure"
-// +kubebuilder:validation:XValidation:rule="has(self.aws) == (self.provider == 'AWS')",message="aws must be set when provider is AWS"
-// +kubebuilder:validation:XValidation:rule="has(self.ibmCloud) == (self.provider == 'IBMCloud')",message="ibmCloud must be set when provider is IBMCloud"
-// +kubebuilder:validation:XValidation:rule="has(self.aescbc) == (self.provider == 'AESCBC')",message="aescbc must be set when provider is AESCBC"
+// +kubebuilder:validation:XValidation:rule="self.provider == 'Azure' ? has(self.azure) : !has(self.azure)",message="azure is required when provider is Azure, and forbidden otherwise"
+// +kubebuilder:validation:XValidation:rule="self.provider == 'AWS' ? has(self.aws) : !has(self.aws)",message="aws is required when provider is AWS, and forbidden otherwise"
+// +kubebuilder:validation:XValidation:rule="self.provider == 'IBMCloud' ? has(self.ibmCloud) : !has(self.ibmCloud)",message="ibmCloud is required when provider is IBMCloud, and forbidden otherwise"
+// +kubebuilder:validation:XValidation:rule="self.provider == 'AESCBC' ? has(self.aescbc) : !has(self.aescbc)",message="aescbc is required when provider is AESCBC, and forbidden otherwise"
+// +union
 type SecretEncryptionKeyStatus struct {
     // provider identifies the encryption provider.
     // +required
+    // +unionDiscriminator
     // +kubebuilder:validation:Enum=Azure;AWS;IBMCloud;AESCBC
     Provider SecretEncryptionProvider `json:"provider"`
     // azure holds the Azure KMS key identity fields.
     // +optional
+    // +unionMember
     Azure AzureKMSKeyStatus `json:"azure,omitempty,omitzero"`
     // aws holds the AWS KMS key identity fields.
     // +optional
+    // +unionMember
     AWS AWSKMSKeyStatus `json:"aws,omitempty,omitzero"`
     // ibmCloud holds the IBM Cloud KMS key identity fields.
     // +optional
+    // +unionMember
     IBMCloud IBMCloudKMSKeyStatus `json:"ibmCloud,omitempty,omitzero"`
     // aescbc holds a reference to the AESCBC key secret.
     // +optional
+    // +unionMember
     AESCBC AESCBCKeyStatus `json:"aescbc,omitempty,omitzero"`
 }
 
