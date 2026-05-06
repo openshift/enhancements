@@ -133,10 +133,19 @@ inspecting individual resources in the guest cluster.
    enabling automatic rotation detection and eliminating the
    need for manual `backupKey` management.
 
-4. Maintain cluster availability during the re-encryption process.
+4. Maintain cluster availability during the re-encryption process
+   via a two-stage KAS rollout that prevents decryption failures
+   during rolling updates.
 
 5. Support all encryption types (Azure KMS, AWS KMS, IBM Cloud
    KMS, AESCBC) with a single, generic re-encryption mechanism.
+
+6. Expose Prometheus metrics for re-encryption state and failures
+   to enable alerting without requiring active polling of
+   conditions.
+
+7. Maintain a brief history of recent key rotations in
+   HostedCluster/HCP status for audit and debugging.
 
 ### Non-Goals
 
@@ -1944,6 +1953,24 @@ skew between the HO and per-cluster HCCO is safe.
   Pruned after successful migration.
 - **API throughput impact**: Proportional to encrypted object
   count. Migrator uses pagination.
+
+### Prometheus Metrics
+
+The HCCO re-encryption controller exposes metrics derived from
+`status.secretEncryption` for alerting:
+
+| Metric | Type | Description |
+|---|---|---|
+| `hypershift_encryption_migration_state` | Gauge | Current rotation state per hosted cluster. Label `state` maps to `history[0].state` or `idle` when no rotation is in progress. |
+| `hypershift_encryption_migration_duration_seconds` | Histogram | Duration of completed rotations (from `startedTime` to `completionTime`). |
+| `hypershift_encryption_migration_failures_total` | Counter | Total `StorageVersionMigration` CR failures per hosted cluster. |
+
+**Suggested alert rules:**
+
+- `HyperShiftEncryptionMigrationStuck`: Fires when state is
+  not `idle` or `Completed` for more than 1 hour.
+- `HyperShiftEncryptionMigrationPersistentFailure`: Fires when
+  failures increase by 3+ within 30 minutes.
 
 ## Support Procedures
 
