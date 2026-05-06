@@ -43,12 +43,14 @@ active key can be set in `SecretEncryptionSpec`, and the
 the write provider and the old key as a read provider. However,
 there is no mechanism to re-encrypt existing etcd data with the new
 key after rotation, and the current `backupKey` API requires manual
-lifecycle management that is error-prone. This enhancement adds a
-re-encryption controller in the Hosted Cluster Config Operator
-(HCCO) that orchestrates a safe two-stage KAS rollout (first adding
-the new key as a read-only provider, then promoting it to the write
-provider), deploys the `kube-storage-version-migrator` in the
-control plane (management cluster) to support zero-worker-node
+lifecycle management that is error-prone. This enhancement adds key rotation
+orchestration to the CPO's main reconciler (detecting key changes,
+driving a safe two-stage KAS rollout — first adding the new key as
+a read-only provider, then promoting it to write), a re-encryption
+controller in the HCCO (creating and monitoring
+`StorageVersionMigration` CRs in the guest cluster after the
+rollout converges), deploys the `kube-storage-version-migrator` in
+the control plane (management cluster) to support zero-worker-node
 clusters, introduces `status.secretEncryption` fields on
 HostedCluster/HCP to track the active key, target key, and rollout
 phase, deprecates the `backupKey` spec fields, and tracks progress
@@ -149,10 +151,10 @@ inspecting individual resources in the guest cluster.
 This enhancement adds etcd data re-encryption support to HyperShift
 by reusing library-go's `KubeStorageVersionMigrator` struct (which
 creates and monitors `StorageVersionMigration` CRs via the
-`migration.k8s.io/v1alpha1` API) within a new HCCO controller,
-deploying the `kube-storage-version-migrator` in the control plane,
-introducing a status field for rotation tracking, and deprecating
-the `backupKey` spec fields.
+`migration.k8s.io/v1alpha1` API), deploying the
+`kube-storage-version-migrator` in the control plane, introducing
+a status field for rotation tracking, and deprecating the
+`backupKey` spec fields.
 
 The design reuses the same `StorageVersionMigration` mechanism that
 standalone OCP uses for re-encryption, ensuring consistency and
@@ -160,30 +162,24 @@ debuggability across both topologies.
 
 The changes span multiple components:
 
-1. **HCCO** (new controller): Detect active key changes by
-   computing a fingerprint of the current encryption key from
+1. **CPO main reconciler** (new logic): Detect active key changes
+   by computing a fingerprint of the current encryption key from
    `hcp.Spec.SecretEncryption` and comparing it against
    `hcp.Status.SecretEncryption.ActiveKey`. When a change is
    detected, snapshot the target key in
-   `hcp.Status.SecretEncryption.TargetKey` and orchestrate a
-   two-stage KAS rollout: first deploy the new key as read-only
-   (Stage 1: `ReadOnlyDeploy`), then promote it to write
-   provider (Stage 2: `WritePromote`), waiting for full KAS
-   convergence between stages. After Stage 2 converges, trigger
-   re-encryption (Stage 3: `Migrating`) by calling
-   `KubeStorageVersionMigrator.EnsureMigration()` for each
-   encrypted resource. On completion, update `ActiveKey` to
-   match `TargetKey`, clear `TargetKey` and `RolloutPhase`, and
-   set the `EtcdDataEncryptionUpToDate` condition on HCP. If the
-   spec key changes during an active rotation, the controller
-   continues with the snapshotted target key — the new change is
-   picked up after the current rotation completes.
+   `hcp.Status.SecretEncryption.TargetKey` and drive a two-stage
+   KAS rollout: first deploy the new key as read-only (Stage 1:
+   `ReadOnlyDeploy`), then promote it to write provider
+   (Stage 2: `WritePromote`), waiting for full KAS convergence
+   between stages. After Stage 2 converges, set
+   `rolloutPhase=Migrating` to hand off to the HCCO. If the spec
+   key changes during `ReadOnlyDeploy`, the CPO updates
+   `targetKey` in-place; during later phases, it continues with
+   the snapshotted target key — the new change is picked up
+   after the current rotation completes.
 
-2. **CPO** (existing code modification): Deploy the
-   `kube-storage-version-migrator` as a control plane component
-   in the HCP namespace, connecting to the guest cluster KAS.
-   Modify `adaptSecretEncryptionConfig()` and KMS provider
-   constructors to generate the `EncryptionConfiguration` based
+2. **CPO `adaptSecretEncryptionConfig()`** (existing code
+   modification): Generate the `EncryptionConfiguration` based
    on `hcp.Status.SecretEncryption.RolloutPhase`: during
    `ReadOnlyDeploy`, the old key remains the write provider and
    the new key is read-only; during `WritePromote` and
@@ -192,13 +188,25 @@ The changes span multiple components:
    only when `status.secretEncryption.activeKey` is not set
    (upgrade transition).
 
-3. **cluster-kube-storage-version-migrator-operator** (separate
+3. **CPO** (existing code modification): Deploy the
+   `kube-storage-version-migrator` as a control plane component
+   in the HCP namespace, connecting to the guest cluster KAS.
+
+4. **HCCO** (new controller): Watch for
+   `rolloutPhase=Migrating`. When set, orchestrate re-encryption
+   by calling `KubeStorageVersionMigrator.EnsureMigration()` for
+   each encrypted resource using guest cluster clients, monitor
+   completion, and on success update `ActiveKey` to match
+   `TargetKey`, clear `TargetKey` and `RolloutPhase`, and set
+   `EtcdDataEncryptionUpToDate=True` on HCP.
+
+5. **cluster-kube-storage-version-migrator-operator** (separate
    repo change): Remove the
    `include.release.openshift.io/ibm-cloud-managed` annotation
    from the operator manifests to disable the data-plane
    instance for HyperShift.
 
-4. **HyperShift Operator** (existing code modification): Bubble up
+6. **HyperShift Operator** (existing code modification): Bubble up
    the `EtcdDataEncryptionUpToDate` condition and
    `SecretEncryption` status from HCP to HostedCluster. Deploy a
    `ValidatingAdmissionPolicy` that blocks active key changes on
@@ -229,19 +237,19 @@ The changes span multiple components:
 2. The HyperShift Operator syncs the key configuration to the HCP
    namespace (existing behavior, no changes needed).
 
-3. The HCCO re-encryption controller computes a fingerprint of
-   the active key from `hcp.Spec.SecretEncryption` and compares
-   it against one derived from
-   `hcp.Status.SecretEncryption.ActiveKey`. If the status field
-   is nil (first rotation) or the fingerprints differ (new
-   rotation), the controller snapshots the spec's active key
-   into `hcp.Status.SecretEncryption.TargetKey` and sets
+3. The CPO main reconciler computes a fingerprint of the active
+   key from `hcp.Spec.SecretEncryption` and compares it against
+   one derived from `hcp.Status.SecretEncryption.ActiveKey`. If
+   the status field is nil (first rotation) or the fingerprints
+   differ (new rotation), the CPO snapshots the spec's active
+   key into `hcp.Status.SecretEncryption.TargetKey` and sets
    `hcp.Status.SecretEncryption.RolloutPhase` to
    `ReadOnlyDeploy`. If the fingerprints match, re-encryption
    is already complete and no action is taken.
 
-4. **Stage 1 — ReadOnlyDeploy**: The CPO reads
-   `rolloutPhase=ReadOnlyDeploy` and regenerates the
+4. **Stage 1 — ReadOnlyDeploy**: The CPO's
+   `adaptSecretEncryptionConfig()` reads
+   `rolloutPhase=ReadOnlyDeploy` and generates the
    `EncryptionConfiguration` with the **old key**
    (`status.activeKey`) as the write provider and the **new
    key** (`status.targetKey`) as a read-only provider. The KAS
@@ -251,12 +259,13 @@ The changes span multiple components:
    no pod writes with the new key yet, all reads succeed across
    all replicas throughout the rollout.
 
-5. The HCCO waits for full KAS convergence
+5. The CPO main reconciler waits for full KAS convergence
    (`updatedReplicas == replicas == readyReplicas`), then sets
    `rolloutPhase=WritePromote`.
 
-6. **Stage 2 — WritePromote**: The CPO reads
-   `rolloutPhase=WritePromote` and regenerates the
+6. **Stage 2 — WritePromote**: The CPO's
+   `adaptSecretEncryptionConfig()` reads
+   `rolloutPhase=WritePromote` and generates the
    `EncryptionConfiguration` with the **new key**
    (`status.targetKey`) as the write provider and the **old
    key** (`status.activeKey`) as a read-only provider. The KAS
@@ -266,21 +275,21 @@ The changes span multiple components:
    provider (from Stage 1), so they can decrypt data written by
    new-config pods.
 
-7. The HCCO waits for full KAS convergence, then sets
-   `rolloutPhase=Migrating` and creates
-   `StorageVersionMigration` CRs in the hosted cluster for each
-   encrypted resource type. It sets
+7. The CPO main reconciler waits for full KAS convergence, then
+   sets `rolloutPhase=Migrating` and sets
    `EtcdDataEncryptionUpToDate=False` with reason
    `ReEncryptionInProgress`.
 
-8. **Stage 3 — Migrating**: The `kube-storage-version-migrator`
+8. **Stage 3 — Migrating**: The HCCO re-encryption controller
+   detects `rolloutPhase=Migrating` and creates
+   `StorageVersionMigration` CRs in the hosted cluster for each
+   encrypted resource type. The `kube-storage-version-migrator`
    controller, running in the HCP namespace (control plane),
-   processes each `StorageVersionMigration` CR via the guest
-   cluster KAS: it lists all objects of each resource type and
-   performs a no-op write-back. Since all KAS replicas now agree
-   on the encryption config (convergence confirmed in step 7),
-   the write-back transparently re-encrypts all data with the
-   new active key.
+   processes each CR via the guest cluster KAS: it lists all
+   objects of each resource type and performs a no-op write-back.
+   Since all KAS replicas now agree on the encryption config
+   (convergence confirmed in step 7), the write-back
+   transparently re-encrypts all data with the new active key.
 
 9. The HCCO re-encryption controller detects all
    `StorageVersionMigration` CRs have `MigrationSucceeded=True`.
@@ -298,7 +307,7 @@ The changes span multiple components:
     sidecar container is removed from the KAS pod; the
     read-only provider is removed from the
     `EncryptionConfiguration`. If the spec key was changed
-    again during the rotation, the controller detects the new
+    again during the rotation, the CPO detects the new
     mismatch and starts a fresh rotation from step 3.
 
 ```mermaid
@@ -312,30 +321,31 @@ sequenceDiagram
 
     Admin->>HO: Update activeKey in HC spec
     HO->>CPO: Sync key config to HCP namespace
-    HCCO->>HCCO: Compute key fingerprint from HCP spec
-    HCCO->>HCCO: Compare against status.secretEncryption.activeKey
-    Note over HCCO: Mismatch → snapshot targetKey,<br/>set rolloutPhase=ReadOnlyDeploy
+    CPO->>CPO: Compute key fingerprint from HCP spec
+    CPO->>CPO: Compare against status.secretEncryption.activeKey
+    Note over CPO: Mismatch → snapshot targetKey,<br/>set rolloutPhase=ReadOnlyDeploy
 
     rect rgb(230, 245, 255)
-    Note over CPO,KAS: Stage 1: ReadOnlyDeploy
-    CPO->>CPO: Regenerate EncryptionConfiguration<br/>(old key=write, new key=read-only)
+    Note over CPO,KAS: Stage 1: ReadOnlyDeploy (CPO)
+    CPO->>CPO: adaptSecretEncryptionConfig()<br/>(old key=write, new key=read-only)
     CPO->>KAS: Rolling restart with new config
-    KAS-->>HCCO: Rollout complete (all replicas converged)
-    HCCO->>HCCO: Set rolloutPhase=WritePromote
+    KAS-->>CPO: Rollout complete (all replicas converged)
+    CPO->>CPO: Set rolloutPhase=WritePromote
     end
 
     rect rgb(230, 255, 230)
-    Note over CPO,KAS: Stage 2: WritePromote
-    CPO->>CPO: Regenerate EncryptionConfiguration<br/>(new key=write, old key=read-only)
+    Note over CPO,KAS: Stage 2: WritePromote (CPO)
+    CPO->>CPO: adaptSecretEncryptionConfig()<br/>(new key=write, old key=read-only)
     CPO->>KAS: Rolling restart with new config
-    KAS-->>HCCO: Rollout complete (all replicas converged)
-    HCCO->>HCCO: Set rolloutPhase=Migrating
+    KAS-->>CPO: Rollout complete (all replicas converged)
+    CPO->>CPO: Set rolloutPhase=Migrating
+    Note over CPO: EtcdDataEncryptionUpToDate=False
     end
 
     rect rgb(255, 245, 230)
-    Note over HCCO,SVM: Stage 3: Migrating
+    Note over HCCO,SVM: Stage 3: Migrating (HCCO)
+    HCCO->>HCCO: Detect rolloutPhase=Migrating
     HCCO->>SVM: Create StorageVersionMigration CRs
-    Note over HCCO: EtcdDataEncryptionUpToDate=False
     SVM->>KAS: List + no-op write-back per resource<br/>(via guest cluster KAS)
     SVM-->>HCCO: MigrationSucceeded=True (all CRs)
     end
@@ -354,28 +364,28 @@ the failed CR, and retries on the next reconcile. The condition is
 set to `False` with reason `ReEncryptionFailed` and a message
 describing which resource failed.
 
-**Key changes mid-rotation**: The controller is designed to be
-safe without relying on the VAP (see Component 6). Behavior
-depends on the current rollout phase:
+**Key changes mid-rotation**: The system is designed to be safe
+without relying on the VAP (see Component 6). Behavior depends
+on the current rollout phase:
 
-- **During `ReadOnlyDeploy`**: No data has been encrypted with
-  the target key yet — it is only a read-only provider. If the
-  spec's active key changes, the controller updates
+- **During `ReadOnlyDeploy`** (CPO): No data has been encrypted
+  with the target key yet — it is only a read-only provider. If
+  the spec's active key changes, the CPO main reconciler updates
   `status.targetKey` to the new spec key in-place and restarts
-  `ReadOnlyDeploy` with the corrected target. The CPO picks up
-  the new `targetKey` on the next reconcile and generates the
-  updated `EncryptionConfiguration`. This allows immediate
-  correction of wrong-key mistakes without waiting for a full
-  rotation cycle.
+  `ReadOnlyDeploy` with the corrected target. The adapt function
+  picks up the new `targetKey` on the next reconcile and
+  generates the updated `EncryptionConfiguration`. This allows
+  immediate correction of wrong-key mistakes without waiting for
+  a full rotation cycle.
 
-- **During `WritePromote` or `Migrating`**: Some KAS replicas
-  may have already written data with the target key. Abandoning
-  it would require keeping 3 keys simultaneously (old active +
-  abandoned target + new key), which violates the two-sidecar
-  constraint. The controller continues with the snapshotted
-  `targetKey` and ignores the spec change. Once the current
-  rotation completes, the controller detects the new mismatch
-  and starts a fresh rotation.
+- **During `WritePromote`** (CPO) **or `Migrating`** (HCCO):
+  Some KAS replicas may have already written data with the
+  target key. Abandoning it would require keeping 3 keys
+  simultaneously (old active + abandoned target + new key),
+  which violates the two-sidecar constraint. The responsible
+  controller continues with the snapshotted `targetKey` and
+  ignores the spec change. Once the current rotation completes,
+  the CPO detects the new mismatch and starts a fresh rotation.
 
 The VAP (Component 6) provides a better UX by rejecting
 mid-rotation changes at admission time with a clear error
@@ -385,10 +395,10 @@ message, rather than silently restarting or queuing them.
 `continueToken` for resumption. The controller detects stale CRs
 and retries as needed.
 
-**Guest cluster KAS unreachable**: The HCCO and the control plane
-migrator both connect to the guest cluster KAS. If unreachable,
-the controller retries with backoff. The condition reflects the
-inability to check status.
+**Guest cluster KAS unreachable**: The HCCO (during Migrating
+phase) and the control plane migrator both connect to the guest
+cluster KAS. If unreachable, the HCCO retries with backoff. The
+condition reflects the inability to check status.
 
 ### API Extensions
 
@@ -454,8 +464,8 @@ const (
 // key rotation and re-encryption.
 type SecretEncryptionStatus struct {
     // ActiveKey is the encryption key specification that all etcd
-    // data is confirmed encrypted with. Updated by the HCCO after
-    // successful re-encryption.
+    // data is confirmed encrypted with. Updated after successful
+    // re-encryption.
     // +optional
     ActiveKey *SecretEncryptionKeyStatus `json:"activeKey,omitempty"`
     // TargetKey is the key being rolled out during an active
@@ -600,11 +610,12 @@ secret is accidentally deleted, the CPO can reconstruct the
 provider. Without this, a deleted secret would leave the cluster
 unable to read data encrypted with the previous key.
 
-The HCCO detects key changes by computing a fingerprint of the
-spec's active key and the status's active key and comparing
-them: nil/empty status means first rotation, mismatch means new
-rotation, match means re-encryption is complete. No hash is
-stored — it is always computed on the fly from the key fields.
+The CPO main reconciler detects key changes by computing a
+fingerprint of the spec's active key and the status's active
+key and comparing them: nil/empty status means first rotation,
+mismatch means new rotation, match means re-encryption is
+complete. No hash is stored — it is always computed on the fly
+from the key fields.
 
 The `RolloutPhase` field drives the CPO's
 `EncryptionConfiguration` generation:
@@ -706,15 +717,15 @@ The same marker applies to `AzureKMSSpec.BackupKey` and
 This enhancement is designed specifically for the HyperShift
 topology. It affects:
 
-- **Management cluster (HCP namespace)**: The HCCO re-encryption
-  controller runs here. It computes the active key fingerprint
-  from `hcp.Spec.SecretEncryption`, compares it against the
-  key stored in `hcp.Status.SecretEncryption.ActiveKey`, checks
-  KAS
-  Deployment convergence, and sets conditions on HCP. The
-  `kube-storage-version-migrator` also runs here as a control
-  plane Deployment, connecting to the guest cluster KAS to
-  process `StorageVersionMigration` CRs.
+- **Management cluster (HCP namespace)**: The CPO main
+  reconciler runs here, detecting key changes, driving the
+  two-stage KAS rollout (ReadOnlyDeploy → WritePromote), and
+  setting conditions on HCP. The HCCO re-encryption controller
+  also runs here, handling the Migrating phase by creating
+  `StorageVersionMigration` CRs in the guest cluster. The
+  `kube-storage-version-migrator` runs as a control plane
+  Deployment, connecting to the guest cluster KAS to process
+  `StorageVersionMigration` CRs.
 - **Guest cluster**: `StorageVersionMigration` CRs are created
   here by the HCCO using the guest cluster client. The
   `kube-storage-version-migrator` (running in the control plane)
@@ -726,11 +737,11 @@ topology. It affects:
   `cluster-kube-storage-version-migrator-operator` repo.
 
 The design follows HyperShift's established pattern: the CPO
-manages control plane pod configuration (KAS encryption config
-generation and migrator deployment), while the HCCO manages the
-re-encryption lifecycle. Deploying the migrator in the control
-plane ensures re-encryption works on clusters with zero worker
-nodes.
+manages KAS Deployment lifecycle (encryption config generation,
+rollout orchestration, migrator deployment), while the HCCO
+manages guest cluster operations (StorageVersionMigration CR
+lifecycle). Deploying the migrator in the control plane ensures
+re-encryption works on clusters with zero worker nodes.
 
 No additional RBAC is required for the HCCO:
 - The HCCO already has `get`, `list`, `watch` on Deployments and
@@ -811,10 +822,10 @@ its introduction and has no version-specific API changes. The
 auto-generated and track the `migration.k8s.io/v1alpha1` API,
 which has been stable since OCP 4.3.
 
-#### Component 1: Key Change Detection (HCCO)
+#### Component 1: Key Change Detection (CPO Main Reconciler)
 
-The HCCO re-encryption controller computes the active key
-fingerprint on each reconciliation:
+The CPO main reconciler computes the active key fingerprint on
+each reconciliation:
 
 - Azure KMS: SHA-256 hash of `keyVaultName/keyName/keyVersion`
 - AWS KMS: SHA-256 hash of the active key ARN
@@ -888,23 +899,24 @@ from `hcp.Status.SecretEncryption.ActiveKey`:
   `rolloutPhase=ReadOnlyDeploy`, and begin the two-stage
   rollout.
 
-**Mid-rotation spec changes**: The controller uses a hybrid
-interrupt/queue strategy depending on the rollout phase:
+**Mid-rotation spec changes**: The CPO main reconciler uses a
+hybrid interrupt/queue strategy depending on the rollout phase:
 
-- **`ReadOnlyDeploy`**: If `fingerprint(spec.activeKey)` ≠
-  `fingerprint(status.targetKey)`, the controller updates
+- **`ReadOnlyDeploy`** (CPO): If `fingerprint(spec.activeKey)` ≠
+  `fingerprint(status.targetKey)`, the CPO updates
   `status.targetKey` to the new spec key and restarts
   `ReadOnlyDeploy`. This is safe because no data has been
   encrypted with the target key yet — it was only a read-only
   provider. The corrected key takes effect on the next KAS
   rollout without completing a full wasted rotation.
 
-- **`WritePromote` or `Migrating`**: The controller continues
-  with the snapshotted `targetKey` and ignores the spec change.
-  Interrupting would require 3 simultaneous keys (old active +
-  abandoned target + new key), violating the two-sidecar
-  constraint. Once the rotation completes, the controller
-  detects the new mismatch and starts a fresh rotation.
+- **`WritePromote`** (CPO) **or `Migrating`** (HCCO): The
+  responsible controller continues with the snapshotted
+  `targetKey` and ignores the spec change. Interrupting would
+  require 3 simultaneous keys (old active + abandoned target +
+  new key), violating the two-sidecar constraint. Once the
+  rotation completes, the CPO detects the new mismatch and
+  starts a fresh rotation.
 
 This hybrid approach ensures safety without relying on the VAP
 while providing fast correction for the common "wrong key"
@@ -915,32 +927,33 @@ the two-stage rollout, so initial encryption setup is treated
 identically to a key rotation — all pre-existing data passes
 through the apiserver's encryption layer.
 
-#### Component 2: Re-encryption Orchestration (HCCO)
+#### Component 2: Rollout Orchestration (CPO Main Reconciler)
 
-**New file:**
-`control-plane-operator/hostedclusterconfigoperator/controllers/reencryption/reencryption.go`
+**New logic in:**
+`control-plane-operator/controllers/hostedcontrolplane/hostedcontrolplane_controller.go`
 
-The controller instantiates `KubeStorageVersionMigrator` using
-guest cluster clients and orchestrates a state machine driven
-by `status.secretEncryption.rolloutPhase`:
+The CPO main reconciler drives the two-stage KAS rollout state
+machine. This runs in the CPO's reconciliation loop (not in an
+adapt function), with access to read and write HCP status:
 
 1. If encryption is not configured, remove the
    `EtcdDataEncryptionUpToDate` condition if present, clear
    `targetKey` and `rolloutPhase` if set, and return.
 
-2. If `rolloutPhase` is not empty, a rotation is in progress:
+2. If `rolloutPhase` is not empty and owned by the CPO
+   (`ReadOnlyDeploy` or `WritePromote`):
    a. If `rolloutPhase == ReadOnlyDeploy` and
       `fingerprint(spec.activeKey)` ≠
       `fingerprint(status.targetKey)`: the spec key changed
       during `ReadOnlyDeploy` — append an `Interrupted`
       history entry (from=`activeKey`, to=abandoned
       `targetKey`), update `status.targetKey` to the spec's
-      active key (restart with corrected target). The CPO
-      picks up the new `targetKey` on the next reconcile.
+      active key (restart with corrected target).
       Continue at step 4 (`ReadOnlyDeploy`).
-   b. Otherwise (`WritePromote` or `Migrating`): continue
-      with the snapshotted `targetKey`, ignoring the current
-      spec. Skip to step 4.
+   b. If `rolloutPhase == WritePromote`: continue with the
+      snapshotted `targetKey`. Skip to step 5.
+   If `rolloutPhase == Migrating`: the HCCO owns this phase —
+   skip (no CPO action needed).
 
 3. Compute fingerprints of the spec's active key and the
    status's active key and compare them. If they match,
@@ -950,35 +963,49 @@ by `status.secretEncryption.rolloutPhase`:
    `rolloutPhase=ReadOnlyDeploy`, and set condition
    `False/ReadOnlyRolloutInProgress`.
 
-4. **ReadOnlyDeploy phase**: Wait for KAS Deployment
-   convergence (`updatedReplicas == replicas == readyReplicas`).
-   The CPO reads `rolloutPhase=ReadOnlyDeploy` and generates
-   the `EncryptionConfiguration` with `status.activeKey` as the
+4. **ReadOnlyDeploy phase**: The adapt function generates the
+   `EncryptionConfiguration` with `status.activeKey` as the
    write provider and `status.targetKey` as a read-only
-   provider. If not converged, set condition
+   provider. Wait for KAS Deployment convergence
+   (`updatedReplicas == replicas == readyReplicas`). If not
+   converged, set condition
    `False/ReEncryptionWaitingForKASConvergence` and requeue.
    Once converged, set `rolloutPhase=WritePromote` and set
    condition `False/WritePromotionInProgress`.
 
-5. **WritePromote phase**: Wait for KAS Deployment convergence
-   again. The CPO reads `rolloutPhase=WritePromote` and
-   regenerates the `EncryptionConfiguration` with
-   `status.targetKey` as the write provider and
-   `status.activeKey` as a read-only provider. If not
+5. **WritePromote phase**: The adapt function generates the
+   `EncryptionConfiguration` with `status.targetKey` as the
+   write provider and `status.activeKey` as a read-only
+   provider. Wait for KAS Deployment convergence. If not
    converged, set condition
    `False/ReEncryptionWaitingForKASConvergence` and requeue.
    Once converged, set `rolloutPhase=Migrating` and set
    condition `False/ReEncryptionInProgress`.
 
-6. **Migrating phase**: Determine the encrypted resource list
-   based on encryption type. For KMS, use
-   `KMSEncryptedObjects()` (5 resource types). For AESCBC, use
-   only `secrets` (AESCBC only encrypts secrets, as defined in
-   `aescbc.go`). For each resource, call
+The CPO uses `Status().Patch()` with `MergeFrom` for all
+status updates, patching only the `secretEncryption` sub-field
+and the `EtcdDataEncryptionUpToDate` condition.
+
+#### Component 2b: Re-encryption Orchestration (HCCO)
+
+**New file:**
+`control-plane-operator/hostedclusterconfigoperator/controllers/reencryption/reencryption.go`
+
+The HCCO re-encryption controller instantiates
+`KubeStorageVersionMigrator` using guest cluster clients and
+handles the `Migrating` phase:
+
+1. If `rolloutPhase != Migrating`, return (no action — the CPO
+   owns the earlier phases).
+
+2. Determine the encrypted resource list based on encryption
+   type. For KMS, use `KMSEncryptedObjects()` (5 resource
+   types). For AESCBC, use only `secrets` (AESCBC only encrypts
+   secrets, as defined in `aescbc.go`). For each resource, call
    `migrator.EnsureMigration(gr, computedKeyHash)` and track
    finished/failed/in-progress state.
 
-7. If all resources migrated successfully, append a `Completed`
+3. If all resources migrated successfully, append a `Completed`
    history entry (from=`activeKey`, to=`targetKey`, with
    `startedTime` and `completionTime`), set
    `hcp.Status.SecretEncryption.ActiveKey` to `TargetKey`,
@@ -987,12 +1014,11 @@ by `status.secretEncryption.rolloutPhase`:
    5 entries (oldest pruned on append). All fields are updated
    in a single HCP status patch call to ensure atomicity. The
    controller uses `Status().Patch()` with `MergeFrom` (rather
-   than `Status().Update()`) to avoid clobbering status fields
-   managed by the existing `hcpStatusReconciler`, which also
-   updates HCP status concurrently. On `Conflict` errors, the
-   controller re-reads the HCP and retries the patch.
+   than `Status().Update()`) to avoid clobbering other status
+   fields. On `Conflict` errors, the controller re-reads the
+   HCP and retries the patch.
 
-8. If any resource failed and not retried within 5 minutes,
+4. If any resource failed and not retried within 5 minutes,
    prune the failed CR for retry on next reconcile and set
    condition `False/ReEncryptionFailed`. The condition message
    includes elapsed time since re-encryption started (e.g.,
@@ -1004,7 +1030,7 @@ by `status.secretEncryption.rolloutPhase`:
    `ReEncryptionPersistentFailure` to distinguish transient
    failures from systemic issues requiring manual intervention.
 
-9. Otherwise, set condition `False/ReEncryptionInProgress` and
+5. Otherwise, set condition `False/ReEncryptionInProgress` and
    requeue after 30 seconds. The condition message includes
    progress (e.g., `"3/5 resources migrated, elapsed 2m15s"`)
    and the elapsed time since re-encryption started. The elapsed
@@ -1026,7 +1052,7 @@ For KMS (from `support/config/kms.go:KMSEncryptedObjects()`):
 For AESCBC (from `aescbc.go`):
 - `secrets`
 
-#### Component 3: CPO EncryptionConfiguration Changes
+#### Component 3: CPO `adaptSecretEncryptionConfig()` Changes
 
 **Modified files:**
 - `control-plane-operator/controllers/hostedcontrolplane/v2/kas/secretencryption.go`
@@ -1173,9 +1199,9 @@ installed in all topologies.
 
 #### Component 6: ValidatingAdmissionPolicy (UX Improvement)
 
-The system is designed to be safe without the VAP — the HCCO
-controller queues mid-rotation key changes by continuing with
-the snapshotted `targetKey` and deferring the new spec key
+The system is designed to be safe without the VAP — the CPO
+main reconciler queues mid-rotation key changes by continuing
+with the snapshotted `targetKey` and deferring the new spec key
 until the current rotation completes (see Component 1). The
 VAP provides a better user experience by rejecting mid-rotation
 changes at admission time with a clear error message, rather
@@ -1310,21 +1336,26 @@ Management Cluster (HCP namespace)
     EtcdDataEncryptionUpToDate=False
 
   CPO                              HCCO
-  - KAS encryption config         - Re-encryption Controller (NEW)
-    generation (MODIFIED)          - Computes key fingerprint
-    - Reads rolloutPhase from        from hcp.Spec.SecretEncryption
-      hcp.Status to determine      - Compares against
-      write/read providers           hcp.Status.SecretEncryption
-    - ReadOnlyDeploy:                .ActiveKey
-      old=write, new=read          - Snapshots targetKey, drives
-    - WritePromote/Migrating:        rolloutPhase state machine:
-      new=write, old=read            ReadOnlyDeploy → WritePromote
-    - backupKey fallback for         → Migrating
-      transition safety            - Waits for KAS convergence
-                                     between each phase
-  - Deploys kube-storage-         - Creates SVMs after Stage 2
-    version-migrator in            - Queues mid-rotation spec
-    HCP namespace                    changes (VAP-independent)
+  - Main reconciler (NEW):        - Re-encryption Controller (NEW)
+    - Computes key fingerprint       Handles Migrating phase only:
+      from hcp.Spec                - Watches for
+    - Compares against               rolloutPhase=Migrating
+      hcp.Status.ActiveKey         - Creates SVMs in guest cluster
+    - Snapshots targetKey          - Monitors completion
+    - Drives ReadOnlyDeploy →      - Updates activeKey, clears
+      WritePromote phases            targetKey + rolloutPhase
+    - Waits for KAS convergence    - Sets condition True on success
+    - Sets rolloutPhase=Migrating
+      to hand off to HCCO
+  - adaptSecretEncryptionConfig()
+    (MODIFIED):
+    - Reads rolloutPhase to
+      determine write/read keys
+    - backupKey fallback for
+      transition safety
+  - Deploys kube-storage-
+    version-migrator in
+    HCP namespace
 
   kube-storage-version-migrator
   (control plane Deployment,
@@ -1502,14 +1533,16 @@ and re-encryption must work in these scenarios. Deploying the
 migrator in the control plane (HCP namespace) ensures it is
 always available regardless of worker node count.
 
-### Run Key Detection or Re-encryption in the CPO
+### Run Re-encryption (Migrating Phase) in the CPO
 
-**Rejected because**: CPOv2 adapt functions receive fresh objects
-from static YAML templates and cannot reliably diff against
-prior state. The HCCO has direct access to HCP spec/status and
-manages guest cluster resources — it is the natural owner for
-both key change detection and `StorageVersionMigration` CR
-lifecycle.
+**Rejected because**: The Migrating phase requires creating and
+monitoring `StorageVersionMigration` CRs in the guest cluster.
+The HCCO already has guest cluster client access and manages
+guest cluster resources — it is the natural owner for the
+`StorageVersionMigration` CR lifecycle. Key change detection
+and the two-stage KAS rollout (ReadOnlyDeploy/WritePromote) DO
+run in the CPO main reconciler, since the CPO manages KAS
+Deployment lifecycle.
 
 ### Direct etcd Manipulation
 
