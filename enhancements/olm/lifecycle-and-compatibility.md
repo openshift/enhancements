@@ -163,7 +163,7 @@ The lifecycle FBC metadata follows the schema:
             "minItems": 1,
             "items": {
               "type": "object",
-              "required": ["name", "timeBegin", "timeEnd"],
+              "required": ["name", "startDate", "endDate"],
               "additionalProperties": false,
               "properties": {
                 "name": {
@@ -177,12 +177,12 @@ The lifecycle FBC metadata follows the schema:
                     "Extended life cycle support (ELS) add-on"
                   ]
                 },
-                "timeBegin": {
+                "startDate": {
                   "type": "string",
                   "format": "date",
                   "description": "Start date of this phase (inclusive)."
                 },
-                "timeEnd": {
+                "endDate": {
                   "type": "string",
                   "format": "date",
                   "description": "End date of this phase (inclusive)."
@@ -221,35 +221,80 @@ The lifecycle FBC metadata follows the schema:
 }
 ```
 
-Example:
+**Root fields:**
+
+| Field | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `schema` | string | yes | Always `io.openshift.operators.lifecycles.v1alpha1`. Identifies this blob type within FBC. |
+| `package` | string | yes | The OLM catalog package name (e.g., `aws-efs-csi-driver-operator`). Must match the operator's package in the catalog. |
+| `versions` | array | yes | List of version entries. Each entry describes one minor release of the operator. |
+
+**Version fields:**
+
+| Field | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `name` | string | yes | Version identifier in `MAJOR.MINOR` format (e.g., `4.12`, `1.5`). |
+| `phases` | array | yes | Ordered list of lifecycle phases for this version. Must be contiguous (no gaps or overlaps). |
+| `platformCompatibility` | array | no | Platforms this version is compatible with. Omitted if no compatibility data is available. |
+
+**Phase fields:**
+
+| Field | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `name` | string | yes | Phase name (e.g., `Full support`, `Maintenance support`). |
+| `startDate` | string | yes | Start date in `YYYY-MM-DD` format. |
+| `endDate` | string | yes | End date in `YYYY-MM-DD` format. Must be strictly after `startDate`. |
+
+Phases within a version are ordered chronologically and must be contiguous: the start date of phase N must be exactly one day after the end date of phase N-1. There must be no gaps or overlaps between adjacent phases.
+
+**Platform compatibility fields:**
+
+| Field | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `name` | string | yes | Platform identifier (e.g., `openshift`). |
+| `versions` | array | yes | List of platform versions this operator version is compatible with, each in `MAJOR.MINOR` format. |
+
+The `platformCompatibility` structure is designed to support multiple platforms. Currently, only `openshift` is populated.
+
+**Example:**
 
 ```yaml
-package: fuse-apicurito
 schema: io.openshift.operators.lifecycles.v1alpha1
+package: aws-efs-csi-driver-operator
 versions:
-- name: "7.13"
-  phases:
-  - name: Maintenance support
-    timeBegin: "2024-06-10"
-    timeEnd: "2024-06-30"
-  - name: Extended life cycle support (ELS) 1
-    timeBegin: "2024-07-01"
-    timeEnd: "2026-06-30"
-  - name: Extended life cycle support (ELS) 2
-    timeBegin: "2026-07-01"
-    timeEnd: "2027-06-30"
-  platformCompatibility:
-  - name: openshift
-    versions:
-    - "4.12"
-    - "4.13"
-    - "4.14"
-    - "4.15"
-    - "4.16"
-    - "4.17"
-    - "4.18"
-    - "4.19"
-    - "4.20"
+  - name: "4.12"
+    phases:
+      - name: Full support
+        startDate: "2023-01-17"
+        endDate: "2023-08-17"
+      - name: Maintenance support
+        startDate: "2023-08-18"
+        endDate: "2024-07-17"
+      - name: Extended update support
+        startDate: "2024-07-18"
+        endDate: "2025-01-17"
+      - name: Extended update support Term 2
+        startDate: "2025-01-18"
+        endDate: "2026-01-17"
+      - name: Extended update support Term 3
+        startDate: "2026-01-18"
+        endDate: "2027-01-17"
+    platformCompatibility:
+      - name: openshift
+        versions:
+          - "4.12"
+  - name: "4.17"
+    phases:
+      - name: Full support
+        startDate: "2024-10-01"
+        endDate: "2025-05-25"
+      - name: Maintenance support
+        startDate: "2025-05-26"
+        endDate: "2026-04-01"
+    platformCompatibility:
+      - name: openshift
+        versions:
+          - "4.17"
 ```
 
 The lifecycle-server exposes an internal HTTPS API (not exposed outside the cluster):
@@ -291,11 +336,10 @@ This enhancement depends on the Console capability (for UI display) and OLM (for
 
 #### Lifecycle Metadata Schema
 
-The lifecycle metadata uses FBC's extensibility mechanism. Each entry uses the schema `io.openshift.operators.lifecycles.v1alpha1` and contains:
-
-- **Version**: Operator minor version (X.Y format)
-- **Platform compatibility**: List of supported platforms and platform versions
-- **Lifecycle phases**: Named phases ("Community", "Full Support", "Maintenance", "EUS-1", "EUS-2", "End of Life") with date ranges
+The lifecycle metadata uses FBC's extensibility mechanism.
+Each FBC lifecycle blob carries the data of each operator using the `io.openshift.operators.lifecycles.v1alpha1` schema.
+The data include the available package versions, the lifecycle phases for each version, and the platforms each version is compatible with.
+See [API Extensions](#api-extensions) for the full schema definition, field descriptions, and examples.
 
 The lifecycle-server treats this content opaquely — it extracts and serves entries matching `io.openshift.operators.lifecycles.*` schemas without parsing the internal structure. This means future schema changes (field-level within a version, or new schema versions) flow through without requiring lifecycle-server code changes.
 
