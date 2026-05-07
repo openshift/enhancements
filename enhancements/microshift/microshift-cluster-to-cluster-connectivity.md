@@ -751,3 +751,5 @@ restart. Emergency: `ip route flush table 200`.
 
 - Test Harness updates to accomodate multiple scenarios
   with VMs running different configs.
+- A new container image for the healthcheck Pod will
+  likely need to be onboarded.
