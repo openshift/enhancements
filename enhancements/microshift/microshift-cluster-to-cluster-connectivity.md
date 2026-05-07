@@ -98,6 +98,10 @@ directly through the MicroShift config file.
    operates at the cluster network level.
 4. Overlapping CIDRs — clusters must use distinct
    network ranges.
+5. One-way connectivity — C2CC requires bidirectional
+   configuration. Both clusters must configure each
+   other as remote peers. One-way setups (only one
+   side configured) are not supported.
 
 ## Proposal
 
@@ -107,7 +111,6 @@ C2CC adds the following components:
    the MicroShift config defining `remoteClusters[]`,
    each with `nextHop`, `clusterNetwork`,
    `serviceNetwork`, and optional `domain`.
-   It may include an option to disable DNS caching.
 
 2. **Route Manager Controller** — Maintains OVN static
    routes on the Gateway Router, nftables masquerade
