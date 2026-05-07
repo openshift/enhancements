@@ -236,11 +236,18 @@ The changes span multiple components:
    `kube-storage-version-migrator` as a control plane component
    in the HCP namespace, connecting to the guest cluster KAS.
 
-4. **cluster-kube-storage-version-migrator-operator** (separate
-   repo change): Remove the
-   `include.release.openshift.io/ibm-cloud-managed` annotation
-   from the operator manifests to disable the data-plane
-   instance for HyperShift.
+4. **CPO CVO component** (platform-conditional): On non-IBM
+   platforms, add the data-plane
+   `cluster-kube-storage-version-migrator-operator` Deployment
+   to `resourcesToRemove()` in
+   `hypershift/control-plane-operator/controllers/hostedcontrolplane/v2/cvo/deployment.go`.
+   This generates a cleanup manifest with
+   `release.openshift.io/delete: "true"` that the CVO in the
+   hosted cluster processes to delete the data-plane operator.
+   On IBM Cloud, the data-plane operator is kept (IBM does not
+   want additional control-plane deployments). The control-plane
+   migrator Deployment (Component 3) also uses a platform
+   predicate to skip IBM Cloud.
 
 5. **HyperShift Operator** (existing code modification): Bubble up
    the `EtcdDataEncryptionUpToDate` condition and
@@ -821,19 +828,17 @@ topology. It affects:
   here by the HCCO using the guest cluster client. The
   `kube-storage-version-migrator` (running in the control plane)
   processes these CRs via the guest cluster KAS. The data-plane
-  `cluster-kube-storage-version-migrator-operator` is disabled
-  for HyperShift by removing
-  `include.release.openshift.io/ibm-cloud-managed` from its
-  manifests in the
-  `cluster-kube-storage-version-migrator-operator` repo.
-  For existing clusters upgrading from a version where the
-  data-plane operator was present, explicit cleanup is
-  required — the CVO does not delete resources when manifests
-  are removed from a profile. The data-plane operator
-  Deployment is added to `ResourcesToRemove()`, and the HCCO
-  explicitly deletes it from the hosted cluster using a
-  client on upgrade (the same pattern used for other disabled
-  components like `network-operator` on IBM Cloud).
+  On non-IBM platforms, the data-plane
+  `cluster-kube-storage-version-migrator-operator` is disabled:
+  its Deployment is added to `resourcesToRemove()` in the CPO's
+  CVO component, which generates a cleanup manifest with
+  `release.openshift.io/delete: "true"`. The CVO in the hosted
+  cluster processes this manifest and deletes the data-plane
+  operator. The control-plane migrator (Component 3) replaces
+  it. On IBM Cloud, the data-plane operator is kept — IBM does
+  not want additional control-plane deployments. The
+  control-plane migrator Deployment uses a platform predicate
+  to skip IBM Cloud.
 
 The design follows HyperShift's established pattern: the CPO
 manages KAS Deployment configuration (encryption config
@@ -842,8 +847,8 @@ re-encryption lifecycle (phase derivation, status management,
 StorageVersionMigration CR lifecycle). Both components derive
 their decisions from observable state independently, with no
 stored phase field as the source of truth. Deploying the
-migrator in the control plane ensures re-encryption works on
-clusters with zero worker nodes.
+migrator in the control plane (on non-IBM platforms) ensures
+re-encryption works on clusters with zero worker nodes.
 
 No additional RBAC is required for the HCCO:
 - The HCCO already has `get`, `list`, `watch` on Deployments and
@@ -1354,10 +1359,11 @@ Deployment in the HCP namespace. The migrator image is sourced
 from the OCP release payload. It connects to the guest cluster
 KAS using the `admin-kubeconfig` secret.
 
-The migrator is always deployed — it has responsibilities
-beyond encryption (e.g., API version migrations). The
-data-plane operator is disabled for HyperShift (see Topology
-Considerations). The `StorageVersionMigration` CRD remains
+On non-IBM platforms, the control-plane migrator replaces the
+data-plane operator (see Topology Considerations). The CPO
+component registration uses a platform predicate to skip
+deployment on IBM Cloud, where the data-plane operator
+continues to run. The `StorageVersionMigration` CRD remains
 installed in all topologies.
 
 #### Component 5: HyperShift Operator Integration
@@ -1641,12 +1647,11 @@ the backup is no longer needed for restore.
    packages with no external dependencies beyond what HyperShift
    already vendors.
 
-3. **Cross-repo dependency**: Disabling the data-plane
-   `cluster-kube-storage-version-migrator-operator` requires a
-   separate PR in the
-   `cluster-kube-storage-version-migrator-operator` repo to
-   remove the `include.release.openshift.io/ibm-cloud-managed`
-   annotation from its manifests.
+3. **Platform-conditional behavior**: The control-plane migrator
+   is only deployed on non-IBM platforms. On IBM Cloud, the
+   data-plane operator continues to run. This requires platform
+   predicates in the CPO component registration and the
+   `resourcesToRemove()` cleanup list.
 
 4. **API deprecation**: The `backupKey` fields are deprecated
    but must remain in the API for backward compatibility. This
