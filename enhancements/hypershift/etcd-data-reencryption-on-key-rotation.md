@@ -827,9 +827,13 @@ topology. It affects:
   manifests in the
   `cluster-kube-storage-version-migrator-operator` repo.
   For existing clusters upgrading from a version where the
-  data-plane operator was present, the CVO in the hosted
-  cluster will garbage-collect the stale resources when the
-  manifests are no longer part of the desired state.
+  data-plane operator was present, explicit cleanup is
+  required — the CVO does not delete resources when manifests
+  are removed from a profile. The data-plane operator
+  Deployment is added to `ResourcesToRemove()`, and the HCCO
+  explicitly deletes it from the hosted cluster using a
+  client on upgrade (the same pattern used for other disabled
+  components like `network-operator` on IBM Cloud).
 
 The design follows HyperShift's established pattern: the CPO
 manages KAS Deployment configuration (encryption config
