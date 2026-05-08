@@ -1,5 +1,5 @@
 ---
-title: lightspeed-agentic-operators
+title: lightspeed-agentic-platform
 authors:
   - "@harche"
 reviewers:
@@ -23,7 +23,7 @@ superseded-by:
   - N/A
 ---
 
-# Lightspeed Agentic Operators
+# Lightspeed Agentic Platform
 
 ## Release Signoff Checklist
 
