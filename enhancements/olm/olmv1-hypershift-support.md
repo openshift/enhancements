@@ -74,15 +74,17 @@ HyperShift is the multi-tenancy approach endorsed by OpenShift. Currently, OLMv1
 This proposal enables OLMv1 HyperShift support through per-hosted-cluster catalogd deployments that serve both default and custom catalogs. 
 
 - catalogd runs in management cluster (`clusters-{name}` namespace)
-- operator-controller has local access to catalogd ClusterCatalog service API
+- operator-controller has local access to catalogd service API
+- console-operator uses Konnectivity tunneling for catalogd access (no external Routes)
 - Aligns with HyperShift default (90%+ deployments)
-- Requires external route for console-operator access
-- Simplest deployment model
+- Uses proven Konnectivity sidecar pattern (mirrors OLM v0 PackageServer)
+- Avoids public catalog exposure and cloud provider Route partitioning concerns
 - Use existing ClusterCatalog and ClusterExtension CRDs (cluster-scoped)
 - Store all ClusterCatalogs in hosted cluster's API server (default + custom)
 - Single catalogd instance serves both catalog types
 - catalogd version exactly matches hosted cluster OCP version (including patch)
 - Zero code changes to catalogd/operator-controller (standard KUBECONFIG env var)
+- Zero code changes to console-operator (Konnectivity sidecar is platform configuration)
 - Complete tenant isolation
 
 ### Workflow Description
@@ -91,8 +93,10 @@ This proposal enables OLMv1 HyperShift support through per-hosted-cluster catalo
 
 1. The hosted cluster admin sits down at the OpenShift console with credentials for their hosted cluster API
 2. console-operator lists ClusterCatalogs from hosted cluster API and discovers both default (platform-managed) and custom (tenant-created) catalogs
-3. For each catalog, console-operator reads `ClusterCatalog.Status.URLs.Base` and makes HTTP request to catalogd
-4. catalogd returns catalog content
+3. For each catalog, console-operator reads `ClusterCatalog.Status.URLs.Base` (service-based URL: `https://catalogd.clusters-{name}.svc.cluster.local:8443/...`)
+4. console-operator makes HTTPS request routed through konnectivity-socks5-proxy sidecar (HTTP_PROXY env var)
+5. Konnectivity sidecar tunnels request to management cluster catalogd service
+6. catalogd returns catalog content through tunnel
 5. console-operator composes a catalog inventory page to hosted cluster admin
 6. The hosted cluster admin selects a catalog entity to install
 7. console-operator creates a new ClusterExtension resource in the hosted cluster API
@@ -268,6 +272,29 @@ spec:
 - Provisions default ClusterCatalog resources in hosted cluster API
 - Monitors OLMv1 health and blocks upgrades when necessary
 
+**console-operator Konnectivity Access (Data Plane)**
+
+- Location: Hosted cluster worker nodes (data plane component)
+- Accesses catalogd in management cluster via Konnectivity tunneling
+- **Sidecar injection pattern**: konnectivity-socks5-proxy sidecar injected by HyperShift platform
+- HTTP_PROXY/HTTPS_PROXY env vars route traffic through sidecar (socks5://127.0.0.1:8090)
+- Reads service-based URLs from ClusterCatalog.Status.URLs.Base
+- DNS resolution through tunnel to management cluster
+- Tunneled HTTPS to catalogd service in management cluster
+- **No code changes required**: Standard HTTPS requests, platform handles tunneling
+- **Proven pattern**: Mirrors OLM v0 PackageServer Konnectivity access
+- Latency: <10ms via tunnel vs +20-50ms via external Route
+
+**Access Flow:**
+1. console-operator reads `ClusterCatalog.Status.URLs.Base` → `https://catalogd.clusters-{name}.svc.cluster.local:8443/...`
+2. Makes HTTPS GET request (standard HTTP client)
+3. HTTP_PROXY env var routes to konnectivity-socks5-proxy sidecar (localhost:8090)
+4. Sidecar resolves DNS via management cluster (through tunnel)
+5. Sidecar tunnels HTTPS through konnectivity-server
+6. Request arrives at catalogd Service in management cluster
+7. catalogd serves catalog content
+8. Response tunneled back to console-operator
+
 #### HyperShift Component Integration
 
 A shared kubeconfig injection utility provides consistent KUBECONFIG mounting for all OLMv1 components:
@@ -369,15 +396,60 @@ Per-hosted-cluster catalogd deployment consumes ~50-100Mi memory per hosted clus
 - Resource overhead scales linearly but remains acceptable for large deployments
 - For 100 hosted clusters: ~5-10Gi additional memory total
 
-**Approach-Specific Costs**
+**Konnectivity Tunnel Dependency**
 
-- Requires external route exposure for console-operator access
-- Public catalog endpoint (security consideration for catalog content)
-- DNS and load balancer dependencies
+console-operator catalog access depends on functional Konnectivity tunneling. This dependency is accepted because:
+
+- Konnectivity already required for OLM v0 (PackageServer access) - no new dependency
+- HyperShift provides robust Konnectivity infrastructure with automatic reconnection
+- Tunnel failure affects console-operator only (operator-controller uses direct service access)
+- Monitoring and alerting on Konnectivity health already exists for OLM v0
+- Graceful degradation: console UI shows "catalog unavailable" rather than crashing
+- Performance: <10ms latency via tunnel (validated against OLM v0 pattern)
+
+**Security Benefits vs External Route Approach**
+
+Konnectivity tunneling eliminates security concerns associated with external Routes:
+
+- No public catalog exposure (all access internal via authenticated tunnel)
+- Reduced attack surface (no publicly-accessible endpoints)
+- Avoids cloud provider Route partitioning operational complexity (e.g., AWS)
+- Defense in depth (requires both API authentication AND tunnel authentication)
+- Better audit trail (all access logged through tunnel)
+- Compliance-friendly (internal-only access aligns with zero-trust models)
 
 ## Alternatives (Not Implemented)
 
-### Alternative 1: Split Deployments across Control-Plane and Data-Plane
+### Alternative 1: External Route Access for console-operator
+
+**Description:** catalogd runs in management cluster with external OpenShift Route for console-operator access
+
+**Architecture:**
+```
+console-operator (worker node)
+  → ClusterCatalog.Status.URLs.Base
+    → "https://catalogd-customer1.apps.mgmt-cluster.example.com/..."
+  → External DNS → Management cluster ingress
+  → Route → catalogd.clusters-customer1.svc
+  → catalogd pod (+20-50ms external hop)
+```
+
+**Pros:**
+- ✅ Simpler deployment (no sidecar injection required)
+- ✅ No console-operator configuration needed
+- ✅ Uses standard OpenShift ingress patterns
+
+**Cons:**
+- ❌ **Requires external Route**: catalogd must be publicly accessible
+- ❌ **Security concerns**: Catalog content exposed via public endpoint
+- ❌ **Cloud provider Route partitioning**: AWS and other providers require Routes in separate network partitions, adding operational complexity
+- ❌ **Higher latency**: +20-50ms for external hop vs <10ms via Konnectivity
+- ❌ **Additional failure modes**: DNS, load balancer, ingress controller dependencies
+- ❌ **Compliance concerns**: Public catalog exposure may violate security policies
+
+**Verdict:** ❌ **Rejected** - Security scrutiny on external Routes and cloud provider partitioning requirements make this approach operationally complex and less secure than Konnectivity tunneling
+
+### Alternative 2: Split Deployments across Control-Plane and Data-Plane
 
 **Description:** Existing cluster-olm, operator-controller components would deploy to control-plane, catalogd deployment to data-plane
 
@@ -402,9 +474,9 @@ Per-hosted-cluster catalogd deployment consumes ~50-100Mi memory per hosted clus
 - More complex deployment (likely cannot re-use cluster-olm-operator, so we have divergent CVO, HCP integration)
 - Does not align with HyperShift OLMv0 default (`olmCatalogPlacement: management`)
 
-Rejected - complexity, component reuse, pause impacts
+**Verdict:** ❌ **Rejected** - Complexity, divergent component reuse patterns, worker node scaling-to-zero impacts OLMv1 availability
 
-### Alternative 2: Single Centralized catalogd
+### Alternative 3: Single Centralized catalogd
 
 **Description:** One catalogd in management cluster watches all hosted cluster APIs
 
