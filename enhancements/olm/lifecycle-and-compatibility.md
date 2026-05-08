@@ -101,7 +101,7 @@ This proposal introduces three sets of changes across three repositories to deli
 
 **console frontend** is the OpenShift Console UI that displays lifecycle information.
 
-1. The Red Hat catalog pipeline ensures that lifecycle metadata (using the `io.openshift.operators.lifecycles.v1alpha1` schema) is included in the FBC for the Red Hat operator catalogs, validating that it conforms to the schema correctly during the catalog build process.
+1. Lifecycle metadata is centrally managed by Red Hat product management in the Product Lifecycle and Compatibility Center (PLCC) — individual operator teams do not author or maintain this data. The Red Hat catalog pipeline pulls lifecycle data from PLCC and injects it into the FBC for Red Hat operator catalogs during the catalog build process, validating that it conforms to the `io.openshift.operators.lifecycles.v1alpha1` schema.
 2. The lifecycle-controller watches for CatalogSource resources. When it detects a CatalogSource, it creates a lifecycle-server Deployment that mounts the catalog image as an OCI volume.
 3. When the catalog image changes (detected by watching CatalogSource pods), the lifecycle-controller updates the lifecycle-server Deployment to reference the new image.
 4. The lifecycle-server starts, walks the FBC content on its mounted volume, extracts entries matching `io.openshift.operators.lifecycles.*` schemas, and serves them over an HTTPS API.
@@ -444,6 +444,17 @@ Extend the existing OLMv0 catalog pods' GetPackage gRPC API to include lifecycle
 - Even a simple implementation carries risk of post-change bugs/regressions in the mature OLMv0 codebase.
 - Syncing from a separate lifecycle database introduces risk that derivative data is out-of-sync.
 
+### Use FBC bundle properties and Console-side parsing
+
+Instead of introducing a new lifecycle-controller and lifecycle-server, lifecycle metadata could be added as an opaque [bundle property](https://github.com/operator-framework/operator-registry/blob/677f3ea1240ab76f5cc5958520b142591f6c20e2/alpha/property/property.go#L15-L18) in the existing FBC schema. The Console already [pulls bundle/CSV information](https://github.com/openshift/console/blob/1fea0064885a01e46ce60b659b5057798e56e76f/pkg/olm/catalog.go#L72) to build an internal cache, so it could parse these custom properties directly — avoiding any new server-side components.
+
+**Rejected because:**
+
+- This approach couples the Console directly to an internal, non-public property schema in FBC bundles, making it harder to evolve the lifecycle metadata format independently.
+- Bundle properties are per-bundle, while lifecycle metadata is per-package/per-version — embedding it in bundles creates redundancy and potential consistency issues across the upgrade graph.
+- The lifecycle-server approach provides a single, cacheable API endpoint that decouples the Console from the details of how lifecycle data is stored and structured in the catalog, making it easier to transition to the OLMv1-native solution in the future.
+- As described in the [Workflow Description](#workflow-description), lifecycle metadata is not authored by individual operator teams in their bundle contributions — it is centrally managed by Red Hat product management in PLCC and injected at catalog build time. Using bundle properties would either require operator teams to maintain data they don't own, or require the catalog build pipeline to mutate bundle content to inject externally-owned metadata.
+
 ### OLMv1-centric catalog overhaul / registry+v2
 
 A complete revamp of FBC schemas to natively incorporate lifecycle, compatibility, semver-based upgrade graphs, and other improvements.
@@ -462,6 +473,8 @@ A complete revamp of FBC schemas to natively incorporate lifecycle, compatibilit
 3. **Source system of record:** Where should product teams directly maintain their lifecycle information — PLCC or FBC? - For this EP, PLCC.
 
 4. **Console feature flag integration:** What is the correct approach for gating the lifecycle UI in the Console? How should the `OPERATOR_LIFECYCLE_METADATA` feature flag integrate with the feature gate being added for this enhancement? Needs alignment with the Console team.
+
+5. **Generic FBC Blob Getter OPM server gRPC endpoint** are the risks we identify with extending the GRPc API surface offered by OPM serve really that risky if we consider an endpoint that fetches generic (schema, package, version) indexed FBC blobs? 
 
 ## Test Plan
 
@@ -501,6 +514,7 @@ Testing covers all three components:
 - At least 10 operators (with representation from all three lifecycle tiers) include lifecycle information that flows from FBC catalog contributions to Console UI views
 - Telemetry in place to track operator lifecycle status across the fleet
 - User-facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/) - only expected documentation is on the Console side to explain the new columns. No customer facing docs for the lifecycle metadata API, or how the backend works, since they are internal details and not for general user consumption.
+- We have conclusive reasons to reject the idea of adding generic catalog FBC blob fetcher gRPC endpoint to OPM that would allow console to query the catalog specifically for the lifecycle metadata FBC blobs for a given package   
 
 ### Removing a deprecated feature
 
