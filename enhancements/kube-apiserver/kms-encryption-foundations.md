@@ -453,6 +453,58 @@ Credentials and ConfigMap data (`kms-secret-{key}-{keyID}` and `kms-configmap-{k
 
 During KMS-to-KMS migration, the encryption-configuration secret contains provider configs for all active keys. The operator creates a separate sidecar for each key, listening on its own unix domain socket (e.g., `kms-1.sock`, `kms-2.sock`).
 
+#### Health Reporter Sidecar
+
+When KMS encryption is enabled, a health reporter sidecar runs alongside every API server pod replica. The sidecar probes the colocated KMS plugin(s) and publishes the outcome to the owning operator's CR as a per-node condition. A separate aggregator controller picks up these conditions and emits a single `KMSPluginsDegraded` rollup, which propagates to the `ClusterOperator`'s `Degraded` condition.
+
+##### Topology
+
+One sidecar per API server pod replica, scaling with control-plane HA replica count:
+
+- One per kube-apiserver static pod (typically 3 in HA, one per control-plane node)
+- One per `openshift-oauth-apiserver` Deployment replica
+- One per `openshift-apiserver` Deployment replica
+
+During KMS-to-KMS migration, the same sidecar probes every active KMS plugin in its pod (see [Multiple Concurrent Sidecars](#multiple-concurrent-sidecars)) and reports their combined state in the Message field of its single per-node condition.
+
+##### Probe contract
+
+Each sidecar probes its colocated KMS plugin(s) over the local UDS at `unix:///var/run/kmsplugin/kms-{keyID}.sock` (the same socket path scheme described in [Sidecar Injection](#sidecar-injection)).
+
+##### Per-tick emission
+
+Each probe yields a HealthStatus carrying:
+
+- `State`: healthy / unhealthy / RPC error
+- `KeyID`: keyID currently active in the probed plugin
+- `Timestamp`: time of this check (last-check time; not the condition's `LastTransitionTime`, which records state flips only)
+
+##### Destination
+
+The sidecar writes one advisory condition per pod replica to the owning operator's `*.operator.openshift.io/cluster` CR via Server-Side Apply. The aggregator controller reads these advisory conditions and emits the `KMSPluginsDegraded` rollup. See [KMS Plugin Health Conditions](#kms-plugin-health-conditions) for the exact naming, status mapping, and rollup behavior.
+
+```
+within each apiserver pod (3 in HA):
+
+  KMS plugin (kms-2.sock, write)  ──┐
+  KMS plugin (kms-1.sock, read)   ──┤  UDS
+                                    │
+                                    ▼
+                          health-reporter sidecar
+                                    │
+                                    │  SSA (per-node fieldManager)
+                                    ▼
+operator CR (kubeapiservers.operator.openshift.io/cluster):
+  ├─ KMSHealthReporter_<nodeName>    ◄─ written by each per-pod reporter
+  │      (advisory, one per node, multi-plugin state in Message)
+  │
+  └─ KMSPluginsDegraded              ◄─ written by aggregator controller
+            │                            (reads the per-node entries above)
+            │  matches _Degraded suffix
+            ▼
+  ClusterOperator: Degraded
+```
+
 ### User Stories
 
 - As a cluster admin, I want to enable KMS encryption by updating the APIServer resource, so I can declaratively configure encryption without manually managing keys.
@@ -508,6 +560,81 @@ This feature does not depend on the features that are excluded from the OKE prod
 - keyController uses provider-specific field-level comparison (not simple equality) to determine migration necessity
 - UDS path convention: `unix:///var/run/kmsplugin/kms-{keyID}.sock` — keyID appended for uniqueness
 
+#### KMS Plugin Health Conditions
+
+##### Naming convention
+
+Each reporter sidecar writes one condition per pod replica to the owning operator's CR (`kubeapiservers.operator.openshift.io/cluster`, etc.), keyed by the node:
+
+```
+KMSHealthReporter_<nodeName>
+```
+
+The Type has no `_Available` or `_Degraded` suffix, so it stays advisory on the operator CR (library-go's `StatusSyncer` ignores it). The aggregator controller consumes these conditions and emits the `KMSPluginsDegraded` rollup separately (see [Aggregator behavior](#aggregator-behavior)).
+
+##### Status mapping
+
+The condition's `Status` is determined by the probe outcomes across all plugins in the sidecar's pod:
+
+| Probe outcome | Status | Reason |
+|---|---|---|
+| All plugins healthy | True | `AsExpected` |
+| Any plugin returns not-ok | False | `Unhealthy` |
+| Any plugin RPC error, no explicit not-ok | Unknown | `Unreachable` |
+
+##### Message format
+
+The Message is the structured input the aggregator controller consumes. One line per probed plugin:
+
+```
+keyID=<id> status=healthy lastChecked=<RFC 3339 timestamp>
+```
+
+When a plugin is unhealthy, a trailing `detail=<healthz.detail>` is appended:
+
+```
+keyID=<id> status=unhealthy lastChecked=<RFC 3339 timestamp> detail=<healthz.detail>
+```
+
+Each line is a sequence of `key=value` pairs separated by spaces. `detail=...` is the only field whose value may contain spaces; it is always last on its line. `lastChecked` is per-plugin so partial probe failures (one plugin stuck while others probe normally) are visible.
+
+##### Example
+
+A three-node control plane during KMS-to-KMS migration. One pod is healthy (master-0); another has a misconfigured cloud credential affecting one of its plugins (master-1); the third cannot reach its plugins at all (master-2):
+
+```yaml
+status:
+  conditions:
+    - type: KMSHealthReporter_master-0
+      status: "True"
+      reason: AsExpected
+      message: |
+        keyID=2 status=healthy lastChecked=2026-05-08T12:34:56Z
+        keyID=1 status=healthy lastChecked=2026-05-08T12:34:56Z
+    - type: KMSHealthReporter_master-1
+      status: "False"
+      reason: Unhealthy
+      message: |
+        keyID=2 status=unhealthy lastChecked=2026-05-08T12:34:56Z detail=credential lacks decrypt permission
+        keyID=1 status=healthy lastChecked=2026-05-08T12:34:56Z
+    - type: KMSHealthReporter_master-2
+      status: "Unknown"
+      reason: Unreachable
+      message: |
+        keyID=2 status=unreachable lastChecked=2026-05-08T12:34:56Z detail=connection refused
+        keyID=1 status=unreachable lastChecked=2026-05-08T12:34:56Z detail=connection refused
+```
+
+See [Aggregator behavior](#aggregator-behavior) for how these conditions roll up to the `ClusterOperator`.
+
+##### SSA mechanism
+
+Two classes of writers share the conditions array: the operator (writing its own conditions like `NodeControllerDegraded` plus the aggregator's `KMSPluginsDegraded` rollup) and N reporter sidecars (each writing its `KMSHealthReporter_<nodeName>`). Per-entry ownership is enabled by `+listType=map +listMapKey=type` on `OperatorStatus.Conditions`. Each reporter uses a per-node fieldManager (`kms-health-reporter-<nodeName>`); all writers apply with `Force: true`.
+
+##### Aggregator behavior
+
+A separate aggregator controller reads the `KMSHealthReporter_<nodeName>` conditions on the operator's CR and emits a single rollup condition `KMSPluginsDegraded`. The `_Degraded` suffix routes this rollup into the `ClusterOperator`'s `Degraded` slot via library-go's `StatusSyncer`.
+
 ### Risks and Mitigations
 
 **Risk: KMS Plugin Unavailable During Controller Sync**
@@ -525,6 +652,18 @@ This feature does not depend on the features that are excluded from the OKE prod
 **Risk: Configuration Change During Write Key Promotion (Tech Preview v2)**
 - **Impact:** Conflict with in-progress state machine
 - **Mitigation:** keyController blocks new encryption key generation during promotion
+
+**Risk: Stale Reporter Conditions**
+- **Impact:** A reporter that hangs leaves its last `KMSHealthReporter_<nodeName>` condition in etcd unchanged.
+- **Mitigation:** Per-plugin `lastChecked` timestamps in Message expose staleness. The aggregator controller can treat conditions whose `lastChecked` exceeds a freshness threshold as effectively `Unknown`.
+
+**Risk: Orphaned Conditions on Mode Switch**
+- **Impact:** When KMS is disabled (e.g., switching to `aescbc`), reporter sidecars are removed. Without explicit cleanup, `KMSHealthReporter_<nodeName>` and `KMSPluginsDegraded` entries remain stale on the operator CR.
+- **Mitigation:** The aggregator controller owns cleanup. It removes orphaned `KMSHealthReporter_<nodeName>` entries (when their owning sidecar is no longer present) and removes its own `KMSPluginsDegraded` entry on KMS disable.
+
+**Risk: Cold-Start Window**
+- **Impact:** KMS plugin starts first (KAS depends on it), KAS starts second, reporter starts last. During the window between KAS readiness and reporter readiness, no `KMSHealthReporter_<nodeName>` condition exists even though KMS is functional.
+- **Mitigation:** Consumers must not infer "KMS broken" from condition absence; missing means "not yet observed". KMS plugin lifecycle and KAS startup do not depend on reporter conditions existing.
 
 #### KMS Key Loss Considerations
 
@@ -630,7 +769,7 @@ No special handling required.
 ## Operational Aspects of API Extensions
 
 **Monitoring:**
-- Operator conditions: `EncryptionControllerDegraded`, `EncryptionMigrationControllerProgressing`, `KMSPluginDegraded`
+- Operator conditions: `EncryptionControllerDegraded`, `EncryptionMigrationControllerProgressing`, plus per-node `KMSHealthReporter_<nodeName>` and the aggregated `KMSPluginsDegraded` (rolled into the `ClusterOperator`'s `Degraded` condition; see [Health Reporter Sidecar](#health-reporter-sidecar))
 - Metrics: `apiserver_storage_transformation_operations_total`, `apiserver_storage_transformation_duration_seconds`
 
 **Impact:**
