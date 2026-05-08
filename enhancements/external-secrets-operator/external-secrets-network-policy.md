@@ -13,7 +13,7 @@ last-updated:  2026-05-04
 tracking-link: 
   - https://issues.redhat.com/browse/ESO-165
   - https://issues.redhat.com/browse/ESO-70
-  - https://redhat.atlassian.net/browse/RFE-8516
+  - https://redhat.atlassian.net/browse/ESO-418
 see-also:
   - NA
 replaces:
@@ -39,8 +39,8 @@ In a multi-tenant or security-conscious environment, it is crucial to enforce ne
 - As a `external-secrets` user, I need assurance that applying security policies will not break core functionalities like secret management or webhook validation.
 - As an administrator, I want to configure and manage egress rules for `external-secrets` operands via the operator API or CRDs, so I can control which external services they are allowed to access.
 - As an administrator on a proxy-configured cluster, I want the operator to automatically allow ESO pods to reach the proxy server, so I do not have to manually create egress NetworkPolicies after every install or upgrade.
-- As an administrator who manages proxy egress manually, I want to set `spec.appConfig.proxy.networkPolicyAllowProxyEgressAll: Unmanaged` to disable the operator's automatic proxy egress policy, so I retain full control over proxy traffic rules.
-- As a cluster administrator upgrading from an older release, I want the operator to clean up legacy unprefixed NetworkPolicy objects after it has applied the new prefixed ones, so there are no stale or duplicate policies left behind.
+- As an administrator who manages proxy egress manually, I want to set `spec.appConfig.proxy.networkPolicy: Unmanaged` to disable the operator's automatic proxy egress policy, so I retain full control over proxy traffic rules.
+- As a developer after upgrading from an older release, I want the operator to clean up legacy unprefixed NetworkPolicy objects after it has applied the new prefixed ones, so there are no stale or redundant policies left behind.
 
 ### Goals
 
@@ -49,15 +49,14 @@ In a multi-tenant or security-conscious environment, it is crucial to enforce ne
 - Define specific ingress and egress rules for `external-secrets` operand  to allow them to function correctly while blocking unnecessary traffic.
 - Ensure that metrics collection for all components remains functional.
 - Ensure the API server can communicate with the `webhook` for admission control.
-- Automatically create a proxy-egress allow policy when an effective proxy is configured, controlled by `spec.appConfig.proxy.networkPolicyAllowProxyEgressAll` (default `Managed`).
-- Introduce a stable `eso-sys-` / `eso-user-` naming scheme for all operator-managed NetworkPolicy objects to enable unambiguous ownership and safe pruning.
-- Migrate legacy unprefixed NetworkPolicy names to the new scheme on upgrade and clean up stale objects without leaving gaps in coverage.
+- Automatically create a proxy-egress allow policy when an effective proxy is configured, controlled by `spec.appConfig.proxy.networkPolicy` (default `Managed`)
+- Introduce a stable naming scheme (`eso-sys-` / `eso-user-`) for all operator-managed NetworkPolicy objects. This ensures unambiguous ownership and prevents naming overlaps with default policies, which currently lead to reconciliation conflicts
+- Handle the migration of legacy, unprefixed NetworkPolicies to the new naming scheme during upgrades. This includes cleaning up stale objects while ensuring no gaps in traffic coverage during the transition.
 
 ### Non-Goals
 
 - This enhancement does not propose creating a generic, cluster-wide policy management solution. The policies are specific to `external-secrets`.
 - We are not introducing AdminNetworkPolicy at this stage, as standard NetworkPolicy objects are sufficient for this scope and can be managed directly by the operator.
-- `spec.appConfig.proxy.networkPolicyAllowProxyEgressAll` does not affect non-proxy clusters — `getProxyConfiguration()` returns nil there and no proxy policy is ever created regardless of the field value.
 
 ## Proposal
 
@@ -95,8 +94,8 @@ The proposal is to create and manage `NetworkPolicy` objects for both the operat
 
 4.  **Proxy Egress Policy (conditional):** After applying the static operand policies, the reconciler evaluates whether an automatic proxy egress allow policy should be created in the `external-secrets` namespace. The policy is created only when **both** conditions hold:
 
-    * `spec.appConfig.proxy.networkPolicyAllowProxyEgressAll` is `Managed` (the default).
-    * `getProxyConfiguration()` returns a non-nil result - i.e., an effective proxy is actually configured on the cluster.
+    * `spec.appConfig.proxy.networkPolicy` is `Managed` (the default).
+    *  Proxy is configured in `ExternalSecretsManager` or `ExternalSecretsConfig` or in the OpenShift cluster.
 
     When created, this policy allows all ESO pods to reach the proxy server on its configured port. When either condition is not met (`Unmanaged`, or no proxy configured), the policy is not created; if one was previously created, it is removed on the next reconcile.
 
@@ -106,8 +105,10 @@ The proposal is to create and manage `NetworkPolicy` objects for both the operat
     * Programmatically-built system policies : also use the `eso-sys-<stable-name>` prefix (e.g., `eso-sys-proxy-egress-core`). These are assembled in Go at reconcile time because they embed runtime data (e.g., the proxy port from `getProxyConfiguration()`).
     * User-defined policies from `spec.networkPolicies[]`: the operator prepends `eso-user-` to the logical name in the CR. The user writes `name: allow-external-secrets-egress`; the resulting Kubernetes object is named `eso-user-allow-external-secrets-egress`.
 
-6.  **Migration and prune:** `cleanupMigratedNetworkPolicies()` runs only after the apply step fully succeeds. On the first reconcile after upgrade (no `migration-complete` annotation on the CR), it lists all NetworkPolicies in the namespace by label (`app.kubernetes.io/managed-by` + `app.kubernetes.io/part-of`) and by name, diffs against the already-applied desired set, and deletes any whose name is not in the desired set — this covers legacy unprefixed names as well as any stale user NPs. Once all deletions succeed, a `migration-complete` annotation is written to the `ExternalSecretsConfig` CR using the `fieldOwner` option. On subsequent reconciles the full deletion loop is skipped, but the label-based list and diff still runs every reconcile to catch newly stale entries (e.g. a user removes an NP from the CR). This function will be removed after 3 releases, by which point every cluster will have been reconciled at least once under the new naming scheme.
-
+6.  **Migration and prune:** `cleanupMigratedNetworkPolicies()` runs only after the apply step fully succeeds. On each reconcile it operates as follows:
+    1. Check whether the annotation `externalsecretsconfig.operator.openshift.io/skip-np-cleanup-check: "true"` is present on the `ExternalSecretsConfig` CR. If the annotation is present, skip the full deletion loop entirely.
+    2. If the annotation is absent, list all NetworkPolicy resources in the namespace by label (`app.kubernetes.io/managed-by: external-secrets-operator` and `app.kubernetes.io/part-of: external-secrets-operator`) and by name, and delete any whose name is not in the desired set. The legacy unprefixed policies — `deny-all-traffic`, `allow-to-dns`, `allow-api-server-egress-for-main-controller`, etc. — carry the operator labels but are no longer in the desired set, so they get cleaned up. Stale user NPs are also removed by the same diff to avoid duplicate NPs.
+    3. After all deletions succeed, write the `externalsecretsconfig.operator.openshift.io/skip-np-cleanup-check: "true"` annotation onto the `ExternalSecretsConfig` CR using the `fieldOwner` option so subsequent reconciles skip the deletion loop and avoid unnecessary GETs.On subsequent reconciles (annotation present), the full deletion loop is skipped, but the label-based list and diff still runs every reconcile to catch newly stale entries (e.g. a user removes an NP from the CR).
       
 ### Implementation Details/Notes/Constraints
 
@@ -293,7 +294,7 @@ Example user configuration:
     spec:
       appConfig:
         proxy:
-          networkPolicyAllowProxyEgressAll: Managed   # default; set Unmanaged to manage proxy egress yourself
+          networkPolicy: Managed   # default; set Unmanaged to manage proxy egress yourself
       networkPolicies:
         - name: allow-external-secrets-egress    # K8s object: eso-user-allow-external-secrets-egress
           componentName: CoreController
@@ -307,10 +308,12 @@ Example user configuration:
 
     The policy is applied only when **both** conditions hold:
 
-    * `spec.appConfig.proxy.networkPolicyAllowProxyEgressAll` is `Managed` (the default).
+    * `spec.appConfig.proxy.networkPolicy` is `Managed` (the default).
     * `getProxyConfiguration()` returns a non-nil result - i.e., an effective proxy is actually configured on the cluster.
 
     If either condition is not met, this policy is not created (or removed if previously present).
+
+    **Port derivation:** The proxy port used in this policy is extracted from the proxy URL returned by `getProxyConfiguration()`. If the URL contains an explicit port (e.g. `http://proxy.example.com:3128`), that port is used directly. If the URL omits the port, the standard default for the URL scheme is applied: **443** for `https` and **80** for `http`.
 
     Illustrative structure (port value filled in at runtime):
 
@@ -396,14 +399,14 @@ This enhancement introduces new fields to the existing `ExternalSecretsConfig` c
     type ProxyConfig struct {
         // ... existing httpProxy, httpsProxy, noProxy fields ...
 
-        // networkPolicyAllowProxyEgressAll controls whether the operator automatically
+        // networkPolicy controls whether the operator automatically
         // creates and manages the "eso-sys-proxy-egress-core" NetworkPolicy that allows
         // all ESO pods to reach the cluster proxy server.
         // On clusters without a proxy configured, this field has no effect regardless of value.
         // +kubebuilder:validation:Enum=Managed;Unmanaged
         // +kubebuilder:default=Managed
         // +optional
-        NetworkPolicyAllowProxyEgressAll NetworkPolicyEgressManagement `json:"networkPolicyAllowProxyEgressAll,omitempty"`
+        NetworkPolicy NetworkPolicyEgressManagement `json:"networkPolicy,omitempty"`
     }
 
     type ExternalSecretsConfigSpec struct {
@@ -467,13 +470,13 @@ The main drawback is the added complexity of managing multiple `NetworkPolicy` o
     4.  Confirm the `curl` pod **cannot** `ping` or otherwise access the pods on non-allowed ports.
     5.  Verify the webhook is accessible on port `:10250` from the API server for admission control.
     6.  Simulate an upgrade from the previous release (with legacy unprefixed policy names) and verify that `cleanupMigratedNetworkPolicies()` removes all legacy objects and leaves only `eso-sys-*` and `eso-user-*` objects.
-    7.  Verify the `migration-complete` annotation is written to the `ExternalSecretsConfig` CR after a successful cleanup, and that subsequent reconciles skip the deletion loop.
+    7.  Verify the `externalsecretsconfig.operator.openshift.io/skip-np-cleanup-check: "true"` annotation is written to the `ExternalSecretsConfig` CR after a successful cleanup, and that subsequent reconciles skip the deletion loop.
   
 * **Proxy Egress Tests:**
-    1.  On a proxy-configured cluster with `spec.appConfig.proxy.networkPolicyAllowProxyEgressAll: Managed` (the default), verify that `eso-sys-proxy-egress-core` is created in the `external-secrets` namespace and that ESO pods can successfully reach the proxy server.
-    2.  On a non-proxy cluster with `networkPolicyAllowProxyEgressAll: Managed`, verify that `eso-sys-proxy-egress-core` is **not** created (because `getProxyConfiguration()` returns nil).
-    3.  On a proxy-configured cluster with `networkPolicyAllowProxyEgressAll: Unmanaged`, verify that `eso-sys-proxy-egress-core` is **not** created, and that if it was previously created it is removed on the next reconcile.
-    4.  Change `networkPolicyAllowProxyEgressAll` from `Unmanaged` to `Managed` on a proxy cluster and verify the policy is re-created on the next reconcile.
+    1.  On a proxy-configured cluster with `spec.appConfig.proxy.networkPolicy: Managed` (the default), verify that `eso-sys-proxy-egress-core` is created in the `external-secrets` namespace and that ESO pods can successfully reach the proxy server.
+    2.  On a non-proxy cluster with `networkPolicy: Managed`, verify that `eso-sys-proxy-egress-core` is **not** created (because `getProxyConfiguration()` returns nil).
+    3.  On a proxy-configured cluster with `networkPolicy: Unmanaged`, verify that `eso-sys-proxy-egress-core` is **not** created, and that if it was previously created it is removed on the next reconcile.
+    4.  Change `networkPolicy` from `Unmanaged` to `Managed` on a proxy cluster and verify the policy is re-created on the next reconcile.
 
 * **Naming and Validation Tests:**
     1.  Create a valid entry (e.g., `name: allow-external-secrets-egress`) and confirm the resulting Kubernetes object is named `eso-user-allow-external-secrets-egress`.
@@ -509,9 +512,9 @@ Not applicable.
 * **Upgrade:** On upgrade, the operator applies the new `eso-sys-` prefixed NetworkPolicy objects first, then runs `cleanupMigratedNetworkPolicies()` to remove legacy unprefixed objects (e.g., `deny-all-traffic`, `allow-to-dns`, etc.). This apply-before-delete ordering ensures there is no window where a required policy is absent.
 
   This function runs only after the apply step fully succeeds. On each reconcile it operates as follows:
-  1. Check whether a `migration-complete` annotation is present on the `ExternalSecretsConfig` CR. If the annotation is present, skip the full deletion loop entirely.
+  1. Check whether the annotation `externalsecretsconfig.operator.openshift.io/skip-np-cleanup-check: "true"` is present on the `ExternalSecretsConfig` CR. If the annotation is present, skip the full deletion loop entirely.
   2. If the annotation is absent, list all NetworkPolicy resources in the namespace by label (`app.kubernetes.io/managed-by: external-secrets-operator` and `app.kubernetes.io/part-of: external-secrets-operator`) and by name, and delete any whose name is not in the desired set. The legacy unprefixed policies - `deny-all-traffic`, `allow-to-dns`, `allow-api-server-egress-for-main-controller`, etc. - carry the operator labels but are no longer in the desired set, so they get cleaned up. Stale user NPs are also removed by the same diff to avoid the duplicate NPs.
-  3. After all deletions succeed, write the `migration-complete` annotation onto the `ExternalSecretsConfig` CR using the `fieldOwner` option so subsequent reconciles skip the deletion loop and avoid unnecessary GETs.
+  3. After all deletions succeed, write the `externalsecretsconfig.operator.openshift.io/skip-np-cleanup-check: "true"` annotation onto the `ExternalSecretsConfig` CR using the `fieldOwner` option so subsequent reconciles skip the deletion loop and avoid unnecessary GETs.
 
   > **Note:** `cleanupMigratedNetworkPolicies()` is a temporary migration helper. It must be removed after 3 releases. By that point every cluster is assumed to have been reconciled at least once under the new naming scheme and no legacy unprefixed objects will remain.
 
@@ -544,7 +547,7 @@ This enhancement only involves adding `NetworkPolicy` resources, which are manag
 
 Two new API fields are introduced:
 
-* **`spec.appConfig.proxy.networkPolicyAllowProxyEgressAll` (enum `Managed|Unmanaged`, default `Managed`):** Controls automatic proxy egress policy creation. Operators can observe the effect of this field by checking for the presence of the `eso-sys-proxy-egress-core` NetworkPolicy in the `external-secrets` namespace. Changing to `Unmanaged` removes the policy on the next reconcile.
+* **`spec.appConfig.proxy.networkPolicy` (enum `Managed|Unmanaged`, default `Managed`):** Controls automatic proxy egress policy creation. Operators can observe the effect of this field by checking for the presence of the `eso-sys-proxy-egress-core` NetworkPolicy in the `external-secrets` namespace. Changing to `Unmanaged` removes the policy on the next reconcile.
 
 ## Support Procedures
 
