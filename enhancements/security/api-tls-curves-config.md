@@ -85,19 +85,46 @@ section for details.
 
 ### Workflow Description
 
-Administrators will use the [existing custom TLS security profile flow](https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html/security_and_compliance/tls-security-profiles#tls-profiles-ingress-configuring_tls-security-profiles)
-for setting the supported groups.
+Administrators configure TLS groups cluster-wide via the `apiserver.config.openshift.io/cluster`
+object, which serves as the global default for all cluster components (subject to
+the `tlsAdherence` setting described in the
+[centralized TLS config enhancement](centralized-tls-config.md)):
 
-Specifically administrators will use
+```bash
+oc edit apiserver cluster
+```
 
-`oc edit IngressController default -n openshift-ingress-operator`
+```yaml
+apiVersion: config.openshift.io/v1
+kind: APIServer
+metadata:
+  name: cluster
+spec:
+  tlsSecurityProfile:
+    type: Custom
+    custom:
+      ciphers:
+      - ECDHE-ECDSA-AES128-GCM-SHA256
+      minTLSVersion: VersionTLS12
+      groups:
+      - X25519MLKEM768
+      - X25519
+```
 
-and edit the spec.tlsSecurityProfile field:
+Component-specific objects can be used to override the cluster-wide default
+for individual components. For example, to override the groups on the ingress
+controller only:
+
+```bash
+oc edit IngressController default -n openshift-ingress-operator
+```
 
 ```yaml
 apiVersion: operator.openshift.io/v1
 kind: IngressController
- ...
+metadata:
+  name: default
+  namespace: openshift-ingress-operator
 spec:
   tlsSecurityProfile:
     type: Custom
@@ -107,8 +134,10 @@ spec:
       minTLSVersion: VersionTLS13
       groups:
       - X25519MLKEM768
- ...
 ```
+
+See the [Component Configuration Consumption](#component-configuration-consumption)
+section for the full list of configuration sources and their precedence.
 
 ### API Extensions
 
@@ -117,17 +146,65 @@ spec:
 - The field is gated behind the `TLSCurvePreferences` feature gate, enabled in
   `DevPreviewNoUpgrade` and `TechPreviewNoUpgrade` tiers
 - The addition of this field should not affect existing API behaviour
+- **Component implementors do not need to check for the feature gate.** Because
+  the field is optional (`+optional`, `omitempty`), components need only inspect
+  the field's value when unmarshaling the TLS security profile. When the feature
+  gate is disabled the field will never be set, so components will continue
+  using the TLS implementation's defaults transparently. When the field is
+  present, components use the specified groups; when absent, they fall back to
+  defaults. This mirrors the approach used for `tlsAdherence` in
+  [openshift/api#2583](https://github.com/openshift/api/pull/2583).
 
 ### Topology Considerations
 
 #### Hypershift / Hosted Control Planes
 
-Hypershift [does not currently consume custom TLS supported groups](https://github.com/openshift/hypershift/blob/6b0338c192c966a9c072bfc6af45202739e9e553/support/config/cipher.go#L30).
-However, this is planned in the future.
+For HyperShift deployments, the TLS security profile for hosted control plane
+components is determined by the **management cluster**, not the hosted cluster.
+Hosted cluster administrators should not control TLS groups for components
+running in the provider's domain.
+
+HyperShift's control-plane-operator (CPO) directly manages a set of control
+plane components that, in standalone clusters, are managed through the normal
+SLO/operand chain. These components fall into three categories, each requiring
+a different mechanism for consuming TLS group configuration:
+
+**Category 1 — HyperShift-aware SLOs:**
+
+In standalone clusters, these operators watch `apiserver.config.openshift.io/cluster`
+and configure their operands. In HyperShift, these SLOs are run directly by the
+CPO and have access to the management cluster's KAS. They should read the TLS
+profile (including `groups`) from the `HostedCluster` CR spec in the management
+KAS rather than from `apiserver.config.openshift.io/cluster` in the hosted
+cluster's KAS.
+
+**Category 2 — Operands of SLOs (most components):**
+
+In standalone clusters, these components are configured by their SLO via
+command-line flags or environment variables. In HyperShift, the CPO replaces
+the SLO's role and must directly set the TLS-related flags and environment
+variables on their pod specs, including any group configuration derived from
+the `HostedCluster` CR.
+
+**Category 3 — Self-configuring components:**
+
+In standalone clusters, these components watch `apiserver.config.openshift.io/cluster`
+and configure their own TLS servers directly. In HyperShift, such components
+may be watching the wrong config object (the hosted cluster's rather than the
+management cluster's). These components should accept CLI flags for TLS
+settings that take precedence over the watched config object. The CPO sets
+these flags when deploying the component.
+
+This categorization mirrors the approach described in the
+[centralized TLS config enhancement](centralized-tls-config.md#hypershift--hosted-control-planes).
 
 #### Standalone Clusters
 
-N/A
+This is the primary target for this enhancement. Standalone clusters benefit
+directly from the ability to configure TLS groups cluster-wide via
+`apiserver.config.openshift.io/cluster`. Operators that already watch this
+object for TLS profile changes will be updated to read the new `groups` field
+and pass it through to their respective components.
 
 #### Single-node Deployments or MicroShift
 
@@ -150,9 +227,16 @@ based on their operational context:
 - Read TLS configuration from `apiserver.config.openshift.io/cluster`
 - Component operators watch this object and regenerate configuration when it
   changes
-- Example: The kube-apiserver operator reads the `tlsSecurityProfile` field and
-  passes the groups to the kube-apiserver via command-line flags or
-  configuration files
+- When `tlsAdherence: StrictAllComponents` is set, all components must honor
+  the `groups` field from this object. When `tlsAdherence` is unset or
+  `LegacyAdheringComponentsOnly`, only components that already honor the
+  cluster-wide TLS profile are required to do so
+- Component implementors should use the `ShouldHonorClusterTLSProfile` helper
+  function from library-go (rather than checking `tlsAdherence` values
+  directly) to determine whether to apply the configured groups
+- Example: The kube-apiserver operator reads the `tlsSecurityProfile` field
+  (including `groups`) and passes the configuration to the kube-apiserver via
+  command-line flags or configuration files
 
 **2. Kubelet Configuration**
 
@@ -212,8 +296,14 @@ based on their operational context:
 For operators managing components that need to respect TLS configuration:
 
 1. **Watch** the appropriate configuration source:
-   - `apiserver.config.openshift.io/cluster` for control plane components
+   - `apiserver.config.openshift.io/cluster` — the cluster-wide default for all
+     components when `tlsAdherence: StrictAllComponents` is set, or for
+     legacy-adhering components when `tlsAdherence` is unset or
+     `LegacyAdheringComponentsOnly`
    - Component-specific operator CRs (IngressController, KubeletConfig, etc.)
+     when a per-component override is needed
+   - `HostedCluster` CR in the management KAS — for HyperShift-aware SLOs
+     running in HyperShift (Category 1 components)
 
 2. **Extract** the `tlsSecurityProfile` including the `groups` field
 
@@ -260,6 +350,14 @@ Components running in FIPS mode must omit these groups. The FIPS-approved
 post-quantum alternatives (`SecP256r1MLKEM768`, `SecP384r1MLKEM1024`) require
 Go 1.26+ and are not currently supported.
 
+**Library-go update:** To support these defaults, the `TLSProfiles` mapping in
+[library-go](https://github.com/openshift/library-go) will be updated to include
+the `groups` field for each named profile. Operators and components that
+currently use the library-go `TLSProfiles` mapping to build their `tls.Config`
+will automatically pick up the new group defaults after updating their
+library-go dependency. Component owners must ensure their library-go version
+includes this update as part of the GA promotion work.
+
 #### Mismatching groups and ciphersuites
 
 There is a case where the administrator could incorrectly specify a set of
@@ -274,7 +372,10 @@ To avoid this scenario, OpenShift should implement validation to prevent known
 invalid combinations. A validation layer will be added to check for compatible
 combinations of groups and ciphersuites. If a known invalid combination is
 detected, the configuration will be rejected, informing the user of the
-incompatibility immediately rather than failing at runtime.
+incompatibility immediately rather than failing at runtime. This validation
+will be implemented as CEL validation expressions on the CRD, consistent with
+the approach used for TLS 1.3 cipher validation described in the
+[centralized TLS config enhancement](centralized-tls-config.md).
 
 #### Handling unsupported groups in custom profiles
 
@@ -294,17 +395,24 @@ handshakes will fail with errors like "handshake failure" (for cipher suites)
 or "no shared group" (for groups). This is the expected and desired
 behavior — it ensures only supported cryptographic parameters are used.
 
-**Why not validate at API level:**
-Validating group support at the API level would require maintaining a
-comprehensive registry of:
+**API-level validation against the IANA registry:**
+Rather than foregoing all API-level validation, group names will be validated
+against the [IANA TLS Supported Groups registry](https://www.iana.org/assignments/tls-parameters/tls-parameters.xhtml#tls-parameters-8).
+This approach provides a meaningful improvement over completely unvalidated
+strings while avoiding the infeasible task of tracking per-library support
+matrices:
 
-- All TLS implementation libraries used across OpenShift components
-- Version-specific support matrices for each library
-- Continuous updates as libraries evolve
+- Group names not present in the IANA registry are rejected at the API level,
+  providing immediate feedback for clearly invalid values
+- Group names that are valid per the IANA registry but unsupported by a
+  specific component version still produce runtime errors — this is the
+  expected "use at your own risk" behavior for custom profiles
+- Automation (a periodic job or CI check) queries the IANA registry and updates
+  the CEL allowlist in the CRD to keep it current as new groups are
+  standardized
 
-This approach is infeasible and would create a maintenance burden that
-outweighs the benefit. Runtime failures provide clear, immediate feedback about
-incompatibilities.
+This is strictly an improvement over completely unvalidated strings and avoids
+the maintenance burden of a per-library, version-specific support matrix.
 
 **Recommended approach:**
 
