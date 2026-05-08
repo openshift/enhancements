@@ -134,6 +134,10 @@ N/A
 This change will affect the TLS profile of both single node and microshift
 deployments.
 
+#### OpenShift Kubernetes Engine
+
+N/A
+
 ### Implementation Details/Notes/Constraints
 
 #### Component Configuration Consumption
@@ -351,6 +355,8 @@ scanned with the [tls-scanner tool](github.com/openshift/tls-scanner) to verify
 that TLS implementations within OpenShift expose these groups as supported. It
 should also be verified that the TLS implementations will fallback to a default
 group set when not specified.
+
+## Graduation Criteria
 
 ### Dev Preview -> Tech Preview
 
