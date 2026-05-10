@@ -37,7 +37,7 @@ Customers need a supported, persistent way to tune DNS pod resources through the
 ### User Stories
 
 1. As a MicroShift administrator running high DNS query workloads, I want to increase the CPU and memory allocated to CoreDNS so that DNS resolution remains responsive under load.
-2. As a MicroShift administrator on a resource-constrained edge device, I want to reduce the DNS pod resource requests so that more capacity is available for application workloads.
+2. As a MicroShift administrator on a resource-constrained edge device, I want to adjust the DNS pod resource allocation to balance DNS reliability with available capacity for application workloads.
 3. As a MicroShift administrator, I want to set resource limits on the DNS pod to prevent it from consuming excessive resources on shared nodes.
 
 ### Goals
@@ -268,7 +268,8 @@ When downgrading to a version without `dns.resources` support, the field is igno
 N/A
 
 ## Operational Aspects of API Extensions
-N/A
+
+When resource limits are configured, the DNS container is subject to standard Kubernetes enforcement. If the container exceeds its memory limit, the kubelet will OOM-kill it. If it exceeds its CPU limit, it will be throttled. In both cases, the DaemonSet controller will automatically restart the container. Administrators should monitor DNS pod restarts (`oc get pods -n openshift-dns`) after changing resource limits to ensure the configured values are sufficient for their workload.
 
 ## Support Procedures
 N/A
