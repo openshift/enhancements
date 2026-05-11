@@ -7,9 +7,9 @@ reviewers:
   - "TBD - etcd team: snapshot restore semantics, etcdutl flags"
   - "TBD - API review: new field on ManagedEtcdSpec, union API, feature gate"
 approvers:
-  - "TBD"
+  - "@enxebre"
 api-approvers:
-  - "TBD"
+  - "@enxebre"
 creation-date: 2026-05-07
 last-updated: 2026-05-08
 tracking-link:
