@@ -215,16 +215,13 @@ This prevents the control plane from being temporarily blocked by the absent `Et
 #### Error Handling
 
 **Restore Job failure with circuit breaker**: When the restore Job fails (all retry attempts exhausted with `backoffLimit: 3`),
-the CPO sets `EtcdSnapshotRestored=False` with reason `RestoreJobFailed` and increments a retry counter stored as an annotation
-on the HostedControlPlane (`hypershift.openshift.io/restore-retry-count`).
+the CPO sets `EtcdSnapshotRestored=False` with reason `RestoreJobFailed` and increments the `restoreRetryCount` field in the HostedControlPlane status.
 On the next reconcile, the CPO automatically deletes the failed Job, removes the `EtcdSnapshotRestored` condition, and creates a fresh Job.
 This handles transient failures such as IAM propagation delays during initial cluster creation.
 
-After **10 failed Job attempts** (configurable via annotation), the CPO sets `EtcdSnapshotRestored=False` with reason `RestorePermanentlyFailed` and stops creating new Jobs.
+After **10 failed Job attempts**, the CPO sets `EtcdSnapshotRestored=False` with reason `RestorePermanentlyFailed` and stops creating new Jobs.
 This prevents unbounded API churn from permanent failures (wrong bucket, deleted service account, corrupt archive).
-To retry after manual remediation, an operator can reset the counter by deleting the `hypershift.openshift.io/restore-retry-count` annotation from the HostedControlPlane.
-
-The retry counter is stored as an annotation rather than a status field because it is a transient operational counter, not a user-facing API. It is reset by deleting the annotation during manual remediation. If the annotation value cannot be parsed as an integer, the CPO treats it as 0 and logs a warning.
+To retry after manual remediation, an operator can reset the counter by setting the `restoreRetryCount` status field to 0 on the HostedControlPlane.
 
 **Restore PVC stuck**: If the restore PVC remains in `Pending` state (e.g., due to storage quota exhaustion or zone constraints), the restore Job cannot start. After a 10-minute timeout, the CPO deletes the Pending PVC and counts it as a retry attempt, triggering the circuit breaker logic above. The `EtcdSnapshotRestored=False` condition message includes the PVC status to aid debugging.
 
@@ -254,7 +251,7 @@ type ManagedEtcdSpec struct {
     // performed.
     // +optional
     // +openshift:enable:FeatureGate=HCPAutomatedEtcdBackup
-    AutomatedBackup *AutomatedEtcdBackupConfig `json:"automatedBackup,omitempty"`
+    AutomatedBackup AutomatedEtcdBackupConfig `json:"automatedBackup,omitzero"`
 }
 ```
 
@@ -264,20 +261,19 @@ This field is distinct from the existing `Backup HCPEtcdBackupConfig` field on `
 
 ```go
 // AutomatedEtcdBackupConfig configures scheduled etcd backups to cloud storage.
-// The pointer to AutomatedEtcdBackupConfig is intentional: nil means automated
-// backup is disabled. The required storage.type field prevents an empty struct
-// from being valid.
+// The zero value means automated backup is disabled. The required storage.type
+// field prevents an empty struct from being valid.
 type AutomatedEtcdBackupConfig struct {
     // schedule is a cron expression defining the backup frequency using the
     // standard 5-field format (minute hour day-of-month month day-of-week).
-    // The schedule is interpreted in UTC. When nil, the CPO applies a default
+    // The schedule is interpreted in UTC. When empty, the CPO applies a default
     // schedule (currently every hour). The default is applied by the
     // controller at reconcile time, not the CRD schema, so it may change
     // across releases. The value must be between 1 and 64 characters long.
     // +optional
     // +kubebuilder:validation:MaxLength=64
     // +kubebuilder:validation:XValidation:rule="self.matches('^[^ ]+ [^ ]+ [^ ]+ [^ ]+ [^ ]+$')",message="schedule must be a 5-field cron expression (minute hour day-of-month month day-of-week)"
-    Schedule *string `json:"schedule,omitempty"`
+    Schedule string `json:"schedule,omitempty"`
 
     // storage configures the cloud storage backend for backup archives.
     // +required
@@ -303,7 +299,7 @@ type AutomatedEtcdBackupStorage struct {
 
     // gcs configures Google Cloud Storage as the backup destination.
     // +optional
-    GCS *AutomatedEtcdBackupGCS `json:"gcs,omitempty"`
+    GCS AutomatedEtcdBackupGCS `json:"gcs,omitzero"`
 }
 
 // AutomatedEtcdBackupStorageType is a string identifying a storage backend.
@@ -434,22 +430,28 @@ Not applicable. This feature is HyperShift-specific and does not depend on featu
 
 ### Implementation Details/Notes/Constraints
 
-#### Relationship with HCPEtcdBackup
+#### Consolidation with Existing Backup and Restore Work
 
-The existing `Backup` field on `ManagedEtcdSpec` (gated behind `HCPEtcdBackup`) configures one-shot CRD-based backups (designed for OADP integration)
-via the `HCPEtcdBackup` CRD, orchestrated by the `HCPEtcdBackupReconciler` in the HyperShift Operator (HO).
-The `HCPEtcdBackupReconciler` runs in the HO namespace and requires cross-namespace cert fetching via the `fetch-etcd-certs` init container.
-The proposed automated backup runs in the HCP namespace, where it has direct access to etcd pods and PKI secrets,
-simplifying RBAC and eliminating the need for cross-namespace access patterns.
-The proposed `automatedBackup` field configures CronJob-based scheduled backups orchestrated by a new controller in the CPO.
+HyperShift has several existing backup and restore mechanisms developed independently over time. This section describes their relationship with the proposed automated backup and the consolidation path.
 
-**Concurrent operation**: Both features can be active simultaneously.
-They use different orchestration controllers (HO vs CPO), different trigger mechanisms (CRD creation vs CronJob schedule),
-and different storage formats (OADP BackupStorageLocation vs direct cloud storage upload).
-Both perform `etcdctl snapshot save` against the same etcd cluster, but etcd snapshots are read-only linearizable reads that do not block or interfere with each other.
-If both happen to run at the exact same moment, the etcd server handles concurrent snapshot requests safely.
+**Existing mechanisms**:
 
-**Long-term direction**: `automatedBackup` is designed for lightweight, self-contained scheduled backup without OADP dependency. `HCPEtcdBackup` targets full cluster disaster recovery via OADP. They serve different use cases and are expected to coexist.
+| Mechanism | Location | Trigger | Scope | Status |
+| --------- | -------- | ------- | ----- | ------ |
+| `restoreSnapshotURL` ([hypershift#1239](https://github.com/openshift/hypershift/pull/1239)) | CPO (etcd StatefulSet init container) | Manual: operator sets URL on HostedCluster | Restore only (pre-signed S3 URL) | GA, active |
+| `HCPEtcdBackup` CRD (SDE-3219, CNTRLPLANE-445) | HO (`HCPEtcdBackupReconciler`) | Manual: operator creates `HCPEtcdBackup` CR | One-shot backup to S3/Azure (OADP integration) | Tech Preview |
+| `etcd-backup` subcommand ([hypershift#3034](https://github.com/openshift/hypershift/pull/3034)) | CPO binary | Called by `HCPEtcdBackupReconciler` | Legacy monolithic snapshot+S3 upload | Active (used by HCPEtcdBackup) |
+| Proposed `automatedBackup` | CPO (new controller) | Scheduled: CronJob | Automated backup+restore with PKI secrets | This enhancement |
+
+**Relationship with `restoreSnapshotURL`**: The `restoreSnapshotURL` field provides manual, URL-based restore from a pre-signed S3 URL. It does not restore PKI secrets (the operator must ensure the same CA and signing keys are available). The proposed automated restore is a superset: it restores both the etcd snapshot and PKI secrets from a managed archive. Both mechanisms use the `EtcdSnapshotRestored` condition. They are mutually exclusive at restore time — if both `restoreSnapshotURL` and `automatedBackup` are configured, the CPO should reject the configuration with a validation error. Long-term, `restoreSnapshotURL` may be deprecated in favor of `automatedBackup` once all storage backends are supported.
+
+**Relationship with `HCPEtcdBackup` CRD**: The `HCPEtcdBackup` CRD (gated behind `HCPEtcdBackup`) configures one-shot CRD-based backups designed for OADP integration, orchestrated by the `HCPEtcdBackupReconciler` in the HyperShift Operator (HO). The reconciler runs in the HO namespace and requires cross-namespace cert fetching via the `fetch-etcd-certs` init container. The proposed automated backup runs in the HCP namespace, where it has direct access to etcd pods and PKI secrets, simplifying RBAC and eliminating the need for cross-namespace access patterns.
+
+Both features can be active simultaneously. They use different orchestration controllers (HO vs CPO), different trigger mechanisms (CRD creation vs CronJob schedule), and different storage formats (OADP BackupStorageLocation vs direct cloud storage upload). Both perform `etcdctl snapshot save` against the same etcd cluster, but etcd snapshots are read-only linearizable reads that do not block or interfere with each other. If both happen to run at the exact same moment, the etcd server handles concurrent snapshot requests safely.
+
+**Relationship with `etcd-backup` subcommand**: The `etcd-backup` subcommand (hypershift#3034) is a legacy monolithic command that takes an etcd snapshot and uploads it to S3. It does not bundle PKI secrets. The proposed automated backup uses a different architecture (init container for snapshot, main container for bundling and upload) and adds GCS support. The `etcd-backup` subcommand continues to serve `HCPEtcdBackup` CRD workflows.
+
+**Consolidation path**: `automatedBackup` is designed as a lightweight, self-contained scheduled backup that does not depend on OADP. Once S3 and Azure backends are added (see [Future Work](#future-work)), it will cover all platforms currently served by `HCPEtcdBackup`. At that point, the community should evaluate whether `HCPEtcdBackup` should be deprecated in favor of `automatedBackup`, or whether OADP integration remains a distinct use case. Similarly, `restoreSnapshotURL` can be deprecated once automated restore supports all platforms. The consolidation timeline depends on backend availability and user feedback during Tech Preview.
 
 #### HostedCluster to HostedControlPlane Propagation
 
@@ -478,7 +480,7 @@ The first three secrets are always included in the backup archive. The AESCBC en
   where the CPO uses it to generate the KAS `EncryptionConfiguration`.
   The CronJob includes this key as an additional Volume and VolumeMount, and the bundler and restorer handle it generically alongside the PKI secrets.
   The key must be restored before KAS starts, or the restored etcd data is permanently unreadable.
-- **KMS encryption** (`spec.secretEncryption.type == kms`): The encryption key lives in the cloud KMS service (AWS KMS, Azure Key Vault, IBM Key Protect).
+- **KMS encryption** (`spec.secretEncryption.type == kms`): The encryption key lives in the cloud KMS service (GCP Cloud KMS, AWS KMS, Azure Key Vault, IBM Key Protect).
   No Kubernetes secret needs backing up, but the cloud KMS key must remain accessible and the KMS configuration on the new HostedCluster must reference the same key.
   The restore scope is limited to etcd data and PKI secrets; KMS key availability is a cluster configuration prerequisite, not a restore responsibility.
   If the KMS key is inaccessible or the new HostedCluster references a different key, KAS will fail to start after an otherwise successful restore
@@ -541,7 +543,7 @@ A circuit breaker (10 attempts max) prevents this from becoming an unbounded ret
 
 The restore flow is fully idempotent and safe across CPO restarts and upgrades.
 All restore state is persisted on the HostedControlPlane CR via the `EtcdSnapshotRestored` condition
-and the `hypershift.openshift.io/restore-retry-count` annotation, not in operator memory.
+and the `restoreRetryCount` status field, not in operator memory.
 Once `EtcdSnapshotRestored=True` is set, no restore Job is created regardless of how many times the CPO restarts or reconciles.
 If the CPO restarts while a restore Job is still running, the reconciler observes the existing Job and waits for it to complete — it does not create a duplicate.
 If the CPO restarts after a restore Job failure but before cleanup, the reconciler detects the failed Job and follows the standard auto-recovery path:
@@ -612,6 +614,14 @@ Operators running hundreds of hosted clusters should size the management cluster
 
 In multi-tenant environments where multiple hosted clusters share the same GCP project and backup bucket, operators must ensure `infraID` uniqueness across clusters. A misconfigured `infraID` on a new cluster could restore from the wrong cluster's backup. For environments requiring stronger isolation, operators should use separate buckets per cluster or per tenant.
 
+#### Interaction with Etcd Sharding
+
+The [etcd sharding by resource kind](https://github.com/openshift/enhancements/pull/1979) proposal introduces multiple etcd instances per hosted control plane, each storing a subset of API resources. If sharding is enabled alongside automated backup, the backup CronJob must snapshot all etcd shards to produce a consistent recovery point. Key considerations:
+
+- **Backup**: The CronJob must iterate over all shard endpoints and include a snapshot from each shard in the archive. The archive format would extend from a single `snapshot.db` to `snapshot-<shard>.db` per shard. The init container must take all snapshots within a short window to minimize cross-shard drift.
+- **Restore**: All shard snapshots must be restored together. The restore Job must provision an init container per shard and coordinate single-replica startup across all StatefulSets.
+- **Ordering**: Sharding is not yet implemented. This enhancement targets the current single-etcd architecture. Sharding support for automated backup will be addressed when the sharding enhancement progresses, either as an update to this enhancement or a follow-up.
+
 #### PVC Sizing
 
 The restore PVC is sized at 20Gi and uses the same StorageClass as the etcd StatefulSet's PVCs to ensure zone-compatible volume provisioning.
@@ -676,7 +686,7 @@ Supporting restore of a running cluster by scaling etcd to 0, restoring, and sca
 
 ## Future Considerations
 
-- **Long-term relationship with HCPEtcdBackup**: Should `HCPEtcdBackup` (one-shot CRD-based) be deprecated in favor of `automatedBackup`, or do they serve permanently distinct use cases? Both snapshot etcd but differ in orchestration, storage, and scheduling.
+- **Consolidation with existing backup/restore mechanisms**: See [Consolidation with Existing Backup and Restore Work](#consolidation-with-existing-backup-and-restore-work) for the relationship between `automatedBackup`, `HCPEtcdBackup`, `restoreSnapshotURL`, and the `etcd-backup` subcommand. Once S3 and Azure backends are available, evaluate deprecation of overlapping mechanisms.
 
 ## Test Plan
 
@@ -688,13 +698,13 @@ E2E tests run on a periodic Prow job against a GKE management cluster. This is a
 
 ### Unit Tests
 
-- **Predicate logic**: Tests all predicate branches (nil managed, nil automatedBackup, wrong storage type, etcd not available, feature gate disabled, happy path)
+- **Predicate logic**: Tests all predicate branches (zero-value managed, zero-value automatedBackup, wrong storage type, etcd not available, feature gate disabled, happy path)
 - **CronJob adaptation**: Verifies schedule, containers, volumes, volume mounts, concurrency policy, ServiceAccount Workload Identity annotation, and `hypershift.openshift.io/managed-by` label
 - **Backup condition reconciliation**: Tests all condition transitions (`BackupSucceeded`, `BackupInProgress`, `WaitingForFirstSchedule`, `CronJobSuspended`, `WaitingForEtcd`)
 - **Upload bundling**: Verifies snapshot and secrets are correctly bundled into tar.gz
 - **Restore secrets**: Verifies JSON secret files are correctly deserialized and created/updated in the target namespace
 - **Archive validation**: Tests completeness check, snapshot status validation, and JSON schema validation
-- **Circuit breaker**: Tests retry counter increment, `RestorePermanentlyFailed` condition after max retries, and counter reset via annotation deletion
+- **Circuit breaker**: Tests retry counter increment, `RestorePermanentlyFailed` condition after max retries, and counter reset via status patch
 - **PVC timeout**: Tests PVC deletion after 10-minute timeout
 
 ### Integration Tests
@@ -854,7 +864,7 @@ oc get hostedcontrolplane <name> -n <hcp-namespace> \
 
 # Check retry counter
 oc get hostedcontrolplane <name> -n <hcp-namespace> \
-  -o jsonpath='{.metadata.annotations.hypershift\.openshift\.io/restore-retry-count}'
+  -o jsonpath='{.status.restoreRetryCount}'
 
 # Check restore Job logs
 oc logs job/etcd-restore -n <hcp-namespace> --all-containers
@@ -874,8 +884,8 @@ oc logs job/etcd-restore -n <hcp-namespace> --all-containers
 3. Fix the underlying issue (storage permissions, network access, bucket configuration).
 4. If the circuit breaker has triggered (`RestorePermanentlyFailed`), reset it:
    ```bash
-   oc annotate hostedcontrolplane <name> -n <hcp-namespace> \
-     hypershift.openshift.io/restore-retry-count-
+   oc patch hostedcontrolplane <name> -n <hcp-namespace> \
+     --type merge --subresource status -p '{"status":{"restoreRetryCount":0}}'
    ```
 5. Delete the failed Job if still present: `oc delete job etcd-restore -n <hcp-namespace>`.
 6. The CPO will automatically remove the `EtcdSnapshotRestored` condition and create a new Job on the next reconcile.
