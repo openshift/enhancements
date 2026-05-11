@@ -1,11 +1,12 @@
 ---
 title: support-different-gateway-api-service-provisioning-with-different-gatewayclass
 authors:
-  - TBD
+  - "@rikatz"
 reviewers:
-  - TBD
+  - "@gcs278"
 approvers:
-  - TBD
+  - "@Miciah"
+  - "@knobunc"
 api-approvers:
   - TBD
 creation-date: 2026-04-28
@@ -30,9 +31,11 @@ OpenShift-managed GatewayClasses (`openshift-external`,
 to provision Gateway instances with different service topologies.
 Each GatewayClass maps to a specific service type and
 configuration: external LoadBalancer, internal LoadBalancer, or
-ClusterIP. The Cluster Ingress Operator (CIO) provisions a default
-ConfigMap per GatewayClass using the sail-operator library,
-following the Istio GatewayClass defaults mechanism. This mirrors
+ClusterIP. The Cluster Ingress Operator (CIO) passes the service
+configuration to the sail-operator library, which provisions a
+GatewayClass defaults ConfigMap following the Istio GatewayClass
+defaults mechanism. CIO then creates the GatewayClasses
+automatically when `openshift-default` is created. This mirrors
 the service customization that CIO already provides for
 IngressControllers, but applied to Gateway API.
 
@@ -57,9 +60,11 @@ GatewayClasses will be introduced.
 
 There is a goal to backport this feature to previous OCP versions
 because this is a desired capability for existing deployments. The
-backport feasibility depends on the availability of a specific
-OSSM version that includes the GatewayClass defaults patch
-(version TBD, must be verified before backport planning).
+backport is feasible for OCP versions using OSSM >= 3.2.4 or
+>= 3.3.1, which include the required GatewayClass defaults fix
+([sail-operator#1465](https://github.com/istio-ecosystem/sail-operator/pull/1465)).
+Backport to versions using OSSM 3.0.x or 3.1.x is not possible
+without an additional upstream cherry-pick.
 
 ### User Stories
 
@@ -127,6 +132,10 @@ monitor the provisioned Gateways through existing telemetry.
 - Existing telemetry already covers these new GatewayClasses
   since we collect `controllerName` to determine OCP Gateway API
   usage.
+- Reuse as much as possible the existing CIO service
+  customization functions (from IngressController service
+  provisioning) for building the GatewayClass defaults, rather
+  than creating new logic from scratch.
 - Support backporting to previous OCP versions (subject to
   availability of the required OSSM version with the GatewayClass
   defaults patch).
@@ -155,12 +164,12 @@ openshift.io/gateway-controller/v1`, CIO will:
 
 1. Provision Istio/OSSM the same way it does for
    `openshift-default`.
-2. Create a ConfigMap with GatewayClass defaults for the specific
-   class, following the Istio GatewayClass defaults mechanism
-   documented at
+2. Pass the service configuration as `json.RawMessage` to the
+   sail-operator library, which provisions a GatewayClass
+   defaults ConfigMap following the Istio mechanism documented at
    https://istio.io/latest/docs/tasks/traffic-management/ingress/gateway-api/#gatewayclass-defaults.
-3. The ConfigMap contains the service type and platform-specific
-   annotations that define the service topology for that class.
+3. Create the GatewayClass resources (if they do not already
+   exist) with the correct `controllerName`.
 
 This approach is consistent with how CIO already provisions
 automatic HPA for Gateways managed by CIO.
@@ -169,8 +178,11 @@ One ConfigMap is created per GatewayClass (not per Gateway
 instance). All Gateways referencing a given GatewayClass share
 the same default configuration.
 
-The user creates the GatewayClasses manually when needed. CIO
-does not pre-create them.
+CIO automatically creates the three new GatewayClasses when
+`openshift-default` is created (or during upgrade). This keeps
+the Gateway API enablement workflow unchanged: the cluster
+administrator creates `openshift-default`, and CIO provisions
+the additional classes as part of the enablement process.
 
 ### Workflow Description
 
@@ -180,23 +192,30 @@ the cluster and Gateway infrastructure.
 **application developer** is a human user responsible for
 deploying applications and creating routes.
 
-1. The cluster administrator creates a GatewayClass with name
-   `openshift-external` and `spec.controllerName:
-   openshift.io/gateway-controller/v1`.
-2. CIO detects the new GatewayClass and provisions Istio/OSSM if
-   not already running.
-3. CIO creates a ConfigMap with GatewayClass defaults that
-   configures service type `LoadBalancer` with external scope and
-   platform-specific annotations (e.g., AWS NLB annotations,
-   health check intervals, `externalTrafficPolicy`).
-4. The cluster administrator creates a Gateway referencing
-   `gatewayClassName: openshift-external`.
-5. Istio provisions the Gateway with an Envoy deployment and a
-   service matching the defaults from the ConfigMap (external
-   LoadBalancer with correct annotations).
-6. CIO manages DNS for the Gateway listeners (same as today).
-7. The application developer creates an HTTPRoute attached to the
-   Gateway.
+1. The cluster administrator creates the `openshift-default`
+   GatewayClass with `spec.controllerName:
+   openshift.io/gateway-controller/v1` (existing enablement
+   workflow, unchanged).
+2. CIO detects `openshift-default` and provisions Istio/OSSM
+   (same as today).
+3. The sail-operator library (or Sail Operator, depending on the
+   approach) creates the GatewayClass defaults ConfigMap for
+   each new class, with the appropriate service type and
+   platform-specific annotations. CIO passes the required
+   configuration as `json.RawMessage`, the same way it does for
+   HPA provisioning.
+4. CIO creates the `openshift-external`, `openshift-internal`,
+   and `openshift-clusterip` GatewayClasses (if they do not
+   already exist) with the same `controllerName`.
+5. The cluster administrator creates a Gateway referencing one
+   of the available GatewayClasses (e.g.,
+   `gatewayClassName: openshift-external`).
+6. Istio provisions the Gateway with an Envoy deployment and a
+   service matching the defaults from the ConfigMap.
+7. CIO manages DNS for the Gateway listeners (same as today,
+   except for `openshift-clusterip` which gets no DNS).
+8. The application developer creates an HTTPRoute attached to
+   the Gateway.
 
 The same workflow applies for `openshift-internal` (internal
 LoadBalancer) and `openshift-clusterip` (ClusterIP, no
@@ -206,21 +225,24 @@ LoadBalancer, no DNS).
 sequenceDiagram
     participant Admin as Cluster Admin
     participant CIO as cluster-ingress-operator
+    participant Sail as sail-operator library
     participant Istio as Istio/OSSM
     participant Envoy as Envoy Proxy
     participant Cloud as Cloud Provider
 
-    Admin->>CIO: Create GatewayClass (openshift-external)
+    Admin->>CIO: Create GatewayClass (openshift-default)
     CIO->>Istio: Provision Istio (if needed)
-    CIO->>CIO: Create ConfigMap with GatewayClass defaults
-    Note over CIO: service type: LoadBalancer<br/>annotations: platform-specific<br/>externalTrafficPolicy, health checks
+    CIO->>Sail: Pass json.RawMessage with service config
+    Sail->>Sail: Create ConfigMap per GatewayClass
+    Note over Sail: external: LB + platform annotations<br/>internal: LB + internal annotations<br/>clusterip: ClusterIP, no LB
+    CIO->>CIO: Create openshift-external,<br/>openshift-internal, openshift-clusterip
 
     Admin->>Istio: Create Gateway (class: openshift-external)
     Istio->>Envoy: Deploy Envoy proxy
-    Istio->>Cloud: Create Service (LoadBalancer, external)
+    Istio->>Cloud: Create Service (per ConfigMap defaults)
     CIO->>Cloud: Create DNS records for listeners
 
-    Note over Admin,Cloud: Same flow for openshift-internal<br/>(internal LB) and openshift-clusterip<br/>(ClusterIP, no DNS)
+    Note over Admin,Cloud: No DNS for openshift-clusterip
 ```
 
 ### API Extensions
@@ -254,12 +276,10 @@ following rules:
 
    Any other `openshift-*` name will be rejected.
 
-<!-- TODO: Determine whether the VAP action should be `Deny`
-(hard error, blocks creation) or `Warn` (allows creation but
-emits a warning). A hard deny is safer but may break existing
-workflows if users have already created non-standard
-GatewayClasses. A warning allows gradual adoption but does not
-prevent misconfiguration. -->
+The VAP must use `Deny` (hard error, blocks creation) to
+prevent misconfiguration. Warnings are not sufficient because
+a misconfigured GatewayClass with the `openshift-*` prefix
+would be silently ignored by CIO, leading to user confusion.
 
 Example VAP (simplified):
 
@@ -416,13 +436,13 @@ ensure consistency.
    the same `controllerName:
    openshift.io/gateway-controller/v1`.
 
-2. **ConfigMap provisioning**: For each recognized GatewayClass,
-   CIO creates a ConfigMap with GatewayClass defaults using the
-   mechanism defined at
+2. **ConfigMap provisioning**: The sail-operator library (or Sail
+   Operator) provisions the GatewayClass defaults ConfigMap,
+   following the mechanism defined at
    https://istio.io/latest/docs/tasks/traffic-management/ingress/gateway-api/#gatewayclass-defaults.
-   The ConfigMap is created using the sail-operator library (or
-   Sail Operator), consistent with how CIO already manages the
-   automatic HPA ConfigMap for Gateway.
+   CIO passes the required service configuration as
+   `json.RawMessage` to the sail-operator library, the same
+   pattern used for HPA provisioning today.
 
 3. **Platform-specific annotations**: CIO derives the
    platform-specific service annotations from the cluster
@@ -443,18 +463,27 @@ This enhancement does not require a new feature gate. It is a CIO
 behavioral change that extends existing Gateway API support.
 
 **OSSM version requirement**: The GatewayClass defaults ConfigMap
-mechanism depends on a specific Istio/OSSM patch that supports
-the `gatewayclass-defaults` ConfigMap. The exact OSSM version
-that includes this fix must be verified before implementation and
-before any backport planning. This is a hard dependency.
+mechanism depends on the upstream fix
+[istio-ecosystem/sail-operator#1465](https://github.com/istio-ecosystem/sail-operator/pull/1465)
+("set preserve-unknown-fields on gatewayClasses"), merged to
+upstream `main` on 2025-12-17. This fix was cherry-picked to:
 
-<!-- TODO: The developer implementing this should verify which
-OSSM version includes the GatewayClass defaults ConfigMap fix
-and document it here. -->
+- **release-3.2** (downstream
+  `openshift-service-mesh/sail-operator`): available since
+  tag `3.2.3-dev` (2026-02-19). First GA tag: **`v3.2.4`**
+  (2026-04-22).
+- **release-3.3**: available since tag `3.3.0-dev`
+  (2026-03-06). First GA tag: **`v3.3.1`** (2026-03-27).
 
-<!-- TODO: The developer should fill in the specific ConfigMap
-structure and the exact sail-operator library API used for
-ConfigMap provisioning. -->
+The fix is **not present** in any 3.0.x or 3.1.x release (no
+upstream cherry-pick to `release-1.25` or `release-1.26`).
+
+This means:
+- OCP 4.23 (targeting OSSM 3.3.x): supported.
+- Backports to OCP versions using OSSM >= 3.2.4: supported.
+- Backports to OCP versions using OSSM 3.0.x or 3.1.x: **not
+  possible** without an additional cherry-pick upstream.
+
 
 ### Risks and Mitigations
 
@@ -502,9 +531,10 @@ supported by Istio. Monitor upstream changes and adapt if needed.
    service? A proposed approach is ClusterIP + manual NodePort
    service, which works as long as we document it for users.
 
-2. What is the minimum OSSM version required for the GatewayClass
-   defaults ConfigMap mechanism? This must be verified before
-   implementation begins and before backport planning.
+2. ~~What is the minimum OSSM version required?~~ **Answered**:
+   OSSM >= 3.2.4 (sail-operator `v3.2.4`) or >= 3.3.1
+   (`v3.3.1`). Not available in 3.0.x or 3.1.x. See
+   [Implementation Details](#implementation-detailsnotesconstraints).
 
 3. For backports: should the ConfigMap be created by CIO directly,
    or should we rely on the sail-operator library being available
@@ -514,13 +544,6 @@ supported by Istio. Monitor upstream changes and adapt if needed.
    on a platform where certain annotations are not applicable
    (e.g., `openshift-internal` on a bare metal cluster without a
    cloud load balancer)?
-
-5. Should the ValidatingAdmissionPolicy use `Deny` (hard error,
-   blocks creation) or `Warn` (allows creation but emits a
-   warning)? A hard deny is safer but may break workflows if
-   users have already created non-standard GatewayClasses. A
-   warning allows gradual adoption but does not prevent
-   misconfiguration.
 
 ## Alternatives (Not Implemented)
 
@@ -558,9 +581,10 @@ Reference dev-guide/test-conventions.md for details. -->
 
 Testing will cover the following scenarios:
 
-1. Create each of the three new GatewayClasses and verify CIO
-   creates the correct ConfigMap with the expected service type
-   and annotations.
+1. Create `openshift-default` and verify CIO automatically
+   creates `openshift-external`, `openshift-internal`, and
+   `openshift-clusterip` GatewayClasses with the correct
+   ConfigMap for each.
 2. Create a Gateway with each new GatewayClass and verify the
    provisioned service has the correct type (LoadBalancer
    external, LoadBalancer internal, ClusterIP) and annotations.
@@ -606,9 +630,10 @@ N/A.
 
 ### Upgrade
 
-Clusters upgrading to 4.23 gain the ability to create the new
-GatewayClasses. No existing resources are modified. The
-`openshift-default` GatewayClass continues to work as before.
+Clusters upgrading to 4.23 where `openshift-default` already
+exists will have the three new GatewayClasses automatically
+created by CIO during the upgrade. The `openshift-default`
+GatewayClass continues to work as before.
 
 ### Downgrade
 
@@ -629,10 +654,10 @@ needs to be defined. Considerations include:
 - Existing Gateway services may lose their customized
   configuration on the next Istio reconciliation if the ConfigMap
   is removed.
-- For backported versions, a specific OSSM version containing
-  the GatewayClass defaults patch is required (version TBD).
-  Clusters without this OSSM version cannot use the new
-  GatewayClasses.
+- For backported versions, OSSM >= 3.2.4 or >= 3.3.1 is
+  required (contains the GatewayClass defaults fix from
+  sail-operator#1465). Clusters on OSSM 3.0.x or 3.1.x cannot
+  use the new GatewayClasses.
 - Both scenarios (Gateways staying with degraded behavior, or
   Gateways being cleaned up by Istio) need to be tested during
   implementation to determine the actual behavior and define the
@@ -676,7 +701,7 @@ for GatewayClass naming enforcement.
   enforcement is lost but Gateway provisioning continues to
   work. CIO should recreate the VAP on the next reconciliation.
 
-#### Support Procedures
+## Support Procedures
 
 Check the GatewayClass defaults ConfigMap exists:
 ```bash
