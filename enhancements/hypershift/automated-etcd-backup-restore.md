@@ -443,15 +443,39 @@ HyperShift has several existing backup and restore mechanisms developed independ
 | `etcd-backup` subcommand ([hypershift#3034](https://github.com/openshift/hypershift/pull/3034)) | CPO binary | Called by `HCPEtcdBackupReconciler` | Legacy monolithic snapshot+S3 upload | Active (used by HCPEtcdBackup) |
 | Proposed `automatedBackup` | CPO (new controller) | Scheduled: CronJob | Automated backup+restore with PKI secrets | This enhancement |
 
-**Relationship with `restoreSnapshotURL`**: The `restoreSnapshotURL` field provides manual, URL-based restore from a pre-signed S3 URL. It does not restore PKI secrets (the operator must ensure the same CA and signing keys are available). The proposed automated restore is a superset: it restores both the etcd snapshot and PKI secrets from a managed archive. Both mechanisms use the `EtcdSnapshotRestored` condition. They are mutually exclusive at restore time — if both `restoreSnapshotURL` and `automatedBackup` are configured, the CPO should reject the configuration with a validation error. Long-term, `restoreSnapshotURL` may be deprecated in favor of `automatedBackup` once all storage backends are supported.
+**Relationship with `restoreSnapshotURL`**: The `restoreSnapshotURL` field provides manual, URL-based restore from a pre-signed S3 URL.
+It does not restore PKI secrets (the operator must ensure the same CA and signing keys are available).
+The proposed automated restore is a superset: it restores both the etcd snapshot and PKI secrets from a managed archive.
+Both mechanisms use the `EtcdSnapshotRestored` condition.
+They are mutually exclusive at restore time — if both `restoreSnapshotURL` and `automatedBackup` are configured,
+the CPO should reject the configuration with a validation error.
+Long-term, `restoreSnapshotURL` may be deprecated in favor of `automatedBackup` once all storage backends are supported.
 
-**Relationship with `HCPEtcdBackup` CRD**: The `HCPEtcdBackup` CRD (gated behind `HCPEtcdBackup`) configures one-shot CRD-based backups designed for OADP integration, orchestrated by the `HCPEtcdBackupReconciler` in the HyperShift Operator (HO). The reconciler runs in the HO namespace and requires cross-namespace cert fetching via the `fetch-etcd-certs` init container. The proposed automated backup runs in the HCP namespace, where it has direct access to etcd pods and PKI secrets, simplifying RBAC and eliminating the need for cross-namespace access patterns.
+**Relationship with `HCPEtcdBackup` CRD**: The `HCPEtcdBackup` CRD (gated behind `HCPEtcdBackup`) configures one-shot CRD-based backups
+designed for OADP integration, orchestrated by the `HCPEtcdBackupReconciler` in the HyperShift Operator (HO).
+The reconciler runs in the HO namespace and requires cross-namespace cert fetching via the `fetch-etcd-certs` init container.
+The proposed automated backup runs in the HCP namespace, where it has direct access to etcd pods and PKI secrets,
+simplifying RBAC and eliminating the need for cross-namespace access patterns.
 
-Both features can be active simultaneously. They use different orchestration controllers (HO vs CPO), different trigger mechanisms (CRD creation vs CronJob schedule), and different storage formats (OADP BackupStorageLocation vs direct cloud storage upload). Both perform `etcdctl snapshot save` against the same etcd cluster, but etcd snapshots are read-only linearizable reads that do not block or interfere with each other. If both happen to run at the exact same moment, the etcd server handles concurrent snapshot requests safely.
+Both features can be active simultaneously.
+They use different orchestration controllers (HO vs CPO), different trigger mechanisms (CRD creation vs CronJob schedule),
+and different storage formats (OADP BackupStorageLocation vs direct cloud storage upload).
+Both perform `etcdctl snapshot save` against the same etcd cluster,
+but etcd snapshots are read-only linearizable reads that do not block or interfere with each other.
+If both happen to run at the exact same moment, the etcd server handles concurrent snapshot requests safely.
 
-**Relationship with `etcd-backup` subcommand**: The `etcd-backup` subcommand (hypershift#3034) is a legacy monolithic command that takes an etcd snapshot and uploads it to S3. It does not bundle PKI secrets. The proposed automated backup uses a different architecture (init container for snapshot, main container for bundling and upload) and adds GCS support. The `etcd-backup` subcommand continues to serve `HCPEtcdBackup` CRD workflows.
+**Relationship with `etcd-backup` subcommand**: The `etcd-backup` subcommand (hypershift#3034) is a legacy monolithic command
+that takes an etcd snapshot and uploads it to S3. It does not bundle PKI secrets.
+The proposed automated backup uses a different architecture (init container for snapshot, main container for bundling and upload)
+and adds GCS support. The `etcd-backup` subcommand continues to serve `HCPEtcdBackup` CRD workflows.
 
-**Consolidation path**: `automatedBackup` is designed as a lightweight, self-contained scheduled backup that does not depend on OADP. Once S3 and Azure backends are added (see [Future Work](#future-work)), it will cover all platforms currently served by `HCPEtcdBackup`. At that point, the community should evaluate whether `HCPEtcdBackup` should be deprecated in favor of `automatedBackup`, or whether OADP integration remains a distinct use case. Similarly, `restoreSnapshotURL` can be deprecated once automated restore supports all platforms. The consolidation timeline depends on backend availability and user feedback during Tech Preview.
+**Consolidation path**: `automatedBackup` is designed as a lightweight, self-contained scheduled backup that does not depend on OADP.
+Once S3 and Azure backends are added (see [Future Work](#future-work)),
+it will cover all platforms currently served by `HCPEtcdBackup`.
+At that point, the community should evaluate whether `HCPEtcdBackup` should be deprecated in favor of `automatedBackup`,
+or whether OADP integration remains a distinct use case.
+Similarly, `restoreSnapshotURL` can be deprecated once automated restore supports all platforms.
+The consolidation timeline depends on backend availability and user feedback during Tech Preview.
 
 #### HostedCluster to HostedControlPlane Propagation
 
