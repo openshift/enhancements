@@ -545,6 +545,10 @@ supported by Istio. Monitor upstream changes and adapt if needed.
    (e.g., `openshift-internal` on a bare metal cluster without a
    cloud load balancer)?
 
+5. For backports: should the backport create the extra GatewayClass 
+   during the backport, or GatewayClass should be created just on 
+   main branch?
+
 ## Alternatives (Not Implemented)
 
 ### Alternative 1: Modify openshift-default Behavior
