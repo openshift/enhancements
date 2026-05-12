@@ -8,12 +8,12 @@ approvers:
   - "@Miciah"
   - "@knobunc"
 api-approvers:
-  - TBD
+  - "@knobunc"
 creation-date: 2026-04-28
 last-updated: 2026-04-28
 status: provisional
 tracking-link:
-  - NO-JIRA
+  - https://redhat.atlassian.net/browse/NE-2699
 see-also:
   - "/enhancements/ingress/gateway-api-with-cluster-ingress-operator.md"
   - "/enhancements/ingress/gateway-api-without-olm.md"
