@@ -53,3 +53,36 @@ HACKMD_IMAGE=enhancements-hackmd-cli:latest # hackmd-cli image
 .PHONY: report-image
 report-image:
 	$(RUNTIME) build -f ./hack/Dockerfile.hackmd-cli --tag $(HACKMD_IMAGE)
+
+##@ Agentic Docs Evaluation
+
+.PHONY: eval
+eval: ## Run all agentic docs evaluations
+	@echo "Running agentic docs evaluations..."
+	test/eval/run-eval.sh
+
+.PHONY: eval-filter
+eval-filter: ## Run evaluations matching FILTER pattern (e.g., FILTER=anti-pattern)
+	@test -n "$(FILTER)" || (echo "Error: FILTER not set. Usage: make eval-filter FILTER=navigation"; exit 1)
+	@echo "Running evaluations (filter: $(FILTER))..."
+	test/eval/run-eval.sh "$(FILTER)"
+
+.PHONY: eval-navigation
+eval-navigation: ## Run navigation scenario tests
+	@echo "Running navigation scenarios..."
+	test/eval/run-eval.sh navigation
+
+.PHONY: eval-anti-pattern
+eval-anti-pattern: ## Run anti-pattern scenarios (tests what docs prevent)
+	@echo "Running anti-pattern scenarios..."
+	test/eval/run-eval.sh anti-pattern
+
+.PHONY: eval-view
+eval-view: ## Open web UI to view evaluation results
+	@echo "Opening evaluation results viewer..."
+	npx --yes promptfoo@latest view
+
+.PHONY: eval-clean
+eval-clean: ## Clean evaluation cache
+	@echo "Cleaning evaluation cache..."
+	rm -rf .promptfoo/

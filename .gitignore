@@ -5,3 +5,11 @@ enhancement-tool
 tools/bin
 tools/cover.out
 super-linter.log
+
+# Node.js dependencies (for promptfoo evals)
+node_modules/
+package-lock.json
+
+# Promptfoo cache and results
+.promptfoo/
+promptfoo-results.json
