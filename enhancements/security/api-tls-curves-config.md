@@ -266,6 +266,8 @@ based on their operational context:
     tlsSecurityProfile:
       type: Custom
       custom:
+        ciphers:
+        - ECDHE-ECDSA-AES128-GCM-SHA256
         minTLSVersion: VersionTLS13
         groups:
         - X25519MLKEM768
@@ -294,6 +296,9 @@ based on their operational context:
     tlsSecurityProfile:
       type: Custom
       custom:
+        ciphers:
+        - ECDHE-RSA-CHACHA20-POLY1305
+        minTLSVersion: VersionTLS13
         groups:
         - X25519MLKEM768
   ```
@@ -593,6 +598,9 @@ spec:
   tlsSecurityProfile:
     type: Custom
     custom:
+      ciphers:
+      - ECDHE-RSA-CHACHA20-POLY1305
+      minTLSVersion: VersionTLS13
       groups:
       - X25519MLKEM768
       - X25519
