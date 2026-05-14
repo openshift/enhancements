@@ -39,6 +39,11 @@ As an administrator, I want to explicitly set the supported TLS groups to ensure
 PQC readiness throughout OpenShift so that I can ensure the security of TLS
 communication in the era of quantum computing.
 
+As an administrator, I want to rely on default TLS groups and default TLS
+security profiles without explicitly configuring supported groups, so that my
+cluster continues to work securely out of the box without requiring manual TLS
+configuration.
+
 ### Goals
 
 To provide an interface that allows the setting of TLS groups to be used cluster
@@ -111,6 +116,11 @@ spec:
       - X25519
 ```
 
+In the example above, the APIServer configures the `tlsSecurityProfile` to use
+TLS v1.2 or higher, with one cipher (`ECDHE-ECDSA-AES128-GCM-SHA256`), and two
+supported groups (`X25519MLKEM768` and `X25519`) for key exchange.
+`X25519MLKEM768` is preferred over `X25519` due to the ordering.
+
 Component-specific objects can be used to override the cluster-wide default
 for individual components. For example, to override the groups on the ingress
 controller only:
@@ -135,6 +145,10 @@ spec:
       groups:
       - X25519MLKEM768
 ```
+
+In the example above, the Ingress Controller can restrict traffic to use TLS
+v1.3 only, with one cipher (`ECDHE-RSA-CHACHA20-POLY1305`), and one supported
+group (`X25519MLKEM768`) for key exchange.
 
 See the [Component Configuration Consumption](#component-configuration-consumption)
 section for the full list of configuration sources and their precedence.
