@@ -6,6 +6,7 @@ reviewers:
   - "@enxebre, for CPO component framework and HCP architecture"
   - "@sjenning, for etcd and control plane scalability"
   - "@csrwng, for HCP lifecycle and API design"
+  - "@JoelSpeed"
 approvers:
   - "@enxebre"
 api-approvers:
@@ -259,17 +260,20 @@ type EtcdShardResource struct {
     // apiGroup is the API group of the resource (e.g., "coordination.k8s.io"
     // for leases). An empty string designates the core API group (e.g.,
     // events, pods, configmaps).
-    // When non-empty, must be a valid DNS subdomain (RFC 1123).
+    // When non-empty, must be at most 253 characters in length and consist
+    // of only lowercase alphanumeric characters, hyphens and periods. Each
+    // period separated segment must start and end with an alphanumeric
+    // character.
     // +required
     // +kubebuilder:validation:MinLength=0
     // +kubebuilder:validation:MaxLength=253
     // +kubebuilder:validation:XValidation:rule="self == '' || self.matches('^[a-z0-9]([a-z0-9-]*[a-z0-9])?([.][a-z0-9]([a-z0-9-]*[a-z0-9])?)*$')",message="apiGroup must be a valid DNS subdomain (lowercase alphanumeric, hyphens, dots)"
-    APIGroup string `json:"apiGroup,omitempty"`
+    APIGroup *string `json:"apiGroup,omitempty"`
 
     // resource is the plural resource name (e.g., "events", "leases",
     // "configmaps"). Must be a valid DNS label (RFC 1123): lowercase
     // alphanumeric characters or hyphens, starting and ending with an
-    // alphanumeric character.
+    // alphanumeric character, max 63 characters.
     // +required
     // +kubebuilder:validation:MinLength=1
     // +kubebuilder:validation:MaxLength=63
@@ -283,8 +287,10 @@ type ManagedEtcdShardSpec struct {
     // name is a unique identifier for this shard. It is used to derive
     // resource names (e.g., StatefulSet "etcd-{name}", Service
     // "etcd-client-{name}").
+    // Must be a valid DNS1123 label (lowercase alphanumeric with hyphens,
+    // starting and ending with an alphanumeric character), max 48 characters.
+    // Immutable once set.
     // +required
-    // +immutable
     // +kubebuilder:validation:MinLength=1
     // +kubebuilder:validation:MaxLength=48
     // +kubebuilder:validation:XValidation:rule="self.matches('^[a-z0-9]([-a-z0-9]*[a-z0-9])?$')",message="name must be a valid DNS1123 label: lowercase alphanumeric with hyphens, starting and ending with an alphanumeric character"
@@ -296,8 +302,8 @@ type ManagedEtcdShardSpec struct {
     // resource name. For example, events in the core group would be
     // {resource: "events"}, and leases in the coordination group would be
     // {apiGroup: "coordination.k8s.io", resource: "leases"}.
+    // Minimum 1, maximum 20 entries. Immutable once set.
     // +required
-    // +immutable
     // +kubebuilder:validation:MinItems=1
     // +kubebuilder:validation:MaxItems=20
     // +listType=map
@@ -313,14 +319,12 @@ type ManagedEtcdShardSpec struct {
     Storage ManagedEtcdShardStorageSpec `json:"storage,omitzero"`
 
     // replicas is the number of etcd replicas for this shard. Must be 1 or 3.
-    // If specified, overrides controllerAvailabilityPolicy for this shard.
-    // If not specified, defaults to 3 for HA deployments or 1 for
-    // SingleReplica, following controllerAvailabilityPolicy.
-    // +optional
+    // Immutable once set.
+    // +required
     // +kubebuilder:validation:Enum=1;3
     // +kubebuilder:validation:Minimum=1
-    // +kubebuilder:validation:XValidation:rule="!has(oldSelf) || self == oldSelf",message="replicas is immutable"
-    Replicas int32 `json:"replicas,omitempty"`
+    // +kubebuilder:validation:XValidation:rule="self == oldSelf",message="replicas is immutable"
+    Replicas int32 `json:"replicas"`
 
     // scheduling configures per-shard pod placement constraints. These
     // constraints are merged with the framework's control plane node
@@ -334,18 +338,16 @@ type ManagedEtcdShardSpec struct {
 type EtcdShardSchedulingSpec struct {
     // nodeSelector constrains this shard's pods to nodes matching the
     // specified labels, in addition to the framework's control plane node
-    // selector. Keys and values must be valid Kubernetes label key/value pairs.
+    // selector. Keys and values must be valid Kubernetes label key/value
+    // pairs. Maximum 16 entries.
     // +optional
-    // -kubebuilder:validation:XValidation:rule=`self.all(key, size(key) <= 317 && key.matches('^(([A-Za-z0-9]+(\\.[A-Za-z0-9]+)?)*[A-Za-z0-9]\\/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$'))`, message="label key must be a valid qualified name"
-    // -kubebuilder:validation:XValidation:rule=`self.all(key, size(self[key]) <= 63 && self[key].matches('^(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?$'))`, message="label value must be 63 characters or less and consist of valid label characters"
-    // TODO: label key/value validations disabled pending resolution of CEL cost budget issue (see HostedClusterSpec.Labels)
     // +kubebuilder:validation:MinProperties=1
     // +kubebuilder:validation:MaxProperties=16
     NodeSelector map[string]string `json:"nodeSelector,omitempty"`
 
     // tolerations allows this shard's pods to schedule on nodes with
     // matching taints, in addition to the framework's control plane
-    // tolerations.
+    // tolerations. Maximum 16 entries.
     // +optional
     // +listType=atomic
     // +kubebuilder:validation:MinItems=1
@@ -357,8 +359,10 @@ type EtcdShardSchedulingSpec struct {
 // within an unmanaged (externally operated) etcd deployment.
 type UnmanagedEtcdShardSpec struct {
     // name is a unique identifier for this shard.
+    // Must be a valid DNS1123 label (lowercase alphanumeric with hyphens,
+    // starting and ending with an alphanumeric character), max 48 characters.
+    // Immutable once set.
     // +required
-    // +immutable
     // +kubebuilder:validation:MinLength=1
     // +kubebuilder:validation:MaxLength=48
     // +kubebuilder:validation:XValidation:rule="self.matches('^[a-z0-9]([-a-z0-9]*[a-z0-9])?$')",message="name must be a valid DNS1123 label: lowercase alphanumeric with hyphens, starting and ending with an alphanumeric character"
@@ -367,8 +371,8 @@ type UnmanagedEtcdShardSpec struct {
 
     // resources is the list of Kubernetes resource types routed to this
     // shard. Uses the same format as ManagedEtcdShardSpec.Resources.
+    // Minimum 1, maximum 20 entries. Immutable once set.
     // +required
-    // +immutable
     // +kubebuilder:validation:MinItems=1
     // +kubebuilder:validation:MaxItems=20
     // +listType=map
@@ -378,19 +382,18 @@ type UnmanagedEtcdShardSpec struct {
     Resources []EtcdShardResource `json:"resources,omitempty"`
 
     // endpoint is the full etcd client endpoint URL for this shard.
+    // Must be a valid HTTPS URL, max 267 characters. Immutable once set.
     // +required
-    // +immutable
     // +kubebuilder:validation:MinLength=1
-    // +kubebuilder:validation:MaxLength=255
+    // +kubebuilder:validation:MaxLength=267
     // +kubebuilder:validation:XValidation:rule="isURL(self) && url(self).getScheme() == 'https'",message="endpoint must be a valid HTTPS URL"
     // +kubebuilder:validation:XValidation:rule="self == oldSelf",message="endpoint is immutable"
     Endpoint string `json:"endpoint,omitempty"`
 
     // tls specifies TLS configuration for this shard's HTTPS endpoint.
     // +required
-    // +immutable
     // +kubebuilder:validation:XValidation:rule="self == oldSelf",message="tls is immutable"
-    TLS EtcdTLSConfig `json:"tls,omitzero"`
+    TLS EtcdTLSConfig `json:"tls"`
 }
 ```
 
@@ -417,7 +420,9 @@ type ManagedEtcdSpec struct {
     // the default shard (catch-all for all resources not explicitly
     // routed). Entries in this list define non-default shards,
     // each deployed as an independent StatefulSet and ControlPlaneComponent.
-    // Immutable after creation.
+    // Minimum 1, maximum 10 entries. Resources must not overlap across
+    // shards. Immutable after creation: shards cannot be added, removed,
+    // or reordered.
     // +optional
     // +openshift:enable:FeatureGate=EtcdSharding
     // +listType=map
@@ -439,7 +444,9 @@ type UnmanagedEtcdSpec struct {
     // (the catch-all for all resources not explicitly routed). Entries
     // in this list define non-default shards, each with its own endpoint
     // and TLS configuration.
-    // Immutable after creation.
+    // Minimum 1, maximum 10 entries. Resources must not overlap across
+    // shards. Immutable after creation: shards cannot be added, removed,
+    // or reordered.
     // +optional
     // +openshift:enable:FeatureGate=EtcdSharding
     // +listType=map
@@ -456,8 +463,8 @@ type UnmanagedEtcdSpec struct {
 function (not a method on the API type, per
 [OpenShift API conventions](https://github.com/openshift/enhancements/blob/master/dev-guide/api-conventions.md)
 which forbid functions on API types). It always synthesizes a default shard from the
-top-level `Storage` and `Scheduling` fields (with `ResourcePrefixes: ["/"]`,
-replicas from `controllerAvailabilityPolicy`), and appends any explicit non-default
+top-level `Storage` and `Scheduling` fields (with replicas from
+`controllerAvailabilityPolicy`), and appends any explicit non-default
 shards from the `Shards` list. When no
 shards are configured, the result is a single default shard — identical to today's
 behavior. The function is defined in `support/etcd/` or a similar helper package, not
@@ -501,10 +508,10 @@ on cluster functionality.
 
 #### Configuration Matrix
 
-| Storage Type | Survives pod restart | Survives full-cluster restart | DR/Migration | Memory pressure |
+| Storage Type | Survives container/pod restart | Survives pod rescheduling or node restart | DR/Migration | Memory pressure |
 | --- | --- | --- | --- | --- |
 | PVC | Yes | Yes | Yes (backed up) | None (disk) |
-| EmptyDir | No | No | No | Uses node RAM |
+| EmptyDir | Yes (same pod) | No | No | Uses node RAM |
 
 The existing `ManagedEtcdStorageSpec` is **unchanged** by this enhancement — it
 continues to support only `PersistentVolume`. Per-shard storage uses a new
@@ -551,10 +558,13 @@ type ManagedEtcdShardStorageSpec struct {
 type ManagedEtcdShardPersistentVolumeSpec struct {
     // storageClassName overrides the StorageClass for this shard's PVCs.
     // If not specified, the parent ManagedEtcdSpec's storageClassName is used.
-    // Must be a valid DNS1123 subdomain, max 253 characters.
+    // Must be a valid DNS1123 subdomain (lowercase alphanumeric, hyphens, or
+    // dots, starting and ending with an alphanumeric character), max 253
+    // characters.
     // +optional
     // +kubebuilder:validation:MinLength=1
     // +kubebuilder:validation:MaxLength=253
+    // +kubebuilder:validation:XValidation:rule="self.matches('^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$')",message="storageClassName must be a valid DNS1123 subdomain"
     StorageClassName string `json:"storageClassName,omitempty"`
 }
 ```
@@ -573,9 +583,9 @@ independently per shard risks misconfiguration (e.g., a PVC smaller than the
 quota causes filesystem-full errors before the clean quota alarm fires). The
 `storageClassName` can be overridden per shard to target different I/O tiers
 or storage pools.
-Replicas and scheduling on non-default shards default to framework values
-(3 replicas HA, no special scheduling) if unset — they do not inherit from the
-top-level `Replicas`/`Scheduling` fields, which apply only to the default shard.
+Replicas on non-default shards are required (must be explicitly set to 1 or 3).
+Scheduling defaults to no special scheduling if unset. Neither inherits from the
+top-level fields, which apply only to the default shard.
 
 **Validation rules:**
 
@@ -626,8 +636,8 @@ top-level `Replicas`/`Scheduling` fields, which apply only to the default shard.
 
       Storage ManagedEtcdShardStorageSpec `json:"storage,omitzero"`
 
-      // +kubebuilder:validation:XValidation:rule="!has(oldSelf) || self == oldSelf",message="replicas is immutable"
-      Replicas int32 `json:"replicas,omitempty"`
+      // +kubebuilder:validation:XValidation:rule="self == oldSelf",message="replicas is immutable"
+      Replicas int32 `json:"replicas"`
 
       Scheduling EtcdShardSchedulingSpec `json:"scheduling,omitzero"`
   }
@@ -640,8 +650,7 @@ top-level `Replicas`/`Scheduling` fields, which apply only to the default shard.
   The same per-field immutability pattern applies to `UnmanagedEtcdShardSpec` fields
   (`Name`, `Resources`, `Endpoint`, `TLS`).
 
-- Validate replica count: must be 1 or 3 on `ManagedEtcdShardSpec.Replicas`
-  (non-default shards only; the default shard uses `controllerAvailabilityPolicy`)
+- Validate replica count: must be 1 or 3 on `ManagedEtcdShardSpec.Replicas` (required)
 - Enforce `MaxItems=10` for both managed and unmanaged shards arrays
 - Use `+listType=map` and `+listMapKey=name` for the shards array
 - Validate scheduling: `nodeSelector` keys and values must be valid Kubernetes label
@@ -659,7 +668,7 @@ top-level `Replicas`/`Scheduling` fields, which apply only to the default shard.
 The resource and shard name validations above apply identically to unmanaged
 shards. Additionally:
 
-- Each shard's `Endpoint` must be a valid HTTPS URL (validated via CEL `isURL` + scheme check), at most 255 characters
+- Each shard's `Endpoint` must be a valid HTTPS URL (validated via CEL `isURL` + scheme check), at most 267 characters
 - Each shard's `TLS.ClientSecret` must reference a valid secret name
 - The top-level `endpoint` becomes `--etcd-servers`; the shards list becomes
   `--etcd-servers-overrides`
@@ -979,21 +988,25 @@ Garbage collection on HCP deletion is automatic.
 Each shard adds the following resources per HCP. The exact footprint varies based on
 storage type and replica count:
 
-| Resource | Per shard (3 replicas, PVC) | Per shard (3 replicas, EmptyDir) |
-| --- | --- | --- |
-| Pods | 3 | 3 |
-| PVCs | 3 | 0 |
-| Services | 2 (client + discovery) | 2 (client + discovery) |
-| ServiceMonitor | 1 | 1 |
-| PDB | 1 | 1 |
-| TLS Secrets | ~3 (server, peer, client) | ~3 (server, peer, client) |
+| Resource | 3 replicas, PVC | 3 replicas, EmptyDir | 1 replica, PVC | 1 replica, EmptyDir |
+| --- | --- | --- | --- | --- |
+| Pods | 3 | 3 | 1 | 1 |
+| PVCs | 3 | 0 | 1 | 0 |
+| Services | 2 (client + discovery) | 2 (client + discovery) | 2 (client + discovery) | 2 (client + discovery) |
+| ServiceMonitor | 1 | 1 | 1 | 1 |
+| PDB | 1 | 1 | 1 | 1 |
+| TLS Secrets | ~3 (server, peer, client) | ~3 (server, peer, client) | ~3 (server, peer, client) | ~3 (server, peer, client) |
+
+**Note on 1-replica shards:** Single-replica shards have no quorum redundancy — any pod
+failure makes the shard completely unavailable until the pod restarts. Use `replicas: 1`
+only for ephemeral data (e.g., events with EmptyDir) where brief unavailability is
+acceptable.
 
 **Example:** A 3-shard configuration (default + events + leases) with the default and
-leases on PVC and events on EmptyDir produces 9 pods, 6 PVCs, 6 Services, 3
-ServiceMonitors, 3 PDBs, and ~9 TLS Secrets per HCP. At scale (hundreds of HCPs on a
-single management cluster), operators should account for this linear growth when sizing
-the management cluster. Single-replica shards (`replicas: 1`) reduce the pod and PVC
-count proportionally.
+leases on PVC (3 replicas each) and events on EmptyDir (1 replica) produces 7 pods,
+6 PVCs, 6 Services, 3 ServiceMonitors, 3 PDBs, and ~9 TLS Secrets per HCP. At scale
+(hundreds of HCPs on a single management cluster), operators should account for this
+linear growth when sizing the management cluster.
 
 #### Instance-Level I/O Budget Considerations
 
