@@ -161,13 +161,12 @@ section for the full list of configuration sources and their precedence.
   `DevPreviewNoUpgrade` and `TechPreviewNoUpgrade` tiers
 - The addition of this field should not affect existing API behaviour
 - **Component implementors do not need to check for the feature gate.** Because
-  the field is optional (`+optional`, `omitempty`), components need only inspect
-  the field's value when unmarshaling the TLS security profile. When the feature
-  gate is disabled the field will never be set, so components will continue
-  using the TLS implementation's defaults transparently. When the field is
-  present, components use the specified groups; when absent, they fall back to
-  defaults. This mirrors the approach used for `tlsAdherence` in
-  [openshift/api#2583](https://github.com/openshift/api/pull/2583).
+  the field is optional (`+optional`, `omitempty`), the field's presence is
+  sufficient signal. When the field is set, components use the specified groups;
+  when absent, they fall back to the TLS implementation's defaults. When the
+  feature gate is not enabled, the API server will not persist the field, so it
+  will never be set — components therefore continue behaving exactly as they do
+  today without any feature-gate awareness.
 
 ### Topology Considerations
 
