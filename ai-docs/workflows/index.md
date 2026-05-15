@@ -5,8 +5,9 @@ AI-optimized guides for OpenShift development processes.
 ## Workflow Guides
 
 - [enhancement-process.md](enhancement-process.md) - Writing enhancement proposals (structured version of `../guidelines/enhancement_template.md`)
+- [topology-considerations-guide.md](topology-considerations-guide.md) - Guide for addressing SNO, MicroShift, Hypershift, and OKE in enhancement proposals
 - [implementing-features.md](implementing-features.md) - Feature implementation workflow (spec → plan → build → test → review → ship)
-- [exec-plans/](exec-plans/) - Feature tracking templates and guidance (Tier 1)
+- [exec-plans/](exec-plans/) - Feature tracking templates and guidance (Platform)
 
 ## Authoritative Sources
 

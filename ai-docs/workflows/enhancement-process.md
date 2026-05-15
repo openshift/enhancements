@@ -154,5 +154,6 @@ ls enhancements/
 ## Related
 
 - **Authoritative Template**: [../guidelines/enhancement_template.md](../../guidelines/enhancement_template.md)
+- **Topology Considerations**: [topology-considerations-guide.md](topology-considerations-guide.md) - Guide for SNO, MicroShift, Hypershift, OKE sections
 - **API Conventions**: [../practices/development/api-evolution.md](../practices/development/api-evolution.md)
 - **Feature Development**: [implementing-features.md](implementing-features.md)

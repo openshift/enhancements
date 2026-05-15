@@ -1,14 +1,14 @@
 # Exec-Plans: Feature Implementation Tracking
 
-**Purpose**: Track multi-week feature implementation progress (Tier 1 guidance)  
-**Last Updated**: 2026-04-29  
+**Purpose**: Track multi-week feature implementation progress (Platform guidance)
+**Last Updated**: 2026-04-29
 
 ## Overview
 
 Exec-plans are ephemeral documents that track feature implementation. They bridge the gap between enhancement (design) and implementation (code).
 
 **Key Points**:
-- Guidance lives here (Tier 1 platform docs)
+- Guidance lives here (Platform docs)
 - Actual exec-plans live in component repos (`agentic/exec-plans/active/`)
 - Exec-plans are temporary → extract to permanent docs, then delete
 

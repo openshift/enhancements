@@ -24,7 +24,7 @@ When working on OpenShift:
 ### Common Task Flows
 
 **Writing enhancement proposal?**
-→ `./guidelines/enhancement_template.md` → `./ai-docs/workflows/enhancement-process.md` → `./ai-docs/practices/development/api-evolution.md`
+→ `./guidelines/enhancement_template.md` → `./ai-docs/workflows/enhancement-process.md` → `./ai-docs/workflows/topology-considerations-guide.md` → `./ai-docs/practices/development/api-evolution.md`
 
 **Building operator?**
 → `./ai-docs/DESIGN_PHILOSOPHY.md` → `./ai-docs/platform/operator-patterns/controller-runtime.md` → `./ai-docs/platform/operator-patterns/status-conditions.md` → `./ai-docs/practices/testing/pyramid.md`
@@ -44,7 +44,7 @@ When working on OpenShift:
 
 | Role | Start Here | Then Read |
 |------|-----------|-----------|
-| **Enhancement Author** | `./guidelines/enhancement_template.md` | `./ai-docs/workflows/enhancement-process.md` |
+| **Enhancement Author** | `./guidelines/enhancement_template.md` | `./ai-docs/workflows/enhancement-process.md` → `./ai-docs/workflows/topology-considerations-guide.md` |
 | **Operator Developer** | `./ai-docs/DESIGN_PHILOSOPHY.md` | `./ai-docs/platform/operator-patterns/` |
 | **API Designer** | `./ai-docs/practices/development/api-evolution.md` | `./dev-guide/` |
 | **Platform Architect** | `./ai-docs/decisions/` | `./ai-docs/DESIGN_PHILOSOPHY.md` |
@@ -95,6 +95,7 @@ When working on OpenShift:
 | Workflow | File | Links to Authoritative Source |
 |----------|------|-------------------------------|
 | **Enhancement process** | `./ai-docs/workflows/enhancement-process.md` | `./guidelines/enhancement_template.md` |
+| **Topology considerations** | `./ai-docs/workflows/topology-considerations-guide.md` | Guide for SNO, MicroShift, Hypershift, OKE sections |
 | **Feature implementation** | `./ai-docs/workflows/implementing-features.md` | `./dev-guide/` |
 | **Exec-plan guidance** | `./ai-docs/workflows/exec-plans/` | Template for multi-week features |
 
@@ -171,8 +172,9 @@ When working on OpenShift:
 │   └── development/              # API evolution, compatibility
 ├── decisions/                    # Cross-repo ADRs
 ├── workflows/                    # AI-optimized process guides
-│   ├── exec-plans/               # Feature tracking templates (Tier 1)
+│   ├── exec-plans/               # Feature tracking templates (Platform)
 │   ├── enhancement-process.md
+│   ├── topology-considerations-guide.md
 │   └── implementing-features.md
 └── references/                   # Pointers (GitHub links, oc commands)
     ├── repo-index.md
