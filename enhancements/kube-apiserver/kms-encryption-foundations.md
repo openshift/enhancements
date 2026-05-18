@@ -94,6 +94,8 @@ Encryption controllers split the KMS configuration API into multiple parts store
 3. `kms-secret-{key}-{keyID}` — individual keys from the referenced Secret are stored as separate entries (e.g., `kms-secret-id-1`, `kms-secret-login-1`, `kms-secret-password-1` for Vault approle credentials)
 4. `kms-configmap-{key}-{keyID}` — individual keys from the referenced ConfigMap are stored as separate entries (e.g., `kms-configmap-ca-1` for CA bundles)
 
+   Credentials are stored as individual top-level keys rather than a single nested blob because the installer controller writes each `.data` key as a separate file on disk and the KMS plugin sidecar — a third-party binary — consumes credentials as individual files. Bundling them into one entry would require the sidecar to parse and extract them, which it cannot do.
+
    For example, an encryption-configuration secret with this layout:
    ```yaml
    apiVersion: v1
