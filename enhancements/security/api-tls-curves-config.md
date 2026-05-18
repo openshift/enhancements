@@ -274,6 +274,11 @@ based on their operational context:
         - X25519
   ```
 
+  In the example above, the KubeletConfig configures the `tlsSecurityProfile`
+  to use TLS v1.3 only, with one cipher (`ECDHE-ECDSA-AES128-GCM-SHA256`), and
+  two supported groups (`X25519MLKEM768` and `X25519`) for key exchange.
+  `X25519MLKEM768` is preferred over `X25519` due to the ordering.
+
 - The Machine Config Operator (MCO) watches `KubeletConfig` objects
 - MCO renders this configuration into kubelet configuration files on nodes via
   MachineConfigs
