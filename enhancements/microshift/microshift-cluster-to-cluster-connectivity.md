@@ -107,7 +107,7 @@ directly through the MicroShift config file.
 
 C2CC adds the following components:
 
-1. **Configuration & Validation** — A `c2cc` section in
+1. **Configuration & Validation** — A `clusterToCluster` section in
    the MicroShift config defining `remoteClusters[]`,
    each with `nextHop`, `clusterNetwork`,
    `serviceNetwork`, and optional `domain`.
