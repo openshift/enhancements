@@ -3,14 +3,14 @@ title: lifecycle-and-compatibility
 authors:
   - "@perdasilva"
 reviewers:
-  - "@joelanford, for OLM architecture and lifecycle-server design"
+  - "@joelanford, for OLM architecture and ExperimentalListPackageCustomSchemas design"
   - "@spadgett, for Console integration and frontend architecture"
 approvers:
   - "@joelanford"
 api-approvers:
   - None
 creation-date: 2026-04-29
-last-updated: 2026-04-29
+last-updated: 2026-06-01
 tracking-link:
   - https://issues.redhat.com/browse/OCPSTRAT-2618
 status: provisional
@@ -26,17 +26,15 @@ This enhancement introduces operator lifecycle and platform compatibility visibi
 for OLMv0-managed operators in OpenShift. A new lifecycle metadata extension schema
 (`io.openshift.operators.lifecycles.v1alpha1`) is added to File-Based Catalogs (FBC)
 to carry per-operator support phase, lifecycle timeline, and platform compatibility data.
-Two new downstream-only components — a lifecycle-controller and a lifecycle-server —
-are deployed to extract and serve this metadata. The lifecycle-controller runs in the
-`openshift-operator-lifecycle-manager` namespace and manages lifecycle-server Deployments
-alongside CatalogSource pods, limited specifically the redhat-operators CatalogSource in the
-`openshift-marketplace` namespace. The lifecycle-server exposes an **internal** HTTPS API
-secured via TokenReview and SubjectAccessReview — callers must present a ServiceAccount
-token with the requisite nonResourceURL RBAC to access lifecycle data. The OpenShift
-Console is extended with a backend proxy endpoint and frontend UI columns ("Cluster
-Compatibility" and "Support") on the installed operators table, giving platform engineers
-immediate visibility into which operators are supported, approaching end-of-life, or
-incompatible with the current cluster version.
+A new `ExperimentalListPackageCustomSchemas` gRPC endpoint is added to `opm serve` via
+a new `ExperimentalRegistry` gRPC service — since CatalogSource catalog pods already run
+`opm serve`, they automatically serve custom FBC schemas (including lifecycle metadata)
+through this endpoint. The OpenShift Console backend
+acts as a gRPC client, calling `ExperimentalListPackageCustomSchemas` directly on the CatalogSource catalog pods
+and exposing the results over HTTP. The Console frontend adds "Cluster Compatibility" and
+"Support" columns on the installed operators table, giving platform engineers immediate
+visibility into which operators are supported, approaching end-of-life, or incompatible
+with the current cluster version.
 
 ## Motivation
 
@@ -60,8 +58,6 @@ Without lifecycle visibility, customers risk running unsupported operator config
 
 * As a cluster administrator, I want lifecycle and compatibility information to be available in disconnected environments, so that I have the same operational visibility regardless of cluster connectivity.
 
-* As an operator author, I want to include lifecycle metadata in my operator's catalog entry, so that my users have visibility into the support status of my operator versions.
-
 ### Goals
 
 1. Surface operator lifecycle phase (tech-preview, GA, maintenance, deprecated, end-of-life) per installed operator in the OpenShift Console.
@@ -78,45 +74,43 @@ Without lifecycle visibility, customers risk running unsupported operator config
 4. Changes to existing OLMv0 controllers, Subscription API, or catalog operator code.
 5. OLMv1-specific integration — this enhancement targets OLMv0 exclusively.
 6. Defining the ground truth lifecycle data structure — that is owned by the ProdOps engineering team. However, defining the FBC schema (`io.openshift.operators.lifecycles.v1alpha1`) that carries this data within catalogs is a goal of this enhancement.
-7. Defining a stable, general purpose, and documented lifecycle API. For this EP, all lifecycle data schemas and server APIs are strictly for internal use by the OCP Console
-8. Support for Microshift
+7. Defining a stable, general purpose, and documented lifecycle API. For this EP, the lifecycle FBC schema and the Console's use of `ExperimentalListPackageCustomSchemas` are strictly internal implementation details, not a public API surface.
+8. Support for MicroShift.
+9. Support for HyperShift / Hosted Control Planes — the Console backend's network access to CatalogSource catalog pods in HCP topologies requires further investigation. HyperShift support may be addressed in a future iteration.
 
 ## Proposal
 
-This proposal introduces three sets of changes across three repositories to deliver operator lifecycle visibility:
+This proposal introduces two sets of changes across two repositories to deliver operator lifecycle visibility:
 
-1. **operator-framework-olm**: A new lifecycle-controller and lifecycle-server that extract and serve lifecycle metadata from FBC catalogs.
-2. **console-operator**: RBAC configuration granting the Console ServiceAccount access to the lifecycle-server API.
-3. **console**: A backend proxy endpoint and frontend UI components to display lifecycle and compatibility data.
+1. **operator-registry**: A new `ExperimentalListPackageCustomSchemas` gRPC endpoint on a new `ExperimentalRegistry` gRPC service in `opm serve` that serves custom FBC schema blobs (including lifecycle metadata) from the existing CatalogSource catalog pods.
+2. **console**: A backend gRPC client that queries CatalogSource catalog pods for lifecycle metadata and exposes it over HTTP, plus frontend UI components to display lifecycle and compatibility data.
 
 ### Workflow Description
 
 **platform engineer** is a human user who manages an OpenShift cluster and its installed operators.
 
-**lifecycle-controller** is a controller that watches CatalogSource resources and manages lifecycle-server Deployment resources.
+**CatalogSource catalog pod** is the existing pod running `opm serve` that serves operator catalog content over gRPC, including custom FBC schemas via the `ExperimentalListPackageCustomSchemas` endpoint.
 
-**lifecycle-server** is an HTTPS server that reads FBC catalog content from OCI volume mounts and serves lifecycle metadata.
-
-**console backend** is the OpenShift Console server that proxies lifecycle API requests.
+**console backend** is the OpenShift Console server that acts as a gRPC client to CatalogSource catalog pods.
 
 **console frontend** is the OpenShift Console UI that displays lifecycle information.
 
-1. Lifecycle metadata is centrally managed by Red Hat product management in the Product Lifecycle and Compatibility Center (PLCC) — individual operator teams do not author or maintain this data. The Red Hat catalog pipeline pulls lifecycle data from PLCC and injects it into the FBC for Red Hat operator catalogs during the catalog build process, validating that it conforms to the `io.openshift.operators.lifecycles.v1alpha1` schema.
-2. The lifecycle-controller watches for CatalogSource resources. When it detects a CatalogSource, it creates a lifecycle-server Deployment that mounts the catalog image as an OCI volume.
-3. When the catalog image changes (detected by watching CatalogSource pods), the lifecycle-controller updates the lifecycle-server Deployment to reference the new image.
-4. The lifecycle-server starts, walks the FBC content on its mounted volume, extracts entries matching `io.openshift.operators.lifecycles.*` schemas, and serves them over an HTTPS API.
-5. A platform engineer navigates to the Installed Operators page in the OpenShift Console.
-6. The console frontend requests lifecycle data for installed operators via the console backend proxy endpoint (`/api/olm/lifecycle/`).
-7. The console backend authenticates with the lifecycle-server using its pod ServiceAccount token and forwards the request.
-8. The lifecycle-server responds with lifecycle metadata for the requested packages.
-9. The console frontend renders "Cluster Compatibility" and "Support" columns:
+1. Lifecycle metadata is centrally managed by Red Hat product management in the Product Lifecycle and Compatibility Center (PLCC) — individual operator teams do not author or maintain this data. The Red Hat catalog pipeline pulls lifecycle data from PLCC and injects it into the FBC for Red Hat operator catalogs during the catalog build process, validating that it conforms to the `io.openshift.operators.lifecycles.v1alpha1` schema. The catalog pipeline is responsible for ensuring that each `(schema, packageName)` pair has exactly one lifecycle metadata blob — duplicates must be prevented at build time.
+2. The existing CatalogSource catalog pods (running `opm serve`) automatically index custom FBC schemas — including lifecycle metadata — during cache build. The lifecycle data is served via the `ExperimentalListPackageCustomSchemas` gRPC endpoint on the catalog pod's `ExperimentalRegistry` gRPC service (port 50051).
+3. A platform engineer navigates to the Installed Operators page in the OpenShift Console.
+4. The console frontend requests lifecycle data for installed operators via the console backend endpoint (`/api/olm/lifecycle/{catalogNamespace}/{catalogName}/{packageName}`).
+5. The console backend dials the CatalogSource catalog pod's gRPC service at `{catalogName}.{catalogNamespace}.svc:50051` and calls `ExperimentalListPackageCustomSchemas` with the lifecycle schema and package name filters.
+6. The catalog pod streams lifecycle metadata for the requested package.
+7. The console backend marshals the protobuf response to JSON and returns it over HTTP.
+8. The console frontend renders "Cluster Compatibility" and "Support" columns:
    - **Cluster Compatibility**: Shows whether the installed operator version is compatible with the current cluster version ("Compatible", "Incompatible", or "No data").
    - **Support**: Shows the current support phase with remaining time, using color-coded icons (green check for >12 months remaining, yellow warning for <=12 months remaining, "Self-support" when all phases have ended).
 
 #### Error Handling
 
-- If the lifecycle-server is unavailable, the console displays "No data" labels for both columns.
-- If a catalog does not contain lifecycle metadata, the lifecycle-server returns empty results and the console displays "No data".
+- If the CatalogSource catalog pod is unavailable or does not support `ExperimentalListPackageCustomSchemas`, the console displays "No data" labels for both columns.
+- If a catalog does not contain lifecycle metadata, the `ExperimentalListPackageCustomSchemas` endpoint returns empty results and the console displays "No data".
+- If the endpoint returns multiple lifecycle metadata documents for the same package (indicating a catalog build error), the console logs an error and displays "No data" for that operator rather than attempting to merge or choose between conflicting documents.
 - Lifecycle data is cached in the console frontend with a 5-minute success TTL and 30-second error TTL, with request deduplication to avoid redundant API calls.
 
 ### API Extensions
@@ -297,25 +291,31 @@ versions:
           - "4.17"
 ```
 
-The lifecycle-server exposes an internal HTTPS API (not exposed outside the cluster):
+The `ExperimentalListPackageCustomSchemas` gRPC endpoint is served by the existing CatalogSource catalog pods (running `opm serve`):
 
-- **Host**: `https://<catalogSourceName>-lifecycle-server.<catalogSourceNamespace>.svc:8443`
-- **Path**: `/api/lifecycles/v1alpha1?packageNames=<commaSeparatedListOfPackageNames>`
+- **Service**: `ExperimentalRegistry` (new OPM gRPC service, separate from the existing `Registry` service)
+- **Endpoint**: `rpc ExperimentalListPackageCustomSchemas(ExperimentalListPackageCustomSchemasRequest) returns (stream google.protobuf.Struct)`
+- **Address**: `{catalogName}.{catalogNamespace}.svc:50051`
+- **Required metadata**: Clients must send the `x-acknowledge-experimental: true` gRPC metadata header. Without this header, the endpoint silently returns an empty stream (no error) to ensure callers explicitly acknowledge the experimental nature of the API.
+- **Request fields**:
+  - `schema` (string, **required**): FBC schema to query (e.g. `io.openshift.operators.lifecycles.v1alpha1`). Returns `InvalidArgument` if empty.
+  - `packageName` (string, optional): package name to scope the query. When provided, only blobs for that package are returned. When empty, returns blobs stored without a package association.
+- **Response**: server-side stream of `google.protobuf.Struct` messages, each containing a raw FBC blob as a JSON-like structure. Multiple blobs may be returned for the same `(schema, packageName)` pair if the catalog contains more than one matching entry.
+- **Error codes**: `InvalidArgument` if `schema` is empty or fails input validation (must match `^[a-zA-Z0-9][a-zA-Z0-9._-]*$`); `Unimplemented` if the store does not support custom schema queries; `Internal` for unmarshalling or other server-side errors.
 
-The lifecycle-server authenticates callers via TokenReview and authorizes them via SubjectAccessReview on nonResourceURLs (`/api/*/lifecycles/*`). A ClusterRole and ClusterRoleBinding grant the Console ServiceAccount read access to these paths.
+The console backend adds an HTTP endpoint that acts as a gRPC client:
 
-The console backend adds a proxy endpoint:
-
-- **Path**: `/api/olm/lifecycle/`
-- Validates catalog namespace and name inputs against strict regex to prevent SSRF.
-- Forwards requests to the per-catalog lifecycle-server using the pod's ServiceAccount bearer token.
+- **Path**: `/api/olm/lifecycle/{catalogNamespace}/{catalogName}/{packageName}`
+- Validates catalog namespace and name inputs against strict Kubernetes DNS name regex to prevent injection attacks.
+- Dials the CatalogSource catalog pod's gRPC service and calls `ExperimentalListPackageCustomSchemas` with the lifecycle schema and package name filters.
+- Marshals protobuf `Struct` responses to JSON and returns them over HTTP.
+- Handles gRPC `Unimplemented` errors (from older opm versions) by returning HTTP 503, which the frontend treats as "No data".
 
 ### Topology Considerations
 
 #### Hypershift / Hosted Control Planes
 
-The lifecycle-controller and lifecycle-server run in the same namespace as CatalogSource pods. In HyperShift environments, marketplace CatalogSources are typically in the host cluster. It's not exactly clear yet what strategy we'll pursue to get this working on HCP. It may lead to architectural changes. The groundwork for this is 
-still ongoing and this enhancement will be updated once we have a clear path.
+HyperShift is out of scope for this enhancement. The Console backend needs network access to the CatalogSource catalog pods' gRPC service, and the specifics of how this works in HCP topologies (where the control plane and data plane run in separate clusters) have not yet been resolved. HyperShift support may be addressed in a future iteration once the standalone cluster implementation is validated.
 
 #### Standalone Clusters
 
@@ -323,14 +323,13 @@ This enhancement is fully relevant and functional on standalone clusters. It is 
 
 #### Single-node Deployments or MicroShift
 
-There is a singleton lifecycle-controller and an additional pod is created per Catalog source. For *this* EP, 
-only the redhat-operators ClusterCatalog is reconciled. Therefore, this EP would introduce two new pods. On single-node OpenShift (SNO), this represents a modest increase in resource consumption. The lifecycle-server pod include resource requests to ensure appropriate scheduling.
+No new pods are introduced — the `ExperimentalListPackageCustomSchemas` endpoint is served by the existing CatalogSource catalog pods. There is no additional resource consumption beyond the negligible cost of indexing custom FBC schemas during cache build.
 
 This enhancement does not apply to MicroShift.
 
 #### OpenShift Kubernetes Engine
 
-This enhancement depends on the Console capability (for UI display) and OLM (for CatalogSource resources). OKE includes OLM but the Console operator is optional. If the Console capability is not enabled, the lifecycle-controller and lifecycle-server still deploy but the lifecycle data will not be visible to users through the Console.
+This enhancement depends on the Console capability (for UI display) and OLM (for CatalogSource resources). OKE includes OLM but the Console operator is optional. If the Console capability is not enabled, the `ExperimentalListPackageCustomSchemas` endpoint is still available on catalog pods but lifecycle data will not be visible to users.
 
 ### Implementation Details/Notes/Constraints
 
@@ -341,35 +340,28 @@ Each FBC lifecycle blob carries the data of each operator using the `io.openshif
 The data include the available package versions, the lifecycle phases for each version, and the platforms each version is compatible with.
 See [API Extensions](#api-extensions) for the full schema definition, field descriptions, and examples.
 
-The lifecycle-server treats this content opaquely — it extracts and serves entries matching `io.openshift.operators.lifecycles.*` schemas without parsing the internal structure. This means future schema changes (field-level within a version, or new schema versions) flow through without requiring lifecycle-server code changes.
+The `ExperimentalListPackageCustomSchemas` endpoint treats this content opaquely — it serves entries matching the requested schema filter without parsing the internal structure. This means future schema changes (field-level within a version, or new schema versions) flow through without requiring any server-side code changes.
 
-#### Lifecycle Controller (operator-framework-olm)
+#### ExperimentalListPackageCustomSchemas gRPC Endpoint (operator-registry)
 
-The lifecycle-controller:
+A new `ExperimentalListPackageCustomSchemas` RPC is added as part of a new `ExperimentalRegistry` gRPC service in `opm serve`, separate from the existing `Registry` service:
 
-- Watches CatalogSource resources and reconciles lifecycle-server Deployments
-- Uses server-side apply (SSA) for all owned resources
-- Manages NetworkPolicy resources to restrict traffic to the lifecycle-server
-- Configures TLS via controller-runtime-common for secure communication
-- Supports leader election for HA deployments
-- Detects catalog image changes by watching CatalogSource pods and updates the lifecycle-server Deployment accordingly
-
-#### Lifecycle Server (operator-framework-olm)
-
-The lifecycle-server:
-
-- Serves FBC lifecycle content over HTTPS with TLS
-- Mounts catalog images as OCI volumes
-- Walks FBC subdirectories to find and serve lifecycle schema entries
-- Authenticates callers via TokenReview and authorizes via SubjectAccessReview
-- Includes health/readiness probes and resource requests
-- Runs with restricted security context (read-only root filesystem, non-root, dropped capabilities)
+- During cache build, `opm serve` walks the FBC content and indexes all non-standard schemas (anything other than `olm.package`, `olm.channel`, `olm.bundle`, `olm.deprecation`) as custom schema metadata, keyed by `(schema, packageName)`. Custom schema blobs without a `package` field are stored with an empty `packageName` key. Blobs are content-addressed using FNV64a hashing, which naturally deduplicates identical blobs stored under the same `(schema, packageName)` pair.
+- Clients must send the `x-acknowledge-experimental: true` gRPC metadata header. Without this header, the endpoint silently returns an empty stream. This forces callers to explicitly acknowledge the experimental nature of the API.
+- The `ExperimentalListPackageCustomSchemas` endpoint requires `schema` (returns `InvalidArgument` if empty) and accepts an optional `packageName`. It streams all matching blobs as `google.protobuf.Struct` messages.
+- The server-side implementation uses a duck-typed `customSchemaQuerier` interface on the cache store. If the store does not implement this interface, the endpoint returns gRPC `Unimplemented`, providing graceful degradation for older opm versions. Cache-layer `ValidationError`s (e.g. input validation failures in schema or packageName) are converted to gRPC `InvalidArgument`.
+- Meta keys are validated against the pattern `^[a-zA-Z0-9][a-zA-Z0-9._-]*$` — they must start with an alphanumeric character and may only contain alphanumeric characters, dots, underscores, and dashes. A dedicated `ValidationError` type is used to distinguish validation failures from other errors.
+- Two storage backends are supported: a JSON filesystem backend (stores blobs as `{schema}/{packageName}/{fnv64a-hash}.json` files under the cache directory) and a pogreb key-value store backend (stores blobs under a single `metas/{schema}/{packageName}` key as concatenated length-prefixed proto binary blobs, with each blob preceded by a 4-byte big-endian uint32 length header). The deprecated SQLite backend does not implement the `customSchemaQuerier` interface and returns `Unimplemented`.
 
 #### Console Backend (console)
 
-- Adds `/api/olm/lifecycle/` proxy endpoint
-- Authenticates with lifecycle-server using the pod's ServiceAccount bearer token
-- Validates catalog namespace and name inputs against strict regex patterns to prevent SSRF attacks
+- Adds `/api/olm/lifecycle/{catalogNamespace}/{catalogName}/{packageName}` HTTP endpoint
+- Acts as a gRPC client: dials the CatalogSource catalog pod at `{catalogName}.{catalogNamespace}.svc:50051` and calls `ExperimentalListPackageCustomSchemas` with the `x-acknowledge-experimental: true` metadata header, `schema=io.openshift.operators.lifecycles.v1alpha1`, and the requested `packageName`
+- Marshals the streamed protobuf `Struct` responses to JSON using `protojson.Marshal` and returns them over HTTP
+- Validates catalog namespace and name inputs against strict Kubernetes DNS name regex (`^[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?$`) to prevent injection attacks
+- Handles gRPC errors gracefully: `Unimplemented` and `Unavailable` return HTTP 503; other gRPC errors return HTTP 502
+- If the gRPC stream returns more than one document for a package, the Console backend logs an error and returns an error response — the frontend displays "No data" for that operator. The catalog pipeline is the authoritative source and is expected to ensure exactly one lifecycle metadata blob per package; duplicates indicate a catalog build issue.
+- Uses insecure gRPC transport credentials for the catalog pod connection — this is consistent with how OLMv0 controllers already connect to catalog pods (intra-cluster traffic over the pod network). The Console HTTP endpoint itself remains behind the existing Console authentication middleware.
 
 #### Console Frontend (console)
 
@@ -377,43 +369,42 @@ The lifecycle-server:
 - Adds `ClusterCompatibilityStatus` and `SupportPhaseStatus` components using PatternFly Labels
 - Version matching uses minor version fallback when lifecycle metadata versions (e.g. "2.16") don't exactly match the CSV spec version (e.g. "2.16.0")
 - Support column shows:
-  - Last support phase end date with green check icon (>12 months remaining) or yellow warning icon (<=12 months remaining)
-  - Tooltip with current phase name (e.g. "Maintenance support", "Extended life cycle support")
+  - The current lifecycle phase name if within the support period
   - "Self-support" when all phases have ended
   - "No data" when lifecycle info is unavailable
-- All UI gated behind the `OPERATOR_LIFECYCLE_METADATA` feature flag
-
-#### Console Operator (console-operator)
-
-- Adds ClusterRole and ClusterRoleBinding granting the Console ServiceAccount read access to lifecycle-server nonResourceURL paths (`/api/*/lifecycles/*`)
-- Manifest scoped to the Console capability
-
-#### Deployment Manifests (operator-framework-olm)
-
-- RBAC, NetworkPolicy, Service, and Deployment manifests for lifecycle-controller and lifecycle-server
-- IBM Cloud managed variants included
-- CRD manifests updated with lifecycle annotations
-- Initially restricted to CatalogSources in the `openshift-marketplace` namespace (and potentially limited to only the `redhat-operators` CatalogSource)
+- All UI gated behind the `OLMLifecycleAndCompatibility` feature gate
 
 ### Risks and Mitigations
 
-| Risk                                                                           | Mitigation                                                                                                                                                                                                                                                                                    |
-|:-------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| New components increase operational surface area                               | The lifecycle-server is designed as a simple, stateless HTTP server with minimal failure modes. The lifecycle-controller can be scaled to zero in an emergency.                                                                                                                               |
-| Lifecycle metadata may become stale or out-of-sync with PLCC                   | The ProdOps team is responsible for defining validation and synchronization tooling. Catalog builds will include validated lifecycle metadata.                                                                                                                                                |
-| SSRF via console proxy endpoint                                                | Console backend validates catalog namespace and name inputs against strict regex patterns before forwarding requests.                                                                                                                                                                         |
-| Catalog image polling timing may cause briefly stale lifecycle data            | The lifecycle-controller watches CatalogSource pods and updates the lifecycle-server Deployment when the catalog image changes. A small window of staleness is acceptable since lifecycle metadata changes infrequently.                                                                      |
-| Additional resource consumption on SNO                                         | Lifecycle-server pods include appropriate resource requests. The pods are lightweight and stateless.                                                                                                                                                                                          |
-| Existing network and disk I/O concerns due to image pulling and data wrangling | The lifecycle-server pods runs on the same node as the CatalogSource pod, and using the OCI image mount to mount the catalog image filesystem directly into the server pod - this mitigates the need to download the same image again and obviates the need to copy FBC bytes into empty dirs |
+| Risk                                                                                  | Mitigation                                                                                                                                                                                                                                                                                                                                                                                                               |
+|:--------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Lifecycle metadata may become stale or out-of-sync with PLCC                          | The ProdOps team is responsible for defining validation and synchronization tooling. Catalog builds will include validated lifecycle metadata.                                                                                                                                                                                                                                                                           |
+| Injection attacks via console lifecycle endpoint                                      | Console backend validates catalog namespace and name inputs against strict Kubernetes DNS name regex before dialing gRPC.                                                                                                                                                                                                                                                                                                |
+| Extends the gRPC API surface of OPM serve                                             | The `ExperimentalListPackageCustomSchemas` endpoint is generic (not lifecycle-specific), returns opaque FBC blobs, and gracefully returns `Unimplemented` on older opm versions. It does not increase the lifecycle-specific API surface.                                                                                                                                                                                            |
+| CatalogSource pods running older opm versions won't support `ExperimentalListPackageCustomSchemas`        | Console backend handles gRPC `Unimplemented` error and returns HTTP 503. The frontend treats this as "No data" and displays graceful fallback labels.                                                                                                                                                                                                                                                                    |
+| Duplicate lifecycle metadata blobs in catalog for the same package                            | The catalog pipeline is responsible for ensuring exactly one lifecycle blob per `(schema, packageName)`. The Console treats duplicates as a catalog build error — it logs the issue and displays "No data" for the operator.                                                                                                                                                                                             |
+| Cache digest mismatch between new and older opm versions                                     | The new opm version stores additional custom schema entries in the cache, which changes the on-disk state. If an older opm version reads this cache, the digest could theoretically differ. This is mitigated by the fact that the cache digest is calculated over all keys in the pogreb database or all files in the cache filesystem — older opm versions will compute the correct digest for the cache they observe. |
 
 ### Drawbacks
 
-- This approach introduces a new downstream-only component (lifecycle-controller + lifecycle-server) that serves a single purpose. This is acknowledged as immediate tech debt that will need to be reconciled when OLMv1 matures.
-- The lifecycle-server operates out-of-band from the existing OLM architecture, meaning it duplicates some catalog image handling logic.
+- This approach extends the gRPC API surface of `opm serve` with the `ExperimentalListPackageCustomSchemas` endpoint. Although the endpoint is generic and not lifecycle-specific, it is a new API that needs to be maintained.
 - The long-term desired approach is an OLMv1-centric catalog overhaul that would natively incorporate lifecycle metadata alongside other data model improvements (semver-based upgrade graphs, simplified disconnected mirroring, search facets, etc.). This pragmatic approach was chosen to meet the OCP 5.0 timeline.
-- As it is now, this approach does not work with CatalogSources of grpc type with a custom address, backed by ConfigMaps, or of *internal* type.
 
 ## Alternatives (Not Implemented)
+
+### Dedicated lifecycle-controller and lifecycle-server
+
+Instead of adding a gRPC endpoint to the existing catalog pods, deploy two new downstream-only components in `operator-framework-olm`: a lifecycle-controller that watches CatalogSource resources and manages per-CatalogSource lifecycle-server Deployments, and a lifecycle-server that mounts the catalog image as an OCI volume, walks the FBC content, and serves lifecycle metadata over an internal HTTPS API (authenticated via TokenReview/SubjectAccessReview). The Console would proxy requests to the lifecycle-server instead of calling gRPC on the catalog pods directly.
+
+**Not adopted because:**
+
+- Introduces new downstream-only components (lifecycle-controller + lifecycle-server) that serve a single purpose — acknowledged tech debt that would need reconciliation when OLMv1 matures.
+- Duplicates catalog image handling logic, since the lifecycle-server must independently mount and parse the same catalog image that the CatalogSource pod already serves.
+- Adds operational surface area: a new controller pod plus one lifecycle-server pod per CatalogSource, with associated RBAC, NetworkPolicy, Service, and Deployment manifests.
+- Does not work with CatalogSources of gRPC type with a custom address, backed by ConfigMaps, or of *internal* type.
+- More complex HyperShift/HCP story since the lifecycle-server pods need to run alongside CatalogSource pods.
+
+**Note:** this approach remains a fallback option if the `ExperimentalListPackageCustomSchemas` approach proves insufficient during Tech Preview validation. See [Graduation Criteria](#graduation-criteria).
 
 ### Console-only changes (use OLMv1 ClusterCatalog data)
 
@@ -425,14 +416,13 @@ The Console already integrates with OLMv1's catalogd via the `api/v1/all` endpoi
 2. OLMv1 catalogs may diverge from OLMv0 catalogs in the future.
 3. Catalog image poll timing means CatalogSource and ClusterCatalog digests may never agree, potentially showing lifecycle data that is ahead of what OLMv0 can actually install.
 
-### Extend OLMv0 GRPC APIs
+### Extend OLMv0 GRPC APIs with lifecycle-specific endpoint
 
-Extend the existing OLMv0 catalog pods' gRPC API to include lifecycle metadata end-point
+Extend the existing OLMv0 catalog pods' gRPC API to include a lifecycle-specific endpoint (e.g. `GetLifecycleMetadata`).
 
 **Rejected because:**
 
-- We'd like to avoid increasing the public API surface for v0 to keep the support surface as low as possible
-- We intend to introduce a more broadly available mechanism for surfacing lifecycle metadata in v1 
+- A lifecycle-specific endpoint increases the domain-specific API surface of OPM serve, making it harder to maintain long-term. The adopted `ExperimentalListPackageCustomSchemas` approach is generic — it serves arbitrary custom FBC schema blobs without knowledge of lifecycle semantics, keeping the API surface minimal and reusable for other custom schemas in the future.
 
 ### Extend OLMv0 GetPackage API
 
@@ -443,16 +433,17 @@ Extend the existing OLMv0 catalog pods' GetPackage gRPC API to include lifecycle
 - A fully correct implementation would require significant refactoring of OLMv0's multi-writer controllers, async catalog handling, and forcible status overwrites.
 - Even a simple implementation carries risk of post-change bugs/regressions in the mature OLMv0 codebase.
 - Syncing from a separate lifecycle database introduces risk that derivative data is out-of-sync.
+- Changes to OLMv0 carry serious risks due to possible unintended side effects.
 
 ### Use FBC bundle properties and Console-side parsing
 
-Instead of introducing a new lifecycle-controller and lifecycle-server, lifecycle metadata could be added as an opaque [bundle property](https://github.com/operator-framework/operator-registry/blob/677f3ea1240ab76f5cc5958520b142591f6c20e2/alpha/property/property.go#L15-L18) in the existing FBC schema. The Console already [pulls bundle/CSV information](https://github.com/openshift/console/blob/1fea0064885a01e46ce60b659b5057798e56e76f/pkg/olm/catalog.go#L72) to build an internal cache, so it could parse these custom properties directly — avoiding any new server-side components.
+Instead of using the `ExperimentalListPackageCustomSchemas` gRPC endpoint, lifecycle metadata could be added as an opaque [bundle property](https://github.com/operator-framework/operator-registry/blob/677f3ea1240ab76f5cc5958520b142591f6c20e2/alpha/property/property.go#L15-L18) in the existing FBC schema. The Console already [pulls bundle/CSV information](https://github.com/openshift/console/blob/1fea0064885a01e46ce60b659b5057798e56e76f/pkg/olm/catalog.go#L72) to build an internal cache, so it could parse these custom properties directly — avoiding any new gRPC endpoints.
 
 **Rejected because:**
 
 - This approach couples the Console directly to an internal, non-public property schema in FBC bundles, making it harder to evolve the lifecycle metadata format independently.
 - Bundle properties are per-bundle, while lifecycle metadata is per-package/per-version — embedding it in bundles creates redundancy and potential consistency issues across the upgrade graph.
-- The lifecycle-server approach provides a single, cacheable API endpoint that decouples the Console from the details of how lifecycle data is stored and structured in the catalog, making it easier to transition to the OLMv1-native solution in the future.
+- The `ExperimentalListPackageCustomSchemas` approach provides a single, cacheable API endpoint that decouples the Console from the details of how lifecycle data is stored and structured in the catalog, making it easier to transition to the OLMv1-native solution in the future.
 - As described in the [Workflow Description](#workflow-description), lifecycle metadata is not authored by individual operator teams in their bundle contributions — it is centrally managed by Red Hat product management in PLCC and injected at catalog build time. Using bundle properties would either require operator teams to maintain data they don't own, or require the catalog build pipeline to mutate bundle content to inject externally-owned metadata.
 
 ### OLMv1-centric catalog overhaul / registry+v2
@@ -468,129 +459,126 @@ A complete revamp of FBC schemas to natively incorporate lifecycle, compatibilit
 
 1. **Pre-releases and Tech Preview versions:** Catalogs include version numbers that don't follow standard semver (e.g. "0.0.0-4.99.0-techpreview"). How should these be handled in lifecycle metadata validation that requires all minor versions to be represented?
 
-2. **Concurrent Lifecycle Phases:** Do we need to account for operators having concurrent lifecycle phases? If so, how should concurrent phases be presented to users? - For this EP this is disallowed.
+2. ~~**Concurrent Lifecycle Phases:** Do we need to account for operators having concurrent lifecycle phases? If so, how should concurrent phases be presented to users?~~ **Resolved:** Concurrent phases are disallowed in this EP. Phases within a version must be contiguous and non-overlapping.
 
-3. **Source system of record:** Where should product teams directly maintain their lifecycle information — PLCC or FBC? - For this EP, PLCC.
+3. ~~**Source system of record:** Where should product teams directly maintain their lifecycle information — PLCC or FBC?~~ **Resolved:** PLCC is the source of record. Lifecycle metadata is centrally managed by Red Hat product management and injected into FBC during catalog builds.
 
-4. **Console feature flag integration:** What is the correct approach for gating the lifecycle UI in the Console? How should the `OPERATOR_LIFECYCLE_METADATA` feature flag integrate with the feature gate being added for this enhancement? Needs alignment with the Console team.
+4. ~~**Console feature flag integration:** What is the correct approach for gating the lifecycle UI in the Console? How should the `OPERATOR_LIFECYCLE_METADATA` feature flag integrate with the feature gate being added for this enhancement? Needs alignment with the Console team.~~ **Resolved:** The Console lifecycle UI is gated behind the `OLMLifecycleAndCompatibility` feature gate. OLMv0 does not support feature gates, so the `ExperimentalListPackageCustomSchemas` gRPC endpoint is always available on catalog pods; only the Console UI consumption is gated.
 
-5. **Generic FBC Blob Getter OPM server gRPC endpoint** are the risks we identify with extending the GRPc API surface offered by OPM serve really that risky if we consider an endpoint that fetches generic (schema, package, version) indexed FBC blobs? 
+5. **ListPackageCustomSchemas validation for GA:** The `ExperimentalListPackageCustomSchemas` gRPC endpoint approach needs practical validation during Tech Preview. Key areas to validate include: performance under load with large catalogs, graceful degradation with mixed opm versions across CatalogSource pods, and operational simplicity compared to the dedicated lifecycle-controller/server alternative. If validation reveals issues, the lifecycle-controller/server approach (described in [Alternatives](#alternatives-not-implemented)) can be used as a fallback.
 
 ## Test Plan
 
-Testing covers all three components:
+Testing covers two components:
 
-**operator-framework-olm:**
-- Unit tests for lifecycle-controller reconciliation, including: CatalogSource mapping, catalog image change propagation, multi-CatalogSource management, Deployment field validation (security context, probes, resource requests, tolerations, node affinity), and error propagation.
-- Unit tests for lifecycle-server: TLS configuration, FBC catalog building, HTTP handler concurrency safety, multiple API versions, and FBC subdirectory walking.
-- Ginkgo e2e test suite covering: happy-path provisioning, cleanup on CatalogSource deletion, pod hardening validation, and independent multi-CatalogSource lifecycle management.
+**operator-registry:**
+- Unit tests for `ExperimentalListPackageCustomSchemas` server implementation: streaming multiple blobs, empty results for nonexistent packages, `InvalidArgument` when schema is missing, `ValidationError` handling, handling of stores that do not implement the `customSchemaQuerier` interface (returns `Unimplemented`), and silent empty stream when the `x-acknowledge-experimental` header is missing.
+- Unit tests for cache custom schema indexing: FBC walking, custom schema storage and retrieval, metaKey validation (path traversal prevention), storage of packageless blobs with empty packageName, and multiple blobs per `(schema, packageName)` pair.
+- Unit tests for both JSON filesystem and pogreb storage backends: `PutMeta` content-addressed storage (FNV64a hashing), `SendMetas` iteration and length-prefixed proto binary decoding (pogreb), and correct handling of missing directories or keys.
 
 **console:**
+- Backend unit tests for the lifecycle gRPC handler: catalog pod address formatting, Kubernetes name validation (rejecting invalid patterns like domains with dots, uppercase characters, length violations), gRPC error code mapping (`Unimplemented` → 503, `Unavailable` → 503, other → 502).
 - Frontend unit tests for the `useOperatorLifecycle` hook, `ClusterCompatibilityStatus`, and `SupportPhaseStatus` components.
 - Tests for version matching logic (exact match and minor version fallback).
 
-**console-operator:**
-- Verification that RBAC manifests are correctly scoped to the Console capability.
-
 **Integration testing:**
-- End-to-end validation that lifecycle metadata flows from FBC catalog content through the lifecycle-server, console backend proxy, and into the console frontend UI.
-- Validation that catalogs without lifecycle metadata display appropriate "No data" indicators.
+- End-to-end validation that lifecycle metadata flows from FBC catalog content through the CatalogSource catalog pod's `ExperimentalListPackageCustomSchemas` gRPC endpoint, console backend gRPC client, and into the console frontend UI.
+- Validation that catalogs without lifecycle metadata (or running older opm versions) display appropriate "No data" indicators.
 - Disconnected environment validation.
 
 ## Graduation Criteria
 
 ### Dev Preview -> Tech Preview
 
-- Lifecycle-controller and lifecycle-server deploy successfully
+- `ExperimentalListPackageCustomSchemas` gRPC endpoint available on CatalogSource catalog pods
 - Console displays lifecycle and compatibility columns for installed operators
 - End-to-end functionality verified in connected and disconnected environments
 
 ### Tech Preview -> GA
 
 - Product Management is happy to go GA with the functionality
+- `ExperimentalListPackageCustomSchemas` approach validated in practice — performance under load, mixed opm version compatibility, and operational simplicity confirmed. Decision made on whether to continue with `ExperimentalListPackageCustomSchemas` or fall back to the dedicated lifecycle-controller/server alternative (see [Alternatives](#alternatives-not-implemented))
 - 50% of operators + some selected operators in the redhat-operators catalog include lifecycle and compatibility metadata
 - Load testing completed to ensure performance thresholds are not violated
 - Upgrade and downgrade testing completed
 - At least 10 operators (with representation from all three lifecycle tiers) include lifecycle information that flows from FBC catalog contributions to Console UI views
 - Telemetry in place to track operator lifecycle status across the fleet
-- User-facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/) - only expected documentation is on the Console side to explain the new columns. No customer facing docs for the lifecycle metadata API, or how the backend works, since they are internal details and not for general user consumption.
-- We have conclusive reasons to reject the idea of adding generic catalog FBC blob fetcher gRPC endpoint to OPM that would allow console to query the catalog specifically for the lifecycle metadata FBC blobs for a given package   
+- User-facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/) — only expected documentation is on the Console side to explain the new columns. No customer facing docs for the lifecycle metadata API, or how the backend works, since they are internal details and not for general user consumption.
 
 ### Removing a deprecated feature
 
-This feature is new and not replacing a deprecated feature. If the OLMv1-centric approach supersedes this implementation in the future, the lifecycle-controller and lifecycle-server components would be removed along with the console proxy endpoint, and the console frontend would be updated to consume lifecycle data from the OLMv1 catalog API instead.
+This feature is new and not replacing a deprecated feature. If the OLMv1-centric approach supersedes this implementation in the future, the `ExperimentalListPackageCustomSchemas` endpoint would remain available (it is generic) but the console frontend would be updated to consume lifecycle data from the OLMv1 catalog API instead.
 
 ## Upgrade / Downgrade Strategy
 
 **Upgrade:**
-- On upgrade to a version containing this feature, the lifecycle-controller and lifecycle-server Deployments are created automatically.
-- The lifecycle-controller begins watching CatalogSources in the `openshift-marketplace` namespace and provisioning lifecycle-server pods.
+- On upgrade to a version containing this feature, CatalogSource catalog pods automatically gain the `ExperimentalListPackageCustomSchemas` gRPC endpoint when the updated `opm` binary is deployed. No new Deployments or pods are created.
+- The Console backend begins querying catalog pods for lifecycle metadata.
 - No user action is required.
 - Existing operator functionality is unaffected — no changes to OLMv0 controllers or Subscription API.
 
 **Downgrade:**
-- On downgrade, the lifecycle-controller and lifecycle-server Deployments are removed by CVO along with their associated RBAC, NetworkPolicy, and Service resources.
-- The console will no longer display lifecycle columns (the feature flag will be absent).
+- On downgrade, the Console feature flag is absent, so the lifecycle columns are not rendered and no gRPC calls to catalog pods are made.
+- Catalog pods revert to an opm version without `ExperimentalListPackageCustomSchemas`, but this is transparent since nothing queries the endpoint.
 - No manual cleanup steps are required.
-- No data loss occurs since the lifecycle-server is stateless.
+- No data loss occurs since the catalog pod serves data from its existing FBC cache.
 
 ## Version Skew Strategy
 
-The lifecycle-controller, lifecycle-server, console-operator RBAC, and console changes are all deployed as part of the same release payload. During a rolling upgrade:
+The opm binary (in CatalogSource catalog pods) and console changes are all deployed as part of the same release payload. During a rolling upgrade:
 
-- If the lifecycle-server is deployed before the console changes: The server is running but the console does not yet display the columns. No user-visible impact.
-- If the console changes are deployed before the lifecycle-server: The console attempts to fetch lifecycle data, receives errors, and displays "No data" labels. This is the expected fallback behavior.
-- The lifecycle-server is independent of OLMv0 controllers and does not participate in version skew with the catalog operator, subscription controller, or any other OLMv0 component.
-- If the CatalogSource gets updated, the lifecycle-service will update its data as a consequence. If the data is not compatible with what the lifecycle-server and/or console expect the user may see the "No data" label until all component versions are harmonized.
+- If the catalog pod is updated before the console changes: The `ExperimentalListPackageCustomSchemas` endpoint is available but not consumed. No user-visible impact.
+- If the console changes are deployed before the catalog pod update: The Console calls `ExperimentalListPackageCustomSchemas`, receives gRPC `Unimplemented`, and displays "No data" labels. This is the expected fallback behavior.
+- The `ExperimentalListPackageCustomSchemas` endpoint is independent of OLMv0 controllers and does not participate in version skew with the catalog operator, subscription controller, or any other OLMv0 component.
+- If the CatalogSource catalog image is updated, the catalog pod rebuilds its cache and the new lifecycle metadata is immediately available through `ExperimentalListPackageCustomSchemas`.
 
 ## Operational Aspects of API Extensions
 
-The lifecycle-server exposes an internal HTTPS API authenticated via TokenReview/SubjectAccessReview on nonResourceURLs.
+The `ExperimentalListPackageCustomSchemas` gRPC endpoint is served by the existing CatalogSource catalog pods. No new API extensions or CRDs are introduced.
 
 **Health indicators:**
-- Lifecycle-server pods include readiness and liveness probes
-- The lifecycle-controller monitors CatalogSource resources and lifecycle-server Deployment status
-- NetworkPolicy restricts traffic to the lifecycle-server to authorized sources
+- CatalogSource catalog pods already include readiness and liveness probes. The `ExperimentalListPackageCustomSchemas` endpoint is served as part of the existing gRPC service and does not require additional health checks.
 
 **Impact on existing SLIs:**
-- The lifecycle-controller and lifecycle-server are independent of the OLMv0 control loop. They do not affect operator installation, updates, or any existing OLM functionality.
-- The console proxy adds one additional HTTP call per installed-operators page load. Responses are cached (5-minute TTL) to minimize impact.
-- Expected catalog sizes and lifecycle metadata volumes are small (kilobytes per catalog), so API throughput impact is negligible.
+- The `ExperimentalListPackageCustomSchemas` endpoint is a lightweight addition to the existing gRPC service. It does not affect operator installation, updates, or any existing OLM functionality.
+- The console backend adds one gRPC call per installed-operators page load. Responses are cached (5-minute success TTL, 30-second error TTL) to minimize impact.
+- Custom schema indexing during cache build adds negligible overhead — lifecycle metadata volumes are small (kilobytes per catalog).
 
 **Failure modes:**
-- If the lifecycle-server is unavailable, the console displays "No data" — no impact on operator management functionality.
-- If the lifecycle-controller fails, existing lifecycle-server pods continue to serve their last-known data. New CatalogSources will not get lifecycle-server pods until the controller recovers.
-- If the console proxy endpoint fails, only lifecycle display is affected. All other console functionality remains operational.
+- If the CatalogSource catalog pod is unavailable, the Console displays "No data" for lifecycle columns — no impact on operator management functionality.
+- If the catalog pod runs an older opm version without `ExperimentalListPackageCustomSchemas`, the Console receives gRPC `Unimplemented` and displays "No data".
+- If the Console backend gRPC client fails, only lifecycle display is affected. All other Console functionality remains operational.
 
 **Escalation teams:**
-- OLM team: lifecycle-controller and lifecycle-server issues
-- Console team: proxy endpoint and frontend display issues
+- OLM team: `ExperimentalListPackageCustomSchemas` endpoint and CatalogSource catalog pod issues
+- Console team: gRPC client, HTTP endpoint, and frontend display issues
+- Layered products / PLCC team: lifecycle metadata content issues (incorrect dates, missing operators, stale data from the Product Lifecycle and Compatibility Center)
+- Konflux operator pipeline team: issues related to injection of lifecycle data into catalogs during the catalog build process
 
 ## Support Procedures
 
 **Detecting failure:**
 - If lifecycle data is not appearing in the console, check:
-  - `oc get pods -n openshift-operator-lifecycle-manager -l app=lifecycle-controller` — controller pod should be running
-  - `oc get pods -n <catalogSourceNamespace> -l app=<catalogSourceName>-lifecycle-server` — lifecycle-server pod should be running for each CatalogSource
-  - Console pod logs for errors proxying to the lifecycle-server endpoint
-  - Lifecycle-server pod logs for TLS, authentication, or FBC parsing errors
+  - `oc get pods -n <catalogSourceNamespace>` — CatalogSource catalog pod should be running
+  - Console pod logs for gRPC connection errors or HTTP 503/502 responses from the lifecycle endpoint
+  - CatalogSource catalog pod logs for cache build errors or custom schema indexing issues
 
 **Disabling the feature:**
-- In an emergency, the lifecycle-controller Deployment can be scaled to zero. Existing lifecycle-server pods will continue serving cached data but will not be updated when catalog images change.
+- The Console lifecycle UI is gated behind the `OLMLifecycleAndCompatibility` feature gate. When the feature gate is not enabled, the lifecycle columns are not rendered and no gRPC calls to catalog pods are made.
+- The `ExperimentalListPackageCustomSchemas` endpoint remains available on catalog pods regardless of the feature gate state. OLMv0 does not have support for feature gates, so the experimental gRPC API is always present once the updated `opm` binary is deployed. The feature gate only controls the Console UI that consumes this endpoint.
+- The `ExperimentalListPackageCustomSchemas` endpoint is not consumed by any component other than the Console, so its presence on catalog pods when the feature gate is disabled has no functional impact.
 
-**Consequences of disabling:**
-- Console will display "No data" for lifecycle and compatibility columns
+**Consequences of not enabling:**
+- Console displays the installed operators table without lifecycle and compatibility columns
 - No impact on existing operator installation, updates, or cluster health
-- No data loss — the lifecycle-server is stateless
 
 **Recovery:**
-- Scaling the lifecycle-controller back up will cause it to reconcile all CatalogSources and recreate any missing lifecycle-server pods
-- Functionality resumes without manual intervention
+- Enabling the `OLMLifecycleAndCompatibility` feature gate activates the lifecycle columns in the Console
+- No manual intervention required — the `ExperimentalListPackageCustomSchemas` endpoint is always available on catalog pods running the updated opm
 
 ## Infrastructure Needed
 
 No new subprojects or repositories are needed. All changes are contained within existing repositories:
 
-- `openshift/operator-framework-olm` — lifecycle-controller and lifecycle-server
-- `openshift/console` — backend proxy and frontend UI
-- `openshift/console-operator` — RBAC manifests
+- `operator-framework/operator-registry` — `ExperimentalListPackageCustomSchemas` gRPC endpoint on a new `ExperimentalRegistry` gRPC service
+- `openshift/console` — backend gRPC client and frontend UI
