@@ -352,6 +352,8 @@ Schema for `C2CC` (top-level fields beside
 |-------|------|----------|---------|-------------|
 | `routeTable` | int | no | `200` | Linux routing table ID for remote cluster pod/service CIDR routes. Must not conflict with system tables (0, 253, 254, 255) or `serviceRouteTable`. |
 | `serviceRouteTable` | int | no | `201` | Linux routing table ID for service traffic rerouting via the management port. Must not conflict with system tables or `routeTable`. |
+| `dns.cacheTTL` | int (seconds) | no | `10` | Maximum TTL for positive DNS cache entries in the CoreDNS server blocks generated for remote clusters. Must be >= 0. Setting to 0 disables positive caching. |
+| `dns.cacheNegativeTTL` | int (seconds) | no | `10` | Maximum TTL for denial (NXDOMAIN/NODATA) DNS cache entries in the CoreDNS server blocks generated for remote clusters. Must be >= 0. Setting to 0 disables denial caching. |
 
 C2CC is disabled when `remoteClusters` is empty or
 absent. Requires OVN-Kubernetes CNI (`network.cniPlugin`
@@ -444,7 +446,14 @@ a non-empty `Domain`. Each block performs domain rewrite
 (`.remote-domain` → `.cluster.local`) and forwards to the
 remote cluster's DNS IP (10th IP of the remote
 `serviceNetwork[0]`, computed during config validation).
-Example output:
+Each server block includes a `cache` stanza whose
+positive and denial TTLs are controlled by
+`dns.cacheTTL` and `dns.cacheNegativeTTL` respectively
+(defaults: 10s each). This lets operators tune caching
+for their environment — for example, lowering TTLs for
+clusters with fast-changing service endpoints, or
+raising them to reduce DNS load on the remote CoreDNS.
+Example output (with defaults):
 ```
 other-cluster.local:5353 {
     bufsize 1232
@@ -460,11 +469,12 @@ other-cluster.local:5353 {
 }
 ```
 The server blocks are rendered once during the DNS
-component startup. Changes to the C2CC config require
-a MicroShift restart to take effect in CoreDNS. Because
-the blocks are part of the template rendering pipeline,
-they do not conflict with CoreDNS reconciliation — the
-same template is used on every render cycle.
+component startup. Changes to the C2CC config (including
+DNS cache TTLs) require a MicroShift restart to take
+effect in CoreDNS. Because the blocks are part of the
+template rendering pipeline, they do not conflict with
+CoreDNS reconciliation — the same template is used on
+every render cycle.
 
 **Healthcheck Pod**: The C2CC controller deploys a
 lightweight probe Pod and a ClusterIP Service with a
@@ -628,7 +638,9 @@ loss, OVN-K restart, firewall reload, OVN NB DB wipe.
 reconciliation cycles.
 
 **DNS**: Negative caching, multiple remote cluster
-domain isolation.
+domain isolation. Custom `dns.cacheTTL` and
+`dns.cacheNegativeTTL` values are reflected in the
+generated CoreDNS server blocks.
 
 **IPSec**: Libreswan setup, ESP verification, MTU
 validation with double encapsulation, plaintext
