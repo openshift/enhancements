@@ -383,13 +383,15 @@ includes this update as part of the GA promotion work.
 
 #### Mismatching groups and ciphersuites
 
-There is a case where the administrator could incorrectly specify a set of
-ciphersuites that do not work with each other. For example, using an RSA
-ciphersuite with an ECDHE group (such as `TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256`
-and `P-256`). The default behavior of OpenSSL as well as Go's crypto/tls (both
-used extensively in OpenShift) is to fail at **TLS handshake time**. The TLS
-server instance will start normally, but when TLS clients attempt to handshake
-with the TLS server, the handshake will fail with a `handshake failure`.
+There is a case where the administrator could incorrectly specify ciphersuites
+and groups that do not work with each other. For example, specifying only
+non-EC DHE cipher suites (e.g. `DHE-RSA-AES256-GCM-SHA384`) while listing only
+EC-based groups (e.g. `X25519`, `P-256`) — DHE key exchange does not use EC
+groups, so no shared key exchange method can be negotiated. The default behavior
+of OpenSSL as well as Go's crypto/tls (both used extensively in OpenShift) is
+to fail at **TLS handshake time**. The TLS server instance will start normally,
+but when TLS clients attempt to handshake with the TLS server, the handshake
+will fail with a `handshake failure`.
 
 To avoid this scenario, OpenShift should implement validation to prevent known
 invalid combinations. A validation layer will be added to check for compatible
