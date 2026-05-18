@@ -6,15 +6,14 @@ authors:
   - "@eggfoobar"
 reviewers:
   - "@tjungblu, for cluster-etcd-operator"
-  - "@joelspeed, for API and infrastructure config"
-  - "@spadgett, for console"
+  - "@joelspeed, for API, infrastructure config, and cluster-config-operator scope"
   - "@jerpeter, for OpenShift architecture"
 approvers:
   - "@jerpeter, for OpenShift architecture"
 api-approvers:
   - "@joelspeed, for API and infrastructure config"
 creation-date: 2026-05-11
-last-updated: 2026-05-11
+last-updated: 2026-05-18
 tracking-link:
   - https://issues.redhat.com/browse/OCPEDGE-2280
 replaces:
@@ -26,44 +25,41 @@ superseded-by: []
 
 ## Terms
 
-**Mutable Topology** — The capability for an OpenShift cluster to transition between topology modes as a Day 2 operation, removing the existing assumption that topologies are immutable after installation.
+**Topology Modes** — OpenShift supports several topology configurations. The `TopologyMode` enum defines the API values: `SingleReplica`, `HighlyAvailable`, `DualReplica`, and `HighlyAvailableArbiter`. Beyond these enum values, OpenShift recognizes deployment shapes that use specific enum values with particular node configurations: compact clusters (control-plane nodes serve as workers), Two-Node with Arbiter (TNA — 2 control-plane nodes + 1 arbiter + workers, uses `HighlyAvailableArbiter`), and Two-Node with Fencing (TNF — 2 schedulable control-plane nodes with STONITH, uses `DualReplica`).
 
-**Topology Transition** — A directed, orchestrated change from one topology mode to another (e.g., SingleReplica to HighlyAvailable). Transitions are managed by a dedicated operator and follow a directed graph of supported paths.
+This enhancement initially targets `controlPlaneTopology` transitions only (SingleReplica → HighlyAvailable). The broader topology landscape is acknowledged here because the architecture must not preclude future support for these additional configurations.
 
-**OpenShift Topology Transition Operator (OTTO)** — An optional payload operator responsible for orchestrating topology transitions. OTTO owns the transition graph, validates preconditions, coordinates with cluster operators, and updates the Infrastructure config once the cluster is ready.
+**Mutable Topology** — The capability for an OpenShift cluster to transition between topology modes (e.g., SingleReplica to HighlyAvailable) as a Day 2 operation. This enhancement removes the existing assumption that topologies are fixed at installation time.
+
+**Topology Transition** — A directed change from one topology mode to another (e.g., SingleReplica to HighlyAvailable). Transitions are managed by a controller in cluster-config-operator and follow a set of supported transitions.
 
 **Control Plane Topology** — The cluster-topology mode describing how control-plane nodes are deployed and managed (SingleReplica, HighlyAvailable, or other supported modes). Control-plane nodes are nodes labeled with `node-role.kubernetes.io/control-plane` or `node-role.kubernetes.io/master`.
 
-**Infrastructure Topology** — The cluster-topology mode describing how infrastructure workloads are distributed (SingleReplica, HighlyAvailable, or other supported modes). When there are no worker nodes, control-plane nodes serve as workers.
+**Infrastructure Topology** — The cluster-topology mode describing how infrastructure workloads are distributed (SingleReplica, HighlyAvailable, or other supported modes). When there are no dedicated worker nodes, `infrastructureTopology` is set to match `controlPlaneTopology` since control-plane nodes serve as workers.
 
-**Compact Cluster** — A cluster where control-plane nodes also serve as workers. In the initial SNO-to-HA transition, the target is a 3-node compact cluster with no dedicated worker nodes.
+**Compact Cluster** — A cluster where control-plane nodes also serve as workers. In the initial SNO-to-HA transition, the target is a 3-node compact cluster with no dedicated worker nodes. The compact deployment shape is a consequence of not adding dedicated worker nodes — it is not a distinct `TopologyMode` enum value.
+
+**mastersSchedulable** — A field in the infrastructure status indicating whether control-plane nodes are schedulable for general workloads. The topology transition controller recalculates this value as part of a transition.
 
 **Cluster Administrator** — An entity responsible for managing an existing cluster, including Day 2 operations such as topology transitions and node scaling.
 
 ## Summary
 
-This enhancement introduces "mutable topology" which is defined as "the ability for OpenShift clusters to transition between topology modes as a Day 2 operation". This changes the existing OpenShift assumption that topologies are immutable after installation.
+This enhancement enables OpenShift clusters to transition between topology modes as a Day 2 operation. This changes the existing OpenShift assumption that topologies are immutable after installation.
 
-A new optional payload operator, the OpenShift Topology Transition Operator (OTTO), will orchestrate transitions.
-OTTO maintains a directed graph of supported transitions along with their preconditions, configuration steps, and validation criteria.
-A new `oc adm transition topology` CLI command provides an interactive interface for cluster administrators to configure and execute transitions.
+A new `desiredTopology` field in the infrastructure spec expresses the administrator's intent to transition. A topology transition controller in cluster-config-operator watches for changes to this field, validates preconditions, coordinates the transition, and updates the existing topology status fields when the cluster is ready.
+A new `oc adm transition topology` CLI command provides an interface for cluster administrators to initiate transitions.
 The initial implementation supports transitioning Single Node OpenShift (SNO) clusters to HA compact (3-node) on `platform: none`.
+
+This enhancement supersedes the [Adaptable Topology proposal](https://github.com/openshift/enhancements/pull/1905), which proposed a new `Adaptable` topology mode requiring changes across all core operators. That proposal is withdrawn in favor of this controller-based approach.
 
 ## Motivation
 
 Cluster demands change over time. Customers who start with Single Node OpenShift (SNO) at edge locations may later require high availability as workloads become more critical. Today, this requires redeploying the cluster — a disruptive operation that involves workload migration, downtime, and operational overhead.
 
-The previous approach to this problem ([Adaptable Topology](https://github.com/openshift/enhancements/pull/1905)) proposed a new topology mode
-where operators dynamically react to node count changes.
-That approach required updating every core operator to handle dynamic topology shifts
-and introduced a new topology enum value that all operators had to understand.
-It also coupled topology behavior to node count, making operator logic more complex.
+The previous approach to this problem ([Adaptable Topology](https://github.com/openshift/enhancements/pull/1905)) proposed a new `Adaptable` topology mode where operators would dynamically react to node count changes. That approach required updating every core operator to handle dynamic topology shifts and introduced a new topology enum value that all operators had to understand. It also coupled topology behavior to node count, making operator logic more complex.
 
-Mutable topology takes a different approach: instead of adding a new topology mode that operators must interpret,
-transitions are orchestrated by a dedicated operator that coordinates the sequencing, validates preconditions,
-and updates the Infrastructure config only when the cluster is ready for the new mode.
-Operators continue to react to the same fixed topology values they already understand.
-This keeps operator logic simple and concentrates transition complexity in a single component.
+Mutable topology takes a different approach: instead of adding a new topology mode that operators must interpret, transitions are orchestrated by a controller in cluster-config-operator that coordinates the sequencing, validates preconditions, and updates the infrastructure CR only when the cluster is ready for the new mode. Operators continue to react to the same fixed topology values they already understand. This keeps operator logic simple and concentrates transition complexity in an existing core component.
 
 ### User Stories
 
@@ -73,13 +69,12 @@ This keeps operator logic simple and concentrates transition complexity in a sin
 
 * As a cluster administrator managing a fleet of edge deployments, I want a supported path to transition my cluster topology so that I don't need to redeploy clusters when my infrastructure requirements change.
 
-* As a platform engineer, I want topology transitions managed by a dedicated operator so that the transition logic is isolated from my operational tooling and I have a clear interface for monitoring transition state.
+* As a cluster administrator, I want topology transitions managed through a well-defined API so that I have a clear interface for monitoring transition state and integrating with my operational tooling.
 
 ### Goals
 
 * Officially support topology transitions in OpenShift
-* Provide a topology transition operator (OTTO) that owns the transition graph and orchestrates transitions safely
-* Provide an `oc adm transition topology` CLI command for interactive transition management
+* Provide a supported interface for administrators to initiate topology transitions
 * Support transitioning SNO clusters to HA compact (3-node) on `platform: none` as the initial transition path
 * Maintain backward compatibility — existing clusters with fixed topology modes are unaffected
 * Establish the architectural foundation for additional transition paths in the future
@@ -92,119 +87,22 @@ This keeps operator logic simple and concentrates transition complexity in a sin
 * Automatic node provisioning or deprovisioning based on workload demands
 * Scaling down control-plane or worker nodes (scale-down may be addressed in a future enhancement)
 * Supporting bidirectional transitions (e.g., HA → SNO) in the initial implementation
-* Installing OTTO by default on all clusters
 
 ## Proposal
 
-Mutable topology introduces a new optional payload operator and CLI command to enable topology transitions as Day 2 operations.
+This enhancement introduces a new infrastructure API field and a topology transition controller in cluster-config-operator (CCO; not to be confused with cloud-credential-operator) to enable topology transitions as Day 2 operations.
 
-A dedicated operator is the right vehicle for this because topology transitions are long-running, multi-step orchestration workflows that require persistent state, failure recovery, and coordination across multiple cluster operators. This logic does not belong in CVO — CVO is a critical-path operator where additional surface area increases risk to every cluster, and topology transitions are operationally distinct from version management. It does not belong in the CLI because CLI processes cannot survive disconnects or provide the reconciliation loop needed for automatic recovery from partial failures. A separate operator isolates this complexity, ships with the payload but installs only when needed, and can be tested independently.
+The approach follows the standard Kubernetes spec/status contract and mirrors the pattern used by `oc adm upgrade`:
 
-The approach has two components:
+1. **`desiredTopology` field in InfrastructureSpec** — Expresses the administrator's intent to transition. The CLI patches this field to initiate a transition. The existing `controlPlaneTopology` and `infrastructureTopology` fields in status continue to represent the cluster's observed topology.
 
-1. **OpenShift Topology Transition Operator (OTTO)** — An operator that ships with the payload but is not installed by default. OTTO owns the transition graph, validates preconditions, orchestrates the transition sequence, and updates the Infrastructure config as the final step.
+2. **Topology transition controller in cluster-config-operator** — A new controller in CCO that watches the infrastructure CR for `desiredTopology` changes, validates preconditions, coordinates the transition, and updates the status topology fields when the cluster is ready for the new mode.
 
-2. **`oc adm transition topology` CLI command** — An interactive command that installs/activates OTTO if needed, guides the administrator through configuring the transition (nodes, certificates, secrets, etc.), and monitors transition status via OTTO's custom resources.
+3. **`oc adm transition topology` CLI command** — A command that validates preconditions before patching `spec.desiredTopology` on the infrastructure CR, then monitors transition progress.
 
-### Workflow Description
+The transition controller is proposed to live in cluster-config-operator because CCO is the canonical location for config.openshift.io CRD manifests and bootstrap CR rendering, and the topology transition logic is tightly coupled to the Infrastructure CR schema it ships. This is a deliberate expansion of CCO's scope since historically the repo has been limited to CRD manifests and bootstrap rendering. The controller is feature-gated using the standard library-go FeatureGateAccess pattern: when the gate is disabled the controller is not registered with the manager and incurs negligible runtime overhead; a gate change triggers an operator restart via ForceExit so the new state is picked up cleanly.
 
-#### Transition: SNO to HA Compact (3-Node)
-
-**cluster administrator** is an entity responsible for managing an existing cluster.
-
-**Non-functional constraint**: There is no availability guarantee during topology transitions. Scaling control-plane nodes is an explicit operational action, and administrators should treat it as a maintenance window. The cluster is expected to be fully available before and after the transition, but not necessarily during.
-
-##### Pre-Transition
-
-1. The cluster administrator prepares the additional control-plane nodes (hardware, network, OS)
-2. The cluster administrator runs `oc adm transition topology` to begin the interactive transition flow
-3. The CLI checks whether OTTO is installed; if not, it installs/activates it
-4. The CLI guides the administrator through providing required configuration:
-   - Node identities and access details for the new control-plane nodes
-   - Any certificates or secrets required for the transition
-   - Load balancing configuration (on `platform: none`, the user manages their own VIPs/DNS)
-5. The CLI creates a transition CR with the provided configuration
-6. OTTO validates preconditions:
-   - Current topology is SingleReplica
-   - Target topology is HighlyAvailable
-   - Required nodes are reachable and meet minimum resource requirements
-   - Required certificates and secrets are present
-   - Platform is supported (`platform: none` in the initial implementation)
-
-##### During Transition
-
-7. OTTO signals that a transition is in progress (status on the transition CR)
-8. OTTO triggers setup changes on dependent operators:
-   - cluster-etcd-operator (CEO) scales etcd members sequentially following the bootstrap pattern (1→2→3)
-   - Each new node joins as a learner and is promoted to a voting member before the next is added
-   - The kube-apiserver, kube-controller-manager, and kube-scheduler start on new nodes via static pods managed by the kubelet
-   - Ingress, networking, and other infrastructure operators prepare for multi-node operation
-9. OTTO validates that all operator-specific setup steps have completed successfully
-10. OTTO updates the Infrastructure status fields:
-    - `controlPlaneTopology` transitions from `SingleReplica` to `HighlyAvailable`
-    - `infrastructureTopology` transitions from `SingleReplica` to `HighlyAvailable`
-11. Operators reconcile against the new topology values and adjust their deployment strategies, replica counts, and placement policies
-
-##### Post-Transition
-
-12. OTTO validates that all operators have reconciled to a healthy state
-13. The transition CR is updated to reflect completion
-14. The CLI reports success to the administrator
-
-##### Failure Handling
-
-If a transition fails partway through:
-
-- OTTO reports the failure state on the transition CR with diagnostic information
-- For etcd scaling failures, CEO attempts to roll back to the previous member count (e.g., roll back to 1 member if the 1→2→3 scale-up fails)
-- The administrator can inspect OTTO logs and the transition CR for details
-- The administrator can retry the transition after addressing the issue
-
-### API Extensions
-
-#### Transition Custom Resource
-
-OTTO will define a custom resource for managing topology transitions:
-
-```yaml
-apiVersion: topology.openshift.io/v1alpha1
-kind: TopologyTransition
-metadata:
-  name: sno-to-ha-compact
-spec:
-  targetTopology:
-    controlPlane: HighlyAvailable
-    infrastructure: HighlyAvailable
-  nodes:
-    # Node configuration provided by the administrator
-    # Exact schema TBD based on OTTO implementation
-status:
-  phase: Pending | Validating | InProgress | Completed | Failed
-  conditions:
-    - type: PreflightChecksPassed
-      status: "True"
-    - type: EtcdScalingComplete
-      status: "True"
-    - type: InfrastructureUpdated
-      status: "True"
-  message: "Transition completed successfully"
-```
-
-#### Infrastructure Config Changes
-
-No new enum values are added to the Infrastructure config. The existing `controlPlaneTopology` and `infrastructureTopology` fields retain their current values (`SingleReplica`, `HighlyAvailable`, `DualReplica`, `HighlyAvailableArbiter`).
-
-OTTO updates these fields as the final step of a transition, changing them from one fixed mode to another (e.g., `SingleReplica` → `HighlyAvailable`).
-
-A ValidatingAdmissionPolicy will be added to prevent direct edits to topology fields outside of OTTO's service account. This ensures transitions are always orchestrated rather than applied ad hoc.
-
-#### Feature Gate
-
-A new feature gate `MutableTopology` will be added to gate this functionality. The feature gate will progress through the following stages:
-
-- **Dev Preview**: Part of the `DevPreviewNoUpgrade` feature set
-- **Tech Preview**: Moved to the `TechPreviewNoUpgrade` feature set
-- **GA**: Moved to the `Default` feature set
+See [Alternatives](#alternatives-not-implemented) for the full analysis of controller placement options.
 
 ### Topology Considerations
 
@@ -218,133 +116,263 @@ Future support for HyperShift is not planned for this enhancement but is not rul
 
 Standalone clusters are the primary target for mutable topology. This enhancement enables standalone clusters to start with minimal footprints and transition to multi-node configurations without redeployment.
 
-`platform: none` will be supported for the initial SNO → HA compact transition. On `platform: none`, the administrator is responsible for managing their own load balancing configuration (VIPs, DNS) when scaling beyond a single node.
+`platform: none` will be supported for the initial SNO → HA compact transition. On `platform: none`, the administrator is responsible for external networking prerequisites (VIPs, DNS, load balancer configuration) as described in the [Pre-Transition](#pre-transition) workflow.
 
 `platform: baremetal` support is planned for a subsequent phase pending resolution of keepalived networking for single-node clusters. The Bare Metal Networking team will be consulted to determine keepalived configuration capabilities.
+
+This design does not inhibit expansion to cloud platforms (AWS, Azure, GCP) in the future — the supported transitions list and precondition validation are per-transition, so cloud-specific transitions can add platform-specific checks without changing the controller architecture. Cloud platforms are out of scope for the initial implementation.
 
 #### Single-node Deployments or MicroShift
 
 Single Node OpenShift (SNO) clusters are the primary source topology for transitions. The initial use case is enabling SNO deployments to transition to HA compact (3-node) configurations as requirements change.
 
-OTTO ships with the payload but is not installed by default, so there is no resource impact on SNO clusters that do not use this feature.
+The topology transition controller is gated by the `MutableTopology` feature gate and has no resource impact on clusters that do not use this feature.
 
-MicroShift is not affected by this enhancement. A separate enhancement may address MicroShift-to-SNO transitions but it is unlikely it will be included as part of supported transitions in OTTO.
+MicroShift is not affected by this enhancement and is unlikely to be included as a supported transition target.
 
 #### OpenShift Kubernetes Engine
 
-This proposal does not depend on features excluded from the OpenShift Kubernetes Engine (OKE) product offering. OTTO modifies core infrastructure components — the Infrastructure API, installer, cluster-etcd-operator, and other in-payload operators — all of which are included in OKE. OKE clusters that use mutable topology will benefit from the same transition capabilities as OCP clusters.
+This proposal does not depend on features excluded from the OpenShift Kubernetes Engine (OKE) product offering. Mutable topology modifies core infrastructure components — the infrastructure API, cluster-config-operator, cluster-etcd-operator, and other in-payload operators — all of which are included in OKE.
+
+### Workflow Description
+
+#### Transition: SNO to HA Compact (3-Node)
+
+**Operational guidance**: Administrators should treat topology transitions as a maintenance window. The cluster is expected to remain available throughout the transition, but availability is not guaranteed — administrators should reduce non-critical workload risk accordingly. The cluster is expected to be fully available before and after the transition.
+
+##### Pre-Transition
+
+1. The cluster administrator prepares at least 2 additional control-plane nodes and joins them to the cluster — the kubelet is running on each node and Node objects exist in the Kubernetes API. On `platform: none`, the administrator manages their own load balancing configuration (VIPs, DNS).
+2. The cluster administrator runs `oc adm transition topology HighlyAvailable`
+3. The CLI validates preconditions before patching (e.g., feature gate enabled, no transition already in progress)
+4. The CLI patches the infrastructure CR: `spec.desiredTopology: HighlyAvailable`
+5. The API server validates `desiredTopology` via CEL validation rules, rejecting unsupported topology modes before accepting the write
+
+##### During Transition
+
+6. The topology transition controller in CCO detects the `desiredTopology` change and validates preconditions:
+   - Current `controlPlaneTopology` is `SingleReplica`
+   - Target topology is `HighlyAvailable`
+   - At least 3 nodes with `node-role.kubernetes.io/control-plane` or `node-role.kubernetes.io/master` labels are present in the Node API
+   - Platform is supported (`platform: none` in the initial implementation)
+7. The controller signals that a transition is in progress (via infrastructure status conditions)
+8. Operator-specific setup:
+   - cluster-etcd-operator (CEO) scales etcd members sequentially (1→2→3), reusing the learner-to-voter promotion mechanism from bootstrapping — each new node joins as a learner and is promoted to a voting member before the next is added
+   - The kube-apiserver, kube-controller-manager, and kube-scheduler operators create static pod manifests for the new control-plane nodes; the kubelet runs the pods
+   - Ingress controller adjusts replica count based on the new topology (specific scaling behavior to be validated during dev preview)
+9. The controller updates the infrastructure status fields:
+   - `controlPlaneTopology` transitions from `SingleReplica` to `HighlyAvailable`
+   - `infrastructureTopology` transitions from `SingleReplica` to `HighlyAvailable` (no dedicated workers, so it matches control plane topology)
+   - `mastersSchedulable` is recalculated
+10. Operators reconcile against the new topology values and adjust their deployment strategies, replica counts, and placement policies
+
+    **Note**: OLM-managed operators that read topology at startup rather than watching for changes may need to be restarted after the transition completes. See [Drawbacks](#drawbacks) for details.
+
+##### Post-Transition
+
+11. The controller validates that critical operators have reconciled to a healthy state
+12. The infrastructure status reflects the completed transition. `desiredTopology` matches `status.controlPlaneTopology`, so no further action is taken.
+13. The CLI reports success to the administrator
+
+##### Failure Handling
+
+If a transition fails partway through:
+
+- The controller reports the failure via infrastructure status conditions with diagnostic information
+- For etcd scaling failures, CEO attempts to roll back to the previous member count (e.g., roll back to 1 member if the 1→2→3 scale-up fails)
+- The administrator can inspect CCO logs and infrastructure status for details
+- On failure, the controller resets `desiredTopology` to the pre-transition topology value so that `desiredTopology` matches `status.controlPlaneTopology` again (idle state). This is a deliberate deviation from the standard Kubernetes convention that controllers should not mutate spec: without the reset, the controller would continuously retry a failed transition with no administrator intervention, which is undesirable for a high-risk orchestration workflow. By resetting spec, the controller returns to an idle state and the administrator can address the underlying issue and explicitly re-initiate the transition via `oc adm transition topology`
+
+### API Extensions
+
+#### Infrastructure API Changes
+
+This enhancement modifies the existing infrastructure CR (`infrastructures.config.openshift.io`) following the standard Kubernetes spec/status contract:
+
+**Spec (user intent):**
+
+A new `desiredTopology` field is added to `InfrastructureSpec` to express the administrator's intent to transition:
+
+```go
+type InfrastructureSpec struct {
+	CloudConfig  ConfigMapFileReference `json:"cloudConfig"`
+	PlatformSpec PlatformSpec           `json:"platformSpec,omitempty"`
+	// desiredTopology expresses the administrator's intent for the
+	// cluster's control plane topology. The installer sets this field
+	// to match the cluster's initial controlPlaneTopology. When the
+	// value differs from status.controlPlaneTopology, the topology
+	// transition controller in cluster-config-operator initiates a
+	// transition. When the value matches status.controlPlaneTopology,
+	// no transition is in progress.
+	// +openshift:enable:FeatureGate=MutableTopology
+	DesiredTopology TopologyMode `json:"desiredTopology"`
+}
+```
+
+There is no kubebuilder default — the initial value is not static. The installer (or a CCO bootstrap reconciler) writes `desiredTopology` to match the cluster's installed `controlPlaneTopology` (e.g., `SingleReplica` for SNO, `HighlyAvailable` for standard clusters). This makes the field effectively required-on-create at install time. A transition is initiated when `desiredTopology` differs from `status.controlPlaneTopology`. No transition occurs when the values match.
+
+**Status (observed state):**
+
+The existing fields in `InfrastructureStatus` that the controller updates upon successful transition:
+
+```go
+// controlPlaneTopology expresses the expectations for operands that normally
+// run on control nodes. Currently documented as "set once by the installer
+// and not expected to change." This enhancement changes that contract when
+// the MutableTopology feature gate is enabled.
+// +kubebuilder:default=HighlyAvailable
+ControlPlaneTopology TopologyMode `json:"controlPlaneTopology"`
+
+// infrastructureTopology expresses the expectations for infrastructure
+// services that do not run on control plane nodes. When there are no
+// dedicated worker nodes, this is set to match controlPlaneTopology.
+// +kubebuilder:default=HighlyAvailable
+InfrastructureTopology TopologyMode `json:"infrastructureTopology,omitempty"`
+```
+
+No new enum values are added to `TopologyMode`. The existing values (`SingleReplica`, `HighlyAvailable`, `DualReplica`, `HighlyAvailableArbiter`) are sufficient.
+
+**Transition progress** will be reported via the following condition types on the infrastructure status:
+
+| Condition Type | Meaning |
+| -------------- | ------- |
+| `TopologyTransitionProgressing` | A transition is in progress. `status: True` when actively transitioning, `status: False` when idle or complete. |
+| `TopologyTransitionCompleted` | The most recent transition completed successfully. `status: True` after successful completion. |
+| `TopologyTransitionFailed` | The most recent transition attempt failed. `status: True` when a failure has occurred. `message` contains diagnostic details. |
+
+These condition types provide a stable contract for the CLI, console, and telemetry consumers. Reason values (e.g., `TransitionStarted`, `EtcdScalingInProgress`, `WaitingForOperators`, `PreconditionNotMet`, `EtcdScalingFailed`) will be refined during dev preview implementation.
+
+#### Admission Control
+
+**Spec validation**: A CEL validation rule on the `desiredTopology` field will restrict accepted values to topology modes that have defined transitions. For the initial implementation, this limits the field to `SingleReplica` and `HighlyAvailable`. Setting `desiredTopology` to an unsupported value (e.g., `External`) will be rejected by the API server. Access to `spec.desiredTopology` is governed by the existing RBAC for the infrastructure CR (`infrastructures.config.openshift.io`). By default, only users with `cluster-admin` or equivalent roles can modify infrastructure spec fields. No additional RBAC restrictions are proposed for the initial implementation; a dedicated role for topology transitions may be considered in future iterations if finer-grained access control is needed.
+
+**Status protection**: A ValidatingAdmissionPolicy (VAP) targeting the `/status` subresource of the infrastructure CR will prevent direct edits to the `controlPlaneTopology`, `infrastructureTopology`, and `mastersSchedulable` status fields outside of the CCO topology transition controller's service account (in the `openshift-config-operator` namespace). This ensures transitions are always orchestrated rather than applied ad hoc.
+
+The VAP will use a **fail-closed** policy — if the VAP is unavailable, all edits to the protected status fields are blocked. This prevents uncontrolled topology changes when the admission infrastructure is degraded. Note that fail-closed assumes the API server is healthy enough to evaluate admission policies; if the API server itself is unavailable, no writes to the infrastructure CR can occur regardless.
+
+ValidatingAdmissionPolicy GA'd in Kubernetes 1.30 (OCP 4.17). VAP support for `/status` subresource matching via `matchPolicy` configuration on `ValidatingAdmissionPolicyBinding` will be validated against the target OCP release during dev preview. During cluster bootstrap, the infrastructure CR status fields are written by the installer before the admission infrastructure is fully initialized — the fail-closed policy does not apply at that stage because the API server's admission chain is not yet active. Post-bootstrap, the VAP exempts the CCO topology transition controller's service account via a `matchConditions` CEL expression.
+
+#### Feature Gate
+
+A new feature gate `MutableTopology` will be added to gate this functionality. The feature gate will progress through the following stages:
+
+- **Dev Preview**: Part of the `DevPreviewNoUpgrade` feature set
+- **Tech Preview**: Moved to the `TechPreviewNoUpgrade` feature set
+- **GA**: Moved to the `Default` feature set
 
 ### Implementation Details/Notes/Constraints
 
-#### OpenShift Topology Transition Operator (OTTO)
+#### Topology Transition Controller
 
-OTTO is a new optional payload operator with the following characteristics:
+A new topology transition controller is added to cluster-config-operator with the following characteristics:
 
-- **Ships with the payload** but is **not installed by default**
-- Installed either manually or via the `oc adm transition topology` command
-- Owns the transition graph — the directed graph defining which topology transitions are supported
-- Owns the validation criteria for each transition (required nodes, certificates, secrets, operator states)
+- Watches the infrastructure CR for `spec.desiredTopology` diverging from `status.controlPlaneTopology`
+- Gated by the `MutableTopology` feature gate — inactive when the gate is disabled
+- Maintains the set of supported transitions (initially only SingleReplica → HighlyAvailable on `platform: none`)
+- Validates preconditions before starting a transition
 - Orchestrates transitions by interacting with cluster operators via their existing APIs
-- Updates the Infrastructure status field as the final step, after the cluster is ready for the new topology
-- Reports transition status via custom resources
+- Updates `controlPlaneTopology`, `infrastructureTopology`, and `mastersSchedulable` in status as the final step
+- Reports transition progress via infrastructure status conditions
 
-##### Transition Graph
+##### Supported Transitions
 
-OTTO maintains a directed graph of supported transitions. For the initial implementation:
+For the initial implementation:
 
 ```text
 SingleReplica (SNO, platform: none) → HighlyAvailable (3-node compact)
 ```
 
-Future transitions can be added to the graph without modifying the core operator logic. Each edge in the graph includes:
+Future transitions can be added without modifying the core controller logic. Each supported transition defines:
 
 - **Preconditions**: What must be true before the transition can start
-- **Configuration steps**: What OTTO must do during the transition
+- **Orchestration steps**: What the controller coordinates during the transition
 - **Validation criteria**: What must be true after the transition for it to be considered complete
 
 ##### Transition Orchestration
 
-When a transition is triggered, OTTO follows this sequence:
+When `spec.desiredTopology` differs from `status.controlPlaneTopology`, the controller follows this sequence:
 
-1. **Validate preconditions** — check that the source topology, target topology, platform, and provided configuration are valid
-2. **Signal transition in progress** — update the transition CR status
-3. **Execute operator-specific setup**:
-   - Coordinate with CEO for etcd member scaling
+1. **Validate preconditions** — check that the source topology, target topology, platform, and control-plane node count (3+) are valid
+2. **Signal transition in progress** — set infrastructure status conditions and set `Upgradeable=False` on the CCO `ClusterOperator` with reason `TopologyTransitionInProgress` to prevent CVO from initiating an upgrade while the cluster is in an intermediate topology state
+3. **Coordinate operator-specific setup**:
+   - CEO scales etcd members sequentially (1→2→3)
    - Wait for kube-apiserver, kube-controller-manager, and kube-scheduler to start on new nodes
-   - Coordinate with ingress, networking, and other operators as needed. Specific requirements will be discovered as part of dev preview work.
-4. **Validate operator readiness** — confirm all operators report healthy for the target topology
-5. **Update Infrastructure status** — change `controlPlaneTopology` and `infrastructureTopology` to the target values
-6. **Validate post-transition health** — confirm operators reconcile successfully against the new topology
-7. **Report completion** — update the transition CR status
+   - Specific requirements for ingress, networking, monitoring, and other operators will be validated and documented during dev preview implementation. These operators are expected to reconcile on infrastructure status topology field changes, but the exact behavior for each has not yet been confirmed.
+4. **Update infrastructure status** — change `controlPlaneTopology`, `infrastructureTopology`, and `mastersSchedulable` to the target values
+5. **Validate post-transition health** — confirm operators reconcile successfully against the new topology
+6. **Report completion** — update infrastructure status conditions
 
 #### `oc adm transition topology` CLI Command
 
-The CLI command provides an interactive interface for topology transitions:
+The CLI command provides an interface for topology transitions:
 
-- Installs/activates OTTO if not already present
-- Guides the administrator through required configuration (nodes, certificates, secrets)
-- Creates the transition CR with the provided configuration
-- Monitors the transition CR for status updates
+- Validates preconditions client-side (feature gate enabled, no transition in progress)
+- Patches `spec.desiredTopology` on the infrastructure CR
+- Monitors infrastructure status conditions for progress
 - Reports success or failure with diagnostic information
 
-The CLI does not contain transition logic — it delegates entirely to OTTO. This keeps the CLI thin and avoids bloating it as more transitions are supported.
+The CLI does not contain transition logic — it delegates entirely to the CCO controller. This follows the same pattern as `oc adm upgrade`, which patches `spec.desiredUpdate` and lets the CVO do the work.
 
 #### etcd Scaling: SNO to HA Compact
 
-When transitioning from SNO to a 3-node compact cluster, CEO scales etcd members sequentially — the same approach used during cluster bootstrapping (1→2→3 members):
+When transitioning from SNO to a 3-node compact cluster, CEO scales etcd members sequentially. Each new member joins as a learner and is promoted to a voting member using the same learner-to-voter promotion mechanism that CEO uses during cluster bootstrapping.
+
+The overall orchestration differs from bootstrapping: bootstrapping uses a temporary bootstrap member that is later removed before the cluster reaches steady state, while a Day 2 transition adds permanent members to a running production cluster. Critically, the 2-voter intermediate state (steps 4–5 below) is unique to Day 2 transitions — it does not occur during bootstrapping.
 
 1. **Starting state**: 1 etcd voting member (quorum=1)
 2. CEO adds an etcd learner on the second control-plane node
-3. The learner syncs data from the existing voter via snapshot transfer
+3. The learner syncs data from the existing voter via data replication
 4. CEO promotes the learner to a voting member — the cluster now has 2 voting members (quorum=2)
 5. CEO adds an etcd learner on the third control-plane node
 6. The learner syncs data from an existing voter
 7. CEO promotes the learner to a voting member — the cluster now has 3 voting members (quorum=2)
 8. The cluster can now tolerate the loss of one control-plane node
 
+During the 2-member state (steps 4–5), the cluster has zero fault tolerance for control-plane node failures — losing either member is fatal.
+
 This is a sequential process. The 2-member state in steps 4–5 is the primary risk window — quorum requires both members, so losing either is fatal. This window is minimized by proceeding to step 5 immediately after promotion.
 
-The 2-member state is transient and follows the same pattern as cluster bootstrapping — a well-exercised code path.
+The learner-to-voter promotion code path is well-exercised from cluster bootstrapping. However, the 2-member steady state is unique to Day 2 transitions — during bootstrapping, the temporary bootstrap member is removed before the cluster reaches steady state, so the cluster never operates with exactly 2 voting members handling production traffic. The blast radius of a failure during the 2-member window is higher than during initial installation because this is a production cluster with live workloads.
 
 #### Component Changes Summary
 
 | Component | Changes Required |
 | --------- | ---------------- |
-| OTTO (new) | Transition operator with transition graph, validation, orchestration, and transition control CRD(s) |
-| `oc` CLI | New `oc adm transition topology` interactive command |
-| Infrastructure API | ValidatingAdmissionPolicy to restrict direct topology field edits |
-| cluster-etcd-operator | Coordinate with OTTO for sequential etcd scaling during transitions |
-| Ingress, networking, monitoring operators | Respond to OTTO coordination signals during transitions; reconcile on Infrastructure config changes |
+| cluster-config-operator | New topology transition controller; watches `spec.desiredTopology`, coordinates transitions, updates status topology fields |
+| Infrastructure API (`openshift/api`) | Add `desiredTopology` to `InfrastructureSpec`; update immutability documentation on status topology fields; ValidatingAdmissionPolicy for topology field edits |
+| `oc` CLI | New `oc adm transition topology` command |
+| cluster-etcd-operator | Sequential etcd scaling during transitions (learner-to-voter promotion mechanism from bootstrapping) |
+| ingress, networking, monitoring operators | Reconcile on infrastructure status topology field changes |
 
 #### Platform Support Constraints
 
-The initial implementation targets `platform: none` clusters. On `platform: none`, the administrator is responsible for managing their own load balancing configuration (VIPs, DNS) when scaling beyond a single node.
+See [Standalone Clusters](#standalone-clusters) for platform support details. The initial implementation targets `platform: none` only; `platform: baremetal` and cloud platforms are future work.
 
-`platform: baremetal` support is planned for a subsequent phase. Bare metal networking uses keepalived for ingress load balancing, which is not useful and creates a point of failure for SNO deployments. The Bare Metal Networking team will be consulted to determine if this networking setup can be enabled for single-node clusters transitioning to HA.
+The node-joining mechanism is initially UPI, but the design must not preclude future use of the Machine API Operator (MAO) for automated node provisioning. The topology transition controller checks for Node objects in the Kubernetes API regardless of how they were provisioned, so MAO-provisioned nodes are expected to work without controller changes. However, Machine object lifecycle implications have not yet been validated.
 
 ### Risks and Mitigations
 
 #### Risk: Quorum Loss During Two-Member Transient State
 
-**Risk**: During sequential etcd scaling (1→2→3), the cluster passes through a 2-member state where quorum=2. Losing either member during this window causes quorum loss.
+**Risk**: During sequential etcd scaling (1→2→3), the cluster passes through a 2-member state where quorum=2. Losing either member during this window is fatal — the cluster loses its API and requires manual recovery.
 
 **Mitigation**:
-- The 2-member state is transient and follows the same sequential pattern used during cluster bootstrapping — a well-exercised code path
+- The 2-member state is transient and the learner-to-voter promotion mechanism is reused from cluster bootstrapping — a well-exercised code path
 - Learner instances are used before promoting members to minimize the promotion window
 - No availability guarantee during transitions; administrators should treat scaling operations as a maintenance window
 - CEO will attempt rollback if scaling fails (e.g., rollback to 1 member if the 1→2→3 scale-up fails partway through)
-- Future iterations may explore admitting two learners simultaneously and promoting only when both are ready, eliminating the 2-member voting window entirely but that is out of scope for this enhancement
+- Future iterations may explore admitting two learners simultaneously and promoting only when both are ready, eliminating the 2-member voting window entirely, but that is out of scope for this enhancement
 
 #### Risk: Transition Fails Partway Through
 
-**Risk**: A transition may fail after some operators have begun reconfiguring but before the transition completes, leaving the cluster in an intermediate state.
+**Risk**: A transition may fail after some operators have begun reconfiguring but before the transition completes, leaving the cluster in an intermediate state. For example, etcd scales to 2 members, a network partition occurs between them, and both lose quorum with no API available.
 
 **Mitigation**:
-- OTTO validates preconditions before starting
-- OTTO sequences operations so that the Infrastructure config is updated only after all setup steps succeed
-- Operators do not see a topology change until OTTO updates the Infrastructure status as the final step
-- If setup steps fail, OTTO reports the failure and CEO attempts rollback for etcd
-- The transition CR provides detailed status for troubleshooting
+- The controller validates preconditions before starting
+- The controller sequences operations so that topology status fields are updated only after all setup steps succeed
+- Operators do not see a topology change until the controller updates the infrastructure status as the final step
+- If setup steps fail, the controller reports the failure and CEO attempts rollback for etcd
+- infrastructure status conditions provide detailed state for troubleshooting
 
 #### Risk: Platform Bare Metal May Not Support Single-Node Clusters
 
@@ -355,23 +383,24 @@ The initial implementation targets `platform: none` clusters. On `platform: none
 - `platform: none` provides full support as a fallback
 - The limitation can be documented while bare metal support is resolved
 
-#### Risk: OTTO Adds Payload Bloat
+#### Risk: Cannot Validate External Requirements
 
-**Risk**: Adding another operator to the payload increases the overall payload size, even though OTTO is not installed by default.
+**Risk**: On `platform: none`, the topology transition controller cannot validate external requirements such as correct load balancer configuration or DNS setup. An administrator may initiate a transition with misconfigured networking, leading to a partially functional cluster.
 
 **Mitigation**:
-- OTTO is optional and not installed unless explicitly activated
-- The alternative (embedding transition logic in the CLI or CVO) was evaluated and rejected due to scalability and separation of concerns (see [Alternatives](#alternatives-not-implemented))
+- Pre-flight checks validate what is within the cluster's control (node presence, resource requirements, operator health)
+- External requirements (VIPs, DNS, load balancer configuration) are documented as the administrator's responsibility
+- The CLI can surface warnings about external prerequisites before patching the infrastructure CR
 
 ### Drawbacks
 
-#### Additional Operator in the Payload
-
-OTTO adds a new operator to the OpenShift payload. Even though it is not installed by default, it increases the payload size. This is a deliberate trade-off to keep transition logic isolated and maintainable.
-
 #### Coordination Across Teams
 
-The SNO-to-HA transition requires coordination with CEO, ingress, networking, and other operator teams to ensure they respond correctly to OTTO's orchestration signals. This is less coordination than the previous Adaptable Topology approach (which required every operator to handle dynamic node-count awareness), but still significant.
+The SNO-to-HA transition requires coordination with CEO, ingress, networking, and other operator teams to ensure they reconcile correctly when topology status fields change. This is less coordination than the previous Adaptable Topology approach (which required every operator to handle dynamic node-count awareness), but still significant.
+
+#### OLM Operators and Topology Changes
+
+OLM-managed operators that read topology values at startup (rather than watching for changes) will not automatically react to topology transitions. These operators will need to either be updated to watch the infrastructure CR for topology changes, or be restarted after a transition completes. The scope of affected operators needs investigation.
 
 #### One-Way Transitions (Initially)
 
@@ -389,20 +418,30 @@ The [Adaptable Topology proposal](https://github.com/openshift/enhancements/pull
 - Required shared library-go utilities that every operator team needed to adopt
 - The `Adaptable` enum value created a paradigm that was fundamentally different from existing fixed topology modes
 
-Mutable topology achieves the same end goal (SNO clusters can grow to HA) with less operator-side complexity. Operators continue to react to the same fixed topology values they already understand. Transition complexity is concentrated in OTTO rather than distributed across all operators.
+Mutable topology achieves the same end goal (SNO clusters can grow to HA) with less operator-side complexity. Operators continue to react to the same fixed topology values they already understand. Transition complexity is concentrated in a single controller rather than distributed across all operators.
 
 ### CLI-Only Transition Runner
 
 An alternative is to embed all transition logic in the `oc adm transition` command without a dedicated operator.
 
 **Why it was rejected**:
-- The set of supported topologies is bounded, so the transition graph itself stays small. However, each transition is a long-running, multi-step process (etcd scaling alone takes minutes) that requires persistent state tracking a CLI process cannot reliably provide — a dropped SSH session or terminal close would leave the cluster in an intermediate state with no automated recovery
-- Error recovery and retry logic is better suited to an operator's reconciliation loop than imperative CLI code
+- The set of supported topologies is bounded, so the transition graph stays small. However, each transition is a long-running, multi-step process — etcd scaling alone takes minutes.
+- A CLI process cannot provide persistent state tracking. A dropped SSH session or terminal close would leave the cluster in an intermediate state with no automated recovery.
+- Error recovery and retry logic is better suited to a controller's reconciliation loop than imperative CLI code
 - The CLI would need direct access to operator internals, violating separation of concerns
 
-### Extending an Existing Core Operator
+### Dedicated Topology Transition Operator
 
-Rather than introducing a new operator, transition logic could be added to an existing core operator. The most plausible candidates:
+An earlier revision of this enhancement proposed a standalone topology transition operator deployed on-demand (not installed by default). The operator would own a transition CRD, manage the transition graph, and orchestrate the full transition lifecycle independently.
+
+**Why it was rejected**:
+- The scope does not warrant a new operator — cluster-config-operator is the natural home for this logic since it already owns the `config.openshift.io` API group and infrastructure CR lifecycle
+- A standalone operator adds payload size, requires its own upgrade/lifecycle management, and introduces another component to monitor
+- The transition controller can live in CCO with zero overhead when not in use, gated by the `MutableTopology` feature gate
+
+### Extending Another Core Operator
+
+Rather than adding the transition controller to cluster-config-operator, it could be added to another existing core operator. The most plausible candidates:
 
 #### Controller in CVO
 
@@ -410,7 +449,7 @@ An alternative is to add transition controllers to the cluster-version-operator 
 
 **Why it was rejected**:
 - CVO is a critical-path operator — every cluster depends on it for updates. Adding topology transition logic increases the surface area for bugs in a component where failures have outsized blast radius
-- CVO is always active and manages every cluster. OTTO is optional and only installed when topology transitions are needed. Embedding optional, long-running orchestration workflows in a required operator couples their failure modes unnecessarily
+- CVO is always active and manages every cluster. The topology transition controller is gated by a feature gate and only active when needed. However, embedding long-running orchestration workflows in CVO couples their failure modes unnecessarily
 - Topology transitions and version management are operationally distinct workflows with different preconditions, sequencing, and failure handling. While both touch infrastructure state, a topology transition is not a version change — it coordinates operators laterally rather than rolling out a new payload
 
 #### Controller in cluster-etcd-operator (CEO)
@@ -428,23 +467,22 @@ MCO handles node-level changes and rolling operations, making it a candidate for
 
 **Why it was rejected**:
 - MCO's domain is machine configuration (OS, kubelet config, node-level state), not cluster topology orchestration
-- Topology transitions require cross-operator coordination (etcd, ingress, networking, Infrastructure config) that is outside MCO's current scope
+- Topology transitions require cross-operator coordination (etcd, ingress, networking, infrastructure CR) that is outside MCO's current scope
 - Like CVO and CEO, MCO is a critical-path operator where additional surface area increases risk to every cluster
 
-## Open Questions [optional]
+**Note on CCO scope expansion**: The scope-expansion concern raised against CEO and MCO also applies to CCO, which currently focuses on CRD manifests and config synchronization. However, CCO is the canonical owner of the infrastructure CR and the `config.openshift.io` API group, making it the most natural home. The transition controller is also feature-gated with zero overhead when inactive, unlike CEO or MCO where additional code paths could affect core operations regardless of whether transitions are used.
 
-1. **Transition Graph scope**: Beyond SNO → HA compact on `platform: none`, what transitions should be supported and on what platforms? The initial plan limits scope to this single path. Future transitions can be added to the graph without modifying core architecture.
+## Open Questions
 
-2. **HyperShift considerations**: Since the scope has broadened from edge-specific to changing the topology assumption for OpenShift as a whole, do we need to consider HyperShift support? Initial answer is no — this would be future work and require its own enhancement.
+1. **HyperShift considerations**: Since the scope has broadened from edge-specific deployments to changing the topology assumption for OpenShift as a whole, do we need to consider HyperShift support? Initial answer is no — this would be future work and require its own enhancement.
 
-3. **OTTO activation mechanism**: What is the exact mechanism for OTTO's conditional installation? Options include an OLM subscription, a CVO-managed optional deployment, or a standalone manifest applied by the CLI.
+2. **Learner promotion after voter failure**: If CEO runs a learner on a second control-plane node and the voter fails, can quorum restore promote the learner? Or can only former voters be restored with quorum?
 
-4. **Operator coordination protocol**: How does OTTO signal operators during the transition? Options include direct API calls to operator-specific endpoints, shared condition fields on the transition CR, or operator-specific CRs that OTTO creates.
-The primary concern is how to trigger CEO that it should add nodes and how to update the infrastructure API so that the status fields accurately reflect the topology change after completion.
+3. **OLM operator impact**: Which OLM-managed operators read topology values? Do they watch the infrastructure CR or read at startup only? This determines whether operators need code changes or just a restart after transition.
 
-5. **ValidatingAdmissionPolicy scope**: Should the VAP prevent all direct edits to topology fields, or only edits from non-OTTO service accounts? The latter requires RBAC integration with the VAP.
+4. **Per-operator transition behavior**: The transition behavior for CEO is understood (etcd sequential scaling). The specific requirements for ingress, networking, monitoring, and other operators during a topology transition need validation during dev preview. The per-operator topology dependency matrix is a prerequisite for entering dev preview — see [Graduation Criteria](#entering-dev-preview).
 
-6. **Learner promotion after voter failure**: If CEO runs a learner on a second control-plane node and the voter fails, can quorum restore promote the learner? Or can only former voters be restored with quorum?
+5. **Minimum resource requirements**: The controller should validate that new control-plane nodes meet minimum resource requirements before initiating a transition. The specific resource thresholds need to be defined.
 
 ## Test Plan
 
@@ -463,35 +501,43 @@ The primary concern is how to trigger CEO that it should add nodes and how to up
 
 | Test | Description |
 | ---- | ----------- |
-| OTTO installation | Verify OTTO installs correctly when activated |
-| Precondition validation | Verify OTTO rejects transitions with missing nodes, invalid platforms, or unsupported source topologies |
-| CLI interaction | Verify `oc adm transition topology` correctly interacts with OTTO |
+| Precondition validation | Verify controller rejects transitions with missing nodes, invalid platforms, or unsupported source topologies |
+| CLI interaction | Verify `oc adm transition topology` correctly patches `spec.desiredTopology` and monitors progress |
+| Feature gate gating | Verify the controller is inactive when `MutableTopology` feature gate is disabled |
 
 #### Transition Tests
 
 | Test | Description |
 | ---- | ----------- |
-| SNO → HA compact (3-node) | Full transition on `platform: none` with validation of etcd scaling, operator health, and Infrastructure config updates |
+| SNO → HA compact (3-node) | Full transition on `platform: none` with validation of etcd scaling, operator health, and infrastructure status updates |
 | etcd quorum management | Verify CEO correctly manages etcd member addition through the 1→2→3 sequence |
-| Failure and rollback | Verify OTTO and CEO handle failures during transition (e.g., node unreachable, etcd promotion failure) |
-| Post-transition operator health | Verify all operators reconcile successfully after the Infrastructure config is updated |
+| Failure and rollback | Verify controller and CEO handle failures during transition (e.g., node unreachable, etcd promotion failure) |
+| Post-transition operator health | Verify all operators reconcile successfully after infrastructure topology status fields are updated |
 
 ### QE Testing
 
 Standard QE testing scenarios will include:
-- OTTO installation and activation validation
 - Full SNO → HA compact transition on `platform: none`
 - Transition failure and recovery scenarios
 - Post-transition cluster stability over 24 hours
+- Destructive testing: control-plane node failure during the 2-member etcd window
+- Network partition scenarios during transition (e.g., partition between etcd members during scaling)
+- Concurrent operation testing: transition + upgrade attempt (verify mutual exclusion)
+- Node resource exhaustion during transition (e.g., insufficient disk or memory on new control-plane nodes)
 
 ## Graduation Criteria
 
 ### Entering Dev Preview
 
-- OTTO operator implemented with transition CRD and SNO → HA compact graph edge
+- Manual SNO-to-HA transition tested (scaling a single-replica cluster to multiple replicas) to validate assumptions about operator behavior
+- Topology transition controller implemented in cluster-config-operator with SNO → HA compact support
+- `desiredTopology` field added to `InfrastructureSpec`
 - `oc adm transition topology` CLI command implemented
 - `MutableTopology` feature gate added to `DevPreviewNoUpgrade` feature set
 - ValidatingAdmissionPolicy enforces controlled topology field updates
+- Per-operator topology dependency matrix completed: for each in-payload operator that reads `controlPlaneTopology` or `infrastructureTopology`, document what the operator uses the value for (replica count, scheduling, feature enablement) and whether it watches the infrastructure CR for changes or reads the value only at startup
+- Operators that read topology only at startup are identified and a restart strategy is documented for post-transition reconciliation
+- CCO sets `Upgradeable=False` on its ClusterOperator while a topology transition is in progress
 - CI lanes operational for transition testing
 - Developer documentation available
 
@@ -499,16 +545,17 @@ Standard QE testing scenarios will include:
 
 - Transition test suite validates full SNO → HA compact path
 - Tests verify operator health during and after transitions
-- OTTO failure handling and CEO rollback validated
+- Controller failure handling and CEO rollback validated
 - `oc adm transition topology` command provides clear diagnostics on failure
 - User-facing documentation in [openshift-docs](https://github.com/openshift/openshift-docs/)
-- Platform bare metal single-node support resolved or limitation documented
+- ValidatingAdmissionPolicy for topology field protection validated in CI
+- Platform bare metal single-node support resolved (keepalived networking can be configured for single-node clusters) or limitation documented (`platform: none` remains the only supported path)
 
 ### Tech Preview -> GA
 
 - Full test coverage including upgrades (y-stream and z-stream) on post-transition clusters
 - SLOs documented and validated
-- Monitoring and telemetry for transition metrics (success/failure rates, duration)
+- Monitoring and telemetry for transition metrics: Prometheus metrics exposed (transition_started, transition_completed, transition_failed, transition_duration_seconds) with alerts defined for stuck transitions exceeding SLO thresholds
 - Support procedures documented
 - Feature gate moved to `Default` feature set
 
@@ -522,49 +569,49 @@ N/A
 
 Clusters that have undergone topology transitions follow standard OpenShift upgrade procedures. The resulting topology values (`HighlyAvailable`, `SingleReplica`, etc.) are existing enum values that all operators already support. There are no special upgrade considerations for post-transition clusters.
 
-OTTO itself upgrades as part of the payload if installed. If not installed, it has no upgrade impact.
+The topology transition controller upgrades as part of cluster-config-operator via the standard CVO-managed upgrade path.
 
 ### Downgrades
 
 **Z-stream downgrades** (within a minor version that supports mutable topology):
-Standard downgrade procedures apply. OTTO and the transition CRD are preserved. Completed transitions are not reverted — the cluster retains its current topology.
+Standard downgrade procedures apply. Completed transitions are not reverted — the cluster retains its current topology.
 
 **Y-stream downgrades** (to a minor version without mutable topology support):
 The CVO will evaluate the feature gate during downgrade. If the target release does not include the `MutableTopology` feature gate:
-- OTTO will not be managed by the target release's CVO
-- Completed transitions are not affected — the Infrastructure config contains standard topology values that the target release understands
-- In-progress transitions should be completed or rolled back before downgrading
+- The topology transition controller will not be active in the target release
+- The `desiredTopology` spec field is feature-gated — the field will not be present in the target release's CRD schema, and the stored value will be handled according to Kubernetes CRD schema evolution rules
+- Completed transitions are not affected — the infrastructure CR contains standard topology values that the target release understands
+- In-progress transitions must be completed or rolled back before downgrading. The `Upgradeable=False` condition on the CCO ClusterOperator blocks CVO from initiating any version change (including downgrades) while a transition is in progress. If `desiredTopology` and `status.controlPlaneTopology` disagree, the administrator must either allow the transition to complete or reset `desiredTopology` to the current topology value before proceeding with the downgrade
 
 ## Version Skew Strategy
 
-Mutable topology is gated by the `MutableTopology` feature gate. OTTO is only active when the feature gate is enabled.
+Mutable topology is gated by the `MutableTopology` feature gate. The topology transition controller is only active when the feature gate is enabled.
 
-Version skew during transitions is not a concern because OTTO orchestrates the entire sequence within a single cluster version. Administrators should not initiate upgrades while a transition is in progress.
+Version skew during transitions is not a concern because the controller manages the entire sequence within a single cluster version. The CCO topology transition controller enforces this by setting `Upgradeable=False` on its ClusterOperator while a transition is in progress, preventing CVO from initiating an upgrade.
 
 Post-transition clusters use standard topology values that all operator versions understand. There is no version skew risk for completed transitions.
 
 ## Operational Aspects of API Extensions
 
-OTTO introduces a `TopologyTransition` CRD. This CRD:
+This enhancement adds a `desiredTopology` field to `InfrastructureSpec`. This field:
 
-- Is only created when a transition is initiated (not present on clusters that don't use mutable topology)
-- Has no impact on existing SLIs when not in use
-- During transitions, OTTO makes API calls to coordinate with operators. These calls are low-frequency and bounded by the transition sequence.
+- Has no impact when it matches the current `status.controlPlaneTopology` (the default state)
+- During transitions, the CCO topology transition controller makes API calls to coordinate with operators. These calls are low-frequency and bounded by the transition sequence.
 
-The ValidatingAdmissionPolicy that restricts direct topology field edits is evaluated by the API server with no additional services required. If the VAP is unavailable, the API server's existing failure policy applies.
+The ValidatingAdmissionPolicy that restricts direct topology status field edits is evaluated by the API server with no additional services required. The VAP uses a fail-closed policy — if the VAP is unavailable, all edits to the protected status fields are blocked.
 
 ## Support Procedures
 
 ### Team Ownership
 
 **OpenShift Edge Team:**
-- OTTO operator implementation and maintenance
+- Topology transition controller in cluster-config-operator
 - CLI (`oc adm transition topology` command)
-- Transition graph definition and validation logic
-- Infrastructure config ValidatingAdmissionPolicy
+- Supported transition definitions and validation logic
+- Infrastructure CR ValidatingAdmissionPolicy
 
 **Control Plane Team:**
-- cluster-etcd-operator (CEO) etcd scaling coordination with OTTO
+- cluster-etcd-operator (CEO) etcd scaling coordination
 
 **Bare Metal Networking Team:**
 - Bare metal networking for SNO clusters (future platform support)
@@ -574,15 +621,10 @@ The ValidatingAdmissionPolicy that restricts direct topology field edits is eval
 
 ### Detecting Issues
 
-**OTTO Not Installing:**
-- Symptom: `oc adm transition topology` fails to activate OTTO
-- Check: Verify OTTO deployment and pod status in the `openshift-topology-transition-operator` namespace
-- Resolution: Check OTTO pod logs for startup failures
-
 **Transition Stuck or Failed:**
-- Symptom: Transition CR shows `InProgress` or `Failed` for an extended period
-- Check: `oc get topologytransition <name> -o yaml` for status conditions and messages
-- Check: OTTO pod logs for orchestration errors
+- Symptom: infrastructure status conditions show transition in progress or failed for an extended period
+- Check: `oc get infrastructure cluster -o yaml` for status conditions
+- Check: cluster-config-operator logs for transition controller errors
 - Check: CEO logs for etcd scaling operations
 - Resolution: Address the reported issue and retry, or contact support
 
@@ -596,16 +638,16 @@ The ValidatingAdmissionPolicy that restricts direct topology field edits is eval
 
 | Failure Mode | Impact | Recovery |
 | ------------ | ------ | -------- |
-| OTTO fails during precondition check | No impact — transition not started | Address the precondition and retry |
+| Controller fails during precondition check | No impact — transition not started | Address the precondition and retry |
 | etcd scaling failure mid-transition | etcd may be in 2-member state | CEO attempts automatic rollback to 1 member; if that fails, follow etcd disaster recovery |
 | Operator fails to reconcile post-transition | Operator-specific impact | Investigate operator logs; file bug against the operator component |
-| OTTO crash during transition | Transition paused | OTTO restarts via deployment controller and resumes from last checkpoint on the transition CR |
+| CCO crash during transition | Transition paused | CCO restarts via deployment controller and the transition controller resumes reconciliation |
 
-## Infrastructure Needed [optional]
+## Infrastructure Needed
 
 No additional infrastructure is required for this feature.
 
-CI infrastructure will experience increased demand as new test lanes are introduced to support:
+CI will experience increased demand as new test lanes are introduced to support:
 - Full SNO → HA compact transitions on `platform: none`
 - Post-transition cluster stability validation
 - Upgrade testing on post-transition clusters
