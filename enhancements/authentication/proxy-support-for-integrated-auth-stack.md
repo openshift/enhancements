@@ -164,6 +164,7 @@ The configuration workflow:
    3. re-validate proxy connectivity via the proxy validation controller,
    4. re-deploy `oauth-server` using new environment variable values and trusted CA bundle.
       This includes synchronizing the given `trustedCA` ConfigMap into `openshift-authentication` namespace.
+      This step must also be repeated every time the `trustedCA` ConfigMap content is modified.
 
 When the proxy configuration is removed, it causes the same process to happen, just not using any proxy,
 or using the cluster-wide proxy when that is specified.
@@ -323,6 +324,9 @@ The container entrypoint appends it to the system trust store after the existing
 copy, resulting in the OAuth Server trusting: system CAs + cluster-wide proxy CA (if any) + component proxy CA.
 This follows the existing entrypoint pattern that already copies the injected system trust bundle
 into the container's trust path.
+
+CAO must watch the source ConfigMap in `openshift-config`, copy it into `openshift-authentication` on any
+change and also re-deploy OAuth Server so that the updated ConfigMap is picked up.
 
 ### Risks and Mitigations
 
