@@ -318,11 +318,10 @@ for expected deployments (under 10 remote clusters).
 The periodic reconcile interval (10s) is independent
 of N.
 
-The practical upper bound for remote cluster count is
-an open question (see Open Questions). Resource
-consumption is not expected to be the limiting factor;
-operational complexity of managing N×(N-1) config
-entries is the more likely constraint.
+C2CC will be tested with up to 3 interconnected
+clusters. Resource consumption is not expected to be
+the limiting factor; operational complexity of managing
+N×(N-1) config entries is the more likely constraint.
 
 #### OpenShift Kubernetes Engine
 
@@ -595,9 +594,11 @@ reconciliation cycle (every 10s or upon incoming event).
 
 ## Open Questions
 
-1. **Remote cluster count limits**: What is the
-   practical upper bound? Should we limit that? Up
-   to how many interconnected clusters should we test?
+1. ~~**Remote cluster count limits**: What is the~~
+   ~~practical upper bound? Should we limit that? Up~~
+   ~~to how many interconnected clusters should we test?~~
+
+   Settled on 3 interconnected VMs.
 
 ## Test Plan
 
@@ -645,7 +646,7 @@ generated CoreDNS server blocks.
 **IPSec**: Libreswan setup, ESP verification, MTU
 validation with double encapsulation, plaintext
 rejection (verify traffic is dropped — not sent in
-plaintext — when IPSec SAs are absent and enforcement
+plaintext — when IPSec SAs ar/Opene absent and enforcement
 policies are configured), host-to-pod rejection (curl
 directly from Cluster A's host to a pod on Cluster B
 — should be rejected since the host does not have
