@@ -125,6 +125,7 @@ hence the need to add the option to add component-scoped proxy to authentication
 - A generalized per-component proxy framework. This is scoped to authentication only; extending to other operators would require a separate enhancement.
 - HyperShift (Hosted Control Planes) support. HyperShift manages authentication proxy requirements through its own mechanisms and is excluded from the initial scope.
 - Proxy support for the OAuth API Server's External OIDC mode. External OIDC is gated behind TechPreviewNoUpgrade and its egress is limited to the `oauth-apiserver external-oidc` subcommand. Proxy support for that code path can be added when External OIDC matures; it is expected to reuse the same `spec.proxy` configuration rather than introducing a separate field.
+- Proxy configuration for user-managed LDAP group sync CronJobs. These are not managed by the authentication operator and must be configured independently by the administrator.
 
 ## Proposal
 
@@ -327,6 +328,16 @@ into the container's trust path.
 
 CAO must watch the source ConfigMap in `openshift-config`, copy it into `openshift-authentication` on any
 change and also re-deploy OAuth Server so that the updated ConfigMap is picked up.
+
+#### LDAP Group Sync
+
+[LDAP group sync](https://docs.redhat.com/en/documentation/openshift_container_platform/4.18/html/authentication_and_authorization/ldap-syncing#ldap-auto-syncing_ldap-syncing-groups)
+is typically configured as a user-managed `CronJob` that runs `oc adm groups sync`. This job is
+not managed by the authentication operator, so setting `spec.proxy` will not configure proxy
+settings for LDAP group sync. Administrators who rely on LDAP group sync in disconnected
+environments must independently configure proxy settings for their sync jobs (e.g. by setting
+`HTTP_PROXY`/`HTTPS_PROXY` environment variables on the `CronJob` pod spec). This limitation
+should be documented.
 
 ### Risks and Mitigations
 
