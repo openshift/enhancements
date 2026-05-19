@@ -124,7 +124,7 @@ hence the need to add the option to add component-scoped proxy to authentication
 - Modifications to the cluster-wide proxy API (`proxy.config.openshift.io/v1`).
 - A generalized per-component proxy framework. This is scoped to authentication only; extending to other operators would require a separate enhancement.
 - HyperShift (Hosted Control Planes) support. HyperShift manages authentication proxy requirements through its own mechanisms and is excluded from the initial scope.
-- Proxy support for the OAuth API Server's External OIDC mode. External OIDC is gated behind TechPreviewNoUpgrade and its egress is limited to the `oauth-apiserver external-oidc` subcommand. Proxy support for that code path can be added when External OIDC matures.
+- Proxy support for the OAuth API Server's External OIDC mode. External OIDC is gated behind TechPreviewNoUpgrade and its egress is limited to the `oauth-apiserver external-oidc` subcommand. Proxy support for that code path can be added when External OIDC matures; it is expected to reuse the same `spec.proxy` configuration rather than introducing a separate field.
 
 ## Proposal
 
