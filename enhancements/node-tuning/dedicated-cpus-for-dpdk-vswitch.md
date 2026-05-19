@@ -13,7 +13,7 @@ approvers:
 api-approvers:
   - "@MarSik"
 creation-date: 2026-05-06
-last-updated: 2026-05-06
+last-updated: 2026-05-19
 status: provisional
 tracking-link:
   - https://redhat.atlassian.net/browse/CNF-22582
@@ -77,12 +77,12 @@ handling, and all Kubernetes-scheduled workloads regardless of QoS class.
   scheduling (all QoS classes), OS daemons, and kernel housekeeping.
 - Automatically ban dedicated CPUs from irqbalance and configure `isolcpus=domain,managed_irq`
   to prevent hardware interrupts and kernel scheduler interference on dedicated CPUs.
-- Provide the ability to disable OVN-Kubernetes dynamic OVS thread pinning when static CPU
-  dedication is desired.
-- Ensure the feature is orthogonal to existing dynamic OVS pinning — both modes must be able to
-  coexist in the cluster, with the choice made per PerformanceProfile.
+- Provide the ability to disable OVN-Kubernetes dynamic OVS thread pinning independently
+  of CPU dedication. This option is orthogonal to `dedicated` — OVS dynamic pinning and
+  OVS-DPDK can coexist, and disabling dynamic pinning may not be desired in all `dedicated`
+  CPU scenarios.
 - Integrate with TuneD so that dedicated CPUs are added to `isolcpus` and receive the same
-  kernel-level isolation as existing isolated CPUs.
+  kernel-level isolation as `isolated` CPU sets.
 
 ### Non-Goals
 
@@ -92,8 +92,8 @@ handling, and all Kubernetes-scheduled workloads regardless of QoS class.
 ## Proposal
 
 This proposal introduces two new fields to the PerformanceProfile API and corresponding changes
-to the node-tuning-operator controllers that generate Kubelet configuration, TuneD profiles, and
-MachineConfig resources.
+to the Node Tuning Operator controllers that generate Kubelet configuration, TuneD daemon
+profiles, Tuned custom resources (`tuneds.tuned.openshift.io`), and MachineConfig resources.
 
 ### Prerequisites
 
@@ -102,9 +102,9 @@ The `dedicated` CPU feature requires either **Workload Partitioning** or the Kub
 these, Burstable and BestEffort QoS pods can still be scheduled on dedicated CPUs through
 kernel cpuset inheritance, breaking the isolation guarantee.
 
-**Note:** Validation webhook enforcement of this prerequisite is deferred to a future iteration
-(see [Graduation Criteria](#graduation-criteria)). Initially, this is a documented requirement
-that the administrator must ensure.
+The PerformanceProfile controller can check the infrastructure mode to determine whether
+Workload Partitioning is present and report an error condition on the PerformanceProfile status
+when `dedicated` is set without WP or `strict-cpu-reservation`.
 
 ### New API Fields
 
@@ -163,7 +163,7 @@ that the administrator must ensure.
    threads. Reserved CPU 0 and its sibling 4 handle system daemons. The remaining CPUs
    (2-3, 6-7) are isolated for application workloads.
 
-3. The node-tuning-operator reconciles the PerformanceProfile and generates:
+3. The Node Tuning Operator reconciles the PerformanceProfile and generates:
    - A **KubeletConfig** with `ReservedSystemCPUs` set to the union of `reserved` and `dedicated`
      CPUs (`"0-1,4-5"` in this example), ensuring no pods are scheduled on dedicated CPUs.
    - A **TuneD profile** that:
@@ -231,7 +231,7 @@ validation webhook will be extended to validate:
 
 This feature only affects the data plane (worker nodes). The PerformanceProfile is applied to
 worker nodes via the NodePool's tuning configuration. No changes are required to management
-cluster components. The node-tuning-operator running in the hosted control plane already handles
+cluster components. The Node Tuning Operator running in the hosted control plane already handles
 PerformanceProfile reconciliation for guest cluster nodes.
 
 #### Standalone Clusters
@@ -244,7 +244,7 @@ For SNO, the feature is applicable but administrators must be careful not to sta
 components by dedicating too many CPUs. The `reserved` CPU set must be large enough for both
 control plane workloads and system daemons.
 
-MicroShift does not use the PerformanceProfile CRD or the node-tuning-operator. Low-latency
+MicroShift does not use the PerformanceProfile CRD or the Node Tuning Operator. Low-latency
 tuning on MicroShift is achieved through host-level RHEL TuneD profiles
 (`microshift-low-latency` RPM) and manual kubelet configuration. Achieving equivalent CPU
 dedication on MicroShift would require manual host-level TuneD and kubelet configuration —
@@ -252,7 +252,7 @@ this is out of scope for this enhancement.
 
 #### OpenShift Kubernetes Engine
 
-This feature depends on the node-tuning-operator and PerformanceProfile API which are part of
+This feature depends on the Node Tuning Operator and PerformanceProfile API which are part of
 OCP, not OKE. This enhancement does not apply to OKE.
 
 ### Implementation Details/Notes/Constraints
@@ -299,9 +299,11 @@ to reference just the dedicated CPU set separately from isolated CPUs.
 
 #### Systemd CPU Affinity
 
-The TuneD profile updates the systemd CPU affinity mask to exclude dedicated CPUs. This is done
-via the `[sysctl]` or `[systemd]` TuneD plugin, similar to how the existing `cpu-partitioning`
-TuneD profile confines system services to housekeeping CPUs
+The TuneD profile updates the systemd CPU affinity mask by 
+setting the `systemd.cpu_affinity` kernel command-line parameter, to exclude dedicated CPUs. 
+This is done via the `[sysctl]` or `[systemd]` TuneD plugin,
+similar to how the existing `cpu-partitioning`
+TuneD profile confines system services to housekeeping CPUs 
 (see [tuned cpu-partitioning profile](https://github.com/redhat-performance/tuned/blob/master/profiles/cpu-partitioning/tuned.conf#L28)
 and the [openshift-node-performance template](https://github.com/openshift/cluster-node-tuning-operator/blob/main/assets/performanceprofile/tuned/openshift-node-performance#L141)).
 
@@ -426,11 +428,8 @@ arbitrary CPUs from irqbalance independently of CPU dedication. This was rejecte
 
 - Full e2e test coverage including interaction with Workload Partitioning and MixedCPUs.
 - Upgrade testing completed.
-- Performance benchmarking showing no regression in packet forwarding rates.
 - User-facing documentation merged in openshift-docs.
 - Feedback from at least one customer deployment incorporated.
-- Validation webhook enforcement of Workload Partitioning / `strict-cpu-reservation`
-  prerequisite when `dedicated` is set.
 
 ### Removing a deprecated feature
 
@@ -451,7 +450,7 @@ N/A
 
 ## Version Skew Strategy
 
-- The node-tuning-operator is the sole consumer of the new PerformanceProfile fields. There is no
+- The Node Tuning Operator is the sole consumer of the new PerformanceProfile fields. There is no
   cross-component version skew concern within the operator itself.
 - If the operator is upgraded but the CRD has not been updated yet, the new fields will not be
   present and the operator falls back to existing behavior.
@@ -491,5 +490,5 @@ N/A
 
 ## Infrastructure Needed
 
-No new infrastructure is needed. The existing CI infrastructure for the node-tuning-operator
+No new infrastructure is needed. The existing CI infrastructure for the Node Tuning Operator
 and PerformanceProfile e2e tests will be extended to cover the new fields.
