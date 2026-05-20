@@ -296,21 +296,29 @@ The cluster-wide proxy machinery inserts additional implicit values (service/pod
 internal API hostname, platform metadata IPs), but these are unnecessary for authentication components,
 which connect to internal services via DNS names already covered by `.svc` and `.cluster.local`.
 
-#### Proxy Validation
-
-The existing proxy validation controller is extended to validate the component-scoped proxy.
-The controller validates proxy URL format and `trustedCA` content, consistent with the Cluster Network Operator's
-validation for the cluster-wide proxy, and sets `Degraded` on invalid configuration.
-To avoid false positives from transient external IdP outages, the controller validates IdP connectivity
-on configuration change only, not on every sync loop. Transient IdP unreachability emits a
-Warning event; the `Degraded` condition is reserved for proxy-level and configuration failures.
-
 #### Operator Process
 
-The CAO makes outbound calls (e.g., OIDC discovery) during config observation. When the component-scoped
-proxy is configured, these calls use a proxy-aware HTTP transport instead of relying on process-level
-environment variables. When `spec.proxy.trustedCA` is set, the component CA is loaded into the
-operator's certificate pool for these outbound calls.
+When the component-scoped proxy is configured, it is read from the API resource, not injected
+as process-level environment variables. All outbound calls from the operator process that
+previously relied on `http.ProxyFromEnvironment` must use a proxy-aware HTTP transport with
+the resolved proxy configuration instead. When `spec.proxy.trustedCA` is set, the component
+CA is loaded into the operator's certificate pool for these calls. The following operator
+controllers are affected:
+
+- **Config observation** — OIDC discovery calls during IdP validation use a proxy-aware
+  transport so that discovery requests reach external IdP endpoints through the component proxy.
+
+- **Endpoint accessibility** — the route health check hits the external OAuth route hostname,
+  which in cloud environments resolves to an external load balancer. Without proxy awareness,
+  this check would falsely report the OAuth server as unavailable when no cluster-wide proxy
+  is configured. The route check controller is updated to use the resolved component proxy.
+
+- **Proxy validation** — the existing proxy validation controller already tests OAuth route
+  reachability through the cluster-wide proxy. It is extended to also validate the
+  component-scoped proxy configuration and to test IdP endpoint connectivity on configuration
+  change. Transient IdP unreachability shall emit a Warning event; the `Degraded` condition is
+  reserved for proxy-level and configuration failures (connection refused, TLS handshake
+  errors with the proxy itself).
 
 #### OAuth Server
 
