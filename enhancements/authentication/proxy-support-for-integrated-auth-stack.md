@@ -2,12 +2,13 @@
 title: proxy-support-for-integrated-auth-stack
 authors:
   - "@tchap"
-reviewers: # Include a comment about what domain expertise a reviewer is expected to bring and what area of the enhancement you expect them to focus on. For example: - "@networkguru, for networking aspects, please look at IP bootstrapping aspect"
-  - TBD
-approvers: # This should be a single approver. The role of the approver is to raise important questions, ensure the enhancement receives reviews from all applicable areas/SMEs, and determine when consensus is achieved such that the EP can move forward to implementation.  Having multiple approvers makes it difficult to determine who is responsible for the actual approval. Team leads and staff engineers often make good approvers.
-  - TBD
-api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None". Once your EP is published, ask in #forum-api-review to be assigned an API approver.
-  - TBD
+reviewers:
+  - "@liouk"
+  - "@everettraven"
+approvers:
+  - "@benluddy"
+api-approvers:
+  - "@everettraven"
 creation-date: 2026-05-18
 last-updated: 2026-05-18
 status: provisional|implementable|implemented|deferred|rejected|withdrawn|replaced|informational
