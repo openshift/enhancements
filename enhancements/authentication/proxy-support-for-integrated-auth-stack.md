@@ -405,10 +405,7 @@ and generated documentation.
 
 ## Open Questions
 
-1. **Should proxy credentials be supported via a Secret reference?** The cluster-wide proxy embeds credentials in the URL.
-   An optional `proxyCredentials` SecretNameReference would improve security.
-
-2. **Should a validating admission webhook reject invalid proxy configuration?** Currently, validation
+1. **Should a validating admission webhook reject invalid proxy configuration?** Currently, validation
    is done by the controller at runtime (setting `Degraded` on error), matching the cluster-wide proxy
    pattern. A webhook would give immediate feedback on `oc apply`, but introduces availability concerns:
    if the webhook is unavailable, writes to the `Authentication` resource are either blocked (preventing
