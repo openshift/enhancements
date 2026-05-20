@@ -181,7 +181,7 @@ The user authentication workflow:
 
 The `Authentication` operator (`operator.openshift.io/v1`) spec needs to be extended to accommodate the proxy settings.
 
-`AuthenticationProxyConfig` mimics the cluster-wide proxy configuration for consistency.
+`AuthenticationProxyConfig` aligns with the cluster-wide proxy configuration for consistency.
 
 ```golang
 type AuthenticationSpec struct {
@@ -189,28 +189,31 @@ type AuthenticationSpec struct {
 
 	// proxy configures proxy settings for authentication components
 	// (the OAuth server and the cluster authentication operator).
-	// When set, these values are used for authentication components,
-	// overriding the cluster-wide proxy (proxy.config.openshift.io/cluster).
+	// When set, these values override the cluster-wide proxy
+	// (proxy.config.openshift.io/cluster) for authentication operands only.
 	// No per-field inheritance from the cluster-wide proxy occurs.
-	// When omitted (nil), the cluster-wide proxy is used, preserving
+	// When omitted, the cluster-wide proxy is used, preserving
 	// existing behavior.
 	// +optional
-	Proxy *AuthenticationProxyConfig `json:"proxy,omitempty"`
+	Proxy AuthenticationProxyConfig `json:"proxy,omitzero"`
 }
 
 // AuthenticationProxyConfig holds proxy configuration scoped to
 // authentication components (the OAuth server and the cluster
 // authentication operator).
+// +kubebuilder:validation:XValidation:rule="has(self.httpProxy) || has(self.httpsProxy)",message="at least one of httpProxy or httpsProxy must be specified"
 type AuthenticationProxyConfig struct {
 	// httpProxy is the URL of the proxy for HTTP requests.
-	// An empty string means no HTTP proxy is used.
-	// +required
-	HTTPProxy *string `json:"httpProxy"`
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:XValidation:rule="isURL(self)",message="httpProxy must be a valid URL"
+	// +optional
+	HTTPProxy string `json:"httpProxy,omitempty"`
 
 	// httpsProxy is the URL of the proxy for HTTPS requests.
-	// An empty string means no HTTPS proxy is used.
-	// +required
-	HTTPSProxy *string `json:"httpsProxy"`
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:XValidation:rule="isURL(self)",message="httpsProxy must be a valid URL"
+	// +optional
+	HTTPSProxy string `json:"httpsProxy,omitempty"`
 
 	// trustedCA is a reference to a ConfigMap in the openshift-config
 	// namespace containing a CA certificate bundle under the key
@@ -218,18 +221,30 @@ type AuthenticationProxyConfig struct {
 	// used by authentication components for proxy TLS connections.
 	// When omitted, only the system trust store is used.
 	// +optional
-	TrustedCA configv1.ConfigMapNameReference `json:"trustedCA,omitempty"`
+	TrustedCA AuthenticationConfigMapReference `json:"trustedCA,omitzero"`
+}
+
+// AuthenticationConfigMapReference references a ConfigMap in the
+// openshift-config namespace.
+type AuthenticationConfigMapReference struct {
+	// name is the metadata.name of the referenced ConfigMap.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	// +required
+	Name string `json:"name"`
 }
 ```
 
-`httpProxy` and `httpsProxy` are `*string` with `+required`, so CRD schema validation
-ensures both are always present when `spec.proxy` is set — there is no partial
-configuration state and proxying can't get disabled by accident by forgetting to fill in a field.
+`httpProxy` and `httpsProxy` are optional individually, but a CEL validation rule enforces
+that at least one is present when the `spec.proxy` object is set. `MinLength=1` prevents
+empty strings.
 
-No CRD-level URL format validation is applied, following the same approach as the cluster-wide proxy
-(`config.openshift.io/v1 Proxy`), which also accepts free-form strings. URL format and `trustedCA`
-content are validated at runtime by the proxy validation controller, which sets `Degraded` on
-invalid configuration.
+`AuthenticationConfigMapReference` is a local type with name format validations
+(`MinLength`, `MaxLength`), replacing the shared `configv1.ConfigMapNameReference`
+which lacks these validations.
+
+URL format is validated at the CRD level via `isURL(self)`. The `trustedCA` content and proxy connectivity
+are validated at runtime by the proxy validation controller, which sets `Degraded` on invalid configuration.
 
 ### Topology Considerations
 
@@ -270,15 +285,13 @@ Not affected.
 
 #### Proxy Resolution
 
-The `httpProxy` and `httpsProxy` fields are required when the `proxy` object is present.
-This is enforced by CRD schema validation, preventing partial configurations where an
-administrator sets `spec.proxy` but forgets to specify the proxy URLs.
+A CEL validation rule enforces that at least one of `httpProxy` or `httpsProxy` is present
+when the `proxy` object is set.
 
-Resolution follows three states:
+Resolution follows two states:
 
-1. `spec.proxy` set with non-empty values — use component-scoped proxy, overriding any cluster-wide proxy.
-2. `spec.proxy` set with empty strings (`httpProxy: ""`, `httpsProxy: ""`) — explicitly no proxy for auth components, even if a cluster-wide proxy is configured.
-3. `spec.proxy` absent (`nil`) — fall back to the cluster-wide proxy (`proxy.config.openshift.io/cluster`) as today.
+1. `spec.proxy` set — use component-scoped proxy, overriding any cluster-wide proxy.
+2. `spec.proxy` absent — fall back to the cluster-wide proxy (`proxy.config.openshift.io/cluster`) as today.
 
 No per-field inheritance from the cluster-wide proxy occurs; component-scoped proxy is all-or-nothing.
 
@@ -402,15 +415,6 @@ but this is explicitly rejected. The goal is to have a component-scoped proxy co
 **Annotations on the Authentication operator resource:** Proxy settings could be stored as annotations
 instead of typed spec fields. This loses CRD schema validation, discoverability via `oc explain`,
 and generated documentation.
-
-## Open Questions
-
-1. **Should a validating admission webhook reject invalid proxy configuration?** Currently, validation
-   is done by the controller at runtime (setting `Degraded` on error), matching the cluster-wide proxy
-   pattern. A webhook would give immediate feedback on `oc apply`, but introduces availability concerns:
-   if the webhook is unavailable, writes to the `Authentication` resource are either blocked (preventing
-   recovery) or silently unvalidated. The most valuable validation (IdP connectivity through the proxy)
-   is inherently async and cannot run in a webhook regardless.
 
 ## Test Plan
 
