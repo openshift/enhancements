@@ -459,7 +459,7 @@ When KMS encryption is enabled, a health reporter sidecar runs alongside every A
 
 The sidecar's lifecycle (injection into the pod spec, image, mounts, RBAC) is managed by the same mechanism that handles KMS plugin sidecars; see [KMS Plugin Lifecycle Management](#kms-plugin-lifecycle-management-tech-preview-v2).
 
-The reporter receives the set of UDS sockets to probe as flags at injection time. The `pluginlifecycle` package in library-go already enumerates the active KMS plugins from the encryption-config secret when it builds the pod spec (see [`AddKMSPluginSidecarToPodSpec`](https://github.com/openshift/library-go/blob/master/pkg/operator/encryption/kms/pluginlifecycle/sidecar.go)), so passing the same socket paths into the reporter is essentially free. Plugin additions and removals always trigger a pod-spec change, which restarts the pod, so there is no live-discovery requirement.
+The reporter receives the set of UDS sockets to probe as flags at injection time. The `pluginlifecycle` package in library-go already enumerates the active KMS plugins from the encryption-config secret when it builds the pod spec, so passing the same socket paths into the reporter is essentially free. Plugin additions and removals always trigger a pod-spec change, which restarts the pod, so there is no live-discovery requirement.
 
 ##### Topology
 
@@ -475,7 +475,7 @@ During KMS-to-KMS migration, the same sidecar probes every active KMS plugin in 
 
 Each sidecar probes its colocated KMS plugin(s) over the local UDS at `unix:///var/run/kmsplugin/kms-{keyID}.sock` (the same socket path scheme described in [Sidecar Injection](#sidecar-injection)).
 
-**Naming caveat.** `{keyID}` in the socket path is **not** an id of a cryptographic key. It is the id of the encryption key secret managed by the encryption controllers, which acts as a **revision number**. The KMS v2 plugin separately reports the id of the remote KEK it currently uses in its `StatusResponse.key_id`. This document keeps `keyID` for the socket-path id and `kekID` for the plugin-reported KEK. Conflating them will misbehave in any consumer that assumes `keyID` names a key.
+**Naming caveat.** `{keyID}` in the socket path is **not** an id of a cryptographic key. It is the id of the encryption key secret managed by the encryption controllers, a monotonically incrementing sequence number (a new one per key rotation). The KMS v2 plugin separately reports the id of the remote KEK it currently uses in its `StatusResponse.key_id`. This document keeps `keyID` for the socket-path id and `kekID` for the plugin-reported KEK. Conflating them will misbehave in any consumer that assumes `keyID` names a key.
 
 ##### Per-tick emission
 
@@ -483,7 +483,7 @@ Each probe produces one `PluginHealthCondition` (defined in [Message format](#me
 
 ##### Destination
 
-The sidecar writes one advisory condition per pod replica to the owning operator's `*.operator.openshift.io/cluster` CR via Server-Side Apply (per-entry ownership via `+listType=map` on `OperatorStatus.Conditions`). The aggregator controller reads these advisory conditions and emits the `KMSPluginsDegraded` rollup. See [KMS Plugin Health Conditions](#kms-plugin-health-conditions) for the exact naming, status mapping, and rollup behavior.
+The sidecar writes one condition per pod replica to the owning operator's `*.operator.openshift.io/cluster` CR via Server-Side Apply (per-entry ownership via `+listType=map` on `OperatorStatus.Conditions`). The aggregator controller reads these conditions and emits the `KMSPluginsDegraded` rollup. See [KMS Plugin Health Conditions](#kms-plugin-health-conditions) for the exact naming, status mapping, and rollup behavior, and [KMS Health Reporter Connectivity](#kms-health-reporter-connectivity) for how the reporter authenticates and connects to perform the write.
 
 ```
 within each apiserver pod (3 in HA):
@@ -498,7 +498,7 @@ within each apiserver pod (3 in HA):
                                     ▼
 operator CR (kubeapiservers.operator.openshift.io/cluster):
   ├─ KMSHealthReporter_<nodeName>    ◄─ written by each per-pod reporter
-  │      (advisory, one per node, multi-plugin state in Message)
+  │      (one per node, multi-plugin state in Message)
   │
   └─ KMSPluginsDegraded              ◄─ written by aggregator controller
             │                            (reads the per-node entries above)
@@ -506,16 +506,6 @@ operator CR (kubeapiservers.operator.openshift.io/cluster):
             ▼
   ClusterOperator: Degraded
 ```
-
-##### Auth and connection
-
-**Auth**: the reporter uses a **legacy ServiceAccount token** (mounted from a Secret) bound to a minimal Role that only permits applying its single per-node condition entry on the operator CR. The projected SA tokens available in API-server-adjacent namespaces are admin-grade, as are the auth client certificates on disk; both would over-privilege a sidecar whose only job is one SSA apply. The legacy SA token keeps the blast radius minimal if the sidecar is compromised. The tradeoff is lifetime: a legacy token does not expire, whereas a projected token rotates. We accept this, since a token scoped to one verb on one resource is a far smaller prize than an admin-grade token, expiring or not.
-
-**Connection**: all reporters reach the kube-apiserver through the in-cluster Service `kubernetes.default.svc`.
-
-In an HA control plane this survives KMS failure: if one node's KMS plugin breaks, that node's KAS degrades, but the Service still has healthy endpoints on the other nodes, so the affected node's reporter can still deliver its condition. The Service approach only fully breaks when every KMS plugin is down, and that is a cluster-down event already surfaced by far louder signals (`ClusterOperator`, etcd, kubelet probes) than a missing reporter condition. On Single-Node OpenShift the Service has a single endpoint, so a broken local KMS plugin does leave the reporter unable to write; this is acceptable for the same reason: the cluster is already hard-down and the condition would be redundant.
-
-Dialing `127.0.0.1:6443` directly (the kube-apiserver static pod uses `hostNetwork: true`) was considered and rejected. It would bridge the post-start window where the local KAS accepts TLS connections but is still absent from `kubernetes.default` `Endpoints` (the Service reconciler self-gates on `/readyz`; see [`kubernetesservice/controller.go`](https://github.com/kubernetes/kubernetes/blob/master/pkg/controlplane/controller/kubernetesservice/controller.go)). But reporting KMS plugin health is not on KAS's critical startup path, and a not-ready KAS is already surfaced with higher signal-to-noise by `ClusterOperator`, kubelet probes, and KAS's own readiness machinery.
 
 ### User Stories
 
@@ -572,6 +562,16 @@ This feature does not depend on the features that are excluded from the OKE prod
 - keyController uses provider-specific field-level comparison (not simple equality) to determine migration necessity
 - UDS path convention: `unix:///var/run/kmsplugin/kms-{keyID}.sock` — keyID appended for uniqueness
 
+#### KMS Health Reporter Connectivity
+
+**Auth**: the reporter uses a **legacy ServiceAccount token** (mounted from a Secret) bound to a minimal Role that only permits applying its single per-node condition entry on the operator CR. The projected SA tokens available in API-server-adjacent namespaces are admin-grade, as are the auth client certificates on disk; both would over-privilege a sidecar whose only job is one SSA apply. The legacy SA token keeps the blast radius minimal if the sidecar is compromised. The tradeoff is lifetime: a legacy token does not expire, whereas a projected token rotates. We accept this, since a token scoped to one verb on one resource is a far smaller prize than an admin-grade token, expiring or not.
+
+**Connection**: all reporters reach the kube-apiserver through the in-cluster Service `kubernetes.default.svc`.
+
+In an HA control plane this survives KMS failure: if one node's KMS plugin breaks, that node's KAS degrades, but the Service still has healthy endpoints on the other nodes, so the affected node's reporter can still deliver its condition. The Service approach only fully breaks when every KMS plugin is down, and that is a cluster-down event already surfaced by far louder signals (`ClusterOperator`, etcd, kubelet probes) than a missing reporter condition. On Single-Node OpenShift the Service has a single endpoint, so a broken local KMS plugin does leave the reporter unable to write; this is acceptable for the same reason: the cluster is already hard-down and the condition would be redundant.
+
+Dialing `127.0.0.1:6443` directly (the kube-apiserver static pod uses `hostNetwork: true`) was considered and rejected. It would bridge the post-start window where the local KAS accepts TLS connections but is still absent from `kubernetes.default` `Endpoints` (the Service reconciler self-gates on `/readyz`; see [`kubernetesservice/controller.go`](https://github.com/kubernetes/kubernetes/blob/master/pkg/controlplane/controller/kubernetesservice/controller.go)). But reporting KMS plugin health is not on KAS's critical startup path, and a not-ready KAS is already surfaced with higher signal-to-noise by `ClusterOperator`, kubelet probes, and KAS's own readiness machinery.
+
 #### KMS Plugin Health Conditions
 
 ##### Naming convention
@@ -582,13 +582,13 @@ Each reporter sidecar writes one condition per pod replica to the owning operato
 KMSHealthReporter_<nodeName>
 ```
 
-The Type has no `_Available` or `_Degraded` suffix, so it stays advisory on the operator CR (library-go's `StatusSyncer` ignores it). The aggregator controller consumes these conditions and emits the `KMSPluginsDegraded` rollup separately (see [Aggregator behavior](#aggregator-behavior)).
+The Type has no `_Available` or `_Degraded` suffix, so library-go's `StatusSyncer` ignores it and it does not propagate to the `ClusterOperator`. The aggregator controller consumes these conditions and emits the `KMSPluginsDegraded` rollup separately (see [Aggregator behavior](#aggregator-behavior)).
 
-This is a **temporary mechanism**. Long term, we plan to add first-class status fields for KMS plugin health to the operator CR API, so this signal lives in a typed shape rather than an advisory string-encoded condition. Until then, encoding it in `KMSHealthReporter_<nodeName>` avoids an API change and keeps the design reversible.
+This is a **temporary mechanism**. Long term, we plan to add first-class status fields for KMS plugin health to the operator CR API, so this signal lives in a typed shape rather than a string-encoded condition. Until then, encoding it in `KMSHealthReporter_<nodeName>` avoids an API change and keeps the design reversible.
 
 ##### Status mapping
 
-While this advisory condition is a temporary solution (see [Naming convention](#naming-convention)), the `Status` and `Reason` are hardcoded to avoid library-go's `StatusSyncer` or other consumers reacting to per-pod transitions:
+While this condition is a temporary solution (see [Naming convention](#naming-convention)), the `Status` and `Reason` are hardcoded to avoid library-go's `StatusSyncer` or other consumers reacting to per-pod transitions:
 
 - `Status: True`
 - `Reason: AsExpected`
@@ -604,8 +604,8 @@ type PluginHealthConditions []PluginHealthCondition
 
 type PluginHealthCondition struct {
     KeyID       string    `json:"keyID"`            // encryption-key-secret id from the socket path (kms-{keyID}.sock); not a cryptographic key
-    KEKID       string    `json:"kekID,omitempty"`  // remote KEK id from the plugin's KMS v2 StatusResponse.key_id; omitted when the plugin is unreachable
-    Status      string    `json:"status"`           // healthy | unhealthy | unreachable
+    KEKID       string    `json:"kekID,omitempty"`  // remote KEK id from the plugin's KMS v2 StatusResponse.key_id; omitted when the probe errors (no StatusResponse)
+    Status      string    `json:"status"`           // healthy | unhealthy | error
     LastChecked time.Time `json:"lastChecked"`      // RFC 3339 timestamp of this probe
     Detail      string    `json:"detail,omitempty"` // error/health detail; omitted when healthy
 }
@@ -627,15 +627,15 @@ status:
     - type: KMSHealthReporter_master-0
       status: "True"
       reason: AsExpected
-      message: '[{"kekID":"projects/p/locations/l/keyRings/r/cryptoKeys/k/cryptoKeyVersions/2","keyID":"2","status":"healthy","lastChecked":"2026-05-08T12:34:56Z"},{"kekID":"projects/p/locations/l/keyRings/r/cryptoKeys/k/cryptoKeyVersions/1","keyID":"1","status":"healthy","lastChecked":"2026-05-08T12:34:56Z"}]'
+      message: '[{"kekID":"kek-9f2c","keyID":"2","status":"healthy","lastChecked":"2026-05-08T12:34:56Z"},{"kekID":"kek-4a17","keyID":"1","status":"healthy","lastChecked":"2026-05-08T12:34:56Z"}]'
     - type: KMSHealthReporter_master-1
       status: "True"
       reason: AsExpected
-      message: '[{"kekID":"projects/p/locations/l/keyRings/r/cryptoKeys/k/cryptoKeyVersions/2","keyID":"2","status":"unhealthy","lastChecked":"2026-05-08T12:34:56Z","detail":"credential lacks decrypt permission"},{"kekID":"projects/p/locations/l/keyRings/r/cryptoKeys/k/cryptoKeyVersions/1","keyID":"1","status":"healthy","lastChecked":"2026-05-08T12:34:56Z"}]'
+      message: '[{"kekID":"kek-9f2c","keyID":"2","status":"unhealthy","lastChecked":"2026-05-08T12:34:56Z","detail":"credential lacks decrypt permission"},{"kekID":"kek-4a17","keyID":"1","status":"healthy","lastChecked":"2026-05-08T12:34:56Z"}]'
     - type: KMSHealthReporter_master-2
       status: "True"
       reason: AsExpected
-      message: '[{"keyID":"2","status":"unreachable","lastChecked":"2026-05-08T12:34:56Z","detail":"connection refused"},{"keyID":"1","status":"unreachable","lastChecked":"2026-05-08T12:34:56Z","detail":"connection refused"}]'
+      message: '[{"keyID":"2","status":"error","lastChecked":"2026-05-08T12:34:56Z","detail":"connection refused"},{"keyID":"1","status":"error","lastChecked":"2026-05-08T12:34:56Z","detail":"connection refused"}]'
 ```
 
 See [Aggregator behavior](#aggregator-behavior) for how these conditions roll up to the `ClusterOperator`.
