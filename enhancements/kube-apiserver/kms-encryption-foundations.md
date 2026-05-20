@@ -640,6 +640,14 @@ status:
 
 See [Aggregator behavior](#aggregator-behavior) for how these conditions roll up to the `ClusterOperator`.
 
+##### Probe interval
+
+Each reporter probes and emits on a fixed interval, **default 30 seconds**, passed as a sidecar flag at injection time (alongside the UDS socket paths). The exact value is not load-bearing: a probe cycle is `n` local UDS gRPC calls, one per `n` colocated plugins, followed by a single SSA write carrying all `n` results to the operator CR. Both are cheap, and tens-of-seconds detection latency is acceptable for KMS plugin health (key rotation and credential expiry are minutes-to-hours events).
+
+Emission is unconditional and best-effort. The reporter writes its condition every tick even when nothing changed: the stale-reporter mitigation (see [Risks and Mitigations](#risks-and-mitigations)) relies on `lastChecked` advancing, so a write-on-change-only reporter would leave a healthy steady-state condition indistinguishable from a hung one. The reporter attempts the write every interval no matter the cluster state. If it cannot reach the kube-apiserver within the interval, it discards that result rather than queuing it: the reporter only ever needs its freshest probe on the CR, so once the next interval produces a result with a newer `lastChecked`, the un-written previous one is outdated and pointless to retry. A reporter that keeps failing to write stops advancing `lastChecked` and is caught by the staleness threshold.
+
+The aggregator's staleness threshold is derived from the interval rather than configured independently: a condition whose `lastChecked` is older than `4 × interval` (120 s at the default) is treated as `Unknown`. Four intervals give enough data points that one or two dropped probes do not flip the rollup. Reporters apply small random jitter so replicas do not write the operator CR in lockstep.
+
 ##### Aggregator behavior
 
 An aggregator controller reads the per-node `KMSHealthReporter_<nodeName>` conditions on the operator's CR and emits rollup conditions on the same CR. The first rollup is `KMSPluginsDegraded`; its `_Degraded` suffix routes it into the `ClusterOperator`'s `Degraded` slot via library-go's `StatusSyncer`. Additional rollups (e.g. `KMSPluginsAvailable`, `KMSPluginsProgressing`) may be added so the `ClusterOperator`'s `Available` and `Progressing` slots also reflect KMS plugin health. Each suffix maps to its matching `ClusterOperator` field via the same `StatusSyncer` convention, so each new type slots in without additional plumbing.
@@ -666,7 +674,7 @@ The plan is to extend the existing [`conditionController`](https://github.com/op
 
 **Risk: Stale Reporter Conditions**
 - **Impact:** A reporter that hangs leaves its last `KMSHealthReporter_<nodeName>` condition in etcd unchanged.
-- **Mitigation:** Per-plugin `lastChecked` timestamps in Message expose staleness. The aggregator controller can treat conditions whose `lastChecked` exceeds a freshness threshold as effectively `Unknown`.
+- **Mitigation:** Per-plugin `lastChecked` timestamps in Message expose staleness. The aggregator controller treats a condition whose `lastChecked` exceeds the freshness threshold (`4 × probe interval`; see [Probe interval](#probe-interval)) as effectively `Unknown`.
 
 **Risk: Orphaned Conditions on Mode Switch**
 - **Impact:** When KMS is disabled (e.g., switching to `aescbc`), reporter sidecars are removed. Without explicit cleanup, `KMSHealthReporter_<nodeName>` and `KMSPluginsDegraded` entries remain stale on the operator CR.
