@@ -156,15 +156,13 @@ The configuration workflow:
      proxy:
        httpProxy: "http://proxy.corp.example.com:3128"
        httpsProxy: "http://proxy.corp.example.com:3128"
-       noProxy: ".cluster.local,.svc,10.0.0.0/8,172.16.0.0/12"
        trustedCA:
          name: "auth-proxy-ca-bundle"
    ```
 2. `spec.proxy` is picked up by the operator, causing it to:
-   1. finalize `noProxy` with some hard-coded values like `.cluster.local`,
-   2. re-run IdP validation (e.g., OIDC discovery) using the proxy,
-   3. re-validate proxy connectivity via the proxy validation controller,
-   4. re-deploy `oauth-server` using new environment variable values and trusted CA bundle.
+   1. re-run IdP validation (e.g., OIDC discovery) using the proxy,
+   2. re-validate proxy connectivity via the proxy validation controller,
+   3. re-deploy `oauth-server` using new environment variable values and trusted CA bundle.
       This includes synchronizing the given `trustedCA` ConfigMap into `openshift-authentication` namespace.
       This step must also be repeated every time the `trustedCA` ConfigMap content is modified.
 
@@ -213,13 +211,6 @@ type AuthenticationProxyConfig struct {
 	// An empty string means no HTTPS proxy is used.
 	// +required
 	HTTPSProxy *string `json:"httpsProxy"`
-
-	// noProxy is a comma-separated list of hostnames and/or CIDRs and/or IPs
-	// for which the proxy should not be used.
-	// Cluster-internal defaults (.cluster.local, .svc, localhost, 127.0.0.1)
-	// are always appended by the operator.
-	// +optional
-	NoProxy string `json:"noProxy,omitempty"`
 
 	// trustedCA is a reference to a ConfigMap in the openshift-config
 	// namespace containing a CA certificate bundle under the key
@@ -291,11 +282,11 @@ Resolution follows three states:
 
 No per-field inheritance from the cluster-wide proxy occurs; component-scoped proxy is all-or-nothing.
 
-Static cluster-internal `noProxy` defaults (`.cluster.local`, `.svc`, `localhost`, `127.0.0.1`) are
-auto-appended to the user-provided value when the component-scoped proxy is active.
-The cluster-wide proxy machinery inserts additional implicit values (service/pod/machine network CIDRs,
-internal API hostname, platform metadata IPs), but these are unnecessary for authentication components,
-which connect to internal services via DNS names already covered by `.svc` and `.cluster.local`.
+The operator always sets `NO_PROXY` to static cluster-internal defaults
+(`.cluster.local`, `.svc`, `localhost`, `127.0.0.1`) when the component-scoped proxy is active.
+There is no user-configurable `noProxy` field — per-IdP proxy configuration is a non-goal.
+Authentication components connect to internal services via DNS names covered by `.svc` and
+`.cluster.local`, so network CIDRs and the api-int hostname are not needed.
 
 #### Operator Process
 
@@ -351,7 +342,7 @@ should be documented.
 ### Risks and Mitigations
 
 **Cluster lockout from invalid proxy configuration.**
-A misconfigured component proxy (wrong URL, missing CA, incorrect `noProxy`) can prevent
+A misconfigured component proxy (wrong URL, missing CA) can prevent
 the OAuth Server from reaching the external IdP, locking all users out of the cluster.
 The proxy validation controller tests IdP connectivity on configuration change and reports
 warnings for unreachable IdPs and `Degraded` for proxy-level failures (connection refused,
