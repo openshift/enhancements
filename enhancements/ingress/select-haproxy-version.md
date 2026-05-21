@@ -126,6 +126,13 @@ OCP 5.0.
 the first release where this feature becomes available. Starting with OCP
 5.1, exactly 3 versions will be supported (e.g., 5.1, 5.0, and 4.22).
 
+**Implementation Approach**: This feature will be implemented using a sidecar
+deployment model where HAProxy runs in a separate container alongside the
+main router container. Each supported HAProxy version is packaged in its own
+dedicated container image, providing clean separation of concerns and
+independent versioning. See the Implementation section below for detailed
+information.
+
 ### Workflow Description
 
 **cluster administrator** is a human user responsible for managing
@@ -281,14 +288,75 @@ extended to support it.
 This enhancement works with OpenShift Kubernetes Engine (OKE) as it relies
 on standard IngressController resources which are available in OKE.
 
-### Implementation Proposals
+### Implementation Details
 
-This section presents three distinct approaches for packaging, distributing, and
-isolating multiple HAProxy versions. Each proposal addresses the challenge of
-managing multiple HAProxy binaries with their dynamic dependencies (pcre,
-openssl, FIPS libraries) in different ways.
+#### Chosen Implementation: External HAProxy Images with Sidecar Deployment
 
-#### Proposal 1: Multiple HAProxy Versions in Single Router Image
+This implementation deploys HAProxy as a separate sidecar container alongside the
+main router container. Each supported HAProxy version is packaged in its own
+dedicated container image. One HAProxy sidecar image is built per OCP version,
+with a 1:1 mapping between OCP version and HAProxy version.
+
+**Pod Structure**:
+```yaml
+spec:
+  initContainers:
+  - name: init-router-config
+    image: registry.redhat.io/openshift4/ose-haproxy-router:v5.0
+    # Run script to copy static files (error pages) and templates to shared volume
+    command: ["/usr/local/bin/init-haproxy-files.sh"]
+    volumeMounts:
+    - name: haproxy-shared
+      mountPath: /mnt/shared
+  containers:
+  - name: router
+    image: registry.redhat.io/openshift4/ose-haproxy-router:v5.0
+    # Router logic, template rendering, route watching
+    volumeMounts:
+    - name: haproxy-shared
+      mountPath: /var/lib/haproxy
+  - name: haproxy
+    image: registry.redhat.io/openshift4/ose-haproxy:4.22
+    # HAProxy binary with its dependencies
+    volumeMounts:
+    - name: haproxy-shared
+      mountPath: /var/lib/haproxy
+  volumes:
+  - name: haproxy-shared
+    emptyDir: {}
+```
+
+The init container runs from the router image and executes a shell script to
+copy static files (error pages, scripts) and HAProxy configuration templates
+from the router image filesystem to the shared emptyDir volume. The router
+container generates HAProxy configuration and writes it to the shared volume.
+The router communicates with HAProxy through the HAProxy admin socket (also
+on the shared volume) to trigger configuration reloads and manage the HAProxy
+process.
+
+**Advantages**:
+- Clean separation of concerns (router logic vs HAProxy runtime)
+- Smaller individual images
+- Independent versioning and updates
+- No library isolation complexity
+- Only selected version image is pulled
+- HAProxy image can be updated independently
+
+**Disadvantages**:
+- Requires pod structure changes (init container + sidecar)
+- Minimal additional container overhead
+- Requires special handling if using new features from a newer HAProxy
+  version, not available on an older one
+- Init container needed for static files and initial configuration
+- Operator must maintain mapping from OCP version to HAProxy sidecar image
+- More complex startup sequence
+
+### Alternative Implementation Approaches
+
+During the design phase, two alternative approaches were considered but not
+selected. These are documented here for completeness and future reference.
+
+#### Alternative 1: Multiple HAProxy Versions in Single Router Image
 
 This proposal packages all supported HAProxy versions (up to 3) within the
 existing router container image. Each HAProxy version is installed with its
@@ -446,68 +514,7 @@ Disadvantages:
   identical libraries across versions)
 - Image rebuilds required to update any HAProxy version
 
-#### Proposal 2: External HAProxy Images with Sidecar Deployment
-
-This proposal deploys HAProxy as a separate sidecar container alongside the
-main router container. Each supported HAProxy version is packaged in its own
-dedicated container image. One HAProxy sidecar image is built per OCP version,
-with a 1:1 mapping between OCP version and HAProxy version.
-
-**Pod Structure**:
-```yaml
-spec:
-  initContainers:
-  - name: init-router-config
-    image: registry.redhat.io/openshift4/ose-haproxy-router:v5.0
-    # Run script to copy static files (error pages) and templates to shared volume
-    command: ["/usr/local/bin/init-haproxy-files.sh"]
-    volumeMounts:
-    - name: haproxy-shared
-      mountPath: /mnt/shared
-  containers:
-  - name: router
-    image: registry.redhat.io/openshift4/ose-haproxy-router:v5.0
-    # Router logic, template rendering, route watching
-    volumeMounts:
-    - name: haproxy-shared
-      mountPath: /var/lib/haproxy
-  - name: haproxy
-    image: registry.redhat.io/openshift4/ose-haproxy:4.22
-    # HAProxy binary with its dependencies
-    volumeMounts:
-    - name: haproxy-shared
-      mountPath: /var/lib/haproxy
-  volumes:
-  - name: haproxy-shared
-    emptyDir: {}
-```
-
-The init container runs from the router image and executes a shell script to
-copy static files (error pages, scripts) and HAProxy configuration templates
-from the router image filesystem to the shared emptyDir volume. The router
-container generates HAProxy configuration and writes it to the shared volume.
-The router communicates with HAProxy through the HAProxy admin socket (also
-on the shared volume) to trigger configuration reloads and manage the HAProxy
-process.
-
-Advantages:
-- Clean separation of concerns (router logic vs HAProxy runtime)
-- Smaller individual images
-- Independent versioning and updates
-- No library isolation complexity
-- Only selected version image is pulled
-- HAProxy image can be updated independently
-
-Disadvantages:
-- Requires pod structure changes (init container + sidecar)
-- Minimal additional container overhead
-- Requires special handling if using new features from a newer HAProxy
-  version, not available on an older one
-- Init container needed for static files and initial configuration
-- Operator must maintain mapping from OCP version to HAProxy sidecar image
-- More complex startup sequence
-
-#### Proposal 3: Distinct Router Images per HAProxy Version
+#### Alternative 2: Distinct Router Images per HAProxy Version
 
 This proposal creates completely separate router images for each supported
 HAProxy version. Each image contains the router code and a single embedded
@@ -541,8 +548,8 @@ Disadvantages:
 
 ### Implementation Details/Notes/Constraints
 
-The implementation requires selecting one of the proposals above and making the
-following high-level code changes:
+The implementation using the sidecar deployment model requires the following
+high-level code changes:
 
 1. **API Changes**: Add the `haproxyVersion` field to the IngressController
    CRD in the `openshift/api` repository, gated behind the
@@ -556,27 +563,24 @@ following high-level code changes:
 
 3. **Operator Logic**: Update the ingress-controller-operator to:
    - Read and validate the `haproxyVersion` field
-   - Determine which HAProxy binary and dependencies to use based on the
-     selected implementation proposal
-   - Map the OCP version to the appropriate haproxy path (proposal 1) or
-     container image (proposals 2 and 3) reference
-   - Update the router deployment with the appropriate image or version
-     references
+   - Map the OCP version to the appropriate HAProxy sidecar container image
+     reference
+   - Update the router deployment to include the HAProxy sidecar container
+     with the selected image
+   - Configure the init container to copy static files and templates to the
+     shared volume
    - Report the effective HAProxy version in a new IngressController status
      field (e.g., `status.effectiveHAProxyVersion: "OCP-4.22"`) showing the
      OCP version that determines the HAProxy version in use
    - HAProxy's own version number is available through HAProxy's built-in
      metrics
 
-4. **HAProxy Binary Management**: The selected implementation proposal
-   (Proposal 1, 2, or 3 from the Implementation Proposals section) determines
-   how HAProxy binaries and their dependencies are packaged and distributed.
-   All proposals must:
-   - Ensure the correct direct dependencies (pcre, openssl, FIPS libraries)
-     and indirect dependencies (libc and other system libraries) are available
-     for each HAProxy version
-   - For Proposal 1: include all dependencies in version-specific directories
-     to ensure complete isolation
+4. **HAProxy Image Management**: Using the sidecar deployment model:
+   - Build separate HAProxy container images for each supported OCP version
+   - Each HAProxy image includes the HAProxy binary and all its dependencies
+     (pcre, openssl, FIPS libraries, libc, and other system libraries)
+   - The operator maintains a mapping from OCP version (e.g., "OCP-4.22") to
+     the corresponding HAProxy sidecar image reference
    - Maintain compatibility matrices for HAProxy versions and their
      dependencies
 
@@ -600,14 +604,13 @@ following high-level code changes:
 
 ### Risks and Mitigations
 
-**Risk 1**: Supporting multiple HAProxy versions increases the image size and/or
-complexity depending on the implementation proposal.
+**Risk 1**: Supporting multiple HAProxy versions increases operational complexity
+with the sidecar deployment model.
 
-**Mitigation**: Limit support to 3 distinct versions. The impact varies by
-proposal: Proposal 1 increases single image size but simplifies deployment;
-Proposal 2 minimizes individual image sizes but adds inter-container
-complexity; Proposal 3 creates multiple images but with the simplest runtime
-model. Monitor image size and establish clear deprecation policies.
+**Mitigation**: Limit support to 3 distinct versions. The sidecar approach
+minimizes individual image sizes and only pulls the selected version. Monitor
+image size and establish clear deprecation policies. The init container and
+sidecar pattern is well-established in Kubernetes, reducing operational risk.
 
 **Risk 2**: Administrators may select outdated HAProxy versions with known
 security vulnerabilities.
@@ -622,10 +625,10 @@ libraries (pcre, openssl, FIPS), including potential incompatibilities when
 running older libraries from previous OCP releases on newer kernels.
 
 **Mitigation**: Thoroughly test each supported version with its dependencies
-on each supported kernel version. Package dependencies alongside HAProxy
-binaries to ensure compatibility. Implement robust validation during version
-selection. Document tested library/kernel combinations and known
-incompatibilities.
+on each supported kernel version. Each HAProxy sidecar image is self-contained
+with all required dependencies, eliminating library isolation concerns.
+Implement robust validation during version selection. Document tested
+library/kernel combinations and known incompatibilities.
 
 **Risk 4**: Complexity in troubleshooting when different IngressControllers
 run different HAProxy versions.
@@ -638,21 +641,40 @@ Include version information in support bundles.
 
 This enhancement introduces additional complexity to the ingress subsystem:
 - Increased maintenance burden for supporting multiple HAProxy versions
-- Implementation complexity varies by proposal: Proposal 1 increases image
-  size and library isolation complexity; Proposal 2 introduces pod structure
-  changes and inter-container communication; Proposal 3 multiplies build
-  pipeline complexity
-- Additional testing required for version compatibility matrices across all
-  proposals
+- Pod structure changes introducing an init container and sidecar container
+- Inter-container communication via shared volume for configuration and
+  admin socket
+- More complex startup sequence with init container copying static files
+- Additional testing required for version compatibility matrices
 - Potential for configuration drift across IngressControllers
+- Operator must maintain mapping from OCP version to HAProxy sidecar image
 
 However, these drawbacks are outweighed by the operational benefits of
 reducing upgrade risk and allowing gradual migration of critical production
-workloads.
+workloads. The sidecar pattern is well-established in Kubernetes and provides
+clean separation of concerns between router logic and HAProxy runtime.
 
-## Alternatives (Not Implemented)
+## Alternatives
 
-### Alternative 1: Pin to Specific HAProxy Version Numbers
+### Alternative Implementation Approaches (Not Selected)
+
+The chosen sidecar deployment model was selected over two alternative
+packaging approaches. The alternatives are documented in detail in the
+"Alternative Implementation Approaches" section under Implementation Details.
+In summary:
+
+- **Alternative 1**: Multiple HAProxy Versions in Single Router Image -
+  packages all versions in one image with library isolation via chroot,
+  environment variables, or manual library loader invocation. Not selected
+  due to image size concerns and library isolation complexity.
+
+- **Alternative 2**: Distinct Router Images per HAProxy Version - creates
+  separate router images for each version. Not selected due to build pipeline
+  complexity and router code duplication across images.
+
+### Alternative API Approaches (Not Implemented)
+
+#### Alternative 1: Pin to Specific HAProxy Version Numbers
 
 Instead of referencing OpenShift releases, allow administrators to specify
 exact HAProxy version numbers (e.g., "2.6.2").
@@ -662,7 +684,7 @@ arbitrary HAProxy versions, significantly increasing the support matrix and
 maintenance burden. Tying to OpenShift releases ensures only tested and
 validated combinations are used.
 
-### Alternative 2: Automatic Canary Testing
+#### Alternative 2: Automatic Canary Testing
 
 Implement automatic canary testing where the operator gradually rolls out
 new HAProxy versions and monitors for issues.
@@ -673,7 +695,7 @@ proposal provides the building blocks for manual canary testing by allowing
 administrators to create separate IngressControllers with different
 versions.
 
-### Alternative 3: Complete IngressController Image Selection
+#### Alternative 3: Complete IngressController Image Selection
 
 Allow selection of entire router images rather than just HAProxy versions.
 
@@ -684,10 +706,11 @@ OpenShift release.
 
 ## Open Questions [optional]
 
-1. Which implementation proposal (1, 2, or 3) should be selected for the
-   initial implementation? The choice impacts image size, operational
-   complexity, and maintainability. See the Implementation Proposals section
-   for detailed trade-offs.
+1. ~~Which implementation proposal (1, 2, or 3) should be selected for the
+   initial implementation?~~ **RESOLVED**: Proposal 2 (External HAProxy Images
+   with Sidecar Deployment) has been selected. The sidecar approach provides
+   clean separation of concerns, smaller individual images, and independent
+   versioning while avoiding library isolation complexity.
 
 2. How to pin an HAProxy version from OpenShift 4.22 before migrating to 5.0
    or 5.1?
@@ -695,15 +718,15 @@ OpenShift release.
 3. What telemetry should be collected to track HAProxy version adoption and
    identify potential issues with specific versions?
 
-4. **FIPS compliance and validation**: How do FIPS requirements impact each
-   implementation proposal?
+4. **FIPS compliance and validation**: How do FIPS requirements impact the
+   HAProxy sidecar container?
    - How is FIPS mode validated for each HAProxy version?
    - What are the certification implications of running FIPS-validated
      libraries from older OCP releases on newer kernels?
 
-5. **Version to image mapping**: For Proposals 1 and 2, how does the operator
-   maintain the mapping from `haproxyVersion: "OCP-X.Y"` to the actual haproxy
-   path or container image reference?
+5. **Version to image mapping**: How does the operator maintain the mapping
+   from `haproxyVersion: "OCP-X.Y"` to the HAProxy sidecar container image
+   reference?
    - Is the mapping hardcoded in the operator?
    - Stored in an API resource?
    - When is this mapping validated (reconcile time vs cluster upgrade time)?
@@ -723,21 +746,22 @@ OpenShift release.
      clusters not yet upgraded to the next version?
    - How do we communicate the support lifecycle to administrators?
 
-7. **Library compatibility across kernel versions**: For Proposal 1
-   (particularly 1.a chroot, but applies to all sub-proposals), what are the
-   risks of running older dynamic libraries (pcre, openssl, FIPS modules from
-   OCP 4.22) on a newer kernel (from OCP 5.1)?
+7. **Library compatibility across kernel versions**: What are the risks of
+   running older dynamic libraries (pcre, openssl, FIPS modules from OCP 4.22)
+   packaged in HAProxy sidecar images on a newer kernel (from OCP 5.1)?
    - Are there known incompatibilities between specific library/kernel
      version combinations?
    - How do we validate compatibility during testing?
    - Should we document supported/tested combinations?
 
-8. **Proposal 3 image sourcing**: For Proposals 2 and 3, when building OCP 5.1
-   with three distinct images (containing HAProxy from 5.1, 5.0, and 4.22),
-   how are the older image versions obtained?
-   - Can previous OCP releases (5.0 and 4.22) provide their router or HAProxy
+8. **HAProxy sidecar image sourcing**: When building OCP 5.1 with three
+   distinct HAProxy sidecar images (containing HAProxy from 5.1, 5.0, and
+   4.22), how are the older image versions obtained?
+   - Can previous OCP releases (5.0 and 4.22) provide their HAProxy sidecar
      images?
    - What actions are needed to make this approach feasible?
+   - Should older images be rebuilt for newer OCP releases or reused from
+     previous releases?
 
 9. **HAProxy version correlation and visibility**: The IngressController
    status shows the OCP version (e.g., `status.effectiveHAProxyVersion:
@@ -814,8 +838,9 @@ Tests must cover:
 - Multiple IngressControllers with different HAProxy versions
 - Validation that routes work correctly with different HAProxy versions
 - Performance and resource consumption with multiple versions
-- HAProxy configuration reload functionality across all implementation
-  proposals (all proposals support seamless reload via admin socket API)
+- HAProxy configuration reload functionality via admin socket API
+- Init container startup and static file copying
+- Sidecar container communication and shared volume functionality
 
 **Negative Tests**:
 - Attempting to use unsupported/unavailable versions
@@ -1019,21 +1044,13 @@ the current default HAProxy version without requiring manual intervention.
 
 ## Infrastructure Needed [optional]
 
-Potential infrastructure needs (varies by implementation proposal):
+The sidecar deployment implementation requires:
 
-**All Proposals**:
 - CI infrastructure to test all supported HAProxy versions across platforms
 - Build pipeline updates to compile and package multiple HAProxy versions
-
-**Proposal 1 (Single Image)**:
-- Additional storage for larger router images containing multiple HAProxy
-  versions
-
-**Proposal 2 (Sidecar)**:
+  as separate sidecar images
 - Separate container image registry entries for HAProxy sidecar images
+  (e.g., `ose-haproxy:4.22`, `ose-haproxy:5.0`, `ose-haproxy:5.1`)
 - Storage for multiple HAProxy sidecar images
-
-**Proposal 3 (Distinct Router Images)**:
-- Multiple container image registry entries (one per HAProxy version)
-- Build pipeline capable of producing parallel router images
-- Storage for multiple complete router images
+- Build pipeline capable of producing HAProxy images for current and
+  previous OCP versions
