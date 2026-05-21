@@ -444,6 +444,32 @@ but this is explicitly rejected. The goal is to have a component-scoped proxy co
 instead of typed spec fields. This loses CRD schema validation, discoverability via `oc explain`,
 and generated documentation.
 
+**OIDC discovery URL override with in-cluster reverse proxy:** Instead of configuring a forward proxy
+on auth components, add a `discoveryURL` field to the OIDC IdP configuration that points to an
+in-cluster reverse proxy service. The reverse proxy would serve a rewritten OIDC discovery document
+where endpoint URLs (JWKS, UserInfo, token) point back to itself, then proxy the actual requests to
+the external IdP. This was rejected for several reasons:
+
+- *Does not eliminate the connectivity requirement.* The reverse proxy service itself still needs to
+  reach the external IdP — the fundamental problem ("something in the cluster must egress to the IdP")
+  is unchanged. The reverse proxy would either need its own forward proxy configuration or a special
+  network path, shifting the problem rather than solving it.
+- *OIDC-only.* The discovery URL approach only works for IdPs that publish an OpenID Connect
+  discovery document. The auth stack also supports GitHub, GitLab, Google, BasicAuth, LDAP, and
+  Keystone — all of which make server-side outbound calls to arbitrary endpoints without a discovery
+  mechanism. A forward proxy configuration covers all IdP types uniformly.
+- *Significant operational burden on the customer.* The customer must deploy, configure, and maintain
+  a reverse proxy service that handles TLS termination, URL rewriting in discovery document responses,
+  high availability (it is in the authentication critical path), and lifecycle management across
+  cluster upgrades. This is operationally similar to the "internal IdP federation" workaround
+  described in the Motivation section, though lighter-weight.
+- *URL rewriting fragility.* The reverse proxy must parse and rewrite multiple URLs in the OIDC
+  discovery document (`token_endpoint`, `userinfo_endpoint`, `jwks_uri`, and potentially others).
+  If the IdP adds or changes endpoints in its discovery document, the proxy may need updating.
+
+The forward proxy approach is simpler for administrators (a single URL configuration), works for all
+IdP types, and does not require deploying additional services.
+
 ## Test Plan
 
 TBD
