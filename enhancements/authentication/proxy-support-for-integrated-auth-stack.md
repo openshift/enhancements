@@ -314,14 +314,19 @@ controllers are affected:
 - **Config observation** — OIDC discovery calls during IdP validation use a proxy-aware
   transport so that discovery requests reach external IdP endpoints through the component proxy.
 
-- **Endpoint accessibility** — the route health check hits the external OAuth route hostname,
-  which in cloud environments resolves to an external load balancer. Without proxy awareness,
-  this check would falsely report the OAuth server as unavailable when no cluster-wide proxy
-  is configured. The route check controller is updated to use the resolved component proxy.
+- **Endpoint accessibility** — a liveness probe that checks whether the OAuth server is
+  reachable via its route, service, and pod endpoints (hitting `/healthz`). The route check
+  hits the external OAuth route hostname, which in cloud environments resolves to an external
+  load balancer. Without proxy awareness, this check would falsely report the OAuth server
+  as unavailable when no cluster-wide proxy is configured. The route check is updated to
+  use the resolved component proxy. Service and pod endpoint checks are not affected (they
+  use cluster-internal addresses).
 
-- **Custom route** — the custom route controller checks OAuth route availability by hitting
-  the route hostname's `/healthz` endpoint. Same situation as endpoint accessibility — needs
-  proxy awareness for disconnected environments.
+- **Custom route** — manages the `oauth-openshift` Route lifecycle (creation, custom
+  hostname/TLS from `ingress.config`) and reports route health to
+  `ingress.config/cluster.status.componentRoutes`. Its availability check also hits the
+  route hostname's `/healthz` endpoint — same external load balancer situation as endpoint
+  accessibility — and needs proxy awareness for disconnected environments.
 
 - **Proxy validation** — the existing proxy validation controller already tests OAuth route
   reachability through the cluster-wide proxy. It is extended to also validate the
