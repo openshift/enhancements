@@ -325,6 +325,17 @@ controllers are affected:
   reserved for proxy-level and configuration failures (connection refused, TLS handshake
   errors with the proxy itself).
 
+Regarding config observation, both Integrated OAuth and External OIDC modes make outbound
+calls to external IdP endpoints for validation:
+
+| Mode | Controller | Outbound call | Code location |
+|------|------------|---------------|---------------|
+| Integrated OAuth | Config observation | OIDC discovery (`/.well-known/openid-configuration`) | [`idp_conversions.go:discoverOpenIDURLs()`](https://github.com/openshift/cluster-authentication-operator/blob/9d5f19f8ad67/pkg/controllers/configobservation/oauth/idp_conversions.go#L315) |
+| Integrated OAuth | Config observation | OIDC password grant flow check | [`idp_conversions.go:checkOIDCPasswordGrantFlow()`](https://github.com/openshift/cluster-authentication-operator/blob/9d5f19f8ad67/pkg/controllers/configobservation/oauth/idp_conversions.go#L373) |
+| External OIDC | External OIDC | CA certificate validation via OIDC discovery | [`externaloidc_controller.go:validateCACert()`](https://github.com/openshift/cluster-authentication-operator/blob/9d5f19f8ad67/pkg/controllers/externaloidc/externaloidc_controller.go#L670) |
+
+External OIDC is out of scope for this enhancement. The Integrated OAuth calls need to use the component-scoped proxy.
+
 #### OAuth Server
 
 The operator injects `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` environment variables into the
