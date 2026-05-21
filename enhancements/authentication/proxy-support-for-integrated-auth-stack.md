@@ -318,6 +318,10 @@ controllers are affected:
   this check would falsely report the OAuth server as unavailable when no cluster-wide proxy
   is configured. The route check controller is updated to use the resolved component proxy.
 
+- **Custom route** — the custom route controller checks OAuth route availability by hitting
+  the route hostname's `/healthz` endpoint. Same situation as endpoint accessibility — needs
+  proxy awareness for disconnected environments.
+
 - **Proxy validation** — the existing proxy validation controller already tests OAuth route
   reachability through the cluster-wide proxy. It is extended to also validate the
   component-scoped proxy configuration and to test IdP endpoint connectivity on configuration
@@ -325,16 +329,29 @@ controllers are affected:
   reserved for proxy-level and configuration failures (connection refused, TLS handshake
   errors with the proxy itself).
 
+- **Deployment controller** — resolves the effective proxy configuration and injects it into
+  the OAuth Server deployment. Syncs the `trustedCA` ConfigMap from `openshift-config` to
+  `openshift-authentication` and adds the CA volume/mount to the deployment.
+
 Regarding config observation, both Integrated OAuth and External OIDC modes make outbound
 calls to external IdP endpoints for validation:
 
-| Mode | Controller | Outbound call | Code location |
-|------|------------|---------------|---------------|
-| Integrated OAuth | Config observation | OIDC discovery (`/.well-known/openid-configuration`) | [`idp_conversions.go:discoverOpenIDURLs()`](https://github.com/openshift/cluster-authentication-operator/blob/9d5f19f8ad67/pkg/controllers/configobservation/oauth/idp_conversions.go#L315) |
-| Integrated OAuth | Config observation | OIDC password grant flow check | [`idp_conversions.go:checkOIDCPasswordGrantFlow()`](https://github.com/openshift/cluster-authentication-operator/blob/9d5f19f8ad67/pkg/controllers/configobservation/oauth/idp_conversions.go#L373) |
-| External OIDC | External OIDC | CA certificate validation via OIDC discovery | [`externaloidc_controller.go:validateCACert()`](https://github.com/openshift/cluster-authentication-operator/blob/9d5f19f8ad67/pkg/controllers/externaloidc/externaloidc_controller.go#L670) |
+| Mode | Controller | Component | Outbound call |
+|------|------------|-----------|---------------|
+| Integrated OAuth | Config observation | [`ObserveIdentityProviders()`](https://github.com/openshift/cluster-authentication-operator/blob/9d5f19f8ad67/pkg/controllers/configobservation/oauth/observe_idps.go#L19) | [`discoverOpenIDURLs()`](https://github.com/openshift/cluster-authentication-operator/blob/9d5f19f8ad67/pkg/controllers/configobservation/oauth/idp_conversions.go#L315) |
+| Integrated OAuth | Config observation | [`ObserveIdentityProviders()`](https://github.com/openshift/cluster-authentication-operator/blob/9d5f19f8ad67/pkg/controllers/configobservation/oauth/observe_idps.go#L19) | [`checkOIDCPasswordGrantFlow()`](https://github.com/openshift/cluster-authentication-operator/blob/9d5f19f8ad67/pkg/controllers/configobservation/oauth/idp_conversions.go#L373) |
+| External OIDC | External OIDC | [`sync()`](https://github.com/openshift/cluster-authentication-operator/blob/9d5f19f8ad67/pkg/controllers/externaloidc/externaloidc_controller.go#L99) | [`validateCACert()`](https://github.com/openshift/cluster-authentication-operator/blob/9d5f19f8ad67/pkg/controllers/externaloidc/externaloidc_controller.go#L670) |
 
 External OIDC is out of scope for this enhancement. The Integrated OAuth calls need to use the component-scoped proxy.
+
+The remaining affected controllers and the calls that need proxy awareness:
+
+| Controller | Component | Outbound call |
+|------------|-----------|---------------|
+| Endpoint accessibility | [`NewOAuthRouteCheckController()`](https://github.com/openshift/cluster-authentication-operator/blob/9d5f19f8ad67/pkg/controllers/oauthendpoints/oauth_endpoints_controller.go#L31) | [`buildTLSClient()`](https://github.com/openshift/cluster-authentication-operator/blob/9d5f19f8ad67/pkg/libs/endpointaccessible/endpoint_accessible_controller.go#L177) |
+| Custom route | [`NewCustomRouteController()`](https://github.com/openshift/cluster-authentication-operator/blob/9d5f19f8ad67/pkg/controllers/customroute/custom_route_controller.go#L57) | [`routeAvailability()`](https://github.com/openshift/cluster-authentication-operator/blob/9d5f19f8ad67/pkg/controllers/customroute/custom_route_conditions.go#L140) |
+| Proxy validation | [`NewProxyConfigChecker()`](https://github.com/openshift/cluster-authentication-operator/blob/9d5f19f8ad67/pkg/controllers/proxyconfig/proxyconfig_controller.go#L38) | [`checkProxyConfig()`](https://github.com/openshift/cluster-authentication-operator/blob/9d5f19f8ad67/pkg/controllers/proxyconfig/proxyconfig_controller.go#L110) |
+| Deployment | [`NewOAuthServerWorkloadController()`](https://github.com/openshift/cluster-authentication-operator/blob/9d5f19f8ad67/pkg/controllers/deployment/deployment_controller.go#L74) | [`proxyConfigToEnvVars()`](https://github.com/openshift/cluster-authentication-operator/blob/9d5f19f8ad67/pkg/controllers/deployment/default_deployment.go#L146) |
 
 #### OAuth Server
 
