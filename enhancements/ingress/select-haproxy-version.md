@@ -591,16 +591,14 @@ high-level code changes:
    - Requested OCP versions are available in the current cluster
    - Exactly 3 versions are provided (except OCP 5.0 which provides 2)
 
-6. **Upgrade/Downgrade Handling**: Implement logic to handle cluster
-   upgrades and downgrades according to the specified version policy:
+6. **Upgrade Handling**: Implement logic to handle cluster upgrades according
+   to the specified version policy:
    - "Current" always uses the latest available version
    - Specific versions are preserved if available in the target release
-   - Fall back to default if a version becomes unsupported when
-     Downgrading
-   - Deny cluster upgrades when any IngressController references a
-     `haproxyVersion` that would become unsupported in the target release,
-     requiring administrators to update to "Current" or a supported version
-     first.
+   - Set the ingress ClusterOperator resource's `Upgradeable` condition to
+     `False` when any IngressController references a `haproxyVersion` that
+     would become unsupported in the target release, preventing cluster
+     upgrades until administrators update to "Current" or a supported version.
 
 ### Risks and Mitigations
 
@@ -654,7 +652,7 @@ reducing upgrade risk and allowing gradual migration of critical production
 workloads. The sidecar pattern is well-established in Kubernetes and provides
 clean separation of concerns between router logic and HAProxy runtime.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Alternative Implementation Approaches (Not Selected)
 
@@ -712,11 +710,21 @@ OpenShift release.
    clean separation of concerns, smaller individual images, and independent
    versioning while avoiding library isolation complexity.
 
-2. How to pin an HAProxy version from OpenShift 4.22 before migrating to 5.0
-   or 5.1?
-
-3. What telemetry should be collected to track HAProxy version adoption and
+2. What telemetry should be collected to track HAProxy version adoption and
    identify potential issues with specific versions?
+
+3. ~~**HAProxy version pinning during initial feature adoption**: Since OCP 5.0
+    is the first release where the `haproxyVersion` field becomes available,
+    how should administrators pin to OCP 4.22's HAProxy version when upgrading
+    from OCP 4.22 to OCP 5.0?~~ **RESOLVED**: The migration should preserve the
+    HAProxy version from 4.22 during upgrades from OCP 4.22 to OCP 5.0. The
+    migration process will automatically populate the `haproxyVersion` field with
+    "OCP-4.22" for all existing IngressControllers during the upgrade to 5.0,
+    ensuring HAProxy version stability. Administrators who want to adopt OCP
+    5.0's newer HAProxy version must explicitly update the `haproxyVersion` field
+    to "Current" after the upgrade completes. This approach prioritizes upgrade
+    safety and allows administrators to test and validate the new HAProxy version
+    on their own timeline.
 
 4. **FIPS compliance and validation**: How do FIPS requirements impact the
    HAProxy sidecar container?
@@ -754,14 +762,17 @@ OpenShift release.
    - How do we validate compatibility during testing?
    - Should we document supported/tested combinations?
 
-8. **HAProxy sidecar image sourcing**: When building OCP 5.1 with three
+8. ~~**HAProxy sidecar image sourcing**: When building OCP 5.1 with three
    distinct HAProxy sidecar images (containing HAProxy from 5.1, 5.0, and
-   4.22), how are the older image versions obtained?
-   - Can previous OCP releases (5.0 and 4.22) provide their HAProxy sidecar
-     images?
-   - What actions are needed to make this approach feasible?
-   - Should older images be rebuilt for newer OCP releases or reused from
-     previous releases?
+   4.22), how are the older image versions obtained?~~ **RESOLVED**: Each
+   supported HAProxy version is maintained in a distinct repository. When
+   building an OCP release (e.g., OCP 5.1), the build process packages HAProxy
+   from each of the distinct repositories into separate container images. All
+   required HAProxy sidecar images (e.g., images for 5.1, 5.0, and 4.22) are
+   included in the OCP bundle for that release. This approach ensures that each
+   OCP release ships with all necessary HAProxy versions self-contained, without
+   requiring cross-release dependencies or image reuse from previous OCP
+   releases.
 
 9. **HAProxy version correlation and visibility**: The IngressController
    status shows the OCP version (e.g., `status.effectiveHAProxyVersion:
@@ -782,21 +793,7 @@ OpenShift release.
       OCP 5.2 allow `haproxyVersion: "OCP-4.25"`?
     - Should there be separate support tracks for 4.x and 5.x?
 
-11. **HAProxy version pinning during initial feature adoption**: Since OCP 5.0
-    is the first release where the `haproxyVersion` field becomes available,
-    how should administrators pin to OCP 4.22's HAProxy version when upgrading
-    from OCP 4.22 to OCP 5.0?
-    - During the upgrade from 4.22 to 5.0, what should be the default behavior
-      since `haproxyVersion` is not set?
-      - Does it default to "Current" (5.0's HAProxy), forcing an upgrade?
-      - Defaults to "Current" and also pre-populate the API to "OCP-4.22"?
-      - Or should it default to OCP-4.22 exceptionally on 5.0, changing the
-        default to "Current" only on newer versions?
-    - Is there a migration window or grace period where administrators can
-      change the API field before the routers are updated?
-    - How do we document this bootstrapping scenario for the first adopters?
-
-12. **Custom HAProxy image configuration**: Should administrators be allowed to
+11. **Custom HAProxy image configuration**: Should administrators be allowed to
     configure their own HAProxy image in an unsupported fashion, instead of
     always relying on the OCP-related ones?
     - Could this be done via a documented but unsupported API field that is
@@ -817,7 +814,7 @@ The test plan for this enhancement must include:
 - API validation for the `haproxyVersion` field
 - Version selection logic in the operator
 - Version compatibility validation
-- Upgrade and downgrade scenario handling
+- Upgrade scenario handling
 
 **Integration Tests**:
 - IngressController creation with different HAProxy versions
@@ -834,7 +831,6 @@ appropriate test type labels like `[Suite:openshift/conformance/parallel]`,
 Tests must cover:
 - Basic functionality: selecting "Current" and specific OpenShift versions
 - Version persistence across cluster upgrades
-- Fallback behavior during downgrades
 - Multiple IngressControllers with different HAProxy versions
 - Validation that routes work correctly with different HAProxy versions
 - Performance and resource consumption with multiple versions
@@ -845,7 +841,9 @@ Tests must cover:
 **Negative Tests**:
 - Attempting to use unsupported/unavailable versions
 - Invalid version format strings
-- Migrate to an OpenShift version not supporting the selected `haproxyVersion`
+- Verify `Upgradeable=False` condition when attempting to upgrade to an
+  OpenShift version that does not support the currently selected
+  `haproxyVersion`
 
 ## Graduation Criteria
 
@@ -870,7 +868,7 @@ Tests must cover:
 
 ### Tech Preview -> GA
 
-- Extensive testing including upgrade, downgrade, and scale scenarios
+- Extensive testing including upgrade and scale scenarios
 - At least one full release cycle in Tech Preview
 - Available by default with `haproxyVersion: "Current"` behavior
 - Telemetry data showing feature adoption and stability
@@ -895,9 +893,10 @@ When upgrading an OpenShift cluster:
    specified HAProxy version, provided it is still within the supported
    window (current release and up to 2 previous releases).
 3. If a pinned version would become unsupported in the target release
-   (older than the target release minus 2), the cluster upgrade will be
-   denied and the administrator must update the version selection before
-   proceeding.
+   (older than the target release minus 2), the ingress-controller-operator
+   will set the ingress ClusterOperator's `Upgradeable` condition to `False`,
+   blocking the cluster upgrade. The administrator must update the version
+   selection to "Current" or a supported version before proceeding.
 
 No changes to existing IngressController configurations are required during
 upgrades. The default behavior (using the latest HAProxy) is preserved.
@@ -906,27 +905,9 @@ upgrades. The default behavior (using the latest HAProxy) is preserved.
 
 When upgrading from OCP 4.22 (or earlier) to OCP 5.0, the `haproxyVersion`
 field does not exist in the source release. The behavior during this
-bootstrapping scenario is addressed in Open Question #11. Administrators who
-want to preserve OCP 4.22's HAProxy version during the upgrade to 5.0 may
-need to set `haproxyVersion: "OCP-4.22"` on OCP 5.0 before or immediately
-after the upgrade, depending on the final resolution of this question.
-
-**Downgrades**:
-
-During cluster downgrades:
-1. IngressControllers with `haproxyVersion: "Current"` will use the default
-   HAProxy version from the downgraded OpenShift release.
-2. IngressControllers with `haproxyVersion: "OCP-X.Y"` will preserve the
-   specified version if it is available in the downgraded release.
-3. If the specified version is not available in the downgraded release
-   (e.g., it was from a newer release), the operator will fall back to the
-   default HAProxy version and set a condition indicating the version
-   override.
-
-The IngressController will remain available during upgrades and downgrades.
-Version transitions may cause brief disruptions as router pods restart with
-the new HAProxy binary, following standard voluntary disruption best
-practices.
+bootstrapping scenario is addressed in Open Question #3: the migration process
+will automatically populate the `haproxyVersion` field with "OCP-4.22" for all
+existing IngressControllers during the upgrade to 5.0.
 
 ## Version Skew Strategy
 
