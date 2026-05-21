@@ -10,7 +10,7 @@ approvers:
 api-approvers:
   - "@everettraven"
 creation-date: 2026-05-18
-last-updated: 2026-05-18
+last-updated: 2026-05-21
 status: provisional|implementable|implemented|deferred|rejected|withdrawn|replaced|informational
 tracking-link:
   - https://redhat.atlassian.net/browse/CNTRLPLANE-3376
@@ -60,7 +60,7 @@ and are not reachable via private networking.
   ┌──────────┐          │  │  namespace: openshift-authentication          │  │
   │  Route   │──────────│─►│                                               │  │
   │ (ingress)│          │  │  • Hosts /login, /oauth/authorize, /callback  │  │
-  └──────────┘          │  │  • Redirects user to external IdP             │  │
+  └──────────┘          │  │  • Redirects user to IdP (client-side)        │  │
                         │  │  • Exchanges auth codes for tokens ───────────│──│──► External IdP
                         │  │  • Fetches user info and group membership ────│──│──► External IdP
                         │  │  • Issues OpenShift OAuth access tokens       │  │
@@ -126,7 +126,7 @@ hence the need to add the option to add component-scoped proxy to authentication
 - A generalized per-component proxy framework. This is scoped to authentication only; extending to other operators would require a separate enhancement.
 - HyperShift (Hosted Control Planes) support. HyperShift manages authentication proxy requirements through its own mechanisms and is excluded from the initial scope.
 - Proxy support for the OAuth API Server's External OIDC mode. External OIDC is gated behind TechPreviewNoUpgrade and its egress is limited to the `oauth-apiserver external-oidc` subcommand. Proxy support for that code path can be added when External OIDC matures; it is expected to reuse the same `spec.proxy` configuration rather than introducing a separate field.
-- Proxy configuration for user-managed LDAP group sync CronJobs. These are not managed by the authentication operator and must be configured independently by the administrator.
+- Proxy configuration for user-managed LDAP group sync CronJobs. These are not managed by the authentication operator and must be configured independently by the administrator (see [LDAP Group Sync](#ldap-group-sync)).
 
 ## Proposal
 
@@ -290,10 +290,11 @@ when the `proxy` object is set.
 
 Resolution follows two states:
 
-1. `spec.proxy` set — use component-scoped proxy, overriding any cluster-wide proxy.
+1. `spec.proxy` set — use component-scoped proxy, replacing the cluster-wide proxy entirely. No per-field inheritance from the cluster-wide proxy occurs.
 2. `spec.proxy` absent — fall back to the cluster-wide proxy (`proxy.config.openshift.io/cluster`) as today.
 
-No per-field inheritance from the cluster-wide proxy occurs; component-scoped proxy is all-or-nothing.
+Removing `spec.proxy` restores the cluster-wide proxy (if configured) as the effective
+configuration.
 
 The operator always sets `NO_PROXY` to static cluster-internal defaults
 (`.cluster.local`, `.svc`, `localhost`, `127.0.0.1`) when the component-scoped proxy is active.
@@ -410,8 +411,8 @@ and should be documented as a prerequisite.
 **Proxy credential leakage.**
 Proxy credentials embedded in the URL (e.g., `http://user:pass@proxy:3128`) are stored
 in the operator spec and propagated as environment variables to OAuth Server pods. This
-mirrors the cluster-wide proxy's approach. Whether to add support for
-`proxyCredentials` SecretNameReference for improved credential handling is listed as an open question.
+mirrors the cluster-wide proxy's approach. Support for a `proxyCredentials`
+SecretNameReference for improved credential handling could be added as a follow-up.
 
 **Debugging complexity from dual proxy sources.**
 When both a cluster-wide proxy and a component-scoped proxy exist, diagnosing connectivity
@@ -505,7 +506,7 @@ This change is scoped to the CAO only. Version skew doesn't apply.
 ## Operational Aspects of API Extensions
 
 This enhancement adds fields to the existing `Authentication` CRD (`operator.openshift.io/v1`).
-No webhooks, aggregated API servers, or finalizers are introduced. The only operational
+No new CRDs, webhooks, aggregated API servers, or finalizers are introduced. The only operational
 impact is that a misconfigured proxy can block authentication — visible via the
 `ProxyConfigControllerDegraded` condition and `IdPEndpointUnreachable` Warning events.
 
