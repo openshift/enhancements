@@ -4,14 +4,14 @@ authors:
   - richardsonnick
 reviewers:
   - dsalerno # OpenShift networking stack knowledge
-approvers: 
+approvers:
   - joelanford
 api-approvers:
   - everettraven
 creation-date: 2026-01-20
 last-updated: 2026-01-26
 tracking-link:
-  - https://issues.redhat.com/browse/OCPSTRAT-2611 
+  - https://issues.redhat.com/browse/OCPSTRAT-2611
   - https://issues.redhat.com/browse/OCPSTRAT-2321
 ---
 
@@ -61,7 +61,7 @@ As an application developer, I want to understand clearly which TLS profile appl
 
 ## Proposal
 
-We propose extending the existing `apiserver.config.openshift.io/v1` API to serve as the source of truth for TLS security settings across the cluster. All components should honor the TLS configuration defined in this API by default, with specific components supporting explicit overrides via their own Custom Resources. 
+We propose extending the existing `apiserver.config.openshift.io/v1` API to serve as the source of truth for TLS security settings across the cluster. All components should honor the TLS configuration defined in this API by default, with specific components supporting explicit overrides via their own Custom Resources.
 
 ### API Design Principles
 
@@ -162,10 +162,35 @@ All override mechanisms must be explicitly documented in user-facing documentati
 
 4. Component operators watch the APIServer configuration and update their respective component configurations. This applies to **all TLS servers in the cluster**—any component implementing TLS should honor this API.
 
-   - **CVO-managed operators:** Cluster operators read the configuration and configure their operands accordingly.
+   - **CVO-managed operators:** Cluster operators read the configuration and configure their operands accordingly. For operators that consume configuration via ConfigMaps, the CVO provides an annotation-based mechanism to automatically inject centralized TLS settings into operator ConfigMaps. See "CVO ConfigMap TLS Injection" section below for details.
    - **OLM-managed operators:** Operators are expected to read the `apiserver.config.openshift.io/cluster` resource themselves for configuration. OLM does not inject or proxy this configuration.
 
 5. Each component applies the new TLS settings. Components unable to comply should report their status (mechanism to be standardized for GA; see Graduation Criteria).
+
+#### CVO ConfigMap TLS Injection
+
+For operators that consume configuration via ConfigMaps, the CVO can automatically inject centralized TLS settings using the `config.openshift.io/inject-tls: "true"` annotation. When the CVO processes a ConfigMap manifest with this annotation, it reads the TLS configuration from `apiserver.config.openshift.io/cluster` and injects `minTLSVersion` and `cipherSuites` into the `servingInfo` section of supported configuration types (`GenericOperatorConfig` and `GenericControllerConfig`) within the ConfigMap's data entries.
+
+**Example:**
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  annotations:
+    config.openshift.io/inject-tls: "true"
+data:
+  config.yaml: |
+    apiVersion: operator.openshift.io/v1alpha1
+    kind: GenericOperatorConfig
+    servingInfo:
+      bindAddress: 0.0.0.0:8443
+      # minTLSVersion and cipherSuites automatically injected by CVO
+```
+
+**Limitations:**
+- Only injects into `GenericOperatorConfig` (`operator.openshift.io/v1alpha1`) and `GenericControllerConfig` (`config.openshift.io/v1`)
+- If centralized TLS config lacks `minTLSVersion` or `cipherSuites`, those fields are **deleted** from the ConfigMap (not left unchanged)
 
 #### Ingress Override Workflow
 
@@ -475,7 +500,7 @@ Create a dedicated new Custom Resource for cluster-wide TLS configuration. This 
    - **Option B:** Use omission to mean "no opinion" and require admins to explicitly opt-in to a supported mode before they can upgrade.
    - **Option C:** Have a controller set the field to the default behavior if it is omitted on upgrade.
 
-   **Resolved** We will use option A:Use omission to mean "no opinion" with `LegacyAdheringComponentsOnly` behavior. Eventually require setting `StrictAllComponents` explicitly before upgrade. 
+   **Resolved** We will use option A:Use omission to mean "no opinion" with `LegacyAdheringComponentsOnly` behavior. Eventually require setting `StrictAllComponents` explicitly before upgrade.
 
 ## Graduation Criteria
 
