@@ -97,7 +97,7 @@ clear remediation steps.
 
 ## Proposal
 
-The solution consists of three components working together:
+The solution consists of four components working together:
 
 1. **SELinuxWarningController carry patch** in
    `kube-controller-manager`: The upstream Kubernetes
@@ -121,6 +121,10 @@ The solution consists of three components working together:
    administrators about workloads incompatible with
    SELinuxMount GA, providing actionable information about
    which pods and volumes are affected.
+
+4. **Knowledge base article**, linked from the alert. It will
+   describe details about why the cluster is un-upgradeable
+   and how the cluster admin can fix it.
 
 What is *the actual API object* is currently open. Ideas:
 
@@ -308,9 +312,10 @@ have broader RBAC permissions and huge memory overhead.
 
 **Use kube-controller-manager-operator**: Implement the
 `Upgradeable: false` as condition in KCM-o ClusterOperator
-and not CSO. This is a viable alternative, we've chosen
-CSO only because we're more familiar with it and `SELinuxMount`
-is a sig-storage feature.
+and not CSO. This does not work on HyperShift - KCM is managed
+directly by control-plane-operator (CPO) and not by KCM-o.
+We would need to duplicate the code in KCM-o (for standalone
+clusters) and in CPO (for hosted control planes).
 
 **Use a standalone controller/operator**: A dedicated
 operator could handle both detection and upgrade blocking.
