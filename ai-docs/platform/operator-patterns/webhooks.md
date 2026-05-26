@@ -2,13 +2,16 @@
 
 **Category**: Platform Pattern  
 **Applies To**: Operators with API validation/mutation needs  
-**Last Updated**: 2026-04-28  
+**Last Updated**: 2026-05-26 
+**Scope**: All form factors with networking considerations (see below)
 
 ## Overview
 
 Webhooks extend Kubernetes API server with custom validation, mutation, and conversion logic. They intercept API requests before objects are persisted to etcd.
 
 **Types**: ValidatingWebhook, MutatingWebhook, ConversionWebhook
+
+**⚠️ Form Factor Note**: In **Hypershift/HCP**, the documented pattern is deploying webhooks as sidecars to kube-apiserver (in the management cluster). See [azure-workload-identity-webhook.md](../../../enhancements/hypershift/azure-workload-identity-webhook.md) for the authoritative HCP webhook pattern.
 
 ## Key Concepts
 
@@ -258,3 +261,5 @@ rate(admission_webhook_rejections_total[5m])
 - **controller-runtime**: [Webhook Guide](https://book.kubebuilder.io/cronjob-tutorial/webhook-implementation.html)
 - **OpenShift**: [Admission Plugins](https://docs.openshift.com/container-platform/latest/architecture/admission-plug-ins.html)
 - **Pattern**: Implements "API-First Design" from [DESIGN_PHILOSOPHY.md](../../DESIGN_PHILOSOPHY.md)
+- **HCP Enhancements** (authoritative webhook pattern for HCP):
+  - [azure-workload-identity-webhook.md](../../../enhancements/hypershift/azure-workload-identity-webhook.md) - KAS sidecar webhook pattern in HyperShift

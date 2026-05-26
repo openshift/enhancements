@@ -2,13 +2,21 @@
 
 **Category**: OpenShift Platform API  
 **API Group**: config.openshift.io/v1  
-**Last Updated**: 2026-04-28  
+**Last Updated**: 2026-05-26
+**Scope**: All form factors (see HCP note below)
 
 ## Overview
 
 ClusterOperator represents the status of a platform component. Every core OpenShift component reports its health via a ClusterOperator resource.
 
 **Purpose**: Centralized health monitoring and upgrade orchestration.
+
+**⚠️ Form Factor Note**: In **Hypershift/HCP**, ClusterOperators exist in **both** clusters:
+- **Guest cluster**: Platform components serving the hosted cluster (same as standalone)
+- **Management cluster**: HyperShift platform components managing hosted control planes
+- The CVO in the **guest** cluster watches ClusterOperators in the guest cluster
+
+See [hypershift-control-plane-version-status.md](../../../enhancements/hypershift/hypershift-control-plane-version-status.md) for authoritative details on CVO placement in HCP.
 
 ## Key Fields
 

@@ -26,6 +26,9 @@ When working on OpenShift:
 **Writing enhancement proposal?**
 → `./guidelines/enhancement_template.md` → `./ai-docs/workflows/enhancement-process.md` → `./ai-docs/workflows/topology-considerations-guide.md` → `./ai-docs/practices/development/api-evolution.md`
 
+**Adding new component?**
+→ `./dev-guide/new-components.md` (payload vs OLM) → `./guidelines/enhancement_template.md` → `./ai-docs/workflows/enhancement-process.md`
+
 **Building operator?**
 → `./ai-docs/DESIGN_PHILOSOPHY.md` → `./ai-docs/platform/operator-patterns/controller-runtime.md` → `./ai-docs/platform/operator-patterns/status-conditions.md` → `./ai-docs/practices/testing/pyramid.md`
 

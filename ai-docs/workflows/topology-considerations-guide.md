@@ -307,11 +307,46 @@ From `configurable-network-diagnostics-pod-placement.md`:
 
 ---
 
+---
+
+## For Agentic Docs Contributors
+
+**Context**: When documenting form factor behavior in `ai-docs/`, use authoritative enhancements as primary sources.
+
+### Critical Rule
+
+**ALWAYS cite authoritative enhancements when documenting HCP/SNO/MicroShift behavior.**
+
+❌ **DON'T**: Rely on training data or general Kubernetes knowledge for form factor specifics
+✅ **DO**: Read relevant enhancements, extract facts, cite sources
+
+### Process
+
+1. **Find authoritative source** - Search `enhancements/hypershift/`, topology sections in EPs
+2. **Extract facts** - Quote specific lines, note architecture details
+3. **Cite in docs** - Add references section linking to enhancements
+4. **Mark inferences** - Distinguish verified facts from logical inferences
+
+### Authoritative Sources by Topic
+
+| Topic | Enhancement | Key Facts |
+|-------|-------------|-----------|
+| **HCP upgrade orchestration** | enhancements/hypershift/hypershift-control-plane-version-status.md | CPO (mgmt) vs CVO (guest), separate version tracking |
+| **HCP networking** | enhancements/hypershift/hosted-control-plane-metrics-exposure.md, monitoring.md | Management/guest network separation |
+| **HCP operator placement** | enhancements/hypershift/node-tuning.md | Split operator pattern, two kubeconfigs |
+| **SNO constraints** | Search topology sections in EPs | Single node, no HA, resource limits |
+| **MicroShift differences** | Search topology sections in EPs | No CVO/CNO, RPM-based upgrades |
+
+See [HCP_CONTENT_AUDIT.md](../HCP_CONTENT_AUDIT.md) for verification methodology.
+
+---
+
 ## Related Documentation
 
 - **Enhancement template**: [../../guidelines/enhancement_template.md](../../guidelines/enhancement_template.md)
 - **MicroShift repo**: https://github.com/openshift/microshift
 - **OKE comparison**: https://docs.redhat.com/en/documentation/openshift_container_platform/latest/html/overview/oke-about#about_oke_similarities_and_differences
+- **HCP enhancements**: [../../enhancements/hypershift/](../../enhancements/hypershift/)
 
 ---
 

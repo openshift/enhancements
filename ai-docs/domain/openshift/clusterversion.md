@@ -2,13 +2,22 @@
 
 **Category**: OpenShift Platform API  
 **API Group**: config.openshift.io/v1  
-**Last Updated**: 2026-04-29  
+**Last Updated**: 2026-05-26
+**Scope**: All form factors (see HCP note below)
 
 ## Overview
 
 ClusterVersion represents the desired and current version of the OpenShift cluster. The Cluster Version Operator (CVO) watches this resource and orchestrates upgrades.
 
 **Singleton**: Only one ClusterVersion exists, named `version`.
+
+**⚠️ Form Factor Note**: In **Hypershift/HCP**:
+- ClusterVersion exists in the **guest cluster** (not management cluster)
+- The CVO runs in the **guest cluster** and manages guest cluster components
+- The **management cluster** uses HyperShift's `HostedCluster` API instead
+- Control plane and guest cluster have separate version lifecycles
+
+See [hypershift-control-plane-version-status.md](../../../enhancements/hypershift/hypershift-control-plane-version-status.md) for authoritative details on HCP version tracking.
 
 ## Key Fields
 

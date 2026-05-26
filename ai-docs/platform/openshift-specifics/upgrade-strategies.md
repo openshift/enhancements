@@ -2,13 +2,16 @@
 
 **Category**: OpenShift-Specific Pattern  
 **Applies To**: All ClusterOperators  
-**Last Updated**: 2026-04-28  
+**Last Updated**: 2026-05-26
+**Scope**: Primarily standalone clusters; see [HCP Differences](#hypershift--hosted-control-planes-hcp) section
 
 ## Overview
 
 OpenShift upgrades are orchestrated by the Cluster Version Operator (CVO). Every operator must support N→N+1 version skew and coordinate with CVO for zero-downtime upgrades.
 
 **Goal**: Upgrade 1000-node cluster with zero application downtime.
+
+**⚠️ Form Factor Note**: This document describes upgrade behavior in **standalone OpenShift clusters** (self-hosted control plane). For Hypershift/HCP deployments, control plane and data plane upgrade separately—see the HCP section below.
 
 ## Key Concepts
 
@@ -257,9 +260,96 @@ oc get co -o json | jq '.items[] | select(.status.conditions[] | select(.type=="
 ❌ **Ignoring Upgradeable**: Allowing unsafe upgrades to proceed  
 ❌ **Blocking CVO**: Long-running reconciliation preventing other operators from upgrading
 
+## Hypershift / Hosted Control Planes (HCP)
+
+**⚠️ Critical Difference**: In HCP, the control plane and data plane upgrade **independently**.
+
+### HCP Upgrade Model
+
+```
+Standalone:
+  CVO upgrades control plane → operators → workloads (all in same cluster)
+
+HCP:
+  Management Cluster:
+    HyperShift Operator upgrades → Hosted Control Plane components
+  Guest Cluster:
+    CVO in guest upgrades → operators in guest → workloads
+```
+
+### Key Differences
+
+| Aspect | Standalone | HCP |
+|--------|-----------|-----|
+| **Control plane location** | Same cluster as workloads | Management cluster |
+| **Upgrade orchestrator** | CVO in same cluster | HyperShift Operator (mgmt) + CVO (guest) |
+| **Version skew** | N→N+1 within cluster | Control plane and data plane can differ |
+| **Node upgrades** | MCO reboots nodes | Guest MCO manages guest nodes; mgmt cluster nodes managed separately |
+| **Operator location** | Depends—some in mgmt, some in guest | Must explicitly consider |
+
+**Note on node upgrades in HCP**: The control plane runs as **pods** in the management cluster (not on dedicated nodes). The management cluster has its own worker nodes where these control plane pods run. Those management cluster nodes are upgraded by the **management cluster's MCO**, independently from the guest cluster. The **guest cluster's MCO** only manages guest cluster worker nodes.
+
+### HCP Considerations for Operators
+
+**If your operator runs in the management cluster**:
+- ✅ Upgraded by HyperShift Operator, not CVO
+- ✅ Must tolerate guest cluster version skew (guest may be older)
+- ✅ Network access to guest cluster required (via KAS)
+
+**If your operator runs in the guest cluster**:
+- ✅ Upgraded by CVO in guest (same as standalone)
+- ✅ Must tolerate control plane version skew (control plane may be newer)
+- ✅ API calls go through remote KAS (in management cluster)
+
+**If your operator is split across both**:
+- ✅ Coordination required—design for independent upgrade order
+- ✅ Must tolerate partial upgrade state (mgmt upgraded, guest not yet)
+- ✅ Document dependencies in enhancement proposal
+
+### SNO (Single-Node OpenShift) Considerations
+
+**Resource Constraints**:
+- All overhead runs on ONE node (control plane + workloads)
+- No HA—single point of failure during node reboot
+- Node upgrade = full cluster downtime (1 node can't drain itself)
+
+**Upgrade Impact**:
+```yaml
+# Standalone HA cluster
+3 control plane nodes + N worker nodes
+→ Rolling update, zero downtime
+
+# SNO
+1 node
+→ Node reboot = cluster downtime (~5-10 minutes)
+```
+
+**Design Considerations**:
+- Accept brief downtime during upgrades (unavoidable in SNO)
+- Ensure rapid reconciliation after reboot
+- Test with `replica: 1` configurations
+
+### MicroShift Considerations
+
+**Different Upgrade Model**:
+- No CVO—upgrades via RPM/greenboot
+- No MCO—host OS managed separately
+- Operators may not exist (smaller footprint)
+
+**If your enhancement involves**:
+- ✅ New APIs → May not be available in MicroShift
+- ✅ Operators → May not run in MicroShift
+- ✅ CVO coordination → Not applicable to MicroShift
+
+See [topology-considerations-guide.md](../../workflows/topology-considerations-guide.md) for comprehensive form factor guidance.
+
 ## References
 
 - **CVO**: [Cluster Version Operator](https://github.com/openshift/cluster-version-operator)
 - **Enhancement**: [Upgrade Ordering](https://github.com/openshift/enhancements/blob/master/dev-guide/cluster-version-operator/dev/operators.md)
 - **API**: [ClusterVersion](https://github.com/openshift/api/blob/master/config/v1/types_cluster_version.go)
 - **Pattern**: Implements "Upgrade Safety" from [DESIGN_PHILOSOPHY.md](../../DESIGN_PHILOSOPHY.md)
+- **Form Factors**: [topology-considerations-guide.md](../../workflows/topology-considerations-guide.md) - Comprehensive HCP/SNO/MicroShift guidance
+- **HCP Enhancements** (authoritative sources for HCP upgrade behavior):
+  - [hypershift-control-plane-version-status.md](../../../enhancements/hypershift/hypershift-control-plane-version-status.md) - Management vs guest upgrade orchestration
+  - [monitoring.md](../../../enhancements/hypershift/monitoring.md) - Control plane/guest cluster separation

@@ -28,7 +28,7 @@
 | **Alternatives** | Other approaches considered | List with rationale | Optional |
 | **Implementation Details** | Technical design | API examples, diagrams | ✅ |
 | **Test Plan** | How to verify | Test scenarios | ✅ |
-| **Graduation Criteria** | When to promote | DevPreview → TechPreview → GA | ✅ |
+| **Graduation Criteria** | When to promote | DevPreview → TechPreview → GA (or alpha → GA if confident) | ✅ |
 | **Upgrade/Downgrade** | Migration strategy | Version compatibility | If applicable |
 
 ## Enhancement States
@@ -94,8 +94,10 @@ spec:
 
 ### Graduation Criteria
 - DevPreview: API defined, basic implementation
-- TechPreview: Feature complete, tested
-- GA: Production-ready, stable API
+- TechPreview: Feature complete, tested (optional if confident in API)
+- GA: Production-ready, stable API, no breaking changes allowed
+
+See [../guidelines/supportability.md](../../guidelines/supportability.md) for Tech Preview policy and when you can skip TechPreview stage.
 
 ## Implementation History
 - 2026-04-29: Initial proposal
@@ -126,6 +128,7 @@ spec:
 ❌ **No test plan**: How will we verify this works?  
 ❌ **Ignoring upgrades**: What happens to existing clusters?  
 ❌ **Breaking changes**: Not considering backward compatibility
+❌ **Wrong delivery mechanism**: Should this be in payload or OLM? See [new-components.md](../../dev-guide/new-components.md)
 
 ## Examples
 
@@ -154,6 +157,8 @@ ls enhancements/
 ## Related
 
 - **Authoritative Template**: [../guidelines/enhancement_template.md](../../guidelines/enhancement_template.md)
+- **Supportability Policy**: [../guidelines/supportability.md](../../guidelines/supportability.md) - Tech Preview vs GA, graduation paths
+- **New Component Policy**: [../dev-guide/new-components.md](../../dev-guide/new-components.md) - Payload vs OLM decision criteria
 - **Topology Considerations**: [topology-considerations-guide.md](topology-considerations-guide.md) - Guide for SNO, MicroShift, Hypershift, OKE sections
 - **API Conventions**: [../practices/development/api-evolution.md](../practices/development/api-evolution.md)
 - **Feature Development**: [implementing-features.md](implementing-features.md)

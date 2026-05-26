@@ -38,6 +38,48 @@ Evolving APIs requires backward compatibility. OpenShift follows Kubernetes API 
 | Make optional field required | `*string → string` | Old resources lack required field |
 | Remove enum value | `enum: [A, B]` (was `[A, B, C]`) | Old resources have invalid value |
 
+## Graduation Path Policy
+
+OpenShift generally follows the **alpha → beta → GA** progression, but this is **not always required**.
+
+### When You Can Skip Beta/TechPreview
+
+You may go **alpha → GA directly** when:
+- ✅ API is stable and well-understood
+- ✅ Implementation is production-quality from the start
+- ✅ No expectation of API changes before GA
+- ✅ Sufficient confidence to commit to long-term support
+
+**BUT** you must still meet GA quality requirements (see below).
+
+### When Beta/TechPreview Is Required
+
+Use **TechPreview** stage when:
+- ⚠️ API design needs real-world validation
+- ⚠️ Implementation quality unknown (scalability, stability)
+- ⚠️ Want flexibility to change API without migration path
+- ⚠️ Feature requires special enablement (feature gate)
+
+### Testing Requirements for GA (Cannot Be Skipped)
+
+**Whether you go alpha → GA directly or alpha → beta → GA, GA requires:**
+
+| Requirement | Why |
+|-------------|-----|
+| **Sufficient test coverage** | Unit, integration, e2e tests |
+| **Upgrade/downgrade testing** | N→N+1 and rollback scenarios |
+| **Scale testing** | Load testing, resource usage validation |
+| **End-to-end tests** | Required for non-optional features |
+| **SLI/SLO definition** | Service level indicators and objectives |
+| **User documentation** | openshift-docs PRs |
+| **Sufficient feedback time** | Real-world usage validation |
+
+**Skipping TechPreview does NOT skip these requirements** - you still need production-quality testing.
+
+**Key Rule**: If unsure about API or implementation, use TechPreview. Going directly to GA means **no breaking changes ever** AND **full production quality from day one**.
+
+See [supportability.md](../../../guidelines/supportability.md) for official Tech Preview policy and [enhancement_template.md](../../../guidelines/enhancement_template.md) for graduation criteria details.
+
 ## Versioning Strategy
 
 ### Adding New API Version
@@ -49,14 +91,14 @@ type MyResourceSpec struct {
     Image    string `json:"image"`
 }
 
-// v1beta1 (add features)
+// v1beta1 (add features) - OPTIONAL stage
 type MyResourceSpec struct {
     Replicas int    `json:"replicas"`
     Image    string `json:"image"`
     Strategy string `json:"strategy,omitempty"` // New optional field
 }
 
-// v1 (stable)
+// v1 (stable) - can skip v1beta1 if confident
 type MyResourceSpec struct {
     Replicas int    `json:"replicas"`
     Image    string `json:"image"`
@@ -271,3 +313,5 @@ func TestBackwardCompatibility(t *testing.T) {
 - **Kubernetes**: [API Conventions](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md)
 - **Dev Guide**: [api-conventions.md](../../../dev-guide/api-conventions.md)
 - **OpenShift**: [API Review Process](https://github.com/openshift/api/blob/master/REVIEW.md)
+- **Supportability**: [supportability.md](../../../guidelines/supportability.md) - Tech Preview vs GA policy
+- **Graduation Criteria**: [enhancement_template.md](../../../guidelines/enhancement_template.md) - Testing requirements for GA

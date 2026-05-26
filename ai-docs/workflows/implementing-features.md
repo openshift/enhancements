@@ -27,7 +27,7 @@ Feature implementation follows: Spec → Plan → Build → Test → Review → 
 - [ ] API design reviewed
 - [ ] Risks and mitigations identified
 - [ ] Test plan defined
-- [ ] Graduation criteria set (DevPreview → TechPreview → GA)
+- [ ] Graduation criteria set (DevPreview → TechPreview → GA, or DevPreview → GA if API stable)
 - [ ] Enhancement PR merged
 
 **Artifacts**: Merged enhancement in `enhancements/`
@@ -141,7 +141,11 @@ See [../practices/testing/pyramid.md](../practices/testing/pyramid.md)
 **Graduation Path**:
 ```
 DevPreview (4.16) → TechPreview (4.17) → GA (4.18)
+OR
+DevPreview (4.16) → GA (4.17)  # If API stable and confident
 ```
+
+See [../guidelines/supportability.md](../../guidelines/supportability.md) for when you can skip TechPreview.
 
 ## Feature States
 
@@ -215,6 +219,7 @@ PR 3 (E2E):
 ## Related
 
 - **Enhancement Process**: [enhancement-process.md](enhancement-process.md)
+- **Supportability Policy**: [../guidelines/supportability.md](../../guidelines/supportability.md) - Tech Preview vs GA, graduation paths
 - **Exec Plans**: [exec-plans/](exec-plans/) - Track multi-week features
 - **Testing**: [../practices/testing/pyramid.md](../practices/testing/pyramid.md)
 - **API Evolution**: [../practices/development/api-evolution.md](../practices/development/api-evolution.md)
