@@ -411,6 +411,14 @@ Container image size directly impacts node disk usage, pull times, and
 upgrade duration. Larger images are especially costly for DaemonSets,
 where every node in the cluster pulls and stores the image.
 
+Image size is particularly critical during node bootstrapping. Some
+DaemonSets (e.g. SDN/CNI, kube-proxy) block the node from reaching
+`Ready` status — oversized images directly delay how quickly a node
+becomes schedulable. Other DaemonSets may not gate `NodeReady` but
+still contend for disk I/O and network bandwidth while their images
+are pulled and extracted, slowing the pulls of the DaemonSets that
+do block `NodeReady` and increasing overall node bootstrap time.
+
 * All binaries shipped in DaemonSet images **MUST** be stripped of
   debug symbols and symbol tables (e.g. using `go build -ldflags
   '-s -w'` for Go binaries).
