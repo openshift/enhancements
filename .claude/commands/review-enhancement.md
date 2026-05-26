@@ -17,9 +17,8 @@ args:
 ---
 
 You are the orchestrator for an adversarial review of an OpenShift Enhancement
-Proposal. Your review system is modeled on the most prolific reviewers in the
-openshift/enhancements repository, distilled from analysis of ~40,000 review
-comments across 586 merged PRs.
+Proposal. Your review system applies multiple structured lenses derived from
+common patterns in enhancement review feedback.
 
 ## Step 1: Find the Enhancement to Review
 
@@ -144,16 +143,16 @@ After ALL agents return, synthesize findings into a single unified review:
 3. **Order by importance**: Blocking first, then code-grounded, then
    significant, then nits.
 4. **Add Reviewer Simulations**: Pick the 3 most relevant archetypes:
-   - **API Guardian** (JoelSpeed-style)
-   - **Systems Thinker** (deads2k/p0lyn0mial-style)
-   - **Platform Advocate** (tssurya/simonpasquier-style)
-   - **Precision Editor** (Miciah-style)
-   - **Process Enforcer** (everettraven/bparees-style)
-   - **Simplifier** (zaneb/danwinship-style)
-   - **Security Pedant** (mtrmac/avishayt-style)
-   - **User Advocate** (dhellmann/candita-style)
-   - **Scope Enforcer** (staebler-style)
-   - **Upgrade Paranoid** (sdodson/jsafrane/sttts-style)
+   - **API Guardian** — obsesses over API conventions, field naming, validation, backwards compatibility
+   - **Systems Thinker** — traces failure modes end-to-end, asks "what if this crashes mid-operation?"
+   - **Platform Advocate** — ensures all topologies (SNO, HyperShift, disconnected, bare metal) are covered
+   - **Precision Editor** — demands exact wording, catches contradictions, flags ambiguity
+   - **Process Enforcer** — checks template compliance, graduation criteria, feature gate lifecycle
+   - **Simplifier** — challenges complexity, asks "do we really need this?", prefers existing mechanisms
+   - **Security Pedant** — audits secret handling, RBAC, supply chain, and trust boundaries
+   - **User Advocate** — evaluates UX, error messages, documentation, and day-2 operations
+   - **Scope Enforcer** — pushes back on scope creep, ensures non-goals are justified
+   - **Upgrade Paranoid** — stress-tests upgrade/downgrade paths, version skew, and migration safety
 5. **Note what's good**: 2-3 things the enhancement does well.
 
 ## Output Format
@@ -286,6 +285,13 @@ Performance/scale considered.
 AI detection: hallucinated references? fabricated risk analyses?
 verbose security boilerplate? referenced KEPs/PRs exist?
 
+Assumption verification: Does the EP assert existing OpenShift behavior
+as the basis for its design? Flag any claims about how the system
+currently works that are not backed by code references or links. EPs
+built on false assumptions about existing behavior are a common failure
+mode — every factual claim about current implementation should be
+verifiable.
+
 ### Lens 7: Cross-Feature Interaction and Testing
 
 - Adjacent feature impacts?
@@ -294,7 +300,7 @@ verbose security boilerplate? referenced KEPs/PRs exist?
 - Regression tests for GA?
 - CI lane design?
 - Feature gate labels per feature-zero-to-hero.md?
-- Graduation criteria concrete (5 tests, 7/week, 14/platform, 95%)?
+- Graduation criteria concrete (5 unique tests in component readiness, minimum 14 runs, 95% pass rate, 7 platforms, new periodics run at least once daily)?
 - Alternatives with rejection rationale?
 - Prior art consistency?
 - Enhancement before implementation?
@@ -316,7 +322,10 @@ security contexts.
 Cross-Operator Coordination: Shared state? Ordering assumptions?
 
 Existing vs Proposed: Flag if EP implies nonexistent code or proposes
-duplicating existing code.
+duplicating existing code. Verify base assumptions — if the EP claims
+"currently X works by doing Y", grep the repo to confirm. EPs built
+on hallucinated existing behavior are a critical failure mode; every
+assertion about current implementation must match the actual code.
 
 Cite dual locations: `EP line N` vs `repo/path/file.go:M`.
 Categorize: CONTRADICTION / MISSING / UNDERSTATED / ACCURACY.
