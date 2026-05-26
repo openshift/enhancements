@@ -678,7 +678,7 @@ The plan is to extend the existing [`conditionController`](https://github.com/op
 - **Impact:** A reporter that hangs leaves its last `KMSHealthReporter_<nodeName>` condition in etcd unchanged.
 - **Mitigation:** Per-plugin `lastChecked` timestamps in Message expose staleness. The aggregator controller treats a condition whose `lastChecked` exceeds the freshness threshold (`4 × probe interval`; see [Probe interval](#probe-interval)) as effectively `Unknown`.
 
-**Risk: Orphaned Conditions on Mode Switch**
+**Risk: Orphaned Conditions on encryption type change and node replacement**
 - **Impact:** When KMS is disabled (e.g., switching to `aescbc`), reporter sidecars are removed. Without explicit cleanup, `KMSHealthReporter_<nodeName>` and `KMSPluginsDegraded` entries remain stale on the operator CR.
 - **Mitigation:** The aggregator controller owns cleanup. It removes orphaned `KMSHealthReporter_<nodeName>` entries (when their owning sidecar is no longer present) and removes its own `KMSPluginsDegraded` entry on KMS disable.
 
