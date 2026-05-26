@@ -11,7 +11,7 @@ approvers:
 api-approvers:
   - "@JoelSpeed"
 creation-date: 2025-12-03
-last-updated: 2026-04-23
+last-updated: 2026-05-26
 tracking-link:
   - "https://redhat.atlassian.net/browse/CNTRLPLANE-243"
 see-also:
@@ -440,9 +440,85 @@ Without this protocol a race can occur: preflight passes for config A, the key-c
 
 Each controller writing its own condition prevents this. If the config changes mid-flight, the key-controller posts a new hash and the preflight controller sees the mismatch and re-runs the check.
 
-#### Variation: KMS Key Rotation
+#### KMS Key Rotation
 
-When a KMS plugin rotates its `key_id` (KEK), this triggers neither a new encryption key secret nor a new revision. The mechanism for detecting and handling `key_id` rotation is under evaluation and not covered in this enhancement.
+When the remote KMS rotates backing key material (for example, a new Vault Transit key version), the KMS v2 plugin reports a new opaque `key_id` in `Status` (called `kekId` below) and `Encrypt` responses. Cluster admins need etcd data re-encrypted under the new key without minting a new encryption key secret or extra static pod revisions for every external rotation.
+
+Approach: Keep the existing encryption state machine, migration controller, and state controller unchanged. Add a new `EncryptionRotationController` per API server operand. It tracks convergence of the `kekId` across control plane nodes, records rotation progress on operator status, and triggers storage migration by adjusting two fields in the existing resources: 
+- prune `StorageVersionMigration` objects per encrypted group resource 
+- clear `migrated-*` annotations on the encryption-config secret
+
+This allows us to keep the migration controller entirely unchanged.
+
+##### Status API
+
+We propose to add new fields for rotation and health status on the operand resource (not on `config.openshift.io/v1/APIServer`):
+
+```yaml
+apiVersion: operator.openshift.io/v1
+kind: KubeAPIServer
+metadata:
+  name: cluster
+status:
+  encryptionStatus:
+    healthReports: [...]
+    keyRotationStatus: [...]   # max n-entries
+  conditions:
+    # interim — health controller today
+    - type: KMSHealthReporter_master-0
+      status: "True"
+      reason: AsExpected
+      message: '[{"kekID":"kek-9f2c","keyID":"2","status":"healthy","lastChecked":"..."},...]'
+```
+
+##### External components
+
+- KMS health aggregation: (separate controller, in development - TODO rebase with Krzys PR) populates `KubeAPIServer.status.encryptionStatus.healthReports` from per-node plugin probes. Until that field is populated, the same data may appear in `status.conditions` (`type: KMSHealthReporter_<node>`, JSON in `message`). The rotation controller reads `healthReports` when present; it does not probe plugins or write health data.
+
+- Pre-flight: ([Pre-flight Checker](#pre-flight-checker-tech-preview-v2)) validates KMS configuration before an encryption key is created. It will record the very first `kekId` it can observe from querying the plugin during its initial checks.
+
+##### KEK convergence
+
+For each plugin `keyId`, collect `kekId` from every healthy node reporting that `keyId`. We determine "converged" when all such nodes report the same `kekId`:
+
+```text
+keyId "1" → { master-0: kek-4a17, master-1: kek-4a17 }   ✓ converged
+keyId "2" → { master-0: kek-9f2c, master-1: kek-7aa1 }   ✗ divergent
+```
+
+Rotation uses the `keyId` of the current write EncryptionKey KMS config, then requires that it to be converged before setting `discoveryTime` or considering `startRotation`.
+
+We set a 5 minute convergence delay, allowing the apiservers to settle on the new KEK and invalidate their own internal caches. 
+
+##### `keyRotationStatus`
+
+Each entry tracks one rotation episode (ring buffer, capped at 10 (tbd) items):
+
+| Field | Meaning |
+|-------|---------|
+| `kekId` | KEK identity for this episode |
+| `discoveryTime` | When all nodes agree on this `kekId` for the `keyId`/plugin instance. Unset until per-`keyId` convergence. |
+| `migrationStartTime` | When the operator started storage migration. Empty = not started. |
+| `migrationFinishTime` | When migration completed (mirrored from secret `migrated-*` covering all encrypted GRs). Empty with `migrationStartTime` set means a rotation is in progress. |
+
+
+##### `startRotation` (KEK change only)
+
+This is not the same as initial provider migration, which is handled entirely by the migration controller on first enablement. `startRotation` runs only when:
+
+1. A prior rotation episode has `migrationFinishTime` (e.g. the initial migration finished).
+2. For the current write `keyId`, per-node health shows a `kekId` different from the last completed rotation entry.
+3. That `kekId` is converged across all nodes for that `keyId`. This sets `discoveryTime` on a new `keyRotationStatus` entry and trims the list for retaining the last n episodes.
+4. `discoveryTime` + convergence delay has elapsed.
+5. Then: set `migrationStartTime` and call `PruneMigration` per encrypted GR, clear secret `migrated-*` annotations. This causes the migration controller to run.
+
+A manual spike confirmed that deleting `StorageVersionMigration` CRs and clearing `migrated-resources` / `migrated-timestamp` on the encryption-config secret re-triggers migration without changes to `state.MigratedFor`, the state machine, or the migration controller.
+
+##### End-to-end flow
+
+**Initial provider migration**: Migration controller ensures SVM per GR. Rotation controller sets `discoveryTime` when health agrees on `kekId` (mirror only, never `startRotation`). Migration controller sets `migrated-*` on the secret. Rotation controller sets `migrationFinishTime` when annotations cover all encrypted GRs.
+
+**KEK rotation**: Rotation controller sets `discoveryTime` when the new `kekId` converges → waits convergence delay → sets `migrationStartTime` → prunes SVM and clears migration annotations → migration controller re-encrypts → rotation controller sets `migrationFinishTime`.
 
 ### KMS Plugin Lifecycle Management (Tech Preview v2)
 
