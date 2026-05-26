@@ -881,6 +881,16 @@ Instead of extending existing controllers, create new KMS-only controllers.
 
 **Why not chosen:** Adds complexity to plugin lifecycle (must detect identical providers), breaks isolation, and complicates rollback scenarios.
 
+### Alternative: Exposing KMS Plugin Status Outside the Pod
+
+The plugin's `Status` gRPC is reachable only over the in-pod UDS. Three projections outward were considered:
+
+1. **`kube-rbac-proxy` in front of the plugin's `Status` RPC.** Adds a new exposed port on the kube-apiserver pod.
+2. **Carry patch in kube-apiserver** to expose plugin status. Grows the kube-apiserver carry set we are trying to shrink.
+3. **`kube-rbac-proxy` in front of the kube-apiserver pod.** No new port, but inserts a single point of failure in front of kube-apiserver.
+
+**Chosen:** the in-pod [Health Reporter Sidecar](#health-reporter-sidecar) consumes `Status` locally and pushes the result to the operator CR.
+
 ## Infrastructure Needed
 
 None - extends existing library-go code.
