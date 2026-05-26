@@ -652,6 +652,8 @@ The aggregator's staleness threshold is derived from the interval rather than co
 
 An aggregator controller reads the per-node `KMSHealthReporter_<nodeName>` conditions on the operator's CR and emits rollup conditions on the same CR. The first rollup is `KMSPluginsDegraded`; its `_Degraded` suffix routes it into the `ClusterOperator`'s `Degraded` slot via library-go's `StatusSyncer`. Additional rollups (e.g. `KMSPluginsAvailable`, `KMSPluginsProgressing`) may be added so the `ClusterOperator`'s `Available` and `Progressing` slots also reflect KMS plugin health. Each suffix maps to its matching `ClusterOperator` field via the same `StatusSyncer` convention, so each new type slots in without additional plumbing.
 
+These rollup conditions (`KMSPluginsDegraded`, and any future `KMSPluginsAvailable` / `KMSPluginsProgressing`) are the admin-facing signal: they surface through `ClusterOperator` so that `oc get co kube-apiserver` is sufficient to learn KMS plugin health. The per-node `KMSHealthReporter_<nodeName>` conditions are plumbing for the aggregator and tooling, not intended for direct admin consumption.
+
 The plan is to extend the existing [`conditionController`](https://github.com/openshift/library-go/blob/master/pkg/operator/encryption/controllers/condition_controller.go) in library-go's encryption controllers, which already emits the `Encrypted` condition on the same operator CR. It sits in the right call path (operator CR → ClusterOperator) and runs on the informer set the rollup needs. If extending it turns out to be a poor fit (conflicting sync triggers, unrelated dependencies that make the rollup hard to reason about), a dedicated controller will be introduced instead.
 
 ### Risks and Mitigations
