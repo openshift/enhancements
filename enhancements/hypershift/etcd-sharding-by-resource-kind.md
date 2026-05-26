@@ -283,6 +283,7 @@ type EtcdShardResource struct {
 
 // ManagedEtcdShardSpec defines the configuration for a single etcd shard
 // within a managed etcd deployment.
+// +kubebuilder:validation:XValidation:rule="has(oldSelf.storage) == has(self.storage)",message="storage cannot be added or removed after creation"
 type ManagedEtcdShardSpec struct {
     // name is a unique identifier for this shard. It is used to derive
     // resource names (e.g., StatefulSet "etcd-{name}", Service
@@ -314,8 +315,9 @@ type ManagedEtcdShardSpec struct {
 
     // storage configures the storage backend for this shard.
     // If not specified, the shard inherits PersistentVolume storage from
-    // the parent ManagedEtcdSpec.Storage.
+    // the parent ManagedEtcdSpec.Storage. Immutable once set.
     // +optional
+    // +kubebuilder:validation:XValidation:rule="self == oldSelf",message="storage is immutable"
     Storage ManagedEtcdShardStorageSpec `json:"storage,omitzero"`
 
     // replicas is the number of etcd replicas for this shard. Must be 1 or 3.
@@ -431,6 +433,7 @@ type ManagedEtcdSpec struct {
     // +kubebuilder:validation:MaxItems=10
     // +kubebuilder:validation:XValidation:rule="self.all(s1, self.all(s2, s1.name == s2.name || !s1.resources.exists(r, s2.resources.exists(q, r.apiGroup == q.apiGroup && r.resource == q.resource))))",message="resources must not overlap across shards"
     // +kubebuilder:validation:XValidation:rule="!has(oldSelf) || self.size() == oldSelf.size()",message="shards cannot be added or removed after creation"
+    // +kubebuilder:validation:XValidation:rule="!has(oldSelf) || oldSelf.all(old, self.exists(cur, cur.name == old.name))",message="existing shards cannot be replaced"
     Shards []ManagedEtcdShardSpec `json:"shards,omitempty"`
 }
 
@@ -455,6 +458,7 @@ type UnmanagedEtcdSpec struct {
     // +kubebuilder:validation:MaxItems=10
     // +kubebuilder:validation:XValidation:rule="self.all(s1, self.all(s2, s1.name == s2.name || !s1.resources.exists(r, s2.resources.exists(q, r.apiGroup == q.apiGroup && r.resource == q.resource))))",message="resources must not overlap across shards"
     // +kubebuilder:validation:XValidation:rule="!has(oldSelf) || self.size() == oldSelf.size()",message="shards cannot be added or removed after creation"
+    // +kubebuilder:validation:XValidation:rule="!has(oldSelf) || oldSelf.all(old, self.exists(cur, cur.name == old.name))",message="existing shards cannot be replaced"
     Shards []UnmanagedEtcdShardSpec `json:"shards,omitempty"`
 }
 ```
@@ -612,15 +616,24 @@ top-level fields, which apply only to the default shard.
   //   message="shards cannot be added or removed after creation"
   ```
 
-  **On `Shards` field (list-level):** prevent adding or removing shards after creation:
+  **On `Shards` field (list-level):** prevent adding, removing, or replacing shards
+  after creation:
   ```go
   // +kubebuilder:validation:XValidation:rule="!has(oldSelf) || self.size() == oldSelf.size()",
   //   message="shards cannot be added or removed after creation"
+  // +kubebuilder:validation:XValidation:rule="!has(oldSelf) || oldSelf.all(old, self.exists(cur, cur.name == old.name))",
+  //   message="existing shards cannot be replaced"
   ```
 
-  Combined with `+listType=map` and `+listMapKey=name`, this prevents adds, removes,
-  and renames (renaming changes the map key, which is an add+remove). Reordering is
-  a no-op for map-type lists since items are matched by key, not position.
+  The size check alone is not sufficient: with `+listType=map`, transition rules on
+  list items only fire for entries correlated by key. An entry removed from the list
+  has no correlated new entry, so its per-field `self == oldSelf` rules never fire.
+  Similarly, a newly added entry has no correlated old entry, so transition rules are
+  skipped. This means swapping one shard for another (remove `events`, add `foo`) would
+  pass the size check while bypassing all per-field immutability. The second rule closes
+  this gap by requiring every old shard name to still be present. Combined with the size
+  check, this makes the set of shard names fully immutable. Reordering is a no-op for
+  map-type lists since items are matched by key, not position.
 
   **Per-field immutability on `ManagedEtcdShardSpec`:** each field is individually
   immutable, following the pattern used by `GCPWorkloadIdentityConfig` fields. This
