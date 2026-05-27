@@ -78,7 +78,7 @@ platform upgrade.
 - Backward compatibility: pools without explicit OS Image Stream 
   selection default to `rhel-9` and maintain current OS version during 
   platform upgrades
-- Day-zero RHEL 10 deployments (stretch goal)
+* Day-zero RHEL 10 deployments
 
 #### Future Phases (Out of Scope for Initial Release)
 
@@ -222,11 +222,13 @@ cluster. The user can explicitly set the desired stream in the
 `install-config.yaml`. If no stream is specified, the installer 
 determines the default based on the context:
 
-- When the FeatureGate `OSStreams` is enabled, RHEL 10 is selected.
-- For utilities without access to FeatureGates — such as the 
-  `openshift-install coreos print-stream-json` command or the parts of 
-  the installer that generate the install-config itself — the installer 
-  uses its build-time version. Versions 5.0 and above default to RHEL 10; 
+* When the `OSStreams` FeatureGate is enabled, the installer will default
+  to RHEL 9. However, when both the `OSStreams` and `DefaultRHEL10` FeatureGates
+  are enabled, RHEL 10 will be selected as the default.
+* For utilities without access to FeatureGates — such as the
+  `openshift-install coreos print-stream-json` command or the parts of
+  the installer that generate the install-config itself — the installer
+  uses its build-time version. Versions 5.0 and above default to RHEL 10;
   older versions default to RHEL 9.
 
 Based on the resolved stream, the installer performs three actions:
@@ -390,8 +392,9 @@ timelines.
 **Deliverables:**
 - OSStreams feature gate, `osImageStream` field in MachineConfigPool, 
   OSImageStream v1alpha1 resource
-- OS Image Stream extraction from the release payload image
-- MachineConfigPool reconciliation, bootstrap, and runtime OS Image 
+* DefaultRHEL10 feature gate which will explicitly control defaulting to RHEL 10.
+* OS Image Stream extraction from the release payload image
+* MachineConfigPool reconciliation, bootstrap, and runtime OS Image
   Stream population logic
 
 **Status**: TechPreviewNoUpgrade feature set, v1alpha1 API, Tech 
