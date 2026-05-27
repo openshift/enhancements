@@ -3,18 +3,19 @@ title: gateway-api-crd-management-mode
 authors:
   - "@rikatz"
 reviewers:
-  - "@Miciah" 
-  - "@gcs278" 
-  - "@knobunc" 
+  - "@Miciah"
+  - "@gcs278"
+  - "@knobunc"
+  - "@everettraven"
 approvers:
-  - TBD
+  - "@knobunc"
 api-approvers:
-  - TBD
+  - "@everettraven"
 creation-date: 2026-05-26
-last-updated: 2026-05-26
+last-updated: 2026-05-27
 status: provisional
 tracking-link:
-  - TBD
+  - https://redhat.atlassian.net/browse/NE-2733
 see-also:
   - "/enhancements/ingress/gateway-api-with-cluster-ingress-operator.md"
   - "/enhancements/ingress/gateway-api-crd-life-cycle-management.md"
