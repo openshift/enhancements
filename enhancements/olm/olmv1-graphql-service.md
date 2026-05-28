@@ -39,6 +39,8 @@ Today, catalog consumers must either download the entire catalog via `/api/v1/al
 
 * As a catalogd maintainer, I want to be able to evolve FBC schema to fulfil as-yet-unknown roles/goals without having to make associated changes through the pipeline to facilitate structured queries.
 
+* As an operator-controller maintainer, I want to be able to ensure that my intercomponent network traffic is optimized to the minimum which meets my needs (versus the 100% caching implemented today).
+
 * As a console user, I want to retrieve all `olm.package` entries without their `icon` blobs so that I can list available operators without transferring 5-8 MB of base64 icon data per catalog (icons constitute 98-99% of all `olm.package` bytes).
 
 * As a CI pipeline, I want to issue a single GraphQL query that returns bundles alongside their channel memberships so that I can validate upgrade-graph correctness without multiple sequential HTTP calls.
