@@ -12,7 +12,7 @@ approvers:
 api-approvers:
   - None
 creation-date: 2026-05-19
-last-updated: 2026-05-19
+last-updated: 2026-06-11
 status: provisional
 tracking-link:
   - https://issues.redhat.com/browse/OCPSTRAT-3250
@@ -121,7 +121,7 @@ graph LR
 2. **Resolve:** The CronJob queries Konflux Snapshots for the most recent push build that has been auto-released successfully.
 3. **Label:** The CronJob labels the resolved Snapshot with `test.appstudio.openshift.io/run=hypershift-ho-release-gate-aro-hcp`. This signals the Konflux Integration Service to execute the IntegrationTestScenario's pipeline against that Snapshot.
 4. **Test:** The Integration Service creates a PipelineRun from the ITS definition, which deploys the resolved HO image and runs e2e tests against it. Each platform defines its own `IntegrationTestScenario` that specifies the test suite and infrastructure — for example, ARO HCP tests run against Azure-provisioned clusters, while ROSA HCP tests would use AWS.
-5. **Promote:** On pass, the pipeline's `finally` block creates a Konflux Release object referencing the tested Snapshot and a platform-specific ReleasePlan. Konflux's release pipeline pushes the image to the verified repository.
+5. **Promote:** On pass, the Integration Service marks the Snapshot as successful. Because the platform's ReleasePlan has `auto-release: "true"`, the Integration Service automatically creates a Release object. Konflux's release pipeline then pushes the image to the verified repository.
 6. **Notify:** On failure, a Slack webhook fires with failure details (snapshot name, image ref, pipeline run link).
 
 ```mermaid
@@ -130,7 +130,7 @@ sequenceDiagram
     participant K as Konflux API
     participant IS as Integration Service
     participant P as E2E Pipeline
-    participant TC as Test Cluster
+    participant Prow as Prow (gangway)
     participant Rel as Konflux Release
     participant VR as Verified Repo
     participant Slack as Slack
@@ -140,10 +140,13 @@ sequenceDiagram
     Cron->>K: Label Snapshot with test.appstudio.openshift.io/run
     K-->>IS: Snapshot label triggers ITS
     IS->>P: Create PipelineRun
-    P->>TC: Provision cluster + deploy HO
-    P->>TC: Run e2e test suite
+    P->>Prow: Trigger periodic jobs via gangway API
+    Prow-->>P: Return job results
+    P->>P: Evaluate results (all must pass)
     alt Tests pass
-        P->>Rel: Create Release object
+        P-->>IS: Pipeline succeeds
+        IS->>IS: Mark Snapshot passed
+        IS->>Rel: Auto-release creates Release object
         Rel->>VR: Push validated image
     else Tests fail
         P->>Slack: Send failure notification
@@ -193,21 +196,38 @@ This enhancement does not affect OKE. It operates within Konflux CI infrastructu
 
 The implementation consists of creating Konflux resources and a Tekton pipeline definition. All resources are created in the `crt-redhat-acm-tenant` namespace unless noted otherwise.
 
-The Tekton pipeline definition lives in the HyperShift repository (`.tekton/pipelines/`), referenced by the ITS via git resolver. Konflux namespace resources (IntegrationTestScenario, ReleasePlan, CronJob, RBAC) are defined in `contrib/konflux/` in the HyperShift repository and applied to the `crt-redhat-acm-tenant` namespace. Changes to these resources follow the standard PR review process.
+The Tekton pipeline definition lives in the HyperShift repository (`.tekton/pipelines/`), referenced by the ITS via git resolver. Konflux namespace resources (IntegrationTestScenario, ReleasePlan, CronJob, RBAC) are defined in [`releng/konflux-release-data`](https://gitlab.cee.redhat.com/releng/konflux-release-data) on GitLab CEE and deployed to the `crt-redhat-acm-tenant` namespace by ArgoCD. This is the standard Konflux GitOps pattern for all tenants. The `ReleasePlanAdmission` follows a separate path within the same repository under the releng tenant namespace.
+
+#### CR Interaction
+
+The following diagram shows how the Konflux custom resources interact during the nightly gating flow:
+
+```mermaid
+graph TD
+    CJ["CronJob\nhypershift-operator-nightly-promotion"] -->|"kubectl label snapshot"| SS["Snapshot\n(latest auto-released push build)"]
+    SS -->|"label triggers"| ITS["IntegrationTestScenario\nhypershift-ho-release-gate-aro-hcp"]
+    ITS -->|"Integration Service creates"| PR["PipelineRun\nho-release-gate pipeline"]
+    PR -->|"on pass"| IS["Integration Service\nmarks Snapshot passed"]
+    IS -->|"auto-release creates"| R["Release"]
+    R -->|"references"| RP["ReleasePlan\nhypershift-operator-ho-release-gate-aro-hcp\n(auto-release: true)"]
+    RP -->|"admitted by"| RPA["ReleasePlanAdmission\n(rhtap-releng-tenant)"]
+    RPA -->|"pushes image to"| VR["Verified Repository\nquay.io"]
+    PR -->|"on fail"| Slack["Slack Notification"]
+```
 
 #### Files to Create
 
 | Location | File/Resource | Action |
 | -------- | ------------- | ------ |
-| Repo | `.tekton/pipelines/ho-release-gate.yaml` | Create: E2E test pipeline |
-| Konflux namespace | `ReleasePlan/hypershift-operator-ho-release-gate-aro-hcp` | Create: Gated release plan |
-| Releng tenant | `ReleasePlanAdmission` | Create: Admission policy (releng coordination needed) |
-| Konflux namespace | `IntegrationTestScenario/hypershift-ho-release-gate-aro-hcp` | Create: Wire e2e as Snapshot gate |
-| Konflux namespace | `CronJob/hypershift-operator-nightly-promotion` | Create: Nightly trigger |
-| Konflux namespace | `ServiceAccount/nightly-promotion-sa` | Create: CronJob identity |
-| Konflux namespace | `Role/nightly-promotion-role` | Create: RBAC permissions |
-| Konflux namespace | `RoleBinding/nightly-promotion-binding` | Create: RBAC binding |
-| Konflux namespace | `Secret/slack-webhook` | Create: Webhook URL |
+| HyperShift repo | `.tekton/pipelines/ho-release-gate.yaml` | Create: E2E test pipeline |
+| `konflux-release-data` | `ReleasePlan/hypershift-operator-ho-release-gate-aro-hcp` | Create: Gated release plan |
+| `konflux-release-data` | `ReleasePlanAdmission` | Create: Admission policy (releng coordination needed) |
+| `konflux-release-data` | `IntegrationTestScenario/hypershift-ho-release-gate-aro-hcp` | Create: Wire e2e as Snapshot gate |
+| `konflux-release-data` | `CronJob/hypershift-operator-nightly-promotion` | Create: Nightly trigger |
+| `konflux-release-data` | `ServiceAccount/nightly-promotion-sa` | Create: CronJob identity |
+| `konflux-release-data` | `Role/nightly-promotion-role` | Create: RBAC permissions |
+| `konflux-release-data` | `RoleBinding/nightly-promotion-binding` | Create: RBAC binding |
+| `konflux-release-data` | `Secret/slack-webhook` | Create: Webhook URL |
 
 #### Nightly CronJob
 
@@ -308,7 +328,7 @@ roleRef:
 
 #### ReleasePlan (per-platform)
 
-A per-platform resource created by the HCP team in the `crt-redhat-acm-tenant` namespace. The YAML below shows the ARO HCP pilot instance. Future platforms (ROSA HCP, GCP HCP) will each get their own ReleasePlan. All platforms push to the same verified repository, tagged differently per managed service. Auto-release is disabled (`auto-release: 'false'`), meaning images only reach the verified repo through explicit Release objects created after tests pass.
+A per-platform resource created by the HCP team in the `crt-redhat-acm-tenant` namespace. The YAML below shows the ARO HCP pilot instance. Future platforms (ROSA HCP, GCP HCP) will each get their own ReleasePlan. All platforms push to the same verified repository, tagged differently per managed service. Auto-release is enabled (`auto-release: 'true'`), meaning the Integration Service automatically creates a Release object when the ITS pipeline passes — no custom release-creation logic is needed in the pipeline itself.
 
 ```yaml
 apiVersion: appstudio.redhat.com/v1alpha1
@@ -317,7 +337,7 @@ metadata:
   name: hypershift-operator-ho-release-gate-aro-hcp
   namespace: crt-redhat-acm-tenant
   labels:
-    release.appstudio.openshift.io/auto-release: 'false'
+    release.appstudio.openshift.io/auto-release: 'true'
 spec:
   target: rhtap-releng-tenant
   application: hypershift-operator
@@ -353,49 +373,36 @@ spec:
     description: Triggered only by nightly CronJob, not on every push build
 ```
 
-#### Release Object (created programmatically on test pass)
+#### Release Object (created automatically by Integration Service)
 
-Release objects are not created in advance. They are generated programmatically by a Tekton `finally` task after e2e tests pass. Each references the specific tested Snapshot and the platform's gated ReleasePlan. Once created, Konflux's built-in release pipeline handles the actual image push.
-
-```yaml
-apiVersion: appstudio.redhat.com/v1alpha1
-kind: Release
-metadata:
-  generateName: hypershift-operator-ho-release-gate-aro-hcp-
-  namespace: crt-redhat-acm-tenant
-spec:
-  snapshot: <snapshot-name-that-passed-tests>
-  releasePlan: hypershift-operator-ho-release-gate-aro-hcp
-  gracePeriodDays: 7
-```
+Release objects are not created manually or by pipeline tasks. When the ITS pipeline passes, the Integration Service marks the Snapshot as successful. Because the ReleasePlan has `auto-release: "true"`, the Integration Service automatically creates a Release object referencing the tested Snapshot and the platform's ReleasePlan. Konflux's built-in release pipeline then handles the image push to the verified repository.
 
 #### E2E Test Pipeline
 
-A new Tekton pipeline at `.tekton/pipelines/ho-release-gate.yaml` consisting of five sequential tasks followed by a `finally` block for promotion or notification. All test jobs run in Prow; Konflux launches Prow jobs and consumes their pass/fail results and run links.
+A new Tekton pipeline at `.tekton/pipelines/ho-release-gate.yaml`. All test jobs run in Prow — the pipeline triggers Prow periodic jobs via the gangway API and polls for results. Prow manages all test infrastructure (cluster provisioning, HO deployment, teardown).
 
 **Pipeline tasks (sequential):**
 
 | Task | Purpose |
 | ---- | ------- |
 | `extract-image` | Parse Snapshot, extract HO image reference |
-| `setup-test-env` | Provision or connect to test infrastructure |
-| `deploy-ho` | Deploy the HO image under test |
-| `run-e2e` | Execute the e2e test suite |
-| `cleanup` | Tear down test resources |
+| `run-e2e` | Trigger Prow periodic jobs via gangway API, poll for results |
+| `evaluate-results` | Aggregate results from multiple parallel jobs (AND logic — all must pass) |
 
 **Finally tasks (always run):**
 
 | Task | Condition | Purpose |
 | ---- | --------- | ------- |
-| `create-release` | `run-e2e` succeeded | Create Konflux Release object |
-| `notify-slack` | `run-e2e` failed | Send Slack webhook notification |
+| `notify-slack` | `evaluate-results` failed | Send Slack webhook notification |
+
+Release creation is handled automatically by the Integration Service on test pass (see ReleasePlan section above) — no `create-release` task is needed.
 
 **Slack notification task:**
 
 ```yaml
 - name: notify-slack
   when:
-  - input: $(tasks.run-e2e.status)
+  - input: $(tasks.evaluate-results.status)
     operator: in
     values: ["Failed"]
   taskSpec:
@@ -572,6 +579,8 @@ This enhancement does not introduce any API extensions. No CRDs, webhooks, aggre
 
 ## Support Procedures
 
+**Ownership:** The RITS (Release Infrastructure & Testing Services) team owns monitoring and triage of the gated promotion pipeline. Consecutive failures are a top RITS priority.
+
 **Detecting failures:**
 - Slack notifications are sent on every pipeline failure with the snapshot name, image reference, and a link to the failed PipelineRun.
 - Stale promotion alerts fire when no successful promotion has occurred within the configurable threshold (default 3 days).
@@ -585,7 +594,7 @@ This enhancement does not introduce any API extensions. No CRDs, webhooks, aggre
   ```bash
   oc create job --from=cronjob/hypershift-operator-nightly-promotion manual-$(date +%s) -n crt-redhat-acm-tenant
   ```
-- For persistent test failures, investigate the e2e test logs in the linked PipelineRun and coordinate with the HyperShift development team.
+- For persistent test failures (red for multiple consecutive days), investigate the e2e test logs in the linked PipelineRun and escalate to the HyperShift development team for root cause analysis.
 
 **Impact of pipeline downtime:** If the gated promotion pipeline is unavailable, no new images are promoted to the verified repository. The existing auto-release to ACMD continues unaffected. Managed service teams retain access to their most recently promoted image.
 
