@@ -3,9 +3,10 @@ title: dual-stream-rhel-nodepool
 authors:
   - "@enxebre"
 reviewers:
-  - TBD
+  - "@sdminonne"
+  - "@jparrill"
 approvers:
-  - TBD
+  - "@csrwng"
 api-approvers:
   - TBD
 creation-date: 2026-05-21
@@ -21,17 +22,27 @@ see-also:
 
 ## Summary
 
-OpenShift 5.0 introduces dual-stream node OS support: the release payload carries both RHEL 9 (`rhel-coreos`) and RHEL 10 (`rhel-coreos-10`) node images, and a new `OSImageStream` CRD (TechPreview, behind the `OSStreams` feature gate) allows selecting which RHEL version to use per MachineConfigPool. HyperShift currently assumes a single OS image per architecture and has no mechanism for stream selection.
+OpenShift 5.0 introduces dual-stream node OS support: the release payload carries both RHEL 9 (`rhel-coreos`) and RHEL 10 (`rhel-coreos-10`) node images,
+and a new `OSImageStream` CRD (TechPreview, behind the `OSStreams` feature gate) allows selecting which RHEL version to use per MachineConfigPool.
+HyperShift currently assumes a single OS image per architecture and has no mechanism for stream selection.
 
-This enhancement adds a `spec.osImageStream` field to the NodePool API, threads the stream selection through the token secret and ignition server to the MCO bootstrap pipeline, and updates the boot image metadata parsing to handle the new multi-stream ConfigMap format. The result is that each NodePool in a HostedCluster can independently select RHEL 9 or RHEL 10, with correct boot AMI resolution and ignition payload generation.
+This enhancement adds a `spec.osImageStream` field to the NodePool API, threads the stream selection through the token secret
+and ignition server to the MCO bootstrap pipeline, and updates the boot image metadata parsing to handle the new multi-stream
+ConfigMap format. The result is that each NodePool in a HostedCluster can independently select RHEL 9 or RHEL 10, with correct
+boot AMI resolution and ignition payload generation.
 
 ## Glossary
 
 - **OS stream** — A RHEL major version variant of the node OS image. Current streams are `rhel-9` and `rhel-10`. Each stream has its own `rhel-coreos*` container image and boot disk images (AMIs, VHDs).
-- **OSImageStream** — A TechPreview CRD (`machineconfiguration.openshift.io/v1alpha1`) introduced by the MCO. The singleton `cluster` resource declares `spec.defaultStream` and reports `status.availableStreams` discovered from OCI labels on release images.
+- **OSImageStream** — A TechPreview CRD (`machineconfiguration.openshift.io/v1alpha1`) introduced by the MCO.
+  The singleton `cluster` resource declares `spec.defaultStream` and reports `status.availableStreams` discovered from OCI labels on release images.
 - **MCO bootstrap pipeline** — Three one-shot binaries (`machine-config-operator`, `machine-config-controller`, `machine-config-server`) run sequentially inside the ignition server pod to generate ignition payloads. The ignition server orchestrates them in `GetPayload()` via three steps:
   1. `runMCO()` — executes `machine-config-operator bootstrap`. Reads `--image-references` from the release payload and produces raw manifests (ControllerConfig, MachineConfigPools, MachineConfigs) in an output directory. Internally calls `copyMCOOutputToMCC()` to copy MCO output manifests plus CPO-generated pool overrides (`*.machineconfigpool.yaml`) into the MCC input directory (`mccDir`).
-  2. `runMCC()` — executes `machine-config-controller bootstrap`. Reads all manifests from `mccDir`, including ControllerConfig, FeatureGate, MachineConfigPools, and (with this enhancement) OSImageStream. When the `OSStreams` feature gate is active, the MCC calls `fetchOSImageStream()` to inspect OCI labels on release images, discover available streams, select the stream from `OSImageStream.spec.defaultStream`, and override `ControllerConfig.baseOSContainerImage` with the selected stream's image. It then renders final MachineConfigs with the correct `osImageURL`.
+  2. `runMCC()` — executes `machine-config-controller bootstrap`. Reads all manifests from `mccDir`, including ControllerConfig,
+     FeatureGate, MachineConfigPools, and (with this enhancement) OSImageStream. When the `OSStreams` feature gate is active,
+     the MCC calls `fetchOSImageStream()` to inspect OCI labels on release images, discover available streams, select the stream
+     from `OSImageStream.spec.defaultStream`, and override `ControllerConfig.baseOSContainerImage` with the selected stream's image.
+     It then renders final MachineConfigs with the correct `osImageURL`.
   3. `runMCSAndFetchPayload()` — executes `machine-config-server` which reads the rendered MachineConfigs and produces the ignition JSON payload.
   A preparatory step, `runFeatureGateRender()`, runs before `runMCO()` to write the FeatureGate manifest into `mccDir`.
 - **Token secret** — A per-NodePool Secret in the control plane namespace containing the ignition token, release image, config hash, and other data needed by the ignition server to generate a payload.
@@ -85,7 +96,7 @@ The OS stream flows through three layers:
 2. **NodePool controller** — writes the resolved stream to the token secret. When an explicit `spec.osImageStream.name` is set, includes the stream in the config hash to trigger a rollout; implicit streams do not change the hash. Resolves stream-specific boot AMIs from the release payload's multi-stream ConfigMap.
 3. **Ignition server** — reads the stream from the token secret, generates an OSImageStream CR (`99_osimagestream.yaml`), and places it in the MCC manifest directory. The MCC bootstrap discovers available streams via OCI label inspection and selects the requested stream, producing MachineConfigs with the correct `osImageURL`.
 
-```
+```text
  NodePool API              NodePool Controller              Ignition Server
  ────────────              ───────────────────              ───────────────
  spec.osImageStream:
@@ -220,7 +231,7 @@ type NodePoolStatus struct {
 #### UX Behavior
 
 | `spec.osImageStream.name` | Release | What happens |
-|---------------------------|---------|--------------|
+| ------------------------- | ------- | ------------ |
 | unset | 4.x | Ignition server injects OSImageStream CR with `spec.defaultStream: "rhel-9"` |
 | unset | 5.x | Ignition server injects OSImageStream CR with `spec.defaultStream: "rhel-10"` |
 | `"rhel-9"` | any | OSImageStream CR with `spec.defaultStream: "rhel-9"` |
@@ -259,7 +270,10 @@ The `spec.osImageStream` field is additive and optional. OKE clusters using Hype
 **Phase 0: TechPreview NodePool API**
 
 1. Add `spec.osImageStream` to `NodePoolSpec` — mirrors `MachineConfigPoolSpec.osImageStream` from `openshift/api`. When unset, the system derives the default from the release version.
-2. Add `status.osImageStream` — reports the observed RHEL stream running on nodes. The NodePool controller infers this from the CAPI `Machine` objects' `NodeInfo.OSImage` field (e.g., `"Red Hat Enterprise Linux CoreOS 419.97.202505081234-0 (Plow)"` for RHEL 9, `"Red Hat Enterprise Linux CoreOS 510.97..."` for RHEL 10). The major version in the RHCOS version string (`4xx` = RHEL 9, `5xx` = RHEL 10) determines the stream. The status is set once a majority of nodes in the pool report a consistent OS version, matching the pattern used by `status.version` for release version reporting.
+2. Add `status.osImageStream` — reports the observed RHEL stream running on nodes. The NodePool controller infers this from the CAPI `Machine` objects' `NodeInfo.OSImage` field
+   (e.g., `"Red Hat Enterprise Linux CoreOS 419.97.202505081234-0 (Plow)"` for RHEL 9, `"Red Hat Enterprise Linux CoreOS 510.97..."` for RHEL 10).
+   The major version in the RHCOS version string (`4xx` = RHEL 9, `5xx` = RHEL 10) determines the stream.
+   The status is set once a majority of nodes in the pool report a consistent OS version, matching the pattern used by `status.version` for release version reporting.
 
 **Phase 1: Update CoreOSStreamMetadata Parsing**
 
@@ -270,9 +284,17 @@ The `spec.osImageStream` field is additive and optional. OKE clusters using Hype
    - **Azure**: resolve the stream-specific VHD image URL.
    - **GCP**: resolve the stream-specific GCE image.
    - **KubeVirt/OpenStack/Agent**: resolve the stream-specific disk image or container image as applicable.
-   All platforms fall back to the legacy `stream` key for payloads that don't carry the multi-stream `streams` key. If the `streams` key is present but the requested stream has no boot image for the target platform or region, the resolution function returns an error surfaced through `setPlatformConditions` as `NodePoolValidPlatformImageType=False` — consistent with how missing boot images are already handled today.
+   All platforms fall back to the legacy `stream` key for payloads that don't carry the multi-stream `streams` key.
+   If the `streams` key is present but the requested stream has no boot image for the target platform or region,
+   the resolution function returns an error surfaced through `setPlatformConditions` as `NodePoolValidPlatformImageType=False`
+   — consistent with how missing boot images are already handled today.
 
-4. **Karpenter** — Karpenter uses the same `defaultNodePoolAMI` function as standard NodePools for boot image resolution. Since Karpenter NodePools have no `spec.osImageStream` field, the version-derived default stream is always passed (rhel-9 for < 5.0, rhel-10 for >= 5.0). The in-memory NodePool created by `KarpenterIgnitionReconciler.createInMemoryNodePool()` carries no `osImageStream`, so the ignition payload uses the default stream. The AMI label scheme (`hypershift.openshift.io/ami`) currently assumes one AMI per architecture; extending it with per-stream labels is out of scope for this enhancement and would be addressed if Karpenter gains explicit stream selection in a future phase. No changes to `OpenshiftEC2NodeClass` are planned.
+4. **Karpenter** — Karpenter uses the same `defaultNodePoolAMI` function as standard NodePools for boot image resolution.
+   Since Karpenter NodePools have no `spec.osImageStream` field, the version-derived default stream is always passed
+   (rhel-9 for < 5.0, rhel-10 for >= 5.0). The in-memory NodePool created by `KarpenterIgnitionReconciler.createInMemoryNodePool()`
+   carries no `osImageStream`, so the ignition payload uses the default stream. The AMI label scheme (`hypershift.openshift.io/ami`)
+   currently assumes one AMI per architecture; extending it with per-stream labels is out of scope for this enhancement
+   and would be addressed if Karpenter gains explicit stream selection in a future phase. No changes to `OpenshiftEC2NodeClass` are planned.
 
 **Phase 2: OS Stream Plumbing into Payload Generation**
 
@@ -280,7 +302,7 @@ Thread the OS stream selection from the NodePool controller through the token se
 
 The following diagram shows how the OS stream propagates through the ignition server's bootstrap pipeline. The annotated pipeline shows the three existing stages plus the new injection point:
 
-```
+```text
 GetPayload(releaseImage, customConfig, ..., osStream)
 │
 ├─ 1. runFeatureGateRender()
@@ -331,7 +353,12 @@ GetPayload(releaseImage, customConfig, ..., osStream)
 
 Implementation steps:
 
-1. **Add `usesRunc` field to `ConfigGenerator`** — during `generateMCORawConfig()` (`config.go`), check whether the NodePool's config references a `ContainerRuntimeConfig` CR with `spec.containerRuntimeConfig.defaultRuntime == "runc"`. The MCO implements the equivalent runc upgrade guard in [PR #5891](https://github.com/openshift/machine-config-operator/pull/5891). In HyperShift, the `ContainerRuntimeConfig` CRs are embedded in ConfigMaps referenced by `NodePool.spec.config` — the `ConfigGenerator` already parses these ConfigMaps, so the runc check can inspect the deserialized objects directly. Set `cg.usesRunc = true` if found. This makes the runc signal available to downstream consumers without re-parsing the config.
+1. **Add `usesRunc` field to `ConfigGenerator`** — during `generateMCORawConfig()` (`config.go`), check whether the NodePool's config references
+   a `ContainerRuntimeConfig` CR with `spec.containerRuntimeConfig.defaultRuntime == "runc"`.
+   The MCO implements the equivalent runc upgrade guard in [PR #5891](https://github.com/openshift/machine-config-operator/pull/5891).
+   In HyperShift, the `ContainerRuntimeConfig` CRs are embedded in ConfigMaps referenced by `NodePool.spec.config` —
+   the `ConfigGenerator` already parses these ConfigMaps, so the runc check can inspect the deserialized objects directly.
+   Set `cg.usesRunc = true` if found. This makes the runc signal available to downstream consumers without re-parsing the config.
 
 2. **Add `getRHELStream()` pure function** — a unit-testable function that encapsulates all stream resolution logic:
 
@@ -354,12 +381,15 @@ Implementation steps:
    - **Unset + release >= 5.0** → return `"rhel-10"` (default)
    - **Unset + release < 5.0** → return `""` (no stream, legacy behavior)
 
-   When the function returns `""`, the system uses the existing single-stream code path — no OSImageStream CR is generated, no stream is included in the hash, and the MCC uses `BaseOSContainerImage` from ControllerConfig as-is.
+   When the function returns `""`, the system uses the existing single-stream code path — no OSImageStream CR is generated,
+   no stream is included in the hash, and the MCC uses `BaseOSContainerImage` from ControllerConfig as-is.
 
-3. **Call `getRHELStream()` from `NewToken()`** — `NewToken()` (`token.go`) already receives the `ConfigGenerator` (which has `usesRunc` and `releaseImage.Version()`), and has access to the NodePool spec. It calls `getRHELStream()` and stores the result in a new `rhelStream string` field on the `Token` struct.
+3. **Call `getRHELStream()` from `NewToken()`** — `NewToken()` (`token.go`) already receives the `ConfigGenerator`
+   (which has `usesRunc` and `releaseImage.Version()`), and has access to the NodePool spec.
+   It calls `getRHELStream()` and stores the result in a new `rhelStream string` field on the `Token` struct.
 
    The reconcile flow in the NodePool controller is:
-   ```
+   ```text
    signalConditions loop    → validMachineConfigCondition (EXTENDED, see step 4)
                              → ...
    setPlatformConditions()  → (platform-specific conditions)
@@ -369,21 +399,33 @@ Implementation steps:
    token.Reconcile()        → creates token secret with os-stream
    ```
 
-4. **Extend `validMachineConfigCondition` with RHEL stream validation** — `validMachineConfigCondition` (`conditions.go`) already instantiates a `ConfigGenerator` to validate the NodePool's config. After the existing config validation succeeds, call `getRHELStream()` with the NodePool's `spec.osImageStream.name`, the release version, and `configGenerator.usesRunc`. On error, set `NodePoolValidMachineConfigConditionType=False` and short-circuit:
+4. **Extend `validMachineConfigCondition` with RHEL stream validation** — `validMachineConfigCondition` (`conditions.go`) already instantiates
+   a `ConfigGenerator` to validate the NodePool's config. After the existing config validation succeeds, call `getRHELStream()` with the
+   NodePool's `spec.osImageStream.name`, the release version, and `configGenerator.usesRunc`.
+   On error, set `NodePoolValidMachineConfigConditionType=False` and short-circuit:
 
    - **Explicit `rhel-10` on release < 5.0** → reason `InvalidMachineConfig`, message "OS stream rhel-10 requires release version >= 5.0".
    - **Explicit `rhel-10` with runc** → reason `InvalidMachineConfig`, message "OS stream rhel-10 is incompatible with default_runtime=runc; RHEL 10 does not ship runc".
-   - **Implicit upgrade to >= 5.0 with runc (fallback to `rhel-9`)** → set `NodePoolValidMachineConfigConditionType=True` with an informational message "OS stream defaulted to rhel-9: RHEL 10 is incompatible with default_runtime=runc". This is not an error — reconciliation continues.
+   - **Implicit upgrade to >= 5.0 with runc (fallback to `rhel-9`)** → set `NodePoolValidMachineConfigConditionType=True`
+     with an informational message "OS stream defaulted to rhel-9: RHEL 10 is incompatible with default_runtime=runc".
+     This is not an error — reconciliation continues.
 
    Because `validMachineConfigCondition` runs before `NewToken()`, invalid combinations are caught early and no token secret is created for rejected NodePools.
 
 5. **Write `os-stream` to the token secret** — `token.reconcileTokenSecret()` writes `token.rhelStream` into the token secret's `Data` map as a new `os-stream` key. Add a `TokenSecretOSStreamKey = "os-stream"` constant alongside the existing `TokenSecretReleaseKey`, etc.
 
-6. **Include stream in the config hash** — add a `rhelStream string` field to the `rolloutConfig` struct (`config.go`). This field is only set when the user explicitly sets `spec.osImageStream.name` — implicitly resolved streams leave it as `""`. Append `rhelStream` to the hash inputs in `Hash()` and `HashWithoutVersion()` alongside the existing fields (`mcoRawConfig`, `releaseImage.Version()`, `pullSecretName`, etc.). Since `""` is a no-op in the string concatenation hash, implicit streams never change the hash. This ensures that:
+6. **Include stream in the config hash** — add a `rhelStream string` field to the `rolloutConfig` struct (`config.go`).
+   This field is only set when the user explicitly sets `spec.osImageStream.name` — implicitly resolved streams leave it as `""`.
+   Append `rhelStream` to the hash inputs in `Hash()` and `HashWithoutVersion()` alongside the existing fields
+   (`mcoRawConfig`, `releaseImage.Version()`, `pullSecretName`, etc.). Since `""` is a no-op in the string concatenation hash,
+   implicit streams never change the hash. This ensures that:
    - Existing NodePools with no explicit stream produce the same hash as before the feature is introduced, avoiding accidental rollouts on upgrade.
    - Upgrading to >= 5.0 (where the implicit default shifts to `rhel-10`) does not trigger a rollout from the stream alone — the rollout is already driven by the release version component (`releaseImage.Version()`).
 
-   **Design invariant**: the `rhelStream` field in `rolloutConfig` MUST be populated directly from `spec.osImageStream.name` (empty string when unset), never from the resolved return value of `getRHELStream()`. Using the resolved value would inject a non-empty default (e.g., `"rhel-10"` for >= 5.0) into the hash for every NodePool without an explicit field, triggering a fleet-wide mass rollout on upgrade.
+   **Design invariant**: the `rhelStream` field in `rolloutConfig` MUST be populated directly from `spec.osImageStream.name`
+   (empty string when unset), never from the resolved return value of `getRHELStream()`. Using the resolved value would inject
+   a non-empty default (e.g., `"rhel-10"` for >= 5.0) into the hash for every NodePool without an explicit field,
+   triggering a fleet-wide mass rollout on upgrade.
 
 7. **Pass stream through `IgnitionProvider` interface** — add `osStream string` parameter to `GetPayload()` in the `IgnitionProvider` interface (`tokensecret_controller.go`). The `TokenSecretReconciler` reads `os-stream` from the token secret data and passes it to `GetPayload()`. Update the mock `IgnitionProvider` in tests accordingly.
 
@@ -394,7 +436,11 @@ Implementation steps:
    }
    ```
 
-8. **Generate `99_osimagestream.yaml` in `GetPayload()`** — after `copyMCOOutputToMCC()` returns and before `runMCC()` is called (`local_ignitionprovider.go`, between current lines 742 and 745), write the OSImageStream CR directly to `dirs.mccDir`. The CR only needs `spec.defaultStream` set — the MCC's `fetchOSImageStream()` uses this as the selection input and populates `status.availableStreams` itself via OCI label inspection. If `osStream` is empty (feature gate disabled or pre-5.0 payload), skip writing the CR — the MCC will not run stream discovery and will use the `BaseOSContainerImage` from ControllerConfig as-is.
+8. **Generate `99_osimagestream.yaml` in `GetPayload()`** — after `copyMCOOutputToMCC()` returns and before `runMCC()` is called
+   (`local_ignitionprovider.go`, between current lines 742 and 745), write the OSImageStream CR directly to `dirs.mccDir`.
+   The CR only needs `spec.defaultStream` set — the MCC's `fetchOSImageStream()` uses this as the selection input and populates
+   `status.availableStreams` itself via OCI label inspection. If `osStream` is empty (feature gate disabled or pre-5.0 payload),
+   skip writing the CR — the MCC will not run stream discovery and will use the `BaseOSContainerImage` from ControllerConfig as-is.
 
 9. **Coordinate MCO removal of `ExternalTopologyMode` guard** — the MCC bootstrap (`pkg/controller/bootstrap/bootstrap.go:238`) gates stream discovery on two conditions:
    ```go
@@ -535,11 +581,18 @@ The `rhel-coreos*` images are NOT runtime containers — they are ostree commits
 
 4. **Mixed-stream clusters.** A HostedCluster with RHEL 9 and RHEL 10 NodePools is a new topology. Component compatibility across RHEL versions must be validated. *Mitigation:* This is the same topology supported by standalone clusters via per-MachineConfigPool stream selection.
 
-5. **Disconnected environments require mirroring both streams.** Dual-stream payloads carry two sets of node OS container images (one per RHEL stream). Disconnected customers using both streams must mirror both sets. Boot images are platform-specific and already handled outside the payload (e.g. pre-uploaded AMIs, VHDs). The OS container images are referenced via `ImageDigestMirrorSet` / `ImageTagMirrorSet` — existing IDMS/ITMS mirroring workflows handle this transparently as long as both stream images are included in the mirror list. No additional HyperShift-specific mirroring tooling is needed.
+5. **Disconnected environments require mirroring both streams.** Dual-stream payloads carry two sets of node OS container images
+   (one per RHEL stream). Disconnected customers using both streams must mirror both sets. Boot images are platform-specific
+   and already handled outside the payload (e.g. pre-uploaded AMIs, VHDs). The OS container images are referenced via
+   `ImageDigestMirrorSet` / `ImageTagMirrorSet` — existing IDMS/ITMS mirroring workflows handle this transparently as long as
+   both stream images are included in the mirror list. No additional HyperShift-specific mirroring tooling is needed.
 
 ### Drawbacks
 
-The primary drawback is additional complexity in the ignition pipeline. The token secret gains a new field, the `IgnitionProvider` interface changes, and the `GetPayload` function must generate an additional manifest. However, this complexity mirrors what the installer already does for standalone clusters — it is not HyperShift-specific logic but rather bringing HyperShift into parity with the standalone bootstrap flow.
+The primary drawback is additional complexity in the ignition pipeline. The token secret gains a new field,
+the `IgnitionProvider` interface changes, and the `GetPayload` function must generate an additional manifest.
+However, this complexity mirrors what the installer already does for standalone clusters — it is not HyperShift-specific logic
+but rather bringing HyperShift into parity with the standalone bootstrap flow.
 
 ## Alternatives
 
@@ -554,7 +607,10 @@ This was rejected because:
 
 ## Open Questions
 
-1. ~~Should `spec.osImageStream` be immutable after creation (requiring NodePool replacement to change streams), or mutable (triggering a rolling update)?~~ **Resolved**: The field is mutable but only forward transitions are allowed. A CEL transition rule prevents changing from `rhel-10` to `rhel-9` — in-place OS downgrades are not supported. Forward transitions (`rhel-9` → `rhel-10`) trigger a rollout. To move back to `rhel-9`, users must create a new NodePool.
+1. ~~Should `spec.osImageStream` be immutable after creation (requiring NodePool replacement to change streams),
+   or mutable (triggering a rolling update)?~~ **Resolved**: The field is mutable but only forward transitions are allowed.
+   A CEL transition rule prevents changing from `rhel-10` to `rhel-9` — in-place OS downgrades are not supported.
+   Forward transitions (`rhel-9` → `rhel-10`) trigger a rollout. To move back to `rhel-9`, users must create a new NodePool.
 
 ## Test Plan
 
