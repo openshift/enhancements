@@ -39,6 +39,7 @@ ARO HCP serves as the pilot platform, with ROSA HCP and GCP HCP following the sa
 | Konflux | Red Hat's CI/CD build and release platform |
 | Snapshot | A Konflux object that records the container images produced by a build pipeline run |
 | CPO | Control Plane Operator — the per-hosted-cluster operator deployed by HO |
+| Verified Repository | A single `quay.io` image repository (e.g., `quay.io/<org>/hypershift-operator-verified`) containing only HO images which have passed e2e validation. Each platform tags images differently within this shared repository (e.g., `aro-hcp-<digest>`, `rosa-hcp-<digest>`). |
 
 ## Motivation
 
@@ -69,6 +70,12 @@ A bad image can be consumed by managed service teams before those tests complete
 2. Providing real-time or per-commit gating. The pipeline runs nightly, not on every merge.
 3. Implementing ROSA HCP or GCP HCP promotion paths in the initial rollout. These follow the same template but are deferred to later phases.
 
+#### Design Rationale
+
+**Nightly cadence (24h):** Each pipeline run provisions real cloud infrastructure with platform-specific credentials (e.g., Azure for ARO HCP). A nightly cadence balances validation confidence with cloud infrastructure cost. Per-commit gating is cost-prohibitive and would slow the development feedback loop (see Alternatives). Per-platform cadence can differ — each platform can have its own CronJob schedule.
+
+**Alerting and troubleshooting:** Every failure type triggers a Slack notification (see Error Handling table). Stale promotion alerts fire if no successful promotion occurs within a configurable threshold (default 3 days). Detection commands, remediation steps, and manual re-trigger procedures are documented in Support Procedures.
+
 ## Proposal
 
 Add a parallel, gated promotion path alongside the existing auto-release. A nightly pipeline resolves the most recent HO image built by Konflux's push build pipeline (triggered on every merge to `main`) and tests it against platform-specific e2e suites. Only tested images are promoted to a verified repository. Each platform's promotion is independent — a failure on one does not block others.
@@ -92,11 +99,12 @@ graph LR
 ```mermaid
 graph LR
     A[Nightly CronJob] --> B[Resolve latest Snapshot]
-    B --> C[Run e2e tests against image]
-    C --> D{Tests pass?}
-    D -- Yes --> E[Create Release object]
-    E --> F[Image promoted to verified repo]
-    D -- No --> G[Slack webhook notification]
+    B --> C[Label Snapshot to trigger ITS]
+    C --> D[Integration Service runs e2e pipeline]
+    D --> E{Tests pass?}
+    E -- Yes --> F[Create Release object]
+    F --> G[Image promoted to verified repo]
+    E -- No --> H[Slack webhook notification]
 ```
 
 ### Workflow Description
@@ -105,14 +113,14 @@ graph LR
 
 **Konflux build pipeline** is the existing push build pipeline that creates Snapshots for every merged commit.
 
-**e2e test pipeline** is a Tekton Pipeline defined at `.tekton/pipelines/ho-release-gate.yaml` in the HyperShift repository.
+**e2e test pipeline** is a Tekton Pipeline defined in the HyperShift repository under `.tekton/pipelines/`. For the MVP, a single pipeline file (`ho-release-gate.yaml`) serves the ARO HCP platform. When additional platforms are onboarded, each may get its own pipeline file (e.g., `ho-aro-release-gate.yaml`, `ho-rosa-release-gate.yaml`) if the test suites differ enough to warrant separate pipeline definitions, or they may share a single parameterized pipeline using the ITS `spec.params` field to pass platform-specific values (test suite, credentials, infrastructure target).
 
 **managed service team** is a human team (e.g., ARO HCP engineers) that consumes validated HO images.
 
 1. **Trigger:** A Kubernetes CronJob in the `crt-redhat-acm-tenant` namespace runs nightly.
-2. **Resolve:** The CronJob queries Konflux Snapshots labeled with the push build's PipelineRun name, selects the most recent, and extracts the HO container image reference.
-3. **Launch:** The CronJob creates a Tekton `PipelineRun` referencing the e2e test pipeline (`.tekton/pipelines/ho-release-gate.yaml`), passing the snapshot name and HO image as parameters.
-4. **Test:** The pipeline launches Prow jobs that deploy the resolved HO image and run e2e tests against it. Each platform defines its own `IntegrationTestScenario` that specifies the test suite and infrastructure — for example, ARO HCP tests run against Azure-provisioned clusters, while ROSA HCP tests would use AWS. Konflux orchestrates the run and consumes pass/fail results and links.
+2. **Resolve:** The CronJob queries Konflux Snapshots for the most recent push build that has been auto-released successfully.
+3. **Label:** The CronJob labels the resolved Snapshot with `test.appstudio.openshift.io/run=hypershift-ho-release-gate-aro-hcp`. This signals the Konflux Integration Service to execute the IntegrationTestScenario's pipeline against that Snapshot.
+4. **Test:** The Integration Service creates a PipelineRun from the ITS definition, which deploys the resolved HO image and runs e2e tests against it. Each platform defines its own `IntegrationTestScenario` that specifies the test suite and infrastructure — for example, ARO HCP tests run against Azure-provisioned clusters, while ROSA HCP tests would use AWS.
 5. **Promote:** On pass, the pipeline's `finally` block creates a Konflux Release object referencing the tested Snapshot and a platform-specific ReleasePlan. Konflux's release pipeline pushes the image to the verified repository.
 6. **Notify:** On failure, a Slack webhook fires with failure details (snapshot name, image ref, pipeline run link).
 
@@ -120,15 +128,18 @@ graph LR
 sequenceDiagram
     participant Cron as Nightly CronJob
     participant K as Konflux API
+    participant IS as Integration Service
     participant P as E2E Pipeline
     participant TC as Test Cluster
     participant Rel as Konflux Release
     participant VR as Verified Repo
     participant Slack as Slack
 
-    Cron->>K: Query latest Snapshot
-    K-->>Cron: Return Snapshot + image ref
-    Cron->>P: Create PipelineRun
+    Cron->>K: Query latest auto-released Snapshot
+    K-->>Cron: Return Snapshot name
+    Cron->>K: Label Snapshot with test.appstudio.openshift.io/run
+    K-->>IS: Snapshot label triggers ITS
+    IS->>P: Create PipelineRun
     P->>TC: Provision cluster + deploy HO
     P->>TC: Run e2e test suite
     alt Tests pass
@@ -182,6 +193,8 @@ This enhancement does not affect OKE. It operates within Konflux CI infrastructu
 
 The implementation consists of creating Konflux resources and a Tekton pipeline definition. All resources are created in the `crt-redhat-acm-tenant` namespace unless noted otherwise.
 
+The Tekton pipeline definition lives in the HyperShift repository (`.tekton/pipelines/`), referenced by the ITS via git resolver. Konflux namespace resources (IntegrationTestScenario, ReleasePlan, CronJob, RBAC) are defined in `contrib/konflux/` in the HyperShift repository and applied to the `crt-redhat-acm-tenant` namespace. Changes to these resources follow the standard PR review process.
+
 #### Files to Create
 
 | Location | File/Resource | Action |
@@ -198,7 +211,7 @@ The implementation consists of creating Konflux resources and a Tekton pipeline 
 
 #### Nightly CronJob
 
-Runs nightly at 3:15 AM UTC. Resolves the most recent Snapshot from the push build pipeline, extracts the HO container image reference, and creates a Tekton PipelineRun that executes the e2e test pipeline.
+Runs nightly at 3:15 AM UTC. Resolves the most recent Snapshot from the push build pipeline and labels it to trigger the `hypershift-ho-release-gate-aro-hcp` IntegrationTestScenario. This follows the [Konflux periodic integration test pattern](https://konflux-ci.dev/docs/testing/integration/periodic-integration-tests/) — the CronJob does not create PipelineRuns directly; instead, labeling the Snapshot with `test.appstudio.openshift.io/run=<scenario-name>` signals the Integration Service to execute the ITS pipeline.
 
 ```yaml
 kind: CronJob
@@ -213,7 +226,7 @@ spec:
       template:
         spec:
           containers:
-          - name: resolve-and-test
+          - name: trigger-e2e-scenario
             image: 'quay.io/konflux-ci/task-runner:v1'
             command: ["/bin/bash", "-c"]
             args:
@@ -221,43 +234,41 @@ spec:
               #!/bin/bash
               set -euo pipefail
 
-              # Resolve the most recent Snapshot from push builds
-              SNAPSHOT=$(oc get snapshot \
-                --sort-by=.metadata.creationTimestamp \
-                -l pac.test.appstudio.openshift.io/original-prname=hypershift-operator-main-on-push \
-                -o jsonpath='{.items[-1].metadata.name}')
-              HO_IMAGE=$(oc get snapshot $SNAPSHOT \
-                -o jsonpath='{.spec.components[?(@.name=="hypershift-operator-main")].containerImage}')
-              echo "Resolved snapshot: $SNAPSHOT"
-              echo "HO image: $HO_IMAGE"
+              KONFLUX_SCENARIO_NAME="hypershift-ho-release-gate-aro-hcp"
+              KONFLUX_TENANT_NAME="crt-redhat-acm-tenant"
+              KONFLUX_APPLICATION_NAME="hypershift-operator"
+              KONFLUX_COMPONENT_NAME="hypershift-operator-main"
 
-              # Create a PipelineRun to execute the e2e test pipeline
-              oc create -f - <<EOF
-              apiVersion: tekton.dev/v1
-              kind: PipelineRun
-              metadata:
-                generateName: ho-release-gate-nightly-
-                namespace: crt-redhat-acm-tenant
-              spec:
-                pipelineRef:
-                  resolver: git
-                  params:
-                  - name: url
-                    value: https://github.com/openshift/hypershift
-                  - name: revision
-                    value: main
-                  - name: pathInRepo
-                    value: .tekton/pipelines/ho-release-gate.yaml
-                params:
-                - name: snapshot-name
-                  value: $SNAPSHOT
-                - name: ho-image
-                  value: $HO_IMAGE
-                taskRunTemplate:
-                  serviceAccountName: nightly-promotion-sa
-              EOF
+              # Resolve the most recent Snapshot from push builds that has been auto-released
+              LATEST_SNAPSHOT=$(kubectl get snapshots -n "${KONFLUX_TENANT_NAME}" -o json | \
+                jq --arg application "$KONFLUX_APPLICATION_NAME" \
+                   --arg component "$KONFLUX_COMPONENT_NAME" -r '
+                  .items
+                  | map(select(
+                      .metadata.labels."appstudio.openshift.io/application" == $application and
+                      .metadata.labels."appstudio.openshift.io/component" == $component and
+                      .metadata.labels."pac.test.appstudio.openshift.io/event-type" == "push" and
+                      (.status.conditions // [] | map(select(
+                          .type == "AutoReleased" and
+                          .reason == "AutoReleased" and
+                          .status == "True"
+                          ))
+                      | length > 0)
+                      ))
+                  | sort_by(.metadata.creationTimestamp) | last | .metadata.name')
+
+              if [[ -z "${LATEST_SNAPSHOT}" || "${LATEST_SNAPSHOT}" == "null" ]]; then
+                echo "[ERROR] No valid snapshot found."
+                exit 1
+              fi
+
+              echo "Resolved snapshot: ${LATEST_SNAPSHOT}"
+
+              # Label the Snapshot to trigger the IntegrationTestScenario
+              kubectl -n "${KONFLUX_TENANT_NAME}" label snapshot "${LATEST_SNAPSHOT}" \
+                test.appstudio.openshift.io/run="${KONFLUX_SCENARIO_NAME}"
           serviceAccountName: nightly-promotion-sa
-          restartPolicy: OnFailure
+          restartPolicy: Never
 ```
 
 #### RBAC
@@ -278,14 +289,8 @@ metadata:
   namespace: crt-redhat-acm-tenant
 rules:
 - apiGroups: ["appstudio.redhat.com"]
-  resources: ["snapshots", "releases"]
-  verbs: ["get", "list", "create"]
-- apiGroups: ["appstudio.redhat.com"]
-  resources: ["components"]
-  verbs: ["get", "list", "patch"]
-- apiGroups: ["tekton.dev"]
-  resources: ["pipelineruns"]
-  verbs: ["create", "get", "list"]
+  resources: ["snapshots"]
+  verbs: ["get", "list", "watch", "update", "patch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -324,6 +329,8 @@ A matching `ReleasePlanAdmission` in the `rhtap-releng-tenant` namespace is requ
 
 A per-platform resource created by the HCP team in the `crt-redhat-acm-tenant` namespace. This wires the e2e test Tekton pipeline as a gate on Snapshots. It references a pipeline definition stored in the HyperShift repository, allowing the test pipeline to evolve alongside the code it validates.
 
+The `disabled` context prevents this test from running on every push build. Instead, it is triggered only by the nightly CronJob, which labels the latest Snapshot with `test.appstudio.openshift.io/run=<scenario-name>` to initiate the test on demand. This follows the [Konflux periodic integration test pattern](https://konflux-ci.dev/docs/testing/integration/periodic-integration-tests/).
+
 ```yaml
 apiVersion: appstudio.redhat.com/v1beta2
 kind: IntegrationTestScenario
@@ -342,8 +349,8 @@ spec:
     - name: pathInRepo
       value: .tekton/pipelines/ho-release-gate.yaml
   contexts:
-  - name: application
-    description: HyperShift e2e tests for ARO HCP promotion gating
+  - name: disabled
+    description: Triggered only by nightly CronJob, not on every push build
 ```
 
 #### Release Object (created programmatically on test pass)
