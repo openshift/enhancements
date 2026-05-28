@@ -223,7 +223,7 @@ cluster. The user can explicitly set the desired stream in the
 determines the default based on the context:
 
 * When the `OSStreams` FeatureGate is enabled, the installer will default
-  to RHEL 9. However, when both the `OSStreams` and `DefaultRHEL10` FeatureGates
+  to RHEL 9. However, when both the `OSStreams` and `RHCOS10DefaultInstall` FeatureGates
   are enabled, RHEL 10 will be selected as the default.
 * For utilities without access to FeatureGates — such as the
   `openshift-install coreos print-stream-json` command or the parts of
@@ -392,7 +392,7 @@ timelines.
 **Deliverables:**
 - OSStreams feature gate, `osImageStream` field in MachineConfigPool, 
   OSImageStream v1alpha1 resource
-* DefaultRHEL10 feature gate which will explicitly control defaulting to RHEL 10.
+* RHCOS10DefaultInstall feature gate which will explicitly control defaulting to RHEL 10.
 * OS Image Stream extraction from the release payload image
 * MachineConfigPool reconciliation, bootstrap, and runtime OS Image
   Stream population logic
