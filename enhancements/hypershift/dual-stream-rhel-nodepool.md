@@ -594,7 +594,7 @@ the `IgnitionProvider` interface changes, and the `GetPayload` function must gen
 However, this complexity mirrors what the installer already does for standalone clusters — it is not HyperShift-specific logic
 but rather bringing HyperShift into parity with the standalone bootstrap flow.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Let MCO default the stream without HyperShift involvement
 
