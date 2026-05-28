@@ -12,7 +12,7 @@ approvers:
 api-approvers:
   - "@everettraven"
 creation-date: 2026-05-26
-last-updated: 2026-05-27
+last-updated: 2026-05-28
 status: provisional
 tracking-link:
   - https://redhat.atlassian.net/browse/NE-2733
@@ -27,71 +27,47 @@ see-also:
 
 ## Summary
 
-This enhancement introduces a new `gatewayAPI` configuration struct
-on the cluster-scoped `Ingress` configuration resource
-(`ingress.config.openshift.io/cluster`) that contains a
-`crdManagementMode` enum field controlling how the Cluster Ingress
-Operator (CIO) manages Gateway API Custom Resource Definitions
-(CRDs) and the associated Gateway controller stack (the Istio
-instance deployed by CIO, GatewayClass, Gateway resources). The
-enum exposes three modes -- `Managed`, `Unmanaged`, and
-`ExternalCRDs` -- enabling cluster administrators and third-party
-products to choose whether CIO fully owns the Gateway API CRDs and
-controller, delegates CRD ownership entirely to an external entity,
-or runs the OpenShift Gateway controller against
-externally-provided CRDs. The `gatewayAPI` struct is designed to be
-extended in the future with additional Gateway API-related
-configuration fields.
+This enhancement introduces a new cluster-scoped singleton API
+resource, `Ingress` (resource `ingresses`, singleton named
+`cluster`), in the `operator.openshift.io/v1` group. The
+resource exposes a `spec.gatewayAPI.crdManagementMode` enum
+field that controls how the Cluster Ingress Operator (CIO)
+manages Gateway API CRDs and the associated Gateway controller
+stack (CIO-managed Istio, GatewayClass, Gateway). Three modes
+are provided: `Managed` (default -- CIO owns everything),
+`Unmanaged` (CIO does nothing, external entity takes over), and
+`ExternalCRDs` (CIO runs the Gateway controller against
+externally-provided CRDs, unsupported configuration).
 
-The `ingress.config.openshift.io` API is the correct home for this
-setting because Gateway API CRD management is a cluster-wide,
-platform-level concern. CRDs are cluster-scoped resources, and the
-management mode must apply uniformly across the platform rather
-than being a per-IngressController decision. The
-`ingress.config.openshift.io/cluster` resource already serves as
-the authoritative source of platform-wide ingress configuration
-(base domain, load balancer platform defaults, HSTS policies) that
-the Cluster Ingress Operator watches and consumes to configure
-individual IngressControllers. Adding the Gateway API CRD
-management mode here follows the same established pattern and
-avoids the risk of conflicting configurations from multiple
-IngressController resources.
+The field lives on a new resource rather than on
+`IngressController` (where multiple instances could conflict) or
+`ingress.config.openshift.io/cluster` (which is owned by
+`config-operator` for install-time configuration). The
+`operator.openshift.io` group already has cluster-scoped
+singletons (`DNS`, `Console`) and is the natural home for
+operator-managed behavior.
 
 ## Motivation
 
-The current Gateway API integration in OpenShift, as established by
-the
+As established by the
 [gateway-api-crd-life-cycle-management](gateway-api-crd-life-cycle-management.md)
 and
 [gateway-api-without-olm](gateway-api-without-olm.md)
-enhancements, treats Gateway API CRDs as a core platform API. CIO
-owns the CRDs, pins them to a specific version, protects them with
-Validating Admission Policies (VAPs), and upgrades them automatically
-during cluster upgrades. This is the right default for most customers.
+enhancements, CIO owns the Gateway API CRDs, pins them to a
+specific version, protects them with Validating Admission Policies
+(VAPs), and upgrades them during cluster upgrades. This is the
+right default for most customers, but creates friction for:
 
-However, this "CIO owns everything" model creates friction for several
-legitimate use cases:
+1. **Third-party Gateway API implementations**: Customers using
+   Envoy Gateway, Traefik, Kong, or other non-OpenShift controllers
+   cannot install their own CRD versions because CIO owns and
+   protects them.
 
-1. **Third-party Gateway API implementations**: Customers who want to
-   use a non-OpenShift Gateway API controller (e.g., Envoy Gateway,
-   Traefik, Kong) cannot do so cleanly because CIO installs and
-   protects its own CRD versions. The third-party controller may
-   require a different CRD version or schema.
+2. **Development and testing**: Platform engineers who need newer CRD
+   versions must fight the VAP and CIO reconciler.
 
-2. **Development and testing**: Platform engineers and advanced users
-   sometimes need to test with newer CRD versions or experimental
-   fields. Today, this requires fighting the VAP and the CIO
-   reconciler.
-
-3. **Supportability and observability**: When CRDs are modified
-   outside the expected flow (e.g., by bypassing the VAP), there is
-   no explicit API-level signal that tells support or monitoring
-   who is supposed to own the CRDs and whether the current state is
-   intentional.
-
-This enhancement addresses these gaps by providing an explicit,
-API-level knob that makes CRD ownership a first-class configuration
-choice rather than an implicit assumption.
+3. **Supportability**: There is no API-level signal indicating who
+   owns the CRDs or whether the current state is intentional.
 
 ### User Stories
 
@@ -118,110 +94,79 @@ whether the current CRD state matches the configured ownership mode
 so that I can diagnose issues without needing to inspect labels,
 annotations, and controller logs manually.
 
-#### Story 4: Operational Monitoring at Scale
+#### Story 4: Operational Monitoring
 
-As a fleet administrator managing hundreds of OpenShift clusters, I
-want to monitor the Gateway API CRD ownership state via standard
-OpenShift status conditions and metrics so that I can detect clusters
-where CRD ownership is misconfigured or where CRDs have drifted from
-the expected state, enabling proactive remediation before users are
-affected.
-
-#### Story 5: Automatic CRD Upgrades
-
-As a cluster administrator using the default configuration, I want
-OpenShift to continue automatically upgrading Gateway API CRDs during
-cluster upgrades so that I do not need to manage CRD versions myself,
-and I want the ownership state to be clearly reported in the
-`ingress.config.openshift.io/cluster` status.
+As a fleet administrator, I want to monitor Gateway API CRD ownership
+state via standard OpenShift status conditions so that I can detect
+clusters where CRD ownership is misconfigured or where CRDs have
+drifted from the expected state.
 
 ### Goals
 
-1. Provide an explicit API field on
-   `ingress.config.openshift.io/cluster` that controls Gateway API
-   CRD ownership with three modes: `Managed`, `Unmanaged`, and
-   `ExternalCRDs`.
-2. Enable customers and third-party products to take full control of
-   Gateway API CRDs when needed, without fighting CIO's reconciler
-   or VAP protections.
-3. Expose clear, observable status conditions that report the current
-   CRD ownership mode, CRD presence, and CRD compliance with the
-   expected version.
-4. Signal via status conditions the CRD management state so that
-   external consumers can determine the platform's Gateway API
-   posture.
-5. Preserve the current fully-managed behavior as the default,
+1. Provide a `crdManagementMode` enum field on a new Ingress
+   (`operator.openshift.io/v1`) singleton with three modes:
+   `Managed`, `Unmanaged`, and `ExternalCRDs`.
+2. Allow customers and third-party products to take full control of
+   Gateway API CRDs without fighting CIO's reconciler or VAP.
+3. Expose status conditions reporting CRD ownership mode, presence,
+   and version compliance.
+4. Preserve the current fully-managed behavior as the default,
    requiring no action from existing customers.
-6. Define clear upgrade and downgrade semantics for transitioning
-   between modes.
+5. Define clear upgrade and downgrade semantics for mode transitions.
 
 ### Non-Goals
 
-1. **Unknown field management**: Handling fields in CRDs that are not
-   recognized by the current controller version is a long-term goal
-   that will build on top of this work. This enhancement mentions it
-   for context but does not define the solution. See
-   [gateway-api#3624](https://github.com/kubernetes-sigs/gateway-api/issues/3624)
-   for upstream tracking.
-2. **CRD version ranges**: Allowing a configurable range of acceptable
-   CRD versions rather than pinning to one specific version. This is
-   future work that depends on resolving the unknown fields problem.
+1. **Unknown field management**: Future work tracked upstream in
+   [gateway-api#3624](https://github.com/kubernetes-sigs/gateway-api/issues/3624).
+   This enhancement mentions it for context but does not define the
+   solution.
+2. **CRD version ranges**: Future work that depends on resolving
+   the unknown fields problem.
 3. **Automatic migration of third-party CRDs**: When switching from
-   `Unmanaged` to `Managed`, CIO will not attempt to reconcile or
-   migrate third-party CRDs automatically. The administrator must
-   ensure the cluster state is compatible before changing modes.
-4. **MicroShift support**: MicroShift does not use CIO and has its own
-   Gateway API design. This enhancement does not affect MicroShift.
-5. **Istio CRD management mode**: This enhancement controls only
-   Gateway API CRDs (`gateway.networking.k8s.io` group). Istio CRD
-   management (the `networking.istio.io`, `security.istio.io`, etc.
-   groups) is handled separately by the sail-operator library as
-   described in
+   `Unmanaged` to `Managed`, CIO will not migrate third-party CRDs.
+   The administrator must ensure compatibility before changing modes.
+4. **MicroShift support**: MicroShift does not use CIO and is
+   unaffected by this enhancement.
+5. **Istio CRD management**: This enhancement controls only Gateway
+   API CRDs (`gateway.networking.k8s.io`). Istio CRDs are handled
+   by the sail-operator library as described in
    [gateway-api-without-olm](gateway-api-without-olm.md).
 
 ## Proposal
 
-Add a new `gatewayAPI` struct field to the `IngressSpec` of the
-cluster-scoped `Ingress` configuration resource
-(`ingress.config.openshift.io/cluster`). This struct serves as a
-namespace for all Gateway API-related platform configuration.
-Initially, it contains a single `crdManagementMode` enum field
-with three values: `Managed` (default), `Unmanaged`, and
-`ExternalCRDs`. The struct is intentionally designed to be
-extensible so that future Gateway API configuration fields can be
-added without further API restructuring.
+Introduce a new cluster-scoped singleton API resource in the
+`operator.openshift.io/v1` group:
 
-The Cluster Ingress Operator already watches the
-`ingress.config.openshift.io/cluster` resource and reconciles all
-IngressControllers when it changes. CIO will read the
-`spec.gatewayAPI.crdManagementMode` field from this resource to
-determine its behavior regarding Gateway API CRD lifecycle
-management and the Gateway controller stack (the Istio instance
-deployed by CIO, GatewayClass, Gateway resources).
+- **Kind**: `Ingress`
+- **Resource**: `ingresses`
+- **Scope**: Cluster (non-namespaced)
+- **Singleton name**: `cluster`
+- **Pattern**: Same as `DNS` and `Console` in
+  `operator.openshift.io/v1` -- embeds
+  `OperatorSpec`/`OperatorStatus` inline.
 
-The three modes are:
+The spec contains a `gatewayAPI` struct with a
+`crdManagementMode` enum. The struct is extensible for future
+Gateway API configuration fields.
 
-- **Managed** (default): CIO maintains the Gateway API CRDs, protects
-  them via VAPs, upgrades them during cluster upgrades, and runs the
-  full Gateway controller stack (the Istio instance deployed by CIO,
-  GatewayClass, Gateway). This is the current behavior and the only
-  fully supported configuration.
+CIO watches this resource and reads
+`spec.gatewayAPI.crdManagementMode` to determine its behavior:
 
-- **Unmanaged**: CIO does NOT install Gateway API CRDs and does NOT
-  deploy the Gateway controller stack. The customer or a third-party
-  product brings their own CRDs and Gateway controller. CIO's
-  Gateway-related controllers are disabled entirely. CIO reports
-  observational status (CRD presence, version) but takes no
-  management action.
+- **Managed** (default): CIO installs, protects (via VAP), and
+  upgrades Gateway API CRDs. CIO runs the full Gateway controller
+  stack (CIO-managed Istio, GatewayClass, Gateway). This is the
+  current behavior and the only fully supported configuration.
 
-- **ExternalCRDs**: CIO does NOT manage Gateway API CRDs (no install,
-  no upgrade, no VAP protection) but DOES run the OpenShift Gateway
-  controller stack (the Istio instance deployed by CIO, GatewayClass,
-  Gateway). The customer
-  brings their own CRDs. This is explicitly marked as an
-  **unsupported** configuration, useful for development, testing, or
-  advanced users who need newer CRD versions. CIO reports status
-  including a persistent unsupported warning.
+- **Unmanaged**: CIO does not install CRDs and does not deploy
+  the Gateway controller stack. The customer or a third-party
+  product owns the CRDs and Gateway controller. CIO reports
+  observational status only.
+
+- **ExternalCRDs**: CIO does not manage CRDs but does run the
+  Gateway controller stack. The customer brings their own CRDs.
+  This is an **unsupported** configuration for development and
+  testing. CIO reports status including a persistent unsupported
+  warning.
 
 ### Workflow Description
 
@@ -234,9 +179,9 @@ IngressController resources and manages Gateway API components.
 #### Workflow 1: Default Managed Mode (No Action Required)
 
 1. The cluster administrator installs or upgrades OpenShift.
-2. CIO reads the `ingress.config.openshift.io/cluster` resource and observes that
-   `spec.gatewayAPI.crdManagementMode` is unset (defaults to
-   `Managed`).
+2. CIO reads the Ingress (`operator.openshift.io/v1`) `cluster`
+   resource and observes that `spec.gatewayAPI.crdManagementMode`
+   is unset (defaults to `Managed`).
 3. CIO deploys Gateway API CRDs, VAPs, the CIO-managed Istio
    instance, GatewayClass, and Gateway resources as per the existing
    behavior.
@@ -250,8 +195,13 @@ IngressController resources and manages Gateway API components.
 
 1. The cluster administrator decides to use a third-party Gateway
    API implementation.
-2. The cluster administrator edits the `ingress.config.openshift.io/cluster` resource:
+2. The cluster administrator edits the Ingress
+   (`operator.openshift.io/v1`) `cluster` resource:
    ```yaml
+   apiVersion: operator.openshift.io/v1
+   kind: Ingress
+   metadata:
+     name: cluster
    spec:
      gatewayAPI:
        crdManagementMode: Unmanaged
@@ -274,8 +224,13 @@ IngressController resources and manages Gateway API components.
 
 1. The cluster administrator or developer wants to test with newer
    Gateway API CRDs while using the OpenShift Gateway controller.
-2. The cluster administrator edits the `ingress.config.openshift.io/cluster` resource:
+2. The cluster administrator edits the Ingress
+   (`operator.openshift.io/v1`) `cluster` resource:
    ```yaml
+   apiVersion: operator.openshift.io/v1
+   kind: Ingress
+   metadata:
+     name: cluster
    spec:
      gatewayAPI:
        crdManagementMode: ExternalCRDs
@@ -301,8 +256,13 @@ IngressController resources and manages Gateway API components.
    configuration.
 2. The cluster administrator ensures the existing Gateway API CRDs
    match the version CIO expects, or removes them entirely.
-3. The cluster administrator edits the `ingress.config.openshift.io/cluster` resource:
+3. The cluster administrator edits the Ingress
+   (`operator.openshift.io/v1`) `cluster` resource:
    ```yaml
+   apiVersion: operator.openshift.io/v1
+   kind: Ingress
+   metadata:
+     name: cluster
    spec:
      gatewayAPI:
        crdManagementMode: Managed
@@ -321,7 +281,7 @@ IngressController resources and manages Gateway API components.
 ```mermaid
 sequenceDiagram
     participant Admin as Cluster Admin
-    participant IC as ingress.config.openshift.io/cluster
+    participant IC as Ingress (operator.openshift.io/v1)
     participant CIO as Cluster Ingress Operator
     participant CRDs as Gateway API CRDs
     participant GW as Gateway Stack<br/>(CIO Istio/GatewayClass/Gateway)
@@ -347,34 +307,88 @@ sequenceDiagram
 
 ### API Extensions
 
-This enhancement modifies the existing cluster-scoped `Ingress`
-resource (`ingress.config.openshift.io/cluster`, defined in
-`config/v1/types_ingress.go` in the `openshift/api` repository) by
-adding new fields to `IngressSpec` and `IngressStatus`. No new
-CRDs, admission webhooks, conversion webhooks, aggregated API
-servers, or finalizers are introduced.
+This enhancement introduces a **new CRD** in the
+`operator.openshift.io/v1` group. The new resource follows the
+same pattern as the existing `DNS` and `Console` cluster-scoped
+singletons in this group.
 
-**Why `ingress.config.openshift.io` instead of
-`operator.openshift.io` IngressController:**
+**Why a new resource** (see also Alternatives section):
+`IngressController` is namespaced and multi-instance, so it
+cannot hold a cluster-wide setting without conflicts.
+`ingress.config.openshift.io` is owned by `config-operator` for
+install-time configuration. A dedicated singleton in
+`operator.openshift.io` follows the DNS/Console pattern and
+provides a clean extension point.
 
-The `ingress.config.openshift.io/cluster` resource is the
-cluster-scoped singleton that holds platform-wide ingress
-configuration. It already contains settings that apply uniformly
-across the platform (base domain, load balancer platform defaults,
-HSTS policies) and is watched by CIO to configure individual
-IngressControllers. Gateway API CRD management is a cluster-wide
-concern because:
+The proposed Go types are in a new file in `operator/v1/` in the
+`openshift/api` repository (note: `types_ingress.go` already
+exists for `IngressController`, so this type needs a separate
+file, e.g. `types_ingress_gateway.go`):
 
-1. CRDs are cluster-scoped Kubernetes resources -- there is exactly
-   one set of Gateway API CRDs per cluster.
-2. The management mode must be consistent across the platform. If
-   it lived on IngressController, multiple IngressControllers could
-   specify conflicting modes, creating undefined behavior.
-3. The `ingress.config.openshift.io/cluster` resource is already
-   the authoritative source that CIO watches for platform-level
-   ingress decisions, making it the natural integration point.
+```go
+// +genclient
+// +genclient:nonNamespaced
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+//
+// Ingress holds cluster-wide configuration for Gateway API
+// integration managed by the Cluster Ingress Operator. The
+// canonical name is `cluster`.
+//
+// Compatibility level 1: Stable within a major release for a
+// minimum of 12 months or 3 minor releases (whichever is longer).
+// +openshift:compatibility-gen:level=1
+// +openshift:api-approved.openshift.io=<TBD>
+// +openshift:file-pattern=cvoRunLevel=0000_50,operatorName=ingress,operatorOrdering=02
+// +kubebuilder:object:root=true
+// +kubebuilder:resource:path=ingresses,scope=Cluster
+// +kubebuilder:subresource:status
+// +openshift:capability=Ingress
+type Ingress struct {
+	metav1.TypeMeta `json:",inline"`
 
-The proposed Go types are (in `config/v1/types_ingress.go`):
+	// metadata is the standard object's metadata.
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	// spec holds user settable values for configuration.
+	// +required
+	Spec IngressSpec `json:"spec"`
+
+	// status holds observed values from the cluster.
+	// +optional
+	Status IngressStatus `json:"status"`
+}
+
+type IngressSpec struct {
+	// Inline OperatorSpec for standard operator fields
+	// (managementState, logLevel, etc.)
+	OperatorSpec `json:",inline"`
+
+	// gatewayAPI holds configuration for Gateway API
+	// integration, including how the Cluster Ingress Operator
+	// manages Gateway API CRDs and the Gateway controller stack.
+	// This struct is designed to accommodate additional Gateway
+	// API configuration fields in future releases.
+	//
+	// +required
+	// +openshift:enable:FeatureGate=GatewayAPICRDManagementMode
+	GatewayAPI GatewayAPIIngressConfig `json:"gatewayAPI"`
+}
+
+type IngressStatus struct {
+	// Inline OperatorStatus for standard operator status fields
+	// (conditions, version, observedGeneration, etc.)
+	OperatorStatus `json:",inline"`
+
+	// gatewayAPI holds status information for Gateway API
+	// integration, including conditions related to CRD
+	// management and the Gateway controller stack.
+	//
+	// +optional
+	GatewayAPI GatewayAPIIngressStatus `json:"gatewayAPI,omitempty"`
+}
+```
+
+The `GatewayAPIIngressConfig` and `GatewayAPIIngressStatus` types:
 
 ```go
 // GatewayAPICRDManagementMode describes how the Cluster Ingress
@@ -398,19 +412,17 @@ const (
 	// controller. CIO reports observational status only.
 	UnmanagedGatewayAPICRDs GatewayAPICRDManagementMode = "Unmanaged"
 
-	// ExternalCRDsGatewayAPICRDs means CIO does NOT manage Gateway
-	// API CRDs but DOES deploy the OpenShift Gateway controller
-	// stack (the Istio instance deployed by CIO, GatewayClass,
-	// Gateway). The customer brings their own CRDs. This is an
-	// UNSUPPORTED configuration useful for development, testing,
-	// or advanced users.
+	// ExternalCRDsGatewayAPICRDs means CIO does NOT manage
+	// Gateway API CRDs but DOES deploy the OpenShift Gateway
+	// controller stack (the Istio instance deployed by CIO,
+	// GatewayClass, Gateway). The customer brings their own
+	// CRDs. This is an UNSUPPORTED configuration useful for
+	// development, testing, or advanced users.
 	ExternalCRDsGatewayAPICRDs GatewayAPICRDManagementMode = "ExternalCRDs"
 )
 
 // GatewayAPIIngressConfig holds configuration for Gateway API
-// integration in the Cluster Ingress Operator. This struct is
-// designed to be extended with additional Gateway API-related
-// configuration fields in the future.
+// integration in the Cluster Ingress Operator.
 type GatewayAPIIngressConfig struct {
 	// crdManagementMode specifies how the Cluster Ingress
 	// Operator manages Gateway API Custom Resource Definitions
@@ -429,70 +441,28 @@ type GatewayAPIIngressConfig struct {
 	// is responsible for providing their own CRDs and Gateway
 	// controller. CIO reports observational status only.
 	//
-	// When set to "ExternalCRDs", CIO does not manage Gateway API
-	// CRDs but does deploy the OpenShift Gateway controller stack.
-	// The cluster administrator brings their own CRDs. This is an
-	// unsupported configuration intended for development and
-	// testing.
+	// When set to "ExternalCRDs", CIO does not manage Gateway
+	// API CRDs but does deploy the OpenShift Gateway controller
+	// stack. The cluster administrator brings their own CRDs.
+	// This is an unsupported configuration intended for
+	// development and testing.
 	//
 	// +kubebuilder:default:="Managed"
 	// +default="Managed"
 	// +required
 	CRDManagementMode GatewayAPICRDManagementMode `json:"crdManagementMode"`
 }
-```
 
-The `GatewayAPIIngressConfig` struct is added to `IngressSpec` as a
-value type (not a pointer). The field is mandatory and defaults to
-`Managed` mode. Once set, the administrator must change the mode
-to a different value rather than removing the field entirely:
-
-```go
-type IngressSpec struct {
-	// ... existing fields (domain, appsDomain, componentRoutes,
-	//     requiredHSTSPolicies, loadBalancer) ...
-
-	// gatewayAPI holds configuration for Gateway API integration,
-	// including how the Cluster Ingress Operator manages Gateway
-	// API CRDs and the Gateway controller stack. This struct is
-	// designed to accommodate additional Gateway API configuration
-	// fields in future releases.
-	//
-	// +required
-	// +openshift:enable:FeatureGate=GatewayAPICRDManagementMode
-	GatewayAPI GatewayAPIIngressConfig `json:"gatewayAPI"`
-}
-```
-
-The field path for the CRD management mode is:
-
-```
-spec.gatewayAPI.crdManagementMode
-```
-
-This nesting under the `gatewayAPI` struct allows future fields
-such as `spec.gatewayAPI.someOtherSetting` to be added without
-further API restructuring.
-
-A new `gatewayAPI` struct is added to `IngressStatus` to namespace
-all Gateway API-related status, mirroring the spec-side `gatewayAPI`
-struct. This keeps Gateway API conditions separate from the
-Ingress resource's existing status fields and makes it easy for
-consumers to find all Gateway API state in one place.
-
-```go
-// GatewayAPIIngressStatus holds status information for Gateway API
-// integration managed by the Cluster Ingress Operator.
+// GatewayAPIIngressStatus holds status information for Gateway
+// API integration managed by the Cluster Ingress Operator.
 type GatewayAPIIngressStatus struct {
 	// conditions is a list of conditions related to Gateway API
-	// CRD management and the Gateway controller stack. These
-	// conditions are scoped to Gateway API concerns and are
-	// separate from the Ingress resource's top-level status.
+	// CRD management and the Gateway controller stack.
 	//
 	// Supported condition types are:
 	// * CRDsManaged - whether CIO is actively managing CRDs
-	// * CRDsPresent - whether Gateway API CRDs exist on the cluster
-	// * CRDsCompliant - whether installed CRDs match the expected version
+	// * CRDsPresent - whether Gateway API CRDs exist on cluster
+	// * CRDsCompliant - whether installed CRDs match expected version
 	//
 	// +listType=map
 	// +listMapKey=type
@@ -501,32 +471,15 @@ type GatewayAPIIngressStatus struct {
 }
 ```
 
-The `GatewayAPIIngressStatus` struct is added to `IngressStatus`:
-
-```go
-type IngressStatus struct {
-	// ... existing fields (componentRoutes, defaultPlacement) ...
-
-	// gatewayAPI holds status information for Gateway API
-	// integration, including conditions related to CRD management
-	// and the Gateway controller stack.
-	//
-	// +optional
-	GatewayAPI GatewayAPIIngressStatus `json:"gatewayAPI,omitempty"`
-}
-```
-
-The status field path for Gateway API conditions is:
+The field paths are:
 
 ```
+spec.gatewayAPI.crdManagementMode
 status.gatewayAPI.conditions
 ```
 
 The following conditions are set within
-`status.gatewayAPI.conditions`. These conditions follow the
-standard Kubernetes condition semantics with `type`, `status`,
-`reason`, `message`, `lastTransitionTime`, and
-`observedGeneration` fields:
+`status.gatewayAPI.conditions`:
 
 | Condition Type | Status | Reason | Description |
 |---|---|---|---|
@@ -539,160 +492,96 @@ standard Kubernetes condition semantics with `type`, `status`,
 | `CRDsCompliant` | `False` | `VersionMismatch` | Installed CRDs do not match the expected version. Message includes the expected and actual versions. |
 | `CRDsCompliant` | `Unknown` | `NotApplicable` | Compliance check is not applicable (e.g., Unmanaged mode with no CRDs present) |
 
-Since these conditions live under `status.gatewayAPI.conditions`,
-the `GatewayAPICRDs` prefix is no longer needed on the condition
-type names — the namespace is provided by the struct itself.
-
-Note that CIO already has the machinery to write to the
-`ingress.config.openshift.io/cluster` status subresource -- this is
-the same pattern used for `status.componentRoutes`.
+**Note:** This is a new CRD and must go through the full API
+review process via `#forum-api-review`. The API approver must
+review both this enhancement and the implementation PR in
+`openshift/api`.
 
 ### Topology Considerations
 
 #### Hypershift / Hosted Control Planes
 
-This enhancement applies to Hypershift with the same semantics as
-standalone clusters. The Ingress Operator runs on the management
-cluster but manages resources on the guest cluster via kubeconfig.
-The `spec.gatewayAPI.crdManagementMode` field on the
-`ingress.config.openshift.io/cluster` resource in the guest
-cluster controls CRD management on that guest cluster.
-
-No management-cluster-side changes are required. The mode
-configuration is per-guest-cluster and does not affect the
-management cluster or other guest clusters.
+Same semantics as standalone clusters. The Ingress Operator runs
+on the management cluster but manages resources on the guest
+cluster. The mode is configured per-guest-cluster and does not
+affect the management cluster.
 
 #### Standalone Clusters
 
-This is the primary topology for this enhancement. All three modes
-are fully applicable to standalone clusters with no special
+Primary topology. All three modes apply with no special
 considerations.
 
 #### Single-node Deployments or MicroShift
 
-**Single-node OpenShift (SNO)**: This enhancement applies to SNO
-with no additional resource consumption concerns beyond what the
-existing Gateway API feature already introduces. The `Unmanaged`
-mode may be particularly useful for SNO deployments with constrained
-resources, as it allows disabling the Gateway controller stack
-entirely (the CIO-managed Istio instance, Envoy proxies) to reclaim
-CPU and memory.
+**SNO**: No additional resource concerns. `Unmanaged` mode allows
+disabling the Gateway controller stack to reclaim resources.
 
-**MicroShift**: MicroShift does not use the Cluster Ingress Operator
-and has its own Gateway API design (see the
-[MicroShift Gateway API Support Enhancement](../microshift/gateway-api-support.md)).
-This enhancement does not affect MicroShift.
+**MicroShift**: Not affected. MicroShift does not use CIO (see
+[MicroShift Gateway API Support](../microshift/gateway-api-support.md)).
 
 #### OpenShift Kubernetes Engine
 
-This enhancement is fully applicable to OKE. Since the
+All three modes are available. The
 [gateway-api-without-olm](gateway-api-without-olm.md) enhancement
-enables Gateway API on OKE by eliminating OSSM licensing concerns,
-all three CRD management modes are available on OKE clusters.
-
-The `Unmanaged` mode may be particularly relevant for OKE customers
-who prefer to use their own Gateway API implementation.
+enables Gateway API on OKE by eliminating OSSM licensing concerns.
 
 ### Implementation Details/Notes/Constraints
 
 #### Feature Gate
 
-Per the OpenShift feature development process, this enhancement
-requires a new feature gate. The proposed feature gate name is
-`GatewayAPICRDManagementMode`. The feature gate must be added to
-https://github.com/openshift/api/blob/master/features/features.go
-with the `TechPreviewNoUpgrade` feature set initially.
+New feature gate: `GatewayAPICRDManagementMode`, added to
+`TechPreviewNoUpgrade` in
+[features.go](https://github.com/openshift/api/blob/master/features/features.go).
 
-The `gatewayAPI` field on `IngressSpec` must use the
+The `gatewayAPI` field uses the
 `+openshift:enable:FeatureGate=GatewayAPICRDManagementMode` marker
-to ensure the field is only present in CRDs for feature sets where
-the feature gate is enabled.
-
-The `ExternalCRDs` enum value should use the
-`+openshift:validation:FeatureGateAwareEnum` marker if the intent
-is to gate the unsupported mode separately from the other two modes.
+so it only appears in CRDs when the gate is enabled.
 
 #### Interaction with the GatewayAPI Feature Gate
 
-The existing `GatewayAPI` feature gate controls whether CIO's
-Gateway API controllers are enabled at all. The new
-`GatewayAPICRDManagementMode` feature gate and the
-`crdManagementMode` field only take effect when the `GatewayAPI`
-feature gate is also enabled. When `GatewayAPI` is disabled, the
-`crdManagementMode` field is ignored and CIO does not manage any
-Gateway API resources regardless of the mode.
+The `crdManagementMode` field only takes effect when the existing
+`GatewayAPI` feature gate is also enabled. When `GatewayAPI` is
+disabled, CIO does not manage any Gateway API resources regardless
+of the mode setting.
 
 #### CIO Controller Changes
 
-The following controllers in CIO are affected:
+Affected controllers:
 
-1. **GatewayClass controller**: Must respect the management mode.
-   In `Unmanaged` mode, this controller must be fully disabled. In
-   `Managed` and `ExternalCRDs` modes, it operates as today.
-
-2. **CRD management controller**: Must respect the management mode.
-   In `Managed` mode, it installs, upgrades, and protects CRDs. In
-   `Unmanaged` and `ExternalCRDs` modes, it does not install or manage
-   CRDs but does observe their presence and compliance.
-
-3. **Gateway controller**: Must respect the management mode. In
-   `Unmanaged` mode, this controller is disabled. In `Managed` and
-   `ExternalCRDs` modes, it operates as today.
-
-4. **Status controller**: A new or extended controller that computes
-   the `CRDsManaged`, `CRDsPresent`, and `CRDsCompliant`
-   conditions in `status.gatewayAPI.conditions` based on the
-   configured
-   mode and the observed cluster state.
+| Controller | Managed | Unmanaged | ExternalCRDs |
+|---|---|---|---|
+| CRD management | Install, upgrade, protect (VAP) | Observe only | Observe only |
+| GatewayClass | Active | Disabled | Active |
+| Gateway | Active | Disabled | Active |
+| Status | Report conditions | Report conditions | Report conditions + unsupported warning |
 
 #### VAP Management
 
-In `Managed` mode, the VAP that protects Gateway API CRDs from
-unauthorized modification is deployed as today. In `Unmanaged` and
-`ExternalCRDs` modes, the VAP must be removed to allow the cluster
-administrator or third-party products to modify the CRDs.
-
-The transition from `Managed` to `Unmanaged` or `ExternalCRDs` must
-remove the VAP before CIO stops managing the CRDs, to avoid
-leaving the cluster in a state where CRDs cannot be modified by
-anyone.
+The VAP protecting Gateway API CRDs is deployed only in `Managed`
+mode. When transitioning away from `Managed`, the VAP must be
+removed first to avoid leaving CRDs locked.
 
 #### CRD Validity Definition
 
-A Gateway API CRD is considered **valid** (compliant) when it meets
-the following criteria:
+A Gateway API CRD is considered **compliant** when:
 
-1. **Strict version match**: The CRD must be the exact version that
-   the current CIO release expects. CIO pins to a specific Gateway
-   API release version (e.g., `v1.2.1`). The CRD's
-   `gateway.networking.k8s.io/bundle-version` label must match this
-   pinned version exactly. Version ranges are not supported in this
-   enhancement (see Non-Goals regarding future CRD version range
-   support).
+1. **Strict version match**: The CRD's
+   `gateway.networking.k8s.io/bundle-version` annotation matches
+   the exact Gateway API version that CIO expects (e.g.,
+   `v1.2.1`). Version ranges are not supported (see Non-Goals).
 
-2. **Checksum verification** (future iteration): As a subsequent
-   improvement within this enhancement's scope, CIO will compute a
-   SHA-256 checksum of the CRD's OpenAPI schema and compare it
-   against the expected checksum embedded in the CIO binary. This
-   ensures that even if the version label matches, the actual schema
-   has not been tampered with or partially modified. Until checksum
-   verification is implemented, version label matching is the
-   primary compliance check.
+2. **Checksum verification** (future iteration): SHA-256 checksum
+   of the CRD's OpenAPI schema compared against the expected
+   checksum embedded in the CIO binary.
 
-When CRDs are found to be non-compliant (in any mode), CIO will
-report the mismatch in the `CRDsCompliant` condition (under
-`status.gatewayAPI.conditions`)
-message, including:
-- The expected version and (when available) checksum.
-- The actual version and (when available) checksum found on the
-  cluster.
-- A pointer to where the administrator can obtain the correct CRD
-  manifests. The valid CRD manifests can be obtained from the
-  `gateway-api` container image shipped in the OpenShift release
-  payload at the path `/manifests/gateway-api/`. Alternatively,
-  they can be extracted from the upstream Gateway API release at
-  `https://github.com/kubernetes-sigs/gateway-api/releases` matching
-  the expected version.
+When CRDs are non-compliant, CIO reports the mismatch in the
+`CRDsCompliant` condition message, including expected vs. actual
+versions and where to obtain valid manifests. Valid CRD manifests
+are available from:
+- The `gateway-api` container image in the OpenShift release
+  payload at `/manifests/gateway-api/`.
+- The upstream Gateway API release at
+  `https://github.com/kubernetes-sigs/gateway-api/releases`.
 
 #### Mode Transition Ordering
 
@@ -719,132 +608,97 @@ to avoid leaving the cluster in an inconsistent state:
 
 #### Long-Term: Unknown Field Management
 
-As mentioned in
-[gateway-api-crd-life-cycle-management](gateway-api-crd-life-cycle-management.md),
-the "unknown fields" (or "dead fields") problem is being tracked
-upstream in
+The "unknown fields" problem (CRDs containing fields the controller
+does not recognize) is tracked upstream in
 [gateway-api#3624](https://github.com/kubernetes-sigs/gateway-api/issues/3624).
-The `ExternalCRDs` mode is particularly susceptible to this problem because
-the CRDs may contain fields that the OpenShift Gateway controller
-does not recognize.
-
-This enhancement establishes the foundation for future work on
-unknown field management by providing the management mode
-infrastructure. Future enhancements can build on this to add:
-
-- CRD version range support (allowing a set of compatible versions
-  rather than a single pinned version).
-- Unknown field detection and warning mechanisms.
-- Automated compatibility checks between CRDs and the controller
-  version.
-
-This future work is out of scope for this enhancement.
+The `ExternalCRDs` mode is particularly susceptible. This
+enhancement provides the management mode infrastructure that future
+work (version ranges, unknown field detection, compatibility
+checks) can build on. See Non-Goals for scope.
 
 ### Risks and Mitigations
 
 #### Risk: Unsupported ExternalCRDs Mode Misuse
 
-**Description**: Customers may use the `ExternalCRDs` mode in production
-and then file support tickets when things break due to CRD
-incompatibility.
+Customers may use `ExternalCRDs` in production and file support
+tickets when CRD incompatibility causes issues.
 
-**Mitigation**: The `ExternalCRDs` mode will be clearly documented as
-unsupported. CIO will set a persistent unsupported warning condition
-on the `ingress.config.openshift.io/cluster` status. The condition
-message will include
-explicit language that this configuration is not supported.
-Additionally, telemetry can capture the management mode to help
-support engineers quickly identify clusters using unsupported
-configurations.
+**Mitigation**: CIO sets a persistent unsupported warning condition
+in status. Telemetry captures the management mode for support
+triage.
 
 #### Risk: Orphaned Resources During Mode Transition
 
-**Description**: Switching from `Managed` to `Unmanaged` leaves
-GatewayClass, Gateway, and HTTPRoute resources on the cluster
-without a managing controller, which may confuse administrators.
+Switching to `Unmanaged` leaves GatewayClass, Gateway, and
+HTTPRoute resources without a managing controller.
 
-**Mitigation**: CIO intentionally does NOT remove Gateway API CRDs,
-GatewayClass, or Gateway resources when transitioning to `Unmanaged`
-mode to avoid disrupting existing workloads. The CIO-managed Istio
-instance is shut down, but all Gateway API resources are preserved.
-The cluster administrator is responsible for cleaning up these
-resources if desired. Documentation must clearly state that
-resources are preserved during mode transitions and that the
-administrator must handle cleanup.
+**Mitigation**: CIO preserves all Gateway API resources during
+transitions to avoid disruption. The administrator is responsible
+for cleanup. Documentation must state this clearly.
 
 #### Risk: Incompatible Mode Transition
 
-**Description**: Switching from `Unmanaged` or `ExternalCRDs` to `Managed`
-may fail if the existing CRDs do not match the expected version.
+Switching to `Managed` may fail if existing CRDs do not match the
+expected version.
 
-**Mitigation**: CIO will verify CRD compliance before taking
-ownership. If CRDs are incompatible, CIO will set
-`CRDsCompliant=False` (in `status.gatewayAPI.conditions`) and will
-NOT overwrite the CRDs.
-The administrator must resolve the mismatch (by upgrading or
-removing the CRDs) before the transition can complete. This
-prevents accidental data loss or breaking existing configurations.
+**Mitigation**: CIO verifies CRD compliance before taking
+ownership. If incompatible, CIO sets `CRDsCompliant=False` and
+does not overwrite. The administrator must resolve the mismatch.
 
 #### Risk: Security Implications of Removing VAP
 
-**Description**: In `Unmanaged` and `ExternalCRDs` modes, the VAP is
-removed, allowing any actor with sufficient RBAC to modify the
-Gateway API CRDs.
+In non-`Managed` modes, the VAP is removed, allowing any actor
+with CRD RBAC to modify Gateway API CRDs.
 
-**Mitigation**: This is an explicit trade-off of these modes.
-Documentation must clearly state that the VAP protection is
-removed in non-Managed modes. Customers who choose these modes
-are accepting responsibility for CRD integrity. Standard
-Kubernetes RBAC still applies to CRD modifications.
+**Mitigation**: Explicit trade-off. Standard Kubernetes RBAC still
+applies. Documentation must state that VAP protection is removed.
 
 ### Drawbacks
 
-The primary drawback is increased complexity in CIO. The operator
-must now handle three distinct behavioral modes, each with its own
-set of controllers to enable/disable and status conditions to
-compute. This increases the testing surface and the potential for
-edge-case bugs during mode transitions.
+Increased CIO complexity: three behavioral modes with different
+controller enable/disable states and mode transition logic. This is
+justified by customer demand -- the alternative is customers
+fighting the VAP and CRD reconciler.
 
-However, this complexity is justified by the clear customer demand
-for CRD ownership flexibility and the fact that the alternative --
-customers fighting the VAP and CRD reconciler -- is worse for both
-customers and support.
-
-Another drawback is the `ExternalCRDs` mode, which introduces an explicitly
-unsupported configuration. While this creates a risk of support
-confusion, the alternative of not providing this mode would push
-advanced users toward even more unsupported workarounds (e.g.,
-disabling the VAP manually and using `unsupportedConfigOverrides`).
+The `ExternalCRDs` mode introduces an explicitly unsupported
+configuration, but without it, advanced users would resort to worse
+workarounds (disabling the VAP manually, using
+`unsupportedConfigOverrides`).
 
 ## Open Questions
 
-1. ~~**Field placement**: Resolved. The field lives on
-   `ingress.config.openshift.io/cluster` (not on IngressController)
-   because Gateway API CRDs are cluster-scoped and the management
-   mode is a platform-wide decision that must not conflict across
-   multiple IngressControllers.~~
+1. ~~**Field placement**: Resolved. New Ingress singleton in
+   `operator.openshift.io/v1`, following the DNS/Console pattern.~~
 
-2. **ExternalCRDs mode scope**: Should the `ExternalCRDs` mode
-   perform any compatibility pre-checks before starting the
-   CIO-managed Istio instance, or should it always attempt to start
-   and report incompatibility via status conditions after the fact?
+2. **ExternalCRDs mode scope**: Should `ExternalCRDs` mode perform
+   compatibility pre-checks before starting the Gateway controller,
+   or always start and report incompatibility via status conditions?
 
 3. **CRD cleanup on Unmanaged transition**: Should CIO offer an
-   option to remove the CRDs when transitioning to `Unmanaged`?
-   This is dangerous (it would delete all Gateway/HTTPRoute
-   resources) but some customers may want a clean slate. The
-   current proposal preserves CRDs during transitions.
+   option to remove CRDs when transitioning to `Unmanaged`? This
+   would delete all Gateway/HTTPRoute resources. The current
+   proposal preserves CRDs during transitions.
 
-4. **Interaction with `unsupportedConfigOverrides`**: The existing
-   CRD lifecycle management enhancement mentions
-   `unsupportedConfigOverrides` as a mechanism for bypassing CRD
-   succession checks. Should the new `crdManagementMode` field
-   replace this mechanism, or should they coexist?
+4. **Interaction with `unsupportedConfigOverrides`**: The CRD
+   lifecycle management enhancement uses an "unsupported config
+   override" mechanism to bypass CRD succession checks. Should
+   `crdManagementMode` replace this mechanism or coexist with it?
 
-5. **Telemetry**: What telemetry should be collected for the
-   management mode? At minimum, the configured mode should be
-   reported. Should CIO also report metrics for CRD compliance
-   state and mode transition events?
+5. **Telemetry**: What telemetry should be collected? At minimum
+   the configured mode. Should CIO also report metrics for CRD
+   compliance and mode transitions?
+
+6. **Singleton creation**: Should the `cluster` singleton instance
+   be created by CVO (via a manifest in the release payload) or
+   by CIO on first startup? This affects upgrade behavior and
+   needs alignment with the operator pattern used by DNS/Console.
+
+7. **Kind name collision**: The proposed Kind `Ingress` in
+   `operator.openshift.io/v1` shares a name with the well-known
+   `networking.k8s.io/v1` Ingress. While API groups disambiguate,
+   this may cause user confusion with `oc get ingress`. The short
+   name and resource disambiguation strategy should be decided
+   during API review.
 
 ## Test Plan
 
@@ -946,35 +800,37 @@ dev-guide/feature-zero-to-hero.md:
 
 ### Backport to OCP 4.19
 
-There is a desire to backport this feature all the way back to
-OpenShift OCP 4.19. The motivation is to allow customers who are
-already running 4.19 with third-party Gateway API controllers (or
-who need to opt out of CIO's CRD management) to do so cleanly,
-and to ensure that customers upgrading from 4.19 through later
-releases have a consistent, supported upgrade path with the CRD
-management mode available at every step.
+The official backport target is OCP 4.19. Without this backport,
+customers on 4.19 with third-party Gateway API CRDs face CRD
+succession conflicts when upgrading, because CIO enforces
+ownership with no opt-out. Backporting lets customers set
+`Unmanaged` before upgrading.
 
-Without the backport, customers on 4.19 who have installed
-third-party Gateway API CRDs would face CRD succession conflicts
-during upgrade to a version that includes this knob, because the
-older 4.19 CIO would still enforce CRD ownership with no opt-out
-mechanism. Backporting gives customers the ability to set
-`Unmanaged` or `ExternalCRDs` mode on 4.19 before upgrading,
-ensuring a smooth transition.
+> **Note**: There is also a desire to backport to OCP 4.18, as the
+> lack of this feature is currently blocking 4.18 upgrades for
+> customers with third-party CRDs. This requires the same SBAR
+> exception process and is subject to architect approval.
 
-The backport scope includes:
-- The `gatewayAPI` spec and status structs on
-  `ingress.config.openshift.io`.
-- The `crdManagementMode` enum with all three values.
-- The `status.gatewayAPI.conditions` reporting.
-- The feature gate `GatewayAPICRDManagementMode` (behind
-  `TechPreviewNoUpgrade` on 4.19).
+**SBAR exception process**: Backporting a new CRD to a released
+version requires SBAR (Situation, Background, Assessment,
+Recommendation) with architect approval. The SBAR must justify
+the backport (customer upgrade path continuity) and demonstrate
+bounded risk.
 
-The backport does NOT require changes to the CRD succession logic
-already present in 4.19 (from
-[gateway-api-crd-life-cycle-management](gateway-api-crd-life-cycle-management.md)).
-Instead, it adds the opt-out mechanism on top of the existing
-behavior.
+Backport scope:
+- Ingress CRD manifest for `operator.openshift.io/v1` (CVO).
+- `gatewayAPI` spec/status structs with all three enum values.
+- `status.gatewayAPI.conditions` reporting.
+- Feature gate `GatewayAPICRDManagementMode` (behind
+  `TechPreviewNoUpgrade`).
+- CIO controller changes.
+
+**E2E requirements**: 95%+ pass rate, 7 runs/week on supported
+platforms.
+
+The backport does not change CRD succession logic from
+[gateway-api-crd-life-cycle-management](gateway-api-crd-life-cycle-management.md).
+It adds the opt-out mechanism on top of existing behavior.
 
 ### Removing a deprecated feature
 
@@ -984,17 +840,16 @@ Not applicable. This enhancement adds new functionality.
 
 ### Upgrade
 
-When upgrading from a version that does not have the
-`gatewayAPI.crdManagementMode` field to one that does (e.g.,
+When upgrading from a version that does not have the Ingress
+(`operator.openshift.io/v1`) resource to one that does (e.g.,
 upgrading from 4.18 to 4.19 with the backport applied):
 
-- The field defaults to `Managed`, which preserves the existing
-  behavior. No action is required from the cluster administrator.
+- CVO installs the new Ingress CRD. The `cluster` singleton is
+  created with `spec.gatewayAPI.crdManagementMode` defaulting to
+  `Managed`, preserving existing behavior. No action is required
+  from the cluster administrator.
 - Existing clusters with CIO-managed CRDs continue to work
   identically.
-- The new status conditions are added to the
-  `ingress.config.openshift.io/cluster` status on the first
-  reconciliation after upgrade.
 
 When upgrading a cluster that has a non-default mode set (e.g.,
 upgrading from 4.19 to 4.20+ with mode already configured):
@@ -1009,89 +864,64 @@ upgrading from 4.19 to 4.20+ with mode already configured):
 
 ### Downgrade
 
-When downgrading from a version that has the
-`gatewayAPI.crdManagementMode` field to one that does not:
+When downgrading from a version that has the Ingress
+(`operator.openshift.io/v1`) resource to one that does not:
 
-- The older CIO version does not recognize the `gatewayAPI` field
-  and ignores it (standard Kubernetes API behavior for unknown
-  fields -- the field is simply pruned on the next write).
-- The older CIO version will behave as if the mode is `Managed`
-  (its only behavior), which means it will attempt to install and
-  manage CRDs.
+- The Ingress CRD and `cluster` singleton persist on the cluster
+  (CRDs are not removed during rollbacks), but the older CIO does
+  not watch this resource. It has no effect.
+- The older CIO behaves as `Managed` (its only behavior) and
+  attempts to install and manage Gateway API CRDs.
 - **If the cluster was in `Unmanaged` mode**: The downgraded CIO
   will attempt to install CRDs and deploy the Gateway controller
   stack. If third-party CRDs are present, the existing CRD
   management succession logic (from
   [gateway-api-crd-life-cycle-management](gateway-api-crd-life-cycle-management.md))
   applies.
-- **If the cluster was in `ExternalCRDs` mode**: The downgraded CIO will
-  attempt to take ownership of the CRDs. If they do not match the
-  expected version, the operator reports `Degraded`.
+- **If the cluster was in `ExternalCRDs` mode**: The downgraded CIO
+  will attempt to take ownership of the CRDs. If they do not match
+  the expected version, the operator reports `Degraded`.
 
-**Recommendation**: Before downgrading, the administrator should
-set the mode to `Managed` and ensure CRDs are compatible with the
-target version. Documentation must include this as a required
-pre-downgrade step.
+**Recommendation**: Set mode to `Managed` and ensure CRD
+compatibility before downgrading.
 
 ## Version Skew Strategy
 
-During an upgrade, there may be a brief period where the new CIO
-binary is running but the `ingress.config.openshift.io` CRD has
-not yet been updated to include the `gatewayAPI` field. During this period, CIO
-will treat the absence of the field as `Managed` mode (the default),
-which is the existing behavior. No version skew issues are expected.
-
-The `gatewayAPI` field is consumed only by CIO and does not require
-coordination with any other component on the node or in the control
-plane.
+During upgrade, CIO may start before CVO creates the Ingress CRD.
+CIO treats the absence as `Managed` mode (existing behavior). The
+field is consumed only by CIO and requires no cross-component
+coordination.
 
 ## Operational Aspects of API Extensions
 
-This enhancement adds new fields to the existing
-`ingress.config.openshift.io` CRD and new status conditions. The
-operational impact is minimal:
+Operational impact is minimal -- one additional cluster-scoped
+resource read during CIO reconciliation.
 
-- **API throughput**: No measurable impact. The new field is read
-  by CIO during reconciliation, which already reads the full
-  `Ingress` spec. The additional status conditions add a
-  small amount of data to status updates.
-
-- **SLIs**: The new status conditions themselves serve as SLIs for
-  Gateway API CRD management health. Administrators and monitoring
-  systems can watch for:
-  - `status.gatewayAPI.conditions` `CRDsManaged=False` with
-    unexpected reasons
-  - `status.gatewayAPI.conditions` `CRDsCompliant=False` indicating
-    CRD drift
-  - `status.gatewayAPI.conditions` `CRDsPresent=False` in modes
-    that expect CRDs
+- **SLIs**: `status.gatewayAPI.conditions` (`CRDsManaged`,
+  `CRDsPresent`, `CRDsCompliant`).
 
 - **Failure modes**:
-  - If CIO fails to remove the VAP during a mode transition, CRDs
-    remain protected and the administrator cannot modify them. CIO
-    should retry VAP removal and report the failure in status.
-  - If CIO fails to deploy the Gateway controller stack in
-    `ExternalCRDs` mode because CRDs are absent, CIO should report the
-    failure and retry when CRDs become available.
+  - VAP removal failure during mode transition: CRDs remain locked.
+    CIO retries and reports in status.
+  - `ExternalCRDs` mode with absent CRDs: Gateway controller cannot
+    start. CIO reports and retries when CRDs appear.
 
-- **Escalation**: Issues with CRD management mode should be
-  escalated to the Networking / Ingress team (NID). For issues
-  involving Istio CRD interactions, the OSSM team should be
-  consulted.
+- **Escalation**: Networking / Ingress team. For Istio CRD
+  interactions, consult the OSSM team.
 
 ## Support Procedures
 
 ### Detecting the Current Mode
 
 ```bash
-oc get ingress.config.openshift.io cluster \
+oc get ingress.operator.openshift.io cluster \
   -o jsonpath='{.spec.gatewayAPI.crdManagementMode}'
 ```
 
 ### Checking CRD Management Status
 
 ```bash
-oc get ingress.config.openshift.io cluster \
+oc get ingress.operator.openshift.io cluster \
   -o jsonpath='{.status.gatewayAPI.conditions}' | \
   jq '.[]'
 ```
@@ -1114,7 +944,7 @@ the expected version shown in the condition message.
 
 ```bash
 # Check expected version from condition message
-oc get ingress.config.openshift.io cluster \
+oc get ingress.operator.openshift.io cluster \
   -o jsonpath='{.status.gatewayAPI.conditions}' | \
   jq '.[] | select(.type=="CRDsCompliant")'
 
@@ -1128,56 +958,47 @@ oc delete crd \
   grpcroutes.gateway.networking.k8s.io
 ```
 
-**Symptom**: Gateway controller stack not starting in `ExternalCRDs` mode.
+**Symptom**: Gateway controller not starting in `ExternalCRDs` mode.
 
-**Diagnosis**: Gateway API CRDs are absent. The controller cannot
-create GatewayClass/Gateway resources without the CRDs.
+**Resolution**: Install Gateway API CRDs. CIO starts the
+controller when CRDs appear.
 
-**Resolution**: Install Gateway API CRDs. CIO will detect their
-presence and start the controller stack.
+**Symptom**: `CRDsManaged=False` with reason `ExternalCRDs`.
 
-**Symptom**: `CRDsManaged=False` with reason `ExternalCRDs` and an
-unsupported warning in `status.gatewayAPI.conditions`.
-
-**Diagnosis**: This is expected behavior for `ExternalCRDs` mode. Verify
-with the customer that they intentionally chose this mode. If this
-is a production cluster, recommend switching to `Managed` mode.
+**Resolution**: Expected behavior for `ExternalCRDs` mode. Verify
+the customer intentionally chose this mode. For production
+clusters, recommend switching to `Managed`.
 
 ## Alternatives (Not Implemented)
 
 ### Alternative 1: Boolean Gateway API Disable Switch
 
-A simpler approach would be a boolean field to enable/disable
-Gateway API entirely. However, this does not address the use case
-where customers want to bring their own CRDs while using the
-OpenShift Gateway controller. Additionally, OpenShift API
-conventions prohibit boolean fields in CRDs.
+Does not address the `ExternalCRDs` use case (CRDs external, controller
+active). Also prohibited by OpenShift API conventions (no boolean
+fields in CRDs).
 
-### Alternative 2: Annotation-Based Configuration
+### Alternative 2: Modify `ingress.config.openshift.io/cluster`
 
-Using annotations on the `ingress.config.openshift.io/cluster`
-resource to control CRD management
-mode would avoid an API change but would lack validation,
-defaulting, and discoverability. Annotations are also not visible
-in `oc describe` output as structured fields and cannot have
-kubebuilder validation applied.
+That resource is owned by `config-operator` for install-time
+configuration (base domain, HSTS policies, component routes).
+Gateway API operational behavior belongs in `operator.openshift.io`.
 
-### Alternative 3: Separate CRD for Gateway API Configuration
+### Alternative 3: Annotation-Based Configuration
 
-Creating a new `GatewayAPIConfig` CRD would provide a clean
-separation of concerns but adds operational complexity (a new
-resource to manage, new RBAC rules, a new controller to reconcile).
-Given that CRD management mode is a platform-wide ingress concern,
-placing it on the `ingress.config.openshift.io/cluster` spec is
-more natural and discoverable.
+Lacks validation, defaulting, and discoverability. Not visible in
+`oc describe` as structured fields.
 
-### Alternative 4: Per-CRD Management Granularity
+### Alternative 4: Separate `GatewayAPIConfig` CRD
 
-Instead of a single mode for all Gateway API CRDs, each CRD could
-have its own management mode (e.g., manage GatewayClass CRD but not
-HTTPRoute CRD). This would provide maximum flexibility but adds
-significant complexity for minimal benefit. In practice, CRDs are
-either managed as a cohesive set or not managed at all.
+Adds unnecessary complexity. CRD management is an ingress concern,
+so the Ingress resource in `operator.openshift.io/v1` is a more
+natural home.
+
+### Alternative 5: Per-CRD Management Granularity
+
+Per-CRD modes (e.g., manage GatewayClass CRD but not HTTPRoute)
+add significant complexity for minimal benefit. In practice, CRDs
+are managed as a cohesive set or not at all.
 
 ## Infrastructure Needed
 
