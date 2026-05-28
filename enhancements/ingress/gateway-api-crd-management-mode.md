@@ -616,6 +616,29 @@ enhancement provides the management mode infrastructure that future
 work (version ranges, unknown field detection, compatibility
 checks) can build on. See Non-Goals for scope.
 
+#### Future Work on the Ingress Resource
+
+The new Ingress (`operator.openshift.io/v1`) resource is designed
+to accommodate future configuration beyond `crdManagementMode`:
+
+1. **GatewayClass customization**: The `gatewayAPI` struct can be
+   extended to allow administrators to define additional OpenShift
+   GatewayClasses in a structured way -- specifying service type,
+   resource allocation for Envoy proxies, and other per-class
+   parameters. This would replace the current model where only a
+   single default GatewayClass is created by CIO.
+
+2. **Operator and operand logging levels**: The Ingress resource
+   embeds `OperatorSpec`, which includes `logLevel` (for operands)
+   and `operatorLogLevel` (for the operator) fields. These can be
+   used to implement the logging level controls originally proposed
+   in
+   [ingress-operator-operand-logging-level](ingress-operator-operand-logging-level.md),
+   providing a supported API for adjusting CIO and Gateway
+   controller verbosity.
+
+These are out of scope for this enhancement.
+
 ### Risks and Mitigations
 
 #### Risk: Unsupported ExternalCRDs Mode Misuse
