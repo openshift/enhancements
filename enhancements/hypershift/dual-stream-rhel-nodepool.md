@@ -178,7 +178,10 @@ type NodePoolSpec struct {
     // When set, the referenced stream overrides the default OS images for the
     // pool. When omitted, the pool uses the release version's default stream
     // (rhel-9 for OCP < 5.0, rhel-10 for OCP >= 5.0).
-    // Changing this field triggers a rollout.
+    // Changing this field triggers a rollout. Forward transitions
+    // (rhel-9 → rhel-10) are allowed; backward transitions
+    // (rhel-10 → rhel-9) are rejected by CEL validation because
+    // in-place OS downgrades are not supported.
     //
     // +openshift:enable:FeatureGate=OSStreams
     // +optional
@@ -194,6 +197,9 @@ type OSImageStreamReference struct {
     // +kubebuilder:validation:Enum=rhel-9;rhel-10
     Name string `json:"name,omitempty"`
 }
+
+// CEL transition rule on NodePoolSpec:
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.osImageStream) || !has(oldSelf.osImageStream.name) || oldSelf.osImageStream.name != 'rhel-10' || !has(self.osImageStream) || self.osImageStream.name != 'rhel-9'",message="OS stream downgrade from rhel-10 to rhel-9 is not allowed; create a new NodePool instead"
 ```
 
 #### NodePoolStatus
@@ -221,6 +227,7 @@ type NodePoolStatus struct {
 | `"rhel-10"` | < 5.0 | **Rejected.** `NodePoolValidMachineConfigCondition=False`. |
 | `"rhel-10"` | >= 5.0 | OSImageStream CR with `spec.defaultStream: "rhel-10"` |
 | `"rhel-10"` + runc MachineConfig | >= 5.0 | **Rejected.** `NodePoolValidMachineConfigCondition=False`. RHEL 10 does not ship runc. |
+| `"rhel-9"` (was `"rhel-10"`) | any | **Rejected by CEL.** OS stream downgrade from rhel-10 to rhel-9 is not allowed. |
 | unset + runc MachineConfig | >= 5.0 | Falls back to `rhel-9` for both boot AMI and ignition payload stream. `NodePoolValidMachineConfigCondition=True` with informational message. |
 
 No HostedCluster-level field is needed. Each NodePool independently selects its stream. A cluster can have mixed NodePools (RHEL 9 + RHEL 10 workers).
@@ -547,7 +554,7 @@ This was rejected because:
 
 ## Open Questions
 
-1. Should `spec.osImageStream` be immutable after creation (requiring NodePool replacement to change streams), or mutable (triggering a rolling update)? The current proposal allows mutation with rollout, mirroring how other NodePool spec changes work.
+1. ~~Should `spec.osImageStream` be immutable after creation (requiring NodePool replacement to change streams), or mutable (triggering a rolling update)?~~ **Resolved**: The field is mutable but only forward transitions are allowed. A CEL transition rule prevents changing from `rhel-10` to `rhel-9` — in-place OS downgrades are not supported. Forward transitions (`rhel-9` → `rhel-10`) trigger a rollout. To move back to `rhel-9`, users must create a new NodePool.
 
 ## Test Plan
 
