@@ -10,7 +10,7 @@ approvers:
 api-approvers:
   - "@JoelSpeed"
 creation-date: 2026-05-21
-last-updated: 2026-05-21
+last-updated: 2026-05-29
 status: provisional
 tracking-link:
   - https://issues.redhat.com/browse/OCPSTRAT-3014
@@ -22,7 +22,7 @@ see-also:
 
 ## Summary
 
-OpenShift 5.0 introduces dual-stream node OS support: the release payload carries both RHEL 9 (`rhel-coreos`) and RHEL 10 (`rhel-coreos-10`) node images,
+Starting in OpenShift 4.23, the release payload carries both RHEL 9 (`rhel-coreos`) and RHEL 10 (`rhel-coreos-10`) node images,
 and a new `OSImageStream` CRD (TechPreview, behind the `OSStreams` feature gate) allows selecting which RHEL version to use per MachineConfigPool.
 HyperShift currently assumes a single OS image per architecture and has no mechanism for stream selection.
 
@@ -50,9 +50,9 @@ boot AMI resolution and ignition payload generation.
 
 ## Motivation
 
-OpenShift 5.0 defaults to RHEL 10 for new nodes, but existing workloads may require RHEL 9 during the transition period. Standalone clusters handle this via the OSImageStream CRD and per-MachineConfigPool stream selection. HyperShift has no equivalent mechanism — all NodePools in a HostedCluster get the same OS image regardless of the payload carrying two streams.
+Starting in OpenShift 4.23, the release payload carries both RHEL 9 and RHEL 10 node images. RHEL 9 remains the default for 4.x releases, while OpenShift 5.0 switches the default to RHEL 10. Standalone clusters handle per-pool stream selection via the OSImageStream CRD. HyperShift has no equivalent mechanism — all NodePools in a HostedCluster get the same OS image regardless of the payload carrying two streams.
 
-Without this enhancement, HyperShift users on 5.0+ cannot:
+Without this enhancement, HyperShift users on 4.23+ cannot:
 - Opt specific NodePools into RHEL 10 while keeping others on RHEL 9
 - Gradually migrate workloads between RHEL versions
 - Use the same dual-stream capabilities available in standalone clusters
@@ -60,6 +60,8 @@ Without this enhancement, HyperShift users on 5.0+ cannot:
 ### User Stories
 
 - As a **Platform Operator**, I want to create a NodePool running RHEL 10 alongside my existing RHEL 9 NodePools, so that I can validate workload compatibility before migrating the entire cluster.
+
+- As a **Platform Operator**, I want to opt specific NodePools into RHEL 10 on 4.23+ while keeping the default on RHEL 9, so that I can validate workload compatibility before the 5.0 default switch.
 
 - As a **Platform Operator**, I want my NodePools to automatically use the release version's default OS stream (RHEL 9 for 4.x, RHEL 10 for 5.x) without explicit configuration, so that upgrades to 5.0 move nodes to RHEL 10 by default.
 
@@ -83,7 +85,7 @@ Without this enhancement, HyperShift users on 5.0+ cannot:
 
 - Adding a HostedCluster-level stream field. Stream selection is per-NodePool, mirroring the per-MachineConfigPool model in standalone.
 - Implementing stream discovery logic in HyperShift. The MCO's existing `fetchOSImageStream()` handles OCI label inspection — HyperShift only needs to provide the OSImageStream CR manifest as input.
-- Supporting RHEL 10 on release payloads < 5.0. These payloads do not carry RHEL 10 images.
+- Supporting RHEL 10 on release payloads < 4.23. These payloads do not carry RHEL 10 images.
 - Exposing stream selection in the Karpenter NodePool API. Karpenter NodePools always use the version-derived default stream.
 
 ## Proposal
@@ -92,7 +94,7 @@ Without this enhancement, HyperShift users on 5.0+ cannot:
 
 The OS stream flows through three layers:
 
-1. **NodePool API** — `spec.osImageStream.name` selects `rhel-9` or `rhel-10`. When unset, defaults to `rhel-9` for release < 5.0 and `rhel-10` for >= 5.0.
+1. **NodePool API** — `spec.osImageStream.name` selects `rhel-9` or `rhel-10`. When unset, defaults to `rhel-9` for release < 5.0 and `rhel-10` for >= 5.0. Explicit opt-in to `rhel-10` is allowed starting from release 4.23 (the first release whose payload carries both streams).
 2. **NodePool controller** — writes the resolved stream to the token secret. When an explicit `spec.osImageStream.name` is set, includes the stream in the config hash to trigger a rollout; implicit streams do not change the hash. Resolves stream-specific boot AMIs from the release payload's multi-stream ConfigMap.
 3. **Ignition server** — reads the stream from the token secret, generates an OSImageStream CR (`99_osimagestream.yaml`), and places it in the MCC manifest directory. The MCC bootstrap discovers available streams via OCI label inspection and selects the requested stream, producing MachineConfigs with the correct `osImageURL`.
 
@@ -156,10 +158,17 @@ On the node, the first-boot `machine-config-daemon` (a one-shot podman container
 6. Node boots RHEL 10 AMI, first-boot MCD rebases to RHEL 10 node image.
 7. `status.osImageStream.name` reports `rhel-10`.
 
-**Validation failure — rhel-10 on 4.x release:**
+**Explicit opt-in to rhel-10 on 4.23:**
+
+1. Administrator creates a NodePool with `spec.osImageStream.name: "rhel-10"` on a 4.23 HostedCluster.
+2. NodePool controller validates the stream against the release version. Since 4.23 >= 4.23, validation passes.
+3. NodePool controller resolves the RHEL 10 boot AMI from the release payload's `streams` ConfigMap key.
+4. The flow continues as in the explicit stream workflow above. The default remains `rhel-9` for 4.x, but the user has explicitly opted in to `rhel-10`.
+
+**Validation failure — rhel-10 on pre-4.23 release:**
 
 1. Administrator creates a NodePool with `spec.osImageStream.name: "rhel-10"` on a 4.19 HostedCluster.
-2. NodePool controller checks the release version (4.19 < 5.0) and sets `NodePoolValidMachineConfigConditionType=False` with message "OS stream rhel-10 requires release version >= 5.0, got 4.19.x".
+2. NodePool controller checks the release version (4.19 < 4.23) and sets `NodePoolValidMachineConfigConditionType=False` with message "OS stream rhel-10 requires release version >= 4.23, got 4.19.x".
 3. Reconciliation short-circuits. No machines are created.
 
 **Implicit upgrade with runc guard:**
@@ -187,7 +196,8 @@ type NodePoolSpec struct {
     // transitioning to a major RHEL version.
     //
     // When set, the referenced stream overrides the default OS images for the
-    // pool. When omitted, the pool uses the release version's default stream
+    // pool. Explicit opt-in to rhel-10 is supported starting from OCP 4.23.
+    // When omitted, the pool uses the release version's default stream
     // (rhel-9 for OCP < 5.0, rhel-10 for OCP >= 5.0).
     // Changing this field triggers a rollout. Forward transitions
     // (rhel-9 → rhel-10) are allowed; backward transitions
@@ -232,12 +242,14 @@ type NodePoolStatus struct {
 
 | `spec.osImageStream.name` | Release | What happens |
 | ------------------------- | ------- | ------------ |
-| unset | 4.x | Ignition server injects OSImageStream CR with `spec.defaultStream: "rhel-9"` |
+| unset | < 4.23 | Legacy single-stream behavior. No OSImageStream CR generated. |
+| unset | 4.23 – 4.x | Ignition server injects OSImageStream CR with `spec.defaultStream: "rhel-9"`. User can opt-in to `rhel-10` explicitly. |
 | unset | 5.x | Ignition server injects OSImageStream CR with `spec.defaultStream: "rhel-10"` |
-| `"rhel-9"` | any | OSImageStream CR with `spec.defaultStream: "rhel-9"` |
-| `"rhel-10"` | < 5.0 | **Rejected.** `NodePoolValidMachineConfigCondition=False`. |
+| `"rhel-9"` | >= 4.23 | OSImageStream CR with `spec.defaultStream: "rhel-9"` |
+| `"rhel-10"` | < 4.23 | **Rejected.** `NodePoolValidMachineConfigCondition=False`. Payload does not carry RHEL 10 images. |
+| `"rhel-10"` | 4.23 – 4.x | OSImageStream CR with `spec.defaultStream: "rhel-10"` (explicit opt-in) |
 | `"rhel-10"` | >= 5.0 | OSImageStream CR with `spec.defaultStream: "rhel-10"` |
-| `"rhel-10"` + runc MachineConfig | >= 5.0 | **Rejected.** `NodePoolValidMachineConfigCondition=False`. RHEL 10 does not ship runc. |
+| `"rhel-10"` + runc MachineConfig | >= 4.23 | **Rejected.** `NodePoolValidMachineConfigCondition=False`. RHEL 10 does not ship runc. |
 | `"rhel-9"` (was `"rhel-10"`) | any | **Rejected by CEL.** OS stream downgrade from rhel-10 to rhel-9 is not allowed. |
 | unset + runc MachineConfig | >= 5.0 | Falls back to `rhel-9` for both boot AMI and ignition payload stream. `NodePoolValidMachineConfigCondition=True` with informational message. |
 
@@ -375,11 +387,12 @@ Implementation steps:
 
    Decision logic:
    - **Explicit `rhel-10` + runc** → return error (RHEL 10 does not ship runc)
-   - **Explicit `rhel-10` + release < 5.0** → return error (not available)
-   - **Explicit value set** → return it as-is
+   - **Explicit `rhel-10` + release < 4.23** → return error (not available — payload does not carry RHEL 10 images)
+   - **Explicit value set** → return it as-is (allowed for >= 4.23)
    - **Unset + release >= 5.0 + runc** → return `"rhel-9"` (fallback)
    - **Unset + release >= 5.0** → return `"rhel-10"` (default)
-   - **Unset + release < 5.0** → return `""` (no stream, legacy behavior)
+   - **Unset + release >= 4.23 and < 5.0** → return `"rhel-9"` (default for 4.x, opt-in only)
+   - **Unset + release < 4.23** → return `""` (no stream, legacy behavior)
 
    When the function returns `""`, the system uses the existing single-stream code path — no OSImageStream CR is generated,
    no stream is included in the hash, and the MCC uses `BaseOSContainerImage` from ControllerConfig as-is.
@@ -404,7 +417,7 @@ Implementation steps:
    NodePool's `spec.osImageStream.name`, the release version, and `configGenerator.usesRunc`.
    On error, set `NodePoolValidMachineConfigConditionType=False` and short-circuit:
 
-   - **Explicit `rhel-10` on release < 5.0** → reason `InvalidMachineConfig`, message "OS stream rhel-10 requires release version >= 5.0".
+   - **Explicit `rhel-10` on release < 4.23** → reason `InvalidMachineConfig`, message "OS stream rhel-10 requires release version >= 4.23".
    - **Explicit `rhel-10` with runc** → reason `InvalidMachineConfig`, message "OS stream rhel-10 is incompatible with default_runtime=runc; RHEL 10 does not ship runc".
    - **Implicit upgrade to >= 5.0 with runc (fallback to `rhel-9`)** → set `NodePoolValidMachineConfigConditionType=True`
      with an informational message "OS stream defaulted to rhel-9: RHEL 10 is incompatible with default_runtime=runc".
@@ -620,20 +633,21 @@ This was rejected because:
   - `ConfigGenerator.Hash()` produces different hashes for different explicit streams, but identical hashes when stream is implicit.
   - `getRHELStream()` returns correct defaults for various release versions.
   - runc detection identifies `ContainerRuntimeConfig` CRs with `spec.containerRuntimeConfig.defaultRuntime == "runc"` in NodePool config.
-  - Validation rejects `rhel-10` on release < 5.0.
+  - Validation rejects `rhel-10` on release < 4.23.
   - Token secret contains `os-stream` key with correct value.
   - `GetPayload` generates `99_osimagestream.yaml` with correct `spec.defaultStream`.
   - Config hash changes when an explicit `spec.osImageStream.name` is set, but remains unchanged when stream is implicit (empty `rhelStream`).
 
-- **E2E tests**: Add a new test case to the existing `TestNodePool` suite that creates 8 additional NodePools to validate all stream scenarios in parallel:
+- **E2E tests**: Add a new test case to the existing `TestNodePool` suite that creates 9 additional NodePools to validate all stream scenarios in parallel:
   1. **Explicit rhel-9**: NodePool with `osImageStream.name: "rhel-9"`. Verify nodes report RHEL 9 via `node.Status.NodeInfo.OSImage`.
   2. **Explicit rhel-10**: NodePool with `osImageStream.name: "rhel-10"`. Verify nodes report RHEL 10.
   3. **Implicit default**: NodePool with no `osImageStream`. Verify nodes run the release version's default (RHEL 10 for >= 5.0).
-  4. **Validation rejection**: NodePool with `osImageStream.name: "rhel-10"` on a < 5.0 release. Verify `NodePoolValidMachineConfigConditionType=False` and no machines created.
-  5. **Runc rejection**: NodePool with runc `ContainerRuntimeConfig` and `osImageStream.name: "rhel-10"`. Verify `NodePoolValidMachineConfigConditionType=False`.
-  6. **Runc fallback**: NodePool with runc `ContainerRuntimeConfig` and no explicit `osImageStream` on >= 5.0. Verify it stays on RHEL 9 with informational condition message.
-  7. **Upgrade implicit stream switch (Replace)**: NodePool with `upgradeType: Replace` on a < 5.0 release (implicitly rhel-9). Upgrade the NodePool to a 5.0+ release. Verify nodes are replaced and report RHEL 10 as the new implicit default.
-  8. **Upgrade implicit stream switch (InPlace)**: NodePool with `upgradeType: InPlace` on a < 5.0 release (implicitly rhel-9). Upgrade the NodePool to a 5.0+ release. Verify nodes rebase to RHEL 10 in place.
+  4. **Validation rejection**: NodePool with `osImageStream.name: "rhel-10"` on a < 4.23 release. Verify `NodePoolValidMachineConfigConditionType=False` and no machines created.
+  5. **Explicit opt-in on 4.23**: NodePool with `osImageStream.name: "rhel-10"` on a 4.23 release. Verify nodes boot RHEL 10 while the cluster default remains RHEL 9.
+  6. **Runc rejection**: NodePool with runc `ContainerRuntimeConfig` and `osImageStream.name: "rhel-10"`. Verify `NodePoolValidMachineConfigConditionType=False`.
+  7. **Runc fallback**: NodePool with runc `ContainerRuntimeConfig` and no explicit `osImageStream` on >= 5.0. Verify it stays on RHEL 9 with informational condition message.
+  8. **Upgrade implicit stream switch (Replace)**: NodePool with `upgradeType: Replace` on a < 5.0 release (implicitly rhel-9). Upgrade the NodePool to a 5.0+ release. Verify nodes are replaced and report RHEL 10 as the new implicit default.
+  9. **Upgrade implicit stream switch (InPlace)**: NodePool with `upgradeType: InPlace` on a < 5.0 release (implicitly rhel-9). Upgrade the NodePool to a 5.0+ release. Verify nodes rebase to RHEL 10 in place.
 
   HyperShift will run this test case only in the `e2e-test-preview` test suite until the NodePool API fields GA. Additionally the test will adjust the TestNodePool HostedCluster's TechPreview feature set as needed to pick up the MCO's `OSStreams` feature gate.
 
