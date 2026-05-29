@@ -717,6 +717,85 @@ These rollup conditions (`KMSPluginsDegraded`, and any future `KMSPluginsAvailab
 
 The plan is to extend the existing [`conditionController`](https://github.com/openshift/library-go/blob/master/pkg/operator/encryption/controllers/condition_controller.go) in library-go's encryption controllers, which already emits the `Encrypted` condition on the same operator CR. It sits in the right call path (operator CR → ClusterOperator) and runs on the informer set the rollup needs. If extending it turns out to be a poor fit (conflicting sync triggers, unrelated dependencies that make the rollup hard to reason about), a dedicated controller will be introduced instead.
 
+#### KMS Plugin Image Verification and Certification
+
+Vendors must sign their images using cosign, and follow the certification
+process described in this document to get support for their KMS plugins.
+
+##### Image Signature and Verification
+
+We advise vendors to sign their images with cosign using public key encryption.
+OpenShift must be able to verify image signatures in air-gapped clusters, and
+public key encryption works well in this scenario.
+
+Users must create a `ClusterImagePolicy` resource to configure OpenShift to
+verify the image signature every time CRI-O pulls a plugin image. Users should
+obtain the vendor's public key from the vendor's official documentation (e.g.,
+HashiCorp's documentation for the Vault KMS plugin).
+
+`ClusterImagePolicy` example:
+```yaml
+apiVersion: config.openshift.io/v1
+kind: ClusterImagePolicy
+metadata:
+  name: vault-kms-plugin
+  labels:
+    config.openshift.io/type: kms
+spec:
+  scopes:
+    - docker.io/hashicorp/vault-plugin-kms # this must match the kmsPluginImage in the APIServer config
+  policy:
+    rootOfTrust:
+      policyType: PublicKey
+      publicKey:
+        # here the user must enter Hashicorp's public key (base64-encoded PEM)
+        keyData: LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUZrd0V3WUhLb1pJemowQ0FRWUlLb1pJemowREFRY0RRZ0FFLi4uCi0tLS0tRU5EIFBVQkxJQyBLRVktLS0tLQo=
+    signedIdentity:
+      matchPolicy: MatchRepoDigestOrExact
+```
+
+When vendors release images signed with a new key, users must create a new
+`ClusterImagePolicy` resource with the updated public key. During the transition
+period, both old and new `ClusterImagePolicy` resources must exist in the
+cluster until the previous `ClusterImagePolicy` is no longer needed (i.e when
+migration to the new plugin image is finished).
+
+Users should refer to the vendor's official documentation for the most current
+public key to use in their `ClusterImagePolicy`.
+
+##### Certification
+
+KMS plugin certification follows the CSI driver certification model. A
+dedicated test suite will be added to the `openshift-tests` binary, which
+vendors can extract from an OpenShift release payload and run in a test cluster
+with their KMS plugins installed.
+
+The certification test suite validates:
+- KMS plugin compliance with the Kubernetes KMS v2 API
+- Encrypt/decrypt operations under various conditions
+- Plugin behavior during upgrades and migrations
+
+Vendors extract the test binary from the release payload and execute it against
+their deployed KMS plugin, providing certification results that demonstrate
+compatibility with OpenShift's KMS encryption implementation. This approach
+allows vendors to validate their plugins independently while maintaining
+standardized certification criteria.
+
+##### Compatibility Validation
+
+Runtime compatibility between API field sets and plugin image versions is validated
+automatically by the [Pre-flight Checker](#pre-flight-checker-tech-preview-v2).
+When users configure KMS encryption or update their configuration, the preflight
+checker deploys a test pod with the specified plugin image and validates that it
+can successfully handle the current API configuration. This eliminates the need
+to maintain a compatibility matrix between API versions and plugin versions.
+Incompatible configurations are caught and rejected before deployment.
+
+The certification process validates that a plugin implementation is compatible with
+a specific OpenShift version in general, while the preflight checker ensures that
+each user's specific configuration (image version + API fields + credentials) works
+correctly in their environment.
+
 ### Risks and Mitigations
 
 **Risk: KMS Plugin Unavailable During Controller Sync**
