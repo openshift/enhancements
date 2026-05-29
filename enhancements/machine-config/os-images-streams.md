@@ -78,7 +78,7 @@ platform upgrade.
 - Backward compatibility: pools without explicit OS Image Stream 
   selection default to `rhel-9` and maintain current OS version during 
   platform upgrades
-* Day-zero RHEL 10 deployments
+- Day-zero RHEL 10 deployments
 
 #### Future Phases (Out of Scope for Initial Release)
 
@@ -86,15 +86,39 @@ platform upgrade.
   variants, etc.) - the architecture supports multiple streams, but 
   only 2 will be shipped initially
 - Officially supported bidirectional OS Image Stream switching 
-(RHEL 10 -> 9 downgrade)
+  (RHEL 10 -> 9 downgrade)
 - HCP/Hypershift architecture support
-- Image Mode architecture support 
+- Image Mode architecture support
 
 ### Non-Goals
 
 - Automated migration orchestration
 
 ## Proposal
+
+### Workflow Description
+
+**Cluster administrator** is a human user responsible for managing the
+cluster and its node pools.
+
+1. During installation, the administrator can optionally set the desired
+   OS Image Stream in `install-config.yaml`. If omitted, the installer
+   selects the default based on the cluster version and feature gate
+   status.
+2. After installation, the administrator inspects the available streams
+   and the current default via the `OSImageStream` singleton
+   (`oc get osimagestream cluster -o yaml`).
+3. To migrate a specific pool to a different stream, the administrator
+   sets `spec.osImageStream.name` on the target MachineConfigPool.
+4. To change the cluster-wide default, the administrator updates
+   `spec.defaultStream` on the `OSImageStream` singleton. All pools
+   without an explicit override adopt the new default.
+5. The MCO detects the change, renders new MachineConfigs with the
+   images from the selected stream, and rolls them out to the affected
+   nodes.
+6. The administrator monitors progress through
+   `oc get machineconfigpool` and verifies the result via
+   `status.osImageStream.name` on each pool.
 
 To implement this enhancement, changes are required in the release payload 
 image, the MachineConfigPool reconciliation logic, the new OSImageStream 
@@ -223,7 +247,7 @@ cluster. The user can explicitly set the desired stream in the
 determines the default based on the context:
 
 * When the `OSStreams` FeatureGate is enabled, the installer will default
-  to RHEL 9. However, when both the `OSStreams` and `DefaultRHEL10` FeatureGates
+  to RHEL 9. However, when both the `OSStreams` and `RHCOS10DefaultInstall` FeatureGates
   are enabled, RHEL 10 will be selected as the default.
 * For utilities without access to FeatureGates — such as the
   `openshift-install coreos print-stream-json` command or the parts of
@@ -322,7 +346,7 @@ listed in `OSImageStream.status.availableStreams`.
 
 ### Topology Considerations
 
-#### Hypershift
+#### Hypershift / Hosted Control Planes
 
 This enhancement does **not** apply to HCP/Hypershift architectures. Hypershift
 uses NodePool objects instead of MachineConfigPools and has different
@@ -330,10 +354,30 @@ architectural requirements. Support for OS Image Streams in Hypershift
 environments is part of a separate design covered by 
 [openshift/enhancements#2019](https://github.com/openshift/enhancements/pull/2019).
 
-#### Standalone OpenShift
+#### Standalone Clusters
 
 This enhancement supports standalone OpenShift clusters using MachineConfigPools,
 including Single-Node OpenShift (SNO).
+
+#### Single-node Deployments or MicroShift
+
+SNO is fully supported. The enhancement adds one lightweight singleton CR
+(OSImageStream) and extends the existing MachineConfigPool reconciliation
+logic without introducing additional controllers or workloads, so the
+impact on CPU and memory consumption is negligible.
+
+This enhancement does not apply to MicroShift. MicroShift does not use
+MachineConfigPools or the MachineConfig Operator.
+
+### Implementation Details/Notes/Constraints
+
+- The feature is gated behind the `OSStreams` feature gate.
+- Only forward migration (RHEL 9 -> RHEL 10) is supported; downgrade
+  is technically possible but not covered by testing.
+- There is no explicit limit on the number of concurrent OS Image
+  Streams, but only 2 are shipped initially (RHEL 9 and RHEL 10).
+- The `machine-config-osimageurl` ConfigMap is retained until all its
+  consumers (notably Hypershift) have been migrated.
 
 ### Risks and Mitigations
 
@@ -392,9 +436,10 @@ timelines.
 **Deliverables:**
 - OSStreams feature gate, `osImageStream` field in MachineConfigPool, 
   OSImageStream v1alpha1 resource
-* DefaultRHEL10 feature gate which will explicitly control defaulting to RHEL 10.
-* OS Image Stream extraction from the release payload image
-* MachineConfigPool reconciliation, bootstrap, and runtime OS Image
+- RHCOS10DefaultInstall feature gate which will explicitly control 
+  defaulting to RHEL 10.
+- OS Image Stream extraction from the release payload image
+- MachineConfigPool reconciliation, bootstrap, and runtime OS Image 
   Stream population logic
 
 **Status**: TechPreviewNoUpgrade feature set, v1alpha1 API, Tech 
@@ -426,6 +471,20 @@ Preview support level
 
 **Status in 5.0**: Feature enabled by default, v1 API, GA support 
 level
+
+### Dev Preview -> Tech Preview
+
+This feature was introduced directly as Tech Preview in OpenShift 4.21;
+there is no Dev Preview phase.
+
+### Tech Preview -> GA
+
+- Installer support, including Agent-Based Installer
+- Full default stream management across upgrades
+- End-to-end CI coverage for dual-stream scenarios
+- Tech Preview e2e jobs running RHEL 10 exist and are passing
+- All component teams have assessed RHEL 10 compatibility and filed
+  Jira issues to track any identified blockers
 
 ### Removing a deprecated feature
 
