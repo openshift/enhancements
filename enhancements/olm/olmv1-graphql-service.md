@@ -6,6 +6,8 @@ reviewers:
   - "@everettraven, for catalogd architecture and storage layer expertise, please review the service/storage separation and handler integration"
   - "@tmshort, for OLMv1 e2e and feature gate considerations"
   - "@joelanford, for FBC schema evolution and GraphQL schema discovery approach"
+  - "@sampadgett, for console use-case suitability"
+  - "@TheRealJon, for console use-case suitability"
 approvers:
   - "@joelanford"
 api-approvers:
@@ -52,14 +54,14 @@ Today, catalog consumers must either download the entire catalog via `/api/v1/al
 1. Provide a server-side query endpoint that supports field selection, nested-object traversal, and pagination for FBC catalog data.
 2. Automatically adapt the GraphQL schema when FBC schemas evolve, requiring zero code changes in catalogd.
 3. Maintain full backward compatibility with existing `/api/v1/all` and `/api/v1/metas` endpoints.
-4. Gate the feature behind `GraphQLCatalogQueries` so it can be adopted incrementally.
+4. Impact isolated behind a feature-gate (`GraphQLCatalogQueries`) so it can be adopted incrementally.
 
 ### Non-Goals
 
 1. Replacing or deprecating the existing `/api/v1/all` or `/api/v1/metas` endpoints.
 2. Supporting GraphQL mutations or subscriptions.
 3. Cross-catalog schema stitching (querying multiple catalogs in a single request).
-4. Advanced filtering predicates (e.g., `where: {package: {eq: "foo"}}`) — basic `limit`/`offset` pagination is provided; richer filtering can be considered for future enhancement.
+4. Advanced filtering predicates (e.g., `where: {olmpackage: {eq: "foo"}}`) — basic `limit`/`offset` pagination is provided; richer filtering can be considered for future enhancement.
 
 ## Proposal
 
@@ -115,7 +117,7 @@ Fully supported. The feature gate is available on standalone clusters and behave
 
 #### Single-node Deployments or MicroShift
 
-The GraphQL schema metadata cache (type definitions, field descriptors) adds approximately 100-300 KB per catalog. However, the pre-parsed objects cache — which stores the deserialized JSON for all FBC objects to avoid per-query `json.Unmarshal` — consumes memory roughly equal to the raw catalog size. For the three default OCP catalogs (~60 MB combined), this means up to ~60 MB of additional RSS when the feature gate is enabled. On a typical SNO, this is a meaningful but bounded cost; the cache is released immediately on catalog deletion and rebuilt only on catalog update. CPU cost is amortized: schema building and object parsing happen once per catalog unpack, not per query. MicroShift does not include OLMv1/catalogd, so there is no impact.
+The GraphQL schema metadata cache (type definitions, field descriptors) adds approximately 100-300 KB per catalog — near-zero sustained RSS. Object data is read from disk at query time using index-based byte offsets, with only the requested page (~3 MB max for 100 bundles) held transiently during query execution. Schema discovery runs during `Store()` via a streaming channel fan-out that processes one blob at a time, avoiding even transient bulk memory allocation. There is no meaningful RSS impact on SNO regardless of catalog size. MicroShift does not include OLMv1/catalogd, so there is no impact.
 
 #### OpenShift Kubernetes Engine
 
@@ -131,7 +133,7 @@ OKE includes OLMv1 and catalogd. The feature gate defaults to disabled and does 
 
 **Caching:** Built schemas are cached per catalog name. Cache invalidation occurs on `Store()` (catalog update) and `Delete()` (catalog removal). A `singleflight.Group` prevents duplicate schema builds when concurrent requests hit a cold cache.
 
-**Pre-parsed objects:** FBC meta blobs are parsed once at schema-build time and stored alongside the schema. This eliminates per-query `json.Unmarshal` overhead at the cost of memory roughly equal to the raw blob size.
+**Disk-backed object loading:** Rather than holding all parsed FBC objects in memory, the resolver reads objects from `catalog.jsonl` at query time using byte-offset sections from `index.json`. Only the `limit` objects requested per query are read and parsed (~3 MB max for 100 bundles at 30 KB each). The `DynamicSchema` cache holds only the GraphQL type system and schema metadata (~few KB), so sustained RSS is near-zero regardless of catalog size. Schema discovery runs during `Store()` via a streaming channel fan-out — each blob is parsed, analyzed for field types, and discarded — avoiding even transient accumulation of all blobs in memory.
 
 **Pagination:** Root query fields accept `limit` (default 100) and `offset` (default 0) arguments.
 
@@ -139,7 +141,7 @@ OKE includes OLMv1 and catalogd. The feature gate defaults to disabled and does 
 
 | Risk | Mitigation |
 |---|---|
-| Memory growth from caching parsed objects for very large catalogs | Pre-parsed object memory ≈ raw catalog size. The largest default OCP catalog (redhat-operators) is ~31 MB of FBC; all three defaults total ~60 MB. The cache is per-catalog and released on deletion. SNO deployments should be profiled during Tech Preview to confirm acceptable RSS overhead. |
+| Per-query disk I/O latency from disk-backed object loading | Catalog JSONL is typically in OS page cache after recent `Store()`. Each query reads at most `limit` sections (default max 100, ~3 MB). Sustained RSS is near-zero regardless of catalog size. |
 | Unbounded query complexity (e.g., deeply nested selections) | Request body capped at 1 MB, query string capped at 100 KB. Future work may add query-depth limits. |
 | Schema discovery produces incorrect types for polymorphic fields | Fields with mixed types across objects fall back to `String`. The `value` field in `properties` is serialized as a JSON string for deep nesting. |
 
@@ -157,11 +159,10 @@ The pluralization strategy (append `s`) does not handle irregular English plural
 
 **Client-side GraphQL (e.g., GraphQL-over-JSONL):** Serving raw JSONL and letting clients apply GraphQL queries locally avoids server-side schema building but does not reduce network transfer.
 
-## Open Questions [optional]
+## Open Questions
 
-1. Should the OCP feature gate be named `NewOLMCatalogdGraphQL` (following the `NewOLMCatalogdAPIV1Metas` pattern) or use a different convention?
+1. Should the OCP feature gate be named `NewOLMCatalogdAPIV1GraphQL` (following the `NewOLMCatalogdAPIV1Metas` pattern) or use a different convention?
 2. Should query-depth or query-complexity limits be enforced at alpha, or deferred to beta?
-3. The pre-parsed objects cache adds ~60 MB RSS for the three default OCP catalogs. On SNO (where memory is constrained), should the cache use a lazy-loading strategy (parse on first query, evict under memory pressure) instead of eager pre-warming? Or is ~60 MB acceptable given that catalogd already holds the raw catalog data on disk?
 
 ## Test Plan
 
@@ -174,7 +175,7 @@ The pluralization strategy (append `s`) does not handle irregular English plural
 **OTE tests (drafted):**
 - Per-catalog connectivity tests for `openshift-community-operators`, `openshift-certified-operators`, and `openshift-redhat-operators` verifying the endpoint responds to a `summary` introspection query.
 - Query-scenario tests verifying field selection (packages without icon), nested property traversal (bundle properties), and cross-type queries (bundles + channels).
-- All e2e tests gated on `[OCPFeatureGate:NewOLMCatalogdGraphQL]` and `[Skipped:Disconnected]`.
+- All e2e tests gated on `[OCPFeatureGate:NewOLMCatalogdAPIV1GraphQL]` and `[Skipped:Disconnected]`.
 
 **Integration strategy:** Tests run in the existing OLMv1 CI jobs when the feature gate is enabled in the experimental manifest. The endpoint is exercised via in-cluster curl Jobs with ServiceAccount authentication.
 
@@ -184,6 +185,7 @@ The pluralization strategy (append `s`) does not handle irregular English plural
 
 **Note:** the feature is proposed as controlled by the `Tech Preview No Upgrades` flag so there is no distinct `Dev Preview` phase implemented.  Below points represent satisfied criteria in the current proposal.
 
+- Downstream feature gate `NewOLMCatalogdAPIV1GraphQL` mapped to upstream `GraphQLCatalogQueries` feature gate in cluster-olm-operator.
 - Feature gate `GraphQLCatalogQueries` available and functional when explicitly enabled.
 - Unit and e2e test coverage for all three query patterns (field selection, nested traversal, multi-type queries).
 - Documentation in the catalogd repository (`docs/howto/catalog-queries-graphql-endpoint.md`).
@@ -192,11 +194,10 @@ The pluralization strategy (append `s`) does not handle irregular English plural
 ### Tech Preview -> GA
 
 - Query-complexity or query-depth limits enforced to prevent abuse.
-- Load testing with catalogs containing 5,000+ bundles (comparable to community-operators and operatorhubio at ~4,300-4,800 bundles today) to validate memory and latency bounds.
-- Memory profiling on SNO with all three default OCP catalogs (~60 MB combined) to confirm pre-parsed-object cache RSS is acceptable.
+- Load testing with catalogs containing 5,000+ bundles (comparable to community-operators and operatorhubio at ~4,300-4,800 bundles today) to validate query latency with disk-backed object loading.
 - Feature gate defaults to enabled.
 - User-facing documentation in [openshift-docs](https://github.com/openshift/openshift-docs/).
-- OCP feature gate `NewOLMCatalogdGraphQL` defined in `openshift/api`.
+- OCP feature gate `NewOLMCatalogdAPIV1GraphQL` defined in `openshift/api`.
 
 ### Removing a deprecated feature
 
