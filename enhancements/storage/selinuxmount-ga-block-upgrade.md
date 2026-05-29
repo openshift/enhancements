@@ -104,43 +104,31 @@ The solution consists of four components working together:
    `SELinuxWarningController` already detects pods that use
    volumes with conflicting SELinux contexts. An
    OpenShift-specific `<carry>` patch will extend this
-   controller to write upgrade readiness status to *an API
-   object*, indicating whether incompatible workloads exist in
-   the cluster.
+   controller to write upgrade readiness status to ConfigMap
+   `openshift-config/selinux-conflicts`, indicating whether
+   incompatible workloads exist in the cluster.
 
 2. **cluster-storage-operator (CSO) upgrade check**: CSO will
-   watch *the API object* written by the
+   watch ConfigMap `openshift-config/selinux-conflicts` written by the
    `SELinuxWarningController` and set its `Upgradeable`
    condition accordingly. When incompatible workloads are
    detected, CSO sets `Upgradeable=False` with a message
-   describing the affected workloads and remediation steps.
+   describing how to find the affected workloads and remediation steps.
    When all issues are resolved, CSO sets
    `Upgradeable=True`.
 
 3. **Prometheus alerts**: Alerts will be defined to notify
    administrators about workloads incompatible with
    SELinuxMount GA, providing actionable information about
-   which pods and volumes are affected.
+   how to find the affected Pods.
 
 4. **Knowledge base article**, linked from the alert. It will
    describe details about why the cluster is un-upgradeable
    and how the cluster admin can fix it.
 
-What is *the actual API object* is currently open. Ideas:
-
-* A ConfigMap in a shared namespace, such as
-  `openshift-config/selinux-conflicts`. Does KCM have permissions to do so?
-* Directly cluster-storage-operator CR
-  `storages.operator.openshift.io` named `cluster`. KCM
-  for sure does not have permissions to do so. And the
-  CR is available only when Storage capability is enabled,
-  so it would add some error cases to KCM when the capability
-  is not enabled.
-
 In 5.1, we remove the KCM carry patch, i.e. KCM will
-stop updating the API object. 5.1 CSO will remove the
-object completely and clear any `Upgradeable: false`
-conditions.
+stop updating the ConfigMap. 5.1 CSO will remove the
+ConfigMap and clear any `Upgradeable: false` conditions.
 
 ### Workflow Description
 
@@ -158,9 +146,9 @@ storage components in OpenShift.
    and their volume mounts for SELinux context conflicts.
 2. When the controller detects pods that share a volume with
    different SELinux contexts, it writes this information to
-   an API object. With some throttling, so it does not get
+   the ConfigMap. With some throttling, so it does not get
    updated too often.
-3. CSO watches this API object and evaluates whether the
+3. CSO watches this ConfigMap and evaluates whether the
    cluster is safe to upgrade.
 4. If incompatible workloads exist, CSO sets
    `Upgradeable=False` on its ClusterOperator status with a
@@ -177,18 +165,18 @@ storage components in OpenShift.
      [storage-performant-security-policy](storage-performant-security-policy.md)
      enhancement).
 7. Once all conflicts are resolved, the
-   SELinuxWarningController updates the API object.
+   SELinuxWarningController updates the ConfigMap.
 8. CSO detects the change and sets `Upgradeable=True`.
 9. The cluster administrator can now safely upgrade to
    OCP 5.1.
 10. During the upgrade to 5.1, a newly started 5.1 KCM stops updating
-    the API object. A newly started CSO deletes it + removes any
+    the ConfigMap. A newly started CSO deletes it + removes any
     `Upgradeable: false` condition caused by it.
 
 ```mermaid
 sequenceDiagram
     participant KCM as SELinuxWarningController<br/>(kube-controller-manager)
-    participant API as API Object<br/>(type TBD)
+    participant API as ConfigMap<br/>(type TBD)
     participant CSO as cluster-storage-operator
     participant CO as ClusterOperator<br/>Status
     participant Prom as Prometheus
@@ -212,10 +200,10 @@ sequenceDiagram
 This enhancement does not add new CRDs, admission or
 conversion webhooks, aggregated API servers, or finalizers.
 
-The SELinuxWarningController carry patch will write to an
-existing API object type to communicate upgrade readiness
-status. The specific API object type is an open question
-(see Open Questions section).
+The SELinuxWarningController carry patch will write to a
+ConfigMap `openshift-config/selinux-conflicts` to communicate
+upgrade readiness status. Using `openshift-config` as a place
+to communicate cluster-scope information between KCM and CSO.
 
 ### Topology Considerations
 
@@ -226,7 +214,7 @@ management cluster. The SELinuxWarningController carry patch
 must be able to detect SELinux context conflicts for pods in
 the guest cluster.
 
-The API object used to signal presence of unsafe workloads must be
+The ConfigMap used to signal presence of unsafe workloads must be
 in the guest cluster, because that's the only cluster that KCM sees.
 
 CSO already has a kubeconfig to the guest cluster, so it can read
@@ -256,23 +244,59 @@ The implementation involves changes to two repositories:
 1. **openshift/kubernetes** (carry patch):
    - Modify the `SELinuxWarningController` in
      kube-controller-manager to write upgrade readiness
-     information to an API object when SELinux context
+     information to the ConfigMap when SELinux context
      conflicts are detected on volumes.
+   - Add RBAC rules that allow the `SELinuxWarningController`
+     to create / modify the ConfigMap.
    - The carry patch must be maintainable across Kubernetes
      rebases.
 
 2. **openshift/cluster-storage-operator**:
-   - Add a controller that watches the API object written
+   - Add a controller that watches the ConfigMap written
      by the SELinuxWarningController.
    - Based on the contents, set the `Upgradeable` condition
      on the `storage` ClusterOperator.
    - Define Prometheus alert rules for workloads
      incompatible with SELinuxMount GA.
    - Potentially add RBAC rules to the CSO to be able to
-     access the API object.
+     access the ConfigMap.
 
 The feature must be gated behind a feature gate
 `SELinuxMountGAReadiness`. It is expected to graduate to GA in 5.0.
+
+#### Content of the ConfigMap
+
+To mark the cluster un-upgradeable, a boolean flag in
+the ConfigMap would be enough. However, to display
+a nice message in the Upgradeable condition, it would be
+nice to have a rough number of affected Pods. Like:
+
+> About 100 Pods could get broken by upgrade to the next release.
+> See metric selinux_warning_controller_selinux_volume_conflict
+> to list all of them. Make sure all Pods that share the same
+> volume have either the same SELinux label or have
+> SELinuxChangePolicy set to `Recursive`. See KCS XYZ for
+> details.
+
+Whether the ConfigMap has just a bool or a rough number of
+Pods is an implementation detail at this point.
+We will ensure KCM updates the ConfigMap at most once per minute.
+
+#### Knowledge base article
+
+We need to write a Knowledge base article that describes what
+is going on and how to fix the Pods. Either ensuring that all
+Pods that share the same volume have the same SELinux label
+and they don't mix privileged and unprivileged Pods or
+the Pods have `SELinuxChangePolicy` set to `Recursive` either
+manually or by applying `SELinuxChangePolicy` to a whole namespace.
+
+The KCS must mention how to get list of the Pods. Listing metric
+`selinux_warning_controller_selinux_volume_conflict`
+would be enough for most users, but for those who don't run
+Prometheus we need to document how to scrape KCM metrics
+directly, i.e. getting a token + `curl` + `grep` against
+all KCMs.
 
 ### Risks and Mitigations
 
@@ -353,23 +377,7 @@ be much smaller and less problematic.
 
 ## Open Questions [optional]
 
-1. What API object should the SELinuxWarningController carry
-   patch write to in order to communicate upgrade readiness
-   to cluster-storage-operator? Options include a ConfigMap
-   in a well-known namespace, or a status condition on an
-   existing Custom Resource (Storage CR?).
-   The choice affects RBAC requirements for
-   kube-controller-manager and the watch complexity in CSO.
-
-2. What more e2e tests to add.
-
-3. What should be the update frequency of the API object.
-   On a busy cluster, conflicting Pods can come and
-   disappear quickly. Idea: the carry patch in KCM
-   updates the object every minute. It clears it only
-   when for the whole minute there were no conflicting
-   Pods. For that, we would need the cache introduced in
-   https://github.com/kubernetes/kubernetes/pull/138981.
+1. What more e2e tests to add.
 
 ## Test Plan
 
@@ -437,16 +445,16 @@ upgradeable until all SELinux context conflicts are
 resolved.
 
 During the upgrade, a newly started 5.1 KCM stops updating
-the API object. A newly started CSO deletes it + removes any
+the ConfigMap. A newly started CSO deletes it + removes any
 `Upgradeable: false` condition caused by it.
 
 **Downgrade from OCP 5.0**: If a cluster downgrades from
 5.0 to a previous version, the carry patch and CSO
 controller will no longer be present. Cluster admin
-may need to perform manual cleanup of the API object,
+may need to perform manual cleanup of the ConfigMap,
 as the old KCM won't know about it.
 
-Leaving the API object as it is should not harm anything.
+Leaving the ConfigMap as it is should not harm anything.
 The old CSO will ignore it.
 
 ## Version Skew Strategy
@@ -456,13 +464,13 @@ and cluster-storage-operator may be at different versions
 temporarily. This is safe because:
 
 - If the SELinuxWarningController carry patch is active but
-  CSO has not been updated yet, the API object will be
+  CSO has not been updated yet, the ConfigMap will be
   written but not consumed. The old CSO will not set the
   Upgradeable condition based on it, which is acceptable
   because the upgrade to 5.1 is not imminent during a 5.0
   upgrade.
 - If CSO is updated before kube-controller-manager, CSO
-  will not find the API object and will default to
+  will not find the ConfigMap and will default to
   `Upgradeable=True`, which is safe because the upgrade to
   5.1 cannot happen until the 5.0 upgrade completes.
 
@@ -501,7 +509,7 @@ scalability.
 - **If the SELinuxWarningController is not functioning**:
   Check kube-controller-manager logs for errors related to
   the SELinuxWarningController. If the controller is not
-  running, the API object will not be updated, and CSO may
+  running, the ConfigMap will not be updated, and CSO may
   default to `Upgradeable=True`. This means the upgrade
   safety check will not be active, and manual verification
   of workload compatibility is recommended before upgrading.
