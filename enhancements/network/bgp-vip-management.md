@@ -375,6 +375,21 @@ In this mode:
   for the VIP address to Linux routing table 198 via netlink.
 - When leadership is lost, kube-vip removes the route from table 198.
 - `vip_cleanroutingtable: "true"` is enabled to clean stale routes at startup.
+- **Ingress VIP readiness check:** For the ingress VIP, leader election alone
+  is not sufficient to ensure correct behavior. Unlike the API VIP (where
+  kube-apiserver runs on all control plane nodes), the ingress controller
+  (router/haproxy) may not be running on every node. If kube-vip claims the
+  ingress VIP on a node without a running ingress controller, traffic
+  reaching that node via BGP will fail. To prevent this, kube-vip will be
+  configured with a **service readiness check** for the ingress VIP that
+  periodically probes the local haproxy stats port (port 29445). If the
+  check fails, kube-vip relinquishes leadership for the ingress VIP (stops
+  renewing the Lease) and removes the ingress VIP route from table 198,
+  causing frr-k8s to withdraw the BGP advertisement. Another node where
+  the ingress controller is healthy will then win the election and claim
+  the VIP. This is functionally equivalent to keepalived's `vrrp_script`
+  mechanism, which curls the local haproxy stats port to determine whether
+  a node is eligible to hold the ingress VIP.
 
 kube-vip requires:
 - `hostNetwork: true` for netlink access
@@ -1228,12 +1243,26 @@ This would cause multiple frr-k8s instances to advertise the same VIP `/32`
 to external BGP peers, resulting in multiple BGP routes for the same
 destination with different next-hops.
 
-**Impact on traffic:** External routers receiving the same prefix from multiple
-next-hops will treat this as ECMP and distribute traffic across the
+**Impact on API VIP traffic:** External routers receiving the same prefix from
+multiple next-hops will treat this as ECMP and distribute traffic across the
 partitioned nodes. Since the API server runs on all control plane nodes, API
 requests will succeed regardless of which node receives them -- the client
 reaches a valid kube-apiserver instance either way. This is a transient
 condition, not a data-loss scenario.
+
+**Impact on ingress VIP traffic:** For the ingress VIP, split-brain is more
+consequential. Unlike the API server, the ingress controller (router/haproxy)
+may not be running on every control plane node. During a split-brain, if a
+node that incorrectly believes it is the leader does not have a running
+ingress controller, traffic routed to that node will fail. The ingress VIP
+readiness check (described in the kube-vip section above) mitigates this:
+even during a partition, a node that fails the local haproxy stats port
+check will remove the ingress VIP route from table 198, causing frr-k8s to
+withdraw the BGP advertisement for that next-hop. External routers will then
+only receive the advertisement from nodes where the ingress controller is
+actually running. This reduces the split-brain impact to the same "benign
+ECMP" behavior as the API VIP, since traffic will only reach nodes with a
+healthy ingress controller.
 
 **Resolution:** Kubernetes leader election uses Lease objects with a
 `leaseDurationSeconds` timeout. When the partition heals, the Lease state
