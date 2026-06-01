@@ -80,9 +80,18 @@ Otherwise, auto-discover:
    let the user pick which to include. Add a "Skip code analysis"
    option for document-only review.
 
-4. **If no local repos found**, inform the user the review will be
-   document-only. Suggest which repos they could clone for a deeper
-   review next time.
+4. **Offer to clone missing repos**. If the EP references repos that
+   are not available locally, present them to the user via
+   AskUserQuestion with multiSelect and offer to clone them:
+   ```
+   git clone --depth 1 https://github.com/openshift/{repo-name}.git \
+     ../{repo-name}
+   ```
+   Include a "Skip — document-only review" option. After cloning,
+   include newly cloned repos in the available set.
+
+5. **If no local repos found and user skips cloning**, inform the user
+   the review will be document-only.
 
 ## Step 3: Spawn Parallel Review Agents
 
@@ -290,7 +299,9 @@ as the basis for its design? Flag any claims about how the system
 currently works that are not backed by code references or links. EPs
 built on false assumptions about existing behavior are a common failure
 mode — every factual claim about current implementation should be
-verifiable.
+verifiable. For deeper validation, suggest running
+`/validate-assumptions` which checks claims against actual code and
+documentation.
 
 ### Lens 7: Cross-Feature Interaction and Testing
 
@@ -325,7 +336,8 @@ Existing vs Proposed: Flag if EP implies nonexistent code or proposes
 duplicating existing code. Verify base assumptions — if the EP claims
 "currently X works by doing Y", grep the repo to confirm. EPs built
 on hallucinated existing behavior are a critical failure mode; every
-assertion about current implementation must match the actual code.
+assertion about current implementation must match the actual code. For
+systematic assumption checking, suggest `/validate-assumptions`.
 
 Cite dual locations: `EP line N` vs `repo/path/file.go:M`.
 Categorize: CONTRADICTION / MISSING / UNDERSTATED / ACCURACY.
