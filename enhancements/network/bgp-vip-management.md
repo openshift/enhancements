@@ -528,9 +528,18 @@ type BGPVIPConfig struct {
 
 ```
 
-The types above (`BGPPeerConfig`, `BGPVIPConfig`) are added to the installer's
-bare metal platform types in `installer/pkg/types/baremetal/platform.go`
-(the `Platform` struct), which is the type that parses `install-config.yaml`.
+The types above (`BGPPeerConfig`, `BGPVIPConfig`) are defined as reusable Go
+types in a shared package (e.g., `installer/pkg/types/onprem/` or a common
+types package), not inside the baremetal-specific `platform.go`. Each on-prem
+platform struct that supports BGP VIP management references these shared types
+by embedding or aliasing them. For the first iteration, only the baremetal
+`Platform` struct in `installer/pkg/types/baremetal/platform.go` exposes
+`bgpVIPConfig`. When future platforms (vSphere, OpenStack, Nutanix) gain BGP
+VIP support, they add their own `bgpVIPConfig` field referencing the same
+shared types -- following the established precedent where `apiVIPs`,
+`ingressVIPs`, and `PlatformLoadBalancerType` are structurally identical
+across platforms but defined independently in each platform's types.
+
 This is distinct from the runtime `config/v1.BareMetalPlatformSpec` in
 `openshift/api` which represents the Infrastructure CR.
 
@@ -559,6 +568,32 @@ type Host struct {
     BGPPeers []BGPPeerConfig `json:"bgpPeers,omitempty"`
 }
 ```
+
+**Cross-platform considerations:** The `hosts[].bgpPeers` override is
+inherently baremetal-specific because only the baremetal platform has a
+`hosts[]` array in `install-config.yaml`. Other on-prem platforms (vSphere,
+OpenStack, Nutanix) do not have a per-host concept at install time -- vSphere
+uses `failureDomains[]`, OpenStack uses subnet references, and
+`platform: none` has no per-host configuration mechanism at all.
+
+There is no elegant way to express per-node BGP peer overrides in a
+platform-independent manner at install time. The OpenShift `install-config.yaml`
+API uses discriminated unions where each platform is an independent Go struct,
+and there is no shared "on-prem platform" base type or mixin. This is the same
+pattern followed by `apiVIPs`, `ingressVIPs`, and `loadBalancer.type`, which
+are structurally identical across platforms but defined independently in each
+platform's types.
+
+For platforms without `hosts[]`, per-node BGP peer overrides are handled
+**post-bootstrap via `FRRConfiguration` CRs with `nodeSelector`**, which is
+the day-2 steady-state mechanism for all platforms regardless. The
+`FRRConfiguration` CRD natively supports `nodeSelector`, so no new API is
+required. This means non-baremetal platforms will use the global
+`bgpVIPConfig.peers` for all nodes during bootstrap, with per-node
+differentiation available only after the API server is operational and
+`FRRConfiguration` CRs can be created. For most non-baremetal deployments
+this is acceptable because per-node peering differences are less common when
+nodes are not physically distributed across distinct ToR switches.
 
 The per-host peer override works as follows:
 
@@ -1306,6 +1341,14 @@ routing daemon used by MetalLB and OVN-Kubernetes BGP integration.
 1. When should ECMP support be introduced? What prerequisites (e.g., external
    health checking, graceful restart) must be in place before enabling
    multi-node VIP advertisement?
+
+2. When BGP VIP management is extended to non-baremetal on-prem platforms
+   (vSphere, OpenStack, Nutanix), should those platforms introduce a
+   lightweight per-node peer override mechanism at install time (e.g., a
+   platform-independent `bgpNodeOverrides[]` array keyed by expected
+   hostname), or is the post-bootstrap `FRRConfiguration` CR approach with
+   `nodeSelector` sufficient for per-node peer differentiation on all
+   non-baremetal platforms?
 
 ## Test Plan
 
