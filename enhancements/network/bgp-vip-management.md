@@ -262,7 +262,16 @@ Changes required:
   are updated during cluster upgrades and placed on any new control plane
   nodes (scale-up or replacement). The manifest will configure frr-k8s with
   host networking (`hostNetwork: true`) and the required security capabilities
-  (`NET_ADMIN`, `NET_RAW`, `SYS_ADMIN`, `NET_BIND_SERVICE`).
+  (`NET_ADMIN`, `NET_RAW`, `SYS_ADMIN`, `NET_BIND_SERVICE`). The frr-k8s
+  static pod manifest includes an FRR config renderer sidecar container
+  alongside the FRR daemon containers. This sidecar is analogous to the
+  `keepalived-monitor` sidecar that `baremetal-runtimecfg` runs in the
+  keepalived static pod: it renders the node-specific `frr.conf` at startup
+  by discovering the local node's hostname and primary IP, resolving the
+  correct BGP peer list from a per-node mapping file, and writing the
+  rendered config to a shared `emptyDir` volume for the FRR daemon. See the
+  "Runtime FRR Configuration Rendering" section in Implementation Details
+  for the full mechanism.
 
   MCO currently renders keepalived static pod manifests for on-prem platforms
   (baremetal, openstack, vsphere, nutanix) via `appendManifestsByPlatform()`
@@ -283,6 +292,19 @@ Changes required:
   - BGP neighbor definitions (address, remote ASN, password, BFD profile)
   - Route import from kernel table 198 (kube-vip's routing table)
   - Route filtering to only advertise VIP routes (`/32` or `/128`)
+
+  When per-host BGP peers are configured (via `hosts[].bgpPeers` in
+  `install-config.yaml`), the bootstrap FRR configuration is not a single
+  static file delivered identically to all nodes. Instead, the installer
+  generates a Go template (`frr.conf.tmpl`) and a per-node peer mapping
+  file (`frr-peers.json`) keyed by hostname. An FRR config renderer
+  sidecar in the frr-k8s static pod renders the node-specific `frr.conf`
+  at startup by discovering the local node's hostname and primary IP,
+  resolving the correct peer list from the mapping, and writing the
+  rendered config to a shared volume. This follows the same two-phase
+  rendering architecture used by the `keepalived-monitor` sidecar in
+  `baremetal-runtimecfg`. See the "Runtime FRR Configuration Rendering"
+  section in Implementation Details for the full mechanism.
 
 - **Transition to CRD-based configuration**: The frr-k8s configuration
   lifecycle has three distinct phases, each with a clear owner:
@@ -540,10 +562,23 @@ type Host struct {
 
 The per-host peer override works as follows:
 
-- **Bootstrap phase:** The installer generates a per-node `frr.conf` for each
-  host. If `host.bgpPeers` is set, that host's `frr.conf` uses the
-  host-specific peers; otherwise, it uses the global `bgpVIPConfig.peers`.
-  MCO renders the correct `frr.conf` for each node via per-node MachineConfig.
+- **Bootstrap phase:** MCO delivers a single, identical MachineConfig to all
+  master nodes containing a Go template (`frr.conf.tmpl`) and a JSON peer
+  mapping file (`frr-peers.json`) keyed by hostname. The installer generates
+  the peer mapping from `install-config.yaml`: for each host with
+  `host.bgpPeers` set, the mapping entry uses the host-specific peers;
+  hosts without a per-host override fall back to the global
+  `bgpVIPConfig.peers`. The frr-k8s static pod includes an FRR config
+  renderer sidecar (analogous to the `keepalived-monitor` sidecar in
+  `baremetal-runtimecfg`) that discovers the local node's hostname and
+  primary IP at startup, resolves the correct peer list from the mapping,
+  renders the final `frr.conf`, and writes it to a shared `emptyDir` volume
+  for the FRR daemon. This follows the same two-phase rendering architecture
+  (MCO delivers template, sidecar renders per-node config at runtime) used
+  by keepalived today. On baremetal IPI, hostname is deterministic: the
+  `hosts[].name` field becomes the RHCOS hostname through the BareMetalHost
+  provisioning flow. See the "Runtime FRR Configuration Rendering" section
+  in Implementation Details for the full mechanism.
 
 - **Post-bootstrap CRD phase:** CNO creates per-node `FRRConfiguration` CRs
   with `nodeSelector` matching individual nodes, each containing the
@@ -965,6 +1000,113 @@ The configuration supports both IPv4 and IPv6 address families for dual-stack
 deployments. When only single-stack is configured, the installer will generate
 only the relevant address family block.
 
+#### Runtime FRR Configuration Rendering
+
+MachineConfig is a pool-level primitive: all nodes in a MachineConfigPool
+(e.g., `master`) receive the same rendered MachineConfig. There is no
+per-node MachineConfig mechanism in MCO. When per-host BGP peers are
+configured via `hosts[].bgpPeers`, each node needs a different `frr.conf`
+with its specific peer list and router-id. This is solved using the same
+two-phase rendering architecture that keepalived uses with
+`baremetal-runtimecfg` today.
+
+**Phase 1 -- MCO delivers identical files to all nodes:**
+
+MCO renders a single MachineConfig for all master nodes containing:
+
+- A Go template file (`/etc/frr/frr.conf.tmpl`) with per-node variables
+  for the router-id and BGP neighbor definitions (e.g.,
+  `{{ .RouterID }}`, `{{ range .Peers }}`).
+- A JSON peer mapping file (`/etc/frr/frr-peers.json`) keyed by hostname,
+  generated by the installer from `install-config.yaml`. Each entry maps
+  a hostname to its BGP peer list. Hosts without a per-host override in
+  `hosts[].bgpPeers` are omitted from the mapping and fall back to the
+  global `bgpVIPConfig.peers` at render time.
+
+Both files are placed on disk via MachineConfig and mounted into the
+frr-k8s static pod via `hostPath` volumes.
+
+Example `frr-peers.json` for a multi-rack deployment:
+
+```json
+{
+  "globalPeers": [
+    {"peerAddress": "192.168.1.1", "peerASN": 64512, "bfdEnabled": "false"}
+  ],
+  "hostOverrides": {
+    "master-0": {
+      "peers": [
+        {"peerAddress": "192.168.1.1", "peerASN": 64512, "bfdEnabled": "true"}
+      ]
+    },
+    "master-1": {
+      "peers": [
+        {"peerAddress": "192.168.2.1", "peerASN": 64512, "bfdEnabled": "true"}
+      ]
+    },
+    "master-2": {
+      "peers": [
+        {"peerAddress": "192.168.3.1", "peerASN": 64512, "bfdEnabled": "true"}
+      ]
+    }
+  }
+}
+```
+
+**Phase 2 -- Sidecar renders per-node config at runtime:**
+
+The frr-k8s static pod includes an FRR config renderer sidecar container,
+analogous to the `keepalived-monitor` sidecar that `baremetal-runtimecfg`
+runs in the keepalived static pod. At startup, the sidecar:
+
+1. Reads the Go template and peer mapping file from the `hostPath` volumes.
+2. Discovers the local node's hostname via `os.Hostname()`.
+3. Discovers the local node's primary IP via
+   `/run/nodeip-configuration/primary-ip` (the same mechanism used by
+   `baremetal-runtimecfg` for `.NonVirtualIP`).
+4. Looks up the hostname in the `hostOverrides` map. If a per-host entry
+   exists, uses that peer list; otherwise, falls back to `globalPeers`.
+5. Renders the Go template with the resolved peer list and router-id
+   (primary IP).
+6. Writes the final `frr.conf` to a shared `emptyDir` volume that the FRR
+   daemon container reads at startup.
+
+When all nodes share the same peers (no `hosts[].bgpPeers` overrides), the
+sidecar still runs but the rendering is uniform -- only the router-id
+(derived from each node's primary IP) differs between nodes.
+
+**Node identity key:**
+
+The sidecar uses the OS hostname as the lookup key into the peer mapping.
+On baremetal IPI, hostname is deterministic: the `hosts[].name` field in
+`install-config.yaml` becomes the BareMetalHost CR name, which becomes the
+RHCOS hostname through the provisioning flow. This is the same identity
+mechanism used by the `configure-ovs` per-node NMState configuration
+dispatch. Future platform support (vSphere, OpenStack, `platform: none`)
+may require a more robust identity resolution strategy (e.g., IP-based
+matching or Kubernetes Node object lookup), since hostname assignment on
+those platforms is not always controlled by the installer.
+
+**Parallel with keepalived:**
+
+The existing keepalived static pod uses the same architecture:
+
+- MCO delivers an identical keepalived config template and pod manifest to
+  all master nodes.
+- The `keepalived-monitor` sidecar (from `baremetal-runtimecfg`) runs on
+  each node, discovers the local node's IP (`.NonVirtualIP`), hostname
+  (`.ShortHostname`), and peer IPs (queried from the local
+  kube-apiserver), and renders the final `keepalived.conf` at runtime.
+- The sidecar continuously monitors for changes (new nodes joining,
+  interface changes) and re-renders the config as needed.
+
+The FRR config renderer sidecar follows this pattern. During bootstrap
+(before the API server is available), it operates purely from local state
+(hostname, primary IP, files on disk). Post-bootstrap, it could optionally
+be extended to watch for configuration changes, though this is not required
+for the first iteration since the CRD-based handover (described above)
+takes over configuration management once the API server is available.
+
 #### FRR Daemon Startup Options
 
 The existing frr-k8s DaemonSet starts the BGP daemon with `-p 0` (no listening
@@ -1028,6 +1170,7 @@ implementation:
 | OVN-Kubernetes | `openshift/ovn-kubernetes` | OVN | Awareness of static pod frr-k8s, avoiding DaemonSet conflicts, FRRConfiguration CR coexistence |
 | frr-k8s | `openshift/frr` | MetalLB | Static pod deployment support, FRR daemon startup option changes |
 | kube-vip | (new) | Networking | OpenShift-specific build, inclusion in release payload, Routing Table Mode validation |
+| baremetal-runtimecfg | `openshift/baremetal-runtimecfg` | On-prem Networking | FRR config template rendering support (config renderer sidecar), per-node peer mapping resolution by hostname |
 
 ### Risks and Mitigations
 
