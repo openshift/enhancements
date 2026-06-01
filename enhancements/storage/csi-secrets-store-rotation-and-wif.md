@@ -116,7 +116,68 @@ settings to the CSI driver operand.
 **Cluster administrator** is responsible for managing CSI driver
 configuration.
 
+#### High-Level Architecture
+
+```mermaid
+flowchart TD
+    Admin["Cluster Administrator"] -->|edits| CCD["ClusterCSIDriver CR\n(operator.openshift.io/v1)"]
+
+    subgraph Operator["secrets-store-csi-driver-operator"]
+        AssetFunc["Dynamic AssetFunc\n(enriches CSIDriver manifest)"]
+        DSHook["DaemonSet Hook\n(sets container args)"]
+    end
+
+    CCD -->|watched by| AssetFunc
+    CCD -->|watched by| DSHook
+
+    AssetFunc -->|sets requiresRepublish\n+ tokenRequests| CSIDriver["CSIDriver Object\n(storage.k8s.io/v1)"]
+    DSHook -->|sets --enable-secret-rotation\n+ --rotation-poll-interval| DaemonSet["DaemonSet\n(csi-driver container)"]
+
+    CSIDriver -->|read by| Kubelet["Kubelet"]
+    DaemonSet -->|runs| Driver["CSI Driver Pod"]
+    Kubelet -->|"NodePublishVolume\n(with SA tokens)"| Driver
+    Driver -->|fetches secrets| Provider["Provider Plugin\n(AWS/Azure/GCP)"]
+```
+
+#### tokenRequests Policy Flow
+
+```mermaid
+flowchart TD
+    Start["Operator Reconcile"] --> CheckPolicy{"tokenRequests.policy?"}
+
+    CheckPolicy -->|"nil or Unmanaged\n(default)"| ReadExisting["Read existing CSIDriver\ntokenRequests from cluster"]
+    ReadExisting --> Preserve["Include existing tokenRequests\nin desired CSIDriver spec"]
+    Preserve --> Apply["ApplyCSIDriver\n(hash-based reconcile)"]
+
+    CheckPolicy -->|Managed| UseAudiences["Use audiences from\nClusterCSIDriver"]
+    UseAudiences --> Apply
+
+    Apply --> HashCheck{"Spec hash\nchanged?"}
+    HashCheck -->|No| NoOp["No-op"]
+    HashCheck -->|Yes| Recreate["Delete + Recreate\nCSIDriver"]
+```
+
 #### Enabling Workload Identity Federation
+
+The `tokenRequests` field uses a `policy` sub-field to control whether the
+operator manages the `CSIDriver.spec.tokenRequests` field or preserves existing
+user-configured values.
+
+**Why `tokenRequests.policy` exists**: Some clusters already have manually patched
+`tokenRequests` on the CSIDriver object (e.g., Azure WIF audiences configured
+before this feature existed). On upgrade, the operator will add `requiresRepublish: true`
+to the desired CSIDriver spec, changing the spec-hash and triggering a
+delete+recreate. Without the policy field, this would wipe any existing
+tokenRequests and disrupt WIF. The `"Unmanaged"` default ensures existing
+configurations are preserved until the administrator explicitly opts in to
+operator management.
+
+**Migration workflow**:
+- On upgrade, `tokenRequests.policy` defaults to `"Unmanaged"`, preserving any
+  existing tokenRequests on the CSIDriver.
+- When ready, the administrator sets `tokenRequests.policy: "Managed"` and
+  populates `tokenRequests.audiences` with the desired audiences.
+- From that point, the operator is the sole source of truth for tokenRequests.
 
 1. The cluster administrator edits the `ClusterCSIDriver` for
    `secrets-store.csi.k8s.io`:
@@ -131,14 +192,16 @@ configuration.
        driverType: SecretsStore
        secretsStore:
          tokenRequests:
-           - audience: "sts.amazonaws.com"
-             expirationSeconds: 3600
+           policy: Managed
+           audiences:
+             - audience: "sts.amazonaws.com"
+               expirationSeconds: 3600
    ```
 
 2. The operator will detect the `ClusterCSIDriver` change via the shared informer.
 3. The `StaticResourceController` will call the dynamic `AssetFunc` which will
    read the `ClusterCSIDriver` configuration and generate a `CSIDriver` manifest
-   with `spec.tokenRequests` populated.
+   with `spec.tokenRequests` populated from the audiences list.
 4. `resourceapply.ApplyCSIDriver` will detect the spec hash difference and
    recreate the `CSIDriver` object with the new `tokenRequests`.
 5. Kubelet will observe the updated `CSIDriver` and begin providing the requested
@@ -204,15 +267,49 @@ type SecretsStoreCSIDriverConfigSpec struct {
     // +optional
     SecretRotation *SecretsStoreSecretRotation `json:"secretRotation,omitempty"`
 
-    // tokenRequests specifies service account token audiences that kubelet
-    // will provide to the CSI driver during NodePublishVolume calls.
-    // These tokens enable workload identity federation (WIF) with cloud
-    // providers such as AWS, Azure, and GCP.
-    // An empty audience string means the token uses the kube-apiserver's
-    // default APIAudiences.
+    // tokenRequests controls service account token configuration for
+    // workload identity federation (WIF) with cloud providers.
+    // +optional
+    TokenRequests *SecretsStoreTokenRequests `json:"tokenRequests,omitempty"`
+}
+
+// TokenRequestsPolicy determines how the operator manages the tokenRequests
+// field on the storage.k8s.io CSIDriver object.
+// +kubebuilder:validation:Enum=Managed;Unmanaged
+type TokenRequestsPolicy string
+
+const (
+    // TokenRequestsManaged means the operator uses the audiences list
+    // as the sole source of truth for the CSIDriver.spec.tokenRequests field.
+    TokenRequestsManaged TokenRequestsPolicy = "Managed"
+
+    // TokenRequestsUnmanaged means the operator preserves any existing
+    // tokenRequests already configured on the CSIDriver object and does not
+    // overwrite them.
+    TokenRequestsUnmanaged TokenRequestsPolicy = "Unmanaged"
+)
+
+// SecretsStoreTokenRequests configures how service account tokens are
+// provided to the Secrets Store CSI driver for workload identity federation.
+type SecretsStoreTokenRequests struct {
+    // policy controls whether the operator manages tokenRequests on the
+    // CSIDriver object.
+    // When "Unmanaged" (default), existing tokenRequests on the CSIDriver
+    // are preserved and the audiences list below is ignored.
+    // When "Managed", the operator sets tokenRequests from the audiences
+    // list, replacing any previously configured values.
+    // +default="Unmanaged"
+    // +optional
+    Policy TokenRequestsPolicy `json:"policy,omitempty"`
+
+    // audiences specifies service account token audiences that kubelet will
+    // provide to the CSI driver during NodePublishVolume calls. These tokens
+    // enable workload identity federation (WIF) with cloud providers such as
+    // AWS, Azure, and GCP.
+    // Only honored when policy is "Managed".
     // +optional
     // +listType=atomic
-    TokenRequests []SecretsStoreTokenRequest `json:"tokenRequests,omitempty"`
+    Audiences []SecretsStoreTokenRequest `json:"audiences,omitempty"`
 }
 
 // SecretRotationPolicy determines whether automatic secret rotation is active
@@ -282,9 +379,11 @@ spec:
         policy: Enabled
         rotationPollIntervalSeconds: 300
       tokenRequests:
-        - audience: "sts.amazonaws.com"
-          expirationSeconds: 3600
-        - audience: "api://AzureADTokenExchange"
+        policy: Managed
+        audiences:
+          - audience: "sts.amazonaws.com"
+            expirationSeconds: 3600
+          - audience: "api://AzureADTokenExchange"
 ```
 
 #### Resulting CSIDriver Object
@@ -387,7 +486,7 @@ All new fields will have defaults that match the operator's current hardcoded
 behavior:
 - `secretRotation.policy` will default to `"Enabled"`
 - `rotationPollIntervalSeconds` will default to `120` (2 minutes)
-- `tokenRequests` will default to empty (no WIF)
+- `tokenRequests.policy` will default to `"Unmanaged"` (preserves existing CSIDriver tokenRequests)
 
 Clusters upgrading to the new operator version with no `driverConfig` set will see
 **no change in behavior**. The operator will fall back to these defaults when the
@@ -447,21 +546,42 @@ Nothing considered.
 
 ### E2E Tests
 
+**Secret Rotation scenarios:**
 - No `driverConfig` set: operator uses defaults (`requiresRepublish: true`,
-  `--enable-secret-rotation=true`, `--rotation-poll-interval=2m`, no
+  `--enable-secret-rotation=true`, `--rotation-poll-interval=2m0s`, no
   `tokenRequests`).
-- `secretRotation.policy: "Enabled"` with custom `rotationPollIntervalSeconds`: operator
-  sets `requiresRepublish: true` and the custom interval on the DaemonSet.
-- `secretRotation.policy: "Disabled"`: operator sets `requiresRepublish: false` and
-  `--enable-secret-rotation=false` on the DaemonSet.
-- `tokenRequests` with one or more audiences: operator sets matching
-  `spec.tokenRequests` on the `CSIDriver` object.
-- `tokenRequests` with `expirationSeconds`: operator propagates the expiration
-  value to the `CSIDriver` `tokenRequests`.
-- Multi-cloud WIF: a single Secrets Store CSI Driver instance with multiple
-  `tokenRequests` audiences can mount secrets from different cloud providers.
-- Upgrade: cluster with no `driverConfig` set upgrades to the new version
-  and retains the same rotation behavior.
+- `secretRotation.policy: "Enabled"` with custom `rotationPollIntervalSeconds: 300`:
+  verify CSIDriver has `requiresRepublish: true` and DaemonSet has
+  `--rotation-poll-interval=5m0s`.
+- `secretRotation.policy: "Disabled"`: verify CSIDriver has `requiresRepublish: false`
+  and DaemonSet has `--enable-secret-rotation=false`.
+- Toggle rotation from Disabled back to Enabled: verify CSIDriver and DaemonSet
+  revert to rotation-enabled state.
+
+**tokenRequests migration scenarios:**
+- Pre-existing manually patched tokenRequests on CSIDriver (Azure WIF) + upgrade
+  with no `tokenRequests` configured in ClusterCSIDriver: verify existing
+  tokenRequests are preserved on CSIDriver (Unmanaged default).
+- `tokenRequests.policy: "Unmanaged"` with audiences configured: verify existing
+  CSIDriver tokenRequests are preserved (audiences ignored), status condition
+  warns user.
+- `tokenRequests.policy: "Managed"` with audiences: verify CSIDriver.spec.tokenRequests
+  is set from the audiences list.
+- `tokenRequests.policy: "Managed"` with empty audiences: verify
+  CSIDriver.spec.tokenRequests is cleared.
+- Transition from Unmanaged to Managed: user sets policy to Managed with
+  audiences, verify CSIDriver is updated to match.
+
+**Multi-cloud WIF scenarios:**
+- Multiple audiences (e.g., AWS + Azure): verify CSIDriver has both tokenRequests entries.
+- Audience with custom expirationSeconds: verify expirationSeconds is propagated
+  to CSIDriver.
+
+**Upgrade scenarios:**
+- Upgrade from previous version with manually patched Azure WIF: no disruption,
+  pods continue to mount secrets.
+- Upgrade from previous version with no tokenRequests: defaults maintained, no
+  behavior change.
 
 ## Graduation Criteria
 
@@ -484,7 +604,16 @@ N/A
 **Upgrade**: Clusters upgrading to the new operator version will see no behavior
 change. The operator defaults match the previously hardcoded values
 (`requiresRepublish: true`, `--enable-secret-rotation=true`,
-`--rotation-poll-interval=2m`, no `tokenRequests`). 
+`--rotation-poll-interval=2m`).
+
+**tokenRequests migration**: The `tokenRequests.policy` field defaults to
+`"Unmanaged"`, which means the operator will preserve any existing `tokenRequests`
+already configured on the CSIDriver object (e.g., manually patched Azure WIF
+audiences). This ensures no disruption to workload identity federation on upgrade.
+
+To adopt operator-managed tokenRequests, the administrator must:
+1. Set `tokenRequests.policy: "Managed"` in the `ClusterCSIDriver`.
+2. Populate `tokenRequests.audiences` with the desired audiences.
 
 To adopt the new configuration, the administrator must edit the `ClusterCSIDriver`
 to set `driverType: SecretsStore` with the desired `secretsStore` configuration.
@@ -518,7 +647,8 @@ N/A
   `ClusterCSIDriver` configuration.
 
 - **Disabling the feature**: Set `driverConfig.secretsStore.secretRotation.policy: "Disabled"`
-  to disable rotation, or remove `tokenRequests` to disable WIF.
+  to disable rotation, or set `tokenRequests.policy: "Managed"` with empty audiences to
+  clear WIF configuration.
 
 
 ## Infrastructure Needed [optional]
