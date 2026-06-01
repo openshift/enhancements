@@ -224,7 +224,7 @@ To enable the apiservers to access the KMS plugin, the `/var/run/kmsplugin` dire
              type: AppRole
              appRole:
                secret:
-                 name: vault-approle # Secret in openshift-config namespace with roleID and secretID keys
+                 name: vault-approle # Secret in openshift-config namespace with role-id and secret-id keys
            transitMount: transit
            transitKey: my-encryption-key
    ```
