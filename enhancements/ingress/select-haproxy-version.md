@@ -79,7 +79,7 @@ consistency and track version adoption across the cluster.
   OpenShift release and the 2 previous minor releases (e.g., OCP 5.1, 5.0,
   4.22), provided they are actively supported by Red Hat
 - Provide a 1:1 mapping from OCP version to the default HAProxy version for
-  that release (e.g., `haproxyVersion: "OCP-4.22"` always uses the default
+  that release (e.g., `haproxyOCPVersion: "OCP-4.22"` always uses the default
   HAProxy version from OCP 4.22), providing an intuitive correlation between
   OCP versions and HAProxy versions (see Alternative API Approach #2 for a
   rejected approach using abstract version identifiers)
@@ -111,9 +111,9 @@ consistency and track version adoption across the cluster.
 
 This enhancement proposes adding a new field to the IngressController API
 that allows administrators to specify which HAProxy version to use. The
-version is referenced by OpenShift release version (e.g., "OCP-4.21") or
-the special value "Current" (default) which always uses the default
-HAProxy version on the current OpenShift release.
+version is referenced by OpenShift release version (e.g., "OCP-4.21"). When
+the field is empty (the default), it always uses the default HAProxy version
+from the current OpenShift release.
 
 When an administrator specifies an OpenShift release version, the
 IngressController will use the HAProxy version that shipped with that
@@ -150,7 +150,7 @@ OpenShift cluster infrastructure and upgrades.
    identifies the HAProxy version shipped with the new release.
 2. The cluster administrator creates or updates an IngressController resource,
    specifying the desired HAProxy version in the new API field (e.g.,
-   `haproxyVersion: "OCP-5.0"` or `haproxyVersion: "Current"`).
+   `haproxyOCPVersion: "OCP-5.0"`, or leaving it empty for the default).
 3. The ingress-controller-operator validates the requested version is
    available and supported.
 4. The operator updates the IngressController deployment to use the
@@ -162,22 +162,22 @@ OpenShift cluster infrastructure and upgrades.
 #### Testing a New HAProxy Version Before Production
 
 1. The cluster administrator creates a new IngressController with
-   `haproxyVersion: "Current"` to test the latest HAProxy version.
+   `haproxyOCPVersion` unset (empty) to test the latest HAProxy version.
 2. The cluster administrator configures test routes to use the new
    IngressController via domain or namespace selectors.
 3. The cluster administrator runs tests against the test IngressController
    to validate HAProxy behavior.
 4. Once validated, the cluster administrator updates production
-   IngressControllers to use `haproxyVersion: "Current"` or the specific
-   OpenShift version.
+   IngressControllers to use an empty `haproxyOCPVersion` (for the latest) or
+   a specific OpenShift version.
 
 #### Upgrading OpenShift with HAProxy Version Control
 
 1. The cluster administrator initiates an OpenShift cluster upgrade from
    version 5.0 to 5.1.
-2. For IngressControllers with `haproxyVersion: "Current"`, the operator
+2. For IngressControllers with `haproxyOCPVersion` unset (empty), the operator
    automatically upgrades to the HAProxy version from OpenShift 5.1.
-3. For IngressControllers with `haproxyVersion: "OCP-5.0"`, the operator
+3. For IngressControllers with `haproxyOCPVersion: "OCP-5.0"`, the operator
    preserves the HAProxy version from OpenShift 5.0.
 4. The cluster administrator validates production applications on
    IngressControllers running HAProxy from OpenShift 5.0.
@@ -191,7 +191,7 @@ sequenceDiagram
     participant Operator as Ingress Operator
     participant Router as Router Pods
 
-    Admin->>IC: Update haproxyVersion field
+    Admin->>IC: Update haproxyOCPVersion field
     IC->>Operator: Watch event for spec change
     Operator->>Operator: Validate version availability
     alt Version not available
@@ -215,51 +215,65 @@ the HAProxy version.
 The proposed API fields for the IngressController spec:
 
 ```go
-// HAProxyVersion specifies which HAProxy version to use for this
-// IngressController. Valid values are:
-// - "Current" (default): Use the HAProxy version from the current OpenShift
-//   release (the most recent version available)
-// - "OCP-X.Y": Use the HAProxy version from OpenShift release X.Y
+// HAProxyOCPVersion specifies the OCP release whose default HAProxy version
+// should be applied to this IngressController.
 //
-// Each OpenShift version has a 1:1 mapping to a specific HAProxy version.
+// For example, selecting "OCP-4.22" will configure the IngressController to use 
+// the default HAProxy version shipped with OCP 4.22.
+//
+// Valid values are:
+// - Empty string (default): Use the default HAProxy version from the current
+//   OpenShift release (the most recent version available)
+// - "OCP-X.Y": Use the default HAProxy version from OpenShift release X.Y
+//
 // Exactly 3 versions are supported: the current OpenShift release and the 2
 // prior minor releases, provided they are actively supported by Red Hat.
 //
+// If a specific OCP version is set and would become unsupported in a target
+// cluster upgrade (older than target release minus 2), the ingress
+// ClusterOperator's Upgradeable condition will be set to False, blocking the
+// cluster upgrade until this field is updated to empty or a supported version.
+//
 // +optional
-// +kubebuilder:default="Current"
-// +kubebuilder:validation:Pattern=`^(Current|OCP-[0-9]+\.[0-9]+)$`
+// +kubebuilder:validation:MinLength=0
+// +kubebuilder:validation:MaxLength=12
+// +kubebuilder:validation:Pattern=`^OCP-[0-9]+\.[0-9]+$`
 // +openshift:enable:FeatureGate=SelectableHAProxyVersion
-HAProxyVersion string `json:"haproxyVersion,omitempty"`
+HAProxyOCPVersion string `json:"haproxyOCPVersion,omitempty"`
 ```
 
 The proposed API fields for the IngressController status:
 
 ```go
-// EffectiveHAProxyVersion reports the OCP version determining the HAProxy
-// version currently in use by this IngressController. This reflects the
-// resolved value of the spec.haproxyVersion field.
+// EffectiveHAProxyOCPVersion reports the OCP release whose default HAProxy
+// version is currently in use by this IngressController. This reflects the
+// resolved value of the spec.haproxyOCPVersion field.
 //
 // Examples:
-// - "OCP-5.0": Using HAProxy from OpenShift 5.0
-// - "OCP-4.22": Using HAProxy from OpenShift 4.22
+// - "OCP-5.0": Using the default HAProxy version from OpenShift 5.0
+// - "OCP-4.22": Using the default HAProxy version from OpenShift 4.22
 //
 // The actual HAProxy binary version number is available through HAProxy's
 // own metrics.
 //
 // +optional
-EffectiveHAProxyVersion string `json:"effectiveHAProxyVersion,omitempty"`
+// +kubebuilder:validation:MinLength=0
+// +kubebuilder:validation:MaxLength=12
+// +kubebuilder:validation:Pattern=`^OCP-[0-9]+\.[0-9]+$`
+// +openshift:enable:FeatureGate=SelectableHAProxyVersion
+EffectiveHAProxyOCPVersion string `json:"effectiveHAProxyOCPVersion,omitempty"`
 ```
 
-The validation pattern `^(Current|OCP-[0-9]+\.[0-9]+)$` ensures that only
-"Current" or properly formatted "OCP-X.Y" values (e.g., "OCP-5.0",
-"OCP-4.22") are accepted. Additional validation logic in the operator will
-verify that the specified OCP version is available and supported.
+The validation pattern `^OCP-[0-9]+\.[0-9]+$` ensures that only an empty
+string or properly formatted "OCP-X.Y" values (e.g., "OCP-5.0", "OCP-4.22")
+are accepted. Additional validation logic in the operator will verify that
+the specified OCP version is available and supported.
 
 The field will be gated behind the `SelectableHAProxyVersion` feature gate
 and will only appear in the CRD when the feature gate is enabled.
 
 This modification does not change the behavior of existing IngressController
-resources. When the field is not specified or set to "Current", the
+resources. When the field is not specified or it is empty, the
 IngressController will use the latest HAProxy version, maintaining backward
 compatibility.
 
@@ -530,7 +544,7 @@ differing. Images are tagged by the target OCP version.
 
 The router and HAProxy evolve together within each image as a complete unit.
 The ingress-controller-operator selects the appropriate image based on the
-`haproxyVersion` field. Router code bug fixes are applied to all supported
+`haproxyOCPVersion` field. Router code bug fixes are applied to all supported
 images using the same backport strategy used for patch releases across OCP
 versions.
 
@@ -557,7 +571,7 @@ Disadvantages:
 The implementation using the sidecar deployment model requires the following
 high-level code changes:
 
-1. **API Changes**: Add the `haproxyVersion` field to the IngressController
+1. **API Changes**: Add the `haproxyOCPVersion` field to the IngressController
    CRD in the `openshift/api` repository, gated behind the
    `SelectableHAProxyVersion` feature gate.
 
@@ -568,7 +582,7 @@ high-level code changes:
    specify the Jira component, contact person, and link to this enhancement.
 
 3. **Operator Logic**: Update the ingress-controller-operator to:
-   - Read and validate the `haproxyVersion` field
+   - Read and validate the `haproxyOCPVersion` field
    - Map the OCP version to the appropriate HAProxy sidecar container image
      reference
    - Update the router deployment to include the HAProxy sidecar container
@@ -576,7 +590,7 @@ high-level code changes:
    - Configure the init container to copy static files and templates to the
      shared volume
    - Report the effective HAProxy version in a new IngressController status
-     field (e.g., `status.effectiveHAProxyVersion: "OCP-4.22"`) showing the
+     field (e.g., `status.effectiveHAProxyOCPVersion: "OCP-4.22"`) showing the
      OCP version that determines the HAProxy version in use
    - HAProxy's own version number is available through HAProxy's built-in
      metrics
@@ -593,18 +607,18 @@ high-level code changes:
 5. **Version Validation**: Implement validation to ensure:
    - Only supported OpenShift release versions can be specified (current and
      2 previous minor versions)
-   - Only "Current" or "OCP-X.Y" format is accepted
+   - Only empty string or "OCP-X.Y" format is accepted
    - Requested OCP versions are available in the current cluster
    - Exactly 3 versions are provided (except OCP 5.0 which provides 2)
 
 6. **Upgrade Handling**: Implement logic to handle cluster upgrades according
    to the specified version policy:
-   - "Current" always uses the latest available version
+   - Empty `haproxyOCPVersion` always uses the latest available version
    - Specific versions are preserved if available in the target release
    - Set the ingress ClusterOperator resource's `Upgradeable` condition to
-     `False` when any IngressController references a `haproxyVersion` that
+     `False` when any IngressController references a `haproxyOCPVersion` that
      would become unsupported in the target release, preventing cluster
-     upgrades until administrators update to "Current" or a supported version.
+     upgrades until administrators update to empty or a supported version.
 
 ### Risks and Mitigations
 
@@ -734,15 +748,15 @@ OpenShift release.
    identify potential issues with specific versions?
 
 3. ~~**HAProxy version pinning during initial feature adoption**: Since OCP 5.0
-    is the first release where the `haproxyVersion` field becomes available,
+    is the first release where the `haproxyOCPVersion` field becomes available,
     how should administrators pin to OCP 4.22's HAProxy version when upgrading
     from OCP 4.22 to OCP 5.0?~~ **RESOLVED**: The migration should preserve the
     HAProxy version from 4.22 during upgrades from OCP 4.22 to OCP 5.0. The
-    migration process will automatically populate the `haproxyVersion` field with
+    migration process will automatically populate the `haproxyOCPVersion` field with
     "OCP-4.22" for all existing IngressControllers during the upgrade to 5.0,
     ensuring HAProxy version stability. Administrators who want to adopt OCP
-    5.0's newer HAProxy version must explicitly update the `haproxyVersion` field
-    to "Current" after the upgrade completes. This approach prioritizes upgrade
+    5.0's newer HAProxy version must explicitly update the `haproxyOCPVersion` field
+    to empty after the upgrade completes. This approach prioritizes upgrade
     safety and allows administrators to test and validate the new HAProxy version
     on their own timeline.
 
@@ -753,7 +767,7 @@ OpenShift release.
      libraries from older OCP releases on newer kernels?
 
 5. **Version to image mapping**: How does the operator maintain the mapping
-   from `haproxyVersion: "OCP-X.Y"` to the HAProxy sidecar container image
+   from `haproxyOCPVersion: "OCP-X.Y"` to the HAProxy sidecar container image
    reference?
    - Is the mapping hardcoded in the operator?
    - Stored in an API resource?
@@ -765,7 +779,7 @@ OpenShift release.
      - Day 0: OCP 5.0 releases, supports HAProxy from 5.0 and 4.22
      - Day 90: OCP 5.1 releases, supports HAProxy from 5.1, 5.0, and 4.22
      - Day 180: OCP 4.21 goes EOL (but 4.22, 5.0, 5.1 are still supported)
-   - On Day 180, if a cluster is running OCP 5.0 with `haproxyVersion:
+   - On Day 180, if a cluster is running OCP 5.0 with `haproxyOCPVersion:
      "OCP-4.21"`, should the IngressController:
      - Continue running with OCP 4.21's HAProxy?
      - Set a warning/degraded condition?
@@ -795,7 +809,7 @@ OpenShift release.
    releases.
 
 9. **HAProxy version correlation and visibility**: The IngressController
-   status shows the OCP version (e.g., `status.effectiveHAProxyVersion:
+   status shows the OCP version (e.g., `status.effectiveHAProxyOCPVersion:
    "OCP-5.0"`) and HAProxy exposes its own version number in metrics.
    - Do administrators need an explicit mapping table (OCP version → HAProxy
      version number) in documentation?
@@ -810,7 +824,7 @@ OpenShift release.
     - Should 5.x releases support HAProxy versions from 4.x releases, or only
       from 5.x releases?
     - Example: If OCP 5.2 and OCP 4.25 are both actively supported, should
-      OCP 5.2 allow `haproxyVersion: "OCP-4.25"`?
+      OCP 5.2 allow `haproxyOCPVersion: "OCP-4.25"`?
     - Should there be separate support tracks for 4.x and 5.x?
 
 11. **Custom HAProxy image configuration**: Should administrators be allowed to
@@ -831,7 +845,7 @@ OpenShift release.
 The test plan for this enhancement must include:
 
 **Unit Tests**:
-- API validation for the `haproxyVersion` field
+- API validation for the `haproxyOCPVersion` field
 - Version selection logic in the operator
 - Version compatibility validation
 - Upgrade scenario handling
@@ -849,7 +863,7 @@ appropriate test type labels like `[Suite:openshift/conformance/parallel]`,
 `[Serial]`, `[Slow]`, or `[Disruptive]` as needed.
 
 Tests must cover:
-- Basic functionality: selecting "Current" and specific OpenShift versions
+- Basic functionality: using empty value (default) and specific OpenShift versions
 - Version persistence across cluster upgrades
 - Multiple IngressControllers with different HAProxy versions
 - Validation that routes work correctly with different HAProxy versions
@@ -863,7 +877,7 @@ Tests must cover:
 - Invalid version format strings
 - Verify `Upgradeable=False` condition when attempting to upgrade to an
   OpenShift version that does not support the currently selected
-  `haproxyVersion`
+  `haproxyOCPVersion`
 
 ## Graduation Criteria
 
@@ -890,7 +904,7 @@ Tests must cover:
 
 - Extensive testing including upgrade and scale scenarios
 - At least one full release cycle in Tech Preview
-- Available by default with `haproxyVersion: "Current"` behavior
+- Available by default with empty `haproxyOCPVersion` (current release) behavior
 - Telemetry data showing feature adoption and stability
 - User-facing documentation in openshift-docs
 - Performance testing showing no regression
@@ -906,27 +920,26 @@ N/A - This is a new feature.
 **Upgrades**:
 
 When upgrading an OpenShift cluster:
-1. IngressControllers with `haproxyVersion: "Current"` (or field unset) will
-   automatically use the new HAProxy version from the upgraded OpenShift
-   release.
-2. IngressControllers with `haproxyVersion: "OCP-X.Y"` will preserve the
+1. IngressControllers with `haproxyOCPVersion` unset (empty) will automatically
+   use the new HAProxy version from the upgraded OpenShift release.
+2. IngressControllers with `haproxyOCPVersion: "OCP-X.Y"` will preserve the
    specified HAProxy version, provided it is still within the supported
    window (current release and up to 2 previous releases).
 3. If a pinned version would become unsupported in the target release
    (older than the target release minus 2), the ingress-controller-operator
    will set the ingress ClusterOperator's `Upgradeable` condition to `False`,
    blocking the cluster upgrade. The administrator must update the version
-   selection to "Current" or a supported version before proceeding.
+   selection to empty or a supported version before proceeding.
 
 No changes to existing IngressController configurations are required during
 upgrades. The default behavior (using the latest HAProxy) is preserved.
 
 **Special Case - Upgrading to OCP 5.0 (First Release with Feature)**:
 
-When upgrading from OCP 4.22 (or earlier) to OCP 5.0, the `haproxyVersion`
+When upgrading from OCP 4.22 (or earlier) to OCP 5.0, the `haproxyOCPVersion`
 field does not exist in the source release. The behavior during this
 bootstrapping scenario is addressed in Open Question #3: the migration process
-will automatically populate the `haproxyVersion` field with "OCP-4.22" for all
+will automatically populate the `haproxyOCPVersion` field with "OCP-4.22" for all
 existing IngressControllers during the upgrade to 5.0.
 
 ## Version Skew Strategy
@@ -945,7 +958,7 @@ different router pods may temporarily run different HAProxy versions, which
 is acceptable as each IngressController operates independently.
 
 **API Compatibility**:
-The new `haproxyVersion` field is optional and gated behind a feature gate.
+The new `haproxyOCPVersion` field is optional and gated behind a feature gate.
 Older versions of the operator (before the feature) will ignore this field.
 Newer versions of the operator will handle both the presence and absence of
 the field gracefully.
