@@ -63,6 +63,10 @@ As a cluster administrator, I want to gradually migrate my IngressControllers
 from one LTS OpenShift version's HAProxy to the next, so that I can manage
 changes incrementally across multiple OpenShift releases.
 
+As a cluster administrator, I want to downgrade an existing IngressController
+to a previous HAProxy version, so that I can resolve a critical outage or
+degradation caused by a later HAProxy version.
+
 As a platform operations team, I want to monitor and manage HAProxy versions
 across multiple IngressControllers at scale, so that I can ensure
 consistency and track version adoption across the cluster.
@@ -74,9 +78,11 @@ consistency and track version adoption across the cluster.
 - Support exactly 3 distinct HAProxy versions simultaneously: the current
   OpenShift release and the 2 previous minor releases (e.g., OCP 5.1, 5.0,
   4.22), provided they are actively supported by Red Hat
-- Provide a 1:1 mapping from OCP version to HAProxy version (e.g.,
-  `haproxyVersion: "OCP-4.22"` always uses the specific HAProxy version that
-  shipped with OCP 4.22)
+- Provide a 1:1 mapping from OCP version to the default HAProxy version for
+  that release (e.g., `haproxyVersion: "OCP-4.22"` always uses the default
+  HAProxy version from OCP 4.22), providing an intuitive correlation between
+  OCP versions and HAProxy versions (see Alternative API Approach #2 for a
+  rejected approach using abstract version identifiers)
 - Allow testing new HAProxy versions on dedicated IngressControllers before
   production deployment
 - Maintain compatibility with dynamic HAProxy compilation and required
@@ -682,7 +688,21 @@ arbitrary HAProxy versions, significantly increasing the support matrix and
 maintenance burden. Tying to OpenShift releases ensures only tested and
 validated combinations are used.
 
-#### Alternative 2: Automatic Canary Testing
+#### Alternative 2: Limited Number of HAProxy Versions
+
+Use a limited number of HAProxy version identifiers (e.g., "2.8.10", "2.8.18",
+"3.2.19") instead of OCP version references. Each identifier would map to a
+specific HAProxy version available in the current OCP release.
+
+**Why not selected**: This approach partially solves the difficulties of
+Alternative 1 (arbitrary HAProxy version numbers) by limiting the support
+matrix to a fixed number of versions. However, it does not provide an easy
+or intuitive correlation to the OCP version currently running. Administrators
+would need to consult documentation or status fields to understand which
+actual HAProxy version or OCP release each identifier represents, making it
+less transparent than the OCP-based referencing approach.
+
+#### Alternative 3: Automatic Canary Testing
 
 Implement automatic canary testing where the operator gradually rolls out
 new HAProxy versions and monitors for issues.
@@ -693,7 +713,7 @@ proposal provides the building blocks for manual canary testing by allowing
 administrators to create separate IngressControllers with different
 versions.
 
-#### Alternative 3: Complete IngressController Image Selection
+#### Alternative 4: Complete IngressController Image Selection
 
 Allow selection of entire router images rather than just HAProxy versions.
 
