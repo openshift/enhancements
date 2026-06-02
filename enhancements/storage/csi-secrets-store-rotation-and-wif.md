@@ -260,6 +260,7 @@ type CSIDriverConfigSpec struct {
 
 // SecretsStoreCSIDriverConfigSpec defines properties that can be configured
 // for the Secrets Store CSI driver.
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.tokenRequests) || oldSelf.tokenRequests.policy != 'Managed' || (has(self.tokenRequests) && self.tokenRequests.policy == 'Managed')",message="tokenRequests cannot be removed when policy is Managed"
 type SecretsStoreCSIDriverConfigSpec struct {
     // secretRotation controls automatic secret rotation behavior.
     // When omitted, secret rotation is enabled with a default poll interval
@@ -298,7 +299,9 @@ type SecretsStoreTokenRequests struct {
     // are preserved and the audiences list below is ignored.
     // When "Managed", the operator sets tokenRequests from the audiences
     // list, replacing any previously configured values.
+    // Once set to "Managed", policy cannot be reverted back to "Unmanaged".
     // +default="Unmanaged"
+    // +kubebuilder:validation:XValidation:rule="oldSelf != 'Managed' || self == 'Managed'",message="policy cannot be changed from Managed back to Unmanaged"
     // +optional
     Policy TokenRequestsPolicy `json:"policy,omitempty"`
 
@@ -413,6 +416,14 @@ spec:
 - `secretsStore` must be set if and only if `driverType` is `SecretsStore`
 - `rotationPollIntervalSeconds` defaults to 120 seconds (2 minutes). No minimum
   is enforced at the API level; the administrator is trusted to choose an appropriate value.
+- `tokenRequests.policy` is immutable once set to `"Managed"`:
+  - The `policy` field cannot be changed from `"Managed"` back to `"Unmanaged"` (CEL
+    transition rule: `oldSelf != 'Managed' || self == 'Managed'`).
+  - The `tokenRequests` struct cannot be removed from `secretsStore` if its `policy`
+    was `"Managed"` (CEL rule on the parent struct prevents removal).
+  - This is a one-way transition: once the operator takes ownership of `tokenRequests`,
+    the administrator cannot revert to unmanaged mode. To clear WIF configuration,
+    set `policy: "Managed"` with an empty `audiences` list instead.
 
 ### Topology Considerations
 
@@ -492,6 +503,75 @@ Clusters upgrading to the new operator version with no `driverConfig` set will s
 **no change in behavior**. The operator will fall back to these defaults when the
 `ClusterCSIDriver` does not specify a `SecretsStore` driver config.
 
+##### What Happens to the API During Upgrade
+
+Existing clusters install the operator with a minimal `ClusterCSIDriver`:
+
+```yaml
+apiVersion: operator.openshift.io/v1
+kind: ClusterCSIDriver
+metadata:
+  name: secrets-store.csi.k8s.io
+spec:
+  managementState: Managed
+```
+
+On upgrade:
+
+1. **Stored object does not change.** Kubernetes CRD defaults are applied only
+   during create/update admission, not retroactively to stored objects. The
+   `ClusterCSIDriver` in etcd will remain as-is with no `driverConfig` field.
+
+2. **No nested defaults are injected.** Since `driverConfig` is entirely absent,
+   the API server cannot inject sub-field defaults (like `secretRotation.policy`
+   or `tokenRequests.policy`) into a struct that does not exist.
+
+3. **Operator handles nil gracefully.** The operator code checks each level:
+   - If `DriverType` is not `SecretsStore` (or empty): returns built-in defaults
+     for rotation (`true`, `2m`) and preserves existing `CSIDriver.spec.tokenRequests`
+     from the live cluster object.
+   - If `SecretsStore` is nil: same behavior as above.
+   - If `SecretRotation` is nil: uses built-in defaults (`--enable-secret-rotation=true`,
+     `--rotation-poll-interval=2m`).
+   - If `TokenRequests` is nil: preserves existing `CSIDriver.spec.tokenRequests`.
+
+4. **DaemonSet is unchanged.** The DaemonSet hook returns the same defaults
+   (`true`, `2m`) that are already hardcoded in the static `node.yaml` template.
+   The `setArg` function finds the existing args and replaces them with the same
+   values — resulting in a no-op update.
+
+5. **Existing manually-patched tokenRequests are preserved.** If a cluster has
+   manually configured `tokenRequests` on the `CSIDriver` object (e.g., Azure WIF
+   with `api://AzureADTokenExchange`), the operator reads the live `CSIDriver`
+   object and includes those tokenRequests in the desired spec. This prevents the
+   spec-hash from changing and avoids an unnecessary delete+recreate.
+
+##### How Users Can Start Using the New Configuration
+
+After upgrade, administrators can opt-in to the new fields by editing the
+`ClusterCSIDriver`:
+
+```yaml
+spec:
+  managementState: Managed
+  driverConfig:
+    driverType: SecretsStore
+    secretsStore:
+      secretRotation:
+        policy: Enabled
+        rotationPollIntervalSeconds: 300
+      tokenRequests:
+        policy: Managed
+        audiences:
+          - audience: "sts.amazonaws.com"
+            expirationSeconds: 3600
+```
+
+Once `driverConfig` is set, the CRD schema defaults (e.g., `secretRotation.policy:
+"Enabled"`, `rotationPollIntervalSeconds: 120`, `tokenRequests.policy: "Unmanaged"`)
+will apply to any omitted sub-fields during future updates. Administrators only
+need to specify the fields they wish to override.
+
 
 ### Risks and Mitigations
 
@@ -543,13 +623,30 @@ Nothing considered.
   `requiresRepublish` and `tokenRequests` fields from `ClusterCSIDriver` config.
 - Namespace substitution: non-CSIDriver assets continue to have namespace
   replacement applied correctly.
+- tokenRequests preservation on nil paths:
+  - `DriverType != SecretsStore` with existing CSIDriver tokenRequests: existing
+    tokenRequests are returned (not nil).
+  - `DriverType == SecretsStore` but `SecretsStore` is nil with existing CSIDriver
+    tokenRequests: existing tokenRequests are returned.
+  - `DriverType != SecretsStore` with no existing CSIDriver: returns nil (no error).
+  - `SecretsStore` is nil with no existing CSIDriver: returns nil (no error).
+
+### API Integration Tests (CRD Validation)
+
+**tokenRequests.policy immutability:**
+- Attempt to change `tokenRequests.policy` from `"Managed"` to `"Unmanaged"`: rejected
+  with error "policy cannot be changed from Managed back to Unmanaged".
+- Attempt to remove the `tokenRequests` struct entirely when `policy` was `"Managed"`:
+  rejected with error "tokenRequests cannot be removed when policy is Managed".
+- Transition from `"Unmanaged"` to `"Managed"`: allowed (one-way transition).
+- Update `audiences` while `policy` remains `"Managed"`: allowed.
+- Set `policy` to `"Managed"` on first creation: allowed.
 
 ### E2E Tests
 
 **Secret Rotation scenarios:**
 - No `driverConfig` set: operator uses defaults (`requiresRepublish: true`,
-  `--enable-secret-rotation=true`, `--rotation-poll-interval=2m0s`, no
-  `tokenRequests`).
+  `--enable-secret-rotation=true`, `--rotation-poll-interval=2m0s`).
 - `secretRotation.policy: "Enabled"` with custom `rotationPollIntervalSeconds: 300`:
   verify CSIDriver has `requiresRepublish: true` and DaemonSet has
   `--rotation-poll-interval=5m0s`.
@@ -577,11 +674,25 @@ Nothing considered.
 - Audience with custom expirationSeconds: verify expirationSeconds is propagated
   to CSIDriver.
 
-**Upgrade scenarios:**
+**Upgrade scenarios (no driverConfig set on ClusterCSIDriver):**
+- Minimal CR (`spec.managementState: Managed` only), no existing CSIDriver
+  tokenRequests: verify operator applies defaults (`requiresRepublish: true`,
+  rotation enabled at 2m) and CSIDriver has no tokenRequests.
+- Minimal CR with pre-existing manually patched tokenRequests on CSIDriver
+  (e.g., Azure WIF `api://AzureADTokenExchange`): verify existing tokenRequests
+  are preserved, CSIDriver spec-hash does not change, no delete+recreate occurs.
+- Minimal CR with pre-existing tokenRequests + DaemonSet: verify DaemonSet args
+  remain unchanged (`--enable-secret-rotation=true`, `--rotation-poll-interval=2m`),
+  no rolling update is triggered.
+- `driverType` set to a non-SecretsStore value (e.g., AWS) with existing
+  tokenRequests on CSIDriver: verify tokenRequests are still preserved.
 - Upgrade from previous version with manually patched Azure WIF: no disruption,
   pods continue to mount secrets.
 - Upgrade from previous version with no tokenRequests: defaults maintained, no
   behavior change.
+- Post-upgrade opt-in: administrator sets `driverType: SecretsStore` with
+  `tokenRequests.policy: "Managed"` and audiences, verify CSIDriver is updated
+  to match and DaemonSet args are updated.
 
 ## Graduation Criteria
 
@@ -602,14 +713,26 @@ N/A
 ## Upgrade / Downgrade Strategy
 
 **Upgrade**: Clusters upgrading to the new operator version will see no behavior
-change. The operator defaults match the previously hardcoded values
-(`requiresRepublish: true`, `--enable-secret-rotation=true`,
-`--rotation-poll-interval=2m`).
+change. The existing `ClusterCSIDriver` object (with only `managementState: Managed`)
+remains unchanged in etcd — the new `driverConfig` field is not retroactively
+injected. The operator handles the nil `driverConfig` by using built-in defaults
+that match the previously hardcoded values:
+
+| Component                             | Before Upgrade    | After Upgrade (no driverConfig) |
+| ------------------------------------- | ----------------- | ------------------------------- |
+| DaemonSet `--enable-secret-rotation=` | `true` (template) | `true` (operator default)       |
+| DaemonSet `--rotation-poll-interval=` | `2m` (template)   | `2m` (operator default)         |
+| CSIDriver `requiresRepublish`         | unset (nil)       | `true` (operator default)       |
+| CSIDriver `tokenRequests`             | user-configured   | preserved from live object      |
 
 **tokenRequests migration**: The `tokenRequests.policy` field defaults to
 `"Unmanaged"`, which means the operator will preserve any existing `tokenRequests`
 already configured on the CSIDriver object (e.g., manually patched Azure WIF
 audiences). This ensures no disruption to workload identity federation on upgrade.
+The preservation works at every nil-check level — whether `driverConfig` is absent,
+`driverType` is not `SecretsStore`, `secretsStore` is nil, or `tokenRequests` is nil,
+the operator always reads the live `CSIDriver` object and includes its existing
+`tokenRequests` in the desired spec.
 
 To adopt operator-managed tokenRequests, the administrator must:
 1. Set `tokenRequests.policy: "Managed"` in the `ClusterCSIDriver`.
@@ -618,7 +741,6 @@ To adopt operator-managed tokenRequests, the administrator must:
 To adopt the new configuration, the administrator must edit the `ClusterCSIDriver`
 to set `driverType: SecretsStore` with the desired `secretsStore` configuration.
 No changes are required to keep the existing behavior.
-
 
 ## Version Skew Strategy
 
