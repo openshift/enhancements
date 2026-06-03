@@ -394,15 +394,37 @@ We think it would be waste of time to re-implement the
 same tests and just wait for the cluster getting
 un-upgradeable on the OCP level.
 
-Proposing just a single new test:
+Proposing just a few new tests:
 
-* `[Serial]` Get the cluster un-upgradeable:
-    1. Run two pods that share a RWO volume whose CSI
+* `[Serial]` Get the cluster un-upgradeable and fix it
+    by deleting incompatible Pods:
+    1. Run two Deployments that share a RWO volume whose CSI
        driver supports SELinuxMount, each having a
        different SELinux label.
     2. Wait for the cluster to get `Upgradeable: false`.
-    3. Remove one of the Pods.
+    3. Remove one of the Deployments.
     4. Wait for the cluster to get `Upgradeable: true`.
+* `[Serial]` Get the cluster un-upgradeable and fix it
+    by using the same SELinux label:
+    1. Run two Deployments that share a RWO volume whose CSI
+       driver supports SELinuxMount, each having a
+       different SELinux label.
+    2. Wait for the cluster to get `Upgradeable: false`.
+    3. Update the Deployments to use the same SELinux label.
+    4. Wait for the cluster to get `Upgradeable: true`.
+* * `[Serial]` Get the cluster un-upgradeable and fix it
+    by applying opt-out:
+    1. Run two Deployments that share a RWO volume whose CSI
+       driver supports SELinuxMount, one of them privileged
+       and the other one unprivileged.
+    2. Wait for the cluster to get `Upgradeable: false`.
+    3. Apply the opt-out to the namespace with the Deployments,
+       i.e. label the namespace with
+       `storage.openshift.io/selinux-change-policy=Recursive`.
+    4. Re-deploy the Deployments (the opt-out affects only
+       newly started Pods).
+    5. Wait for the cluster to get `Upgradeable: true`.
+
 
 The test will use the default CSI driver on each platform.
 The test will not run on bare metal, which does not have
