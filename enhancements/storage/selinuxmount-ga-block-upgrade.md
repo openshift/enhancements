@@ -474,6 +474,13 @@ temporarily. This is safe because:
   `Upgradeable=True`, which is safe because the upgrade to
   5.1 cannot happen until the 5.0 upgrade completes.
 
+SELinuxMount feature gate in KCM needs SELinuxChangePolicy
+enabled in all kubelets in the clusters.
+SELinuxChangePolicy was enabled by default in OCP 4.20.
+4.24 control plane and 4.19 kubelets (the last with
+SELinuxChangePolicy disabled) are outside of supported
+version skew.
+
 ## Operational Aspects of API Extensions
 
 This enhancement does not add new API extensions (CRDs,
