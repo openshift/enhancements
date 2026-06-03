@@ -14,8 +14,8 @@ approvers:
 api-approvers:
   - "@JoelSpeed"
 creation-date: 2026-01-29
-last-updated: 2026-01-29
-status: provisional
+last-updated: 2026-05-26
+status: implementable
 tracking-link:
   - https://issues.redhat.com/browse/OCPSTRAT-1285
   - https://issues.redhat.com/browse/OCPSTRAT-2623
@@ -77,6 +77,7 @@ All three features share a unified API design pattern and MCO implementation app
 3. **Additional Artifact Stores**: Enable configurable artifact storage locations, supporting high-performance storage and pre-populated caches
 4. **Unified API**: Provide consistent, declarative configuration through ContainerRuntimeConfig
 5. **Tech Preview for 4.22**: Deliver all three features behind AdditionalStorageConfig feature gate (enabled in TechPreviewNoUpgrade and DevPreviewNoUpgrade feature sets)
+6. **GA for 5.0**: Promote AdditionalStorageConfig feature gate to Default feature set, making all three features generally available
 
 ### Non-Goals
 
@@ -85,7 +86,7 @@ All three features share a unified API design pattern and MCO implementation app
 3. Write-capable artifact stores (read-only only for Tech Preview)
 4. Dynamic artifact mirroring
 5. Upstream Kubernetes KEP (deferred post-Tech Preview)
-6. GA-level API stability in 4.22 (Tech Preview allows iteration)
+6. GA-level API stability in 4.22 (deferred to 5.0)
 
 ## Proposal
 
@@ -175,20 +176,38 @@ type ContainerRuntimeConfig struct {
     metav1.TypeMeta   `json:",inline"`
     metav1.ObjectMeta `json:"metadata,omitempty"`
 
-    // Spec defines the desired state of ContainerRuntimeConfig
+    // spec contains the desired container runtime configuration.
+    // +required
     Spec ContainerRuntimeConfigSpec `json:"spec"`
+
+    // status contains observed information about the container runtime configuration.
+    // +optional
+    Status ContainerRuntimeConfigStatus `json:"status"`
 }
 
 type ContainerRuntimeConfigSpec struct {
-    // ... existing fields ...
+    // machineConfigPoolSelector selects which pools the ContainerRuntimeConfig shoud apply to.
+    // A nil selector will result in no pools being selected.
+    // +optional
+    MachineConfigPoolSelector *metav1.LabelSelector `json:"machineConfigPoolSelector,omitempty"`
 
-    // additionalLayerStores configures additional layer store locations.
+    // containerRuntimeConfig defines the tuneables of the container runtime.
+    // +required
+    ContainerRuntimeConfig *ContainerRuntimeConfiguration `json:"containerRuntimeConfig,omitempty"`
+}
+
+type ContainerRuntimeConfiguration struct {
+    // ... existing fields (pidsLimit, logLevel, logSizeMax, overlaySize, defaultRuntime) ...
+
+    // additionalLayerStores configures additional read-only container image layer store locations
+    // for Open Container Initiative (OCI) images.
     //
-    // Stores are checked in order until a layer is found.
+    // Layers are checked in order: additional stores first, then the default location.
+    // Stores are read-only.
     // Maximum of 5 stores allowed.
     // Each path must be unique.
     //
-    // When omitted, no additional layer stores are configured.
+    // When omitted, only the default layer location is used.
     // When specified, at least one store must be provided.
     //
     // +openshift:enable:FeatureGate=AdditionalStorageConfig
@@ -199,10 +218,10 @@ type ContainerRuntimeConfigSpec struct {
     // +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x.path == y.path))",message="additionalLayerStores must not contain duplicate paths"
     AdditionalLayerStores []AdditionalLayerStore `json:"additionalLayerStores,omitempty"`
 
-    // additionalImageStores configures additional read-only container image store
-    // locations for complete Open Container Initiative (OCI) images.
+    // additionalImageStores configures additional read-only container image store locations
+    // for Open Container Initiative (OCI) images.
     //
-    // Images are checked in order: additional stores first, then default location.
+    // Images are checked in order: additional stores first, then the default location.
     // Stores are read-only.
     // Maximum of 10 stores allowed.
     // Each path must be unique.
@@ -218,15 +237,16 @@ type ContainerRuntimeConfigSpec struct {
     // +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x.path == y.path))",message="additionalImageStores must not contain duplicate paths"
     AdditionalImageStores []AdditionalImageStore `json:"additionalImageStores,omitempty"`
 
-    // additionalArtifactStores configures additional read-only artifact storage
-    // locations for Open Container Initiative (OCI) artifacts.
+    // additionalArtifactStores configures additional read-only artifact storage locations
+    // for Open Container Initiative (OCI) artifacts.
     //
-    // Artifacts are checked in order: additional stores first, then default location.
+    // Artifacts are checked in order: additional stores first, then the default location
+    // (/var/lib/containers/storage/artifacts).
     // Stores are read-only.
     // Maximum of 10 stores allowed.
     // Each path must be unique.
     //
-    // When omitted, only the default artifact location (/var/lib/containers/storage/artifacts/) is used.
+    // When omitted, only the default artifact location is used.
     // When specified, at least one store must be provided.
     //
     // +openshift:enable:FeatureGate=AdditionalStorageConfig
@@ -238,64 +258,52 @@ type ContainerRuntimeConfigSpec struct {
     AdditionalArtifactStores []AdditionalArtifactStore `json:"additionalArtifactStores,omitempty"`
 }
 
-// AdditionalLayerStore defines a storage location for container image layers.
+// StorePath is an absolute filesystem path used by additional container storage configurations.
+// The path must be between 1 and 256 characters long, begin with a forward slash, and only contain
+// the characters a-z, A-Z, 0-9, '/', '.', '_', and '-'. Consecutive forward slashes are not permitted.
+// +kubebuilder:validation:MinLength=1
+// +kubebuilder:validation:MaxLength=256
+// +kubebuilder:validation:XValidation:rule="self.matches('^/[a-zA-Z0-9/._-]+$')",message="path must be absolute and contain only alphanumeric characters, '/', '.', '_', and '-'"
+// +kubebuilder:validation:XValidation:rule="!self.contains('//')",message="path must not contain consecutive forward slashes"
+type StorePath string
+
+// AdditionalLayerStore defines a read-only storage location for Open Container Initiative (OCI) container image layers.
 type AdditionalLayerStore struct {
-    // path is the absolute path to the additional layer store location.
-    //
+    // path specifies the absolute location of the additional layer store.
     // The path must exist on the node before configuration is applied.
     // When a container image is requested, layers found at this location will be used instead of
     // retrieving from the registry.
-    //
-    // This field is required and must:
-    //   - Have length between 1 and 256 characters
-    //   - Start with '/' (absolute path)
-    //   - Contain only: a-z, A-Z, 0-9, '/', '.', '_', '-' (no spaces or special characters)
-    //
+    // The path is required and must be between 1 and 256 characters long, begin with a forward slash,
+    // and only contain the characters a-z, A-Z, 0-9, '/', '.', '_', and '-'.
+    // Consecutive forward slashes are not permitted.
     // +required
-    // +kubebuilder:validation:MinLength=1
-    // +kubebuilder:validation:MaxLength=256
-    // +kubebuilder:validation:XValidation:rule="self.matches('^/[a-zA-Z0-9/._-]+$')",message="path must be absolute and contain only alphanumeric characters, '/', '.', '_', and '-'"
-    Path string `json:"path,omitempty"`
+    Path StorePath `json:"path,omitempty"`
 }
 
-// AdditionalImageStore defines an additional read-only storage location for complete container images.
+// AdditionalImageStore defines an additional read-only storage location for Open Container Initiative (OCI) images.
 type AdditionalImageStore struct {
-    // path is the absolute path to the additional image store location.
-    //
+    // path specifies the absolute location of the additional image store.
     // The path must exist on the node before configuration is applied.
     // When a container image is requested, images found at this location will be used instead of
     // retrieving from the registry.
-    //
-    // This field is required and must:
-    //   - Have length between 1 and 256 characters
-    //   - Start with '/' (absolute path)
-    //   - Contain only: a-z, A-Z, 0-9, '/', '.', '_', '-' (no spaces or special characters)
-    //
+    // The path is required and must be between 1 and 256 characters long, begin with a forward slash,
+    // and only contain the characters a-z, A-Z, 0-9, '/', '.', '_', and '-'.
+    // Consecutive forward slashes are not permitted.
     // +required
-    // +kubebuilder:validation:MinLength=1
-    // +kubebuilder:validation:MaxLength=256
-    // +kubebuilder:validation:XValidation:rule="self.matches('^/[a-zA-Z0-9/._-]+$')",message="path must be absolute and contain only alphanumeric characters, '/', '.', '_', and '-'"
-    Path string `json:"path,omitempty"`
+    Path StorePath `json:"path,omitempty"`
 }
 
-// AdditionalArtifactStore defines an additional storage location for Open Container Initiative (OCI) artifacts.
+// AdditionalArtifactStore defines an additional read-only storage location for Open Container Initiative (OCI) artifacts.
 type AdditionalArtifactStore struct {
-    // path is the absolute path to the additional artifact store location.
-    //
+    // path specifies the absolute location of the additional artifact store.
     // The path must exist on the node before configuration is applied.
-    // When an Open Container Initiative (OCI) artifact is requested, artifacts found at this location will be used instead of
+    // When an artifact is requested, artifacts found at this location will be used instead of
     // retrieving from the registry.
-    //
-    // This field is required and must:
-    //   - Have length between 1 and 256 characters
-    //   - Start with '/' (absolute path)
-    //   - Contain only: a-z, A-Z, 0-9, '/', '.', '_', '-' (no spaces or special characters)
-    //
+    // The path is required and must be between 1 and 256 characters long, begin with a forward slash,
+    // and only contain the characters a-z, A-Z, 0-9, '/', '.', '_', and '-'.
+    // Consecutive forward slashes are not permitted.
     // +required
-    // +kubebuilder:validation:MinLength=1
-    // +kubebuilder:validation:MaxLength=256
-    // +kubebuilder:validation:XValidation:rule="self.matches('^/[a-zA-Z0-9/._-]+$')",message="path must be absolute and contain only alphanumeric characters, '/', '.', '_', and '-'"
-    Path string `json:"path,omitempty"`
+    Path StorePath `json:"path,omitempty"`
 }
 ```
 
@@ -331,7 +339,7 @@ The Machine Config Operator will:
 
 1. **Watch `ContainerRuntimeConfig` resources** for changes to `additionalLayerStores`, `additionalImageStores`, and `additionalArtifactStores`
 2. **Generate configuration files**:
-   - For `additionalLayerStores`: Update `/etc/containers/storage.conf` with `[storage.options.additionallayerstores]` section
+   - For `additionalLayerStores`: Update `/etc/containers/storage.conf` with `additionallayerstores` in `[storage.options]` section (see note below about `:ref` suffix)
    - For `additionalImageStores`: Update `/etc/containers/storage.conf` with `additionalimagestores` array in `[storage.options]` section
    - For `additionalArtifactStores`: Update CRI-O configuration with `additional_artifact_stores` array
 3. **Create MachineConfig**: Bundle generated configuration into a MachineConfig
@@ -343,9 +351,11 @@ The Machine Config Operator will:
 storage.conf (additionalLayerStores):
 
 ```toml
-[storage.options.additionallayerstores]
-"/var/lib/stargz-store"
+[storage.options]
+additionallayerstores = ["/var/lib/stargz-store/store:ref"]
 ```
+
+**`:ref` suffix handling:** The MCO automatically appends `:ref` to each `additionalLayerStores` path when generating `storage.conf`. This suffix is required by containers/storage for reference-based layer resolution. Users configure plain paths (e.g., `/var/lib/stargz-store/store`) in the ContainerRuntimeConfig API and the MCO handles the suffix transparently. The API intentionally does not allow `:` in paths since this is an MCO implementation detail.
 
 storage.conf (additionalImageStores):
 
@@ -408,9 +418,9 @@ This pull-based design means plugins react to filesystem access patterns rather 
 
 | Risk                                            | Impact                                        | Likelihood | Mitigation                                                                                                                                         |
 | ----------------------------------------------- | --------------------------------------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Additional Layer Store API is experimental      | Breaking changes possible before GA           | Medium     | Ship as Tech Preview; work with upstream to stabilize API before GA; document that API changes may require user action                             |
+| containers/storage AdditionalLayerStores API is experimental | Breaking changes possible without major version bump | Medium     | Ship as Tech Preview; work with upstream to stabilize API before GA; document that API changes may require user action; the upstream API can change without a major version bump, which is a known risk for GA stability |
 | Customer burden with BYOS (plugin installation) | Support complexity, adoption barrier          | High       | Provide detailed documentation and validated installation guides; consider community container images for common plugins; clear support boundaries |
-| CRI-O v1.36 delayed                             | Feature delivery delay for artifact stores    | Low        | Maintain upstream communication; PR #9702 already in progress; consider backport to v1.35 if needed                                                |
+| CRI-O v1.36 delayed                             | Feature delivery delay for artifact stores    | Resolved   | CRI-O v1.36.0 released with artifact store support (PR #9702 merged)                                                                               |
 | Quay compatibility unclear for lazy pulling     | Feature may not work with all registries      | Medium     | Test with different Quay storage backends (S3, local); document limitations; consider registry proxy for compatibility                             |
 | Performance may not meet expectations           | User disappointment, low adoption             | Medium     | Validate early with realistic workloads; gather data before setting public targets; RHOAI team validation for artifact stores                      |
 | Storage plugin crashes or hangs                 | Container creation failures, node instability | Low        | Document troubleshooting; provide health check recommendations; plugin failures should not crash CRI-O                                             |
@@ -418,7 +428,7 @@ This pull-based design means plugins react to filesystem access patterns rather 
 
 ### Drawbacks
 
-1. **Experimental API dependency** (additionalLayerStores): Upstream container-libs/storage API may change, requiring user configuration updates
+1. **Experimental API dependency** (additionalLayerStores): Upstream containers/storage AdditionalLayerStores API is experimental and can change without a major version bump, potentially requiring user configuration updates
 2. **BYOS complexity**: Customers must install and manage storage plugin binaries, increasing operational burden
 3. **Registry requirements**: Lazy pulling requires HTTP range request support, limiting registry compatibility
 4. **Image conversion**: eStargz requires converting images from standard OCI format, adding workflow complexity
@@ -454,7 +464,7 @@ This pull-based design means plugins react to filesystem access patterns rather 
 
 **Artifact Stores:** E2E (cache verification), performance (RHOAI SSD validation), edge (air-gapped), negative cases (missing paths)
 
-**Common:** MCO config generation, upgrade/downgrade (4.21 ↔ 4.22), feature gate enforcement, standard behavior regression testing
+**Common:** MCO config generation, upgrade/downgrade (4.22 ↔ 5.0), feature gate enforcement, standard behavior regression testing
 
 ## Graduation Criteria
 
@@ -466,15 +476,15 @@ Not applicable. These features will ship directly to Tech Preview in 4.22, skipp
 
 **Prerequisites:**
 
-- [ ] CRI-O v1.36+ with artifact store support merged and shipped
-- [ ] Field feedback from customer deployments running Tech Preview
-- [ ] Performance metrics collected and validated against target workloads
-- [ ] Security review completed (chunk verification for lazy pulling, plugin isolation)
-- [ ] Comprehensive test coverage (multiple registries, performance benchmarks, upgrade/downgrade)
-- [ ] RHOAI validation completed with published performance data
-- [ ] Migration path defined for any API changes from Tech Preview
+- [x] CRI-O v1.36+ with artifact store support merged and shipped
+- [x] Field feedback from customer deployments running Tech Preview
+- [x] Performance metrics collected and validated against target workloads
+- [x] Security review completed (chunk verification for lazy pulling, plugin isolation)
+- [x] Comprehensive test coverage (multiple registries, performance benchmarks, upgrade/downgrade)
+- [x] RHOAI validation completed with published performance data
+- [x] Migration path defined for any API changes from Tech Preview (no breaking API changes between TP and GA; `:ref` suffix handling moved from API to MCO during TP)
 
-**GA Criteria (Target: 4.23+):**
+**GA Criteria (Target: 5.0):**
 
 - [ ] Features available by default (promote AdditionalStorageConfig feature gate to Default feature set)
 - [ ] API declared stable with backward compatibility guarantees
@@ -486,13 +496,13 @@ Not applicable. These features will ship directly to Tech Preview in 4.22, skipp
 ### Tech Preview (4.22)
 
 - [x] Enhancement proposal approved
-- [ ] All three features behind AdditionalStorageConfig feature gate (enabled in TechPreviewNoUpgrade/DevPreviewNoUpgrade)
-- [ ] API design reviewed and approved by API review team
-- [ ] MCO implementation merged and functional
-- [ ] E2E tests passing in CI for all three features
-- [ ] Documentation in openshift-docs (OSDOCS-10167, OSDOCS-17312)
-- [ ] Limitations, BYOS approach, and support boundaries clearly documented
-- [ ] Known issues and workarounds documented
+- [x] All three features behind AdditionalStorageConfig feature gate (enabled in TechPreviewNoUpgrade/DevPreviewNoUpgrade)
+- [x] API design reviewed and approved by API review team
+- [x] MCO implementation merged and functional
+- [x] E2E tests passing in CI for all three features
+- [x] Documentation in openshift-docs (OSDOCS-10167, OSDOCS-17312)
+- [x] Limitations, BYOS approach, and support boundaries clearly documented
+- [x] Known issues and workarounds documented
 
 ### Removing a deprecated feature
 
@@ -500,9 +510,13 @@ Not applicable - these are new features with no deprecation planned.
 
 ## Upgrade / Downgrade Strategy
 
-**Upgrade (4.21 → 4.22):** New optional fields ignored by older MCO; opt-in via AdditionalStorageConfig feature gate (enabled in TechPreviewNoUpgrade/DevPreviewNoUpgrade); no impact to existing resources
+**Tech Preview Upgrade (4.21 → 4.22):** New optional fields ignored by older MCO; opt-in via AdditionalStorageConfig feature gate (enabled in TechPreviewNoUpgrade/DevPreviewNoUpgrade); no impact to existing resources
 
-**Downgrade (4.22 → 4.21):** Delete ContainerRuntimeConfig resources with new fields; nodes reboot to remove config
+**GA Upgrade (4.22 → 5.0):** Features become available by default (AdditionalStorageConfig feature gate promoted to Default feature set); existing ContainerRuntimeConfig resources with additional storage fields continue to work without modification; no user action required
+
+**GA Downgrade (5.0 → 4.22):** Features remain available on 4.22 only with TechPreviewNoUpgrade enabled; if downgrading to a Default feature set, delete ContainerRuntimeConfig resources with additional storage fields before downgrade; nodes reboot to remove config
+
+**Tech Preview Downgrade (4.22 → 4.21):** Delete ContainerRuntimeConfig resources with new fields; nodes reboot to remove config
 
 ## Version Skew Strategy
 
@@ -516,10 +530,10 @@ This is a node-level feature with no cross-component dependencies beyond the Mac
 
 **Node Version Skew:**
 
-- MCO on older nodes (4.21) ignores unknown fields in ContainerRuntimeConfig (additionalLayerStores, additionalArtifactStores)
-- Nodes running 4.22 MCO can coexist with nodes running 4.21 MCO
+- On 4.22 nodes without TechPreviewNoUpgrade, the CRD does not include additional storage fields (feature-gated at the API level)
+- Nodes running 5.0 MCO can coexist with nodes running 4.22 MCO
 - Feature is opt-in via ContainerRuntimeConfig targeting specific machine pools
-- Mixed-version node pools work correctly (4.22 nodes use new features, 4.21 nodes ignore them)
+- Mixed-version node pools work correctly (5.0 nodes use new features by default, 4.22 nodes require TechPreviewNoUpgrade)
 
 **Component Compatibility:**
 
@@ -531,7 +545,7 @@ This is a node-level feature with no cross-component dependencies beyond the Mac
 
 **API Impact:**
 
-- Two new optional fields in ContainerRuntimeConfig (backward compatible)
+- Three new optional fields in ContainerRuntimeConfig (backward compatible)
 - Uses existing MCO conditions and metrics
 - Minimal throughput impact (low-frequency resources)
 
@@ -595,16 +609,28 @@ This is a node-level feature with no cross-component dependencies beyond the Mac
   - On-cluster layering: /enhancements/machine-config/on-cluster-layering.md
   - Pin and pre-load images: /enhancements/machine-config/pin-and-pre-load-images.md
 
+#### Implementation (4.22 Tech Preview)
+
+- OpenShift API: https://github.com/openshift/api/pull/2681
+- MCO implementation: https://github.com/openshift/machine-config-operator/pull/5666
+- MCO `:ref` suffix fix: https://github.com/openshift/machine-config-operator/pull/5888
+- API `:ref` revert (handled by MCO instead): https://github.com/openshift/api/pull/2823
+
 #### Related Issues
 
 - [OCPSTRAT-1285](https://issues.redhat.com/browse/OCPSTRAT-1285): Speeding Up Pulling Container Images
 - [OCPSTRAT-2623](https://issues.redhat.com/browse/OCPSTRAT-2623): Additional Artifact Store
 - [OCPNODE-4050](https://issues.redhat.com/browse/OCPNODE-4050): Additional Layer Store Support (Epic)
-- [OCPNODE-4051](https://issues.redhat.com/browse/OCPNODE-4051): Additional Artifact Store Support (Epic)
+- [OCPNODE-4051](https://issues.redhat.com/browse/OCPNODE-4051): CRI-O Additional Storage Support (Epic)
 - [OCPNODE-4052](https://issues.redhat.com/browse/OCPNODE-4052): Enhancement Proposal Story
 - [OSDOCS-10167](https://issues.redhat.com/browse/OSDOCS-10167): Documentation for layer stores
 - [OSDOCS-17312](https://issues.redhat.com/browse/OSDOCS-17312): Documentation for artifact stores
 - [RFE-8441](https://issues.redhat.com/browse/RFE-8441): Artifact pre-loading (separate feature, out of scope)
+- [OCPNODE-4060](https://issues.redhat.com/browse/OCPNODE-4060): OpenShift API Implementation Story
+- [OCPNODE-4074](https://issues.redhat.com/browse/OCPNODE-4074): MCO Implementation Story
+- [OCPNODE-4520](https://issues.redhat.com/browse/OCPNODE-4520): Enhancement Update for 5.0 GA
+- [OCPNODE-4521](https://issues.redhat.com/browse/OCPNODE-4521): Promote AdditionalStorageConfig Feature Gate to Default
+- [OCPBUGS-83492](https://issues.redhat.com/browse/OCPBUGS-83492): `:ref` suffix validation bug (fixed)
 - [RHEL-66490](https://issues.redhat.com/browse/RHEL-66490): zstd:chunked image ID inconsistency (related bug)
 
 #### External Resources
