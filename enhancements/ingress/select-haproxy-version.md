@@ -55,9 +55,10 @@ As a cluster administrator, I want to upgrade my OpenShift cluster without
 simultaneously upgrading HAProxy on production IngressControllers, so that I
 can reduce the risk of application outages during the upgrade process.
 
-As a cluster administrator, I want to create a test IngressController with
-a newer HAProxy version, so that I can validate the behavior of the new
-version before deploying it to production workloads.
+As a cluster administrator, I want to create a sharded test IngressController
+with a newer HAProxy version, so that I can evaluate the behavior of the new
+version before deploying it to production workloads, or evaluate the behavior
+in canary test fashion on a small subset of traffic.
 
 As a cluster administrator, I want to gradually migrate my IngressControllers
 from one LTS OpenShift version's HAProxy to the next, so that I can manage
@@ -161,7 +162,7 @@ OpenShift cluster infrastructure and upgrades.
 
 #### Testing a New HAProxy Version Before Production
 
-1. The cluster administrator creates a new IngressController with
+1. The cluster administrator creates a new sharded IngressController with
    `haproxyOCPVersion` unset (empty) to test the latest HAProxy version.
 2. The cluster administrator configures test routes to use the new
    IngressController via domain or namespace selectors.
