@@ -393,6 +393,14 @@ N/A
 
 Will support SNO deployments.
 
+#### OpenShift Kubernetes Engine
+
+This proposal does not depend on features excluded from OKE. All the
+components involved - Agent-based Installer, Machine Config Operator,
+ImageDigestMirrorSet and CRI-O - are part of the core platform available
+in both OCP and OKE. The optional OLM operator mirroring included in the
+extended ISO is not required for the core registry-less workflow.
+
 ### Implementation Details/Notes/Constraints
 
 #### InternalReleaseImage custom resource
