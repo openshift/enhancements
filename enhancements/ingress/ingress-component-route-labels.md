@@ -22,7 +22,7 @@ see-also:
 
 ## Summary
 
-Add a `labels` field to `ComponentRouteSpec` in the `Ingress` config API (`config.openshift.io/v1`). This enables cluster administrators to specify labels on component-managed routes (e.g., console, OAuth) so that IngressControllers using route selectors can manage them for route sharding scenarios.
+This enhancement covers the **API change only**: adding a `labels` field to `ComponentRouteSpec` in the `Ingress` config API (`config.openshift.io/v1`). This enables cluster administrators to specify labels on component-managed routes so that IngressControllers using route selectors can manage them for route sharding scenarios. Operator-side consumption of this field is tracked separately per operator.
 
 ## Motivation
 
@@ -39,9 +39,9 @@ Add a `labels` field to `ComponentRouteSpec` in the `Ingress` config API (`confi
 
 ### Non-Goals
 
+- This proposal covers the API change only. Operator-side consumption (reading and applying labels to routes) is tracked and implemented separately per operator.
 - This proposal does not add labels to `ComponentRouteStatus`. Labels are configuration input, not status output. If an operator that supports the `labels` field encounters an error applying labels, it reports the error through its existing status conditions. If an operator does not yet support the field, the labels are silently ignored.
 - This proposal does not create or manage IngressControllers. Administrators must configure IngressController route selectors separately.
-- This proposal does not modify how operators reconcile routes beyond applying the specified labels.
 
 ## Proposal
 
@@ -52,8 +52,8 @@ Add an optional `labels` field of type `map[string]LabelValue` to the existing `
 - `+mapType=granular` for proper strategic merge patch behavior, allowing individual label keys to be added or removed without replacing the entire map.
 - `MinProperties=1` prevents semantically empty `labels: {}`. When the field is omitted, no additional labels are applied.
 - `MaxProperties=8` bounds the map size. Route sharding typically needs 1-2 labels; 8 provides a ceiling for CEL cost estimation.
-- Key validation uses `format.qualifiedName()` to enforce Kubernetes label key conventions (1-63 character name with optional DNS subdomain prefix up to 253 characters).
-- Value validation uses `format.labelValue()` to enforce Kubernetes label value conventions (0-63 characters, alphanumeric, `-`, `_`, or `.`, must start and end with alphanumeric when non-empty).
+- Key validation uses a CEL rule with `format.qualifiedName()` (a [Kubernetes CEL standard library function](https://kubernetes.io/docs/reference/using-api/cel/#kubernetes-cel-libraries)) to enforce label key conventions.
+- Value validation is enforced by the `LabelValue` type, a new validated `string` alias defined in `config/v1/types_ingress.go`. It uses `format.labelValue()` (also a Kubernetes CEL standard library function) to enforce label value conventions.
 - Keys with `kubernetes.io/` and `k8s.io/` reserved prefixes are rejected, as these are reserved for Kubernetes system use.
 
 ### Label Conflict and Removal Behavior
@@ -106,9 +106,15 @@ spec:
 
 ### API Extensions
 
-Adds one field to an existing stable API type (`config/v1/types_ingress.go`):
+Adds one new type and one new field to `config/v1/types_ingress.go`:
 
 ```go
+// LabelValue is a validated string type for Kubernetes label values,
+// defined in config/v1/types_ingress.go.
+// +kubebuilder:validation:MaxLength=63
+// +kubebuilder:validation:XValidation:rule="!format.labelValue().validate(self).hasValue()"
+type LabelValue string
+
 type ComponentRouteSpec struct {
     // ... existing fields ...
 
@@ -121,7 +127,7 @@ type ComponentRouteSpec struct {
 }
 ```
 
-CEL rules enforce `format.qualifiedName()` for keys, `format.labelValue()` for values, and reject `kubernetes.io/` and `k8s.io/` reserved prefixes. See [openshift/api#2845](https://github.com/openshift/api/pull/2845) for full validation rules and generated manifests.
+`format.qualifiedName()` and `format.labelValue()` are [Kubernetes CEL standard library functions](https://kubernetes.io/docs/reference/using-api/cel/#kubernetes-cel-libraries) provided by the API server, not defined locally. CEL rules on the `Labels` map enforce `format.qualifiedName()` for keys and reject `kubernetes.io/` and `k8s.io/` reserved prefixes. See [openshift/api#2845](https://github.com/openshift/api/pull/2845) for full validation rules and generated manifests.
 
 No new CRDs, webhooks, finalizers, or aggregated API servers are introduced.
 
@@ -192,7 +198,7 @@ This feature modifies the Ingress config API (`config.openshift.io/v1`), which i
 
 CRD validation tests in `config/v1/tests/ingresses.config.openshift.io/IngressComponentRouteLabels.yaml` cover:
 
-- **Happy paths:** single label, multiple labels, DNS-prefixed keys, max-length keys/values (63 characters), empty string values (valid per Kubernetes label spec).
+- **Happy paths:** single label, multiple labels, DNS-prefixed keys, max-length values (63 characters), empty string values (valid per Kubernetes label spec).
 - **Negative paths:** invalid keys, invalid values (starting with dash, e.g., `-starts-with-dash`), reserved prefixes (`kubernetes.io/`, `k8s.io/`), key name part over 63 characters, more than 8 labels.
 - **Non-reserved prefixes:** keys with non-reserved prefixes (e.g., `openshift.io/my-label`) are accepted, confirming the reserved prefix check is not overly broad.
 - **Update scenarios:** add labels, change label values, remove labels (labels present to no labels).
