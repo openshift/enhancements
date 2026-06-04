@@ -31,7 +31,7 @@ superseded-by: []
 
 This enhancement proposal outlines an opinionated workflow to simplify
 on-premises cluster operations - such as installation, upgrade and node
-expansion - by eliminating the need to setup and configure an external
+expansion - by eliminating the need to set up and configure an external
 registry mirror. This approach is specifically designed for disconnected
 environments and leverages existing tools such as Agent-based Installer,
 Assisted Installer and OpenShift Appliance.
@@ -45,17 +45,17 @@ within the same environment. This task involves not only deploying and
 maintaining the registry service itself, but also mirroring the desired
 OpenShift release payload - and optionally some additional OLM operators.
 Such complexity made the initial deployment and further upgrades challenging
-and time-consuming, often resulting in a frustrating process for the less
+and time-consuming, often resulting in a frustrating process for less
 experienced users. Additionally, this approach was not considered suitable for
 resource-constrained environments - where the lack of dedicated hardware for
 hosting an external registry made it impractical.
 
 ### User Stories
 
-* As an OpenShift administrator, I want to install a cluster into a
+* As an OpenShift administrator, I want to install a cluster in a
   disconnected environment without setting up an external registry (and
   optionally a selected set of OLM operators)
-* As an OpenShift administrator, I want to upgrade a cluster into a
+* As an OpenShift administrator, I want to upgrade a cluster in a
   disconnected environment without setting up an external registry (and
   optionally a selected set of OLM operators)
 * As an OpenShift administrator, I want to add a node to an existing cluster in
@@ -71,7 +71,7 @@ hosting an external registry made it impractical.
   leveraging existing tools like the Agent-Based Installer, Assisted Installer
   and OpenShift Appliance
 * Support a mechanism to allow the user, after having successfully installed
-  the cluster, to opt-out from the feature and start using his/her own external
+  the cluster, to opt-out from the feature and start using their own external
   registry for the cluster upgrade operations
 
 ### Non-Goals
@@ -84,7 +84,7 @@ hosting an external registry made it impractical.
 From a broad perspective, this proposal consists of building and releasing an
 extended RHCOS live ISO that includes a full OCP release payload (with a
 selected subset of OLM operators) and all the necessary scripts/services to
-support the various operations. In general a local registry service will be
+support the various operations. In general, a local registry service will be
 running on every control plane node, serving the OCP release payload included
 in the ISO. Also, a new custom resource - managed by the Machine Config
 Operator (MCO) - will be introduced to control and manage the internal release
@@ -94,21 +94,21 @@ payload added to the system.
 
 #### Extended RHCOS ISO build and release
 
-The foundation of the current proposal lies in the user's possibility to
+The foundation of the current proposal lies in the user's ability to
 download a customized self-sufficient RHCOS live ISO, containing all the
 necessary elements to support the cluster operations in a disconnected
 environment.
 This ISO will be prepared and built using the [OpenShift Appliance Builder](https://github.com/openshift/appliance),
 a command line utility for building a disk image to orchestrate an OpenShift
 installation. The Appliance builder will be enhanced with a new 
-`build live-iso` command capable to generate an ISO artifact.
-Since the extended ISO will contain not only a specific set of OCP release images
-- but also additional images related to OLM operators (and other support images),
+`build live-iso` command capable of generating an ISO artifact.
+Since the extended ISO will contain not only a specific set of OCP release images,
+but also additional images related to OLM operators (and other support images),
 the Appliance builder will generate a signed release bundle image listing
 all the included images.
 The extended ISO builder will be integrated within the official Red Hat build and
 release pipeline, so that a new extended RHCOS ISO could be published following
-the same OpenShift release cadence, and make it available via the 
+the same OpenShift release cadence, making it available via the 
 [Red Hat Customer Portal](https://access.redhat.com), specifically through the
 [Red Hat Hybrid Cloud Console](https://console.redhat.com/).
 
@@ -116,8 +116,8 @@ the same OpenShift release cadence, and make it available via the
 
 ##### Bootstrap phase
 
-Based on the same [Agent-based Installer](https://github.com/openshift/enhancements/blob/master/enhancements/agent-installer/automated-workflow-for-agent-based-installer.md)(ABI)
-approach, the installation will be kicked off into an ephemeral environment
+Based on the same [Agent-based Installer](https://github.com/openshift/enhancements/blob/master/enhancements/agent-installer/automated-workflow-for-agent-based-installer.md) (ABI)
+approach, the installation will be kicked off in an ephemeral environment
 fully allocated in memory, as soon as each node is booted using the extended
 ISO (bootstrap phase).
 In addition to the usual ABI services configured to orchestrate the
@@ -134,7 +134,7 @@ During the installation of each control plane node, the contents of the OCP
 release payload will be copied from the ISO to the node's disk (in the format
 of the registry's 'filesystem' backend) after the OS disk writing step - so
 that it remains available not only after the first reboot, but also once the
-installation is complete. Also the registry container image itself will be
+installation is complete. Also, the registry container image itself will be
 copied in the node additional image store for podman.
 [Assisted Service](https://github.com/openshift/assisted-service/)
 and [Assisted Installer](https://github.com/openshift/assisted-installer)
@@ -162,15 +162,15 @@ manage the `InternalReleaseImage` resource (and the related `MachineConfigNodes`
 #### Upgrade
 
 Upgrading an existing lower version cluster will be performed via the same
-extended ISO used for managing the installation. As soon as the user will
-attach the extended ISO to one of the control planes a temporary registry
+extended ISO used for managing the installation. As soon as the user
+attaches the extended ISO to one of the control planes, a temporary registry
 will be created to serve its content, and the IRI resource will report in
 its status the newly discovered release bundle identifier.
-At this point the user could edit the existing IRI spec to add the new
+At this point the user can edit the existing IRI spec to add the new
 release bundle identifier to trigger the copy process (from the temporary
 registry to each local control plane node registry), managed by the Machine
 Config Daemon (MCD). Once the copy has been completed on all the control plane
-nodes, the user could start the usual offline upgrade process via the `oc adm
+nodes, the user can start the usual offline upgrade process via the `oc adm
 upgrade --allow-explicit-upgrade --to-image=<release-image>`.
 At the end of the upgrade the user may decide to delete the previous release
 entry from the IRI resource. In such case the MCD on each control plane node
@@ -191,7 +191,7 @@ this port to be accessible from all the nodes, as well as the registry port.
 
 ### Workflow Description
 
-The various workflows are briefly summarized below, from the user point of
+The various workflows are briefly summarized below, from the user's point of
 view:
 
 #### Installation
@@ -221,10 +221,10 @@ view:
 5. The user edits the IRI resource by adding the release bundle identifier to
    the `spec.releases` field.
 6. The user waits until the copy process of the new release image is completed
-   for all the control plane nodes. The progress and status of the task could
+   for all the control plane nodes. The progress and status of the task can
    be monitored via the IRI `status` field.
 7. Once completed, the IRI status will report also the specific release
-   pullspec, so that the user could upgrade the cluster via the `oc adm upgrade
+   pullspec, so that the user can upgrade the cluster via the `oc adm upgrade
    --allow-explicit-upgrade --to-image=<release-pullspec>`
 
 #### Post-upgrade optional steps
@@ -233,14 +233,14 @@ view:
    not in use anymore.
 2. All the images related to the specified release bundle will be removed
    from all the control plane nodes. The progress and status of the task
-   could be monitored via the IRI `status` field.
+   can be monitored via the IRI `status` field.
 
 #### Node expansion
 
 1. The user runs the `oc adm node-image create` command from within the
    disconnected environment (with optionally some additional node
    configuration).
-2. The user attaches the newly generate node ISO to the target machine(s),
+2. The user attaches the newly generated node ISO to the target machine(s),
    and boots it. The progress and status of the task can be monitored via the
    `oc adm node-image monitor` command.
 3. The user waits until the CSRs are generated, and manually approves them
@@ -252,14 +252,14 @@ view:
 
 The `InternalReleaseImage` is a new singleton custom resource, named `cluster`,
 controlled by MCO, used to keep track and manage the OCP release images stored
-into the control planes nodes. In particular, it will be used for:
+on the control plane nodes. In particular, it will be used for:
 
 * Triggering a new release image copy task - as a preliminary upgrade step
-* Delete from disk a release image version not anymore in use - as an optional
+* Delete from disk a release image version no longer in use - as an optional
   post-upgrade step
 * Opt-out from the feature (by deleting the resource)
 
-This is an example of how the CR will look like:
+This is an example of what the CR will look like:
 
 ```
 apiVersion: machineconfiguration.openshift.io/v1alpha1
@@ -307,12 +307,12 @@ status:
 * The `status.releases.name` is the identifier of the release bundle
 * The `status.releases.image` is the OCP release image pullspec by digest for
   the current release bundle
-* The `status.conditions` field will be used to keep track of the activity
+* The `status.releases.conditions[]` field will be used to keep track of the activity
   performed on the various nodes
 
 For the global IRI conditions, the following type will be defined:
 
-* `Degraded`. When set, it could indicate a failure in the controller, or a problem in one (or more) release bundle.
+* `Degraded`. When set, it may indicate a failure in the controller, or a problem in one (or more) release bundle.
 
 For each release bundle, the following bundle condition types will be defined:
 
@@ -328,7 +328,7 @@ The `MachineConfigNode` CRD will be extended to report the per-node status, so
 that it will be possible to track the current status/errors of each individual
 node. The IRI resource will monitor all the MCN resources to update its status.
 
-Following a proposal example for the extended status field:
+Below is a proposal example for the extended status field:
 
 ```
 apiVersion: machineconfiguration.openshift.io/v1
@@ -357,11 +357,11 @@ status:
             lastTransitionTime: "2024-12-01T08:04:21Z"
 ```
 
-* The `internalReleaseImage.status.releases` field will be used to track the status of the release
+* The `status.internalReleaseImage.releases` field will be used to track the status of the release
   payloads stored in the related node
-* The `internalReleaseImage.status.releases.name` will report the release bundle identifier string
-* The `internalReleaseImage.status.releases.image` will report the OCP release image pullspec by digest
-* The `internalReleaseImage.status.conditions` field will be used to keep track of the activity
+* The `status.internalReleaseImage.releases.name` will report the release bundle identifier string
+* The `status.internalReleaseImage.releases.image` will report the OCP release image pullspec by digest
+* The `status.internalReleaseImage.releases.conditions` field will be used to keep track of the activity
   performed for the specific release payload, and in particular to report any error
 
 For each release bundle, the following bundle condition types will be defined:
@@ -372,7 +372,7 @@ For each release bundle, the following bundle condition types will be defined:
 * `Removing`.  When true, it means that a release deletion is in progress on the current node, and not yet completed.
 * `Degraded`. When true, it means something has gone wrong in the current node.
 
-Additionaly, a new `StateProgress` enum value will be added to the MachineConfigNode conditions type:
+Additionally, a new `StateProgress` enum value will be added to the MachineConfigNode conditions type:
 
 * `InternalReleaseImageDegraded`. When true, it means the current node is not properly working (for one or more release bundles)
 
@@ -417,11 +417,11 @@ to report the ISO label string into its status.
 
 ##### Removal of a release from the InternalReleaseImage resource
 
-The user could remove a release payload not anymore in use by editing the
+The user can remove a release payload no longer in use by editing the
 `spec.releases` field of the `InternalReleaseImage` resource to delete the
 desired release entry value.
 
-A ValidatingAdmissionPolicy will be added to prevent the user to remove
+A ValidatingAdmissionPolicy will be added to prevent the user from removing
 a release entry that is currently being used by the cluster. The policy will
 perform a check against the `ClusterVersion` `version` object to allow (or not)
 the update request.
@@ -440,12 +440,12 @@ performing a check against the `ClusterVersion` `version` object will be used
 (to verify that none of the IRI releases is currently being used by the
 cluster).
 
-This means that a user, to opt-out from the feature, will have to previously
-setup his/her own registry with the required mirrored content and then perform
-a cluster upgrade. Once successfully completed, it'd be possible to remove the
+This means that a user, to opt-out from the feature, will first have to
+set up their own registry with the required mirrored content and then perform
+a cluster upgrade. Once successfully completed, it will be possible to remove the
 IRI resource.
 
-Re-activation scenario will not be supported.
+Re-activation scenarios will not be supported.
 
 #### Extended RHCOS ISO build
 
@@ -502,7 +502,7 @@ A udev rule, along with a systemd service injected by MCO will detect when an
 extended RHCOS ISO is attached, and then mount it to launch a temporary registry
 to serve its content, by looking for devices labelled as `ocp-release-bundle-*`.
 This label will be reported as the bundle identifier in the MCN status (and then
-in the IRI status). After the user modified the IRI resource with the new release
+in the IRI status). After the user modifies the IRI resource with the new release
 bundle identifier, the new OCP release image payload will be copied on each node
 registry using skopeo.
 
@@ -514,7 +514,7 @@ Thus, to fully support also the upgrade, a total of additional ~120GB will be
 required.
 Assisted Service will apply a pre-flight validation to ensure that the
 control plane nodes will meet the new storage requirement. Additionally, it
-should be properly documented in the pre-requistes section.
+should be properly documented in the prerequisites section.
 
 ### Risks and Mitigations
 
@@ -531,13 +531,13 @@ should be properly documented in the pre-requistes section.
   limited set of OLM operators. Including all the OLM operators is not
   feasible, and the current selected set may not be sufficient and/or
   effectively required by all the users.
-* Due the size, some hardware vendors may have difficulties into loading
+* Due to the size, some hardware vendors may have difficulty loading
   such ISO, so a more extended testing may be required.
 * The lifecycle of some OLM operators is different from the OCP one,
-  thus assembling an extended ISO may be challenging due the different release
+  thus assembling an extended ISO may be challenging due to the different release
   timings (between OCP and OLM operators).
-* The upgrade path of some OLM operators may require to include different
-  versions of the same operator, thus impacting on the final size of the
+* The upgrade path of some OLM operators may require including different
+  versions of the same operator, thus impacting the final size of the
   extended ISO.
 * Building and releasing the extended ISO via Konflux requires a non-trivial
   additional effort cost.
