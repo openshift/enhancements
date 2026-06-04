@@ -564,13 +564,28 @@ This feature does not depend on the features that are excluded from the OKE prod
 
 #### KMS Health Reporter Connectivity
 
-**Auth**: the reporter uses a **legacy ServiceAccount token** (mounted from a Secret) bound to a minimal Role that only permits applying its single per-node condition entry on the operator CR. The projected SA tokens available in API-server-adjacent namespaces are admin-grade, as are the auth client certificates on disk; both would over-privilege a sidecar whose only job is one SSA apply. The legacy SA token keeps the blast radius minimal if the sidecar is compromised. The tradeoff is lifetime: a legacy token does not expire, whereas a projected token rotates. We accept this, since a token scoped to one verb on one resource is a far smaller prize than an admin-grade token, expiring or not.
+Short term, the reporter introduces no new credential. Every pod it runs in already mounts an admin-grade identity that can write the owning operator CR, and the reporter reuses it. The connection is split by pod type, because the kube-apiserver runs as a `hostNetwork` static pod while the aggregated API servers run as ordinary Deployments.
 
-**Connection**: all reporters reach the kube-apiserver through the in-cluster Service `kubernetes.default.svc`.
+Reusing an admin-grade token is a deliberate short-term tradeoff. The trust boundary is the pod: the reporter is co-located with the API server process, and on the static pod with sidecars that already hold this exact `cluster-admin` token. A separate scoped credential short term would add a Role, a binding, and a token to rotate without shrinking the admin surface the pod already exposes.
 
-In an HA control plane this survives KMS failure: if one node's KMS plugin breaks, that node's KAS degrades, but the Service still has healthy endpoints on the other nodes, so the affected node's reporter can still deliver its condition. The Service approach only fully breaks when every KMS plugin is down, and that is a cluster-down event already surfaced by far louder signals (`ClusterOperator`, etcd, kubelet probes) than a missing reporter condition. On Single-Node OpenShift the Service has a single endpoint, so a broken local KMS plugin does leave the reporter unable to write; this is acceptable for the same reason: the cluster is already hard-down and the condition would be redundant.
+##### Aggregated API servers (`openshift-apiserver`, `openshift-oauth-apiserver`)
 
-Dialing `127.0.0.1:6443` directly (the kube-apiserver static pod uses `hostNetwork: true`) was considered and rejected. It would bridge the post-start window where the local KAS accepts TLS connections but is still absent from `kubernetes.default` `Endpoints` (the Service reconciler self-gates on `/readyz`; see [`kubernetesservice/controller.go`](https://github.com/kubernetes/kubernetes/blob/master/pkg/controlplane/controller/kubernetesservice/controller.go)). But reporting KMS plugin health is not on KAS's critical startup path, and a not-ready KAS is already surfaced with higher signal-to-noise by `ClusterOperator`, kubelet probes, and KAS's own readiness machinery.
+The aggregated API servers run as Deployments in the pod network, each backed by a ServiceAccount (`openshift-apiserver-sa`, `oauth-apiserver-sa`). The reporter sidecar inherits that projected token with no extra wiring, exactly as the existing `openshift-apiserver-check-endpoints` sidecar does (it runs with no `--kubeconfig` and falls back to in-cluster config). Both SAs are bound to `cluster-admin`, so the token applies the per-node condition with no added RBAC.
+
+##### kube-apiserver
+
+The reporter reuses the kubeconfig `cert-syncer` already uses: it dials the local kube-apiserver at `https://localhost:6443`, the loopback endpoint every static-pod kubeconfig uses (`node-kubeconfigs`, `check-endpoints`), with the `localhost-recovery` token, a non-expiring legacy ServiceAccount token bound to `cluster-admin`. Because a static pod projects nothing automatically, the reporter must also mount the resources that kubeconfig references by path, including the serving CA it uses to verify the loopback connection.
+
+Loopback is deliberate: not `kubernetes.default.svc` (does not resolve from a host-network static pod), and not the `KUBERNETES_SERVICE_HOST` ClusterIP. An unhealthy KMS plugin does not break this write, despite gating its own kube-apiserver's health: KMS gates `/readyz` and `/healthz` but not `/livez`, so the pod is dropped from the Service load balancer but never restarted and keeps serving on loopback. And the reporter writes an `operator.openshift.io` CR, which is not in the encrypted set (OpenShift encrypts only core `secrets` and `configmaps`), so the write uses the identity transformer and never calls KMS.
+
+We lose the cross-node failover the ClusterIP would have offered. This is acceptable, because if a node's local kube-apiserver is itself down, the node's condition stops advancing `lastChecked` and the aggregator flips it to `Unknown` (see [Probe interval](#probe-interval)). Loopback also keeps the cluster network out of the write path: one fewer component that can fail between the reporter and its kube-apiserver.
+
+##### Long term
+
+The reporter moves to a dedicated, least-privilege identity, auto-rotated by the owning operator and scoped by RBAC to its single Server-Side Apply on the operator CR. The mechanism follows the same topology split:
+
+- On the static pod, a managed client certificate whose CN names a dedicated identity, issued and rotated by the operator's existing certrotation, the same mechanism that already mints the scoped `check-endpoints` client cert.
+- On the aggregated API servers, a dedicated ServiceAccount with a minimal Role, its bound token minted and rotated by the operator through the TokenRequest API (a plain projected volume cannot scope below the pod's own SA).
 
 #### KMS Plugin Health Conditions
 
