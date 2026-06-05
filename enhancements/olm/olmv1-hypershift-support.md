@@ -60,6 +60,8 @@ HyperShift is the multi-tenancy approach endorsed by OpenShift. Currently, OLMv1
 - Minimize customization of existing components and creation of bespoke components
 - Maintain operational parity with standalone clusters (TLS management, upgrade conditions)
 - Ensure complete tenant isolation between hosted clusters
+- Update existing OLMv1 (NewOLM) feature-gates in [openshift/API](https://github.com/openshift/api/blob/master/features/features.go) to include HyperShift topology
+- Update existing OLMv1 [OTE](openshift/operator-framework-operator-controller/openshift/tests-extention) to include HyperShift topology testing by removing "NonHyperShiftHOST" constraints
 
 ### Non-Goals
 
