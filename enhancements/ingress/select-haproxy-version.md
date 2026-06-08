@@ -61,7 +61,7 @@ version before deploying it to production workloads, or evaluate the behavior
 in canary test fashion on a small subset of traffic.
 
 As a cluster administrator, I want to gradually migrate my IngressControllers
-from one LTS OpenShift version's HAProxy to the next, so that I can manage
+from one EUS OpenShift version's HAProxy to the next, so that I can manage
 changes incrementally across multiple OpenShift releases.
 
 As a cluster administrator, I want to downgrade an existing IngressController
@@ -118,7 +118,7 @@ from the current OpenShift release.
 
 When an administrator specifies an OpenShift release version, the
 IngressController will use the HAProxy version that shipped with that
-specific OpenShift release. The ingress-controller-operator will manage the
+specific OpenShift release. The cluster-ingress-operator will manage the
 deployment of the appropriate HAProxy binary and its dependencies (pcre,
 openssl, FIPS libraries) to support the selected version.
 
@@ -152,7 +152,7 @@ OpenShift cluster infrastructure and upgrades.
 2. The cluster administrator creates or updates an IngressController resource,
    specifying the desired HAProxy version in the new API field (e.g.,
    `haproxyOCPVersion: "OCP-5.0"`, or leaving it empty for the default).
-3. The ingress-controller-operator validates the requested version is
+3. The cluster-ingress-operator validates the requested version is
    available and supported.
 4. The operator updates the IngressController deployment to use the
    specified HAProxy version and its matching dependencies.
@@ -165,7 +165,7 @@ OpenShift cluster infrastructure and upgrades.
 1. The cluster administrator creates a new sharded IngressController with
    `haproxyOCPVersion` unset (empty) to test the latest HAProxy version.
 2. The cluster administrator configures test routes to use the new
-   IngressController via domain or namespace selectors.
+   IngressController via route or namespace label selectors.
 3. The cluster administrator runs tests against the test IngressController
    to validate HAProxy behavior.
 4. Once validated, the cluster administrator updates production
@@ -210,7 +210,7 @@ sequenceDiagram
 ### API Extensions
 
 This enhancement modifies the existing IngressController CRD
-(`operator.openshift.io/v1`) to add a new optional field for specifying
+(`ingresscontrollers.operator.openshift.io/v1`) to add a new optional field for specifying
 the HAProxy version.
 
 The proposed API fields for the IngressController spec:
@@ -284,7 +284,7 @@ compatibility.
 
 This enhancement works with Hypershift deployments. The HAProxy version
 selection applies to IngressControllers in both the management cluster and
-guest clusters. The ingress-controller-operator in each context manages the
+guest clusters. The cluster-ingress-operator in each context manages the
 appropriate HAProxy binaries and dependencies.
 
 #### Standalone Clusters
@@ -315,8 +315,9 @@ on standard IngressController resources which are available in OKE.
 
 This implementation deploys HAProxy as a separate sidecar container alongside the
 main router container. Each supported HAProxy version is packaged in its own
-dedicated container image. One HAProxy sidecar image is built per OCP version,
-with a 1:1 mapping between OCP version and HAProxy version.
+dedicated container image. Each OCP release includes 3 distinct HAProxy sidecar
+images: the default version for the current OCP release, and the default for the
+2 previous minor OCP releases.
 
 **Pod Structure**:
 ```yaml
@@ -358,14 +359,13 @@ process.
 **Advantages**:
 - Clean separation of concerns (router logic vs HAProxy runtime)
 - Smaller individual images
-- Independent versioning and updates
 - No library isolation complexity
 - Only selected version image is pulled
 - HAProxy image can be updated independently
 
 **Disadvantages**:
 - Requires pod structure changes (init container + sidecar)
-- Minimal additional container overhead
+- Minimal overhead in the additional sidecar container
 - Requires special handling if using new features from a newer HAProxy
   version, not available on an older one
 - Init container needed for static files and initial configuration
@@ -544,7 +544,7 @@ same source during each OCP release, with only the embedded HAProxy binary
 differing. Images are tagged by the target OCP version.
 
 The router and HAProxy evolve together within each image as a complete unit.
-The ingress-controller-operator selects the appropriate image based on the
+The cluster-ingress-operator selects the appropriate image based on the
 `haproxyOCPVersion` field. Router code bug fixes are applied to all supported
 images using the same backport strategy used for patch releases across OCP
 versions.
@@ -582,7 +582,7 @@ high-level code changes:
    the `TechPreviewNoUpgrade` feature set. The feature gate must
    specify the Jira component, contact person, and link to this enhancement.
 
-3. **Operator Logic**: Update the ingress-controller-operator to:
+3. **Operator Logic**: Update the cluster-ingress-operator to:
    - Read and validate the `haproxyOCPVersion` field
    - Map the OCP version to the appropriate HAProxy sidecar container image
      reference
@@ -598,6 +598,9 @@ high-level code changes:
 
 4. **HAProxy Image Management**: Using the sidecar deployment model:
    - Build separate HAProxy container images for each supported OCP version
+   - HAProxy is built as an RPM package and the HAProxy sidecar images are
+     created by installing HAProxy via dnf, ensuring consistency with standard
+     package management practices and dependency resolution
    - Each HAProxy image includes the HAProxy binary and all its dependencies
      (pcre, openssl, FIPS libraries, libc, and other system libraries)
    - The operator maintains a mapping from OCP version (e.g., "OCP-4.22") to
@@ -611,6 +614,9 @@ high-level code changes:
    - Only empty string or "OCP-X.Y" format is accepted
    - Requested OCP versions are available in the current cluster
    - Exactly 3 versions are provided (except OCP 5.0 which provides 2)
+   - Use ValidatingAdmissionPolicy (VAP) to strictly validate that only the
+     exact versions supported by the current release can be specified,
+     providing declarative, version-specific validation without webhooks
 
 6. **Upgrade Handling**: Implement logic to handle cluster upgrades according
    to the specified version policy:
@@ -621,22 +627,36 @@ high-level code changes:
      would become unsupported in the target release, preventing cluster
      upgrades until administrators update to empty or a supported version.
 
+7. **Version Count Rationale - EUS Upgrade Support**: The decision to support
+   exactly 3 distinct HAProxy versions (current and 2 previous minor releases)
+   is driven by Extended Update Support (EUS) requirements. EUS releases occur
+   every 2 minor versions (e.g., 4.22, 5.1, 5.3), and users upgrading from one
+   EUS release to the next need the ability to maintain the same HAProxy version
+   throughout the upgrade path. Supporting 3 versions ensures that when
+   upgrading from one EUS release (e.g., 5.1) to the next (e.g., 5.3), the
+   HAProxy version from the source EUS release remains available in the target
+   release. This allows administrators to upgrade the OpenShift cluster while
+   keeping HAProxy stable, then migrate HAProxy versions independently on their
+   own timeline.
+
 ### Risks and Mitigations
 
 **Risk 1**: Supporting multiple HAProxy versions increases operational complexity
 with the sidecar deployment model.
 
 **Mitigation**: Limit support to 3 distinct versions. The sidecar approach
-minimizes individual image sizes and only pulls the selected version. Monitor
-image size and establish clear deprecation policies. The init container and
-sidecar pattern is well-established in Kubernetes, reducing operational risk.
+minimizes individual image sizes and only pulls the selected version. Establish
+clear deprecation policies. The init container and sidecar pattern is
+well-established in Kubernetes, reducing operational risk.
 
 **Risk 2**: Administrators may select outdated HAProxy versions with known
 security vulnerabilities.
 
-**Mitigation**: Clearly document supported versions and deprecation
-timelines. Provide warnings in the IngressController status when using
-older versions. Consider implementing alerts when versions reach
+**Mitigation**: Track CVEs and security vulnerabilities for all supported
+HAProxy versions and apply fixes by backporting patches or updating the RPM
+builds for each affected version. Clearly document supported versions and
+deprecation timelines. Provide warnings in the IngressController status when
+using older versions. Consider implementing alerts when versions reach
 end-of-support.
 
 **Risk 3**: Dependency conflicts between HAProxy versions and their required
@@ -654,7 +674,7 @@ run different HAProxy versions.
 
 **Mitigation**: Clearly expose the HAProxy version in IngressController
 status. Add metrics and logging to identify which version is running.
-Include version information in support bundles.
+Include version information in the must-gather artifacts.
 
 ### Drawbacks
 
@@ -761,11 +781,12 @@ OpenShift release.
     safety and allows administrators to test and validate the new HAProxy version
     on their own timeline.
 
-4. **FIPS compliance and validation**: How do FIPS requirements impact the
-   HAProxy sidecar container?
-   - How is FIPS mode validated for each HAProxy version?
-   - What are the certification implications of running FIPS-validated
-     libraries from older OCP releases on newer kernels?
+4. ~~**FIPS compliance and validation**: How do FIPS requirements impact the
+   HAProxy sidecar container?~~ **RESOLVED**: FIPS compliance is already
+   validated at the RHEL level. Since each HAProxy sidecar image is built on
+   a specific RHEL base image with HAProxy installed via dnf (as an RPM), FIPS
+   validation follows the standard RHEL certification process. No additional
+   HAProxy-specific FIPS validation is required beyond what RHEL provides.
 
 5. **Version to image mapping**: How does the operator maintain the mapping
    from `haproxyOCPVersion: "OCP-X.Y"` to the HAProxy sidecar container image
@@ -789,13 +810,14 @@ OpenShift release.
      clusters not yet upgraded to the next version?
    - How do we communicate the support lifecycle to administrators?
 
-7. **Library compatibility across kernel versions**: What are the risks of
+7. ~~**Library compatibility across kernel versions**: What are the risks of
    running older dynamic libraries (pcre, openssl, FIPS modules from OCP 4.22)
-   packaged in HAProxy sidecar images on a newer kernel (from OCP 5.1)?
-   - Are there known incompatibilities between specific library/kernel
-     version combinations?
-   - How do we validate compatibility during testing?
-   - Should we document supported/tested combinations?
+   packaged in HAProxy sidecar images on a newer kernel (from OCP 5.1)?~~
+   **RESOLVED**: The sidecar approach eliminates library compatibility concerns.
+   Each HAProxy sidecar image uses a specific RHEL version as its base image,
+   with HAProxy compiled and packaged as an RPM for that RHEL version. The
+   HAProxy binary and all its dependencies are matched to the same RHEL version,
+   ensuring compatibility.
 
 8. ~~**HAProxy sidecar image sourcing**: When building OCP 5.1 with three
    distinct HAProxy sidecar images (containing HAProxy from 5.1, 5.0, and
@@ -850,6 +872,8 @@ The test plan for this enhancement must include:
 - Version selection logic in the operator
 - Version compatibility validation
 - Upgrade scenario handling
+- Verify the operator sets `Upgradeable=False` when `haproxyOCPVersion` specifies
+  a version that is too old to be supported by the next OpenShift minor release.
 
 **Integration Tests**:
 - IngressController creation with different HAProxy versions
@@ -876,9 +900,6 @@ Tests must cover:
 **Negative Tests**:
 - Attempting to use unsupported/unavailable versions
 - Invalid version format strings
-- Verify `Upgradeable=False` condition when attempting to upgrade to an
-  OpenShift version that does not support the currently selected
-  `haproxyOCPVersion`
 
 ## Graduation Criteria
 
@@ -927,7 +948,7 @@ When upgrading an OpenShift cluster:
    specified HAProxy version, provided it is still within the supported
    window (current release and up to 2 previous releases).
 3. If a pinned version would become unsupported in the target release
-   (older than the target release minus 2), the ingress-controller-operator
+   (older than the target release minus 2), the cluster-ingress-operator
    will set the ingress ClusterOperator's `Upgradeable` condition to `False`,
    blocking the cluster upgrade. The administrator must update the version
    selection to empty or a supported version before proceeding.
@@ -948,7 +969,7 @@ existing IngressControllers during the upgrade to 5.0.
 This enhancement handles version skew through the following mechanisms:
 
 **Control Plane / Data Plane Skew**:
-The ingress-controller-operator (control plane) must support serving
+The cluster-ingress-operator (control plane) must support serving
 multiple HAProxy versions to router pods (data plane). The operator version
 determines which HAProxy versions are available, not the router pod version.
 
@@ -966,7 +987,7 @@ the field gracefully.
 
 **Kubelet Compatibility**:
 This enhancement does not involve kubelet changes. HAProxy version selection
-is entirely managed by the ingress-controller-operator and router pods.
+is entirely managed by the cluster-ingress-operator and router pods.
 
 ## Operational Aspects of API Extensions
 
