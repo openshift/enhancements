@@ -14,7 +14,7 @@ api-approvers:
   - "@MarSik"
 creation-date: 2026-05-06
 last-updated: 2026-05-19
-status: provisional
+status: implementable
 tracking-link:
   - https://redhat.atlassian.net/browse/CNF-22582
   - https://redhat.atlassian.net/browse/RFE-8921
@@ -38,10 +38,11 @@ networking and pod-to-pod communication to leverage DPDK-accelerated packet proc
 Two new API fields are introduced: `spec.cpu.dedicated` to define the dedicated CPU set, and
 `spec.net.disableOvsDynamicPinning` to prevent OVN-Kubernetes from dynamically changing `ovs-vswitchd` and
 `ovsdb-server` processes' CPU affinity.
-When `dedicated` is set, the operator automatically configures full kernel-level
-isolation (`isolcpus=domain,managed_irq`, `nohz_full`, `rcu_nocbs`), adds the dedicated CPUs to
-the irqbalance banned mask, and updates the systemd CPU affinity to exclude them from host
-processes.
+When `dedicated` is set, the operator automatically configures kernel-level
+isolation (`isolcpus=managed_irq`, `nohz_full`, `rcu_nocbs`), creates a separate cgroup slice named dedicatedcpus.slice 
+with `cpuset.cpus.partition=isolated` to remove dedicated CPUs from the kernel scheduler's load
+balancing domains, adds the dedicated CPUs to the irqbalance banned mask, and updates the
+systemd CPU affinity to exclude them from host processes.
 
 ## Motivation
 
@@ -57,7 +58,7 @@ provides the complete isolation needed for DPDK vSwitch processes that run outsi
 pod scheduling.
 
 As part of efforts to support OVS-DPDK natively in OpenShift and the OpenPErouter project, there is
-a need for a CPU domain that is excluded from everything: OS daemons, kernel housekeeping, interrupt
+a need for a CPU pool that is excluded from everything: OS daemons, kernel housekeeping, interrupt
 handling, and all Kubernetes-scheduled workloads regardless of QoS class.
 
 ### User Stories
@@ -75,8 +76,10 @@ handling, and all Kubernetes-scheduled workloads regardless of QoS class.
 
 - Provide a `dedicated` CPU set in the PerformanceProfile API that is fully excluded from Kubelet
   scheduling (all QoS classes), OS daemons, and kernel housekeeping.
-- Automatically ban dedicated CPUs from irqbalance and configure `isolcpus=domain,managed_irq`
-  to prevent hardware interrupts and kernel scheduler interference on dedicated CPUs.
+- Automatically ban dedicated CPUs from irqbalance and configure `isolcpus=managed_irq`
+  to prevent managed interrupt affinity on dedicated CPUs. Create a cgroup v2 partition
+  (`cpuset.cpus.partition=isolated`) to remove dedicated CPUs from the kernel scheduler's load
+  balancing domains.
 - Provide the ability to disable OVN-Kubernetes dynamic OVS thread pinning independently
   of CPU dedication. This option is orthogonal to `dedicated` — OVS dynamic pinning and
   OVS-DPDK can coexist, and disabling dynamic pinning may not be desired in all `dedicated`
@@ -113,10 +116,15 @@ when `dedicated` is set without WP or `strict-cpu-reservation`.
    automatically configures full isolation for these CPUs:
    - **Kubelet**: Added to `ReservedSystemCPUs` (union with `reserved` CPUs) so that no pods of
      Garanteed QoS class are scheduled on them.
-   - **Kernel boot parameters**: Added to `isolcpus=domain,managed_irq` (removes CPUs from
-     scheduler load balancing domains and prevents managed interrupt affinity), `nohz_full`
-     (disables scheduler ticks when only one task is running), and `rcu_nocbs` (offloads RCU
-     callbacks to housekeeping CPUs).
+   - **Kernel boot parameters**: Added to `isolcpus=managed_irq` (prevents the kernel from
+     auto-assigning managed interrupts to these CPUs), `nohz_full` (disables scheduler ticks
+     when only one task is running), and `rcu_nocbs` (offloads RCU callbacks to housekeeping
+     CPUs).
+   - **Cgroup v2 partition**: A dedicated cgroup slice is created with `cpuset.cpus.exclusive`
+     set to the dedicated CPUs and `cpuset.cpus.partition` set to `isolated`. This removes
+     the dedicated CPUs from the kernel scheduler's load balancing domains, equivalent to the
+     `isolcpus=domain` kernel parameter but applied at the cgroup level — avoiding conflicts
+     with the existing `isolcpus` boot parameter used for isolated CPUs.
    - **TuneD**: Added to `isolated_cores` (union with `isolated` CPUs) so that kernel
      housekeeping is moved off these cores.
    - **Irqbalance**: Automatically added to the `IRQBALANCE_BANNED_CPUS` mask so that hardware
@@ -169,11 +177,14 @@ when `dedicated` is set without WP or `strict-cpu-reservation`.
    - A **TuneD profile** that:
      - Sets `isolated_cores` to the union of `isolated` and `dedicated` CPUs
        (`"1-3,5-7"` in this example), ensuring kernel housekeeping is moved off these cores.
-     - Configures kernel boot parameters: `isolcpus=domain,managed_irq:1,5`,
-       `nohz_full=1,5`, `rcu_nocbs=1,5` for the dedicated CPUs (in addition to the existing
-       isolated CPU params).
+     - Configures kernel boot parameters: `isolcpus=managed_irq:1-3,5-7`,
+       `nohz_full=1-3,5-7`, `rcu_nocbs=1-3,5-7` for both isolated and dedicated CPUs.
      - Updates the systemd CPU affinity mask to exclude dedicated CPUs, confining all host
        services to reserved CPUs only.
+   - A **cgroup v2 partition** (via a systemd slice or MachineConfig drop-in) that:
+     - Creates a cgroup slice named `dedicatedcpus.slice` with `cpuset.cpus.exclusive=1,5` (the dedicated CPUs).
+     - Sets `cpuset.cpus.partition=isolated` to remove the dedicated CPUs from the kernel
+       scheduler's load balancing domains.
    - A **MachineConfig** that:
      - Does NOT include the OVS dynamic pinning trigger file (because `disableOvsDynamicPinning`
        is `true`).
@@ -209,11 +220,11 @@ type Net struct {
 type CPU struct {
     // ... existing fields (Isolated, Reserved, Shared, Offlined) ...
 
-    // Dedicated defines a set of CPUs dedicated for infrastructure networking
-    // workloads such as DPDK vSwitch or vRouter. These CPUs receive full
-    // kernel-level isolation (isolcpus=domain,managed_irq, nohz_full,
-    // rcu_nocbs), are excluded from Kubelet scheduling (all QoS classes),
-    // banned from irqbalance, and excluded from systemd CPU affinity.
+    // Dedicated defines a set of CPUs fully isolated from the operating system
+	  // and Kubernetes scheduling, intended for exclusive use by user-space
+	  // processes (for example, infrastructure networking workloads such as
+	  // DPDK-based vSwitch or vRouter). WorkloadPartitioning or --strict-cpu-reservation
+	  // kubelet CPUManager policy option are a prerequisite for this feature.
     // +optional
     Dedicated *CPUSet `json:"dedicated,omitempty"`
 }
@@ -283,19 +294,35 @@ TuneD computes reserved CPUs as the complement of `isolated_cores` (all online C
 `isolated_cores`), so adding dedicated CPUs to `isolated_cores` automatically excludes them
 from the housekeeping domain.
 
-The dedicated CPUs receive the following kernel boot parameters via TuneD:
-- `isolcpus=domain,managed_irq:<dedicated>` — removes dedicated CPUs from the kernel scheduler's
-  load balancing domains (`domain`) and prevents the kernel from automatically setting interrupt
-  affinity to these CPUs (`managed_irq`).
-- `nohz_full=<dedicated>` — enables adaptive-ticks mode, suppressing scheduler timer interrupts
-  when only one runnable task is on the CPU.
-- `rcu_nocbs=<dedicated>` — offloads RCU callback processing to housekeeping CPUs.
-
-These parameters are unioned with the existing isolated CPU parameters (isolated CPUs already
-get `isolcpus`, `nohz_full`, and `rcu_nocbs`).
+The dedicated CPUs share the following kernel boot parameters with isolated CPUs via TuneD
+(the parameters are applied to the union of isolated and dedicated CPU sets):
+- `isolcpus=managed_irq:<isolated ∪ dedicated>` — prevents the kernel from automatically
+  setting managed interrupt affinity to these CPUs.
+- `nohz_full=<isolated ∪ dedicated>` — enables adaptive-ticks mode, suppressing scheduler timer
+  interrupts when only one runnable task is on the CPU.
+- `rcu_nocbs=<isolated ∪ dedicated>` — offloads RCU callback processing to housekeeping CPUs.
 
 A new `DedicatedCpus` template variable is introduced for cases where the TuneD profile needs
 to reference just the dedicated CPU set separately from isolated CPUs.
+
+#### Cgroup v2 Partition Isolation
+
+To achieve scheduler domain isolation for dedicated CPUs without using the `isolcpus=domain`
+kernel boot parameter, a cgroup v2 separate slice with isolated partition is created for the dedicated CPUs.
+
+The operator generates a systemd slice named `dedicatedcpus.slice` (via MachineConfig drop-in) that creates a cgroup with:
+- `cpuset.cpus.exclusive` set to the dedicated CPU numbers.
+- `cpuset.cpus.partition` set to `isolated`.
+
+When `cpuset.cpus.partition=isolated` is set on a cgroup, the kernel removes those CPUs from
+the scheduler's load balancing domains — the same effect as `isolcpus=domain`, but applied at
+the cgroup level rather than at boot time. This approach is consistent with how OpenShift already
+handles Guaranteed pods with integral CPUs when the `cpu-load-balancing.crio.io: disable`
+annotation is used, but applied at the infrastructure level rather than the pod level.
+
+This avoids the fundamental conflict with the `isolcpus` kernel parameter: since `isolcpus` can
+only be specified once at boot, it is not possible to apply `domain` isolation to dedicated CPUs
+without also applying it to isolated CPUs.
 
 #### Systemd CPU Affinity
 
@@ -344,14 +371,6 @@ clean opt-out — no runtime logic changes in OVN-Kubernetes are required.
 
 ### Drawbacks
 
-- Adds complexity to the PerformanceProfile API with two new fields. However, these fields are
-  optional and only relevant for the DPDK vSwitch use case. Existing profiles are unaffected.
-- The `dedicated` CPU concept partially overlaps with `reserved` in that both exclude CPUs from
-  pod scheduling. The distinction is important: `dedicated` CPUs also receive full kernel-level
-  isolation (`isolcpus=domain,managed_irq`, `nohz_full`, `rcu_nocbs`), are banned from
-  irqbalance, and are excluded from systemd CPU affinity — none of which apply to `reserved`
-  CPUs. Clear documentation and API field descriptions are needed to avoid confusion.
-
 ## Alternatives (Not Implemented)
 
 ### Automatically disable OVS dynamic pinning when `dedicated` is set
@@ -376,11 +395,6 @@ arbitrary CPUs from irqbalance independently of CPU dedication. This was rejecte
    `infrastructureNetworking` or `dpdkCpus`? The current name is generic enough to support
    future use cases beyond DPDK but may be too vague.
 
-2. Should `isolcpus=domain,managed_irq` be used together (both domain isolation and managed
-   IRQ exclusion), or is one of these flags sufficient on its own? `domain` removes CPUs from
-   scheduler load balancing, while `managed_irq` prevents the kernel from auto-assigning
-   managed interrupts to these CPUs.
-
 ## Test Plan
 
 ### Unit Tests
@@ -389,8 +403,10 @@ arbitrary CPUs from irqbalance independently of CPU dedication. This was rejecte
 - Kubelet config generation: verify `ReservedSystemCPUs` is the union of `reserved`, `dedicated`,
   and `shared`.
 - TuneD profile generation: verify `isolated_cores` is the union of `isolated` and `dedicated`.
-- Kernel boot parameters: verify `isolcpus=domain,managed_irq`, `nohz_full`, and `rcu_nocbs`
+- Kernel boot parameters: verify `isolcpus=managed_irq`, `nohz_full`, and `rcu_nocbs`
   include dedicated CPUs.
+- Cgroup v2 partition: verify a cgroup slice named dedicatedcpus.slice exists for dedicated CPUs with
+  `cpuset.cpus.exclusive` set and `cpuset.cpus.partition=isolated`.
 - Irqbalance banned CPU mask: verify dedicated CPUs are automatically included.
 - Systemd CPU affinity: verify dedicated CPUs are excluded from the affinity mask.
 - MachineConfig generation with and without `disableOvsDynamicPinning`.
@@ -400,8 +416,10 @@ arbitrary CPUs from irqbalance independently of CPU dedication. This was rejecte
 - Apply a PerformanceProfile with `dedicated` and `disableOvsDynamicPinning` fields. Verify:
   - Kubelet's `ReservedSystemCPUs` includes dedicated CPUs.
   - TuneD profile's `isolated_cores` includes dedicated CPUs.
-  - Kernel cmdline contains `isolcpus=domain,managed_irq:<dedicated>`, `nohz_full=<dedicated>`,
-    and `rcu_nocbs=<dedicated>`.
+  - Kernel cmdline contains `isolcpus=managed_irq:<isolated ∪ dedicated>`,
+    `nohz_full=<isolated ∪ dedicated>`, and `rcu_nocbs=<isolated ∪ dedicated>`.
+  - A cgroup v2 partition exists for dedicated CPUs with `cpuset.cpus.exclusive` set and
+    `cpuset.cpus.partition=isolated`.
   - The irqbalance service has `IRQBALANCE_BANNED_CPUS` set to the dedicated CPU mask.
   - Systemd CPU affinity excludes dedicated CPUs (`grep Cpus_allowed_list /proc/1/status`).
   - The OVS dynamic pinning trigger file is absent.
@@ -415,6 +433,10 @@ arbitrary CPUs from irqbalance independently of CPU dedication. This was rejecte
   are confined to their partitioned CPUs and do not leak into dedicated CPUs.
 - Verify the interaction with MixedCPUs: when both `shared` and `dedicated` are set, the CPU
   sets are correctly unioned in Kubelet config.
+- Verify that `IRQBALANCE_BANNED_CPUS` is handled correctly when isolated containers (using the
+  `irq-load-balancing.crio.io: disable` annotation) are created and deleted: dedicated CPUs must
+  remain banned at all times, while isolated container CPUs are dynamically added and removed from the `IRQBALANCE_BANNED_CPUS` 
+  by CRI-O without affecting the dedicated CPU entries in the mask.
 
 ## Graduation Criteria
 
