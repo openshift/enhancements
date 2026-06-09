@@ -795,20 +795,17 @@ OpenShift release.
    - Stored in an API resource?
    - When is this mapping validated (reconcile time vs cluster upgrade time)?
 
-6. **HAProxy version deprecation and continuous support window**: How should
-   we handle HAProxy version support when OCP versions go end-of-life?
-   - Example timeline:
-     - Day 0: OCP 5.0 releases, supports HAProxy from 5.0 and 4.22
-     - Day 90: OCP 5.1 releases, supports HAProxy from 5.1, 5.0, and 4.22
-     - Day 180: OCP 4.21 goes EOL (but 4.22, 5.0, 5.1 are still supported)
-   - On Day 180, if a cluster is running OCP 5.0 with `haproxyOCPVersion:
-     "OCP-4.21"`, should the IngressController:
-     - Continue running with OCP 4.21's HAProxy?
-     - Set a warning/degraded condition?
-     - Be forcibly upgraded to a supported version?
-   - Does the support matrix update when an OCP version goes EOL, even for
-     clusters not yet upgraded to the next version?
-   - How do we communicate the support lifecycle to administrators?
+6. ~~**HAProxy version deprecation and continuous support window**: How should
+   we handle HAProxy version support when OCP versions go end-of-life?~~
+   **RESOLVED**: HAProxy versions from EOL OCP releases that are referenced by
+   newer OCP releases should be maintained normally. Although the OCP release
+   itself may be EOL, Red Hat continues to support the HAProxy version as long
+   as it is included in a supported OCP release. For example, if OCP 4.22 goes
+   EOL but OCP 5.1 still supports "OCP-4.22" as a selectable HAProxy version,
+   Red Hat will continue to maintain and apply security fixes to that HAProxy
+   version. Support ends only when the HAProxy version is no longer referenced
+   by any supported OCP release (i.e., when it falls outside the current release
+   minus 2 window).
 
 7. ~~**Library compatibility across kernel versions**: What are the risks of
    running older dynamic libraries (pcre, openssl, FIPS modules from OCP 4.22)
@@ -889,7 +886,8 @@ appropriate test type labels like `[Suite:openshift/conformance/parallel]`,
 
 Tests must cover:
 - Basic functionality: using empty value (default) and specific OpenShift versions
-- Version persistence across cluster upgrades
+- Version persistence across cluster upgrades, using API field on OCP 5.0 or newer
+- Version persistence when migrating from 4.22 to 5.0, where API field is not available
 - Multiple IngressControllers with different HAProxy versions
 - Validation that routes work correctly with different HAProxy versions
 - Performance and resource consumption with multiple versions
@@ -903,35 +901,21 @@ Tests must cover:
 
 ## Graduation Criteria
 
-**Testing Requirements**:
-- Minimum 5 tests per feature gate
-- All tests must run at least 7 times per week
-- All tests must run at least 14 times per supported platform
-- Tests must be in place at least 14 days before branch cut
-- All tests must pass at least 95% of the time
-- Tests running on all supported platforms: AWS (HA/Single), Azure (HA),
-  GCP (HA), vSphere (HA), Baremetal (HA with IPv4/IPv6/Dual)
+We will introduce the feature as TechPreviewNoUpgrade during the OpenShift 5.0
+development, with the goal of graduating it to GA before it is released.
 
 ### Dev Preview -> Tech Preview
 
-- Ability to select and use different HAProxy versions end-to-end
-- End user documentation covering use cases and migration strategies
-- API stability with no planned breaking changes
-- Sufficient test coverage across supported platforms
-- Gather feedback from early adopters
-- Metrics exposed for HAProxy version tracking
-- Alerts defined for version compatibility issues
+N/A.
 
 ### Tech Preview -> GA
 
-- Extensive testing including upgrade and scale scenarios
-- At least one full release cycle in Tech Preview
-- Available by default with empty `haproxyOCPVersion` (current release) behavior
-- Telemetry data showing feature adoption and stability
-- User-facing documentation in openshift-docs
-- Performance testing showing no regression
-- Support procedures documented for troubleshooting version issues
+- Payload tests pass with HAProxy selection enabled
+- All known regressions are fixed
+- Extensive testing including upgrade scenarios
 - End-to-end tests included in standard conformance suites
+- Support procedures documented for troubleshooting version issues
+- Limitations, such as migration criterias, are documented
 
 ### Removing a deprecated feature
 
@@ -943,7 +927,8 @@ N/A - This is a new feature.
 
 When upgrading an OpenShift cluster:
 1. IngressControllers with `haproxyOCPVersion` unset (empty) will automatically
-   use the new HAProxy version from the upgraded OpenShift release.
+   use the new HAProxy version from the upgraded OpenShift release, except in the
+   case of OpenShift 5.0 (see below).
 2. IngressControllers with `haproxyOCPVersion: "OCP-X.Y"` will preserve the
    specified HAProxy version, provided it is still within the supported
    window (current release and up to 2 previous releases).
@@ -977,7 +962,7 @@ determines which HAProxy versions are available, not the router pod version.
 The operator maintains compatibility with HAProxy versions from the current
 OpenShift release and up to 2 previous releases. During a rolling upgrade,
 different router pods may temporarily run different HAProxy versions, which
-is acceptable as each IngressController operates independently.
+is acceptable.
 
 **API Compatibility**:
 The new `haproxyOCPVersion` field is optional and gated behind a feature gate.
@@ -991,39 +976,7 @@ is entirely managed by the cluster-ingress-operator and router pods.
 
 ## Operational Aspects of API Extensions
 
-### SLIs for API Extensions
-
-This enhancement modifies an existing CRD (IngressController) but does not
-add webhooks or aggregated API servers. The existing SLIs for
-IngressController resources apply:
-
-- `cluster-ingress-operator` condition `Available=True`
-- `cluster-ingress-operator` condition `Degraded=False`
-- IngressController resource status conditions
-
-### Impact on Existing SLIs
-
-**API Throughput**: Minimal impact. The new field is optional and adds
-negligible processing overhead during IngressController reconciliation.
-
-**Scalability**: No significant impact. The operator already manages
-multiple IngressControllers, and version selection is a one-time decision
-during reconciliation.
-
-**API Availability**: No impact. The enhancement does not add API
-dependencies or external calls.
-
-### Measurement and Testing
-
-Performance impact will be measured through:
-- Existing OpenShift scalability tests that create and manage multiple
-  IngressControllers
-- Component Readiness regression testing across all supported platforms
-- Monitoring IngressController reconciliation times with version selection
-  enabled
-
-QE will measure these metrics in standard CI runs for each supported
-platform.
+N/A. - This feature neither extends the API nor adds webhooks.
 
 ## Support Procedures
 
