@@ -96,12 +96,18 @@ versions:
   
 - name: v1beta1
   served: true
-  storage: false  # Deprecated but still served
+  storage: false
+  deprecated: true  # Mark version as deprecated
+  deprecationWarning: "v1beta1 is deprecated; use v1 instead"
   schema:
     openAPIV3Schema: {...}
 ```
 
 ### Conversion Webhook
+
+**⚠️ OpenShift Practice**: OpenShift operators typically **do not serve multiple API versions simultaneously**, so conversion webhooks are rarely needed. Version transitions happen during OpenShift upgrades (one version at a time), not via runtime conversion.
+
+**Contrast with upstream Kubernetes**: The [Kubernetes documentation](https://kubernetes.io/docs/tasks/extend-kubernetes/custom-resources/custom-resource-definition-versioning/) presents serving multiple versions simultaneously as the standard API evolution pattern, stating "it is perfectly safe for some clients to use the old version while others use the new version." Conversion webhooks enable this multi-version serving model.
 
 ```yaml
 spec:
@@ -140,9 +146,10 @@ versions:
 ```
 
 **Benefits**:
-- Separate RBAC for spec vs status
-- Update status without triggering validation webhooks on spec
-- ObservedGeneration pattern
+- **Separate endpoints**: Spec updates blocked at `/status` endpoint; status updates blocked at main endpoint
+- **Separate RBAC**: Controllers can update status without permission to modify spec
+- **Generation tracking**: Status updates don't increment `metadata.generation` (only spec changes do)
+- **ObservedGeneration pattern**: Track which spec version the status reflects
 
 ### Scale Subresource
 
@@ -183,8 +190,11 @@ foo     3          3           5m
 ## Best Practices
 
 1. **Schema Validation**: Define comprehensive OpenAPI schema
-   - Prevent invalid objects from being created
-   - Better than validating in controller
+   - **Synchronous validation at admission time** (fail-fast before persistence)
+   - Per [Kubernetes API conventions](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md): "When custom resources are admitted by the API server, OpenAPI validation is applied to the object prior to any structured client observing the object"
+   - Prevents invalid objects from being written to etcd
+   - Better user experience than async controller validation (immediate feedback)
+   - **Kubernetes principle**: "we never want to change or override a value that was provided by the user. If they requested something invalid, they should get an error"
 
 2. **Status Subresource**: Always use for resources with status
    ```yaml
@@ -203,10 +213,12 @@ foo     3          3           5m
      default: 3
    ```
 
-5. **Short Names**: Provide kubectl shortcuts
+5. **Short Names**: Use sparingly
    ```yaml
    shortNames: [co]  # kubectl get co
    ```
+   
+   **OpenShift API team practice**: Short names should only be used for APIs accessed frequently by the majority of cluster users (e.g., `co` for ClusterOperator, `mc` for MachineConfig). Most operator-specific APIs should **not** define short names to avoid namespace pollution.
 
 ## Common Patterns
 

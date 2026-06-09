@@ -33,15 +33,16 @@ status:
     reason: AsExpected
     message: "All 3 pods are ready"
     lastTransitionTime: "2026-04-28T10:00:00Z"
-    lastHeartbeatTime: "2026-04-28T10:05:00Z"
   - type: Progressing
     status: "False"
     reason: AsExpected
     message: "Desired state reached"
+    lastTransitionTime: "2026-04-28T10:00:00Z"
   - type: Degraded
     status: "False"
     reason: AsExpected
     message: "Component is healthy"
+    lastTransitionTime: "2026-04-28T10:00:00Z"
   - type: Upgradeable
     status: "True"
     reason: AsExpected
@@ -85,17 +86,19 @@ See [status-conditions.md](../../platform/operator-patterns/status-conditions.md
 Component start:
   1. Create ClusterOperator (if not exists)
   2. Set all conditions (Available, Progressing, Degraded)
-  3. Update heartbeat every ~60s
 
 Normal operation:
   1. Update conditions when state changes
-  2. Update heartbeat regularly
+  2. Update lastTransitionTime only when condition status changes
 
 Upgrade:
   1. CVO updates operator image
-  2. Operator sets Progressing=True
-  3. Operator rolls out new workload
-  4. Operator sets Progressing=False, updates versions
+  2. Operator reconciles and detects version change
+  3. Operator sets Progressing=True (if rollout needed)
+  4. Operator rolls out new workload (if applicable)
+  5. Operator sets Progressing=False, updates versions
+
+Note: Some upgrades only require image updates without rollout (Progressing may stay False).
 ```
 
 ## Monitoring
@@ -192,20 +195,13 @@ status:
 
 ```promql
 # Alert on unavailable component
-ALERT ClusterOperatorUnavailable
-  IF cluster_operator_conditions{type="Available", status="False"} == 1
-  FOR 15m
-  
-# Alert on degraded component
-ALERT ClusterOperatorDegraded
-  IF cluster_operator_conditions{type="Degraded", status="True"} == 1
-  FOR 15m
+cluster_operator_conditions{condition="Available"} == 0
 
-# Alert on stale heartbeat
-ALERT ClusterOperatorStale
-  IF (time() - cluster_operator_conditions_last_heartbeat) > 300
-  FOR 5m
+# Alert on degraded component
+cluster_operator_conditions{condition="Degraded"} == 1
 ```
+
+**Note**: The metric uses numeric values (0 = False, 1 = True) and `condition` label (not `type`). See [CVO metrics documentation](https://github.com/openshift/enhancements/blob/master/dev-guide/cluster-version-operator/dev/metrics.md) for full metric definition.
 
 ## Common ClusterOperators
 
@@ -222,13 +218,7 @@ ALERT ClusterOperatorStale
 
 1. **Always set all conditions**: Available, Progressing, Degraded must always be present
 
-2. **Update heartbeat regularly**: Every 60s even if nothing changed
-   ```go
-   setCondition(&co.Status.Conditions, type, status, reason, message)
-   // Updates LastHeartbeatTime automatically
-   ```
-
-3. **Use Upgradeable to block**: Set to False when upgrade would break
+2. **Use Upgradeable to block**: Set to False when upgrade would break
    ```yaml
    - type: Upgradeable
      status: "False"
@@ -236,7 +226,7 @@ ALERT ClusterOperatorStale
      message: "Manual intervention required"
    ```
 
-4. **Set RelatedObjects**: Help debugging
+3. **Set RelatedObjects**: Help debugging
    ```yaml
    relatedObjects:
    - resource: namespaces
@@ -246,9 +236,9 @@ ALERT ClusterOperatorStale
 ## Antipatterns
 
 ❌ **Missing conditions**: Not setting Available/Progressing/Degraded  
-❌ **Stale heartbeat**: Not updating LastHeartbeatTime  
 ❌ **Vague messages**: "Error" instead of "Pod xyz crash looping: OOMKilled"  
-❌ **Wrong Available semantics**: Setting False during normal upgrade
+❌ **Wrong Available semantics**: Setting False during normal upgrade  
+❌ **Unnecessary updates**: Updating conditions when nothing has changed (wasteful reconciliation)
 
 ## References
 

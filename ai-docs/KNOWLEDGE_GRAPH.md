@@ -2,7 +2,7 @@
 
 **Purpose**: Visual navigation map showing how concepts connect
 
-**Last Updated**: YYYY-MM-DD
+**Last Updated**: 2026-06-23
 
 ---
 
@@ -69,7 +69,8 @@
 
 ## Concept Dependencies
 
-### Operator Development Path
+### Operator Development Path (Core / Platform Operators)
+<!-- TODO: add a parallel path for non-core (OLM-managed) operators that use status conditions but don't report via ClusterOperator -->
 ```
 DESIGN_PHILOSOPHY.md
   ↓
@@ -120,12 +121,10 @@ E2E framework specifics
 
 **Read in this order**:
 
-1. **Foundation** (5 min): DESIGN_PHILOSOPHY.md
-2. **Your task** (10 min): 2-3 docs from task path above
-3. **Details** (20 min): Related patterns/concepts as needed
+1. **Foundation**: DESIGN_PHILOSOPHY.md
+2. **Your task**: 2-3 docs from task path above
+3. **Details**: Related patterns/concepts as needed
 4. **Reference** (on-demand): Glossary, repo index when needed
-
-**Total**: ~35 minutes to understand and start, not hours reading everything.
 
 ---
 

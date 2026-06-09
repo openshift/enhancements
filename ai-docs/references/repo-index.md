@@ -32,48 +32,44 @@
 
 ## Search Strategies
 
-### By Keyword
+**GitHub Organization Search**: `https://github.com/orgs/openshift/repositories?q=<keyword>`
 
+**Examples**:
 ```bash
-# Search GitHub org
-https://github.com/orgs/openshift/repositories?q=<keyword>
-
-# Example: storage-related repos
+# By component name
 https://github.com/orgs/openshift/repositories?q=storage
-```
+https://github.com/orgs/openshift/repositories?q=network
 
-### By Topic
-
-```bash
-# Operator repos
+# By type
 https://github.com/orgs/openshift/repositories?q=operator
+https://github.com/orgs/openshift/repositories?q=library
 
-# API repos
-https://github.com/orgs/openshift/repositories?q=api
-```
-
-### By Language
-
-```bash
-# Go repos (most operators)
+# By language
 https://github.com/orgs/openshift/repositories?language=go
+https://github.com/orgs/openshift/repositories?language=python
 ```
 
 ## Operator Naming Conventions
 
-| Pattern | Example | Component Type |
-|---------|---------|---------------|
-| `cluster-<component>-operator` | `cluster-etcd-operator` | Core platform |
-| `<component>-operator` | `machine-api-operator` | Platform feature |
-| `<component>` | `installer` | Tool/utility |
+| Pattern | Example | Notes |
+|---------|---------|-------|
+| `cluster-<component>-operator` | `cluster-etcd-operator` | Historical naming (directory grouping) |
+| `<component>-operator` | `machine-api-operator` | Standard operator naming |
+| `<component>` | `installer` | Tool/utility (non-operator) |
+
+**Note**: The `cluster-` prefix was historically used for directory organization in early OpenShift development, not to indicate semantic differences between operator types. Do not infer component type or importance from naming patterns alone.
 
 ## Finding Component Ownership
 
 **OWNERS Files**: Each repo has `OWNERS` file with approvers/reviewers
 
 ```bash
-# View owners
-curl https://raw.githubusercontent.com/openshift/<repo>/master/OWNERS
+# View owners (most repos use 'main', some older repos use 'master')
+curl https://raw.githubusercontent.com/openshift/<repo>/main/OWNERS
+
+# Or use GitHub API to auto-detect default branch:
+gh api repos/openshift/<repo> --jq '.default_branch' | \
+  xargs -I {} curl https://raw.githubusercontent.com/openshift/<repo>/{}/OWNERS
 ```
 
 ## Anti-Staleness Strategy

@@ -318,13 +318,27 @@ status:
 4. **Non-root user**: Security best practice
 5. **Immutable image tags**: Use SHA256 or semantic versions, not `latest`
 
+### OpenShift Platform Component Guidance
+
+**For operators and platform operands**:
+- ✅ **Always set resource requests**: Required for scheduling
+- ❌ **Avoid resource limits**: Cannot set reasonable limits that work across all cluster sizes
+  - 10-node cluster vs 1000-node cluster have vastly different requirements
+  - Limits appropriate for small clusters cause OOMKills in large clusters
+  - Requests ensure fair scheduling; limits risk availability
+
+**For user workloads**:
+- ✅ Set both requests and limits based on known application requirements
+
 ## Antipatterns
 
-❌ **No resource limits**: Can consume all node resources  
+❌ **No resource requests**: Prevents proper scheduling (always set requests)  
 ❌ **No health probes**: Broken pods stay in service  
 ❌ **Running as root**: Security risk  
 ❌ **Host network for app pods**: Breaks network isolation  
 ❌ **Local storage for stateful data**: Lost on pod deletion
+
+**Note**: For user workloads, also avoid missing resource limits. For OpenShift platform components, limits are intentionally omitted (see best practices above).
 
 ## References
 
