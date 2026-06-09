@@ -12,10 +12,12 @@ ClusterVersion represents the desired and current version of the OpenShift clust
 **Singleton**: Only one ClusterVersion exists, named `version`.
 
 **⚠️ Form Factor Note**: In **Hypershift/HCP**:
-- ClusterVersion exists in the **guest cluster** (not management cluster)
-- The CVO runs in the **guest cluster** and manages guest cluster components
-- The **management cluster** uses HyperShift's `HostedCluster` API instead
-- Control plane and guest cluster have separate version lifecycles
+- **Guest cluster**: Has ClusterVersion (managed by CVO running in guest cluster)
+- **Management cluster**: Has its own separate ClusterVersion (for management cluster infrastructure)
+- **HostedCluster API** (in management cluster): Drives version upgrades for the guest cluster
+  - `HostedClusterStatus.Version` reflects CVO-reported state from guest cluster
+  - Control plane pods run in management cluster but serve the guest cluster
+- Control plane (management-side) and data plane (guest cluster) have **independent** version lifecycles
 
 See [hypershift-control-plane-version-status.md](../../../enhancements/hypershift/hypershift-control-plane-version-status.md) for authoritative details on HCP version tracking.
 
@@ -76,18 +78,20 @@ status:
    ↓
 3. CVO sets status.conditions.Progressing=True
    ↓
-4. CVO updates operators in order:
-   - etcd
-   - kube-apiserver
-   - kube-controller-manager
-   - kube-scheduler
-   - other operators (parallel)
+4. CVO applies manifests in runlevel order:
+   - Runlevel 00-09: Core platform (network, DNS, certs)
+   - Runlevel 10-29: Kubernetes operators (API server, controllers, scheduler)
+   - Runlevel 30+: Other operators (Machine API, OLM, OpenShift core)
+   - Components at same runlevel apply in parallel
    ↓
-5. Each operator reports Progressing=True → False
+5. CVO waits for each operator to reach expected state:
+   - Operator version matches desired version
+   - Operator reports Progressing=False
+   - Operator reports Available=True
    ↓
-6. CVO sets status.conditions.Progressing=False
-   ↓
-7. CVO adds entry to status.history
+6. Once all operators reach expected state:
+   - CVO sets status.conditions.Progressing=False
+   - CVO adds entry to status.history with state=Completed
 ```
 
 ## Channels
@@ -138,31 +142,39 @@ oc logs -n openshift-cluster-version deployment/cluster-version-operator
 ### Version Skew
 
 - **Supported**: N → N+1 (e.g., 4.15 → 4.16)
-- **Not supported**: N → N+2 (e.g., 4.14 → 4.16)
-- **EUS exception**: EUS releases allow skipping one version
+- **Not supported**: N → N+2 version skips (e.g., 4.14 → 4.16)
+
+### EUS (Extended Update Support) Releases
+
+**What EUS provides:**
+- **Extended support lifecycle**: Even-numbered releases (4.8, 4.10, 4.12, 4.14, 4.16, etc.) receive ~14 months additional support
+- **EUS-to-EUS upgrade path**: Streamlined upgrade with reduced worker node reboots
+
+**What EUS does NOT provide:**
+- ❌ **Version skipping**: Must still upgrade sequentially through all intermediate versions
+- ❌ **Control plane version skipping**: Control plane goes through every version (4.12→4.13→4.14→4.15→4.16)
+
+**EUS-to-EUS upgrade process** (e.g., 4.12 to 4.16):
+1. Switch from `eus-4.12` channel to `eus-4.16` channel
+2. Cluster upgrades sequentially: 4.12 → 4.13 → 4.14 → 4.15 → 4.16
+3. Worker node reboots optimized (not control plane version steps)
+
+**References:**
+- [Red Hat OpenShift EUS Policy](https://access.redhat.com/support/policy/updates/openshift-eus) - Official EUS support policy
+- [EUS Upgrades MVP Enhancement](https://github.com/openshift/enhancements/blob/master/enhancements/update/eus-upgrades-mvp.md) - "does not attempt to remove *any* steps along the serial upgrade path from 4.6 to 4.7 to 4.8 to 4.9 to 4.10"
 
 ### Upgrade Paths
 
 ```yaml
-# Valid upgrade graph
+# Valid upgrade graph (arrows show valid upgrade paths)
 4.14.0 → 4.14.1 → 4.14.2
   ↓         ↓         ↓
-4.15.0 ← 4.15.1 ← 4.15.2
+4.15.0 → 4.15.1 → 4.15.2
   ↓         ↓         ↓
-4.16.0 ← 4.16.1 ← 4.16.2
+4.16.0 → 4.16.1 → 4.16.2
 ```
 
 **CVO validates**: Upgrade path exists in Cincinnati graph
-
-## Pausing Upgrades
-
-```bash
-# Pause cluster upgrades (for maintenance)
-oc adm upgrade --pause
-
-# Resume upgrades
-oc adm upgrade --resume
-```
 
 ## Upgrade Conditions
 
@@ -194,17 +206,25 @@ status:
 
 ## CVO Operator Ordering
 
-```yaml
-# manifests/0000_*.yaml files in release image
-0000_00_cluster-version-operator_*.yaml
-0000_50_cluster-etcd-operator_*.yaml
-0000_60_cluster-kube-apiserver-operator_*.yaml
-0000_70_cluster-kube-controller-manager-operator_*.yaml
-0000_80_cluster-kube-scheduler-operator_*.yaml
-0000_90_*  # All other operators (parallel)
-```
+CVO applies manifests in lexicographic order by filename during upgrades. Manifests use the naming convention:
+`0000_<runlevel>_<component>_<manifest>.yaml`
 
-**Ordering ensures**: etcd → API server → controllers → operators
+**Assigned runlevels** (from [CVO dev docs](https://github.com/openshift/enhancements/blob/master/dev-guide/cluster-version-operator/dev/operators.md)):
+- **00-04**: CVO itself
+- **05**: cluster-config-operator
+- **07**: Network operator
+- **08**: DNS operator
+- **09**: Service certificate authority, machine approver
+- **10-29**: Kubernetes operators (e.g., kube-apiserver, kube-controller-manager, kube-scheduler)
+- **30-39**: Machine API
+- **50-59**: Operator Lifecycle Manager (OLM)
+- **60-69**: OpenShift core operators
+
+**Key behaviors**:
+- Components at same runlevel execute in **parallel**
+- Lower runlevels complete before higher runlevels start
+- Ordering only applies during **upgrades** (not initial install or reconciliation)
+- Within a component, manifests apply in alphabetical order
 
 ## Overrides
 
@@ -217,7 +237,13 @@ spec:
     unmanaged: true  # CVO won't update this
 ```
 
-**Use case**: Prevent CVO from managing specific resources (debugging only)
+**⚠️ WARNING**: 
+- Setting `unmanaged: true` prevents CVO from updating the resource
+- **Blocks cluster upgrades** until override is removed
+- Per [upgrade-acknowledgment-gate enhancement](https://github.com/openshift/enhancements/blob/master/enhancements/update/upgrades-blocking-on-ack.md): "CVO currently blocks minor level upgrades when overrides are set"
+- Puts cluster in unsupported state
+- **Use only for emergency debugging**
+- Remove all overrides before attempting upgrades
 
 ## Examples
 

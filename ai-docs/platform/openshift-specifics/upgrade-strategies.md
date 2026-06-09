@@ -32,19 +32,23 @@ OpenShift upgrades are orchestrated by the Cluster Version Operator (CVO). Every
 
 ## CVO Orchestration
 
+CVO applies manifests in lexicographic order by filename prefix during upgrades.
+
+**Runlevel ordering** (from [CVO dev docs](https://github.com/openshift/enhancements/blob/master/dev-guide/cluster-version-operator/dev/operators.md)):
 ```
-CVO upgrade order:
-1. etcd operator
-2. kube-apiserver operator
-3. kube-controller-manager operator
-4. kube-scheduler operator
-5. All other operators (parallel)
+Runlevel 00-09: Core platform (CVO, network, DNS, certs)
+Runlevel 10-29: Kubernetes operators (API server, controllers, scheduler)  
+Runlevel 30-39: Machine API
+Runlevel 50-59: Operator Lifecycle Manager
+Runlevel 60-69: OpenShift core operators
 ```
 
-**Why this order?**
-- etcd must be healthy before API server updates
-- API server must be upgraded before controllers (version skew)
-- Operators depend on API server, so upgrade last
+**Key behaviors**:
+- Components at same runlevel execute in **parallel**
+- Runlevel ordering provides deterministic apply sequence
+- Generally ensures core components are ready before dependent operators
+- **In practice**: Strict ordering rarely critical; most components tolerate version skew during upgrades
+- Ordering is conservative to handle rare edge cases, not strict runtime dependencies
 
 ## Implementation
 
@@ -52,19 +56,22 @@ CVO upgrade order:
 
 ```go
 func (r *Reconciler) checkUpgradeable(ctx context.Context) (bool, string, string) {
-    // Check if upgrade would be unsafe
+    // Check if upgrade would be unsafe based on current cluster state
     
-    // Example: Block if custom config is set
+    // Example: Block if unsupported configuration requires manual intervention
     if hasUnsupportedConfig() {
-        return false, "UnsupportedConfig", 
-            "Custom configuration detected, manual intervention required"
+        return false, "UnsupportedConfiguration", 
+            "Unsupported configuration requires manual steps before upgrade. See documentation for migration path."
     }
     
-    // Example: Block if degraded
-    if isDegraded() {
-        return false, "Degraded",
-            "Component is degraded, fix issues before upgrading"
+    // Example: Block if upgrade would fail due to missing prerequisites
+    if missingUpgradePrerequisites() {
+        return false, "MissingPrerequisites",
+            "Required migration steps not completed. Run 'oc adm upgrade --check' for details."
     }
+    
+    // Note: Degraded state alone should NOT set Upgradeable=False
+    // Only set Upgradeable=False if upgrade would make things worse or fail
     
     // Safe to upgrade
     return true, "AsExpected", "Ready for upgrade"
@@ -80,34 +87,48 @@ func (r *Reconciler) updateStatus(ctx context.Context, co *configv1.ClusterOpera
 }
 ```
 
-### Handling Version Skew
+### Handling Version Skew (Level-Driven Reconciliation)
 
 ```go
+// Level-driven: This reconcile function runs continuously (every N seconds or on watch events)
+// It always converges toward the desired state, not reacting to state changes
 func (r *Reconciler) reconcile(ctx context.Context, obj *MyResource) error {
-    // Get desired version from CVO
+    // Desired state (level): what should exist
     desiredVersion := os.Getenv("RELEASE_VERSION")
     
-    // Get current version from status
+    // Current state (level): what actually exists
     currentVersion := obj.Status.Version
     
+    // Continuous reconciliation: always ensure current matches desired
+    // This check runs on every reconcile loop, not just when version changes
     if desiredVersion != currentVersion {
-        // Upgrade in progress
-        if err := r.upgradeWorkload(ctx, obj, desiredVersion); err != nil {
+        // Converge toward desired state
+        if err := r.ensureVersion(ctx, obj, desiredVersion); err != nil {
+            // Requeue - will retry on next reconcile
             return err
         }
         
-        // Update status
+        // Update status to reflect progress
         obj.Status.Version = desiredVersion
         setCondition(&obj.Status.Conditions,
             configv1.OperatorProgressing,
             configv1.ConditionTrue,
             "RollingOut",
-            fmt.Sprintf("Upgrading to %s", desiredVersion))
+            fmt.Sprintf("Converging to %s", desiredVersion))
     }
     
-    return nil
+    // Continue reconciling other aspects - level-driven means
+    // we continuously ensure ALL desired state, not just version
+    return r.ensureWorkloadState(ctx, obj)
 }
+
+// ❌ Anti-pattern: Edge-driven (don't do this)
+// func (r *Reconciler) onVersionChange(old, new string) {
+//     // Only runs when version changes - misses corrections needed
+// }
 ```
+
+**Level-driven reconciliation pattern**: Per [controller-runtime documentation](https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/reconcile), "Reconciliation is level-based, meaning action isn't driven off changes in individual Events, but instead is driven by actual cluster state read from the apiserver or a local cache." The reconcile function observes current state and continuously converges toward desired state, rather than reacting to specific events. This ensures idempotency and resilience—missed events are automatically corrected on the next reconcile loop.
 
 ### Rolling Update Pattern
 
@@ -194,23 +215,48 @@ type MyResourceSpec struct {
 }
 ```
 
-### Storage Version Migration
+### API Version Transitions (OpenShift Pattern)
+
+**OpenShift approach**: Transition API versions across OpenShift minor releases without serving multiple versions simultaneously (no conversion webhooks needed).
 
 ```yaml
-# Old version (v1alpha1)
-apiVersion: example.com/v1alpha1
-kind: MyResource
-spec:
-  field: value
+# Release N: Serve v1alpha1 only
+versions:
+- name: v1alpha1
+  served: true
+  storage: true
 
-# Hub version (v1)
-apiVersion: example.com/v1
-kind: MyResource
-spec:
-  newField: value
-
-# Use conversion webhooks to handle both
+# Release N+1: Introduce v1, serve both (read-only migration window)
+versions:
+- name: v1
+  served: true
+  storage: true  # New storage version
+- name: v1alpha1
+  served: true   # Still served for read
+  storage: false
+  deprecated: true
+  
+# Release N+2: Stop serving v1alpha1
+versions:
+- name: v1
+  served: true
+  storage: true
+- name: v1alpha1
+  served: false   # No longer served
+  storage: false
 ```
+
+**Migration steps**:
+1. Release N+1: Change storage version, mark old version deprecated
+2. During N+1: All writes go to new version, reads accepted from both
+3. Existing objects migrated during upgrade (touched objects auto-convert)
+4. Release N+2: Stop serving old version entirely
+
+**OpenShift avoids**:
+- ❌ Conversion webhooks (adds complexity, rarely needed)
+- ❌ Serving multiple versions long-term (increases API surface)
+
+See [API evolution](../../practices/development/api-evolution.md) for version transition patterns.
 
 ## Node Upgrades
 
@@ -243,12 +289,28 @@ oc get clusteroperators
 oc get co -o json | jq '.items[] | select(.status.conditions[] | select(.type=="Progressing" and .status=="True")) | .metadata.name'
 ```
 
+## Control Plane Upgrade Pattern
+
+**Static Pod + PDB Guard Pattern**: All control plane components use this pattern for upgrades:
+
+1. **Static pod** runs the actual component (etcd, kube-apiserver, kube-controller-manager, kube-scheduler)
+2. **Guard pod** (Deployment) mirrors the static pod state
+3. **PodDisruptionBudget** on guard pod prevents node drain if it would violate availability
+4. Ensures at least N-1 replicas available during node upgrades
+
+**Why this pattern?**
+- Control plane runs as static pods (not managed by scheduler)
+- PDB only works on pods managed by controllers (Deployment, StatefulSet)
+- Guard pods enable PDB protection for static pods
+
 ## Examples in Components
 
 | Component | Upgrade Strategy | Notes |
 |-----------|------------------|-------|
-| etcd | One pod at a time, quorum maintained | Must maintain 2/3 quorum |
-| kube-apiserver | Rolling update, PDB ensures 1+ available | Uses PodDisruptionBudget |
+| etcd | Static pod + PDB guard | Must maintain quorum (2/3 pods) |
+| kube-apiserver | Static pod + PDB guard | PDB ensures 1+ available |
+| kube-controller-manager | Static pod + PDB guard | Same pattern as above |
+| kube-scheduler | Static pod + PDB guard | Same pattern as above |
 | machine-config-operator | Node drain → reboot → uncordon | Can take 30+ minutes per node |
 | cluster-network-operator | Update CNI plugins in rolling fashion | Brief network interruptions possible |
 
@@ -325,9 +387,30 @@ HCP:
 ```
 
 **Design Considerations**:
-- Accept brief downtime during upgrades (unavoidable in SNO)
+- **Platform operator downtime**: Acceptable during node reboot (unavoidable in SNO)
+- **User-facing services** (ingress, router): Aim to minimize interruption
+  - Use graceful shutdown patterns
+  - Pre-pull images to reduce restart time
+  - Minimize unavailability window
 - Ensure rapid reconciliation after reboot
 - Test with `replica: 1` configurations
+
+### HA Cluster Upgrade Expectations
+
+**For HA (3+ control plane node) clusters**:
+
+- **Platform operators**: Brief downtime acceptable during rollout
+  - Operators can restart/upgrade one at a time
+  - Controller temporarily unavailable (reconciliation paused)
+  
+- **User-facing services** (ingress, router, load balancers): **Zero downtime expected**
+  - Must use PodDisruptionBudgets
+  - Rolling updates with N-1 available
+  - Graceful connection draining
+  
+- **Application workloads**: Should not experience interruption
+  - Proper PDB configuration required
+  - Applications must handle pod churn
 
 ### MicroShift Considerations
 

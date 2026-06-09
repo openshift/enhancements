@@ -33,7 +33,6 @@ Status conditions provide standardized health reporting for OpenShift components
 | Type | Use Case |
 |------|----------|
 | **Upgradeable** | Blocks cluster upgrade if False |
-| **Disabled** | Component intentionally disabled |
 
 ## Implementation
 
@@ -59,7 +58,6 @@ func setCondition(conditions *[]configv1.ClusterOperatorStatusCondition,
             (*conditions)[i].Status = status
             (*conditions)[i].Reason = reason
             (*conditions)[i].Message = message
-            (*conditions)[i].LastHeartbeatTime = now
             return
         }
     }
@@ -71,7 +69,6 @@ func setCondition(conditions *[]configv1.ClusterOperatorStatusCondition,
         Reason:             reason,
         Message:            message,
         LastTransitionTime: now,
-        LastHeartbeatTime:  now,
     })
 }
 ```
@@ -80,20 +77,16 @@ func setCondition(conditions *[]configv1.ClusterOperatorStatusCondition,
 
 1. **Always Set All Three**: Available, Progressing, Degraded must always be set
    
-2. **Heartbeat Updates**: Update LastHeartbeatTime even if condition unchanged
-   - Shows controller is alive
-   - Stale heartbeat triggers alerts
-   
-3. **Reason vs Message**:
+2. **Reason vs Message**:
    - **Reason**: Machine-readable CamelCase token (e.g., `PodsNotReady`)
    - **Message**: Human-readable sentence (e.g., "2 of 3 pods are not ready")
    
-4. **ObservedGeneration**: Track spec changes
+3. **ObservedGeneration**: Track spec changes
    ```go
    status.ObservedGeneration = obj.Generation
    ```
 
-5. **Transition Timing**: LastTransitionTime changes only when Status changes
+4. **Transition Timing**: LastTransitionTime changes only when Status changes
 
 ## Common Patterns
 
@@ -204,14 +197,13 @@ func computeConditions(deployment *appsv1.Deployment) []configv1.ClusterOperator
 
 ```promql
 # Alert on unavailable ClusterOperator
-cluster_operator_conditions{type="Available", status="False"}
+cluster_operator_conditions{condition="Available"} == 0
 
 # Alert on prolonged Degraded
-cluster_operator_conditions{type="Degraded", status="True"}
-
-# Alert on stale heartbeat
-time() - cluster_operator_conditions_last_heartbeat > 300
+cluster_operator_conditions{condition="Degraded"} == 1
 ```
+
+**Note**: The metric uses numeric values (0 = False, 1 = True) and `condition` label. See [CVO metrics documentation](https://github.com/openshift/enhancements/blob/master/dev-guide/cluster-version-operator/dev/metrics.md).
 
 ## Examples in Components
 
@@ -224,9 +216,9 @@ time() - cluster_operator_conditions_last_heartbeat > 300
 ## Antipatterns
 
 ❌ **Skipping conditions**: All three (Available/Progressing/Degraded) must be set  
-❌ **Stale status**: Not updating heartbeat regularly  
 ❌ **Unclear messages**: "Error occurred" (not useful) vs "Pod xyz crash looping: OOMKilled"  
-❌ **Wrong semantics**: Available=False during normal upgrade (should be True)
+❌ **Wrong semantics**: Available=False during normal upgrade (should be True)  
+❌ **Unnecessary updates**: Updating conditions when state hasn't changed
 
 ## References
 

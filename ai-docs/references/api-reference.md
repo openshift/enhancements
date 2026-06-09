@@ -116,11 +116,26 @@ oc get crd myresources.example.com -o jsonpath='{.spec.versions[0].schema.openAP
 oc api-versions
 ```
 
-### Get Resource from Specific API Version
+### Get Resource Without Managed Fields
 
 ```bash
+# Cleaner output (hides metadata.managedFields)
 oc get clusteroperator kube-apiserver -o yaml --show-managed-fields=false
 ```
+
+**Why use `--show-managed-fields=false`?**
+
+The `metadata.managedFields` section tracks field ownership for [server-side apply](https://kubernetes.io/docs/reference/using-api/server-side-apply/). While useful for understanding which controllers/users own which fields, it makes YAML output verbose and hard to read.
+
+**Use cases**:
+- **Human-readable output**: Easier to read resource specs without field manager metadata
+- **Cleaner diffs**: Comparing resources without managedFields noise
+- **Documentation/examples**: Showing resource structure without implementation details
+
+**When to include managed fields**:
+- Debugging field ownership conflicts
+- Understanding which controller modified a field
+- Server-side apply troubleshooting
 
 ## Anti-Staleness Strategy
 
