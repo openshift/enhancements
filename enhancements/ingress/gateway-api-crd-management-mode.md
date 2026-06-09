@@ -230,16 +230,24 @@ IngressController resources and manages Gateway API components.
      gatewayAPI:
        managementMode: Managed
    ```
-4. CIO detects the mode change:
+4. CIO detects the mode change and begins transition.
+   `GatewayAPICRDsManaged` remains `False` until CIO successfully
+   takes ownership:
    a. If CRDs are absent, CIO installs them.
    b. If CRDs are present and match the expected version, CIO takes
-      ownership (adds labels, deploys VAP).
+      ownership (adds labels, deploys VAP) and sets
+      `GatewayAPICRDsManaged=True`.
    c. If CRDs are present but do not match the expected version, CIO
       sets `GatewayAPICRDsCompliant=False` (in `status.conditions`)
-      and does NOT overwrite them. The administrator must resolve
-      the mismatch.
-5. CIO deploys the full Gateway controller stack if not already
-   running.
+      and does NOT overwrite them. `GatewayAPICRDsManaged` stays
+      `False`. The administrator must resolve the mismatch before
+      CIO can take ownership.
+5. Once `GatewayAPICRDsManaged=True`, `GatewayAPICRDsPresent=True`,
+   and `GatewayAPICRDsCompliant=True`, CIO starts the CIO-managed
+   Istio instance, GatewayClass, and Gateway resources. If any of
+   these conditions is not `True`, the Gateway controller stack is
+   not started but the cluster is not marked as degraded and
+   upgrades are not blocked.
 
 ```mermaid
 sequenceDiagram
@@ -288,9 +296,7 @@ the `openshift/api` repository (e.g.,
 // +genclient:nonNamespaced
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 //
-// Ingress holds cluster-wide configuration for Gateway API
-// integration managed by the Cluster Ingress Operator. The
-// canonical name is `cluster`.
+// Ingress contains configuration options specific to the Ingress Operator itself.
 //
 // Compatibility level 4: No compatibility is provided, the API
 // can change at any point for any reason. These capabilities
@@ -485,7 +491,7 @@ Both modes are available on OKE. However, Gateway API support on
 OKE depends on the
 [gateway-api-without-olm](gateway-api-without-olm.md) enhancement
 which eliminates OSSM licensing concerns. Given the desire to
-backport this management mode feature to OCP 4.19, OKE enablement
+backport this management mode feature to OCP 4.18, OKE enablement
 depends on whether `gateway-api-without-olm` is also backported
 to the same version. If that enhancement is not backported, OKE
 support for this feature is limited to the OCP version where
@@ -520,6 +526,24 @@ Affected controllers:
 | GatewayClass | Active | Disabled |
 | Gateway | Active | Disabled |
 | Status | Report conditions | Report conditions |
+
+#### Gateway Controller Stack Start Condition
+
+CIO starts the CIO-managed Istio instance, GatewayClass, and Gateway
+resources only when all three of the following conditions are `True`
+in `status.conditions`:
+
+- `GatewayAPICRDsManaged=True`
+- `GatewayAPICRDsPresent=True`
+- `GatewayAPICRDsCompliant=True`
+
+If any of these conditions is not `True` (e.g., during a transition
+back to `Managed` where CRDs are non-compliant, or while CIO is
+installing CRDs), the Gateway controller stack is not started. This
+is not a degraded state: these conditions do not contribute to the
+operator's `Degraded` status condition and do not block cluster
+upgrades. They are informational signals about Gateway API CRD
+readiness.
 
 #### VAP Management
 
@@ -631,31 +655,14 @@ fighting the VAP and CRD reconciler.
 
 ## Open Questions
 
-1. **CRD cleanup on Unmanaged transition**: Should CIO offer an
-   option to remove CRDs when transitioning to `Unmanaged`? This
-   would delete all Gateway/HTTPRoute resources. The current
-   proposal preserves CRDs during transitions.
+1. **Telemetry**: What telemetry should be collected? At minimum
+   the configured mode, CRDVersion and OSSM Version. 
+   Should CIO also report metrics for CRD compliance and mode transitions?
 
-2. **Interaction with `unsupportedConfigOverrides`**: The CRD
-   lifecycle management enhancement uses an "unsupported config
-   override" mechanism to bypass CRD succession checks. Should
-   `managementMode` replace this mechanism or coexist with it?
-
-3. **Telemetry**: What telemetry should be collected? At minimum
-   the configured mode. Should CIO also report metrics for CRD
-   compliance and mode transitions?
-
-4. **Singleton creation**: Should the `cluster` singleton instance
+2. **Singleton creation**: Should the `cluster` singleton instance
    be created by CVO (via a manifest in the release payload) or
    by CIO on first startup? This affects upgrade behavior and
    needs alignment with the operator pattern used by DNS/Console.
-
-5. **Kind name collision**: The proposed Kind `Ingress` in
-   `operator.openshift.io/v1alpha1` shares a name with the well-known
-   `networking.k8s.io/v1` Ingress. While API groups disambiguate,
-   this may cause user confusion with `oc get ingress`. The short
-   name and resource disambiguation strategy should be decided
-   during API review.
 
 ## Test Plan
 
@@ -746,18 +753,13 @@ dev-guide/feature-zero-to-hero.md:
 - Sufficient time for customer feedback (at least one minor
   release in Tech Preview).
 
-### Backport to OCP 4.19
+### Backport to OCP 4.18
 
-The official backport target is OCP 4.19. Without this backport,
-customers on 4.19 with third-party Gateway API CRDs face CRD
+The official backport target is OCP 4.18. Without this backport,
+customers on 4.18 with third-party Gateway API CRDs face CRD
 succession conflicts when upgrading, because CIO enforces
 ownership with no opt-out. Backporting lets customers set
 `Unmanaged` before upgrading.
-
-> **Note**: There is also a desire to backport to OCP 4.18, as the
-> lack of this feature is currently blocking 4.18 upgrades for
-> customers with third-party CRDs. This requires the same SBAR
-> exception process and is subject to architect approval.
 
 **SBAR exception process**: Backporting a new CRD to a released
 version requires SBAR (Situation, Background, Assessment,
@@ -769,8 +771,8 @@ Backport scope:
 - Ingress CRD manifest for `operator.openshift.io/v1alpha1` (CVO).
 - `gatewayAPI` spec/status structs with both enum values.
 - `status.conditions` Gateway API condition reporting.
-- Feature gate `GatewayAPIManagementMode` (behind
-  `TechPreviewNoUpgrade`).
+- Feature gate `GatewayAPIManagementMode` (initially behind
+  `TechPreviewNoUpgrade`, then `GA` once the E2E requirements pass).
 - CIO controller changes.
 
 **E2E requirements**: 95%+ pass rate, 7 runs/week on supported
@@ -790,7 +792,7 @@ Not applicable. This enhancement adds new functionality.
 
 When upgrading from a version that does not have the Ingress
 (`operator.openshift.io/v1alpha1`) resource to one that does (e.g.,
-upgrading from 4.18 to 4.19 with the backport applied):
+upgrading from 4.17 to 4.18 with the backport applied):
 
 - CVO installs the new Ingress CRD. The `cluster` singleton is
   created with `spec.gatewayAPI.managementMode` defaulting to
@@ -935,7 +937,7 @@ Lacks validation, defaulting, and discoverability. Not visible in
 
 ### Alternative 5: Separate `GatewayAPIConfig` CRD
 
-Adds unnecessary complexity. CRD management is an ingress concern,
+Adds unnecessary complexity. CRD management is an ingress operator configuration,
 so the Ingress resource in `operator.openshift.io/v1alpha1` is a more
 natural home.
 
