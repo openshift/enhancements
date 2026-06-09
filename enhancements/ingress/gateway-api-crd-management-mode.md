@@ -172,10 +172,10 @@ IngressController resources and manages Gateway API components.
 3. CIO deploys Gateway API CRDs, VAPs, the CIO-managed Istio
    instance, GatewayClass, and Gateway resources as per the existing
    behavior.
-4. CIO sets `status.gatewayAPI.conditions`:
-   - `CRDsManaged=True` (reason: `ManagedByCIO`)
-   - `CRDsPresent=True`
-   - `CRDsCompliant=True`
+4. CIO sets the following conditions in `status.conditions`:
+   - `GatewayAPICRDsManaged=True` (reason: `ManagedByCIO`)
+   - `GatewayAPICRDsPresent=True`
+   - `GatewayAPICRDsCompliant=True`
 5. External consumers observe the conditions and proceed normally.
 
 #### Workflow 2: Switching to Unmanaged Mode
@@ -200,17 +200,18 @@ IngressController resources and manages Gateway API components.
       Gateway API CRDs. Removing these resources could cause
       disruptions to existing workloads. The cluster administrator
       is responsible for cleaning up these resources if desired.
-4. CIO sets `status.gatewayAPI.conditions`:
-   - `CRDsManaged=False` (reason: `Unmanaged`)
-   - `CRDsPresent=True/False` (observational)
-   - `CRDsCompliant=Unknown` (not applicable in this mode)
+4. CIO sets the following conditions in `status.conditions`:
+   - `GatewayAPICRDsManaged=False` (reason: `Unmanaged`)
+   - `GatewayAPICRDsPresent=True/False` (observational)
+   - `GatewayAPICRDsCompliant=Unknown` (not applicable in this mode)
 5. The cluster administrator installs their third-party Gateway
    controller and optionally their own CRD version.
-6. Layered products observe the `CRDsManaged=False` condition with
-   reason `Unmanaged` and treat this as a signal that the installed
-   CRDs may not be the ones supported by the OpenShift Gateway API
-   implementation. They should adjust their behavior accordingly
-   (e.g., not relying on specific CRD versions or fields).
+6. Layered products observe the `GatewayAPICRDsManaged=False`
+   condition with reason `Unmanaged` and treat this as a signal
+   that the installed CRDs may not be the ones supported by the
+   OpenShift Gateway API implementation. They should adjust their
+   behavior accordingly (e.g., not relying on specific CRD
+   versions or fields).
 
 #### Workflow 3: Returning to Managed Mode
 
@@ -234,7 +235,7 @@ IngressController resources and manages Gateway API components.
    b. If CRDs are present and match the expected version, CIO takes
       ownership (adds labels, deploys VAP).
    c. If CRDs are present but do not match the expected version, CIO
-      sets `CRDsCompliant=False` (in `status.gatewayAPI.conditions`)
+      sets `GatewayAPICRDsCompliant=False` (in `status.conditions`)
       and does NOT overwrite them. The administrator must resolve
       the mismatch.
 5. CIO deploys the full Gateway controller stack if not already
@@ -254,12 +255,12 @@ sequenceDiagram
     alt Managed (default)
         CIO->>CRDs: Install/upgrade CRDs + VAP
         CIO->>GW: Deploy CIO Istio, GatewayClass, Gateway
-        CIO->>IC: Set status: Managed=True,<br/>Present=True, Compliant=True
+        CIO->>IC: Set status.conditions: GatewayAPICRDsManaged=True,<br/>GatewayAPICRDsPresent=True, GatewayAPICRDsCompliant=True
     else Unmanaged
         CIO->>GW: Stop CIO Istio instance
         CIO->>CRDs: Remove VAP, stop managing
         Note over GW: GatewayClass/Gateway left for<br/>admin cleanup to avoid disruption
-        CIO->>IC: Set status: Managed=False (Unmanaged),<br/>Present=observed
+        CIO->>IC: Set status.conditions: GatewayAPICRDsManaged=False (Unmanaged),<br/>GatewayAPICRDsPresent=observed
     end
 ```
 
@@ -332,19 +333,42 @@ type IngressSpec struct {
 
 type IngressStatus struct {
 	// Inline OperatorStatus for standard operator status fields
-	// (conditions, version, observedGeneration, etc.)
-	OperatorStatus `json:",inline"`
-
-	// gatewayAPI holds status information for Gateway API
-	// integration, including conditions related to CRD
-	// management and the Gateway controller stack.
+	// (conditions, version, observedGeneration, etc.).
+	// conditions holds a list of conditions representing the
+	// operator's current state. Gateway API CRD management
+	// conditions are reported here with the "GatewayAPI" prefix:
 	//
-	// +optional
-	GatewayAPI GatewayAPIIngressStatus `json:"gatewayAPI,omitempty"`
+	// "GatewayAPICRDsManaged" indicates whether CIO is actively
+	// managing Gateway API CRDs:
+	//   - status: True, reason: "ManagedByCIO" — CIO is
+	//     installing, protecting (via VAP), and upgrading CRDs.
+	//   - status: False, reason: "Unmanaged" — the administrator
+	//     chose Unmanaged mode; CIO does not manage CRDs or the
+	//     Gateway controller stack.
+	//
+	// "GatewayAPICRDsPresent" indicates whether Gateway API CRDs
+	// exist on the cluster:
+	//   - status: True, reason: "CRDsFound" — Gateway API CRDs
+	//     are present on the cluster.
+	//   - status: False, reason: "CRDsNotFound" — Gateway API
+	//     CRDs are not present on the cluster.
+	//
+	// "GatewayAPICRDsCompliant" indicates whether the installed
+	// CRDs match the version expected by this CIO release:
+	//   - status: True, reason: "VersionMatch" — installed CRDs
+	//     match the expected version.
+	//   - status: False, reason: "VersionMismatch" — installed
+	//     CRDs do not match the expected version. The message
+	//     includes expected and actual versions and a pointer
+	//     to where valid manifests can be obtained.
+	//   - status: Unknown, reason: "NotApplicable" — compliance
+	//     check is not applicable (e.g., Unmanaged mode with no
+	//     CRDs present).
+	OperatorStatus `json:",inline"`
 }
 ```
 
-The `GatewayAPIIngressConfig` and `GatewayAPIIngressStatus` types:
+The `GatewayAPIIngressConfig` type:
 
 ```go
 // GatewayAPIManagementMode describes how the Cluster Ingress
@@ -402,69 +426,27 @@ type GatewayAPIIngressConfig struct {
 	ManagementMode GatewayAPIManagementMode `json:"managementMode"`
 }
 
-// GatewayAPIIngressStatus holds status information for Gateway
-// API integration managed by the Cluster Ingress Operator.
-type GatewayAPIIngressStatus struct {
-	// conditions is a list of conditions related to Gateway API
-	// CRD management and the Gateway controller stack. These
-	// conditions are scoped to Gateway API concerns and are
-	// separate from the Ingress resource's top-level conditions.
-	//
-	// Supported condition types are:
-	//
-	// "CRDsManaged" indicates whether CIO is actively managing
-	// Gateway API CRDs:
-	//   - status: True, reason: "ManagedByCIO" — CIO is
-	//     installing, protecting (via VAP), and upgrading CRDs.
-	//   - status: False, reason: "Unmanaged" — the administrator
-	//     chose Unmanaged mode; CIO does not manage CRDs or the
-	//     Gateway controller stack.
-	//
-	// "CRDsPresent" indicates whether Gateway API CRDs exist on
-	// the cluster:
-	//   - status: True, reason: "CRDsFound" — Gateway API CRDs
-	//     are present on the cluster.
-	//   - status: False, reason: "CRDsNotFound" — Gateway API
-	//     CRDs are not present on the cluster.
-	//
-	// "CRDsCompliant" indicates whether the installed CRDs match
-	// the version expected by this CIO release:
-	//   - status: True, reason: "VersionMatch" — installed CRDs
-	//     match the expected version.
-	//   - status: False, reason: "VersionMismatch" — installed
-	//     CRDs do not match the expected version. The message
-	//     includes expected and actual versions and a pointer
-	//     to where valid manifests can be obtained.
-	//   - status: Unknown, reason: "NotApplicable" — compliance
-	//     check is not applicable (e.g., Unmanaged mode with no
-	//     CRDs present).
-	//
-	// +listType=map
-	// +listMapKey=type
-	// +optional
-	Conditions []metav1.Condition `json:"conditions,omitempty"`
-}
 ```
 
 The field paths are:
 
 ```
 spec.gatewayAPI.managementMode
-status.gatewayAPI.conditions
+status.conditions
 ```
 
-The following conditions are set within
-`status.gatewayAPI.conditions`:
+The following Gateway API conditions are set within
+`status.conditions` (inherited from `OperatorStatus`):
 
 | Condition Type | Status | Reason | Description |
 |---|---|---|---|
-| `CRDsManaged` | `True` | `ManagedByCIO` | CIO is actively managing CRDs |
-| `CRDsManaged` | `False` | `Unmanaged` | Administrator chose Unmanaged mode |
-| `CRDsPresent` | `True` | `CRDsFound` | Gateway API CRDs are present on the cluster |
-| `CRDsPresent` | `False` | `CRDsNotFound` | Gateway API CRDs are not present on the cluster |
-| `CRDsCompliant` | `True` | `VersionMatch` | Installed CRDs match the expected version |
-| `CRDsCompliant` | `False` | `VersionMismatch` | Installed CRDs do not match the expected version. Message includes the expected and actual versions. |
-| `CRDsCompliant` | `Unknown` | `NotApplicable` | Compliance check is not applicable (e.g., Unmanaged mode with no CRDs present) |
+| `GatewayAPICRDsManaged` | `True` | `ManagedByCIO` | CIO is actively managing CRDs |
+| `GatewayAPICRDsManaged` | `False` | `Unmanaged` | Administrator chose Unmanaged mode |
+| `GatewayAPICRDsPresent` | `True` | `CRDsFound` | Gateway API CRDs are present on the cluster |
+| `GatewayAPICRDsPresent` | `False` | `CRDsNotFound` | Gateway API CRDs are not present on the cluster |
+| `GatewayAPICRDsCompliant` | `True` | `VersionMatch` | Installed CRDs match the expected version |
+| `GatewayAPICRDsCompliant` | `False` | `VersionMismatch` | Installed CRDs do not match the expected version. Message includes the expected and actual versions. |
+| `GatewayAPICRDsCompliant` | `Unknown` | `NotApplicable` | Compliance check is not applicable (e.g., Unmanaged mode with no CRDs present) |
 
 **API versioning note:** As a net-new API, this resource is
 introduced at `v1alpha1` (`operator.openshift.io/v1alpha1`). It
@@ -559,7 +541,7 @@ A Gateway API CRD is considered **compliant** when:
    checksum embedded in the CIO binary.
 
 When CRDs are non-compliant, CIO reports the mismatch in the
-`CRDsCompliant` condition message, including expected vs. actual
+`GatewayAPICRDsCompliant` condition message, including expected vs. actual
 versions and where to obtain valid manifests. Valid CRD manifests
 are available from:
 - The `gateway-api` container image in the OpenShift release
@@ -629,7 +611,7 @@ Switching to `Managed` may fail if existing CRDs do not match the
 expected version.
 
 **Mitigation**: CIO verifies CRD compliance before taking
-ownership. If incompatible, CIO sets `CRDsCompliant=False` and
+ownership. If incompatible, CIO sets `GatewayAPICRDsCompliant=False` and
 does not overwrite. The administrator must resolve the mismatch.
 
 #### Risk: Security Implications of Removing VAP
@@ -786,7 +768,7 @@ bounded risk.
 Backport scope:
 - Ingress CRD manifest for `operator.openshift.io/v1alpha1` (CVO).
 - `gatewayAPI` spec/status structs with both enum values.
-- `status.gatewayAPI.conditions` reporting.
+- `status.conditions` Gateway API condition reporting.
 - Feature gate `GatewayAPIManagementMode` (behind
   `TechPreviewNoUpgrade`).
 - CIO controller changes.
@@ -856,8 +838,8 @@ coordination.
 Operational impact is minimal -- one additional cluster-scoped
 resource read during CIO reconciliation.
 
-- **SLIs**: `status.gatewayAPI.conditions` (`CRDsManaged`,
-  `CRDsPresent`, `CRDsCompliant`).
+- **SLIs**: `status.conditions` (`GatewayAPICRDsManaged`,
+  `GatewayAPICRDsPresent`, `GatewayAPICRDsCompliant`).
 
 - **Failure modes**:
   - VAP removal failure during mode transition: CRDs remain locked.
@@ -879,13 +861,13 @@ oc get ingress.operator.openshift.io cluster \
 
 ```bash
 oc get ingress.operator.openshift.io cluster \
-  -o jsonpath='{.status.gatewayAPI.conditions}' | \
-  jq '.[]'
+  -o jsonpath='{.status.conditions}' | \
+  jq '.[] | select(.type | startswith("GatewayAPI"))'
 ```
 
 ### Common Issues
 
-**Symptom**: `CRDsCompliant=False` in `status.gatewayAPI.conditions`
+**Symptom**: `GatewayAPICRDsCompliant=False` in `status.conditions`
 after switching to `Managed` mode.
 
 **Diagnosis**: The existing CRDs do not match the expected version.
@@ -902,8 +884,8 @@ the expected version shown in the condition message.
 ```bash
 # Check expected version from condition message
 oc get ingress.operator.openshift.io cluster \
-  -o jsonpath='{.status.gatewayAPI.conditions}' | \
-  jq '.[] | select(.type=="CRDsCompliant")'
+  -o jsonpath='{.status.conditions}' | \
+  jq '.[] | select(.type=="GatewayAPICRDsCompliant")'
 
 # Remove CRDs to let CIO reinstall (WARNING: this deletes
 # all Gateway, HTTPRoute, and other Gateway API resources)
