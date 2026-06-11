@@ -146,15 +146,15 @@ This proposal does not depend on features excluded from the OpenShift Kubernetes
 
 #### Transition: SNO to HA Compact (3-Node)
 
-**Operational guidance**: Administrators should treat topology transitions as a maintenance window. Cluster availability is not guaranteed during the transition — particularly during the 2-member etcd window where any control-plane node failure is fatal. Administrators should reduce non-critical workload risk accordingly. Administrators should take an etcd backup after a successful transition (see [Open Questions](#open-questions) regarding pre-transition backup compatibility).
+**Operational guidance**: Administrators should treat topology transitions as a maintenance window. Cluster availability is not guaranteed during the transition — particularly during the 2-member etcd window where any control-plane node failure is fatal. Administrators should reduce non-critical workload risk accordingly. Administrators should take an etcd backup before rand after a successful transition (see [Open Questions](#open-questions) regarding pre-transition backup compatibility).
 
 ##### Pre-Transition
 
-1. The cluster administrator prepares at least 2 additional control-plane nodes and joins them to the cluster — the kubelet is running on each node and Node objects exist in the Kubernetes API. On `platform: none`, the administrator manages their own load balancing configuration (VIPs, DNS).
+1. The cluster administrator prepares exactly 2 additional control-plane nodes and joins them to the cluster — the kubelet is running on each node and Node objects exist in the Kubernetes API. On `platform: none`, the administrator manages their own load balancing configuration (VIPs, DNS).
 2. The cluster administrator runs `oc adm transition topology HighlyAvailable`
 3. The CLI validates preconditions before patching (e.g., feature gate enabled, no transition already in progress)
 4. The CLI patches the infrastructure CR: `spec.controlPlaneTopology: HighlyAvailable`
-5. The API server validates `controlPlaneTopology` against the `DesiredTopologyMode` enum, rejecting unsupported topology modes before accepting the write
+5. The API server validates `controlPlaneTopology` against the `DesiredControlPlaneTopologyMode` enum, rejecting unsupported topology modes before accepting the write
 
 ##### During Transition
 
@@ -166,7 +166,7 @@ This proposal does not depend on features excluded from the OpenShift Kubernetes
    - Platform is supported (`platform: none` in the initial implementation)
 7. The controller signals that a transition is in progress (via CCO ClusterOperator status conditions)
 8. **Node-driven operator reactions** — these happen independently as new control-plane nodes join, before the topology status fields are updated:
-   - cluster-etcd-operator (CEO) detects new control-plane nodes and scales etcd members sequentially (1→2→3), reusing the learner-to-voter promotion mechanism from bootstrapping — each new node joins as a learner and is promoted to a voting member before the next is added
+   - cluster-etcd-operator (CEO) detects new control-plane nodes and scales etcd members sequentially (1→2→3), reusing the learner-to-voter promotion mechanism from bootstrapping — each new node joins as a learner and is promoted to a voting member before the next is added. This is a thoroughly tested procedure that all 3 control plane node clusters go through.
    - The kube-apiserver, kube-controller-manager, and kube-scheduler operators render static pod manifests for the new control-plane nodes; the kubelet starts the pods
 9. The controller updates the infrastructure status fields:
    - `controlPlaneTopology` transitions from `SingleReplica` to `HighlyAvailable`
@@ -188,7 +188,7 @@ The CLI returns immediately after patching `spec.controlPlaneTopology` (step 4).
 If a transition fails partway through:
 
 - The controller sets a `TopologyTransitionFailed` condition on the CCO `ClusterOperator` status with diagnostic information
-- For etcd scaling failures during the 2-member window, quorum is lost and automated recovery is not possible — the administrator must manually run `quorum-restore.sh` per standard etcd disaster recovery procedures
+- For etcd scaling failures during the 2-member window, if a voting member is lost, quorum is lost and automated recovery is not possible — the administrator must manually run `quorum-restore.sh` per standard etcd disaster recovery procedures. In this case, the controller would not be able to set the TopologyTransitionFailed status due to writes being paused on the cluster during quorum loss.
 - The administrator can inspect CCO logs and ClusterOperator status conditions for details
 - `spec.controlPlaneTopology` remains unchanged — the controller will retry the transition with exponential backoff when preconditions are met. To cancel a transition that has not yet reached the status update (step 9), the administrator resets `spec.controlPlaneTopology` to match the current `status.controlPlaneTopology` (e.g., `oc adm transition topology SingleReplica`). After the status fields have been updated, the transition is effectively complete and cannot be cancelled — the cluster is in the new topology. This follows the standard Kubernetes pattern where controllers continuously reconcile toward the desired state until the user changes intent
 
@@ -203,14 +203,14 @@ This enhancement modifies the existing infrastructure CR (`infrastructures.confi
 A new `controlPlaneTopology` field is added to `InfrastructureSpec` to express the administrator's intent to transition:
 
 ```go
-// DesiredTopologyMode restricts the set of topology modes that can be
+// DesiredControlPlaneTopologyMode restricts the set of topology modes that can be
 // requested as a transition target.
 // +kubebuilder:validation:Enum=SingleReplica;HighlyAvailable
-type DesiredTopologyMode string
+type DesiredControlPlaneTopologyMode string
 
 const (
-	DesiredSingleReplica   DesiredTopologyMode = "SingleReplica"
-	DesiredHighlyAvailable DesiredTopologyMode = "HighlyAvailable"
+	DesiredSingleReplica   DesiredControlPlaneTopologyMode = "SingleReplica"
+	DesiredHighlyAvailable DesiredControlPlaneTopologyMode = "HighlyAvailable"
 )
 
 type InfrastructureSpec struct {
@@ -225,13 +225,13 @@ type InfrastructureSpec struct {
 	// means no transition has been requested.
 	// +optional
 	// +openshift:enable:FeatureGate=MutableTopology
-	ControlPlaneTopology DesiredTopologyMode `json:"controlPlaneTopology,omitempty"`
+	ControlPlaneTopology DesiredControlPlaneTopologyMode `json:"controlPlaneTopology,omitempty"`
 }
 ```
 
 The field is empty by default — the installer does not populate it. An empty `spec.controlPlaneTopology` on an existing or upgraded cluster indicates that no transition has ever been requested. After a successful transition, the field remains set (e.g., `HighlyAvailable`) and matches `status.controlPlaneTopology` — the controller is idle. This makes it straightforward to distinguish clusters that have undergone a transition (field set, matches status) from those that have not (field empty). A transition is initiated when the administrator sets `spec.controlPlaneTopology` to a value that differs from `status.controlPlaneTopology`.
 
-The `DesiredTopologyMode` named type restricts accepted values to topology modes that have defined transitions. For the initial implementation, only `SingleReplica` and `HighlyAvailable` are valid. Additional values can be added as new transitions are supported.
+The `DesiredControlPlaneTopologyMode` named type restricts accepted values to topology modes that have defined transitions. For the initial implementation, only `SingleReplica` and `HighlyAvailable` are valid. Additional values can be added as new transitions are supported.
 
 **Mapping to status fields**: `spec.controlPlaneTopology` expresses intent for the control plane topology only. The controller derives the corresponding `infrastructureTopology` and `mastersSchedulable` values based on the transition definition. For the initial SNO → HA compact transition: `controlPlaneTopology` and `infrastructureTopology` both transition to `HighlyAvailable` (no dedicated workers), and `mastersSchedulable` remains `true` (it is already `true` on SNO clusters since the single node runs all workloads; it stays `true` for compact clusters).
 
@@ -268,7 +268,7 @@ These condition types provide a stable contract for the CLI, console, and teleme
 
 #### Admission Control
 
-**Spec validation**: The `DesiredTopologyMode` named type restricts `spec.controlPlaneTopology` to the set of topology modes that have defined transitions (`SingleReplica`, `HighlyAvailable`). The API server rejects unsupported values at admission time via the kubebuilder enum validation on the type. No additional validation rules are required.
+**Spec validation**: The `DesiredControlPlaneTopologyMode` named type restricts `spec.controlPlaneTopology` to the set of topology modes that have defined transitions (`SingleReplica`, `HighlyAvailable`). The API server rejects unsupported values at admission time via the kubebuilder enum validation on the type. No additional validation rules are required.
 
 Access to `spec.spec.controlPlaneTopology` is governed by the existing RBAC for the infrastructure CR (`infrastructures.config.openshift.io`). By default, only users with `cluster-admin` or equivalent roles can modify infrastructure spec fields. No additional RBAC restrictions are proposed for the initial implementation; a dedicated role for topology transitions may be considered in future iterations if finer-grained access control is needed.
 
@@ -358,7 +358,7 @@ The learner-to-voter promotion code path is well-exercised from cluster bootstra
 | Component | Changes Required |
 | --------- | ---------------- |
 | cluster-config-operator | New topology transition controller; watches `spec.controlPlaneTopology`, coordinates transitions, updates status topology fields |
-| Infrastructure API (`openshift/api`) | Add `controlPlaneTopology` to `InfrastructureSpec` with `DesiredTopologyMode` named type; update immutability documentation on status topology fields |
+| Infrastructure API (`openshift/api`) | Add `controlPlaneTopology` to `InfrastructureSpec` with `DesiredControlPlaneTopologyMode` named type; update immutability documentation on status topology fields |
 | `oc` CLI | New `oc adm transition topology` command |
 | cluster-etcd-operator | Sequential etcd scaling during transitions (learner-to-voter promotion mechanism from bootstrapping) |
 | ingress, networking, monitoring operators | Reconcile on infrastructure status topology field changes |
@@ -497,15 +497,13 @@ MCO handles node-level changes and rolling operations, making it a candidate for
 
 ## Open Questions
 
-1. **Learner promotion after voter failure**: If CEO runs a learner on a second control-plane node and the voter fails, can quorum restore promote the learner? Or can only former voters be restored with quorum?
-
 2. **OLM operator impact**: Which OLM-managed operators read topology values? Do they watch the infrastructure CR or read at startup only? This determines whether operators need code changes or just a restart after transition.
 
 3. **Per-operator transition behavior**: The transition behavior for CEO is understood (etcd sequential scaling). The specific requirements for ingress, networking, monitoring, and other operators during a topology transition need validation during dev preview. The per-operator topology dependency matrix is a prerequisite for entering dev preview — see [Graduation Criteria](#entering-dev-preview).
 
 4. **Minimum resource requirements**: The controller should validate that new control-plane nodes meet minimum resource requirements before initiating a transition. The specific resource thresholds need to be defined.
 
-5. **Backup compatibility across topologies**: If an administrator takes an etcd backup on a SNO cluster and later transitions to HA, is the pre-transition backup usable for restore on the post-transition cluster? A new backup should be taken after a successful transition, but the interaction between pre-transition backups and post-transition cluster state needs investigation.
+5. **Backup compatibility across topologies**: If an administrator takes an etcd backup on a SNO cluster and later transitions to HA, is the pre-transition backup usable for restore on the post-transition cluster? A new backup should be taken after a successful transition, but the interaction between pre-transition backups and post-transition cluster state needs investigation. Ideally restoring the pre-transition backup would revert the cluster to SNO, but that flow needs to be validated.
 
 ## Test Plan
 
@@ -546,6 +544,7 @@ Standard QE testing scenarios will include:
 - Network partition scenarios during transition (e.g., partition between etcd members during scaling)
 - Concurrent operation testing: transition + upgrade attempt (verify mutual exclusion)
 - Node resource exhaustion during transition (e.g., insufficient disk or memory on new control-plane nodes)
+- Backup pre-transition and then restore that backup post-transition
 
 ## Graduation Criteria
 
@@ -556,7 +555,7 @@ Standard QE testing scenarios will include:
 - `controlPlaneTopology` field added to `InfrastructureSpec`
 - `oc adm transition topology` CLI command implemented
 - `MutableTopology` feature gate added to `DevPreviewNoUpgrade` feature set
-- `DesiredTopologyMode` named type validated in API integration tests
+- `DesiredControlPlaneTopologyMode` named type validated in API integration tests
 - Per-operator topology dependency matrix completed: for each in-payload operator that reads `controlPlaneTopology` or `infrastructureTopology`, document what the operator uses the value for (replica count, scheduling, feature enablement) and whether it watches the infrastructure CR for changes or reads the value only at startup
 - Operators that read topology only at startup are identified and a restart strategy is documented for post-transition reconciliation
 - CCO sets `Upgradeable=False` on its ClusterOperator while a topology transition is in progress
@@ -598,12 +597,8 @@ The topology transition controller upgrades as part of cluster-config-operator v
 **Z-stream downgrades** (within a minor version that supports mutable topology):
 Standard downgrade procedures apply. Completed transitions are not reverted — the cluster retains its current topology.
 
-**Y-stream downgrades** (to a minor version without mutable topology support):
-The CVO will evaluate the feature gate during downgrade. If the target release does not include the `MutableTopology` feature gate:
-- The topology transition controller will not be active in the target release
-- The `controlPlaneTopology` spec field is feature-gated — the field will not be present in the target release's CRD schema, and the stored value will be handled according to Kubernetes CRD schema evolution rules
-- Completed transitions are not affected — the infrastructure CR contains standard topology values that the target release understands
-- In-progress transitions must be completed or cancelled before downgrading. The `Upgradeable=False` condition on the CCO ClusterOperator blocks CVO from initiating upgrades while a transition is in progress. If `spec.controlPlaneTopology` and `status.controlPlaneTopology` disagree, the administrator must either allow the transition to complete or reset `spec.controlPlaneTopology` to the current topology value before proceeding with any version change
+**Y-stream downgrades**:
+CVO blocks y-stream downgrades.
 
 ## Version Skew Strategy
 
@@ -617,10 +612,10 @@ Post-transition clusters use standard topology values that all operator versions
 
 This enhancement adds a `controlPlaneTopology` field to `InfrastructureSpec`. This field:
 
-- Has no impact when it matches the current `status.controlPlaneTopology` (the default state)
-- During transitions, the CCO topology transition controller makes API calls to coordinate with operators. These calls are low-frequency and bounded by the transition sequence.
+- Has no impact when it matches the current `status.controlPlaneTopology` or is empty
+- During transitions, the CCO topology transition controller makes API calls to coordinate operator transition. These calls are low-frequency and bounded by the transition sequence.
 
-The `DesiredTopologyMode` named type provides API-server-level validation with no additional services required. Topology status fields are not protected by admission policies — this is consistent with other infrastructure status fields.
+The `DesiredControlPlaneTopologyMode` named type provides API-server-level validation with no additional services required. Topology status fields are not protected by admission policies — this is consistent with other infrastructure status fields.
 
 ## Support Procedures
 
@@ -630,7 +625,7 @@ The `DesiredTopologyMode` named type provides API-server-level validation with n
 - Topology transition controller in cluster-config-operator
 - CLI (`oc adm transition topology` command)
 - Supported transition definitions and validation logic
-- Infrastructure CR API changes (`DesiredTopologyMode` type, `controlPlaneTopology` field)
+- Infrastructure CR API changes (`DesiredControlPlaneTopologyMode` type, `controlPlaneTopology` field)
 
 **Control Plane Team:**
 - cluster-etcd-operator (CEO) etcd scaling coordination
@@ -654,7 +649,7 @@ The `DesiredTopologyMode` named type provides API-server-level validation with n
 - Symptom: etcd cluster unhealthy after transition attempt
 - Check: CEO logs for etcd scaling operations
 - Check: etcd member list: `oc -n openshift-etcd exec <etcd-pod> -- etcdctl member list`
-- Resolution: If quorum is lost, follow standard etcd disaster recovery procedures (`quorum-restore.sh`). Automated rollback is not possible without quorum.
+- Resolution: If quorum is lost, follow standard etcd disaster recovery procedures (`quorum-restore.sh`). Automated rollback is not possible without quorum. Restoring to pre-transition snapshot could operate as a fallback recovery procedure pending verification of that procedure. 
 
 ### Recovery Procedures
 
