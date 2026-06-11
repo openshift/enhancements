@@ -5,9 +5,10 @@ authors:
   - "@Leo6Leo"
 reviewers:
   - "@saschagrunert"
+  - "@everettraven"
 approvers:
   - "@spadgett"
-  - "@jhadvig"
+  - "@everettraven"
 api-approvers:
   - "@saschagrunert"
 creation-date: 2026-05-28
