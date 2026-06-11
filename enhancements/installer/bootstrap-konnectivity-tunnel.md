@@ -176,7 +176,13 @@ It applies to all Installer-Provisioned Infrastructure (IPI) platforms.
 
 #### Single-node Deployments or MicroShift
 
-The impact on Single Node OpenShift (SNO) and MicroShift is tracked as an open question (see Open Questions below).
+For standard Single Node OpenShift (SNO) deployments that use a separate bootstrap node, the Konnectivity tunnel operates normally — the bootstrap node runs the Konnectivity server and the single cluster node runs the agent, exactly as in multi-node clusters.
+
+For single-node bootstrap-in-place (where the bootstrap and cluster control planes run on the same node), Konnectivity cannot be deployed because the bootstrap and cluster control planes do not co-exist: the cluster control plane replaces the bootstrap control plane rather than running alongside it.
+There is no separate bootstrap KAS that needs to reach the pod network, so Konnectivity is not needed.
+Bootkube will make the Konnectivity deployment conditional, skipping it in the bootstrap-in-place case.
+
+MicroShift does not use the bootstrap process and is not affected by this enhancement.
 
 #### OpenShift Kubernetes Engine
 
@@ -462,11 +468,11 @@ The bootstrap node must always have access to the release image.
 
 1. How should the bootstrap script determine the bootstrap node IP?
    This IP is required for the server certificate SAN and the agent `--proxy-server-host` argument.
-1. Clarify the impacts, if any, on SNO, MicroShift, and OKE.
-   For SNO, the bootstrap node is typically separate from the single cluster node, so the architecture still applies.
-   MicroShift does not use the bootstrap process and is likely not affected.
-   OKE uses the same installer and is likely affected in the same way as OCP.
-   These assumptions need confirmation.
+1. ~~Clarify the impacts, if any, on SNO, MicroShift, and OKE.~~
+   **Resolved.** Standard SNO with a separate bootstrap node works normally.
+   Single-node bootstrap-in-place cannot deploy Konnectivity because the bootstrap and cluster control planes do not co-exist; bootkube will make the deployment conditional.
+   MicroShift is not affected (no bootstrap process).
+   OKE uses the same installer and is affected in the same way as OCP.
 1. Determine all platforms requiring security group updates for TCP port 8091.
    At minimum, AWS, Azure, GCP, and any other platform where the installer manages firewall rules for the bootstrap node.
 
