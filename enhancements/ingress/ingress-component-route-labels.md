@@ -54,6 +54,7 @@ Add an optional `labels` field of type `map[string]LabelValue` to the existing `
 - `+mapType=granular` for proper strategic merge patch behavior, allowing individual label keys to be added or removed without replacing the entire map.
 - `MinProperties=1` prevents semantically empty `labels: {}`. When the field is omitted, no additional labels are applied.
 - `MaxProperties=8` bounds the map size. Route sharding typically needs 1-2 labels; 8 provides a ceiling for CEL cost estimation.
+- `MaxItems=250` is added to the existing `componentRoutes` list field to bound its cardinality. This is required for CEL cost estimation: without a `maxItems` on the parent list, CEL rules on the nested `labels` map exceed the CRD cost budget. The limit of 250 is generous — component routes are managed by OpenShift operators and typical clusters have fewer than 10.
 - Key validation uses a CEL rule with `format.qualifiedName()` (a [Kubernetes CEL standard library function](https://kubernetes.io/docs/reference/using-api/cel/#kubernetes-cel-libraries)) to enforce label key conventions.
 - Value validation is enforced by the `LabelValue` type, a new validated `string` alias defined in `config/v1/types_ingress.go`. It uses `format.labelValue()` (also a Kubernetes CEL standard library function) to enforce label value conventions.
 - Keys with `kubernetes.io/` and `k8s.io/` reserved prefixes are rejected, as these are reserved for Kubernetes system use.
@@ -108,7 +109,7 @@ spec:
 
 ### API Extensions
 
-Adds one new type and one new field to `config/v1/types_ingress.go`:
+Adds one new type and one new field to `config/v1/types_ingress.go`, and adds a `MaxItems=250` constraint to the existing `componentRoutes` list (required for CEL cost estimation on the nested `labels` map):
 
 ```go
 // LabelValue is a validated string type for Kubernetes label values,
