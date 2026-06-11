@@ -6,9 +6,10 @@ authors:
 reviewers:
   - "@saschagrunert"
 approvers:
-  - TBD
+  - "@spadgett"
+  - "@jhadvig"
 api-approvers:
-  - TBD
+  - "@saschagrunert"
 creation-date: 2026-05-28
 last-updated: 2026-06-02
 status: provisional
