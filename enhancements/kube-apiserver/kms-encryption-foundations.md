@@ -449,8 +449,10 @@ A **KMS rotation controller** runs per API server operand alongside **migrationC
 Rotation progress is tracked on the write-key secret via annotations.
 
 **Responsibilities:**
-- **KMS rotation controller** detects kekId change and writes `encryption.apiserver.operator.openshift.io/target-kek-id`.
+- **KMS rotation controller** bootstraps and updates `encryption.apiserver.operator.openshift.io/target-kek-id`; detects kekId change and starts the convergence clock.
 - **migrationController** executes migration when `target-kek-id ≠ migrated-kek-id` and writes `encryption.apiserver.operator.openshift.io/migrated-kek-id`.
+
+**`needsMigration`** — `target-kek-id` is non-empty and **≠** `migrated-kek-id`. When both are equal, the cluster is in steady state and no migration runs.
 
 **Constraints:**
 - **KEP-3299:** ≥ 5 minutes of cluster-wide converged `kekId` before the KMS rotation controller sets `target-kek-id`.
@@ -465,8 +467,8 @@ All kekId annotations use the prefix **`encryption.apiserver.operator.openshift.
 
 | Full annotation key | Writer | Value | Meaning |
 |---------------------|--------|-------|---------|
-| `encryption.apiserver.operator.openshift.io/target-kek-id` | KMS rotation controller | `kekId` | Target kekId to migrate toward (after 5m delay) |
-| `encryption.apiserver.operator.openshift.io/migrated-kek-id` | migrationController | `kekId` | Last fully migrated kekId |
+| `encryption.apiserver.operator.openshift.io/target-kek-id` | KMS rotation controller | `kekId` | Target kekId to migrate toward (after 5m delay on rotation); equals `migrated-kek-id` in steady state |
+| `encryption.apiserver.operator.openshift.io/migrated-kek-id` | migrationController (rotation); KMS rotation controller (bootstrap) | `kekId` | Last fully migrated kekId |
 | `encryption.apiserver.operator.openshift.io/kek-converged-at` | KMS rotation controller | RFC3339 | When candidate `kekId` first achieved cluster convergence |
 | `encryption.apiserver.operator.openshift.io/kek-converged-id` | KMS rotation controller | `kekId` | Candidate `kekId` the `kek-converged-at` timestamp belongs to |
 
@@ -493,9 +495,9 @@ When `target-kek-id` is set, the migrator sets `write-key = {keyName}-{kekId}` w
 3. **stateController** + deployer roll out encryption config until revision is stable.
 4. **migrationController** migrates each GR via **migrator** → SVM with `encryption.apiserver.operator.openshift.io/write-key={keyName}` only. No `needsMigration`.
 5. **Health aggregation** reports per-node `kekId`.
-6. When **initial migration is complete** and health shows a converged `kekId`, **KMS rotation controller** writes **`encryption.apiserver.operator.openshift.io/migrated-kek-id = {kekId}`** only (bootstrap). Does **not** set `target-kek-id` or start the convergence clock.
+6. When **initial migration is complete** and health shows a converged `kekId`, **KMS rotation controller** bootstraps **`encryption.apiserver.operator.openshift.io/migrated-kek-id = {kekId}`** and **`encryption.apiserver.operator.openshift.io/target-kek-id = {kekId}`** in the same write. Does **not** start the convergence clock.
 
-**End state:** initial migration complete; `migrated-kek-id = kek-old`; `target-kek-id` absent.
+**End state:** initial migration complete; `migrated-kek-id = kek-old`; `target-kek-id = kek-old`.
 
 ```mermaid
 sequenceDiagram
@@ -510,12 +512,12 @@ sequenceDiagram
     Admin->>KeyCtrl: enable KMS encryption
     MigCtrl->>SVM: EnsureMigration per GR
     Health->>RotCtrl: converged kekId
-    RotCtrl->>Secret: migrated-kek-id only
+    RotCtrl->>Secret: migrated-kek-id and target-kek-id
 ```
 
 ###### 2. Rotation when kekId changes (happy path)
 
-**Starting state:** `encryption.apiserver.operator.openshift.io/migrated-kek-id = kek-old`; `encryption.apiserver.operator.openshift.io/target-kek-id` absent; no SVM running.
+**Starting state:** `encryption.apiserver.operator.openshift.io/migrated-kek-id = kek-old`; `encryption.apiserver.operator.openshift.io/target-kek-id = kek-old`; no SVM running.
 
 **What happens, and who drives it:**
 
