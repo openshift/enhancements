@@ -283,6 +283,8 @@ type SecretsStoreCSIDriverConfigSpec struct {
 
     // tokenRequests controls service account token configuration for
     // workload identity federation (WIF) with cloud providers.
+    // When omitted, the operator preserves any existing tokenRequests
+    // already configured on the CSIDriver object without modification.
     // +optional
     TokenRequests *SecretsStoreTokenRequests `json:"tokenRequests,omitempty"`
 }
@@ -328,15 +330,18 @@ type SecretsStoreTokenRequests struct {
 
 // ManagedTokenRequests holds the configuration for operator-managed
 // service account token requests.
+// +kubebuilder:validation:MinProperties=1
 type ManagedTokenRequests struct {
     // audiences specifies service account token audiences that kubelet will
     // provide to the CSI driver during NodePublishVolume calls. These tokens
     // enable workload identity federation (WIF) with cloud providers such as
     // AWS, Azure, and GCP.
+    // When empty, the operator clears all tokenRequests from the CSIDriver object.
     // +optional
-    // +listType=atomic
+    // +listType=map
+    // +listMapKey=audience
     // +kubebuilder:validation:MaxItems=10
-    Audiences []SecretsStoreTokenRequest `json:"audiences,omitempty"`
+    Audiences *[]SecretsStoreTokenRequest `json:"audiences,omitempty"`
 }
 
 // SecretRotationType determines the secret rotation behavior for the
@@ -371,16 +376,20 @@ type SecretsStoreSecretRotation struct {
     // custom holds the custom rotation configuration.
     // Only valid when type is "Custom".
     // +optional
-    Custom *CustomSecretRotation `json:"custom,omitempty"`
+    Custom CustomSecretRotation `json:"custom,omitzero"`
 }
 
 // CustomSecretRotation holds configuration for custom secret rotation behavior.
+// +kubebuilder:validation:MinProperties=1
 type CustomSecretRotation struct {
     // rotationPollIntervalSeconds is the minimum time in seconds between
     // secret rotation attempts. The driver skips provider calls if less than
     // this interval has elapsed since the last successful rotation.
-    // When omitted, the platform chooses a reasonable default (currently 120).
-    // +default=120
+    // Must be at least 1 second and no more than 31560000 seconds (~1 year).
+    // When omitted, this means no opinion and the platform is left to choose a
+    // reasonable default, which is subject to change over time.
+    // +kubebuilder:validation:Minimum=1
+    // +kubebuilder:validation:Maximum=31560000
     // +optional
     RotationPollIntervalSeconds *int32 `json:"rotationPollIntervalSeconds,omitempty"`
 }
@@ -400,13 +409,13 @@ type SecretsStoreTokenRequest struct {
     // expirationSeconds is the requested duration of validity of the
     // service account token. The token issuer may return a token with
     // a different validity duration.
-    // When omitted, the token expiration is determined by the kube-apiserver
-    // (defaults to 1 hour). Must be at least 600 seconds (10 minutes) and
-    // no more than 4294967296 (1 << 32) seconds.
+    // When omitted, the token expiration is determined by the kube-apiserver.
+    // Must be at least 600 seconds (10 minutes) and no more than 315360000
+    // seconds (~10 years).
     // +kubebuilder:validation:Minimum=600
-    // +kubebuilder:validation:Maximum=4294967296
+    // +kubebuilder:validation:Maximum=315360000
     // +optional
-    ExpirationSeconds *int64 `json:"expirationSeconds,omitempty"`
+    ExpirationSeconds int64 `json:"expirationSeconds,omitempty"`
 }
 ```
 
@@ -460,8 +469,16 @@ spec:
 #### Validation Rules
 
 - `secretsStore` must be set if and only if `driverType` is `SecretsStore`
-- `rotationPollIntervalSeconds` defaults to 120 seconds (2 minutes). No minimum
-  is enforced at the API level; the administrator is trusted to choose an appropriate value.
+- `SecretsStoreCSIDriverConfigSpec` has `MinProperties=1` to prevent `secretsStore: {}`.
+- `rotationPollIntervalSeconds` must be between 1 and 31560000 (~1 year). When omitted,
+  the platform chooses old default (2 mins).
+- `expirationSeconds` must be between 600 (10 minutes) and 315360000 (~10 years).
+- `audiences` entries must have unique `audience` values, enforced automatically via
+  `+listType=map` with `+listMapKey=audience`. This also enables SSA patch operations
+  (e.g., adding a single audience without replacing the full list).
+- `ManagedTokenRequests` has `MinProperties=1` to prevent `managed: {}`. The only valid
+  way to clear WIF configuration is `managed: { audiences: [] }` (explicit empty list).
+- `CustomSecretRotation` has `MinProperties=1` to prevent `custom: {}`.
 - `tokenRequests.type` is immutable once set to `"Managed"`:
   - The `type` field cannot be changed from `"Managed"` back to `"Unmanaged"` (CEL
     transition rule on the struct: `!has(oldSelf.type) || oldSelf.type != 'Managed' || self.type == 'Managed'`).
@@ -469,7 +486,7 @@ spec:
     was `"Managed"` (CEL rule on the parent struct prevents removal).
   - This is a one-way transition: once the operator takes ownership of `tokenRequests`,
     the administrator cannot revert to unmanaged mode. To clear WIF configuration,
-    set `type: "Managed"` with `managed.audiences` set to an empty list instead.
+    set `managed.audiences` to an empty list (`audiences: []`).
 - `secretRotation` and `tokenRequests` are discriminated unions:
   - `secretRotation.type` is the discriminator with values `"None"` (disabled) or `"Custom"` (enabled with config).
   - `tokenRequests.type` is the discriminator with values `"Managed"` or `"Unmanaged"`.
@@ -544,10 +561,11 @@ reconciliation will trigger immediately when the administrator changes the
 
 #### Default Behavior and Upgrade Safety
 
-All new fields will have defaults that match the operator's current hardcoded
-behavior:
+All new fields use "no opinion" semantics when omitted — the operator applies
+defaults internally (not via CRD-level `+default`):
 - When `secretRotation` is omitted, the operator defaults to rotation enabled with a 2-minute poll interval
-- When `secretRotation.type` is `"Custom"`, `rotationPollIntervalSeconds` defaults to `120`
+- When `secretRotation.type` is `"Custom"` and `rotationPollIntervalSeconds` is omitted,
+  the operator chooses a reasonable default (currently 120 seconds)
 - When `tokenRequests` is omitted, the operator preserves existing CSIDriver tokenRequests (Unmanaged behavior)
 
 Clusters upgrading to the new operator version with no `driverConfig` set will see
