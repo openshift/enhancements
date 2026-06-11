@@ -93,13 +93,13 @@ flowchart LR
 
     subgraph cluster["Cluster Nodes"]
         direction TB
-        KA["Konnectivity Agent<br>(DaemonSet in<br>openshift-installer-bootstrap)"]
+        KA["Konnectivity Agent<br>(DaemonSet in<br>openshift-bootstrap-konnectivity)"]
         WH["Webhook / Aggregated API<br>(Pod Network)"]
         KA -- "proxied traffic" --> WH
     end
 
     KA -- "TCP:8091<br>mTLS" --> KS
-    PKI -. "Agent Cert<br>(via Secret in<br>openshift-installer-bootstrap)" .-> KA
+    PKI -. "Agent Cert<br>(via Secret in<br>openshift-bootstrap-konnectivity)" .-> KA
 ```
 
 **Key integration points:**
@@ -109,7 +109,7 @@ flowchart LR
 * Konnectivity agents on cluster nodes connect to the Konnectivity server over TCP port 8091 using mTLS.
   Agents run in host-network mode and reach the bootstrap node via the infrastructure network — the same network path used by kubelets to reach the bootstrap KAS.
 * The bootstrap PKI is a self-signed CA generated at bootstrap runtime.
-  It signs the server certificate (which stays on the bootstrap node filesystem) and a shared agent client certificate (distributed as a Secret in the `openshift-installer-bootstrap` namespace).
+  It signs the server certificate (which stays on the bootstrap node filesystem) and a shared agent client certificate (distributed as a Secret in the `openshift-bootstrap-konnectivity` namespace).
 * Once the bootstrap KAS receives a request destined for the cluster (e.g. a webhook call), the EgressSelectorConfiguration routes it through the UDS to the Konnectivity server, which forwards it through a connected agent to the target pod on a cluster node.
 
 ### Workflow Description
@@ -138,13 +138,13 @@ All steps below are performed automatically by the installer and bootstrap scrip
 4. The script creates cluster resources for the Konnectivity agent:
    a. Resolves the `apiserver-network-proxy` image from the release payload.
    b. Substitutes the image and bootstrap IP into the DaemonSet template and writes the resulting manifest to the manifests directory.
-   c. Writes the `openshift-installer-bootstrap` Namespace manifest to the manifests directory.
+   c. Writes the `openshift-bootstrap-konnectivity` Namespace manifest to the manifests directory.
    d. Writes a `konnectivity-agent-certs` Secret manifest (containing the agent certificate and CA) to the manifests directory.
 
 5. The bootstrap kubelet starts the KAS and Konnectivity server static pods.
    The KAS connects to the Konnectivity server via the UDS socket.
 
-6. `cluster-bootstrap` applies all manifests to the cluster, including the `openshift-installer-bootstrap` Namespace, the agent DaemonSet, and the agent certificate Secret.
+6. `cluster-bootstrap` applies all manifests to the cluster, including the `openshift-bootstrap-konnectivity` Namespace, the agent DaemonSet, and the agent certificate Secret.
 
 7. Konnectivity agent pods start on cluster nodes, mount the certificate Secret, and establish mTLS connections to the Konnectivity server on the bootstrap node.
 
@@ -152,10 +152,12 @@ All steps below are performed automatically by the installer and bootstrap scrip
 
 9. At the end of `bootkube.sh`, the production KAS instances on cluster nodes have fully taken over API serving.
    The bootstrap KAS is no longer handling API requests, so tearing down the tunnel does not affect in-flight webhook calls.
-   The `openshift-installer-bootstrap` namespace is deleted, which removes the agent DaemonSet, the certificate Secret, and all agent pods.
+   The `openshift-bootstrap-konnectivity` namespace is deleted, which removes the agent DaemonSet, the certificate Secret, and all agent pods.
+   All bootstrap-specific resources are labelled with `openshift.io/bootstrap-only: "true"` to identify them for cleanup.
 
 10. The installer destroys the bootstrap node infrastructure.
     The Konnectivity server is gone with it.
+    Platform-specific firewall rules for port 8091 are also removed during bootstrap infrastructure teardown.
     The production KAS instances have direct access to the pod network and do not need the tunnel.
 
 ### API Extensions
@@ -188,6 +190,16 @@ MicroShift does not use the bootstrap process and is not affected by this enhanc
 
 The impact on OpenShift Kubernetes Engine (OKE) is tracked as an open question (see Open Questions below).
 
+### Feature Gate
+
+The Konnectivity tunnel is gated behind the following feature gates:
+
+* `FeatureGateCRDCompatibilityRequirementOperator`
+* `FeatureGateClusterAPIMachineManagement`
+
+It will be enabled if either of these feature gates are enabled, both of which are related to ClusterAPI.
+This combination is chosen because ClusterAPI is the primary component currently impacted when the bootstrap KAS cannot access a webhook.
+
 ### Implementation Details/Notes/Constraints
 
 #### Kube-apiserver Configuration
@@ -205,7 +217,7 @@ kind: EgressSelectorConfiguration
 egressSelections:
 - name: "cluster"
   connection:
-    proxyProtocol: "HTTPConnect"
+    proxyProtocol: "GRPC"
     transport:
       uds:
         udsName: "/etc/kubernetes/config/konnectivity-server.socket"
@@ -217,7 +229,7 @@ egressSelections:
     proxyProtocol: "Direct"
 ```
 
-The `cluster` egress uses the HTTPConnect proxy protocol over a Unix Domain Socket.
+The `cluster` egress uses the GRPC proxy protocol over a Unix Domain Socket.
 The UDS path `/etc/kubernetes/config/konnectivity-server.socket` is the path as seen from within the KAS pod container.
 On the host, this corresponds to `/etc/kubernetes/bootstrap-configs/konnectivity-server.socket`, which is where the Konnectivity server creates the socket.
 The KAS pod already mounts this host directory as its `config` volume, so no additional volume mounts are needed.
@@ -275,7 +287,7 @@ The detailed certificate generation logic is available in the [PoC PR](https://g
 * A **shared agent client certificate** is generated with 1-day validity, signed by the Konnectivity CA.
   All Konnectivity agents use the same client certificate.
 
-* The agent certificate, key, and CA certificate are packaged into a Kubernetes `Secret` named `konnectivity-agent-certs` in the `openshift-installer-bootstrap` namespace.
+* The agent certificate, key, and CA certificate are packaged into a Kubernetes `Secret` named `konnectivity-agent-certs` in the `openshift-bootstrap-konnectivity` namespace.
   This Secret is written as a manifest file by `bootkube.sh` and applied by `cluster-bootstrap` alongside the DaemonSet.
   The agent DaemonSet mounts this Secret as a volume.
 
@@ -291,7 +303,7 @@ The detailed certificate generation logic is available in the [PoC PR](https://g
 |------|----|-------------|----------|-----|----------|
 | `ca.crt` / `ca.key` | `konnectivity-signer` | CA | 1 day | None | Bootstrap node only |
 | `server.crt` / `server.key` | `konnectivity-server` | `serverAuth` | 1 day | `IP:<bootstrap-ip>` | Bootstrap node only |
-| `agent.crt` / `agent.key` | `konnectivity-agent` | `clientAuth` | 1 day | None | Secret in `openshift-installer-bootstrap` |
+| `agent.crt` / `agent.key` | `konnectivity-agent` | `clientAuth` | 1 day | None | Secret in `openshift-bootstrap-konnectivity` |
 
 #### Konnectivity Server Configuration
 
@@ -305,12 +317,15 @@ The server uses the `apiserver-network-proxy` image (the same image used by the 
 | Flag | Value | Purpose |
 |------|-------|---------|
 | `--uds-name` | `/etc/kubernetes/bootstrap-configs/konnectivity-server.socket` | UDS path where the KAS connects (host path, mounted into the KAS pod as `/etc/kubernetes/config/konnectivity-server.socket`) |
-| `--server-port` | `8091` | TCP port for agent mTLS connections |
+| `--server-port` | `0` | Disabled; the KAS connects via UDS, not TCP |
+| `--agent-port` | `8091` | TCP port for agent gRPC connections |
 | `--server-cert` / `--server-key` | Paths on bootstrap node filesystem | Server certificate signed by the Konnectivity CA |
 | `--cluster-cert` / `--cluster-key` | Same as server cert/key | Certificate used for cluster-facing traffic (reuses the server certificate) |
-| `--agent-namespace` | `openshift-installer-bootstrap` | Namespace where agents are deployed |
-| `--mode` | `http-connect` | Proxy protocol, matching the `EgressSelectorConfiguration` |
-| `--server-count` | `1` | Only one Konnectivity server instance runs during bootstrap |
+| `--cluster-ca-cert` | Path on bootstrap node filesystem | CA certificate for cluster-facing traffic |
+| `--mode` | `grpc` | Proxy protocol for the KAS frontend, matching the `EgressSelectorConfiguration` |
+| `--proxy-strategies` | `destHost,defaultRoute` | Routing strategies for proxied traffic |
+| `--keepalive-time` | `30s` | Keepalive interval for connections |
+| `--frontend-keepalive-time` | `30s` | Keepalive interval for frontend (KAS) connections |
 
 The static pod mounts the PKI directory from the bootstrap node filesystem via a `hostPath` volume and creates the UDS socket in the bootstrap config directory that the KAS pod already mounts.
 
@@ -339,7 +354,7 @@ apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: konnectivity-agent
-  namespace: openshift-installer-bootstrap
+  namespace: openshift-bootstrap-konnectivity
 spec:
   # ...
   template:
@@ -359,16 +374,10 @@ spec:
         - --ca-cert=/etc/konnectivity/ca.crt
         - --agent-cert=/etc/konnectivity/tls.crt
         - --agent-key=/etc/konnectivity/tls.key
-        # ...keepalive and sync interval flags omitted for brevity...
-        resources:
-          requests:
-            cpu: 10m
-            memory: 32Mi
-        securityContext:
-          readOnlyRootFilesystem: true
-          allowPrivilegeEscalation: false
-          capabilities:
-            drop: ["ALL"]
+        - --keepalive-time=30s
+        - --probe-interval=5s
+        - --sync-interval=5s
+        - --sync-interval-cap=30s
         volumeMounts:
         - name: konnectivity-certs
           mountPath: /etc/konnectivity
@@ -398,6 +407,9 @@ It is the upstream default for the Konnectivity server and is also used by Hyper
 Any platform that configures network filtering for the bootstrap node must allow incoming traffic on this port from cluster nodes (both control plane and worker nodes).
 
 For each of these platforms, a rule must be added to allow inbound TCP port 8091 from cluster node security groups or CIDRs to the bootstrap node.
+These rules are removed during bootstrap infrastructure teardown alongside other bootstrap-only rules (e.g. SSH access).
+
+The following platforms require security group updates: AWS, Azure, GCP, OpenStack, IBM Cloud, and PowerVS.
 
 **Example for AWS** (adding to `AdditionalControlPlaneIngressRules` in the AWSCluster manifest):
 
@@ -410,8 +422,6 @@ For each of these platforms, a rule must be added to allow inbound TCP port 8091
     SourceSecurityGroupRoles: []capa.SecurityGroupRole{"controlplane", "node"},
 },
 ```
-
-The full list of platforms requiring this change is tracked as an open question (see Open Questions below).
 
 ### Risks and Mitigations
 
@@ -429,7 +439,7 @@ Platform firewall rules may block the connection if not updated.
 All Konnectivity agents use the same client certificate.
 A node that obtains the `konnectivity-agent-certs` Secret could impersonate any other agent and proxy traffic through the tunnel.
 **Mitigation:** This is a deliberate simplification.
-The Secret is scoped to the `openshift-installer-bootstrap` namespace, the certificates have 1-day validity, and the entire namespace (including the Secret) is deleted when bootstrap completes.
+The Secret is scoped to the `openshift-bootstrap-konnectivity` namespace, the certificates have 1-day validity, and the entire namespace (including the Secret) is deleted when bootstrap completes.
 Per-node certificates would require a CSR flow or individual Secrets, adding significant complexity for a short-lived tunnel where all agents have identical roles and access levels.
 
 ### Drawbacks
@@ -473,8 +483,8 @@ The bootstrap node must always have access to the release image.
    Single-node bootstrap-in-place cannot deploy Konnectivity because the bootstrap and cluster control planes do not co-exist; bootkube will make the deployment conditional.
    MicroShift is not affected (no bootstrap process).
    OKE uses the same installer and is affected in the same way as OCP.
-1. Determine all platforms requiring security group updates for TCP port 8091.
-   At minimum, AWS, Azure, GCP, and any other platform where the installer manages firewall rules for the bootstrap node.
+1. ~~Determine all platforms requiring security group updates for TCP port 8091.~~
+   **Resolved.** The following platforms require updates: AWS, Azure, GCP, OpenStack, IBM Cloud, and PowerVS.
 
 ## Test Plan
 
@@ -484,11 +494,12 @@ The bootstrap node must always have access to the release image.
 
 ### Dev Preview -> Tech Preview
 
-**TBD**
+The Konnectivity tunnel is gated behind the `FeatureGateCRDCompatibilityRequirementOperator` and `FeatureGateClusterAPIMachineManagement` feature gates, which are initially included in the `TechPreviewNoUpgrade` and `CustomNoUpgrade` FeatureSets.
+It is not deployed on standard GA clusters.
 
 ### Tech Preview -> GA
 
-**TBD**
+When either feature gate graduates to GA (enabled by default), the Konnectivity tunnel will be deployed on all standard cluster installations automatically.
 
 ### Removing a deprecated feature
 
