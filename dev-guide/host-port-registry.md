@@ -9,7 +9,7 @@ reviewers:
 approvers:
   - "@russelb"
 creation-date: 2020-08-26
-last-updated: 2023-11-23
+last-updated: 2026-05-25
 status: informational
 ---
 
@@ -136,6 +136,7 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 | 17697     | kube-apiserver                                  |          | yes                | apiserver     |       | ?                                                                                                                |
 | 22623     | machine-config-server                           |          | yes                | node          |       |                                                                                                                  |
 | 22624     | machine-config-server                           |          | yes                | node          |       |                                                                                                                  |
+| 22625     | internalreleaseimage                            | HTTPS    | yes                | agent         | 5.0   |                                                                                                                  |
 | 60000     | baremetal-operator                              |          | yes                | metal         | 4.6   | metrics                                                                                                          |
 
 
