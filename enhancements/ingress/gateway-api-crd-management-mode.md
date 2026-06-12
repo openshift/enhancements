@@ -5,15 +5,14 @@ authors:
 reviewers:
   - "@Miciah"
   - "@gcs278"
-  - "@knobunc"
   - "@everettraven"
 approvers:
-  - "@knobunc"
+  - "@Miciah"
 api-approvers:
   - "@everettraven"
 creation-date: 2026-05-26
-last-updated: 2026-05-28
-status: provisional
+last-updated: 2026-06-12
+status: implementable
 tracking-link:
   - https://redhat.atlassian.net/browse/NE-2733
 see-also:
