@@ -13,7 +13,7 @@ approvers: # A single approver is preferred, the role of the approver is to rais
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None"
   - None
 creation-date: 2024-01-24
-last-updated: 2024-03-12
+last-updated: 2026-06-11
 tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
   - https://issues.redhat.com/browse/ETCD-514
 ---
@@ -46,6 +46,8 @@ We want to be able to allow for this while minimizing the risk of them setting v
 ### Non-Goals
 
 * Handle consuming value changes without an etcd rollout.
+* Ensure that the backend limit increase doesn't exceed the available free disk space on the nodes.
+* The backend limit can be decreased up to the current DB size (plus a buffer).
 
 ## Proposal
 
@@ -54,8 +56,12 @@ They will be allowed to set any integer gibibyte value between the current limit
 
 Increasing this value will not have etcd immediately reserve this space on disk, it just allows etcd to grow up to that value if etcd grows under the usage of the cluster.
 
-The default value or unset value would be the current, hardcoded backend quota: 8GiB. This would allow for upgrades where this configuration value wouldn't nesscessarily be set.
-An initial upper limit of 32GiB will be enforced due to the [Perf-Scale work](https://issues.redhat.com/browse/PERFSCALE-2881) that proved 32GiB was a maximally stable value: higher values than 34GiB would introduce increasing instability.
+The default value or unset value would be the current, hardcoded backend quota: 8GiB. This would allow for upgrades where this configuration value wouldn't necessarily be set.
+Initial upper limit of 32GiB was identified by the [Perf-Scale work](https://issues.redhat.com/browse/PERFSCALE-2881) as a maximally stable value: higher values than 34GiB would introduce increasing instability.
+
+[Further testing](https://drive.google.com/drive/u/0/folders/15HHGTnicj7g6yGFuyW_mdh-87-R9CHrx) revealed that even 16GiB upper limit results
+in a substantial increase of node memory, but should still within reasonable expectations/bounds for master node memory
+([Control Plane Sizing](https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/scalability_and_performance/recommended-performance-and-scalability-practices-2#master-node-sizing_recommended-control-plane-practices))
 
 We will need to work with the perf team to understand the memory requirements of largers quotas, and the effect of the quota on things like defragmentation, snapshot restore, etc.
 A downside is that with the profiles, discussed in the Alternatives section, there are a discrete, small, number of permutations to test, giving more confidence of the exact effects a given profile has on performance/memory requirements.
@@ -65,13 +71,13 @@ This is a minor consideration as setting the quota to a arbitrarily higher value
 
 **cluster administrator** is a human user responsible deploying and maintaining the cluster.
 
-1. The cluster administrator decides to change the etcd backend quota from the default (8GiB) to a larger value; e.g. 20GiB.
+1. The cluster administrator decides to change the etcd backend quota from the default (8GiB) to a larger value; e.g. 10GiB.
 2. They set the new value via the `etcd.operator.openshift.io/v1` API.
 3. An etcd redeployment will be automatically run which restarts the etcd pods which consume the new value.
 
 #### Invalid value
 
-1. The cluster administrator wants to set the quota from a larger value (e.g. 32GiB) to a smaller one (8GiB).
+1. The cluster administrator wants to set the quota from a larger value (e.g. 16GiB) to a smaller one (8GiB).
 2. They attempt to set the new value via the `etcd.operator.openshift.io/v1` API.
 3. The API server should return an error notifying them that the value is invalid - not allowed to shrink the quota.
 
@@ -81,16 +87,16 @@ In operator/v1/0000_12_etcd-operator_01_config-TechPreviewNoUpgrade.crd.yaml:
 - Add BackendQuotaGiB of type int32
   - With default '8GiB'.
   - With validation disallow a decrease in value.
-  - With an upper limit of '32GiB'.
+  - With an upper limit of '16GiB'.
 
 ```go
 type EtcdSpec struct {
 	// backendQuotaGiB sets the etcd backend storage size limit in gibibytes.
-	// The value should be an integer not less than 8 and not more than 32.
+	// The value should be an integer not less than 8 and not more than 16.
 	// When not specified, the default value is 8.
 	// +kubebuilder:default:=8
 	// +kubebuilder:validation:Minimum=8
-	// +kubebuilder:validation:Maximum=32
+	// +kubebuilder:validation:Maximum=16
 	// +kubebuilder:validation:XValidation:rule="self>=oldSelf",message="etcd backendQuotaGiB may not be decreased"
 	// +openshift:enable:FeatureGate=EtcdBackendQuota
 	// +default=8
@@ -126,18 +132,17 @@ This enhancement will not directly impact MicroShift since the API will be consu
 * We will need to test larger sizes to ensure that everything works as expected.
 * For a larger database, defragmentation of etcd will take longer which will increase the amount of time that etcd is unavaiable for writes.
   Etcd will still be available for reads during defragmentation, so there should be little impact on the apiserver's availability.
-* Downgrades may be impacted if:
-  1. The downgrade is to a version without this feature.
-  2. The quota has been set higher than the default.
-  3. The etcd backends are using more space than the default.
-  A mitigation would be to keep the quota at the higher value (with no way of decreasing it), so that the cluster will continue to function and no data will be lost.
 * Currently, etcd can not detect whether its backend quota configuration value could lead to a database that's larger than the available storage.
   * We could potentially add a prometheus alert to fire when the etcd node is running out of disk space.
   * We could potentially add some validation to the etcd server to check the quota configuration value against the space available and error if too small.
     * This enhancement would need to take into consideration multiple instances sharing a disk to reduce the likelihood of each individual instance thinking it has enough space, but not realizing the other instances are also vying for that space.
+  Please also see [Checking the Upper Bound](#checking-the-upper-bound) for additional details.
 * Etcd puts out a warning if the backend quota is configured to be larger than 8GiB and the documentation calls out that 8GiB is the suggested maximum for normal clusters.
   * We've chosen to allow values higher than this soft-limit as the customers/clusters asking for this feature are larger than would be considered a "normal" cluster.
-  * [The Perf-Scale team has tested values](https://issues.redhat.com/browse/PERFSCALE-2881) up to 40GiB and found that instability was introduced around 34GiB which influenced the recommended maximum: 32GiB.
+  * [The Perf-Scale team has tested values](https://issues.redhat.com/browse/PERFSCALE-2881) up to 40GiB and found that instability was introduced around 34GiB which influenced the recommended maximum: 32GiB. This maximum was further decreased to 16GiB as bigger values substantially increase the memory requirements.
+* When etcd quota hits the limit, it is not possible to do any writes, which means updating `.spec.backendQuotaGiB` will not be possible. Users should remove unnecessary objects (e.g. events) from the cluster to allow the quota increase. This should be documented.
+* The DB size has a big impact on the memory usage. Without the ability to decrease the quota, it is difficult to limit the memory usage.
+  This can result in further cluster performance degradation. It is also difficult to downsize master nodes to reduce costs.
 
 ### Drawbacks
 
@@ -183,7 +188,7 @@ N/A
 - Performance testing for some larger-than-default values
   - Need to find reasonable and safe upper bound for maximum allowed value.
 - End user documentation
-  - Description of the feature and expectations of memory usages for some largers values.
+  - Description of the feature and expectations of memory usages for some larger values.
   - Steps to change the value.
 
 ### Removing a deprecated feature
@@ -205,7 +210,7 @@ N/A
 ## Support Procedures
 
 - If the user attempts to set the quota to an invalid value (not in the form of a resource quantity (e.g. 8GiB, etc)), the API will not accept the value and return an error.
-- If the user attempts to set the quota to a lower value than the current (e.g. 21GiB -> 16GiB), the API will not accept the value and return an error.
+- If the user attempts to set the quota to a lower value than the current DB size (e.g. 21GiB -> 16GiB), the API will not accept the value and return an error.
 - If the value is accepted, an etcd rollout will automatically occur and re-render the etcd podspec with the new quota - this will not cause the etcd instances to immediately reserve disk space, it will only allow them to grow up to the new value.
 
 ## Alternatives (Not Implemented)
@@ -232,7 +237,81 @@ The profiles that will be added are:
 * Larger:
   - ETCD_BACKEND_QUOTA: 16GiB
 
-This alternative was rejected because the discrete values don't provide a benefit to performance or safety of the etcd cluster: it just allows the etcd database to be larger if it needs to be. Also, the current enhancment proposal allows for users to more closely configure their etcd cluster to the resources available to them; with discrete values, a user could have to choose between a value that's too small or too large for their purposes.
+This alternative was rejected because the discrete values don't provide a benefit to performance or safety of the etcd cluster: it just allows the etcd database to be larger if it needs to be. Also, the current enhancement proposal allows for users to more closely configure their etcd cluster to the resources available to them; with discrete values, a user could have to choose between a value that's too small or too large for their purposes.
+
+
+### Decreasing the Quota
+
+In general increasing the quota is done in response to increased demand on the cluster.
+Decreasing or reverting the quota is unlikely to happen often, but it has the following benefit:
+- The DB size has a big impact on the memory usage. Decreasing the quota will limit the memory usage.
+  This can prevent further cluster performance degradation. It can also help with downsizing master
+  nodes and reducing cost.
+
+The `.spec.backendQuotaGiB` validation could be relaxed to allow the quota to be decreased when
+appropriate. To implement the new validation, we would also report the current DB size in
+`.status.BackendSizeKiB`.
+
+```go
+
+// +kubebuilder:validation:XValidation:rule="self.spec.backendQuotaGiB >= oldSelf.spec.backendQuotaGiB || (self.spec.backendQuotaGiB * 1024 * 1024) >= (self.status.BackendSizeKiB + 100 * 1024)",message="etcd .spec.backendQuotaGiB must be greater than .status.backendSizeKiB plus a 100 MiB buffer"
+type Etcd struct {
+  Spec EtcdSpec `json:"spec"`
+  Status EtcdStatus `json:"status"`
+}
+
+type EtcdSpec struct {
+	// backendQuotaGiB sets the etcd backend storage size limit in gibibytes.
+	// The value should be an integer not less than 8 and not more than 16.
+	// When not specified, the default value is 8.
+	// +kubebuilder:default:=8
+	// +kubebuilder:validation:Minimum=8
+	// +kubebuilder:validation:Maximum=16
+	// +openshift:enable:FeatureGate=EtcdBackendQuota
+	// +default=8
+	// +optional
+  BackendQuotaGiB int32 `json:"backendQuotaGiB"`
+}
+
+type EtcdStatus struct {
+  // BackendSizeKiB represents the current etcd backend storage database size in kibibytes.
+  // +kubebuilder:validation:Minimum=0
+  // +openshift:enable:FeatureGate=EtcdBackendQuota
+  // +optional
+  BackendSizeKiB *int64 `json:"backendSizeMiB"`
+}
+```
+
+### Checking the Upper Bound
+
+We could also introduce a validation check to determine the maximum size of the database that can
+fit on all the master nodes.
+
+Unfortunately, this would bring in additional challenges.
+
+While we can collect the current DB size with `etcd_mvcc_db_total_size_in_bytes` metric, it does not
+report the final disk space used. The real space used by etcd in total also includes .snap
+(snapshots) and .wal (write ahead log) files.
+
+Further information about the etcd footprint can be found here: https://docs.google.com/document/d/1O2o1IApHWmSioXG3fez4eVlUHOrXICYGNVIzaqNS0IQ
+
+We also need a reliable mechanism to find the currently available free space on the node. The etcd
+data is stored on the node hostPath in /var/lib/etcd. This could be achieved using a
+`node_filesystem_avail_bytes{mountpoint="/var"}` metric, for example. Although,
+[Moving etcd to a different disk](https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/etcd/ensuring-reliable-etcd-performance-and-scalability#move-etcd-different-disk_etcd-performance)
+should be considered as well when implementing the check.
+
+This feature can be implemented, but better reporting of space usage would probably be needed. The
+validation would probably have to be performed late (no CEL), because for example, the available
+space is not known during cluster install, when the Etcd object has not yet been created and
+reconciled. 
+
+Ultimately, it would be better to implement a standalone feature that solves this issue, for
+example, by providing additional metrics and alerts. This would provide cluster admins with
+real-time information about the upcoming space exhaustion, and not just when the
+`.spec.BackendQuotaGiB` value changes. This would also benefit all clusters (default 8 GiB size)
+even those where the EtcdBackendQuota feature is disabled/unavailable.
+
 
 ## Infrastructure Needed [optional]
 
