@@ -836,16 +836,13 @@ OpenShift release.
    - Should the actual HAProxy version number appear in logs, events, or
      additional status fields?
 
-10. **Version support criteria for 5.x releases with 4.x availability**: Once
+10. ~~**Version support criteria for 5.x releases with 4.x availability**: Once
     OCP 4.23 and newer 4.x versions start releasing (after OCP 5.0 and 5.x are
-    available), what should be the criteria for supported HAProxy versions?
-    - How does the "current and 2 previous minor versions" rule apply across
-      major version boundaries?
-    - Should 5.x releases support HAProxy versions from 4.x releases, or only
-      from 5.x releases?
-    - Example: If OCP 5.2 and OCP 4.25 are both actively supported, should
-      OCP 5.2 allow `haproxyOCPVersion: "OCP-4.25"`?
-    - Should there be separate support tracks for 4.x and 5.x?
+    available), what should be the criteria for supported HAProxy versions?~~
+    **RESOLVED**: This is not a problem because OCP 4.23 is the last 4.x series
+    version and is functionally equivalent to OCP 5.0. No new 4.x versions will
+    be released after 4.23, so there is no need to handle support criteria for
+    concurrent 4.x and 5.x releases.
 
 11. **Custom HAProxy image configuration**: Should administrators be allowed to
     configure their own HAProxy image in an unsupported fashion, instead of
@@ -898,6 +895,39 @@ Tests must cover:
 **Negative Tests**:
 - Attempting to use unsupported/unavailable versions
 - Invalid version format strings
+
+**CI Strategy**:
+
+All existing CI jobs will implicitly test the default (latest) HAProxy version.
+To cover the previous HAProxy version, a subset of existing nightly periodic
+jobs are cloned with a variant suffix (e.g., `-haproxy-prev`) using a CI step
+registry step (e.g., `ingress-conf-haproxy-version`) that writes an
+IngressController installer manifest to set the previous HAProxy version at
+install time. While the feature gate is TechPreviewNoUpgrade, these variants
+will be based on the `-techpreview` jobs.
+
+These variants will run on a single platform (e.g., AWS) rather than duplicating
+across every platform, since HAProxy behavior is platform-agnostic. The initial
+set of previous HAProxy periodic job variants will include:
+- E2E conformance (e.g., `e2e-aws-ovn-haproxy-prev`)
+- Serial tests (e.g., `e2e-aws-ovn-serial-1of2-haproxy-prev`,
+  `e2e-aws-ovn-serial-2of2-haproxy-prev`)
+- Z-stream upgrade (e.g., `e2e-aws-ovn-upgrade-haproxy-prev`)
+- Minor version upgrade (e.g., `e2e-aws-ovn-upgrade-major-haproxy-prev`)
+
+Additionally, an optional on-demand presubmit (e.g., `e2e-aws-ovn-haproxy-prev`)
+will be added to the `openshift/router` and `openshift/cluster-ingress-operator`
+repositories, allowing developers to trigger it via `/test` when touching
+HAProxy-related code.
+
+All upgrade variants run continuous ingress disruption monitors throughout the
+upgrade to detect availability regressions. Note that the upgrade job variants
+are not needed until OCP 5.0, since the 4.22->5.0 upgrade path defaults to the
+previous HAProxy (via auto-set `OCP-4.22`) and is already covered by existing
+major upgrade jobs. If the test matrix grows beyond 2 supported HAProxy versions,
+parameterized CI workflows will replace manually cloned job variants. This is a
+starting point — the scope and coverage will be refined as we coordinate with
+the TRT/TestPlatform team.
 
 ## Graduation Criteria
 
