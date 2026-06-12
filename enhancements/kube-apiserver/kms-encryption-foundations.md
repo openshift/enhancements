@@ -11,7 +11,7 @@ approvers:
 api-approvers:
   - "@JoelSpeed"
 creation-date: 2025-12-03
-last-updated: 2026-04-23
+last-updated: 2026-06-10
 tracking-link:
   - "https://redhat.atlassian.net/browse/CNTRLPLANE-243"
 see-also:
@@ -440,9 +440,143 @@ Without this protocol a race can occur: preflight passes for config A, the key-c
 
 Each controller writing its own condition prevents this. If the config changes mid-flight, the key-controller posts a new hash and the preflight controller sees the mismatch and re-runs the check.
 
-#### Variation: KMS Key Rotation
+#### KMS Key Rotation
 
-When a KMS plugin rotates its `key_id` (KEK), this triggers neither a new encryption key secret nor a new revision. The mechanism for detecting and handling `key_id` rotation is under evaluation and not covered in this enhancement.
+When the remote KMS rotates backing key material (for example, a new Vault Transit key version), the KMS v2 plugin reports a new opaque `key_id` in `Status` (called `kekId` below) and `Encrypt` responses. Cluster admins need etcd data re-encrypted under the new key without minting a new encryption key secret or extra static pod revisions for every external rotation.
+
+A **KMS rotation controller** runs per API server operand alongside **migrationController**, **keyController**, and the encryption state machine. It watches health input, detects when the cluster-converged `kekId` has changed, maintains the [KEP-3299](https://github.com/kubernetes/enhancements/blob/master/keps/sig-auth/3299-kms-v2-improvements/README.md) 5-minute convergence clock on the write-key secret, and writes kekId annotations. **migrationController** executes storage migration when annotations indicate `needsMigration`.
+
+Rotation progress is tracked on the write-key secret via annotations.
+
+**Responsibilities:**
+- **KMS rotation controller** bootstraps and updates `encryption.apiserver.operator.openshift.io/target-kek-id`; detects kekId change and starts the convergence clock.
+- **migrationController** executes migration when `target-kek-id ≠ migrated-kek-id` and writes `encryption.apiserver.operator.openshift.io/migrated-kek-id`.
+
+**`needsMigration`** — `target-kek-id` is non-empty and **≠** `migrated-kek-id`. When both are equal, the cluster is in steady state and no migration runs.
+
+**Constraints:**
+- **KEP-3299:** ≥ 5 minutes of cluster-wide converged `kekId` before the KMS rotation controller sets `target-kek-id`.
+- kekId annotations apply only when KMS encryption is active, existing encryption types are not affected by below changes.
+
+
+##### Secret and SVM annotations
+
+All kekId annotations use the prefix **`encryption.apiserver.operator.openshift.io/`** on the write-key Secret in `openshift-config-managed`.
+
+**Write-key Secret**
+
+| Full annotation key | Writer | Value | Meaning |
+|---------------------|--------|-------|---------|
+| `encryption.apiserver.operator.openshift.io/target-kek-id` | KMS rotation controller | `kekId` | Target kekId to migrate toward (after 5m delay on rotation); equals `migrated-kek-id` in steady state |
+| `encryption.apiserver.operator.openshift.io/migrated-kek-id` | migrationController (rotation); KMS rotation controller (bootstrap) | `kekId` | Last fully migrated kekId |
+| `encryption.apiserver.operator.openshift.io/kek-converged-at` | KMS rotation controller | RFC3339 | When candidate `kekId` first achieved cluster convergence |
+| `encryption.apiserver.operator.openshift.io/kek-converged-id` | KMS rotation controller | `kekId` | Candidate `kekId` the `kek-converged-at` timestamp belongs to |
+
+**StorageVersionMigration CR (cluster-scoped)**
+
+| Full annotation key | Writer | Value | Meaning |
+|---------------------|--------|-------|---------|
+| `encryption.apiserver.operator.openshift.io/write-key` | Migrator | `{keyName}` or `{keyName}-{kekId}` | Idempotency key for this migration run |
+
+When `target-kek-id` is set, the migrator sets `write-key = {keyName}-{kekId}` where `{kekId}` is the value of `target-kek-id`. The migrator replaces an SVM when this annotation differs.
+
+**5m convergence clock:** The KMS rotation controller sets `kek-converged-id` + `kek-converged-at` when a new candidate `kekId` converges; clears both on divergence or after writing `target-kek-id`.
+
+##### End-to-end cases
+
+###### 1. First migration (KMS enablement)
+
+**Starting state:** encryption off or transitioning to KMS; no kekId annotations on the write-key secret.
+
+**What happens, and who drives it:**
+
+1. **cluster admin** enables KMS encryption in the APIServer spec.
+2. **keyController** creates the encryption key secret. No kekId annotations yet.
+3. **stateController** + deployer roll out encryption config until revision is stable.
+4. **migrationController** migrates each GR via **migrator** → SVM with `encryption.apiserver.operator.openshift.io/write-key={keyName}` only. No `needsMigration`.
+5. **Health aggregation** reports per-node `kekId`.
+6. When **initial migration is complete** and health shows a converged `kekId`, **KMS rotation controller** bootstraps **`encryption.apiserver.operator.openshift.io/migrated-kek-id = {kekId}`** and **`encryption.apiserver.operator.openshift.io/target-kek-id = {kekId}`** in the same write. Does **not** start the convergence clock.
+
+**End state:** initial migration complete; `migrated-kek-id = kek-old`; `target-kek-id = kek-old`.
+
+```mermaid
+sequenceDiagram
+    participant Admin
+    participant KeyCtrl as keyController
+    participant MigCtrl as migrationController
+    participant SVM as Migrator
+    participant Health as HealthAggregation
+    participant RotCtrl as KMSRotationController
+    participant Secret as WriteKeySecret
+
+    Admin->>KeyCtrl: enable KMS encryption
+    MigCtrl->>SVM: EnsureMigration per GR
+    Health->>RotCtrl: converged kekId
+    RotCtrl->>Secret: migrated-kek-id and target-kek-id
+```
+
+###### 2. Rotation when kekId changes (happy path)
+
+**Starting state:** `encryption.apiserver.operator.openshift.io/migrated-kek-id = kek-old`; `encryption.apiserver.operator.openshift.io/target-kek-id = kek-old`; no SVM running.
+
+**What happens, and who drives it:**
+
+1. **cluster admin / KMS** rotates remote KEK.
+2. **Health aggregation** converges on **`kek-new`** → **KMS rotation controller** reads it.
+3. **KMS rotation controller** sees `kek-new ≠ migrated-kek-id`. Writes **`encryption.apiserver.operator.openshift.io/kek-converged-id = kek-new`** and **`encryption.apiserver.operator.openshift.io/kek-converged-at = now`**. Does not set `target-kek-id` yet.
+4. For **≥ 5m** converged on `kek-new`: if health diverges, clears `kek-converged-id` and `kek-converged-at`; if stable, sets **`encryption.apiserver.operator.openshift.io/target-kek-id = kek-new`** and clears convergence pair.
+5. **migrationController** sees `needsMigration`. **Migrator** runs with `encryption.apiserver.operator.openshift.io/write-key = {keyName}-kek-new`.
+6. **State machine** and **keyController** hold while `needsMigration`.
+7. **migrationController** completes all GRs → **`encryption.apiserver.operator.openshift.io/migrated-kek-id = kek-new`**.
+
+**End state:** `target-kek-id` and `migrated-kek-id` both `kek-new`.
+
+```mermaid
+sequenceDiagram
+    participant KMS as RemoteKMS
+    participant Health as HealthAggregation
+    participant RotCtrl as KMSRotationController
+    participant Secret as WriteKeySecret
+    participant MigCtrl as migrationController
+    participant SVM as Migrator
+
+    KMS->>Health: KEK rotates to kek-new
+    RotCtrl->>Secret: kek-converged-id, kek-converged-at
+    Note over RotCtrl: wait ≥ 5m stable
+    RotCtrl->>Secret: target-kek-id=kek-new
+    MigCtrl->>SVM: write-key=keyName-kek-new
+    MigCtrl->>Secret: migrated-kek-id=kek-new
+```
+
+###### 3. Rotation while migration is ongoing (kekId supersession)
+
+**Starting state:** `encryption.apiserver.operator.openshift.io/migrated-kek-id = kek-old`; **`encryption.apiserver.operator.openshift.io/target-kek-id = kek-A`**; SVM in flight with `write-key = {keyName}-kek-A`.
+
+**What happens, and who drives it:**
+
+1. **cluster admin / KMS** rotates to **`kek-B`** before kek-A migration finishes.
+2. **KMS rotation controller** sees converged `kek-B ≠ target-kek-id`. Resets `kek-converged-id` + `kek-converged-at` for kek-B.
+3. After **≥ 5m** on kek-B, sets **`encryption.apiserver.operator.openshift.io/target-kek-id = kek-B`**. `migrated-kek-id` stays `kek-old`.
+4. **migrationController** drives **migrator** with `encryption.apiserver.operator.openshift.io/write-key = {keyName}-kek-B` → replaces kek-A SVM.
+5. **migrationController** sets **`encryption.apiserver.operator.openshift.io/migrated-kek-id = kek-B`** when all GRs complete.
+
+**End state:** storage on latest kekId; kek-A never recorded in `migrated-kek-id`.
+
+```mermaid
+sequenceDiagram
+    participant KMS as RemoteKMS
+    participant RotCtrl as KMSRotationController
+    participant Secret as WriteKeySecret
+    participant MigCtrl as migrationController
+    participant SVM as Migrator
+
+    Note over MigCtrl,SVM: migrating kek-A
+    RotCtrl->>Secret: reset kek-converged-id, kek-converged-at
+    Note over RotCtrl: wait ≥ 5m stable
+    RotCtrl->>Secret: target-kek-id=kek-B
+    MigCtrl->>SVM: write-key=keyName-kek-B
+    MigCtrl->>Secret: migrated-kek-id=kek-B
+```
 
 ### KMS Plugin Lifecycle Management (Tech Preview v2)
 
@@ -883,6 +1017,10 @@ No special handling required.
 
 ### Detecting KMS Rotation Issues
 ```bash
+# Check kekId rotation annotations on the write-key secret
+oc get secret -n openshift-config-managed -l encryption.apiserver.operator.openshift.io/component=encryption-key \
+  -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}target={.metadata.annotations.encryption\.apiserver\.operator\.openshift\.io/target-kek-id}{"\t"}migrated={.metadata.annotations.encryption\.apiserver\.operator\.openshift\.io/migrated-kek-id}{"\n"}{end}'
+
 # Check encryption key secrets
 oc get secrets -n openshift-config-managed -l encryption.apiserver.operator.openshift.io/component=encryption-key
 
