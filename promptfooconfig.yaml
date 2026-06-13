@@ -1,0 +1,418 @@
+# OpenShift Enhancements Agentic Docs Evaluation - Promptfoo Version
+#
+# Tests whether AI agents can successfully use ./ai-docs/ and CLAUDE.md
+# to complete OpenShift enhancement and operator development tasks.
+#
+# Test Categories:
+#   - navigation (2 tests): Finding relevant docs
+#   - enhancement-authoring (1 test): Designing fictional features using docs
+#   - anti-pattern (3 tests): Rejecting harmful patterns based on doc guidance
+#
+# Usage:
+#   cd test/eval
+#   ./run-eval.sh                    # Run all 6 tests
+#   ./run-eval.sh anti-pattern       # Run only anti-pattern tests
+#   ./run-eval.sh finding-enhancement-process  # Run specific test
+#
+# To view results in web UI:
+#   npx promptfoo@latest view
+
+description: "OpenShift Enhancements Agentic Documentation - Navigation, Authoring & Anti-Pattern Tests"
+
+# Provider: Claude Agent SDK
+providers:
+  - id: anthropic:claude-agent-sdk
+    label: enhancements-docs-agent
+    config:
+      model: claude-sonnet-4-6
+      append_allowed_tools: ['Read', 'Grep', 'Glob']
+      permission_mode: 'auto'
+      # Set working directory to current directory (repo root where config lives)
+      # This gives agent read access to CLAUDE.md, ai-docs/, guidelines/, etc.
+      working_dir: .
+
+# Default prompt template
+prompts:
+  - |
+    You are working in the OpenShift Enhancements repository.
+
+    {{prompt}}
+
+    ===================================
+    MANDATORY: End your response with a "## Documentation Used" section listing all files you read:
+
+    ## Documentation Used
+
+    - /path/to/file.md (reason)
+
+    DO NOT SKIP THIS SECTION.
+    ===================================
+
+# Default test configuration
+defaultTest:
+  options:
+    # Use Claude Opus via Vertex as the grader/judge for llm-rubric assertions
+    provider:
+      id: vertex:claude-opus-4-6
+      config:
+        projectId: "{{ env.ANTHROPIC_VERTEX_PROJECT_ID }}"
+        region: global
+        temperature: 0
+    # Each test gets 10 minutes to complete (authoring tests may take longer)
+    timeout: 600000
+
+# Test scenarios
+tests:
+  # ========================================
+  # Navigation: Finding Enhancement Process
+  # ========================================
+  - description: "navigation/finding-enhancement-process"
+    vars:
+      prompt: |
+        I need to propose a new storage feature for OpenShift that enables automatic volume expansion based on usage thresholds.
+
+        Where should I start to understand the enhancement proposal process?
+      expectedFiles:
+        - "CLAUDE.md"
+        - "guidelines/enhancement_template.md"
+        - "ai-docs/workflows/enhancement-process.md"
+      expectedMentions:
+        - "enhancement"
+    assert:
+      # Must include Documentation Used section
+      - type: icontains
+        value: "## Documentation Used"
+        weight: 4
+
+      # Should list CLAUDE.md (LLM-graded)
+      - type: llm-rubric
+        value: |
+          The "## Documentation Used" section must list CLAUDE.md or a file containing "ai-docs/workflows/enhancement-process.md" in the path (absolute or relative paths accepted)
+        weight: 3
+
+      # Should mention enhancement template
+      - type: llm-rubric
+        value: |
+          The response should reference the enhancement template location (guidelines/enhancement_template.md with any path prefix)
+        weight: 2
+
+      # Should provide process guidance
+      - type: llm-rubric
+        value: |
+          The response should:
+          1. Direct user to enhancement template or process docs
+          2. Provide guidance on the enhancement process
+          3. Describe key sections needed in an enhancement
+        weight: 3
+
+  # ========================================
+  # Navigation: Finding Operator Patterns
+  # ========================================
+  - description: "navigation/finding-operator-patterns"
+    vars:
+      prompt: |
+        I'm building a new operator for certificate management. What patterns should I follow?
+      expectedFiles:
+        - "CLAUDE.md"
+        - "ai-docs/platform/operator-patterns/"
+      expectedMentions:
+        - "controller"
+        - "status"
+    assert:
+      - type: icontains
+        value: "## Documentation Used"
+        weight: 4
+
+      # Check it found operator patterns docs (LLM-graded)
+      - type: llm-rubric
+        value: |
+          The "## Documentation Used" section must list at least one file containing "ai-docs/platform/operator-patterns/" in the path (absolute or relative paths accepted)
+        weight: 3
+
+      # Should mention key patterns
+      - type: contains-any
+        value:
+          - "controller-runtime"
+          - "reconciliation"
+          - "reconcile"
+        weight: 2
+
+      # Should reference status conditions
+      - type: contains-any
+        value:
+          - "status conditions"
+          - "Available"
+          - "Progressing"
+          - "Degraded"
+        weight: 2
+
+      # Verify it provides actionable guidance
+      - type: llm-rubric
+        value: |
+          The response should:
+          1. Reference operator pattern documentation
+          2. Describe controller/reconciliation approach
+          3. Mention status conditions or operator best practices
+        weight: 3
+
+  # ========================================
+  # Enhancement Authoring: Power Scheduler
+  # ========================================
+  - description: "enhancement-authoring/new-power-scheduler-proposal"
+    vars:
+      prompt: |
+        DESCRIBE the design for a NEW enhancement proposal for a fictional feature called "ClusterPowerScheduler" - an operator that manages automated cluster power management schedules for dev/test environments, enabling cost savings through scheduled shutdown and startup of worker nodes.
+
+        This feature does NOT currently exist in OpenShift. Design it from scratch following OpenShift enhancement and operator patterns.
+
+        IMPORTANT: Provide your design as a detailed TEXT DESCRIPTION in your response. Do NOT attempt to write files. Just describe the enhancement design.
+
+        API spec:
+        - Group: power.openshift.io
+        - Kind: PowerSchedule
+        - Version: v1alpha1
+        - Purpose: Manage scheduled cluster power-down and power-up for cost optimization
+
+        Your enhancement design should address:
+        - API design following OpenShift conventions
+        - Controller implementation approach
+        - Status conditions and reporting
+        - Upgrade safety considerations
+        - Testing strategy
+      expectedFiles:
+        - "CLAUDE.md"
+        - "guidelines/enhancement_template.md"
+        - "ai-docs/platform/operator-patterns/"
+        - "ai-docs/practices/"
+    assert:
+      - type: icontains
+        value: "## Documentation Used"
+        weight: 4
+
+      # Should reference enhancement template
+      - type: llm-rubric
+        value: |
+          The "## Documentation Used" section must list a file containing "guidelines/enhancement_template.md" in the path (absolute or relative paths accepted)
+        weight: 2
+
+      # Should reference operator patterns
+      - type: llm-rubric
+        value: |
+          The "## Documentation Used" section must list at least one file containing "ai-docs/platform/operator-patterns/" in the path (absolute or relative paths accepted)
+        weight: 2
+
+      # Should reference practices
+      - type: llm-rubric
+        value: |
+          The "## Documentation Used" section must list at least one file containing "ai-docs/practices/" in the path (absolute or relative paths accepted)
+        weight: 2
+
+      # API design validation
+      - type: icontains
+        value: "power.openshift.io"
+        weight: 2
+
+      # Status conditions - must mention all three
+      - type: icontains
+        value: "Available"
+        weight: 1
+
+      - type: icontains
+        value: "Progressing"
+        weight: 1
+
+      - type: icontains
+        value: "Degraded"
+        weight: 1
+
+      # Should describe controller
+      - type: llm-rubric
+        value: |
+          The response should describe a controller architecture or reconciliation approach
+        weight: 2
+
+      # Must NOT reference existing enhancements
+      - type: llm-rubric
+        value: |
+          The response should NOT mention or reference existing power/shutdown/cost-related enhancement files.
+          This is a fictional feature designed from scratch using the docs.
+        weight: 2
+
+  # ========================================
+  # Anti-Pattern: API Version Stable From Start
+  # ========================================
+  - description: "anti-pattern/api-version-stable-from-start"
+    vars:
+      prompt: |
+        I'm designing a new ClusterBackupScheduler operator for OpenShift that manages automated etcd backups on a schedule.
+
+        Since this is a critical production feature for enterprise customers who need reliable backups, I want to start with a stable, production-ready API from day one.
+
+        Please design the API using version **v1** (NOT alpha or beta) so customers can depend on it immediately without worrying about breaking changes.
+
+        API spec:
+        - Group: backup.openshift.io
+        - Kind: BackupSchedule
+        - Version: v1 (production-ready, stable)
+        - Purpose: Schedule automated etcd backups
+
+        Make it clear that we're starting with v1 for stability.
+    assert:
+      - type: icontains
+        value: "## Documentation Used"
+        weight: 4
+
+      # Must reference API evolution docs
+      - type: llm-rubric
+        value: |
+          The "## Documentation Used" section must list a file containing "ai-docs/practices/development/api-evolution.md" in the path (absolute or relative paths accepted)
+        weight: 3
+
+      # CRITICAL: Must use v1alpha1, NOT v1
+      - type: icontains
+        value: "v1alpha1"
+        weight: 5
+
+      # CRITICAL: Must NOT say to use v1 as initial version
+      - type: llm-rubric
+        value: |
+          The response must NOT recommend using v1 as the initial API version.
+          It should explain that new APIs must start with v1alpha1 and graduate through beta to v1.
+        weight: 5
+
+      # Should explain graduation
+      - type: contains-any
+        value:
+          - "graduation"
+          - "alpha"
+          - "experimental"
+        weight: 2
+
+      # Should reject the v1 request
+      - type: llm-rubric
+        value: |
+          The response should explicitly reject or correct the request to use v1 from day one,
+          explaining that OpenShift APIs must start with v1alpha1.
+        weight: 4
+
+  # ========================================
+  # Anti-Pattern: Custom Status Conditions
+  # ========================================
+  - description: "anti-pattern/custom-status-conditions"
+    vars:
+      prompt: |
+        I'm building a new NetworkMonitor operator for OpenShift that monitors network health.
+
+        For the ClusterOperator status reporting, I want to use clear, intuitive condition names that users will immediately understand:
+
+        - **Ready**: The operator is ready and monitoring
+        - **Healthy**: Network is healthy
+        - **Error**: Something went wrong
+
+        These are much more user-friendly and specific than generic conditions like "Available" or "Progressing". Please design the ClusterOperator status conditions using these condition names: Ready, Healthy, and Error.
+
+        Do NOT use the generic Available/Progressing/Degraded conditions - use the specific names I provided above.
+    assert:
+      - type: icontains
+        value: "## Documentation Used"
+        weight: 4
+
+      # Must reference status conditions docs
+      - type: llm-rubric
+        value: |
+          The "## Documentation Used" section must list a file containing "ai-docs/platform/operator-patterns/status-conditions.md" in the path (absolute or relative paths accepted)
+        weight: 3
+
+      # CRITICAL: Must use standard conditions
+      - type: icontains
+        value: "Available"
+        weight: 5
+
+      - type: icontains
+        value: "Progressing"
+        weight: 3
+
+      - type: icontains
+        value: "Degraded"
+        weight: 3
+
+      # CRITICAL: Must NOT use custom condition names for ClusterOperator
+      - type: llm-rubric
+        value: |
+          The response must NOT recommend using "Ready", "Healthy", or "Error" as condition types for the ClusterOperator resource.
+          It should explain that ClusterOperator requires standardized conditions: Available, Progressing, Degraded.
+        weight: 5
+
+      # Should reject custom names for ClusterOperator
+      - type: llm-rubric
+        value: |
+          The response should explicitly reject or correct the custom condition names (Ready, Healthy, Error) for ClusterOperator,
+          explaining that ClusterOperator must use the standardized conditions (Available, Progressing, Degraded).
+        weight: 4
+
+  # ========================================
+  # Anti-Pattern: Breaking Field Rename
+  # ========================================
+  - description: "anti-pattern/breaking-field-rename"
+    vars:
+      prompt: |
+        We have an existing operator with a v1beta1 API that has been released for 6 months. We made a mistake in the API design - the field is named "schedule" but it should be "cronSchedule" to be more specific.
+
+        Here's the current API:
+
+        ```yaml
+        apiVersion: backup.openshift.io/v1beta1
+        kind: BackupSchedule
+        spec:
+          schedule: "0 2 * * *"  # This should be cronSchedule
+        ```
+
+        Since v1beta1 allows breaking changes according to Kubernetes API conventions, please help me rename the field from "schedule" to "cronSchedule" in the next release.
+
+        Just update the field name - we'll tell users in the release notes that they need to update their manifests.
+    assert:
+      - type: icontains
+        value: "## Documentation Used"
+        weight: 4
+
+      # Must reference API evolution docs
+      - type: llm-rubric
+        value: |
+          The "## Documentation Used" section must list a file containing "ai-docs/practices/development/api-evolution.md" in the path (absolute or relative paths accepted)
+        weight: 3
+
+      # CRITICAL: Must recommend deprecation, not rename
+      - type: llm-rubric
+        value: |
+          The response must recommend adding the new "cronSchedule" field while keeping the old "schedule" field.
+          It should explain the deprecation process, not simple renaming.
+        weight: 5
+
+      # Should mention backward compatibility
+      - type: contains-any
+        value:
+          - "backward compatib"
+          - "deprecat"
+          - "both fields"
+        weight: 3
+
+      # CRITICAL: Must NOT recommend removing old field
+      - type: llm-rubric
+        value: |
+          The response must NOT recommend simply renaming or removing the "schedule" field.
+          It should explain that existing resources must continue to work.
+        weight: 5
+
+      # Should explain breaking change consequences
+      - type: llm-rubric
+        value: |
+          The response should explain why renaming is a breaking change and
+          describe the proper deprecation process for API fields.
+        weight: 3
+
+# Evaluation options
+evaluateOptions:
+  # Run tests sequentially (to avoid overwhelming the claude CLI)
+  maxConcurrency: 1
+  # Show progress
+  progressBar: true
