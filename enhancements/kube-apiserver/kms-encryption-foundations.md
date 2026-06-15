@@ -429,8 +429,8 @@ Each instance coordinates with its operator's key-controller using a hash-based 
 
 1. The key-controller computes a hash of the current KMS configuration including the contents of the referenced Secrets/ConfigMaps and sets `EncryptionKMSPreflightRequired` (hash in the message).
 2. The preflight controller reads that hash, deploys the preflight pod, and runs the checks.
-3. On success, the preflight controller sets `EncryptionKMSPreflightSucceeded` (same hash in the message) and writes `encryption.apiserver.operator.openshift.io/target-kek-id` on the write-key secret from the observed `kekId`.
-4. The key-controller waits for the two hashes to match before creating an encryption key.
+3. On success, the preflight controller sets `EncryptionKMSPreflightSucceeded` (same hash in the message), including the observed `kekId` from the **Status** check.
+4. The key-controller waits for the two hashes to match, then creates an encryption key and writes `encryption.apiserver.operator.openshift.io/target-kek-id` on the write-key secret from the `kekId` reported by pre-flight.
 
 This follows the same pattern as the revision and installer controllers.
 
@@ -449,7 +449,7 @@ A **KMS rotation controller** runs per API server operand alongside **migrationC
 Rotation progress is tracked on the write-key secret via annotations.
 
 **Responsibilities:**
-- **KMSPreflightController** writes the first `encryption.apiserver.operator.openshift.io/target-kek-id` on the write-key secret, using the `kekId` observed from the plugin `Status` check during [pre-flight](#pre-flight-checker-tech-preview-v2).
+- **keyController** writes the first `encryption.apiserver.operator.openshift.io/target-kek-id` on the write-key secret, using the `kekId` observed from the plugin `Status` check during [pre-flight](#pre-flight-checker-tech-preview-v2).
 - **KMS rotation controller** sets `migrated-kek-id = target-kek-id` after initial migration completes; updates `target-kek-id` when a rotated `kekId` converges (after the 5m clock) and **`migrated-kek-id = target-kek-id`** (migration gate).
 - **migrationController** executes migration when `needsMigration` and writes `encryption.apiserver.operator.openshift.io/migrated-kek-id`.
 
@@ -462,7 +462,7 @@ Rotation progress is tracked on the write-key secret via annotations.
 
 ##### Pre-flight and first `target-kek-id`
 
-Before **keyController** creates the first encryption key, [pre-flight](#pre-flight-checker-tech-preview-v2) validates the KMS configuration. The preflight binary's **Status** check reads `kekId` from the plugin's KMS v2 `StatusResponse`. On success, **KMSPreflightController** writes **`encryption.apiserver.operator.openshift.io/target-kek-id = {kekId}`** on the write-key secret. **`migrated-kek-id` is not set yet** — initial storage migration still runs on the first-enablement path.
+Before **keyController** creates the first encryption key, [pre-flight](#pre-flight-checker-tech-preview-v2) validates the KMS configuration. The preflight binary's **Status** check reads `kekId` from the plugin's KMS v2 `StatusResponse` and returns it to **KMSPreflightController**, which records it in `EncryptionKMSPreflightSucceeded`. **keyController** then writes **`encryption.apiserver.operator.openshift.io/target-kek-id = {kekId}`** on the write-key secret when it creates the encryption key. **`migrated-kek-id` is not set yet** — initial storage migration still runs on the first-enablement path.
 
 ##### Secret and SVM annotations
 
@@ -472,7 +472,7 @@ All kekId annotations use the prefix **`encryption.apiserver.operator.openshift.
 
 | Full annotation key | Writer | Value | Meaning |
 |---------------------|--------|-------|---------|
-| `encryption.apiserver.operator.openshift.io/target-kek-id` | KMSPreflightController (initial); KMS rotation controller (rotation) | `kekId` | Target kekId to migrate toward; equals `migrated-kek-id` in steady state |
+| `encryption.apiserver.operator.openshift.io/target-kek-id` | keyController (initial); KMS rotation controller (rotation) | `kekId` | Target kekId to migrate toward; equals `migrated-kek-id` in steady state |
 | `encryption.apiserver.operator.openshift.io/migrated-kek-id` | KMS rotation controller (bootstrap); migrationController (rotation) | `kekId` | Last fully migrated kekId |
 | `encryption.apiserver.operator.openshift.io/kek-converged-at` | KMS rotation controller | RFC3339 | When candidate `kekId` first achieved cluster convergence |
 | `encryption.apiserver.operator.openshift.io/kek-converged-id` | KMS rotation controller | `kekId` | Candidate `kekId` the `kek-converged-at` timestamp belongs to |
@@ -497,8 +497,8 @@ When `target-kek-id` is set, the migrator sets `write-key = {keyName}-{kekId}` w
 **What happens, and who drives it:**
 
 1. **cluster admin** enables KMS encryption in the APIServer spec.
-2. **keyController** triggers pre-flight. **KMSPreflightController** runs the preflight pod; **Status** reads `kekId` and writes **`encryption.apiserver.operator.openshift.io/target-kek-id = {kekId}`** on the write-key secret.
-3. **keyController** creates the encryption key secret.
+2. **keyController** triggers pre-flight. **KMSPreflightController** runs the preflight pod; **Status** reads `kekId` and reports success to **keyController**.
+3. **keyController** creates the encryption key secret and writes **`encryption.apiserver.operator.openshift.io/target-kek-id = {kekId}`** on the write-key secret.
 4. **stateController** + deployer roll out encryption config until revision is stable.
 5. **migrationController** migrates each GR via **migrator** → SVM with `encryption.apiserver.operator.openshift.io/write-key={keyName}` only (`migrated-kek-id` unset).
 6. **Health aggregation** reports per-node `kekId`.
@@ -519,7 +519,8 @@ sequenceDiagram
 
     Admin->>KeyCtrl: enable KMS encryption
     KeyCtrl->>Preflight: pre-flight required
-    Preflight->>Secret: target-kek-id from Status
+    Preflight->>KeyCtrl: EncryptionKMSPreflightSucceeded (kekId)
+    KeyCtrl->>Secret: target-kek-id from pre-flight
     KeyCtrl->>KeyCtrl: create encryption key
     MigCtrl->>SVM: EnsureMigration per GR
     Health->>RotCtrl: converged kekId
