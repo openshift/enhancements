@@ -412,7 +412,12 @@ The checker consists of two parts: a preflight binary that tests the KMS provide
 
 ##### Preflight Binary
 
-The preflight binary (`kms-preflight`) is shipped in the operator image. It runs on control plane nodes inside a one-shot pod that uses the [KMS plugin lifecycle management](#kms-plugin-lifecycle-management-tech-preview-v2) logic to attach a KMS plugin sidecar based on the current configuration. The binary connects to the plugin via the KMS v2 gRPC API and performs three checks:
+The preflight code is shipped as a new command in each of the operator images. It runs inside a one-shot container with the KMS plugin attached as a sidecar, using the [KMS plugin lifecycle management](#kms-plugin-lifecycle-management-tech-preview-v2) logic. The checker is deployed to match the environment of the API server it validates:
+
+- **Static pod** for kas-o, so the checker runs under the same conditions as the kube-apiserver (e.g., `hostNetwork`, no access to in-cluster DNS). A Deployment would miss issues that only appear in that environment.
+- **Deployment** for aggregated API servers (openshift-apiserver, oauth-apiserver), matching their network environment.
+
+The binary connects to the plugin via the KMS v2 gRPC API and performs three checks:
 
 1. **Status** — polls until the plugin reports `healthz=ok`.
 2. **Encrypt** — encrypts a random payload.
