@@ -248,12 +248,14 @@ operator management.
 This enhancement adds a new `SecretsStore` variant to the existing
 `CSIDriverConfigSpec` discriminated union in `operator.openshift.io/v1`.
 
-A top-level CEL rule on `ClusterCSIDriver` enforces that the resource name and
-`driverType` are consistent (with a `has()` guard for minimal CRs that omit
-`driverConfig` entirely):
+Three top-level CEL rules on `ClusterCSIDriver` enforce name/driverType consistency
+and tokenRequests immutability. Using optional chaining (`?.`) means the rules handle
+`driverConfig`-absent objects (upgrade scenario) without extra `has()` guards:
 
 ```go
-// +kubebuilder:validation:XValidation:rule="!has(self.spec.driverConfig) || (self.spec.driverConfig.driverType == 'SecretsStore' ? self.metadata.name == 'secrets-store.csi.k8s.io' : (self.metadata.name != 'secrets-store.csi.k8s.io' || self.spec.driverConfig.driverType == ''))",message="metadata.name 'secrets-store.csi.k8s.io' requires driverType 'SecretsStore', and driverType 'SecretsStore' requires metadata.name 'secrets-store.csi.k8s.io'"
+// +kubebuilder:validation:XValidation:rule="self.spec.?driverConfig.driverType.orValue('') == 'SecretsStore' ? self.metadata.name == 'secrets-store.csi.k8s.io' : true",message="driverType 'SecretsStore' requires metadata.name 'secrets-store.csi.k8s.io'"
+// +kubebuilder:validation:XValidation:rule="self.metadata.name == 'secrets-store.csi.k8s.io' ? (!has(self.spec.driverConfig) || self.spec.driverConfig.driverType == 'SecretsStore') : true",message="metadata.name 'secrets-store.csi.k8s.io' requires driverType 'SecretsStore'"
+// +kubebuilder:validation:XValidation:rule="oldSelf.spec.?driverConfig.?secretsStore.?tokenRequests.?type.orValue('') != 'Managed' || self.spec.?driverConfig.?secretsStore.?tokenRequests.?type.orValue('') == 'Managed'",message="tokenRequests type cannot be changed from Managed"
 type ClusterCSIDriver struct { ... }
 ```
 
@@ -267,26 +269,25 @@ type CSIDriverConfigSpec struct {
 
     // secretsStore is used to configure the Secrets Store CSI driver.
     // +optional
-    SecretsStore *SecretsStoreCSIDriverConfigSpec `json:"secretsStore,omitempty"`
+    SecretsStore SecretsStoreCSIDriverConfigSpec `json:"secretsStore,omitzero"`
 }
 
 // SecretsStoreCSIDriverConfigSpec defines properties that can be configured
 // for the Secrets Store CSI driver.
 // +kubebuilder:validation:MinProperties=1
-// +kubebuilder:validation:XValidation:rule="!has(oldSelf.tokenRequests) || oldSelf.tokenRequests.type != 'Managed' || (has(self.tokenRequests) && self.tokenRequests.type == 'Managed')",message="tokenRequests cannot be removed when type is Managed"
 type SecretsStoreCSIDriverConfigSpec struct {
     // secretRotation controls automatic secret rotation behavior.
     // When omitted, secret rotation is enabled with a default poll interval
     // of 2 minutes.
     // +optional
-    SecretRotation *SecretsStoreSecretRotation `json:"secretRotation,omitempty"`
+    SecretRotation SecretsStoreSecretRotation `json:"secretRotation,omitzero"`
 
     // tokenRequests controls service account token configuration for
     // workload identity federation (WIF) with cloud providers.
     // When omitted, the operator preserves any existing tokenRequests
     // already configured on the CSIDriver object without modification.
     // +optional
-    TokenRequests *SecretsStoreTokenRequests `json:"tokenRequests,omitempty"`
+    TokenRequests SecretsStoreTokenRequests `json:"tokenRequests,omitzero"`
 }
 
 // TokenRequestsType determines how the operator manages the tokenRequests
@@ -308,7 +309,6 @@ const (
 // SecretsStoreTokenRequests configures how service account tokens are
 // provided to the Secrets Store CSI driver for workload identity federation.
 // +kubebuilder:validation:XValidation:rule="has(self.type) && self.type == 'Managed' ? has(self.managed) : !has(self.managed)",message="managed must be set when type is 'Managed', and must not be set otherwise"
-// +kubebuilder:validation:XValidation:rule="!has(oldSelf.type) || oldSelf.type != 'Managed' || self.type == 'Managed'",message="type cannot be changed from Managed back to Unmanaged"
 // +union
 type SecretsStoreTokenRequests struct {
     // type determines how the operator manages tokenRequests on the
@@ -416,7 +416,7 @@ type SecretsStoreTokenRequest struct {
     // +kubebuilder:validation:Minimum=600
     // +kubebuilder:validation:Maximum=315360000
     // +optional
-    ExpirationSeconds int64 `json:"expirationSeconds,omitempty"`
+    ExpirationSeconds int32 `json:"expirationSeconds,omitempty"`
 }
 ```
 
@@ -481,10 +481,12 @@ spec:
   way to clear WIF configuration is `managed: { audiences: [] }` (explicit empty list).
 - `CustomSecretRotation` has `MinProperties=1` to prevent `custom: {}`.
 - `tokenRequests.type` is immutable once set to `"Managed"`:
-  - The `type` field cannot be changed from `"Managed"` back to `"Unmanaged"` (CEL
-    transition rule on the struct: `!has(oldSelf.type) || oldSelf.type != 'Managed' || self.type == 'Managed'`).
-  - The `tokenRequests` struct cannot be removed from `secretsStore` if its `type`
-    was `"Managed"` (CEL rule on the parent struct prevents removal).
+  - A single CEL rule enforced at the `ClusterCSIDriver` level prevents any transition
+    away from `Managed`, including reverting the type, removing `tokenRequests`, or
+    removing `driverConfig` entirely and re-adding it with a different type:
+    `oldSelf.spec.?driverConfig.?secretsStore.?tokenRequests.?type.orValue('') != 'Managed' || self.spec.?driverConfig.?secretsStore.?tokenRequests.?type.orValue('') == 'Managed'`
+  - Placing the rule at the top level prevents bypass via removal and re-addition of
+    `driverConfig`.
   - This is a one-way transition: once the operator takes ownership of `tokenRequests`,
     the administrator cannot revert to unmanaged mode. To clear WIF configuration,
     set `managed.audiences` to an empty list (`audiences: []`).
@@ -708,9 +710,12 @@ Nothing considered.
 
 **tokenRequests.type immutability:**
 - Attempt to change `tokenRequests.type` from `"Managed"` to `"Unmanaged"`: rejected
-  with error "type cannot be changed from Managed back to Unmanaged".
+  with error "tokenRequests type cannot be changed from Managed".
 - Attempt to remove the `tokenRequests` struct entirely when `type` was `"Managed"`:
-  rejected with error "tokenRequests cannot be removed when type is Managed".
+  rejected with error "tokenRequests type cannot be changed from Managed".
+- Attempt to bypass by removing `driverConfig` and re-adding with a different type:
+  rejected with error "tokenRequests type cannot be changed from Managed" (rule
+  enforced at `ClusterCSIDriver` level, covering the full object transition).
 - Transition from `"Unmanaged"` to `"Managed"`: allowed (one-way transition).
 - Update `managed.audiences` while `type` remains `"Managed"`: allowed.
 - Set `type` to `"Managed"` on first creation: allowed.
