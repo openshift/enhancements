@@ -417,6 +417,8 @@ The preflight code is shipped as a new command in each of the operator images. I
 - **Static pod** for kas-o, so the checker runs under the same conditions as the kube-apiserver (e.g., `hostNetwork`, no access to in-cluster DNS). A Deployment would miss issues that only appear in that environment.
 - **Deployment** for aggregated API servers (openshift-apiserver, oauth-apiserver), matching their network environment.
 
+When an existing KMS plugin is already configured, the checker runs the new plugin alongside the existing one. This catches issues that only appear when multiple plugins run together, such as metric port collisions. When no plugin is configured yet, the checker runs the new plugin alone.
+
 The binary connects to the plugin via the KMS v2 gRPC API and performs three checks:
 
 1. **Status** — polls until the plugin reports `healthz=ok`.
