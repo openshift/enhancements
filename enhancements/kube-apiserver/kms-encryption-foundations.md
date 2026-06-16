@@ -425,7 +425,7 @@ The binary connects to the plugin via the KMS v2 gRPC API and performs three che
 2. **Encrypt** — encrypts a random payload.
 3. **Decrypt** — decrypts the ciphertext and verifies the round-trip matches.
 
-The pod uses readiness gates to post check results back to the controller. A ServiceAccount, Role, and RoleBinding are created so the pod can update its own status. These resources are cleaned up when the pod is removed.
+The pod uses readiness gates to post check results back to the controller. To set the readiness gate condition, the pod needs to PATCH its own status. It uses the same credentials as the health reporter sidecar for the corresponding API server type (see [KMS Health Reporter Connectivity](#kms-health-reporter-connectivity)).
 
 After a successful check the preflight pod is kept for a short period (e.g., 1 hour) so that its logs can be inspected, then cleaned up by a subsequent sync.
 
