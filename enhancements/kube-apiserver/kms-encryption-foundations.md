@@ -412,13 +412,20 @@ The checker consists of two parts: a preflight binary that tests the KMS provide
 
 ##### Preflight Binary
 
-The preflight binary (`kms-preflight`) is shipped in the operator image. It runs on control plane nodes inside a one-shot pod that uses the [KMS plugin lifecycle management](#kms-plugin-lifecycle-management-tech-preview-v2) logic to attach a KMS plugin sidecar based on the current configuration. The binary connects to the plugin via the KMS v2 gRPC API and performs three checks:
+The preflight code is shipped as a new command in each of the operator images. It runs inside a one-shot container with the KMS plugin attached as a sidecar, using the [KMS plugin lifecycle management](#kms-plugin-lifecycle-management-tech-preview-v2) logic. The checker is deployed to match the environment of the API server it validates:
+
+- **Static pod** for kas-o, so the checker runs under the same conditions as the kube-apiserver (e.g., `hostNetwork`, no access to in-cluster DNS). A Deployment would miss issues that only appear in that environment.
+- **Deployment** for aggregated API servers (openshift-apiserver, oauth-apiserver), matching their network environment.
+
+When an existing KMS plugin is already configured, the checker runs the new plugin alongside the existing one. This catches issues that only appear when multiple plugins run together, such as metric port collisions. When no plugin is configured yet, the checker runs the new plugin alone.
+
+The binary connects to the plugin via the KMS v2 gRPC API and performs three checks:
 
 1. **Status** — polls until the plugin reports `healthz=ok`.
 2. **Encrypt** — encrypts a random payload.
 3. **Decrypt** — decrypts the ciphertext and verifies the round-trip matches.
 
-The pod uses readiness gates to post check results back to the controller. A ServiceAccount, Role, and RoleBinding are created so the pod can update its own status. These resources are cleaned up when the pod is removed.
+The pod uses readiness gates to post check results back to the controller. To set the readiness gate condition, the pod needs to PATCH its own status. It uses the same credentials as the health reporter sidecar for the corresponding API server type (see [KMS Health Reporter Connectivity](#kms-health-reporter-connectivity)).
 
 After a successful check the preflight pod is kept for a short period (e.g., 1 hour) so that its logs can be inspected, then cleaned up by a subsequent sync.
 
