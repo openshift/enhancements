@@ -325,7 +325,7 @@ type SecretsStoreTokenRequests struct {
     // managed holds configuration for operator-managed tokenRequests.
     // Only valid when type is "Managed".
     // +optional
-    Managed *ManagedTokenRequests `json:"managed,omitempty"`
+    Managed ManagedTokenRequests `json:"managed,omitzero"`
 }
 
 // ManagedTokenRequests holds the configuration for operator-managed
@@ -340,6 +340,7 @@ type ManagedTokenRequests struct {
     // +optional
     // +listType=map
     // +listMapKey=audience
+    // +kubebuilder:validation:MinItems=0
     // +kubebuilder:validation:MaxItems=10
     Audiences *[]SecretsStoreTokenRequest `json:"audiences,omitempty"`
 }
@@ -391,7 +392,7 @@ type CustomSecretRotation struct {
     // +kubebuilder:validation:Minimum=1
     // +kubebuilder:validation:Maximum=31560000
     // +optional
-    RotationPollIntervalSeconds *int32 `json:"rotationPollIntervalSeconds,omitempty"`
+    RotationPollIntervalSeconds int32 `json:"rotationPollIntervalSeconds,omitempty"`
 }
 
 // SecretsStoreTokenRequest specifies a service account token audience
