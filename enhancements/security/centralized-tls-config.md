@@ -192,6 +192,10 @@ data:
 - Only injects into `GenericOperatorConfig` (`operator.openshift.io/v1alpha1`) and `GenericControllerConfig` (`config.openshift.io/v1`)
 - If centralized TLS config lacks `minTLSVersion` or `cipherSuites`, those fields are **deleted** from the ConfigMap (not left unchanged)
 
+**Supplementary docs**
+
+See [user](../dev-guide/cluster-version-operator/user/tls-injection.md) and [dev](../dev-guide/cluster-version-operator/dev/tls-injection.md) documents in this repo.
+
 #### Ingress Override Workflow
 
 1. The cluster administrator configures a cluster-wide profile (e.g., Modern) in the APIServer configuration.
