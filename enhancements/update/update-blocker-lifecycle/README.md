@@ -44,11 +44,11 @@ Having an explicit, machine-readable lifecycle reduces the chances that issues f
 
 ## Ticket queues
 
-With the changes from this enhancement, the queues become:
+With the changes from this enhancement, the queues are the upper-left three gadgets on [the OTA: triage dashboard](https://redhat.atlassian.net/jira/dashboards/18775).
 
-* [Suspect queue][suspect-queue].
-* [Component developer queue][component-dev-queue] (individual component teams probably want to add additional filtering for their components).
-* [Graph-admin queue][graph-admin-queue].
+* Suspect queue: UpgradeBlockers (needs impact statement request).
+* Component developer queue: UpgradeBlockers (needs impact statement).
+* Graph-admin queue: UpgradeBlockers (impact statement proposed).
 
 ## Motivation
 
@@ -212,6 +212,3 @@ However, removing `UpgradeBlocker` would break folks who are expecting the curre
 But it's not clear to me who would want to keep consuming that label after we grow the fine-grained labeling, but we have been trying to train developers to set `UpgradeBlocker` on potential blockers, and retraining developers is hard.
 
 [graph-data-block]: https://github.com/openshift/cincinnati-graph-data/tree/0335e56cde6b17230106f137382cbbd9aa5038ed#block-edges
-[suspect-queue]: https://issues.redhat.com/issues/?jql=project%20%3D%20OCPBUGS%20AND%20labels%20in%20(upgradeblocker)%20AND%20labels%20not%20in%20(ImpactStatementRequested%2C%20ImpactStatementProposed%2C%20UpdateRecommendationsBlocked)
-[component-dev-queue]: https://issues.redhat.com/issues/?filter=12400182&jql=project%20%3D%20OCPBUGS%20AND%20labels%20in%20(ImpactStatementRequested)
-[graph-admin-queue]: https://issues.redhat.com/issues/?jql=project%20%3D%20OCPBUGS%20AND%20labels%20in%20(ImpactStatementProposed)
