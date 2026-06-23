@@ -37,12 +37,14 @@ As a maintainer of an OpenShift cluster I need the ability to add bare metal hos
 
 - Enable a migration path for existing clusters to leverage nodes without cloud provider integration.
 - Cluster operators will not be `degraded` or stuck in `progressing`.
+- Cluster storage will not be supported in initial implementation.
 
 ### Non-Goals
 
 - Migrating the control plane and infrastructure nodes to `platform: none`. Atleast initially, the goal is to add nodes which lack cloud provider integration to an existing `platform: vsphere` cluster.
 - Autoscaling or machine/cluster API management of nodes
 - Bare metal API integration
+- Cluster storage support
 
 ## Proposal
 
@@ -57,17 +59,20 @@ Another issue the CSI operator has with the non vSphere node is that it fails to
 #### Adding a New Node Without Cloud Provider Integration to a Platform vSphere cluster
 
 1. Install a `platform: vsphere` cluster
-2. Download the RHCOS Live CD which aligns with the installed version of OpenShift.
-3. Obtain or create a worker.ign file. This will be used to bootstrap the bare metal node.
-4. Boot the new bare metal host from the RHCOS Live CD.
-5. Install RHCOS:
+2. Disable Storage Operator
+3. Download the RHCOS Live CD which aligns with the installed version of OpenShift.
+4. Obtain or create a worker.ign file. This will be used to bootstrap the bare metal node.
+5. Boot the new bare metal host from the RHCOS Live CD.
+6. Install RHCOS:
 ```bash=
 coreos-installer install /dev/sdX --insecure-ignition --ignition-url=https://path-to-compute-ignition --platform=metal
 ```
 6. Reboot the node.
 7. Approve CSRs for the node
 
-Note: The [vSphere CSI driver daemonset](https://github.com/kubernetes-sigs/vsphere-csi-driver/blob/4479e2418f38cb93b5da4df7e043aff71a20cccc/manifests/vanilla/vsphere-csi-driver.yaml#L565-L569) tolerates all taints. I was able to disable it by making the operator unmanaged and removing the tolerations.
+Note: 
+1. The [vSphere CSI driver daemonset](https://github.com/kubernetes-sigs/vsphere-csi-driver/blob/4479e2418f38cb93b5da4df7e043aff71a20cccc/manifests/vanilla/vsphere-csi-driver.yaml#L565-L569) tolerates all taints. I was able to disable it by making the operator unmanaged and removing the tolerations.
+2. We did attempt to fix the [vSphere CSI Driver Daemonset](https://github.com/openshift/vmware-vsphere-csi-driver-operator/pull/305) to not deploy to BM node, but we decided to make storage generally not supported in hybrid environment
 
 ### API Extensions
 
@@ -83,78 +88,41 @@ Does not have an impact.
 
 Does not have an impact.
 
+#### OpenShift Kubernetes Engine
+
+Does not have an impact.
+
 ### Implementation Details/Notes/Constraints
 
-#### VMware CSI Driver Operator
+#### Feature Gate Definition
 
-The VMware CSI Driver operator is being enhanced in the following ways:
-1. Modify vmware-vsphere-csi-driver-node daemonset to only get deployed onto vsphere linux nodes
-2. Enhance `checkOnNode` to ignore nodes that are not flagged as being a vSphere node.
+The mixed-node environment behavior is gated behind the `VSphereMixedNodeEnv` feature gate, defined in the OpenShift API. The feature gate allows the new behavior to be introduced incrementally without affecting existing clusters. It is initially available in the `DevPreviewNoUpgrade` feature set and applies to both Hypershift and SelfManagedHA cluster profiles.
 
-##### vmware-vsphere-csi-driver-node DaemonSet
+#### Cluster Storage Operator
 
-The operator will attempt to deploy a daemonset across all nodes to handle CSI driver interactions.  Currently, the daemonset will be places on all nodes that are labeled `kubernetes.io/os: linux`.  When the new non-vSphere node joins the cluster, this daemonset will be assigned to the new node and the pod will start but crash loop continuously. 
+The Cluster Storage Operator will not support hybrid environment.  It will need to be disabled in order for the operator to not go degraded.
 
-To prevent this daemonset pod from being assigned to the bare metal nodes, we are adding a new affinity rule to the daemonset configuration:
+##### Upstream CCM: Node Identity Labeling
 
-```yaml
-      affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-              - matchExpressions:
-                  - key: node.kubernetes.io/instance-type
-                    operator: Exists
-```
+The upstream vSphere Cloud Controller Manager must be capable of stamping a platform-identity label onto vSphere nodes at registration time. This is the mechanism by which the rest of the stack can distinguish vSphere nodes from non-vSphere bare metal nodes without inspecting vCenter directly.
 
-As vSphere nodes join the cluster, the vsphere cloud provider CCM will label the node with several labels.  Due to how `nodeSelector` works, we can only do direct equal comparisons.  All fields the CCM adds are not simple to check, which is why we are opting to use an affinity rule that checks to see if instance type is set.  This will only be set by the vSphere CCM when the VM for a node is found.   
+To accomplish this, the CCM is extended with a configurable node-labels flag. When the `VSphereMixedNodeEnv` feature gate is enabled, the operator passes `node.openshift.io/platform-type=vsphere` to the CCM via this flag. The CCM then applies that label to every vSphere node it initializes, establishing a durable, queryable identity on the node object.
 
-Example node outputs:
+Additionally, the CCM is updated to implement the `InstancesV2` cloud provider interface, which provides a more precise per-node lifecycle model (existence, shutdown state, and metadata). This enables accurate node classification in a mixed environment where some nodes have no corresponding vSphere VM.
 
-```bash
-[ngirard@21-245-93-10 ~]$ oc get nodes
-NAME                           STATUS   ROLES                         AGE     VERSION
-ngirard-multi-twxnm-bm         Ready    worker                        2d19h   v1.32.4
-ngirard-multi-twxnm-master-0   Ready    control-plane,master,worker   2d21h   v1.32.4
-ngirard-multi-twxnm-master-1   Ready    control-plane,master,worker   2d21h   v1.32.4
-ngirard-multi-twxnm-master-2   Ready    control-plane,master,worker   2d21h   v1.32.4
-```
+##### CCM Operator Integration
 
-vSphere Node:
+The cluster-cloud-controller-manager-operator is responsible for deploying and configuring the vSphere CCM. When the `VSphereMixedNodeEnv` feature gate is enabled, the operator must configure the CCM deployment to pass the `node.openshift.io/platform-type=vsphere` node label. This ensures that every vSphere node joining the cluster receives the platform-identity label automatically, without any manual administrator intervention.
+
+The operator reads the feature gate state at reconciliation time and conditionally includes the node label in the CCM deployment arguments. When the feature gate is disabled, the CCM deployment is left unchanged and no platform-type label is applied, preserving backwards-compatible behavior for clusters that do not require mixed-node support.
+
+An example of a vSphere Node with the new label:
 ```yaml
 apiVersion: v1
 kind: Node
 metadata:
   annotations:
-    alpha.kubernetes.io/provided-node-ip: 10.38.202.66
-    cluster.x-k8s.io/cluster-name: ngirard-multi-twxnm-1
-    cluster.x-k8s.io/cluster-namespace: openshift-cluster-api-guests
-    cluster.x-k8s.io/labels-from-machine: node.cluster.x-k8s.io/esxi-host
-    cluster.x-k8s.io/machine: ngirard-multi-twxnm-master-2
-    csi.volume.kubernetes.io/nodeid: '{"csi.vsphere.vmware.com":"42100fe1-0a04-9eb7-1b73-9a3d4578b557"}'
-    k8s.ovn.org/host-cidrs: '["10.38.202.2/32","10.38.202.3/32","10.38.202.66/25"]'
-    k8s.ovn.org/l3-gateway-config: '{"default":{"mode":"shared","bridge-id":"br-ex","interface-id":"br-ex_ngirard-multi-twxnm-master-2","mac-address":"00:50:56:90:2a:9c","ip-addresses":["10.38.202.66/25"],"ip-address":"10.38.202.66/25","next-hops":["10.38.202.1"],"next-hop":"10.38.202.1","node-port-enable":"true","vlan-id":"0"}}'
-    k8s.ovn.org/node-chassis-id: 68047568-cfd9-4ac4-bb5f-1bb12ea64112
-    k8s.ovn.org/node-encap-ips: '["10.38.202.66"]'
-    k8s.ovn.org/node-gateway-router-lrp-ifaddrs: '{"default":{"ipv4":"100.64.0.4/16"}}'
-    k8s.ovn.org/node-id: "4"
-    k8s.ovn.org/node-masquerade-subnet: '{"ipv4":"169.254.0.0/17","ipv6":"fd69::/112"}'
-    k8s.ovn.org/node-primary-ifaddr: '{"ipv4":"10.38.202.66/25"}'
-    k8s.ovn.org/node-subnets: '{"default":["10.129.0.0/23"]}'
-    k8s.ovn.org/node-transit-switch-port-ifaddr: '{"ipv4":"100.88.0.4/16"}'
-    k8s.ovn.org/remote-zone-migrated: ngirard-multi-twxnm-master-2
-    k8s.ovn.org/zone-name: ngirard-multi-twxnm-master-2
-    machine.openshift.io/machine: openshift-machine-api/ngirard-multi-twxnm-master-2
-    machineconfiguration.openshift.io/controlPlaneTopology: HighlyAvailable
-    machineconfiguration.openshift.io/currentConfig: rendered-master-8b8b58c49d5e1ea0b1843be4bf6725ac
-    machineconfiguration.openshift.io/desiredConfig: rendered-master-8b8b58c49d5e1ea0b1843be4bf6725ac
-    machineconfiguration.openshift.io/desiredDrain: uncordon-rendered-master-8b8b58c49d5e1ea0b1843be4bf6725ac
-    machineconfiguration.openshift.io/lastAppliedDrain: uncordon-rendered-master-8b8b58c49d5e1ea0b1843be4bf6725ac
-    machineconfiguration.openshift.io/lastObservedServerCAAnnotation: "false"
-    machineconfiguration.openshift.io/lastSyncedControllerConfigResourceVersion: "596195"
-    machineconfiguration.openshift.io/reason: ""
-    machineconfiguration.openshift.io/state: Done
-    volumes.kubernetes.io/controller-managed-attach-detach: "true"
+    ...
   creationTimestamp: "2025-05-27T13:55:12Z"
   labels:
     beta.kubernetes.io/arch: amd64
@@ -171,6 +139,7 @@ metadata:
     node.cluster.x-k8s.io/esxi-host: ci-vmware-host-2.ci.ibmc.devcluster.openshift.com
     node.kubernetes.io/instance-type: vsphere-vm.cpu-8.mem-16gb.os-unknown
     node.openshift.io/os_id: rhel
+    node.openshift.io/platform-type: vsphere
     topology.csi.vmware.com/openshift-region: us-east
     topology.csi.vmware.com/openshift-zone: us-east-1a
     topology.kubernetes.io/region: us-east
@@ -182,63 +151,13 @@ spec:
   providerID: vsphere://42100fe1-0a04-9eb7-1b73-9a3d4578b557
 ```
 
-non-vSphere node:
-```yaml
-apiVersion: v1
-kind: Node
-metadata:
-  annotations:
-    alpha.kubernetes.io/provided-node-ip: 10.74.208.21
-    k8s.ovn.org/host-cidrs: '["10.74.208.21/25"]'
-    k8s.ovn.org/l3-gateway-config: '{"default":{"mode":"shared","bridge-id":"br-ex","interface-id":"br-ex_ngirard-multi-twxnm-bm","mac-address":"02:92:26:00:00:11","ip-addresses":["10.74.208.21/25"],"ip-address":"10.74.208.21/25","next-hops":["10.74.208.1"],"next-hop":"10.74.208.1","node-port-enable":"true","vlan-id":"0"}}'
-    k8s.ovn.org/node-chassis-id: 394cb6ba-20fe-44b2-834f-b71be0e5407f
-    k8s.ovn.org/node-encap-ips: '["10.74.208.21"]'
-    k8s.ovn.org/node-gateway-router-lrp-ifaddrs: '{"default":{"ipv4":"100.64.0.5/16"}}'
-    k8s.ovn.org/node-id: "5"
-    k8s.ovn.org/node-masquerade-subnet: '{"ipv4":"169.254.0.0/17","ipv6":"fd69::/112"}'
-    k8s.ovn.org/node-primary-ifaddr: '{"ipv4":"10.74.208.21/25"}'
-    k8s.ovn.org/node-subnets: '{"default":["10.131.0.0/23"]}'
-    k8s.ovn.org/node-transit-switch-port-ifaddr: '{"ipv4":"100.88.0.5/16"}'
-    k8s.ovn.org/remote-zone-migrated: ngirard-multi-twxnm-bm
-    k8s.ovn.org/zone-name: ngirard-multi-twxnm-bm
-    machineconfiguration.openshift.io/controlPlaneTopology: HighlyAvailable
-    machineconfiguration.openshift.io/currentConfig: rendered-worker-a4983d88dabdc54ecf977ee120fd3796
-    machineconfiguration.openshift.io/desiredConfig: rendered-worker-a4983d88dabdc54ecf977ee120fd3796
-    machineconfiguration.openshift.io/desiredDrain: uncordon-rendered-worker-a4983d88dabdc54ecf977ee120fd3796
-    machineconfiguration.openshift.io/lastAppliedDrain: uncordon-rendered-worker-a4983d88dabdc54ecf977ee120fd3796
-    machineconfiguration.openshift.io/lastObservedServerCAAnnotation: "false"
-    machineconfiguration.openshift.io/lastSyncedControllerConfigResourceVersion: "596195"
-    machineconfiguration.openshift.io/reason: ""
-    machineconfiguration.openshift.io/state: Done
-    volumes.kubernetes.io/controller-managed-attach-detach: "true"
-  creationTimestamp: "2025-05-27T15:53:24Z"
-  labels:
-    beta.kubernetes.io/arch: amd64
-    beta.kubernetes.io/os: linux
-    kubernetes.io/arch: amd64
-    kubernetes.io/hostname: ngirard-multi-twxnm-bm
-    kubernetes.io/os: linux
-    node-role.kubernetes.io/worker: ""
-    node.openshift.io/os_id: rhel
-  name: ngirard-multi-twxnm-bm
-  resourceVersion: "1704483"
-  uid: d2bfe0f4-d579-45bb-95ea-84d46bb3c152
-spec: {}
-```
-
-For more information on how some of these labels are set:
-
-vSphere cloud provider logic for generating node data:
-https://github.com/kubernetes/cloud-provider-vsphere/blob/76e06fac88a1dca2e027362bf23e196956bbf125/pkg/cloudprovider/vsphere/nodemanager.go#L373
-
-CCM for setting node info such as instance-type:
-https://github.com/kubernetes/cloud-provider/blob/4fde1de51fc1c709a6a53e2bfb065ee2d03d1560/controllers/node/node_controller.go#L511
-
 ##### check_nodes.go
 
 The vSphere controller has a module that checks each node object to make sure it passes all environment / config checks.  As part of the checks, it validates if each node has a virtual machine (VM) found in vSphere.  In the case of the non vsphere bare metal node, the node will not have a VM in vSphere associated with it.  We need to update the check logic to verify that the node is in fact a vSphere node before checking for the VM.
 
-The current plans are to check each node to see if the spec's providerID has been set and the label for provider-type is set.  If both of these are not set, then the node is expected to be ignored by the operator. 
+The current plans are to check each node to see if the spec's providerID has been set and the label for provider-type is set.  If both of these are not set, then the node is expected to be ignored by the operator.
+
+When the `VSphereMixedNodeEnv` feature gate is enabled, the node-check logic uses the `node.openshift.io/platform-type=vsphere` label as its gating signal. A node that does not carry this label is treated as a non-vSphere node and skipped entirely — no VM lookup is attempted and no error is raised. This prevents the operator from going degraded simply because a bare metal node has no corresponding VM in vCenter.
 
 ### Risks and Mitigations
 
@@ -367,20 +286,10 @@ N/A
 
 **!!! TODO !!!**
 
-## Alternatives
+## Alternatives (Not Implemented)
 
-### vmware-vsphere-csi-driver-node DaemonSet
-
-An alternative to using an affinity rule could be enhancing the upstream vsphere cloud provider for CCM to add a new label to the node that directly specifies the platform type.  Currently, the core CCM requests certain fields from each cloud provider, and a label for platform-type is not one of them.  In fact, there is a V2 of the CCM interactions that allows a provider to provide back additional labels to add to a node.  We could leverage this V2 process to return a new platform type label that we can use for nodeSelector.  An example would be:
-
-```yaml
-    labels:
-      node.kubernetes.io/platform-type: vsphere
-```
-
-This will take work with upstream to upgrade / enhance the vsphere ccm to be compliant with the V2 api.  Another alternative to doing the V2 change would be to have the core CCM also ask each provider for its type to set a label for automatically.  This one is a bit more dangerous in the fact that all providers would be asked for the value, but may not have been enhanced to support it.
+N/A
 
 ## Infrastructure Needed [optional]
 
-Use this section if you need things from the project. Examples include a new
-subproject, repos requested, github details, and/or testing infrastructure.
+N/A
