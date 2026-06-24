@@ -201,12 +201,13 @@ variation for detailed guidance.
 
 4. The Cluster Ingress Operator adds the annotation to the Service.
 
-5. The CCM attempts to attach the security groups to the NLB, but AWS
-   does not allow adding security groups to an NLB that was created
-   without security group support. The CCM reports an error.
+5. The CCM detects that the NLB does not support security groups and silently
+   ignores the annotation. The security groups are not attached to the NLB,
+   but no error is reported.
 
-6. The administrator must delete and recreate the NLB to enable security
-   group support. This can be done by either:
+6. The administrator must verify that the security groups were attached to
+   the NLB (via AWS console or CLI). To enable security group support, the
+   administrator must delete and recreate the NLB. This can be done by either:
    - Deleting the Service directly (`oc delete service router-default -n openshift-ingress`),
      allowing the IngressController to recreate it automatically, OR
    - Deleting and recreating the entire IngressController
@@ -224,7 +225,7 @@ variation for detailed guidance.
 
 2. The administrator adds `securityGroups` to the IngressController spec.
 
-3. The Ingress Operator validates the configuration and sets the
+3. The Cluster Ingress Operator validates the configuration and sets the
    IngressController status condition `Degraded=True` with a message
    indicating that BYO security groups require CCM managed mode to be enabled.
    The annotation is not added to the Service.
@@ -233,7 +234,12 @@ variation for detailed guidance.
    cloud-controller-manager-operator to enable managed mode automatically.
 
 5. Once `NLBSecurityGroupMode = Managed` is set in the cloud-config, the
-   Ingress Operator will reconcile and add the annotation to the Service.
+   Cluster Ingress Operator will reconcile and add the annotation to the Service.
+   However, if the NLB was created before Managed mode was enabled, the
+   NLB does not support security groups. The administrator must verify that
+   the security groups were attached (via AWS console or CLI). If not, the
+   Service must be deleted and recreated following the same procedure
+   described in "Variation: NLB Created Before Security Group Support".
 
 #### Variation: Invalid Security Group ID
 
@@ -448,10 +454,11 @@ OpenShift limitation.
 
 ### Downgrade
 
-On downgrade to a version that does not recognize the `securityGroups` field,
-the field is ignored. Existing NLBs with attached security groups continue
-functioning. No managed security groups will be created or modified by older
-versions.
+Administrators must remove the `securityGroups` field from all
+IngressControllers before downgrading to a version that does not support
+this feature. Older CCM versions do not recognize the
+`service.beta.kubernetes.io/aws-load-balancer-security-groups` annotation and
+will report an error during Service reconciliation if the annotation is present.
 
 ## Version Skew Strategy
 
