@@ -10,7 +10,7 @@ approvers:
 api-approvers: 
   - None
 creation-date: 2025-02-10
-last-updated: 2025-02-10
+last-updated: 2026-06-24
 tracking-link: 
   - https://issues.redhat.com/browse/OCPSTRAT-1917
 see-also:
@@ -102,11 +102,71 @@ The mixed-node environment behavior is gated behind the `VSphereMixedNodeEnv` fe
 
 The Cluster Storage Operator will not support hybrid environment.  It will need to be disabled in order for the operator to not go degraded.
 
-##### Upstream CCM: Node Identity Labeling
+##### Upstream CCM: Custom Node Labeling
 
-The upstream vSphere Cloud Controller Manager must be capable of stamping a platform-identity label onto vSphere nodes at registration time. This is the mechanism by which the rest of the stack can distinguish vSphere nodes from non-vSphere bare metal nodes without inspecting vCenter directly.
+The upstream [vSphere Cloud Controller Manager](https://github.com/kubernetes/cloud-provider-vsphere) must be capable of allowing the addition of custom labels onto vSphere nodes at registration time. OpenShift needs to be able to have the ability to distinguish vSphere nodes from non-vSphere bare metal nodes without inspecting vCenter directly.  We will have our 3CMO operator leverage this to add the platform-type label as follows:
 
-To accomplish this, the CCM is extended with a configurable node-labels flag. When the `VSphereMixedNodeEnv` feature gate is enabled, the operator passes `node.openshift.io/platform-type=vsphere` to the CCM via this flag. The CCM then applies that label to every vSphere node it initializes, establishing a durable, queryable identity on the node object.
+```yaml
+apiVersion: v1
+kind: Node
+metadata:
+  labels:
+    node.openshift.io/platform-type: vsphere
+  name: ngirard-multi-twxnm-master-2
+```
+
+To accomplish this, the [upstream vSphere CCM](https://github.com/kubernetes/cloud-provider-vsphere/pull/1528) is enhanced to have a new flag for the CCM binary allowing additional labels to be defined.  The CCM then applies the labels to every vSphere node it initializes, establishing a durable, queryable identity on the node object.  The new parameter is:
+
+```
+--node-labels="$(ADDITIONAL_NODE_LABELS)"
+```
+
+An example of this new flags usage can be seen in the following pod example:
+
+```yaml
+  - command:
+    - /bin/bash
+    - -c
+    - |
+      #!/bin/bash
+      set -o allexport
+      if [[ -f /etc/kubernetes/apiserver-url.env ]]; then
+        source /etc/kubernetes/apiserver-url.env
+      fi
+      exec /bin/vsphere-cloud-controller-manager \
+        --v=3 \
+        --cloud-config=$(CLOUD_CONFIG) \
+        --cloud-provider=vsphere \
+        --controllers=* \
+        --configure-cloud-routes=false \
+        --bind-address=127.0.0.1 \
+        --cluster-name=$(OCP_INFRASTRUCTURE_NAME) \
+        --leader-elect=true \
+        --leader-elect-lease-duration=137s \
+        --leader-elect-renew-deadline=107s \
+        --leader-elect-retry-period=26s \
+        --leader-elect-resource-namespace=openshift-cloud-controller-manager \
+        --feature-gates= \
+        --use-service-account-credentials=true \
+        --node-labels="$(ADDITIONAL_NODE_LABELS)" \
+        --tls-cipher-suites=TLS_AES_128_GCM_SHA256,TLS_AES_256_GCM_SHA384,TLS_CHACHA20_POLY1305_SHA256,TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256 \
+        --tls-min-version=VersionTLS12 \
+        --secure-port=0
+    env:
+    - name: CLOUD_CONFIG
+      value: /etc/kubernetes-cloud-config/cloud.conf
+    - name: OCP_INFRASTRUCTURE_NAME
+      value: ngirard-multi-9lwzb
+    - name: VSPHERE_SECRET_NAMESPACE
+      value: openshift-cloud-controller-manager
+    - name: VSPHERE_SECRET_NAME
+      value: vsphere-cloud-credentials
+    - name: ENABLE_ALPHA_DUAL_STACK
+      value: "true"
+    - name: ADDITIONAL_NODE_LABELS
+      value: node.openshift.io/platform-type=vsphere
+    image: quay.io/openshift-release-dev/ocp-v5.0-art-dev@sha256:a13946ef362862a1693283aa1b181e6f7ff410cc7a0209fcc89fbd0d267195fe
+```
 
 Additionally, the CCM is updated to implement the `InstancesV2` cloud provider interface, which provides a more precise per-node lifecycle model (existence, shutdown state, and metadata). This enables accurate node classification in a mixed environment where some nodes have no corresponding vSphere VM.
 
@@ -121,9 +181,6 @@ An example of a vSphere Node with the new label:
 apiVersion: v1
 kind: Node
 metadata:
-  annotations:
-    ...
-  creationTimestamp: "2025-05-27T13:55:12Z"
   labels:
     beta.kubernetes.io/arch: amd64
     beta.kubernetes.io/instance-type: vsphere-vm.cpu-8.mem-16gb.os-unknown
@@ -145,8 +202,6 @@ metadata:
     topology.kubernetes.io/region: us-east
     topology.kubernetes.io/zone: us-east-1a
   name: ngirard-multi-twxnm-master-2
-  resourceVersion: "1701785"
-  uid: 418b38e5-fea5-4549-afc1-faf938d4f546
 spec:
   providerID: vsphere://42100fe1-0a04-9eb7-1b73-9a3d4578b557
 ```
@@ -161,38 +216,23 @@ When the `VSphereMixedNodeEnv` feature gate is enabled, the node-check logic use
 
 ### Risks and Mitigations
 
-**!!! TODO !!!**
+
 
 ### Drawbacks
 
-**!!! TODO !!!**
 
-The idea is to find the best form of an argument why this enhancement should
-_not_ be implemented.
-
-What trade-offs (technical/efficiency cost, user experience, flexibility,
-supportability, etc) must be made in order to implement this? What are the reasons
-we might not want to undertake this proposal, and how do we overcome them?
-
-Does this proposal implement a behavior that's new/unique/novel? Is it poorly
-aligned with existing user expectations?  Will it be a significant maintenance
-burden?  Is it likely to be superceded by something else in the near future?
 
 ## Open Questions [optional]
 
-**!!! TODO !!!**
+N/A
 
 ## Test Plan
 
 **Note:** *Section not required until targeted at a release.*
 
-**!!! TODO !!!**
-
 ## Graduation Criteria
 
 **Note:** *Section not required until targeted at a release.*
-
-**!!! TODO !!!**
 
 ### Dev Preview -> Tech Preview
 
@@ -264,19 +304,7 @@ Downgrade expectations:
 
 ## Version Skew Strategy
 
-**!!! TODO !!!**
-
-How will the component handle version skew with other components?
-What are the guarantees? Make sure this is in the test plan.
-
-Consider the following in developing a version skew strategy for this
-enhancement:
-- During an upgrade, we will always have skew among components, how will this impact your work?
-- Does this enhancement involve coordinating behavior in the control plane and
-  in the kubelet? How does an n-2 kubelet without this feature available behave
-  when this feature is used?
-- Will any other components on the node change? For example, changes to CSI, CRI
-  or CNI may require updating that component before the kubelet.
+N/A
 
 ## Operational Aspects of API Extensions
 
@@ -284,7 +312,7 @@ N/A
 
 ## Support Procedures
 
-**!!! TODO !!!**
+N/A
 
 ## Alternatives (Not Implemented)
 
