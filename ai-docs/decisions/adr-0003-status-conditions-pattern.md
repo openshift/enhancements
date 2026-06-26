@@ -55,6 +55,7 @@ All ClusterOperators must report three required status conditions: **Available**
 | Install completion | any | true | any | any | any |
 | Begin patch upgrade | any | any | any | any | any |
 | Begin minor upgrade | any | any | any | any | not false |
+| Begin upgrade (w/ force) | any | any | any | any | any |
 | Upgrade completion | target version (declared in operator status) | true | false | any | any |
 
 Install flattens inter-runlevel barriers (components across different runlevels can start in parallel, though intra-component ordering is preserved). Upgrade will not proceed to the next runlevel until the previous runlevel completes (Available=true AND Degraded=false AND target version declared in operator status).

@@ -19,7 +19,8 @@
 
 | Task | Start Here | Then Read | Finally |
 |------|-----------|----------|---------|
-| **Build an operator** | DESIGN_PHILOSOPHY.md | platform/operator-patterns/controller-runtime.md<br>platform/operator-patterns/status-conditions.md | domain/openshift/clusteroperator.md |
+| **Build a core operator** | DESIGN_PHILOSOPHY.md | platform/operator-patterns/controller-runtime.md<br>platform/operator-patterns/status-conditions.md | domain/openshift/clusteroperator.md |
+| **Build an OLM operator** | DESIGN_PHILOSOPHY.md | platform/operator-patterns/controller-runtime.md<br>platform/operator-patterns/status-conditions.md | [OLM packaging](https://olm.operatorframework.io/docs/tasks/creating-operator-manifests/) |
 | **Add a feature** | workflows/index.md (links to enhancement process) | practices/development/index.md (links to API conventions) | practices/testing/index.md |
 | **Debug an issue** | practices/reliability/index.md | references/repo-index.md | `oc adm must-gather --help` |
 | **Understand a concept** | DESIGN_PHILOSOPHY.md | domain/kubernetes/ or domain/openshift/ | platform/operator-patterns/ |
@@ -69,8 +70,8 @@
 
 ## Concept Dependencies
 
-### Operator Development Path (Core / Platform Operators)
-<!-- TODO: add a parallel path for non-core (OLM-managed) operators that use status conditions but don't report via ClusterOperator -->
+### Operator Development Paths
+
 ```
 DESIGN_PHILOSOPHY.md
   ↓
@@ -78,10 +79,31 @@ controller-runtime.md (how reconciliation works)
   ↓
 status-conditions.md (how to report health)
   ↓
-clusteroperator.md (how CVO sees your operator)
-  ↓
-webhooks.md, rbac.md, finalizers.md (advanced patterns)
+  ├─── Core / Platform Operators ───────── OLM-Managed Operators ──┐
+  │                                                                 │
+  │  clusteroperator.md                    Your CRD's .status       │
+  │  (report to CVO via ClusterOperator)   (conditions on your CR)  │
+  │                                                                 │
+  │  CVO orchestrates upgrades             OLM manages lifecycle    │
+  │  Available/Progressing/Degraded/       metav1.Condition types    │
+  │    Upgradeable                         CSV defines install/RBAC │
+  │  configv1 condition types                                       │
+  │                                                                 │
+  └─────────────────────┬───────────────────────────┘
+                        ↓
+        webhooks.md, rbac.md, finalizers.md (advanced patterns)
 ```
+
+**Key difference**: Core operators create a `ClusterOperator` resource so the
+CVO can track their health and gate upgrades (the CVO advances when
+`Available=True`, `Degraded=False`, and the operator version matches the
+target version; setting `Upgradeable=False` blocks
+minor-version updates). OLM-managed operators report status on their own
+Custom Resource using standard `metav1.Condition` and rely on OLM's
+`ClusterServiceVersion` for lifecycle management. OLM does **not** proxy
+operator health to the CVO — a degraded OLM-managed operator does not block
+cluster upgrades (though a CSV's `olm.maxOpenShiftVersion` annotation can
+block minor-version upgrades as a static compatibility constraint).
 
 ### API Development Path
 ```

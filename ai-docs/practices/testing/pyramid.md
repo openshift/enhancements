@@ -194,6 +194,38 @@ tests:
 | machine-api-operator | Integration for API, e2e for cloud | Cloud provider interactions |
 | kube-apiserver | Unit for logic, e2e for availability | HA and upgrade critical |
 
+## Ginkgo-Specific Practices
+
+Many OpenShift operators use Ginkgo for integration and e2e test suites.
+
+### Always use the `ginkgo` CLI for Ginkgo suites
+
+```bash
+# Correct — structured failure output, progress reports, parallel support
+ginkgo -vv --trace ./internal/controller/mycontroller/
+
+# Wrong — swallows Ginkgo's structured output
+go test -v ./internal/controller/mycontroller/
+```
+
+**Why**: Ginkgo writes structured failure output (BeforeSuite errors, step-level progress reports, labeled specs) through its own reporter. When run via `go test`, failures in `SynchronizedBeforeSuite` or `BeforeAll` cause the suite to hang until `go test -timeout` kills it, producing only a goroutine dump. The actual root cause (e.g., a missing binary, a failed envtest startup) is not surfaced. Use the repo's Makefile target (e.g., `make unit`) as the first choice — it invokes `ginkgo` with the right flags. If running directly, use `ginkgo` or `go run github.com/onsi/ginkgo/v2/ginkgo`.
+
+### envtest requires absolute paths for KUBEBUILDER_ASSETS
+
+Integration tests using `controller-runtime/envtest` need `etcd` and `kube-apiserver` binaries, downloaded via `setup-envtest`. The `KUBEBUILDER_ASSETS` environment variable must be an **absolute path**.
+
+`envtest`'s `BinPathFinder` passes `KUBEBUILDER_ASSETS` directly to `exec.Command` without calling `filepath.Abs()`. The `ginkgo` CLI compiles and runs the test binary from a working directory that may not be the repo root, so relative paths fail with `fork/exec .../etcd: no such file or directory` even when the binaries exist.
+
+Most Makefiles already handle this correctly — e.g., `--bin-dir $(shell pwd)/bin` passes an absolute `--bin-dir` to `setup-envtest`, which then returns an absolute path. When running outside the Makefile:
+
+```bash
+# Correct — absolute --bin-dir produces absolute output
+export KUBEBUILDER_ASSETS="$($(pwd)/bin/setup-envtest use <version> --bin-dir $(pwd)/bin -p path)"
+
+# Wrong — relative --bin-dir produces relative output, breaks under ginkgo
+export KUBEBUILDER_ASSETS="$(bin/setup-envtest use <version> --bin-dir bin -p path)"
+```
+
 ## Tools
 
 - **Unit**: `go test`, `testify/assert`, `gomock`

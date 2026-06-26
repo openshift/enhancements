@@ -15,7 +15,7 @@ OpenShift upgrades are orchestrated by the Cluster Version Operator (CVO). Every
 
 ## Key Concepts
 
-- **CVO Ordering**: etcd → kube-apiserver → kube-controller-manager → operators
+- **CVO Ordering**: Runlevel-based; core platform (00-09) → Kubernetes operators including etcd and kube-apiserver in parallel (10-29) → higher-level operators (30+)
 - **Version Skew**: N→N+1 support (current and next minor version)
 - **Progressing Condition**: Signals upgrade in progress
 - **Upgradeable Condition**: Blocks upgrade if False
@@ -25,22 +25,24 @@ OpenShift upgrades are orchestrated by the Cluster Version Operator (CVO). Every
 
 | Phase | CVO Action | Operator Responsibility |
 |-------|-----------|------------------------|
-| **Pre-upgrade** | Check Upgradeable=True | Set Upgradeable=False if unsafe |
+| **Pre-upgrade** | Check Upgradeable not False (minor only) | Set Upgradeable=False if unsafe |
 | **Upgrade** | Update operator image | Reconcile new version |
-| **Rollout** | Wait for Progressing=False | Update workloads, report progress |
-| **Post-upgrade** | Verify Available=True | Resume normal operation |
+| **Rollout** | Wait for Available=True, Degraded=False, version match | Update workloads, report progress |
+| **Post-upgrade** | All operators at target version | Resume normal operation |
 
 ## CVO Orchestration
 
 CVO applies manifests in lexicographic order by filename prefix during upgrades.
 
-**Runlevel ordering** (from [CVO dev docs](https://github.com/openshift/enhancements/blob/master/dev-guide/cluster-version-operator/dev/operators.md)):
+**Runlevel ordering** (from [CVO dev docs: operators.md](https://github.com/openshift/enhancements/blob/master/dev-guide/cluster-version-operator/dev/operators.md) and [upgrades.md](https://github.com/openshift/enhancements/blob/master/dev-guide/cluster-version-operator/dev/upgrades.md)):
 ```
-Runlevel 00-09: Core platform (CVO, network, DNS, certs)
-Runlevel 10-29: Kubernetes operators (API server, controllers, scheduler)  
+Runlevel 00-04: CVO itself
+Runlevel 10-29: Kubernetes operators (cluster-config at 10; etcd, kube-apiserver at 20+)
 Runlevel 30-39: Machine API
-Runlevel 50-59: Operator Lifecycle Manager
+Runlevel 50:    Non-order-specific operators (default; includes OLM, monitoring, samples, service-ca)
 Runlevel 60-69: OpenShift core operators
+Runlevel 70:    Disruptive node-level components (DNS, network/SDN, multus)
+Runlevel 80:    Machine operators
 ```
 
 **Key behaviors**:
@@ -294,14 +296,15 @@ oc get co -o json | jq '.items[] | select(.status.conditions[] | select(.type=="
 **Static Pod + PDB Guard Pattern**: All control plane components use this pattern for upgrades:
 
 1. **Static pod** runs the actual component (etcd, kube-apiserver, kube-controller-manager, kube-scheduler)
-2. **Guard pod** (Deployment) mirrors the static pod state
-3. **PodDisruptionBudget** on guard pod prevents node drain if it would violate availability
+2. **Guard pod** (bare Pod pinned to the node via `pod.Spec.NodeName`) mirrors the static pod's health via a readiness probe pointed at the static pod's health endpoint (`/readyz` for kube-apiserver and etcd; `/healthz` for kube-controller-manager and kube-scheduler)
+3. **PodDisruptionBudget** on guard pods (selected by label, `minAvailable: nodes-1`) prevents node drain if it would violate availability
 4. Ensures at least N-1 replicas available during node upgrades
 
 **Why this pattern?**
 - Control plane runs as static pods (not managed by scheduler)
-- PDB only works on pods managed by controllers (Deployment, StatefulSet)
-- Guard pods enable PDB protection for static pods
+- PDB requires pod objects that can be tracked by the eviction API
+- Guard pods are bare Pods (not Deployments) to avoid depending on the scheduler during control plane degradation
+- The `GuardController` in `library-go` manages guard pod lifecycle across all four operators
 
 ## Examples in Components
 

@@ -32,18 +32,16 @@ Assigned runlevels (from [CVO dev guide: operators.md](../../dev-guide/cluster-v
 | Runlevel | Components |
 |----------|-----------|
 | 00-04 | CVO itself |
-| 05 | cluster-config-operator |
-| 07 | Network operator |
-| 08 | DNS operator |
-| 09 | Service certificate authority, machine approver |
-| 10-29 | Kubernetes operators (kube-apiserver, kube-controller-manager, kube-scheduler, etcd) |
+| 10-29 | Kubernetes operators (cluster-config at 10; etcd, kube-apiserver, kube-controller-manager, kube-scheduler at 20+) |
 | 30-39 | Machine API |
-| 50-59 | Operator Lifecycle Manager (OLM) |
+| 50 | Non-order-specific operators (default runlevel; includes OLM, monitoring, samples, service-ca, machine-approver) |
 | 60-69 | OpenShift core operators (openshift-apiserver, etc.) |
-| 70 | Disruptive node-level components, monitoring, samples |
+| 70 | Disruptive node-level components (DNS, network/SDN, multus) |
 | 80 | Machine operators |
 
-Components sharing the same runlevel run in parallel (e.g., `0000_70_cluster-monitoring-operator_*` and `0000_70_cluster-samples-operator_*` execute concurrently). Within a component, manifests apply in lexicographic order.
+**Note**: The [operators.md](../../dev-guide/cluster-version-operator/dev/operators.md) dev guide contains stale runlevel assignments for several operators. The table above reflects actual release image manifest prefixes, which differ from operators.md for Network/DNS (70 not 07/08), cluster-config (10 not 05), and service-ca/machine-approver (50 not 09).
+
+Components sharing the same runlevel run in parallel (e.g., `0000_50_cluster-monitoring-operator_*` and `0000_50_cluster-samples-operator_*` execute concurrently). Within a component, manifests apply in lexicographic order.
 
 Install flattens inter-runlevel barriers (components across different runlevels can start in parallel), but intra-component ordering is preserved (e.g., a CRD manifest is applied before the Deployment within the same component). Upgrades apply strict runlevel ordering — the next runlevel does not start until the previous one completes.
 
@@ -56,6 +54,7 @@ The CVO uses ClusterOperator status conditions to determine when each component 
 | Install completion | any | true | any | any | any |
 | Begin patch upgrade | any | any | any | any | any |
 | Begin minor upgrade | any | any | any | any | not false |
+| Begin upgrade (w/ force) | any | any | any | any | any |
 | Upgrade completion | target version (declared in operator status) | true | false | any | any |
 
 ### Self-managing design

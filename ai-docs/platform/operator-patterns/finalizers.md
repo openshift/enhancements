@@ -225,8 +225,8 @@ oc patch machine my-machine -p '{"metadata":{"finalizers":[]}}' --type=merge
 | Component | Finalizer Use | Cleanup Action |
 |-----------|--------------|----------------|
 | machine-api-operator | `machine.machine.openshift.io` | Delete cloud VM |
-| cluster-network-operator | `network.operator.openshift.io/finalizer` | Remove network config |
-| cluster-autoscaler | `autoscaler.openshift.io/finalizer` | Delete autoscaler config |
+| cluster-network-operator | (see CNO source for current finalizer names) | Remove network config |
+| cluster-autoscaler | `machinetarget.autoscaling.openshift.io` | Clean up annotations on MachineSet/MachineDeployment targets |
 
 ## Troubleshooting
 
