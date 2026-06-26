@@ -21,7 +21,7 @@
 |------|-----------|----------|---------|
 | **Build an operator** | DESIGN_PHILOSOPHY.md | platform/operator-patterns/controller-runtime.md<br>platform/operator-patterns/status-conditions.md | domain/openshift/clusteroperator.md |
 | **Add a feature** | workflows/index.md (links to enhancement process) | practices/development/index.md (links to API conventions) | practices/testing/index.md |
-| **Debug an issue** | practices/reliability/index.md | platform/operator-patterns/must-gather.md | references/repo-index.md |
+| **Debug an issue** | practices/reliability/index.md | references/repo-index.md | `oc adm must-gather --help` |
 | **Understand a concept** | DESIGN_PHILOSOPHY.md | domain/kubernetes/ or domain/openshift/ | platform/operator-patterns/ |
 | **Find a component** | references/repo-index.md | Component's AGENTS.md | Component's agentic/ docs |
 
