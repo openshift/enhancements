@@ -223,13 +223,13 @@ operator management.
          secretRotation:
            type: Custom
            custom:
-             rotationPollIntervalSeconds: 300
+             minimumRefreshAge: 300
    ```
 
 2. The operator will re-sync:
    - The dynamic `AssetFunc` will set `requiresRepublish: true` on the `CSIDriver`.
    - The `DaemonSetHookFunc` will set `--enable-secret-rotation=true` and
-     `--rotation-poll-interval=5m0s` (from `rotationPollIntervalSeconds: 300`) on the driver container.
+     `--rotation-poll-interval=5m0s` (from `minimumRefreshAge: 300`) on the driver container.
 3. The DaemonSet pods will be rolling-updated with the new arguments.
 4. Kubelet will periodically call `NodePublishVolume` (because `requiresRepublish`
    is true), and the driver will re-fetch secrets from the provider if the cache
@@ -383,16 +383,20 @@ type SecretsStoreSecretRotation struct {
 // CustomSecretRotation holds configuration for custom secret rotation behavior.
 // +kubebuilder:validation:MinProperties=1
 type CustomSecretRotation struct {
-    // rotationPollIntervalSeconds is the minimum time in seconds between
-    // secret rotation attempts. The driver skips provider calls if less than
-    // this interval has elapsed since the last successful rotation.
+    // minimumRefreshAge is the minimum time in seconds between secret
+    // rotation attempts. Each time kubelet calls NodePublishVolume, the driver
+    // checks whether this interval has elapsed since the last successful provider
+    // call. If it has, the driver contacts the secret provider to fetch the latest
+    // secret values and updates the mounted volume.
+    // Setting this value below the kubelet syncFrequency (default: 1 minute) 
+    // has no additional effect on the actual rotation cadence.
     // Must be at least 1 second and no more than 31560000 seconds (~1 year).
     // When omitted, this means no opinion and the platform is left to choose a
     // reasonable default, which is subject to change over time.
     // +kubebuilder:validation:Minimum=1
     // +kubebuilder:validation:Maximum=31560000
     // +optional
-    RotationPollIntervalSeconds int32 `json:"rotationPollIntervalSeconds,omitempty"`
+    MinimumRefreshAge int32 `json:"minimumRefreshAge,omitempty"`
 }
 
 // SecretsStoreTokenRequest specifies a service account token audience
@@ -435,7 +439,7 @@ spec:
       secretRotation:
         type: Custom
         custom:
-          rotationPollIntervalSeconds: 300
+          minimumRefreshAge: 300
       tokenRequests:
         type: Managed
         managed:
@@ -471,7 +475,7 @@ spec:
 
 - `secretsStore` must be set if and only if `driverType` is `SecretsStore`
 - `SecretsStoreCSIDriverConfigSpec` has `MinProperties=1` to prevent `secretsStore: {}`.
-- `rotationPollIntervalSeconds` must be between 1 and 31560000 (~1 year). When omitted,
+- `minimumRefreshAge` must be between 1 and 31560000 (~1 year). When omitted,
   the platform chooses old default (2 mins).
 - `expirationSeconds` must be between 600 (10 minutes) and 315360000 (~10 years).
 - `audiences` entries must have unique `audience` values, enforced automatically via
@@ -567,7 +571,7 @@ reconciliation will trigger immediately when the administrator changes the
 All new fields use "no opinion" semantics when omitted — the operator applies
 defaults internally (not via CRD-level `+default`):
 - When `secretRotation` is omitted, the operator defaults to rotation enabled with a 2-minute poll interval
-- When `secretRotation.type` is `"Custom"` and `rotationPollIntervalSeconds` is omitted,
+- When `secretRotation.type` is `"Custom"` and `minimumRefreshAge` is omitted,
   the operator chooses a reasonable default (currently 120 seconds)
 - When `tokenRequests` is omitted, the operator preserves existing CSIDriver tokenRequests (Unmanaged behavior)
 
@@ -632,7 +636,7 @@ spec:
       secretRotation:
         type: Custom
         custom:
-          rotationPollIntervalSeconds: 300
+          minimumRefreshAge: 300
       tokenRequests:
         type: Managed
         managed:
@@ -642,7 +646,7 @@ spec:
 ```
 
 Once `driverConfig` is set, the CRD schema defaults (e.g.,
-`rotationPollIntervalSeconds: 120` inside `custom`) will apply to omitted
+`minimumRefreshAge: 120` inside `custom`) will apply to omitted
 sub-fields during future updates. Since `secretRotation` and `tokenRequests`
 are discriminated unions with required `type` fields, the administrator must
 always specify the union discriminator when setting these fields.
@@ -650,7 +654,7 @@ always specify the union discriminator when setting these fields.
 
 ### Risks and Mitigations
 
-**Risk**: Setting `rotationPollIntervalSeconds` too low could overwhelm the external
+**Risk**: Setting `minimumRefreshAge` too low could overwhelm the external
 secret provider with API calls.
 
 **Mitigation**: OpenShift document will suggest users to choose a wise value.
@@ -669,16 +673,27 @@ Nothing considered.
 
 ## Open Questions [optional]
 
+All questions have been resolved during review.
+
 1. Should `requiresRepublish` on the `CSIDriver` object always be set to `true`,
    or should it mirror the value of `secretRotation.type`?
 
+   **Resolved**: `requiresRepublish` mirrors `secretRotation.type`. When
+   `secretRotation.type` is `"None"`, the operator sets `requiresRepublish: false`
+   on the `CSIDriver` object, stopping kubelet from periodically calling
+   `NodePublishVolume`. For all other states (omitted or `"Custom"`), it is set
+   to `true`. This avoids unnecessary kubelet calls when the user explicitly opts
+   out of rotation.
+
 2. Should `expirationSeconds` enforce a minimum value of 600 (10 minutes)?
 
-   - The minimum of 600 seconds is already enforced by the
-   kube-apiserver's [TokenRequest API](https://kubernetes.io/docs/reference/kubernetes-api/authentication-resources/token-request-v1/) and [Doc](https://kubernetes-csi.github.io/docs/token-requests.html).
-
-   - The upstream `storage.k8s.io/v1` CSIDriver type also does not enforce this at
-   the CSIDriver spec level. We can document the constraint in the field comment.
+   **Resolved**: Yes, `+kubebuilder:validation:Minimum=600` is enforced at the
+   API level. While the kube-apiserver's
+   [TokenRequest API](https://kubernetes.io/docs/reference/kubernetes-api/authentication-resources/token-request-v1/)
+   already rejects values below 600 at token issuance time, enforcing it in the
+   CRD provides earlier feedback to the user at admission rather than
+   at pod mount time. The maximum is set to 315360000 seconds (~10 years),
+   reduced from the original kubelet internal limit of 2^32.
 
 
 ## Test Plan
@@ -731,7 +746,7 @@ Nothing considered.
 **Secret Rotation scenarios:**
 - No `driverConfig` set: operator uses defaults (`requiresRepublish: true`,
   `--enable-secret-rotation=true`, `--rotation-poll-interval=2m0s`).
-- `secretRotation.type: "Custom"` with `custom.rotationPollIntervalSeconds: 300`:
+- `secretRotation.type: "Custom"` with `custom.minimumRefreshAge: 300`:
   verify CSIDriver has `requiresRepublish: true` and DaemonSet has
   `--rotation-poll-interval=5m0s`.
 - `secretRotation.type: "None"`: verify CSIDriver has `requiresRepublish: false`
