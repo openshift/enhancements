@@ -83,7 +83,7 @@ that I can use pre-existing security groups managed by my security team.
 - Adding security group configuration at cluster installation time via
   `install-config.yaml`. The target of this epic is ROSA, which does not
   need install-time support for the default Ingress Controller.
-- Automatic creation or management of security groups by the Ingress Operator.
+- Automatic creation or management of security groups by the Cluster Ingress Operator.
   The CCM already handles managed security group creation; this enhancement
   only addresses the BYO use case.
 - Managing security group rules through the IngressController API. Users are
@@ -104,11 +104,8 @@ that I can use pre-existing security groups managed by my security team.
    cloud-controller-manager-operator automatically enables this setting
    in the cloud-config when the CCM version supports it. For self-managed
    clusters, this is enforced by default starting in OpenShift 4.22.
-3. The master node IAM role must have the
-   `elasticloadbalancing:SetSecurityGroups` permission (added in
-   [openshift/installer#10512](https://github.com/openshift/installer/pull/10512)).
 
-#### Configuring BYO security groups on the default IngressController
+#### Creating an IngressController with BYO security groups
 
 1. **Cluster administrator** creates security groups in AWS:
 
@@ -123,7 +120,7 @@ aws ec2 authorize-security-group-ingress \
   --protocol tcp --port 443 --cidr 0.0.0.0/0
 ```
 
-2. **Cluster administrator** updates the IngressController with the security
+2. **Cluster administrator** creates the IngressController with the security
    group IDs:
 
 ```yaml
@@ -147,7 +144,7 @@ spec:
 ```
 
 3. **Cluster Ingress Operator** reads the `securityGroups` field and creates
-   (or updates) the router Service with the annotation:
+   the router Service with the annotation:
 
 ```yaml
 apiVersion: v1
@@ -164,82 +161,104 @@ metadata:
    specified security groups to the NLB instead of creating a managed security
    group.
 
+Adding the `securityGroups` field to an existing IngressController (including
+the default) follows the effectuation pattern. See the "Effectuating Security
+Group Updates" section.
+
 #### Updating security groups on an existing IngressController
 
 1. **Cluster administrator** updates the `securityGroups` field in the
    IngressController spec.
-2. **Cluster Ingress Operator** updates the Service annotation.
-3. **CCM** detects the annotation change and transitions the NLB to the new
-   security groups.
+2. **Cluster Ingress Operator** sets the `LoadBalancerProgressing` condition
+   to `Status: True` and waits for the administrator to delete the Service.
 
-**Note:** If the NLB was initially created without any security group (before
-this feature was available), the NLB must be recreated to support security
-groups. This is an AWS platform limitation. The administrator can delete the
-Service directly (allowing automatic recreation) or delete and recreate the
-entire IngressController. See the "NLB Created Before Security Group Support"
-variation for detailed guidance.
+See the "Effectuating Security Group Updates" section for the complete workflow.
 
 #### Removing BYO security groups
 
 1. **Cluster administrator** removes the `securityGroups` field from the
    IngressController spec.
-2. **Cluster Ingress Operator** removes the annotation from the Service.
-3. **CCM** creates a new managed security group and attaches it to the NLB.
-   The BYO security groups are detached but not deleted (the user retains
-   ownership). The original BYO security groups remain in AWS but are no
-   longer associated with the NLB.
+2. **Cluster Ingress Operator** sets the `LoadBalancerProgressing` condition
+   to `Status: True` and waits for the administrator to delete the Service.
 
-#### Variation: NLB Created Before Security Group Support
+See the "Effectuating Security Group Updates" section for the complete workflow.
 
-1. A cluster was provisioned before CCM security group support was available.
-   The existing NLBs were created without security groups.
+When the Service is recreated, the CCM provisions a new NLB without the BYO
+security group annotation and creates a new managed security group for the NLB.
+The original BYO security groups remain in AWS but are no longer associated with
+the NLB.
 
-2. The cluster is upgraded to a version with CCM security group support.
+#### Effectuating Security Group Updates
 
-3. The administrator adds the `securityGroups` field to the
+Changing the `securityGroups` field on an existing IngressController requires
+deleting and recreating the Service.
+
+1. **Cluster administrator** updates the `securityGroups` field in the
    IngressController spec.
 
-4. The Cluster Ingress Operator adds the annotation to the Service.
+2. **Cluster Ingress Operator** detects the change and sets the
+   `LoadBalancerProgressing` condition to `Status: True`:
 
-5. The CCM detects that the NLB does not support security groups and silently
-   ignores the annotation. The security groups are not attached to the NLB,
-   but no error is reported.
+```yaml
+status:
+  conditions:
+  - type: LoadBalancerProgressing
+    status: "True"
+    reason: LoadBalancerRecreationRequired
+    message: |
+      The IngressController securityGroups were changed from ["sg-old123"] to
+      ["sg-new456"]. To effectuate this change, you must delete the service:
+      `oc -n openshift-ingress delete svc/router-default`; the service
+      load-balancer will then be deprovisioned and a new one created. This will
+      cause the new load-balancer to have a different host name and IP address
+      and will cause disruption.
+```
 
-6. The administrator must verify that the security groups were attached to
-   the NLB (via AWS console or CLI). To enable security group support, the
-   administrator must delete and recreate the NLB. This can be done by either:
-   - Deleting the Service directly (`oc delete service router-default -n openshift-ingress`),
-     allowing the IngressController to recreate it automatically, OR
-   - Deleting and recreating the entire IngressController
+3. **Cluster administrator** deletes the Service:
 
-   Deleting only the Service is the recommended approach as it may result in
-   less disruption — the IngressController remains configured and will
-   immediately recreate the Service with the correct annotations. Both
-   approaches cause downtime while the new NLB is provisioned and DNS is updated.
+```bash
+oc delete svc router-default -n openshift-ingress
+```
 
-#### Variation: NLBSecurityGroupMode Not Set in Cloud-Config
+4. **Cloud Controller Manager** deprovisions the existing NLB.
 
-1. The CCM cloud-config does not have `NLBSecurityGroupMode = Managed`
-   (e.g., the cloud-controller-manager-operator has not been updated to set it,
-   or the cluster is running an older CCM version).
+5. **Cluster Ingress Operator** detects the Service deletion and recreates the
+   Service with the new `service.beta.kubernetes.io/aws-load-balancer-security-groups`
+   annotation value.
 
-2. The administrator adds `securityGroups` to the IngressController spec.
+6. **Cloud Controller Manager** provisions a new NLB with the specified security
+   groups.
 
-3. The Cluster Ingress Operator validates the configuration and sets the
-   IngressController status condition `Degraded=True` with a message
-   indicating that BYO security groups require CCM managed mode to be enabled.
-   The annotation is not added to the Service.
+7. **Cluster Ingress Operator** sets `LoadBalancerProgressing` to `Status: False`
+   and `LoadBalancerReady` to `Status: True` when the new NLB is provisioned.
 
-4. The administrator must upgrade the CCM or wait for the
-   cloud-controller-manager-operator to enable managed mode automatically.
+##### Automatic Service Deletion
 
-5. Once `NLBSecurityGroupMode = Managed` is set in the cloud-config, the
-   Cluster Ingress Operator will reconcile and add the annotation to the Service.
-   However, if the NLB was created before Managed mode was enabled, the
-   NLB does not support security groups. The administrator must verify that
-   the security groups were attached (via AWS console or CLI). If not, the
-   Service must be deleted and recreated following the same procedure
-   described in "Variation: NLB Created Before Security Group Support".
+For automation and GitOps workflows, administrators can opt in to automatic
+Service deletion by adding an annotation to the IngressController:
+
+```yaml
+apiVersion: operator.openshift.io/v1
+kind: IngressController
+metadata:
+  name: default
+  namespace: openshift-ingress-operator
+  annotations:
+    ingress.operator.openshift.io/auto-delete-load-balancer: "true"
+spec:
+  endpointPublishingStrategy:
+    loadBalancer:
+      providerParameters:
+        aws:
+          networkLoadBalancer:
+            securityGroups:
+            - sg-new456
+```
+
+When this annotation is present, the Cluster Ingress Operator automatically
+deletes and recreates the Service when the `securityGroups` field changes. This
+causes the same disruption as manual deletion (new NLB, different hostname/IP),
+but without requiring manual intervention.
 
 #### Variation: Invalid Security Group ID
 
@@ -254,7 +273,8 @@ variation for detailed guidance.
    IngressController status shows `LoadBalancerReady=False`.
 
 4. The administrator corrects the security group ID in the
-   IngressController spec.
+   IngressController spec. This triggers the effectuation pattern
+   (see "Effectuating Security Group Updates").
 
 ### API Extensions
 
@@ -316,10 +336,10 @@ type SecurityGroupID string
 
 ### Topology Considerations
 
-The Ingress Operator behavior is identical across all deployment
+The Cluster Ingress Operator behavior is identical across all deployment
 topologies. It reads the `securityGroups` field from the IngressController
-spec and sets the corresponding annotation on the Service. No
-topology-specific logic is required.
+spec and sets the corresponding Service annotation when the Service is
+created or recreated. No topology-specific logic is required.
 
 #### Hypershift / Hosted Control Planes
 
@@ -339,17 +359,10 @@ No unique considerations. See above.
 
 ### Implementation Details/Notes/Constraints
 
-The Ingress Operator follows the existing pattern used for `subnets` and
+The Cluster Ingress Operator follows the existing pattern used for `subnets` and
 `eipAllocations` — it reads the `securityGroups` field from the
-IngressController spec and sets the corresponding Service annotation.
-
-When `securityGroups` is specified, the operator checks the `cloud-provider-config`
-ConfigMap in the `openshift-cloud-controller-manager` namespace to verify that
-`NLBSecurityGroupMode` is set to `Managed`. If managed mode is not enabled, the
-operator sets the IngressController status condition `Degraded=True` with an
-appropriate error message and does not add the annotation to the Service. This
-validation provides early feedback to administrators when the cluster does not
-support BYO security groups.
+IngressController spec and sets the corresponding Service annotation when the
+Service is created or recreated following the effectuation pattern.
 
 The CCM behavior for BYO security groups on NLBs is documented in the
 upstream [cloud-provider-aws NLB security group documentation](https://github.com/kubernetes/cloud-provider-aws/blob/31a27a5f9ac61ad68f9b4d0a8da765ff060245d3/docs/nlb_security_groups.md).
@@ -363,12 +376,10 @@ upstream [cloud-provider-aws NLB security group documentation](https://github.co
 
 - **Interaction with managed security groups.** When BYO security groups
   are specified, the CCM attaches the user-provided security groups
-  instead of creating a managed security group. When transitioning from
-  BYO to managed security groups (by removing the annotation), the CCM
-  creates a new managed security group and attaches it to the NLB, leaving
-  the original BYO security groups unattached. The transition behavior is
-  implemented in the CCM and is transparent to the Ingress Operator.
-
+  instead of creating a managed security group. When removing the
+  securityGroups field, the Service is deleted and recreated. The CCM
+  provisions a new NLB with a managed security group. The original BYO
+  security groups remain in AWS but are no longer associated with any NLB.
 
 ### Drawbacks
 
@@ -398,7 +409,7 @@ None.
 
 - Service generation with and without security groups specified.
 - Validation of security group ID format (`sg-` prefix, hex characters).
-- Annotation removal when `securityGroups` is cleared.
+- LoadBalancerProgressing status when `securityGroups` changes.
 
 **E2E tests:**
 
@@ -408,11 +419,16 @@ None.
    with the correct value.
 2. Verify the NLB is provisioned with the specified security groups
    attached (via AWS API or NLB describe).
-3. Update the `securityGroups` field and verify the Service annotation
-   and NLB are updated.
-4. Remove the `securityGroups` field and verify the annotation is
-   removed from the Service.
-5. Verify that an IngressController without `securityGroups` specified
+3. Update the `securityGroups` field and verify LoadBalancerProgressing is set.
+   Delete the Service and verify a new NLB is provisioned with updated security
+   groups.
+4. Remove the `securityGroups` field and verify LoadBalancerProgressing is set.
+   Delete the Service and verify a new NLB is provisioned with a managed security
+   group.
+5. Add the `ingress.operator.openshift.io/auto-delete-load-balancer`
+   annotation and update the `securityGroups` field. Verify the Service is
+   automatically deleted and recreated with the new security groups.
+6. Verify that an IngressController without `securityGroups` specified
    continues to function as before (no regression).
 
 ## Graduation Criteria
@@ -430,8 +446,6 @@ N/A.
 
 - E2E tests consistently passing
 - CCM BYO security group support is GA (upstream cloud-provider-aws#1379)
-- Validation of NLBSecurityGroupMode cloud-config setting is implemented
-  and tested
 
 ### Removing a deprecated feature
 
@@ -444,13 +458,9 @@ N/A.
 Existing IngressControllers without the `securityGroups` field continue
 working unchanged. The new field is optional and has no default value.
 
-If an administrator adds the `securityGroups` field to an existing
-IngressController whose NLB was created before CCM security group support
-was available (i.e., the NLB has no security group attached), the NLB must
-be recreated. The administrator can delete the Service directly or delete
-and recreate the entire IngressController (see the workflow variations for
-guidance). This causes downtime and is an AWS platform limitation, not an
-OpenShift limitation.
+Adding the `securityGroups` field to an existing IngressController follows the
+same effectuation pattern as updating or removing it. See the "Effectuating
+Security Group Updates" section.
 
 ### Downgrade
 
@@ -464,9 +474,7 @@ will report an error during Service reconciliation if the annotation is present.
 
 This feature requires CCM support for the BYO security group annotation
 (upstream [cloud-provider-aws#1379](https://github.com/kubernetes/cloud-provider-aws/pull/1379))
-and `NLBSecurityGroupMode = Managed` in the CCM cloud-config. The Ingress
-Operator validates the cloud-config setting before applying the annotation,
-preventing configuration mismatches between operator and CCM versions.
+and `NLBSecurityGroupMode = Managed` in the CCM cloud-config.
 
 ## Operational Aspects of API Extensions
 
