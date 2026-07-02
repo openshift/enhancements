@@ -12,7 +12,8 @@ reviewers:
   - "@miheer"
   - "@rfredette"
 approvers:
-  - TBD
+  - "@gcs278"
+  - "@Miciah"
 api-approvers:
   - None
 creation-date: 2026-06-03
@@ -193,6 +194,26 @@ the NLB.
 Changing the `securityGroups` field on an existing IngressController requires
 deleting and recreating the Service.
 
+Although the CCM supports updating security groups in-place, the
+delete/recreate pattern is used for the following reasons:
+
+1. **The Cluster Ingress Operator cannot detect post-provision CCM failures.**
+   Once the NLB is provisioned, `LoadBalancerReady` stays `True` even if a
+   subsequent security group update fails. Requiring Service recreation
+   ensures that invalid security groups are caught during initial provisioning
+   via `LoadBalancerReady=False`.
+2. **Upgrade compatibility with previously-unmanaged annotations.** If a user
+   manually set the
+   `service.beta.kubernetes.io/aws-load-balancer-security-groups` annotation
+   before this feature existed, the effectuation pattern prevents the Cluster
+   Ingress Operator from automatically removing it on upgrade. Instead, the
+   Cluster Ingress Operator sets `LoadBalancerProgressing=True` and waits for
+   the user to act.
+
+See the subnets EP's
+[Effectuating Subnet Updates](https://github.com/openshift/enhancements/blob/master/enhancements/ingress/lb-subnet-selection-aws.md#effectuating-subnet-updates)
+for prior art.
+
 1. **Cluster administrator** updates the `securityGroups` field in the
    IngressController spec.
 
@@ -211,7 +232,13 @@ status:
       `oc -n openshift-ingress delete svc/router-default`; the service
       load-balancer will then be deprovisioned and a new one created. This will
       cause the new load-balancer to have a different host name and IP address
-      and will cause disruption.
+      and will cause disruption. To return to the previous state, you can
+      revert the change to the IngressController:
+      `oc -n openshift-ingress-operator patch ingresscontrollers/default
+      --type=merge --patch='{"spec":{"endpointPublishingStrategy":
+      {"loadBalancer":{"providerParameters":{"type":"AWS","aws":
+      {"type":"NLB","networkLoadBalancer":{"securityGroups":
+      ["sg-old123"]}}}}}}}'`
 ```
 
 3. **Cluster administrator** deletes the Service:
@@ -386,6 +413,8 @@ upstream [cloud-provider-aws NLB security group documentation](https://github.co
 - Adds a new field to the IngressController API, increasing API surface area.
 - Users must manage security group rules outside of OpenShift, which requires
   AWS knowledge.
+- Changing security groups requires Service recreation, causing ingress
+  downtime while the new NLB is provisioned and DNS is updated.
 
 ## Alternatives (Not Implemented)
 
@@ -461,6 +490,28 @@ working unchanged. The new field is optional and has no default value.
 Adding the `securityGroups` field to an existing IngressController follows the
 same effectuation pattern as updating or removing it. See the "Effectuating
 Security Group Updates" section.
+
+#### Unmanaged Security Group Annotation Migration Workflow
+
+If an administrator manually set the
+`service.beta.kubernetes.io/aws-load-balancer-security-groups` annotation on
+the LoadBalancer-type Service before this feature existed, the following
+migration workflow applies after upgrading:
+
+1. The cluster is upgraded to a version with `securityGroups` support. The
+   existing Service annotation is not changed or removed.
+2. The Cluster Ingress Operator detects a mismatch between the spec's
+   `securityGroups` (empty) and the current annotation value, and sets
+   `LoadBalancerProgressing` to `Status: True`.
+3. The administrator sets
+   `spec.endpointPublishingStrategy.loadBalancer.providerParameters.aws.networkLoadBalancer.securityGroups`
+   to match the current annotation value.
+4. The Cluster Ingress Operator resolves the `LoadBalancerProgressing`
+   condition back to `Status: False` once the spec matches the annotation.
+
+This workflow allows the administrator to adopt the new API field without
+disruption. Alternatively, the administrator can delete the Service to
+recreate it without the annotation.
 
 ### Downgrade
 
