@@ -347,6 +347,7 @@ type AWSNetworkLoadBalancerParameters struct {
 	// +listType=atomic
 	// +kubebuilder:validation:MaxItems=5
 	// +kubebuilder:validation:XValidation:rule=`self.all(x, self.exists_one(y, x == y))`,message="securityGroups cannot contain duplicates"
+	// +openshift:enable:FeatureGate=IngressControllerLBSecurityGroupsAWS
 	SecurityGroups []SecurityGroupID `json:"securityGroups,omitempty"`
 }
 
@@ -462,16 +463,14 @@ None.
 
 ## Graduation Criteria
 
-This feature will be introduced as GA when the prerequisite CCM support
-is available and stable.
+This feature will initially be released as Tech Preview, behind the
+`TechPreviewNoUpgrade` feature gate.
 
 ### Dev Preview -> Tech Preview
 
-N/A.
+N/A. This feature will be introduced as Tech Preview.
 
 ### Tech Preview -> GA
-
-**Testing requirements for GA promotion:**
 
 - E2E tests consistently passing
 - CCM BYO security group support is GA (upstream cloud-provider-aws#1379)
