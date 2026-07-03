@@ -104,9 +104,13 @@ The behavior of Go's `crypto/tls` library limits the effect of configuring a cus
 - `TLS_AES_256_GCM_SHA384`
 - `TLS_CHACHA20_POLY1305_SHA256`
 
+**Go Evolutions:** While remarkably stable, the Go implementation can evolve, for example to bump the priority of AES_256 or to support the CCM variants. So the particular list and order described here should not be relied upon.
+
+**Other TLS stacks:** While upstream K8S and OS components use Go's TLS stack, 3rd-party component can use a different language and/or stack, for example rustls which allows specifying ciphersuite list and order regardless of protocol version. Our implementation should not push Go's opinions onto other stacks.
+
 Therefore, the following applies to OpenShift:
 
-**Validation:** The APIServer TLS configuration will reject attempts to specify TLS 1.3 cipher suites. 
+**Validation:** The APIServer TLS configuration will warn about (but allow) configuring TLS 1.3 cipher suites. It should also warn about suites that upstream Go considers vulnerable, or doesn't currently implement.
 
 **Rationale:** This validation prevents the "silent failure" scenario where users believe they have configured specific ciphers but the Go runtime ignores them.
 
