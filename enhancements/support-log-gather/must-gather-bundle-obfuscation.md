@@ -12,15 +12,10 @@ approvers:
 api-approvers:
   - "@TrilokGeer"
   - "@Prashanth684"
-creation-date: 2026-06-27
-last-updated: 2026-07-03
-status: provisional
+creation-date: 2026-07-06
 tracking-link:
-  - https://issues.redhat.com/browse/MG-TBD
-see-also:
-  - "/enhancements/support-log-gather/must-gather-operator.md"
-  - "/enhancements/support-log-gather/must-gather-operator-pvc-destination.md"
-  - "/enhancements/support-log-gather/must-gather-operator-time-filter.md"
+  - https://issues.redhat.com/browse/MG-293
+
 ---
 
 # Must-Gather Bundle Obfuscation
