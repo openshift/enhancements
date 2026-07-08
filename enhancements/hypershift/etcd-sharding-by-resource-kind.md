@@ -828,13 +828,13 @@ func NewShardComponent(shard hyperv1.ManagedEtcdShardSpec) component.ControlPlan
             component.AdaptPodDisruptionBudget(),
         ).
         WithManifestAdapter("defrag-role.yaml",
-            component.WithPredicate(defragControllerPredicate),
+            component.WithPredicate(func(_ component.WorkloadContext) bool { return false }),
         ).
         WithManifestAdapter("defrag-rolebinding.yaml",
-            component.WithPredicate(defragControllerPredicate),
+            component.WithPredicate(func(_ component.WorkloadContext) bool { return false }),
         ).
         WithManifestAdapter("defrag-serviceaccount.yaml",
-            component.WithPredicate(defragControllerPredicate),
+            component.WithPredicate(func(_ component.WorkloadContext) bool { return false }),
         ).
         Build()
 }
@@ -842,15 +842,18 @@ func NewShardComponent(shard hyperv1.ManagedEtcdShardSpec) component.ControlPlan
 
 The only adapt functions that remain are those with real etcd domain logic:
 `adaptStatefulSetForShard` (rewriting `spec.serviceName`, peer URLs, init container
-args, storage type switching, and scheduling merge). Defrag manifests retain their
-predicates but no longer need rename adapters — the template handles naming.
+args, storage type switching, and scheduling merge).
 
 **Defrag controller:** The defrag controller runs as a sidecar inside each etcd pod,
 connecting to `localhost:2379` and discovering cluster members via the etcd member
 list API. Each shard's StatefulSet gets its own defrag sidecar that operates only
-on that shard's members. No changes to the defrag controller are needed — only
-the RBAC resources (Role, RoleBinding, ServiceAccount) need shard-specific names,
-which the template rendering handles.
+on that shard's members. No changes to the defrag controller binary are needed.
+The defrag sidecar is injected into the shard's StatefulSet by
+`adaptStatefulSetForShard` with a per-shard leader election ID (e.g.,
+`etcd-defrag-events-leader-elect`) so multiple defrag controllers don't compete
+for the same lease. Shards reuse the default etcd component's defrag ServiceAccount
+and RBAC — per-shard defrag RBAC manifests are suppressed via predicates that
+return `false`.
 
 #### Framework Extensions
 
