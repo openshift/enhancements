@@ -63,12 +63,18 @@ Beyond the UX burden, the ServiceAccount model provides a false security boundar
   prevent privilege escalation — it merely adds a layer of indirection. See
   [Kubernetes RBAC escalation semantics][k8s-rbac-escalation].
 - **Extension content is inherently cluster-scoped.** Operators install CRDs, ClusterRoles,
-  webhooks, and other cluster-scoped resources. True per-extension least-privilege is impossible
-  without restricting what extensions can install, which would break most operators.
-- **Internal implementation details leak into required permissions.** The controller needs
-  informers for managed resources, which requires list/watch permissions that users must include
-  in the ServiceAccount's RBAC — but these are implementation details that change when internals
-  change, creating fragility.
+  webhooks, and other cluster-scoped resources. True per-extension least-privilege would
+  require restricting extensions to namespace-scoped content only, which would break most
+  operators. A ServiceAccount with permission to create CRDs and ClusterRoles has broad
+  cluster-level impact regardless of how tightly other permissions are scoped, and Kubernetes
+  RBAC cannot restrict `create` operations by resource name.
+- **Internal implementation details leak into required permissions.** The controller's
+  informer caches require list/watch permissions on managed resource types, and these
+  requirements change when the controller's internals change. For example, the Helm applier's
+  ContentManager requires list/watch on cluster-scoped resources, while the boxcutter applier
+  does not — the e2e test suite already maintains two separate RBAC templates for this reason.
+  Users would need to update their ServiceAccount RBAC whenever the controller's cache
+  architecture changes, even though the bundle content is identical.
 
 
 Although OLMv1 is GA in OpenShift, production adoption by customers remains minimal. The
@@ -126,8 +132,6 @@ what values are permitted, without requiring per-extension ServiceAccounts.
   removal is deferred pending architectural guidance on stable API field removal.
 - Building new permission-requesting or permission-derivation systems to replace
   per-ServiceAccount scoping.
-- Console/UI changes to remove the ServiceAccount field from ClusterExtension workflows
-  (tracked separately).
 
 ## Proposal
 
@@ -192,12 +196,48 @@ mechanisms are required together:
   restrict by package name, catalog source, target namespace). VAP alone has no effect
   because users still lack permission to touch ClusterExtensions at all.
 
-Neither mechanism is sufficient alone. The documentation deliverable ([OPRUN-4674][])
-covers common delegation patterns with examples.
+Neither mechanism is sufficient alone. For example, a VAP can restrict installations to a
+set of pre-approved packages:
+
+```yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: restrict-allowed-extensions
+spec:
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["olm.operatorframework.io"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["clusterextensions"]
+  validations:
+    - expression: >-
+        object.spec.source.catalog.packageName in
+        ['cert-manager', 'argocd-operator', 'external-secrets-operator']
+      message: "Only pre-approved extensions may be installed."
+```
+
+This is an admission gate — if the ClusterExtension cannot be created, the controller never
+resolves or installs the bundle. The documentation deliverable ([OPRUN-4674][]) covers
+common delegation patterns including package allowlists, namespace restrictions, and version
+pinning.
 
 ### API Extensions
 
 #### ClusterExtension API change
+
+The `ServiceAccountReference` struct contains a single field:
+
+```go
+type ServiceAccountReference struct {
+	// +kubebuilder:validation:MaxLength:=253
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="name is immutable"
+	// +kubebuilder:validation:XValidation:rule="self.matches(\"^[a-z0-9]...\")",message="..."
+	// +required
+	Name string `json:"name"`
+}
+```
 
 The `spec.serviceAccount` field changes from required to optional and deprecated:
 
@@ -252,9 +292,9 @@ Key design decisions:
 
 #### ValidatingAdmissionPolicy for deprecation warning
 
-Since `x-kubernetes-deprecated` is [not available][k8s-crd-deprecated-issue] for CRD fields, a
+CRD schemas do not support field-level deprecation markers, so a
 [ValidatingAdmissionPolicy][k8s-vap]
-with `validationActions: [Warn]` is used to emit kubectl warnings at admission time:
+with `validationActions: [Warn]` is used to emit deprecation warnings at admission time:
 
 ```yaml
 apiVersion: admissionregistration.k8s.io/v1
@@ -325,6 +365,12 @@ spec:
       packageName: argocd-operator
       version: "0.6.0"
 ```
+
+#### Console/UI impact
+
+The OpenShift Console's OLMv1 workflow is a generic CRD YAML editor with schema-driven
+documentation — there is no custom ClusterExtension form. The schema sidebar automatically
+reflects CRD changes, so making `serviceAccount` optional requires no Console code changes.
 
 ### Topology Considerations
 
@@ -467,7 +513,8 @@ standard Kubernetes API conventions.
 - **Reduced permission granularity.** The per-extension ServiceAccount model, despite its
   practical flaws, provided a mechanism for scoping permissions per extension. This mechanism
   is now gone. For environments where per-extension isolation is a hard requirement,
-  separate clusters or namespace-level isolation at the workload layer must be used instead.
+  separate clusters can be used, or ValidatingAdmissionPolicies can restrict which extensions
+  are permitted to install into which namespaces.
 
 - **Increased trust surface.** The operator-controller is now a higher-value target. Any
   vulnerability in the controller or in the extension resolution/unpacking pipeline carries
@@ -511,22 +558,35 @@ testing surface and create confusing behavioral differences depending on runtime
 Given that OLMv1, although GA, has minimal production adoption by customers, the engineering
 cost of maintaining this infrastructure does not justify the backward compatibility benefit.
 
-### Three paths: no SA, namespace admin, full least-privilege
+### Fix the ServiceAccount model instead of deprecating it
 
 [Raised by @JoelSpeed on EP #1860][EP #1860]:
-instead of deprecating, fix the SA model by offering three tiers: (1) no SA (cluster-admin
-default), (2) namespace-scoped admin SA, (3) fully derived least-privilege SA.
+instead of deprecating, fix the SA model's privilege escalation issue and simplify its
+implementation. The combined proposal:
 
-Options 2 and 3 still require the full SA-impersonation infrastructure plus the
-derive-service-account tooling. The privilege escalation issue in the SA reference model
-remains — any ClusterExtension writer can reference any ServiceAccount in any namespace
-they have access to, regardless of which tier is chosen. Building better UX around a
-fundamentally flawed security model does not solve the core problem.
+1. **Restrict SA references via ValidatingAdmissionPolicy.** A VAP checks whether the user
+   creating or updating a ClusterExtension is authorized to reference the specified
+   ServiceAccount (e.g., by checking a custom verb on the SA resource). The VAP would only
+   validate on create and when `serviceAccount.name` changes, so existing ClusterExtensions
+   continue working after upgrade without new RBAC.
+2. **Simplify impersonation.** Replace the current token-generation approach with built-in
+   Kubernetes API impersonation, reducing the implementation complexity.
+3. **Offer three tiers.** (a) No SA specified — controller uses cluster-admin (default),
+   (b) namespace-scoped admin SA, (c) fully derived least-privilege SA with CLI tooling to
+   help generate the RBAC.
 
-JoelSpeed also noted: "I don't think we can do this until we have something new to point
-users to that replaces this." The replacement is standard Kubernetes RBAC and
-ValidatingAdmissionPolicy for access control, documented as part of this EP's deliverables
-([OPRUN-4674][]).
+This approach would preserve a per-extension privilege ceiling while fixing the escalation
+issue. However, it requires maintaining the SA-impersonation infrastructure (even if
+simplified) alongside the cluster-admin path used by the boxcutter applier — creating two
+different permission models depending on which runtime is active — and building a new VAP
+for SA authorization. The upgrade migration path also introduces complexity: while
+validating only on SA-name changes avoids breaking existing CEs, any new CE creation or SA
+change would require the new authorization RBAC to be in place, creating a behavioral
+difference between pre-existing and new resources.
+
+Given OLMv1's minimal production adoption and the engineering cost relative to the
+RBAC + ValidatingAdmissionPolicy replacement model (which provides equivalent access
+control without per-extension ServiceAccounts), this alternative was not pursued.
 
 ### Better client tooling for ServiceAccount derivation
 
@@ -554,20 +614,6 @@ This adds a new API and approval workflow for a system that only cluster-admins 
 person creating the ClusterExtension is already a cluster-admin, there is no one else to
 approve. For delegation scenarios, standard Kubernetes RBAC is the appropriate mechanism and
 does not require a custom approval workflow.
-
-### Lock down ServiceAccount references
-
-[Raised by @JoelSpeed on EP #1860][EP #1860]:
-instead of removing ServiceAccount, fix the privilege escalation by restricting which users
-can reference which ServiceAccounts, or which ServiceAccounts can be attached to a
-ClusterExtension.
-
-This addresses the escalation vector but does not resolve the other problems: the UX
-complexity of deriving and maintaining per-extension RBAC remains, the controller's internal
-permission needs still leak into user-facing configuration, and the chicken-and-egg problem
-between resolution and permission configuration is unchanged. The replacement access control
-model (RBAC + ValidatingAdmissionPolicy) provides equivalent scoping without requiring
-per-extension ServiceAccounts.
 
 ### Keep ServiceAccount but automate its creation
 
@@ -766,7 +812,6 @@ No new CI jobs, test clusters, or external services are required.
 [k8s-vap]: https://kubernetes.io/docs/reference/access-authn-authz/validating-admission-policy/
 [k8s-rbac-escalation]: https://kubernetes.io/docs/reference/access-authn-authz/rbac/#restrictions-on-role-creation-or-update
 [k8s-rbac-crb]: https://kubernetes.io/docs/reference/access-authn-authz/rbac/#clusterrolebinding-example
-[k8s-crd-deprecated-issue]: https://github.com/kubernetes/kubernetes/issues/131817
 [EP #1860]: https://github.com/openshift/enhancements/pull/1860
 [EP #1897]: https://github.com/openshift/enhancements/pull/1897
 [OPRUN-4674]: https://issues.redhat.com/browse/OPRUN-4674
