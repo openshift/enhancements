@@ -647,6 +647,7 @@ top-level fields, which apply only to the default shard.
       // +kubebuilder:validation:XValidation:rule="self == oldSelf",message="resources are immutable"
       Resources []EtcdShardResource `json:"resources,omitempty"`
 
+      // +kubebuilder:validation:XValidation:rule="self == oldSelf",message="storage is immutable"
       Storage ManagedEtcdShardStorageSpec `json:"storage,omitzero"`
 
       // +kubebuilder:validation:XValidation:rule="self == oldSelf",message="replicas is immutable"
@@ -656,9 +657,11 @@ top-level fields, which apply only to the default shard.
   }
   ```
 
-  `storage` and `scheduling` are intentionally mutable — changing storage type
-  or pod placement does not require data migration. `name`, `resources`, and
-  `replicas` are immutable after creation.
+  `storage`, `name`, `resources`, and `replicas` are immutable after creation.
+  Changing storage type would require data migration (PV → EmptyDir loses
+  persistent data; EmptyDir → PV requires new volume provisioning), so
+  immutability is enforced via CEL. `scheduling` is intentionally mutable —
+  changing pod placement does not require data migration.
 
   The same per-field immutability pattern applies to `UnmanagedEtcdShardSpec` fields
   (`Name`, `Resources`, `Endpoint`, `TLS`).
