@@ -1015,8 +1015,8 @@ storage type and replica count:
 | PVCs | 3 | 0 | 1 | 0 |
 | Services | 2 (client + discovery) | 2 (client + discovery) | 2 (client + discovery) | 2 (client + discovery) |
 | ServiceMonitor | 1 | 1 | 1 | 1 |
-| PDB | 1 | 1 | 1 | 1 |
-| TLS Secrets | ~3 (server, peer, client) | ~3 (server, peer, client) | ~3 (server, peer, client) | ~3 (server, peer, client) |
+| PDB | 1 | 1 | 0 | 0 |
+| TLS Secrets | ~2 (server, peer) | ~2 (server, peer) | ~2 (server, peer) | ~2 (server, peer) |
 
 **Note on 1-replica shards:** Single-replica shards have no quorum redundancy — any pod
 failure makes the shard completely unavailable until the pod restarts. Use `replicas: 1`
@@ -1025,7 +1025,8 @@ acceptable.
 
 **Example:** A 3-shard configuration (default + events + leases) with the default and
 leases on PVC (3 replicas each) and events on EmptyDir (1 replica) produces 7 pods,
-6 PVCs, 6 Services, 3 ServiceMonitors, 3 PDBs, and ~9 TLS Secrets per HCP. At scale
+6 PVCs, 6 Services, 3 ServiceMonitors, 2 PDBs (single-replica shards skip PDB), and
+~6 TLS Secrets (server + peer per shard; client-tls is shared) per HCP. At scale
 (hundreds of HCPs on a single management cluster), operators should account for this
 linear growth when sizing the management cluster.
 
