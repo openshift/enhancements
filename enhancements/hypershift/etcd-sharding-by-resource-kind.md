@@ -984,14 +984,19 @@ same PR — no cross-team dependency.
 
 #### TLS Certificate Generation
 
-Each shard gets its own TLS certificates — there is no cert sharing between shards.
-They are independent components with different pods and services, so each shard has its
-own server cert, peer cert, and client cert secrets (e.g., `etcd-server-tls`,
-`etcd-events-server-tls`). The CPO's PKI controller generates per-shard certificates
-with Subject Alternative Names (SANs) matching the shard's service names (`etcd-client-{shard}`,
-`*.etcd-discovery-{shard}`). Certificate rotation affects only the rotated shard — no
-blast radius to other shards. Since shards are immutable, the set of certificates is
-fixed at creation time.
+Each shard gets its own **server** and **peer** TLS certificates. The CPO's PKI
+controller generates per-shard certificates with Subject Alternative Names (SANs)
+matching the shard's service names (`etcd-client-{shard}`, `*.etcd-discovery-{shard}`).
+For example, `etcd-events-server-tls` and `etcd-events-peer-tls` are distinct from
+the default shard's `etcd-server-tls` and `etcd-peer-tls`. Server and peer certificate
+rotation affects only the rotated shard.
+
+The **client** TLS certificate (`etcd-client-tls`) is shared across all shards. KAS
+uses a single `--etcd-certfile`/`--etcd-keyfile` for all etcd connections (both
+`--etcd-servers` and `--etcd-servers-overrides`), so all shards must trust the same
+client certificate. Sharing the client cert avoids per-shard KAS volume mounts and
+keeps KAS configuration simple. Since shards are immutable, the set of per-shard
+certificates is fixed at creation time.
 
 #### Resource Ownership
 
