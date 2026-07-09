@@ -163,8 +163,8 @@ what values are permitted, without requiring per-extension ServiceAccounts.
    `spec.serviceAccount is deprecated, ignored, and will be removed in a future release.`
 5. The controller logs an INFO-level deprecation message on each reconciliation of a
    ClusterExtension with the field set.
-6. The cluster admin can clear the field at any time — the relaxed immutability rule allows
-   setting `serviceAccount.name` to an empty string.
+6. The cluster admin can clear the field at any time by omitting `serviceAccount` from
+   their manifest.
 
 #### Workflow 3: Scoped access control via RBAC
 
@@ -216,6 +216,13 @@ spec:
         object.spec.source.catalog.packageName in
         ['cert-manager', 'argocd-operator', 'external-secrets-operator']
       message: "Only pre-approved extensions may be installed."
+    - expression: >-
+        has(object.spec.source.catalog.version) &&
+        object.spec.source.catalog.version != ''
+      message: "A version or version range must be specified."
+    - expression: >-
+        object.spec.namespace in ['extensions', 'operators']
+      message: "Extensions may only be installed into approved namespaces."
 ```
 
 This is an admission gate — if the ClusterExtension cannot be created, the controller never
@@ -231,11 +238,12 @@ The `ServiceAccountReference` struct contains a single field:
 
 ```go
 type ServiceAccountReference struct {
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength:=253
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="name is immutable"
 	// +kubebuilder:validation:XValidation:rule="self.matches(\"^[a-z0-9]...\")",message="..."
-	// +required
-	Name string `json:"name"`
+	// +optional
+	Name string `json:"name,omitempty"`
 }
 ```
 
@@ -265,9 +273,6 @@ ServiceAccount ServiceAccountReference `json:"serviceAccount"`
 // Deprecated: serviceAccount is no longer used and will be removed in a future
 // release.
 //
-//nolint:kubeapilinter // deprecated field uses omitzero per OpenShift convention;
-// pointer would be a breaking API change
-//
 // +optional
 ServiceAccount ServiceAccountReference `json:"serviceAccount,omitzero"`
 ```
@@ -285,10 +290,11 @@ Key design decisions:
   [OpenShift API field conventions][ocp-api-field-conventions]
   and Go `staticcheck` deprecation detection.
 
-- **Relaxed immutability.** The `ServiceAccountReference.Name` field's XValidation rule changes
-  from `self == oldSelf` to `self == oldSelf || size(self) == 0`, allowing users to clear the
-  field as part of migration. The DNS validation rule is also made conditional:
-  `size(self) == 0 || self.matches(...)`.
+- **Relaxed immutability.** Users clear the deprecated field by omitting `serviceAccount`
+  entirely from their manifest — the `omitzero` tag on the parent struct handles serialization.
+  Adding `MinLength=1` to `ServiceAccountReference.Name` completes the validation (resolving
+  the KAL `optionalfields` lint) and makes the zero value invalid, which is correct since an
+  empty `name` was never a valid ServiceAccount reference.
 
 #### ValidatingAdmissionPolicy for deprecation warning
 
@@ -377,7 +383,9 @@ reflects CRD changes, so making `serviceAccount` optional requires no Console co
 #### Hypershift / Hosted Control Planes
 
 OLMv1 is not currently available in HyperShift environments. HyperShift support is tracked
-separately in [OCPSTRAT-1818][]. This EP does not affect the HyperShift timeline.
+separately in [OCPSTRAT-1818][]. When OLMv1 ships in HyperShift, the `spec.serviceAccount`
+field should be rejected outright (not just deprecated) since it will have never been
+functional in that environment.
 
 #### Standalone Clusters
 
@@ -432,22 +440,10 @@ simplifying the cache lifecycle. When the boxcutter feature gate is enabled,
 
 #### Downstream deprecation tracking
 
-In OpenShift, [`cluster-olm-operator`][cluster-olm-operator] manages OLMv1 and reports its
-status using [standard ClusterOperator conditions][ocp-clusteroperator-conditions]. This
-existing mechanism already blocks cluster upgrades when ClusterExtensions install bundles
-incompatible with the next OpenShift version.
-
-The same mechanism is used for deprecation tracking in two phases:
-
-**Phase 1 (deprecation release):** `cluster-olm-operator` detects ClusterExtensions
-that still have `spec.serviceAccount` set and reports `EvaluationConditionsDetected=True`.
-`EvaluationConditionsDetected` is a
-[standard ClusterOperator condition type][ocp-clusteroperator-conditions] used to surface
-advisory information. This does not block upgrades.
-
-**Phase 2 (pre-removal release):** The condition switches to
-`Upgradeable=False`, blocking the upgrade to the release that would remove the field. Cluster
-admins must clear `spec.serviceAccount` from all ClusterExtensions before upgrading.
+In the deprecation release, the ValidatingAdmissionPolicy warning is the primary signal to
+users. The specific mechanism for blocking upgrades prior to field removal (e.g.,
+`Upgradeable=False`) will be determined closer to the removal release, as the methods for
+flagging action before removal are expected to evolve.
 
 ### Risks and Mitigations
 
@@ -649,12 +645,9 @@ removed — is outside the scope of this mechanism.
 - Creating or updating a ClusterExtension with `spec.serviceAccount` set produces a
   deprecation warning in the API response.
 - Creating or updating a ClusterExtension without `spec.serviceAccount` produces no warning.
-- The `serviceAccount.name` field can be cleared (set to empty string) but not changed to a
-  different non-empty value.
+- The `serviceAccount` field can be cleared by omitting it from the manifest.
 - Upgrade test: existing ClusterExtensions with `spec.serviceAccount` set continue to
   function after upgrading operator-controller.
-- `cluster-olm-operator` reports `EvaluationConditionsDetected=True` when any
-  ClusterExtension has `spec.serviceAccount` set.
 
 ## Graduation Criteria
 
@@ -677,19 +670,6 @@ N/A. See above.
 - All SA impersonation, authentication, authorization, and synthetic permissions code removed,
   including the `PreflightPermissions` and `SyntheticPermissions` feature gates (neither is
   in the Default feature set).
-- `cluster-olm-operator` sets `EvaluationConditionsDetected=True` with reason
-  `DeprecatedServiceAccountInUse` when any ClusterExtension has the field set. This is advisory
-  and does not block upgrades.
-
-**Following release (monitoring period):**
-- Field remains in the API, deprecated and ignored.
-
-**Subsequent release (potential upgrade blocker):**
-- `cluster-olm-operator` switches to `Upgradeable=False` with reason
-  `DeprecatedServiceAccountMustBeCleared` when any ClusterExtension has the field set.
-  This blocks upgrade to the release that would remove the field, forcing cluster admins to
-  clear the field first.
-
 **Field removal (future, deferred):**
 - Requires architectural guidance on stable API field removal in OpenShift.
 - Not part of this EP's scope. See Open Questions.
@@ -797,7 +777,6 @@ No new CI jobs, test clusters, or external services are required.
 - **2026-06:** This enhancement proposal.
 
 <!-- Reference-style links -->
-[cluster-olm-operator]: https://github.com/openshift/cluster-olm-operator
 [boxcutter]: https://github.com/operator-framework/boxcutter
 [openshift-docs]: https://github.com/openshift/openshift-docs/
 [ocp-ce-permissions]: https://docs.redhat.com/en/documentation/openshift_container_platform/4.22/html-single/extensions/index#olmv1-cluster-extension-permissions_managing-ce
@@ -806,7 +785,6 @@ No new CI jobs, test clusters, or external services are required.
 [ocp-api-tiers]: https://docs.redhat.com/en/documentation/openshift_container_platform/4.19/html/api_overview/understanding-api-support-tiers
 [ocp-api-coding-style]: https://github.com/openshift/api/blob/master/guidelines/api_coding_style.md
 [ocp-api-field-conventions]: https://github.com/openshift/api/blob/master/guidelines/api_field_conventions.md
-[ocp-clusteroperator-conditions]: https://github.com/openshift/enhancements/blob/master/dev-guide/cluster-version-operator/dev/clusteroperator.md
 [api-removal-notifications]: https://github.com/openshift/enhancements/blob/master/enhancements/kube-apiserver/stability-api-removal-notifications.md
 [k8s-api-warnings]: https://kubernetes.io/blog/2020/09/03/warnings/
 [k8s-vap]: https://kubernetes.io/docs/reference/access-authn-authz/validating-admission-policy/
