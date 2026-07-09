@@ -11,7 +11,7 @@ approvers:
 api-approvers:
   - "@JoelSpeed"
 creation-date: 2026-04-23
-last-updated: 2026-04-23
+last-updated: 2026-07-09
 status: provisional
 tracking-link:
   - https://redhat.atlassian.net/browse/OPNET-595
@@ -67,11 +67,15 @@ plane nodes is not feasible. Faster failover (via BFD) and integration with
 external routing infrastructure are additional benefits delivered in this first
 iteration.
 
-ECMP-based load distribution across multiple nodes will be enabled in a
-subsequent iteration once the foundational BGP VIP infrastructure is proven and
-operational experience is gained. The first iteration retains an active/passive
-model via leader election, which is functionally equivalent to keepalived in
-this regard but operates at L3 rather than L2.
+The advertisement model of the first iteration is health-gated ECMP: every
+node whose local backend passes the kube-vip health check advertises the VIP,
+and external routers distribute traffic across the advertising nodes with
+equal-cost multipath. A node whose backend fails withdraws its own path within
+one health-check interval, independently of the other nodes. Implementation
+experience showed this is the natural behavior of kube-vip's Routing Table
+Mode (the leader-election Lease does not gate the route reconciliation loop)
+and that it works well in practice; a single-advertiser (active/passive) mode
+would require an additional kube-vip change and is not part of this iteration.
 
 ### User Stories
 
@@ -148,10 +152,12 @@ this regard but operates at L3 rather than L2.
    will remain as the default and will continue to be supported. BGP-based VIP
    management is an opt-in alternative.
 
-8. ECMP (Equal Cost Multi Path) load distribution for VIPs. The first iteration
-   uses leader-elected, single-node VIP ownership (active/passive). ECMP
-   support, where multiple nodes simultaneously advertise the same VIP for load
-   distribution, is deferred to a future enhancement.
+8. Single-advertiser (active/passive) VIP ownership. Health-gated ECMP --
+   every node with a healthy local backend advertises the VIP -- is the
+   native behavior of kube-vip's Routing Table Mode and is the model of this
+   first iteration. Restricting advertisement to a single elected node would
+   require leadership-gating kube-vip's route reconciliation loop and is
+   deferred until a concrete need for single-advertiser semantics appears.
 
 ## Proposal
 
@@ -263,8 +269,8 @@ Changes required:
   nodes (scale-up or replacement). The manifest will configure frr-k8s with
   host networking (`hostNetwork: true`) and the required security capabilities
   (`NET_ADMIN`, `NET_RAW`, `SYS_ADMIN`, `NET_BIND_SERVICE`). The frr-k8s
-  static pod manifest includes an FRR config renderer sidecar container
-  alongside the FRR daemon containers. This sidecar is analogous to the
+  static pod manifest includes an FRR config renderer init container
+  ahead of the FRR daemon containers. It is analogous to the
   `keepalived-monitor` sidecar that `baremetal-runtimecfg` runs in the
   keepalived static pod: it renders the node-specific `frr.conf` at startup
   by discovering the local node's hostname and primary IP, resolving the
@@ -281,6 +287,28 @@ Changes required:
   management is active, MCO will skip rendering keepalived manifests and
   instead render the kube-vip and frr-k8s static pod manifests along with the
   bootstrap `frr.conf`. This is a required change in the MCO codebase.
+
+  The static pod has two variants. The **bootstrap variant is FRR-only**:
+  the runtimecfg config-render init container, a file-copy init container
+  for the FRR `daemons`/`vtysh.conf` files, and the FRR daemon container.
+  The frr-k8s controller, reloader and status containers are omitted during
+  bootstrap -- there is no Node object, no frr-k8s CRDs and no metrics
+  certificates at that point, and the CRD configuration path is unused. The
+  **day-2 variant runs the full pod** (controller, FRR, reloader,
+  frr-status) on control plane nodes only; the controller and frr-status
+  containers mount the node kubeconfig, and frr-status is passed the mirror
+  pod name (`--pod-name=frr-k8s-<nodeName>`). The metrics exporter is
+  omitted from the static pod for now (static pods have no certificate
+  provisioning path); metrics delivery will be revisited for the Tech
+  Preview observability criteria. Peer data reaches MCO from the
+  installer-generated `bgp-vip-config` ConfigMap: the bootstrap render
+  reads the ConfigMap manifest from the installer asset directory, and
+  day-2 the MCO operator syncs its `config.json` payload (validated and
+  compacted) into a feature-gated internal API field,
+  `ControllerConfigSpec.BGPVIPPeersJSON`, from which the template
+  controller writes the node peer file. A missing or empty ConfigMap on a
+  cluster with BGP VIP management active degrades the operator rather than
+  blanking the peer file on nodes.
 
 - **Bootstrap FRR configuration**: Since `FRRConfiguration` CRDs are not
   available during bootstrap (no API server), the installer will generate a
@@ -317,9 +345,28 @@ Changes required:
 
   2. **Handover (owner: CNO):** Once the API server is available and frr-k8s
      CRDs are registered, CNO performs the transition:
-     - CNO creates `FRRConfiguration` CRs (named with a `bgp-vip-` prefix
+     - CNO creates a `FRRConfiguration` CR (named with a `bgp-vip-` prefix
        and labeled with `app.kubernetes.io/managed-by: cluster-network-operator`)
-       that replicate the bootstrap BGP peering configuration.
+       that carries the BGP **sessions** from the bootstrap configuration:
+       neighbors, passwords, BFD profiles.
+     - VIP **advertisement is deliberately not expressed through the CRD
+       surface**. `FRRConfiguration` `prefixes`/`toAdvertise` render as
+       unconditional `network` statements, which would advertise the VIPs
+       regardless of kube-vip's health gate in routing table 198
+       (implementation experience: this steered ECMP traffic to nodes with
+       failed backends). Instead, the CR's `spec.raw.rawConfig` reproduces
+       the bootstrap advertisement semantics: `ip import-table 198` (zebra
+       only tracks non-main kernel tables when instructed), per-address-
+       family `redistribute table-direct 198` filtered through the VIP
+       route-maps and prefix-lists, and high-sequence permit entries
+       appended to frr-k8s's generated per-neighbor `<peer-address>-out`
+       route-maps. The latter is needed because frr-k8s renders deny-any
+       outbound prefix-lists when `toAdvertise` is absent; a prefix-list
+       deny is a route-map no-match, so evaluation falls through to the
+       appended permits -- egress opens exactly for the VIP prefixes and
+       everything else remains implicitly denied. An upstream frr-k8s
+       feature for advertising redistributed routes would remove this raw
+       route-map coupling.
      - CNO waits for the `FRRNodeState` CR on each node to report that the
        CRD-based configuration has been applied and BGP sessions are
        established.
@@ -331,6 +378,11 @@ Changes required:
        it handles updates to other on-prem static pods like keepalived). The
        frr-k8s static pod will be restarted by the kubelet when its manifest
        changes on disk, picking up the CRD-based configuration seamlessly.
+       (Static-config removal is future work; in the validated
+       implementation the static file and the CRD-based configuration
+       coexist safely -- the FRR daemon loads the static file at startup and
+       the controller-rendered configuration takes over on its first
+       reconcile.)
      - If verification fails (e.g., BGP sessions do not come up with the
        CRD-based config), CNO leaves the static `frr.conf` in place and
        reports a degraded condition. The static config acts as a safety net.
@@ -348,11 +400,13 @@ Changes required:
 - **Single frr-k8s instance per node**: There must be exactly one frr-k8s
   instance running on each node. When frr-k8s is deployed as a static pod on
   control plane nodes, CNO must not also deploy frr-k8s as a DaemonSet on
-  those same nodes. CNO will be modified during implementation to add
-  detection logic (e.g., checking for a node label set by MCO when it renders
-  the static pod MachineConfig, or querying the kubelet mirror pod) and skip
-  DaemonSet scheduling on those nodes. This detection code does not exist in
-  CNO today and will be added as part of this enhancement's implementation.
+  those same nodes. When BGP VIP management is active, CNO renders the
+  frr-k8s DaemonSet with required node-affinity that excludes control plane
+  nodes by role (`node-role.kubernetes.io/master` `DoesNotExist`): masters
+  run the static pod, workers run the DaemonSet. Implementation experience
+  ruled out label-based approaches (a node label set by the static pod):
+  NodeRestriction denies node-credentialed writes of such labels, and
+  DaemonSet scheduling races the labeling on fresh nodes.
   The single frr-k8s instance is shared by all consumers (VIP advertisement,
   MetalLB, OVN-Kubernetes route advertisements) via additive
   `FRRConfiguration` CRs.
@@ -370,16 +424,21 @@ via MachineConfig resources for control plane nodes.
 **`kube-vip-api.yaml` -- API VIP (deployed from bootstrap):**
 
 - Configured with `cp_enable=true`, `address=<api-vip>`,
-  `vip_leaderelection=true`, `vip_routingtable=true`.
-- Participates in Kubernetes leader election via a dedicated Lease to
-  determine which node owns the API VIP. Only the elected leader writes the
-  API VIP `/32` route to Linux routing table 198 via netlink.
-- In Routing Table Mode, kube-vip runs a continuous backend health check
-  loop: it periodically probes the local kube-apiserver (via the Kubernetes
-  API discovery endpoint on `localhost:6443`) and only maintains the route
-  in table 198 while the backend is healthy. If the local kube-apiserver
-  becomes unreachable, the route is removed until it recovers.
-- When leadership is lost, kube-vip removes the route from table 198.
+  `vip_leaderelection=true`, `vip_routingtable=true`,
+  `k8s_config_file=/etc/kubernetes/kubeconfig` and
+  `kubernetes_addr=https://localhost:6443`. The last two direct kube-vip's
+  Kubernetes client at the node kubeconfig and the *local* API server:
+  Lease traffic must not depend on the very VIP kube-vip manages, or
+  leader-election renewal deadlocks when the VIP moves (for example at
+  bootstrap teardown).
+- Runs a continuous backend health check loop: it periodically probes the
+  local kube-apiserver (via the Kubernetes API discovery endpoint on
+  `localhost:6443`) and maintains the API VIP `/32` route in Linux routing
+  table 198 via netlink only while the backend is healthy. If the local
+  kube-apiserver becomes unreachable, the route is removed until it
+  recovers. Every node with a healthy local API server advertises the VIP
+  (health-gated ECMP); the leader-election Lease does not gate the route
+  reconciliation loop.
 - `vip_cleanroutingtable: "true"` is enabled to clean stale routes at
   startup.
 - This manifest is generated by the installer and placed in
@@ -390,16 +449,19 @@ via MachineConfig resources for control plane nodes.
 
 - Configured identically to the API VIP instance but with
   `address=<ingress-vip>` and a different Lease name.
-- Uses the **HTTP backend health check** (a downstream kube-vip
-  enhancement, see "Downstream kube-vip Enhancement" section below) instead
-  of the default Kubernetes API check. Configured with
-  `backend_health_check_url=http://localhost:29445/healthz` to probe the
-  local haproxy stats port. The route in table 198 exists only while the
-  local ingress controller (router/haproxy) is healthy. If the haproxy
-  check fails, kube-vip removes the ingress VIP route, causing frr-k8s to
-  withdraw the BGP advertisement. Another node where the ingress controller
-  is healthy will win the election and claim the VIP. This is functionally
-  equivalent to keepalived's `vrrp_script` mechanism.
+- Uses kube-vip's **configurable HTTP health check** (upstream since
+  kube-vip/kube-vip#1604, see "Downstream kube-vip Changes" section below)
+  instead of the default Kubernetes API check. Configured with
+  `control_plane_health_check_address=http://localhost:1936/healthz` to
+  probe the local OpenShift router's health endpoint -- the same check
+  keepalived's `chk_ingress` script uses today. (An earlier revision of
+  this document pointed at port 29445; that is baremetal-runtimecfg's
+  API-haproxy monitor and is the wrong signal.) The route in table 198
+  exists only while the local ingress controller (router) is healthy. If
+  the router check fails, kube-vip removes the ingress VIP route, causing
+  frr-k8s to withdraw the BGP advertisement for this node; nodes with a
+  healthy router keep advertising. This is functionally equivalent to
+  keepalived's `vrrp_script` mechanism.
 - This manifest is **not** present during bootstrap. The ingress VIP is not
   needed until the ingress controller is operational (a day-2 concern). CNO
   deploys the `kube-vip-ingress.yaml` static pod manifest via MCO
@@ -420,9 +482,12 @@ Both kube-vip instances require:
 OVN-Kubernetes must be aware that frr-k8s may be deployed as a static pod
 rather than a DaemonSet managed by CNO. The key changes:
 
-- **Detection of static pod frr-k8s**: OVN-Kubernetes should detect when
-  frr-k8s is already running as a static pod on a node and skip creating
-  additional FRR-related pods for that node.
+- **Static pod / DaemonSet separation**: OVN-Kubernetes's route
+  advertisement features consume the frr-k8s DaemonSet that CNO deploys.
+  Under BGP VIP management the DaemonSet carries node-affinity excluding
+  control plane nodes by role (see the frr-k8s section above), so on
+  masters the static pod is the single frr-k8s instance serving all
+  consumers, and on workers it is the DaemonSet.
 
 - **FRRConfiguration CR management**: When creating `FRRConfiguration` CRs for
   route advertisements (as described in
@@ -793,37 +858,44 @@ infrastructure (ToR switches, routers) and BGP configuration on those devices.
      node and subsequently on each control plane node.
 
 5. The bootstrap node starts. The kubelet launches the kube-vip-api and
-   frr-k8s static pods. As the only kube-vip instance, the bootstrap node
-   immediately self-elects as leader and writes the API VIP route to table
-   198 via netlink (no API server dependency). frr-k8s establishes BGP
-   sessions with the configured peers using the static `frr.conf` and
-   begins advertising the API VIP route.
+   frr-k8s static pods. kube-vip connects to the local bootstrap
+   kube-apiserver, its backend health check passes, and it writes the API
+   VIP route to table 198 via netlink. frr-k8s establishes BGP sessions
+   with the configured peers using the static `frr.conf` and begins
+   advertising the API VIP route.
 
 6. The API VIP becomes reachable via BGP before the API server starts. The
    kube-apiserver starts and becomes accessible at the API VIP.
 
 7. The remaining control plane nodes are provisioned. Each receives the same
-   static pod manifests. Since the API server is already reachable via the
-   VIP, kube-vip on each node participates in normal Kubernetes leader
-   election; only the elected leader writes the API VIP route to table 198.
+   static pod manifests. As each node's local kube-apiserver becomes
+   healthy, its kube-vip adds the API VIP route to table 198 and its
+   frr-k8s advertises it -- the external peers see equal-cost paths to
+   every healthy control plane node.
 
 8. Once the cluster is fully operational, CNO detects the BGP VIP configuration
    and creates the corresponding `FRRConfiguration` CRs to formalize the
    bootstrap configuration. CNO also deploys the `kube-vip-ingress.yaml`
    static pod manifest via MCO MachineConfig update. This manifest is
-   configured with `backend_health_check_url=http://localhost:29445/healthz`
+   configured with
+   `control_plane_health_check_address=http://localhost:1936/healthz`
    so that the ingress VIP route is only written to table 198 on nodes where
-   the ingress controller (router/haproxy) is healthy.
+   the ingress controller (router) is healthy.
 
 #### Failover Workflow
 
-1. A control plane node holding the API VIP fails.
-2. If BFD is enabled, the external peer detects the failure within milliseconds
-   and withdraws the route.
-3. kube-vip on remaining nodes detects the leadership vacancy and elects a new
-   leader. The new leader writes the API VIP route to its local table 198.
-4. frr-k8s on the new leader advertises the route to external peers.
-5. External peers install the new route. Traffic converges to the new node.
+1. A control plane node advertising the API VIP fails.
+2. If BFD is enabled, the external peer detects the failure within
+   milliseconds and withdraws that node's path; otherwise the BGP hold
+   timer expires. Independently, if only the node's backend (rather than
+   the node itself) fails, kube-vip's health check removes the route from
+   table 198 within one check interval and frr-k8s withdraws the
+   advertisement.
+3. The remaining healthy nodes were already advertising the VIP; external
+   peers simply drop the failed path from the ECMP set. No leadership
+   transfer or re-election is on the failover path.
+4. When the node (or its backend) recovers, its advertisement returns and
+   the peers re-add the path.
 
 #### Error Handling
 
@@ -864,6 +936,13 @@ This enhancement introduces the following API changes:
 
 - **No new runtime CRDs for kube-vip**: kube-vip is configured entirely via
   environment variables in its static pod manifest. No CRD is required.
+
+- **ControllerConfigSpec.BGPVIPPeersJSON (openshift/api,
+  machineconfiguration/v1)**: a feature-gated, optional string field on
+  MCO's internal ControllerConfig API carrying the `bgp-vip-config`
+  ConfigMap's `config.json` payload (validated and compacted by the MCO
+  operator) so the template controller can render the node peer file. Not
+  a user-facing API; only populated when BGP VIP management is active.
 
 This enhancement does not modify the behavior of any existing API resources.
 
@@ -913,6 +992,23 @@ features excluded from OKE.
 
 ### Implementation Details/Notes/Constraints
 
+#### Implementation Experience
+
+The design in this document has been implemented across all affected
+repositories and validated end to end on a dev-scripts bare metal cluster:
+installation completes with the API VIP advertised via BGP from the
+bootstrap phase, both VIPs are advertised with health-gated ECMP, the
+CRD handover works, and the console is reachable over the BGP-routed
+ingress path (35 of 36 cluster operators available; the exception was a
+platform bug unrelated to this feature). The reference implementation --
+a per-repository patch series, the full run ledger of the 14 validation
+installs, an operational runbook and the isolated FRR reproduction -- is
+available at <https://github.com/mkowalski/bgp-vip-demo>. Supporting
+changes are in flight upstream: dev-scripts ToR BGP speaker support
+(openshift-metal3/dev-scripts#1929) and the kube-vip kubeconfig fixes
+(kube-vip/kube-vip#1627). Statements in this document marked "validated"
+refer to that work.
+
 #### Feature Gate
 
 This feature is gated behind the `BGPBasedVIPManagement` feature gate. The
@@ -933,34 +1029,34 @@ The feature will start in the `TechPreviewNoUpgrade` FeatureSet. This means:
 #### Bootstrap Sequence and API Server Dependency
 
 A key concern with VIP management is the apparent circular dependency: the API
-VIP must be reachable before the API server starts, but kube-vip uses
-Kubernetes leader election which requires the API server. This is resolved the
-same way the existing keepalived bootstrap works -- by separating the
-network-level VIP operations from the Kubernetes API dependency:
+VIP must be reachable before the API server starts, but kube-vip talks to a
+Kubernetes API server for its health checks and Lease. This is resolved by
+keeping every Kubernetes interaction strictly node-local:
 
 1. **No circular dependency exists.** Writing a route to kernel table 198 via
-   netlink and advertising it via BGP are pure network-level operations. Neither
-   requires the Kubernetes API server. This is analogous to how keepalived uses
-   VRRP (a pure L2/L3 protocol) to claim the VIP independently of the API
-   server.
+   netlink and advertising it via BGP are pure network-level operations.
+   kube-vip's only API dependency is on the *local* API server
+   (`kubernetes_addr=https://localhost:6443` with the node kubeconfig),
+   never on the VIP.
 
-2. **Bootstrap node (single instance):** On the bootstrap node, kube-vip is
-   the only instance running. Kubernetes leader election with a single
-   candidate results in immediate self-election -- kube-vip wins leadership
-   without needing to contact the API server and writes the VIP route to table
-   198 immediately. frr-k8s then advertises this route via BGP using the static
-   `frr.conf` configuration. The API VIP becomes reachable on the network
-   before the API server starts.
+2. **Bootstrap node:** The bootstrap kube-apiserver comes up on
+   `localhost:6443` without any VIP involvement. As soon as kube-vip's
+   health check against it passes, kube-vip writes the VIP route to table
+   198 and frr-k8s advertises it via BGP using the static `frr.conf`
+   configuration. The API VIP becomes reachable on the network as soon as
+   the bootstrap control plane answers -- validated during implementation.
 
-3. **Control plane nodes (multiple instances):** By the time the remaining
-   control plane nodes boot, the API server is already reachable via the VIP
-   that the bootstrap node advertised. kube-vip on these nodes can use normal
-   Kubernetes leader election via the API to coordinate VIP ownership.
+3. **Control plane nodes:** Each master's kubelet, ignition and cluster
+   join traffic reaches the API via the VIP that the bootstrap node
+   advertises. Each master's kube-vip in turn health-checks its own local
+   kube-apiserver and starts advertising once it is healthy, growing the
+   ECMP set.
 
-4. **Bootstrap teardown:** The bootstrap node runs with a higher leader
-   election priority (analogous to keepalived's priority 70 vs. 40 for
-   masters). When the bootstrap node is shut down, kube-vip on one of the
-   control plane nodes wins the election and takes over the VIP.
+4. **Bootstrap teardown:** When the bootstrap node is destroyed, its BGP
+   sessions drop and its path is withdrawn (BFD or hold timer bounds the
+   detection). The masters were already advertising; no takeover handshake
+   is involved -- validated during implementation: the next-hop set simply
+   pivoted from the bootstrap node to the masters.
 
 This sequence mirrors the existing keepalived bootstrap flow where keepalived
 starts the VRRP daemon independently of the API server, claims the VIP via
@@ -994,59 +1090,56 @@ kube-vip in Routing Table Mode operates as follows:
 - Routes are managed via netlink in routing table ID `198` (configurable via
   `vip_routingtableid`) with routing protocol ID `248` (configurable via
   `vip_routingtableprotocol`).
-- Leader election (`vip_leaderelection: "true"`) determines which single node
-  writes the VIP route. Only the elected leader has the VIP route in table 198;
-  all other nodes do not, ensuring an active/passive model.
+- The backend health check loop runs on every instance and is the sole gate
+  for the route: a node holds the VIP route in table 198 exactly while its
+  local backend is healthy. The leader-election Lease
+  (`vip_leaderelection: "true"`) is configured but does not gate the route
+  reconciliation loop in Routing Table Mode -- all healthy nodes advertise
+  and external peers ECMP across them (validated behavior; see the
+  multi-advertiser section under Risks and Mitigations).
 
-Note: kube-vip also supports an ECMP multi-homing mode (by disabling both
-`vip_leaderelection` and `svc_election`), where all nodes simultaneously
-advertise the VIP. This mode is **not in scope for the first iteration** of
-this enhancement and is deferred to a future phase. The first iteration uses
-leader-elected, single-node VIP ownership exclusively.
+Note: restricting advertisement to a single elected node (active/passive)
+would require leadership-gating kube-vip's route reconciliation loop. This
+is **not part of the first iteration**; health-gated ECMP is the validated
+model.
 
-#### Downstream kube-vip Enhancement: HTTP Backend Health Check
+#### Downstream kube-vip Changes
 
-In Routing Table Mode with leader election, kube-vip runs a continuous
-backend health check loop (in `pkg/cluster/service.go`). On each interval,
-it probes the local backend and adds the VIP route to table 198 if healthy
-or removes it if unhealthy. However, the upstream implementation of this
-check (`pkg/backend/backend.go` `Entry.Check()`) is **hardcoded to
-Kubernetes API server discovery**: it creates a Kubernetes REST client,
-connects to `addr:port`, and calls `client.DiscoveryClient.ServerVersion()`.
-This only succeeds against a real Kubernetes API server and cannot be used
-to check arbitrary HTTP endpoints such as haproxy's stats port.
+Two areas of kube-vip needed attention; both are resolved or in flight
+upstream.
 
-To support the ingress VIP health check, OpenShift's downstream fork of
-kube-vip will add an **HTTP backend health check mode**. The change is
-minimal (~50 lines across 3-4 files):
+**HTTP health check for the ingress VIP.** Upstream kube-vip provides a
+configurable HTTP health check (`control_plane_health_check_address`,
+`control_plane_health_check_timeout_seconds`), and its wiring into the
+Routing Table Mode reconciliation loop merged upstream as
+[kube-vip/kube-vip#1604](https://github.com/kube-vip/kube-vip/pull/1604):
+on each interval the loop probes the configured URL and adds or removes the
+VIP route in table 198 accordingly, falling back to the default Kubernetes
+API discovery check when the address is unset. The ingress instance sets
+`control_plane_health_check_address=http://localhost:1936/healthz` (the
+local router health endpoint). No downstream change is required for this.
 
-1. **New environment variables:**
-   - `backend_health_check_url` -- an HTTP(S) URL to probe (e.g.,
-     `http://localhost:29445/healthz`). When empty (default), the existing
-     Kubernetes API check is used.
-   - `backend_health_check_timeout` -- HTTP request timeout in seconds
-     (default 3).
-
-2. **New `HTTPCheck` method in `pkg/backend/backend.go`:** Performs an
-   HTTP GET against the configured URL and considers the backend healthy
-   if it receives an HTTP 200 response.
-
-3. **Modified reconciliation loop in `pkg/cluster/service.go`:** Inside
-   the `if c.EnableRoutingTable` block, the `entry.Check()` call is
-   replaced with a dispatch: if `backend_health_check_url` is set, use
-   `HTTPCheck`; otherwise, use the default `Check()`.
-
-This change has **zero impact on existing behavior** -- when
-`backend_health_check_url` is empty, the existing Kubernetes API check
-runs unchanged. An upstream contribution may be pursued but is not a
-prerequisite for the first iteration.
+**Kubeconfig handling for static pods.** Implementation experience exposed
+a real gap: kube-vip ignored the explicitly configured kubeconfig path
+(`--k8sConfigPath` / `k8s_config_file`) in **both** the manager
+initialization and the backend health checks, probing only hardcoded
+locations (`/etc/kubernetes/admin.conf`, `$HOME/.kube/config`, in-cluster
+config). OpenShift static pods have none of those -- the node kubeconfig
+lives at `/etc/kubernetes/kubeconfig` -- so kube-vip could neither start
+its manager nor pass a single health check. Upstream PR
+[kube-vip/kube-vip#1627](https://github.com/kube-vip/kube-vip/pull/1627)
+makes an explicitly configured kubeconfig take precedence in both paths
+(no behavior change when the option is unset); the downstream fork carries
+these commits until the PR merges. The manifests additionally set
+`kubernetes_addr=https://localhost:6443` so that Lease and health traffic
+targets the local API server rather than the VIP kube-vip itself manages.
 
 The two kube-vip instances use this as follows:
 
 | Instance | `address` | Health check | Route lifecycle |
 |----------|-----------|-------------|-----------------|
 | `kube-vip-api` | `<api-vip>` | Default (Kubernetes API discovery on `localhost:6443`) | Route in table 198 exists only when local kube-apiserver is healthy |
-| `kube-vip-ingress` | `<ingress-vip>` | HTTP (`backend_health_check_url=http://localhost:29445/healthz`) | Route in table 198 exists only when local haproxy is healthy |
+| `kube-vip-ingress` | `<ingress-vip>` | HTTP (`control_plane_health_check_address=http://localhost:1936/healthz`) | Route in table 198 exists only when the local OpenShift router is healthy |
 
 #### frr-k8s Bootstrap Configuration
 
@@ -1142,38 +1235,37 @@ MCO renders a single MachineConfig for all master nodes containing:
 Both files are placed on disk via MachineConfig and mounted into the
 frr-k8s static pod via `hostPath` volumes.
 
-Example `frr-peers.json` for a multi-rack deployment:
+Example `frr-peers.json` for a multi-rack deployment (the schema matches
+baremetal-runtimecfg's `FRRPeerMapping` type verbatim; the installer's
+`bgp-vip-config` ConfigMap `config.json` uses the same schema -- plus
+`apiVIPs`/`ingressVIPs` keys that runtimecfg ignores -- and is copied
+unchanged to the node peer file, so one schema is used end to end):
 
 ```json
 {
-  "globalPeers": [
+  "localASN": 64512,
+  "defaultPeers": [
     {"peerAddress": "192.168.1.1", "peerASN": 64512, "bfdEnabled": "false"}
   ],
   "hostOverrides": {
-    "master-0": {
-      "peers": [
-        {"peerAddress": "192.168.1.1", "peerASN": 64512, "bfdEnabled": "true"}
-      ]
-    },
-    "master-1": {
-      "peers": [
-        {"peerAddress": "192.168.2.1", "peerASN": 64512, "bfdEnabled": "true"}
-      ]
-    },
-    "master-2": {
-      "peers": [
-        {"peerAddress": "192.168.3.1", "peerASN": 64512, "bfdEnabled": "true"}
-      ]
-    }
+    "master-0": [
+      {"peerAddress": "192.168.1.1", "peerASN": 64512, "bfdEnabled": "true"}
+    ],
+    "master-1": [
+      {"peerAddress": "192.168.2.1", "peerASN": 64512, "bfdEnabled": "true"}
+    ],
+    "master-2": [
+      {"peerAddress": "192.168.3.1", "peerASN": 64512, "bfdEnabled": "true"}
+    ]
   }
 }
 ```
 
 **Phase 2 -- Sidecar renders per-node config at runtime:**
 
-The frr-k8s static pod includes an FRR config renderer sidecar container,
-analogous to the `keepalived-monitor` sidecar that `baremetal-runtimecfg`
-runs in the keepalived static pod. At startup, the sidecar:
+The frr-k8s static pod includes an FRR config renderer init container
+(a one-shot run of `baremetal-runtimecfg`, analogous in role to the
+`keepalived-monitor` sidecar in the keepalived static pod). At startup it:
 
 1. Reads the Go template and peer mapping file from the `hostPath` volumes.
 2. Discovers the local node's hostname via `os.Hostname()`.
@@ -1181,7 +1273,7 @@ runs in the keepalived static pod. At startup, the sidecar:
    `/run/nodeip-configuration/primary-ip` (the same mechanism used by
    `baremetal-runtimecfg` for `.NonVirtualIP`).
 4. Looks up the hostname in the `hostOverrides` map. If a per-host entry
-   exists, uses that peer list; otherwise, falls back to `globalPeers`.
+   exists, uses that peer list; otherwise, falls back to `defaultPeers`.
 5. Renders the Go template with the resolved peer list and router-id
    (primary IP).
 6. Writes the final `frr.conf` to a shared `emptyDir` volume that the FRR
@@ -1216,7 +1308,8 @@ The existing keepalived static pod uses the same architecture:
 - The sidecar continuously monitors for changes (new nodes joining,
   interface changes) and re-renders the config as needed.
 
-The FRR config renderer sidecar follows this pattern. During bootstrap
+The FRR config renderer follows this pattern as a one-shot init
+container. During bootstrap
 (before the API server is available), it operates purely from local state
 (hostname, primary IP, files on disk). Post-bootstrap, it could optionally
 be extended to watch for configuration changes, though this is not required
@@ -1271,6 +1364,42 @@ When `bgpVIPConfig` is set in `install-config.yaml`, the installer will:
 3. CNO will still create the frr-k8s namespace and CRDs so that day-2
    `FRRConfiguration` management works.
 
+#### FRR zebra import-table fix required
+
+FRR versions before 10.7 carry a zebra bug that breaks this design's day-2
+phase: `zebra_add_import_table_entry` clears the `ZEBRA_FLAG_SELECTED` flag
+on the *source* route while importing it, so any route that already exists
+in the kube-vip routing table at the moment the `ip import-table` /
+`redistribute table-direct` configuration is (re)applied is never
+redistributed -- and a configuration reload actively de-selects previously
+selected routes. Bootstrap is unaffected (kube-vip writes the route after
+FRR starts, and live netlink events process correctly), but the CRD
+handover re-applies the configuration while the VIP route already exists,
+silently stopping advertisement. Fixed upstream by FRRouting/frr commit
+`b2c17ad52` ("zebra: Do not clear selected flag on route about to be
+imported", first released in FRR 10.7). OpenShift currently ships FRR
+10.4.x in the frr-k8s image, so the fix must be backported to the shipped
+FRR (RPM or image) as a prerequisite for this enhancement. An isolated
+container reproduction and the backport are part of the reference
+implementation.
+
+#### Static pod API access (RBAC)
+
+The day-2 static pod's controller and status containers authenticate with
+the node kubeconfig (`/etc/kubernetes/kubeconfig`). Its identity is the
+ServiceAccount `openshift-machine-config-operator/node-bootstrapper`
+(verified on a live cluster) -- notably *not* a `system:nodes` group
+identity, so the Node authorizer does not apply and plain RBAC governs
+access to the frr-k8s CRs. CNO ships a ClusterRole and binding for that
+subject: read (`get`/`list`/`watch`) on `frrconfigurations` and
+`frrk8sconfigurations`, write on `frrnodestates` and `bgpsessionstates`
+(including status), node reads, plus namespace-scoped `secrets` (BGP
+session passwords) and `pods` reads in `openshift-frr-k8s`. Known
+limitation to resolve before GA: the credential is shared by all nodes, so
+any node can write any node's state CRs; per-node scoping requires
+admission-level enforcement (for example a CEL ValidatingAdmissionPolicy),
+which RBAC alone cannot express.
+
 #### Cross-Team Dependencies
 
 This enhancement requires changes across multiple components owned by different
@@ -1285,7 +1414,7 @@ implementation:
 | Cluster Network Operator | `openshift/cluster-network-operator` | Networking | Static pod frr-k8s detection logic, bootstrap-to-CRD handover, `FRRConfiguration` CR creation for VIP advertisement |
 | OVN-Kubernetes | `openshift/ovn-kubernetes` | OVN | Awareness of static pod frr-k8s, avoiding DaemonSet conflicts, FRRConfiguration CR coexistence |
 | frr-k8s | `openshift/frr` | MetalLB | Static pod deployment support, FRR daemon startup option changes |
-| kube-vip | (new, downstream fork) | Networking | OpenShift-specific build, inclusion in release payload, Routing Table Mode validation, downstream HTTP backend health check enhancement for ingress VIP |
+| kube-vip | (new, downstream fork) | Networking | OpenShift-specific build, inclusion in release payload, Routing Table Mode validation; carries the kubeconfig handling fixes until kube-vip/kube-vip#1627 merges |
 | baremetal-runtimecfg | `openshift/baremetal-runtimecfg` | On-prem Networking | FRR config template rendering support (config renderer sidecar), per-node peer mapping resolution by hostname |
 
 ### Risks and Mitigations
@@ -1294,58 +1423,48 @@ implementation:
 |------|------------|
 | BGP misconfiguration during bootstrap prevents cluster installation | The installer will validate BGP parameters. Clear error messages will guide the user. A fallback to keepalived can be documented. |
 | kube-vip or frr-k8s static pod crashes during bootstrap | Both components will be configured with restart policies. The kubelet will automatically restart failed static pods. |
-| Conflict between static pod frr-k8s and DaemonSet frr-k8s | CNO will detect static pod deployment and skip DaemonSet creation on affected nodes. |
+| Conflict between static pod frr-k8s and DaemonSet frr-k8s | Under BGP VIP management, CNO renders the DaemonSet with node-affinity excluding control plane nodes by role; masters run the static pod, workers the DaemonSet. |
 | BGP session security (unauthenticated sessions) | MD5 password authentication is supported and should be recommended in documentation. |
 | Route leaking -- kube-vip advertising unintended routes | The FRR configuration uses strict route-maps and prefix-lists to only advertise VIP `/32` routes. |
 | Upstream kube-vip project stability | OpenShift will vendor a specific, tested version of kube-vip. The Routing Table Mode is the simplest mode with minimal moving parts. |
 | FRR-K8s API gaps for bootstrap scenario | Bootstrap uses static `frr.conf` to avoid dependency on the API server. CRD-based management takes over post-bootstrap. |
+| FRR silently not redistributing pre-existing table routes (FRR < 10.7) | Requires the zebra fix FRRouting/frr `b2c17ad52` backported to the shipped FRR (see "FRR zebra import-table fix required"). |
 | Split-brain: network partition causes two nodes to believe they hold the VIP | See detailed analysis below. |
 
-#### Split-Brain Behavior During Network Partitions
+#### Multi-Advertiser Operation and Network Partitions
 
-During a network partition, two or more kube-vip instances may temporarily
-believe they are the leader and write the VIP route to their local table 198.
-This would cause multiple frr-k8s instances to advertise the same VIP `/32`
-to external BGP peers, resulting in multiple BGP routes for the same
-destination with different next-hops.
+In normal operation every node whose local backend is healthy advertises the
+VIP: external BGP peers receive the same `/32` from multiple next-hops and
+distribute traffic across them with ECMP. This is the steady-state model of
+this enhancement, and the same analysis covers network partitions (where a
+subset of nodes keeps advertising a VIP independently).
 
-**Impact on API VIP traffic:** External routers receiving the same prefix from
-multiple next-hops will treat this as ECMP and distribute traffic across the
-partitioned nodes. Since the API server runs on all control plane nodes, API
-requests will succeed regardless of which node receives them -- the client
-reaches a valid kube-apiserver instance either way. This is a transient
-condition, not a data-loss scenario.
+**API VIP traffic:** External routers ECMP across the advertising nodes.
+Since the API server runs on all control plane nodes and each node's
+advertisement is gated on its *local* API server health, every path in the
+ECMP set terminates at a working kube-apiserver. A node whose API server
+degrades withdraws its own path within one health-check interval --
+validated live: during control plane rollouts the ECMP set shrank and grew
+per node, with no client-visible outage.
 
-**Impact on ingress VIP traffic:** For the ingress VIP, split-brain is more
-consequential. Unlike the API server, the ingress controller (router/haproxy)
-may not be running on every control plane node. During a split-brain, if a
-node that incorrectly believes it is the leader does not have a running
-ingress controller, traffic routed to that node will fail. The
-`kube-vip-ingress` instance's HTTP backend health check (configured with
-`backend_health_check_url=http://localhost:29445/healthz`) mitigates this:
-the kube-vip-ingress reconciliation loop continuously probes the local
-haproxy stats port and only maintains the ingress VIP route in table 198
-while haproxy is healthy. Even during a partition, a node that fails the
-haproxy check will have its ingress VIP route removed from table 198,
-causing frr-k8s to withdraw the BGP advertisement for that next-hop.
-External routers will then only receive the advertisement from nodes where
-the ingress controller is actually running. This reduces the split-brain
-impact to the same "benign ECMP" behavior as the API VIP, since traffic
-will only reach nodes with a healthy ingress controller.
+**Ingress VIP traffic:** The ingress controller (router) may not run on
+every node. The `kube-vip-ingress` health check (configured with
+`control_plane_health_check_address=http://localhost:1936/healthz`)
+guarantees only nodes with a healthy local router advertise the ingress
+VIP -- validated live: on a compact cluster with routers on two of three
+control plane nodes, exactly those two advertised. Traffic therefore only
+reaches nodes with a working router, during partitions included.
 
-**Resolution:** Kubernetes leader election uses Lease objects with a
-`leaseDurationSeconds` timeout. When the partition heals, the Lease state
-converges: one node renews the Lease and the others observe they have lost
-leadership. The losing nodes remove the VIP route from their local table 198,
-frr-k8s withdraws the BGP advertisement, and traffic converges back to the
-single leader. The convergence time is bounded by the Lease duration (default
-15 seconds) plus BGP withdrawal propagation (typically sub-second with BFD,
-or up to the hold timer without BFD).
+**Partition healing:** No convergence protocol is needed beyond BGP itself.
+When a partition heals, peers simply merge the advertisements back into one
+ECMP set; when a node dies, BFD (milliseconds) or the BGP hold timer bounds
+the withdrawal of its path.
 
-**Comparison with keepalived:** The existing keepalived/VRRP model has the
-same split-brain risk during network partitions -- multiple nodes may claim
-the VIP via gratuitous ARP. The behavior and resolution are analogous, with
-VRRP advertisement timers playing the role of Lease duration.
+**Comparison with keepalived:** The existing keepalived/VRRP model has a
+genuine split-brain failure mode during partitions -- multiple nodes may
+claim the VIP via gratuitous ARP, and L2 convergence is undefined. The BGP
+model replaces that with well-defined router behavior (ECMP across
+advertised paths), each path individually health-gated.
 
 ### Drawbacks
 
@@ -1440,9 +1559,13 @@ routing daemon used by MetalLB and OVN-Kubernetes BGP integration.
 
 ## Open Questions [optional]
 
-1. When should ECMP support be introduced? What prerequisites (e.g., external
-   health checking, graceful restart) must be in place before enabling
-   multi-node VIP advertisement?
+1. ~~When should ECMP support be introduced?~~ *Resolved by implementation
+   experience:* health-gated ECMP is the native behavior of kube-vip's
+   Routing Table Mode and is the model of the first iteration (see
+   "Multi-Advertiser Operation"). The remaining open question is the
+   inverse: is a single-advertiser (active/passive) option ever needed,
+   and if so, kube-vip's route reconciliation loop must learn to be
+   leadership-gated.
 
 2. When BGP VIP management is extended to non-baremetal on-prem platforms
    (vSphere, OpenStack, Nutanix), should those platforms introduce a
