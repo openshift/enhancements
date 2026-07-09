@@ -726,22 +726,15 @@ The plan is to extend the existing [`conditionController`](https://github.com/op
 
 #### KMS Plugin Image Verification and Certification
 
-Vendors must sign their images using cosign, and run the certification
-test suite described in this document before Red Hat can officially support
-the vendor's KMS plugin.
+Vendors must sign their images using cosign, and run the certification test suite described in this document before Red Hat can officially support the vendor's KMS plugin. In order to provide official support for KMS plugin configuration, we will include a pointer to officially vendor supported and signed images in the OCP payload. This will ensure that only plugin images that can prove their validity and are officially supported can run on the OCP platform.
 
 ##### Image Signature and Verification
 
-We advise vendors to sign their images with cosign using public key encryption.
-OpenShift must be able to verify image signatures in air-gapped clusters, and
-public key encryption is best suited for this scenario.
+We advise vendors to sign their images with cosign using public key encryption. OpenShift must be able to verify image signatures in air-gapped clusters, and public key encryption is best suited for this scenario.
 
 ###### Signing Images with cosign v3
 
-cosign v3 defaults to storing signatures as OCI 1.1 referrers (which are not
-visible as tags). To create signatures compatible with OpenShift, vendors must
-use the `--new-bundle-format=false` and `--use-signing-config=false` flags to
-force creation of legacy `.sig` tags.
+cosign v3 defaults to storing signatures as OCI 1.1 referrers (which are not visible as tags). To create signatures compatible with OpenShift, vendors must use the `--new-bundle-format=false` and `--use-signing-config=false` flags to force creation of legacy `.sig` tags.
 
 **Step-by-step signing process:**
 
@@ -782,20 +775,28 @@ force creation of legacy `.sig` tags.
    skopeo list-tags docker://registry.example.com/kms-plugin | jq -r '.Tags[]' | grep ".sig"
    ```
 
+To generate the base64-encoded public key for the `keyData` field that the KMS encryption API in OCP will need:
+```bash
+cat cosign.pub | base64 -w 0
+```
+
 **Why these flags are required:**
 - `--new-bundle-format=false`: Forces cosign to use the legacy tag-based signature format instead of OCI 1.1 referrers
 - `--use-signing-config=false`: Required when using `--new-bundle-format=false` to disable TUF-provided signing configuration
 
-**Note:** These flags will be removed in cosign v4. When containers/image adds
-OCI 1.1 referrers support in future OpenShift versions, vendors can use cosign
-v3+ default behavior without compatibility flags.
+**Note:** These flags will be removed in cosign v4. When containers/image adds OCI 1.1 referrers support in future OpenShift versions, vendors can use cosign v3+ default behavior without compatibility flags.
+
+###### ImagePolicy Cluster Configuration
+
+The cluster operators will ensure that only verified images can be pulled and run from the cluster. To ensure that, when the KMS plugin is configured, the operators will check the cluster for a scoped ClusterImagePolicy with a well formed name, scope and policy.
+
+To do this, when the controllers detect that KMS mode is configured and the operator is configuring and deploying the plugin, it will first detect which supported KMS plugin is being rolled out. It will then fetch the correct well known ClusterImagePolicy that matches the metadata for the plugin it expects. If the ClusterImagePolicy match the criteria that is embedded in the OCP payload, installation of the KMS plugin will continue.
+
+**Note:**  All supported plugin metadata, including registry image path and public key data, will be hardcoded and included in the OpenShift payload. That data will be provided by KMS plugin vendors to OCP Engineering.
 
 ###### Customer Configuration
 
-Users must create a `ClusterImagePolicy` resource to configure OpenShift to
-verify the image signature every time CRI-O pulls a plugin image. Users should
-obtain the vendor's public key from the vendor's official documentation (e.g.,
-HashiCorp's documentation for the Vault KMS plugin).
+Users must create a `ClusterImagePolicy` resource to configure OpenShift to verify the image signature every time CRI-O pulls a plugin image. Users should obtain the vendor's public key from the vendor's official documentation (e.g., HashiCorp's documentation for the Vault KMS plugin).
 
 `ClusterImagePolicy` example:
 ```yaml
@@ -818,26 +819,75 @@ spec:
       matchPolicy: MatchRepository
 ```
 
-To generate the base64-encoded public key for the `keyData` field:
-```bash
-cat cosign.pub | base64 -w 0
+In order for the API Server Operators to validate that the installed KMS plugin is certified and supported by OCP, it must be defined in a well known way. The fields that match must include the following:
+
+```
+metadata.name
+spec.scopes
+spec.policy.rootOfTrust.policyType
+spec.policy.matchPolicy
 ```
 
-When vendors release images signed with a new key, users must create a new
-`ClusterImagePolicy` resource with the updated public key. During the transition
-period, both old and new `ClusterImagePolicy` resources must exist in the
-cluster until the previous `ClusterImagePolicy` is no longer needed (i.e when
-migration to the new plugin image is finished).
+As part of our KMS documentation, we will publish a mapping of the fields that are required for each KMS plugin.
 
-Users should refer to the vendor's official documentation for the most current
-public key to use in their `ClusterImagePolicy`.
+Additionally, users must set the `spec.policy.rootOfTrust.publicKey.keyData` field to the base64 encoded public key that the image was signed with. Users should refer to the vendor's official documentation for the most current public key to use in their `ClusterImagePolicy`.
+
+When vendors release images signed with a new key, users must create a new `ClusterImagePolicy` resource with the updated public key. During the transition period, both old and new `ClusterImagePolicy` resources must exist in the cluster until the previous `ClusterImagePolicy` is no longer needed (i.e when migration to the new plugin image is finished).
+
+###### Overriding Configuration
+
+There are cases where a user needs the ability to override this configuration in order to be able to use an unsupported plugin image -- for example if there is a hotfix that needs to be handed to a user urgently or even in certain testing  scenarios. We will enable this by adding an override field to the UnsupportedConfigOverrides cluster API that will disable the deployment of the ClusterImagePolicy. This will put the cluster in an unsupported state that will need to be resolved before upgrading the cluster, but it will allow a user a temporary workaround to running unsupported or unverified plugin images.
+
+`UnsupportedConfigOverrides` in cluster config API example:
+```yaml
+apiVersion: operator.openshift.io/v1
+kind: KubeAPIServer
+metadata:
+  name: cluster
+spec:
+  unsupportedConfigOverrides:
+    encryption:
+      kms:
+        ignoreImagePolicy: true
+```
+
+When that override is set, users will be able to apply KMS plugin configuration to the cluster without image verification.
+
+###### Disconnected Concerns
+
+When a cluster is disconnected from external networks or airgapped, the ClusterImagePolicy defined by the cluster will not be sufficient because the cluster will not have access to an external registry to pull the image. OpenShift has tools and APIs that enable core component images and layered operators to be mirrored into disconnected environments in mirror registries (oc-mirror, IDMS, ITMS). In a future iteration, we will update oc-mirror to understand how to mirror KMS plugins and provide the correct set of manifests to apply to the cluster so that plugins can be run out of the box in a seamless experience. For now, we are putting that work out of scope of this initial enhancement.
+
+To manually configure the mirror, the ClusterImagePolicy API has the `spec.policy.signedIdentity.remapIdentity` field that allows users to point the signed image to a mirrored registry.
+
+`ClusterImagePolicy` example for disconnected:
+```yaml
+apiVersion: config.openshift.io/v1
+kind: ClusterImagePolicy
+metadata:
+  name: vault-kms-plugin
+  labels:
+    config.openshift.io/type: kms
+spec:
+  scopes:
+    - mirror.internal.registry.com:5000/internal/mirrored-vault-plugin-kms # mirrored KMS plugin image
+  policy:
+    rootOfTrust:
+      policyType: PublicKey
+      publicKey:
+        # base64-encoded cosign public key (cosign.pub)
+        keyData: LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUZrd0V3WUhLb1pJemowQ0FRWUlLb1pJemowREFRY0RRZ0FFLi4uCi0tLS0tRU5EIFBVQkxJQyBLRVktLS0tLQo=
+    signedIdentity:
+      matchPolicy: MatchRepository
+      remapIdentity:
+        prefix: mirror.internal.registry.com:5000/internal/mirrored-vault-plugin-kms # mirrored KMS plugin image
+        signedPrefix: docker.io/hashicorp/vault-plugin-kms # this must match the kmsPluginImage in the APIServer config
+```
+
+Once a user has applied the ClusterImagePolicy the KMS plugin installation can continue.
 
 ##### Certification
 
-KMS plugin certification follows the CSI driver certification model. A
-dedicated test suite will be added to the `openshift-tests` binary, which
-vendors can extract from an OpenShift release payload and run in a test cluster
-with their KMS plugin installed.
+KMS plugin certification follows the CSI driver certification model. A dedicated test suite will be added to the `openshift-tests` binary, which vendors can extract from an OpenShift release payload and run in a test cluster with their KMS plugin installed.
 
 The certification test suite validates:
 - KMS plugin compliance with the Kubernetes KMS v2 API
@@ -846,11 +896,7 @@ The certification test suite validates:
 
 ###### Extracting the Test Binary and Running the Test Suite
 
-The KMS encryption test suite may take several hours to finish and is marked as
-disruptive (it may affect cluster stability during testing). Vendors are
-advised to run it in a dedicated test cluster within a CI/CD environment where
-test output is persisted. The test output is required to validate KMS plugin
-compatibility with OpenShift.
+The KMS encryption test suite may take several hours to finish and is marked as disruptive (it may affect cluster stability during testing). Vendors are advised to run it in a dedicated test cluster within a CI/CD environment where test output is persisted. The test output is required to validate KMS plugin compatibility with OpenShift.
 
 **Prerequisites:**
 - An OpenShift cluster (version matching the target certification version)
