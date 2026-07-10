@@ -568,10 +568,19 @@ When CRDs are non-compliant, CIO reports the mismatch in the
 `GatewayAPICRDsCompliant` condition message, including expected vs. actual
 versions and where to obtain valid manifests. Valid CRD manifests
 are available from:
-- The `gateway-api` container image in the OpenShift release
-  payload at `/manifests/gateway-api/`.
+- The `cluster-ingress-operator` container image in the OpenShift
+  release payload, at `/gateway-api-manifests/` (see Support
+  Procedures for an extraction example).
 - The upstream Gateway API release at
   `https://github.com/kubernetes-sigs/gateway-api/releases`.
+
+#### Dockerfile Change to Bundle CRD Manifests
+
+The `cluster-ingress-operator` Dockerfile must be updated to copy
+the Gateway API CRD manifests into `/gateway-api-manifests/` in
+the built image, so that the exact CRD manifests CIO expects can
+be retrieved directly from the release payload (see Support
+Procedures) instead of only from the upstream Gateway API release.
 
 #### Mode Transition Ordering
 
@@ -879,9 +888,10 @@ Check the condition message for the expected and actual versions.
 
 **Resolution**: Either upgrade the CRDs to the expected version or
 remove them and let CIO reinstall them. Valid CRD manifests can be
-obtained from the `gateway-api` container image in the OpenShift
-release payload at `/manifests/gateway-api/`, or from the upstream
-Gateway API release at
+extracted from the `cluster-ingress-operator` container image in
+the cluster's current release payload (Gateway API CRD manifests
+are bundled at `/gateway-api-manifests/` in that image), or
+obtained from the upstream Gateway API release at
 `https://github.com/kubernetes-sigs/gateway-api/releases` matching
 the expected version shown in the condition message.
 
@@ -891,8 +901,24 @@ oc get ingress.operator.openshift.io cluster \
   -o jsonpath='{.status.conditions}' | \
   jq '.[] | select(.type=="GatewayAPICRDsCompliant")'
 
-# Remove CRDs to let CIO reinstall (WARNING: this deletes
-# all Gateway, HTTPRoute, and other Gateway API resources)
+# Authenticate to the release image registry using the cluster's
+# pull secret
+oc get secret/pull-secret -n openshift-config \
+  -o jsonpath='{.data.\.dockerconfigjson}' | base64 -d > pull-secret.json
+
+# Extract the Gateway API CRD manifests from the
+# cluster-ingress-operator image in the cluster's current
+# release payload
+CIO_IMAGE=$(oc adm release info --image-for=cluster-ingress-operator \
+  --registry-config=pull-secret.json)
+oc image extract "${CIO_IMAGE}" --registry-config=pull-secret.json \
+  --path /gateway-api-manifests/:./gateway-api-manifests --confirm
+
+# Apply the extracted CRDs to upgrade to the expected version
+oc apply -f ./gateway-api-manifests/
+
+# Alternatively, remove CRDs to let CIO reinstall (WARNING: this
+# deletes all Gateway, HTTPRoute, and other Gateway API resources)
 oc delete crd \
   gatewayclasses.gateway.networking.k8s.io \
   gateways.gateway.networking.k8s.io \
