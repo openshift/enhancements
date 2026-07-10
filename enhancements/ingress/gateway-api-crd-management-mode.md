@@ -924,7 +924,8 @@ oc delete crd \
   gateways.gateway.networking.k8s.io \
   httproutes.gateway.networking.k8s.io \
   referencegrants.gateway.networking.k8s.io \
-  grpcroutes.gateway.networking.k8s.io
+  grpcroutes.gateway.networking.k8s.io \
+  backendtlspolicies.gateway.networking.k8s.io
 ```
 
 ## Alternatives (Not Implemented)
