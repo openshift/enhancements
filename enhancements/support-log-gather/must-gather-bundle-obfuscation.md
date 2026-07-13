@@ -59,7 +59,7 @@ Today, obfuscation requires a separate manual step using the `must-gather-clean`
 
 ### Non-Goals
 
-1. Changes to the must-gather-clean library API (consumed as-is, except for the required `chown` patch)
+1. Changes to the must-gather-clean library API (consumed as-is)
 2. Domain-specific obfuscation patterns shipped as part of the default config (users provide these via `obfuscationConfigRef`)
 3. Obfuscation progress reporting in the MustGather CR status
 
@@ -76,7 +76,7 @@ These sub-fields enable three supported operational modes:
 | Mode | Fields Used | Description |
 |------|-------------|-------------|
 | Gather + Obfuscate + Upload | `obfuscate.enabled: true` + `uploadTarget` | Full pipeline: collect, redact, upload |
-| Obfuscate Only | `obfuscate.enabled: true` + `obfuscate.source` | Redact an existing bundle on a PVC in-place, no gather, no upload |
+| Obfuscate Only | `obfuscate.enabled: true` + `obfuscate.source` | Redact an existing bundle from a PVC to a staging directory, no gather, no upload |
 | Obfuscate + Upload | `obfuscate.enabled: true` + `obfuscate.source` + `uploadTarget` | Redact an existing bundle and upload it, no gather |
 
 ### Workflow Description
@@ -89,15 +89,16 @@ This is the primary workflow for new must-gather collections with obfuscation.
 
 1. The cluster administrator creates a MustGather CR with `spec.obfuscate.enabled: true` and an `uploadTarget` configured
 2. The Must-Gather Operator creates a Job with gather and upload containers
-3. The gather container runs `/usr/bin/gather`, writes output to the shared `/must-gather` volume, and appends `chmod -R a+rwX /must-gather` before exiting (making contents accessible to the non-root upload container)
+3. The gather container runs `/usr/bin/gather`, writes output to the shared `/must-gather` volume, and appends `chown -R 65534:65534 /must-gather` before exiting (transferring ownership to the non-root upload container's uid)
 4. The upload container detects gather completion via `pgrep` polling
 5. The upload script checks the `obfuscate` environment variable
-6. The operator binary is invoked: `must-gather-operator obfuscate --input /must-gather --config <config-path> -v=3`
-7. If `obfuscationConfigRef` is set, the referenced ConfigMap is mounted and used as the config; otherwise the baked-in default config is used
-8. The obfuscation engine walks all files, applying the configured replacements and omissions
-9. Cleaned output replaces the original bundle via atomic rename
-10. An `obfuscation.log` is preserved in the bundle for auditability
-11. The upload script proceeds to tar and SFTP upload as normal
+6. The operator binary is invoked with a separate output directory:
+   `must-gather-operator obfuscate --input /must-gather --output /must-gather-upload/cleaned" -v=3`
+7. If `obfuscationConfigRef` is set, the referenced ConfigMap is mounted and used as the config; otherwise the built-in config is used
+8. The obfuscation engine walks all files, applying the configured replacements and omissions, writing cleaned output to `/must-gather-upload/cleaned`
+9. The upload script redirects `must_gather_output` to the cleaned directory (`must_gather_output="/must-gather-upload/cleaned"`)
+10. An `obfuscation.log` is preserved in the cleaned output for auditability
+11. The upload script proceeds to tar and SFTP upload from the cleaned directory
 12. The MustGather CR status is updated to Completed
 
 #### Mode 2: Obfuscate Only (No Gather, No Upload)
@@ -109,10 +110,10 @@ This mode allows administrators to redact an existing must-gather bundle stored 
 3. The operator creates a Job with only an upload container (no gather container)
 4. The upload container mounts the PVC at `/must-gather`
 5. The operator binary is invoked with the appropriate config (custom or default)
-6. Obfuscation runs in-place on the PVC contents
-7. The `obfuscation.log` is written to the bundle on the PVC
+6. Obfuscation reads from the PVC and writes cleaned output to `/must-gather-upload/cleaned`
+7. The `obfuscation.log` is written to the cleaned output
 8. The MustGather CR status is updated to Completed
-9. The obfuscated bundle remains on the PVC for the administrator to retrieve
+9. The original bundle on the PVC remains untouched; the obfuscated bundle is in the staging directory for the administrator to retrieve
 
 #### Mode 3: Obfuscate + Upload (No Gather)
 
@@ -191,7 +192,7 @@ No new CRDs. The `obfuscate` field is optional and defaults to `nil`, making thi
 
 #### Example CRs
 
-**Mode 1: Gather + Obfuscate + Upload (default config)**
+**Mode 1: Gather + Obfuscate + Upload (built-in config)**
 
 ```yaml
 apiVersion: operator.openshift.io/v1alpha1
@@ -343,7 +344,7 @@ Obfuscation runs as a post-gather, pre-upload step inside the existing upload co
 │  │ writes to         │ output │    read /must-gather  │  │
 │  │ /must-gather ─────┼───vol──│    write to staging   │  │
 │  │                   │        │    dir on upload vol   │  │
-│  │ chmod -R a+rwX    │        │    atomic rename back │  │
+│  │ chown -R 65534    │        │    atomic rename back │  │
 │  │ /must-gather      │        │    to /must-gather    │  │
 │  │ (when obfuscate)  │        │ 3. tar /must-gather   │  │
 │  │                   │ upload │ 4. sftp upload        │  │
@@ -374,18 +375,17 @@ Added `Obfuscate *ObfuscateConfig` struct (with `Enabled *bool`, `ObfuscationCon
 **2. Obfuscation logic (`main.go`)**
 
 A `runObfuscate` function is added to `main.go`, invoked by the upload script:
-- Accepts an input directory path, an optional output directory path (in-place if omitted), and a config file path (defaults to baked-in config)
-- Writes an `obfuscation.log` file into the bundle for auditability
-- Imports `go.uber.org/automaxprocs` to set `GOMAXPROCS` to the container's CPU limit, then uses `min(runtime.GOMAXPROCS(0), 4)` workers to cap parallelism
-- Calls `mgclean.Run()` to perform obfuscation using the capped worker count
-- In in-place mode: writes to a temp directory (`/must-gather-upload/.must-gather-cleaned`), then atomically swaps with the original via `os.RemoveAll` + `os.Rename`
-- Copies the log file into the cleaned output so it survives the replacement
+- Accepts `--input` (required), `--output` (required), and `--config` (defaults to built-in config)
+- Imports `go.uber.org/automaxprocs` to set `GOMAXPROCS` to the container's CPU limit
+- Calls `mgclean.Run()` to perform obfuscation using 4 parallel workers
+- Writes cleaned files to the output directory, preserving directory structure
+- Writes an `obfuscation.log` file into the output for auditability
 
 **3. Job template (`controllers/mustgather/template.go`)**
 
 Changes when `spec.obfuscate.enabled` is true:
 
-*Gather container*: Appends `chmod -R a+rwX /must-gather` to the gather command, making the output volume writable for the non-root upload container. When `spec.obfuscate.source` is set, the gather container is omitted entirely from the Job spec.
+*Gather container*: Appends `chown -R 65534:65534 /must-gather` to the gather command, transferring file ownership to the upload container's uid (65534). This ensures `must-gather-clean` can read input files and `os.Chown` output files without `EPERM` errors. When `spec.obfuscate.source` is set, the gather container is omitted entirely from the Job spec.
 
 *Upload container*: Sets the `obfuscate` environment variable to `"true"`. When `spec.obfuscate.obfuscationConfigRef` is set, the referenced ConfigMap is mounted as a volume at `/etc/must-gather-clean/custom-config/config.yaml` and the `obfuscate_config` environment variable is set to that path. When `spec.obfuscate.source` is set, the referenced PVC is mounted at `/must-gather` instead of the emptyDir volume, and the gather-completion polling is skipped.
 
@@ -402,8 +402,12 @@ if [ "${obfuscate}" = "true" ]; then
     config_flag="--config ${obfuscate_config}"
   fi
   echo "Running obfuscation on $must_gather_output ..."
-  /usr/local/bin/must-gather-operator obfuscate --input "$must_gather_output" ${config_flag} -v=3
+  /usr/local/bin/must-gather-operator obfuscate \
+    --input "$must_gather_output" \
+    --output "/must-gather-upload/cleaned" \
+    ${config_flag} -v=3
   echo "Obfuscation complete."
+  must_gather_output="/must-gather-upload/cleaned"
 fi
 ```
 
@@ -439,7 +443,7 @@ COPY --from=builder .../build/obfuscate-config.yaml /etc/must-gather-clean/defau
 
 **7. Go module (`go.mod`)**
 
-Added `must-gather-clean` as a dependency (pinned to upstream release once the `chown` patch is merged).
+Added `must-gather-clean` as a dependency.
 
 #### Permission Model
 
@@ -450,13 +454,11 @@ The obfuscation step bridges a permission gap between two containers with differ
 | gather | 0 (root) | Creates all files as root-owned in `/must-gather` |
 | upload | 65534 (nobody) | Reads input from `/must-gather`, writes cleaned output to `/must-gather-upload` |
 
-Two mechanisms resolve this:
+This is resolved by a single mechanism:
 
-1. **`chmod` by gather container**: When `obfuscate.enabled: true`, the gather container's command is extended with `chmod -R a+rwX /must-gather`. This runs as root before the gather container exits, making the output volume world-readable and world-writable.
+**`chown` by gather container**: When `obfuscate.enabled: true`, the gather container's command is extended with `chown -R 65534:65534 /must-gather`. This runs as root (which has `CAP_CHOWN`) before the gather container exits, transferring ownership of all collected files to uid 65534. The upload container can then read, write, and `os.Chown` these files without permission errors. No upstream patch to `must-gather-clean` is required.
 
-2. **`chown` patch in must-gather-clean**: The library attempts `os.Chown` on output files to match input ownership. A patch makes `syscall.EPERM` non-fatal, since uid 65534 cannot `chown` to uid 0. Output files are created with uid 65534 ownership instead, which has zero functional impact for the ephemeral Job pod.
-
-**Why not run the upload container as root?** Running as root would eliminate both permission issues but violates the principle of least privilege, conflicts with OpenShift's restricted SCC, and would require explicit `anyuid` SCC bindings.
+**Why not run the upload container as root?** Running as root would eliminate the permission gap entirely but violates the principle of least privilege, conflicts with OpenShift's restricted SCC, and would require explicit `anyuid` SCC bindings.
 
 #### Default Obfuscation Behavior
 
@@ -468,49 +470,31 @@ Two mechanisms resolve this:
 | Kubernetes ConfigMaps | Omitted entirely | Files containing `kind: ConfigMap` are excluded from output |
 | Local IPs (127.0.0.1, 0.0.0.0, ::1) | Preserved | Not obfuscated |
 
-#### Required Upstream Changes to must-gather-clean
-
-The `openshift/must-gather-clean` library requires the following patch before this integration can ship to production. The patch is to `pkg/fsutil/fsutil_unix.go`.
-
-**Problem**: `must-gather-clean` was designed as a standalone CLI tool that typically runs as root or on user-owned files. It preserves input file ownership on output files via `os.Chown`. In the operator context, input files are owned by root (uid 0, from the gather container) but the `chown` is executed by uid 65534 (the upload container). The Linux kernel requires `CAP_CHOWN` to change file ownership to a different user, which non-root processes lack. Without the patch, every file write fails with `EPERM`.
-
-**Required change**: Modify the `chown` function to treat `syscall.EPERM` as non-fatal:
-
-```go
-func chown(path string, stat fs.FileInfo) error {
-    uid := stat.Sys().(*syscall.Stat_t).Uid
-    gid := stat.Sys().(*syscall.Stat_t).Gid
-    err := os.Chown(path, int(uid), int(gid))
-    if err != nil {
-        if errors.Is(err, syscall.EPERM) {
-            klog.V(3).Infof("chown '%s' to (%d, %d) skipped: permission denied (running as non-root)", path, uid, gid)
-            return nil
-        }
-        return err
-    }
-    return nil
-}
-```
-
-**Impact of skipping `chown`**: Output files are owned by uid 65534 instead of uid 0. This is purely cosmetic -- the files are immediately tarred, SFTP-uploaded, and the pod is deleted. File ownership within the tar archive is irrelevant to support engineers analyzing the bundle contents.
-
-**Path to production**: This patch should be proposed upstream to `openshift/must-gather-clean` as a bug fix for non-root execution. Once merged and released, the `replace` directive in the operator's `go.mod` should be removed and replaced with a pinned version. Until then, a `replace` directive pointing to a fork is used for development:
-
-```
-require github.com/openshift/must-gather-clean v0.0.0-00010101000000-000000000000
-replace github.com/openshift/must-gather-clean => ../must-gather-clean
-```
-
 #### Performance Impact
+
+Obfuscation adds a CPU-bound processing step between gather completion and upload. The following benchmarks were collected on an OCP cluster with 3 control-plane nodes and 3 worker nodes.
+
+**Benchmarks**:
+
+| Workers | Bundle Size | Sensitive Data Density | Obfuscation Time |
+|---------|-------------|------------------------|------------------|
+| 4 | ~200 MB | Light | ~50 seconds |
+| 4 | ~400 MB | Light | ~90 seconds |
+| 8 | ~400 MB | Light | ~53 seconds |
+| 8 | ~600 MB | Heavy | ~2 minutes |
+| 8 | ~1.7 GB | Heavy | ~5 minutes |
+| 8 | ~2 GB | Heavy | ~7 minutes |
+
+*"Light" = typical cluster logs with standard IP/MAC occurrences. "Heavy" = logs with dense sensitive data (many unique IPs, MACs, Secrets, ConfigMaps) requiring more regex matching and replacement map lookups.*
 
 **Key observations**:
 
-- Obfuscation is I/O-bound, not CPU-bound. The bottleneck is reading and writing files, not regex processing.
-- The operator uses `automaxprocs` to detect the container's cgroup CPU limit and sets `GOMAXPROCS` accordingly. Worker count is further capped at 4 to avoid excessive I/O contention, since the workload is I/O-bound rather than CPU-bound.
-- In-place mode (used in the operator) requires temporary disk space equal to the bundle size in `/must-gather-upload/.must-gather-cleaned` during processing. After atomic rename, this space is freed.
+- Obfuscation is CPU-bound. The bottleneck is regex matching and consistent replacement across file contents.
+- Doubling workers from 4 to 8 on a 400 MB bundle cut time from ~90s to ~53s (~41% reduction), confirming CPU-bound scaling.
+- Bundles with heavy sensitive data density take significantly longer at the same size (e.g., ~600 MB heavy takes ~2 min vs ~400 MB light at ~53s with 8 workers) due to more regex matches and replacement map operations.
+- The operator uses `automaxprocs` to detect the container's cgroup CPU limit and sets `GOMAXPROCS` accordingly. Worker count is hardcoded to 4 initially; this can be revisited in a future performance-focused proposal based on production data.
+- The operator writes cleaned output to `/must-gather-upload/cleaned`, requiring temporary disk space equal to the bundle size on the upload volume during processing.
 - The upload step (tar + SFTP) is typically the longest phase of the pipeline. Obfuscation adds a smaller fraction of time relative to network-bound upload.
-
-**Worst-case scenario**: On a single-node deployment with a 1GB+ bundle and slow storage (e.g., network-attached PV), obfuscation could take 5-10 minutes. This is still within acceptable bounds for a batch diagnostic operation.
 
 **Mitigation for large bundles**: Users can combine `obfuscate.enabled: true` with `gatherSpec.since` (time-based filtering from the time-filter enhancement) to reduce bundle size before obfuscation, improving both gather and obfuscation performance.
 
@@ -519,18 +503,17 @@ replace github.com/openshift/must-gather-clean => ../must-gather-clean
 | Risk | Impact | Mitigation |
 |------|--------|------------|
 | `must-gather-clean` calls `klog.Exitf` on file errors, terminating the upload container | Upload fails hard instead of returning a recoverable error | The obfuscation runs in the upload container (not the operator controller), so the operator process itself is unaffected; document that file-level errors are fatal |
-| Obfuscation increases Job duration for large bundles | Longer time to upload for support cases | Obfuscation is I/O-bound and parallelized |
-| Container CPU limits may be lower than expected | Obfuscation runs slower with fewer workers | `automaxprocs` detects cgroup CPU limits and sets `GOMAXPROCS` accordingly; worker count is additionally capped at 4 to balance throughput and I/O contention |
-| The `chown` patch to `must-gather-clean` has not yet been merged upstream | Development uses a `replace` directive in `go.mod` pointing to a local fork, which cannot ship to production | Propose the `chown` EPERM fix upstream as a prerequisite; once merged, pin to the upstream release and remove the `replace` directive |
+| Obfuscation increases Job duration for large bundles | Longer time to upload for support cases | Obfuscation is CPU-bound and parallelized; see Performance Impact section for benchmarks |
+| Container CPU limits may be lower than expected | 4 hardcoded workers may exceed available CPU, causing throttling | `automaxprocs` detects cgroup CPU limits and sets `GOMAXPROCS` accordingly; acceptable since obfuscation is a short-lived batch operation. Worker count can be revisited in a future performance-focused proposal |
 | Omitted resources (Secrets, ConfigMaps by default) are permanently excluded from the bundle | Support engineers will not have access to omitted resources, potentially limiting their ability to diagnose issues | Document clearly that any resource type configured for omission will be unavailable to support; users can adjust omission rules via `obfuscationConfigRef` |
-| `obfuscate.source` in-place mode is destructive | Original unobfuscated bundle on PVC is permanently replaced | Document this clearly; users should back up the PVC if they need the original. Consider non-destructive mode as follow-up |
+| `obfuscate.source` mode requires additional disk space | Cleaned output is written to a staging directory (`/must-gather-upload/cleaned`), requiring temporary disk space equal to the bundle size | Acceptable since the upload volume is an emptyDir sized for staging; the original bundle on the PVC remains untouched |
 | Custom must-gather images may produce non-standard output structures | Obfuscation may miss or incorrectly process files from custom images | `must-gather-clean` operates on file content (regex-based), not directory structure, so it is largely format-agnostic. Document that custom image support is best-effort |
 | Invalid custom obfuscation ConfigMap causes runtime failure | Obfuscation fails, Job fails, no upload occurs | Operator logs the error clearly; `obfuscation.log` captures the failure reason. Config validation is best-effort at the library level |
+| CPU-intensive obfuscation pod scheduled on control-plane or infra nodes could starve critical components | Degraded API server, etcd, or ingress performance during obfuscation of large bundles | The Job pod template includes node affinity and tolerations to schedule obfuscation pods exclusively on worker nodes, avoiding control-plane and infra nodes |
 
 ### Drawbacks
 
 - Adds a dependency on the `must-gather-clean` library, increasing the operator binary size and vendor footprint
-- The `chown` patch requires coordination with an upstream repository before production readiness
 - The default ConfigMap omission is aggressive -- some ConfigMaps contain non-sensitive operational data useful for debugging (mitigated by custom config support)
 - Custom config validation is deferred to runtime: a malformed ConfigMap will not be caught at CR creation time, only when the obfuscation Job runs
 
@@ -547,7 +530,7 @@ A dedicated container running the `must-gather-clean` binary between gather and 
 
 ### Running Upload Container as Root (uid 0)
 
-Would eliminate both the `chmod` and `chown` patch requirements.
+Would eliminate the need for `chown` in the gather container.
 
 **Rejected because**:
 - Violates principle of least privilege
@@ -582,17 +565,13 @@ Embedding the full must-gather-clean config YAML directly in the MustGather CR s
 
 3. Should the obfuscation report (`report.yaml` with replacement mappings) be surfaced in the MustGather CR status, or is inclusion in the bundle sufficient?
 
-4. What is the SLA for the upstream `chown` patch to `openshift/must-gather-clean`?
-
-5. For `obfuscate.source` mode, should the operator obfuscate in-place on the source PVC (destructive, replaces original) or write to a separate output PVC (non-destructive, requires additional storage)?
-
-6. Should the operator validate that the referenced `obfuscationConfigRef` ConfigMap exists and contains a `config.yaml` key at CR admission time (via webhook), or only at Job execution time?
+4. Should the operator validate that the referenced `obfuscationConfigRef` ConfigMap exists and contains a `config.yaml` key at CR admission time (via webhook), or only at Job execution time?
 
 ## Test Plan
 
 ### Unit Tests
 
-- `template_test.go`: Verify `getGatherContainer` appends `chmod -R a+rwX` when `obfuscate.enabled` is true, does not when false
+- `template_test.go`: Verify `getGatherContainer` appends `chown -R 65534:65534` when `obfuscate.enabled` is true, does not when false
 - `template_test.go`: Verify `getUploadContainer` passes `obfuscate` env var when `obfuscate.enabled` is true, does not when false
 - `template_test.go`: Verify `getUploadContainer` mounts the ConfigMap and sets `obfuscate_config` env var when `obfuscationConfigRef` is set
 - `template_test.go`: Verify Job template omits the gather container when `obfuscate.source` is set
@@ -602,7 +581,7 @@ Embedding the full must-gather-clean config YAML directly in the MustGather CR s
 ### Integration Tests
 
 - Verify `runObfuscate()` correctly processes a test bundle directory
-- Verify in-place mode atomically replaces the original directory
+- Verify output is written to the staging directory without modifying the input
 - Verify `obfuscation.log` is present in the output
 - Verify IP addresses are consistently replaced across multiple files
 
@@ -626,7 +605,7 @@ Embedding the full must-gather-clean config YAML directly in the MustGather CR s
 - Pre-populate a PVC with a must-gather bundle
 - Create MustGather CR with `obfuscate.enabled: true` and `obfuscate.source` referencing the PVC
 - Verify no gather container is created in the Job
-- Verify the PVC contents are obfuscated in-place
+- Verify the original PVC contents are untouched and cleaned output is in the staging directory
 - Verify `obfuscation.log` exists on the PVC
 
 **Mode 3 (Obfuscate + Upload)**:
@@ -652,8 +631,8 @@ Not applicable. This feature enters directly as Tech Preview.
 - All three modes working end-to-end (gather+obfuscate+upload, obfuscate-only, obfuscate+upload)
 - Custom obfuscation config via ConfigMap working end-to-end
 - Obfuscation logs included in output bundles
-- Upstream `chown` patch merged to `openshift/must-gather-clean`
-- `replace` directive removed from `go.mod` (pinned to upstream release)
+- No upstream patches required for `openshift/must-gather-clean`
+
 - Sufficient user feedback on default obfuscation behavior and custom config UX
 - Comprehensive test coverage including upgrade/downgrade scenarios
 - Performance benchmarking for representative bundle sizes and large bundles (>1GB)
@@ -693,14 +672,12 @@ The `obfuscate` field is an optional addition to the existing `mustgathers.opera
 - **Disabling**: Omit the `spec.obfuscate` field entirely or set `spec.obfuscate.enabled: false` to skip obfuscation.
 - **Consequences of disabling**: Bundles will be uploaded without redaction. No data loss occurs; the full unredacted bundle is uploaded instead.
 - **Common failure modes**:
-  - `permission denied` errors in obfuscation: Indicates the `chmod` step in the gather container did not execute. Verify the gather container command includes the chmod suffix.
+  - `permission denied` errors in obfuscation: Indicates the `chown` step in the gather container did not execute. Verify the gather container command includes the `chown -R 65534:65534` suffix.
   - `klog.Exitf` in upload container logs: Indicates a file-level error in the must-gather-clean library. Check for corrupted or unreadable files in the bundle.
 
 ## Infrastructure Needed
 
-No new infrastructure is needed. The enhancement uses existing CI infrastructure and the existing SFTP upload target for testing. The `must-gather-clean` library is vendored as a Go dependency.
-
-A patch to the upstream `openshift/must-gather-clean` repository is required for the `chown` EPERM handling. This should be proposed as a bug fix PR to that repository.
+No new infrastructure is needed. The enhancement uses existing CI infrastructure and the existing SFTP upload target for testing. The `must-gather-clean` library is vendored as a Go dependency. No upstream patches are required.
 
 ## Future Enhancements
 
