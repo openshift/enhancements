@@ -74,7 +74,7 @@ As a platform engineer, I want to enable auto node sizing and have GOMAXPROCS au
         matchLabels:
           pools.operator.machineconfiguration.openshift.io/worker: ''
       containerRuntimeConfig:
-        gomaxprocsInjectionBehavior: Inject
+        containerGomaxprocsBehavior: Autosize
     ```
 
 2. The Machine Config Operator renders the CRI-O configuration setting `min_injected_gomaxprocs = 1`
@@ -145,7 +145,7 @@ spec:
     matchLabels:
       pools.operator.machineconfiguration.openshift.io/worker: ''
   containerRuntimeConfig:
-    gomaxprocsInjectionBehavior: Inject
+    containerGomaxprocsBehavior: Autosize
 ```
 
 After these configurations are applied and the machine config pool rolls out:
@@ -164,33 +164,33 @@ After these configurations are applied and the machine config pool rolls out:
 
 #### ContainerRuntimeConfig API
 
-A new field `gomaxprocsInjectionBehavior` is added to `ContainerRuntimeConfiguration` in `machineconfiguration.openshift.io/v1`:
+A new field `containerGomaxprocsBehavior` is added to `ContainerRuntimeConfiguration` in `machineconfiguration.openshift.io/v1`:
 
 ```go
-// GomaxprocsInjectionBehaviorType specifies whether CRI-O should inject GOMAXPROCS into containers
-type GomaxprocsInjectionBehaviorType string
+// ContainerGomaxprocsBehaviorType specifies whether CRI-O should inject GOMAXPROCS into containers
+type ContainerGomaxprocsBehaviorType string
 
 const (
-    // GomaxprocsInjectionBehaviorInject enables automatic GOMAXPROCS injection based on CPU requests
-    GomaxprocsInjectionBehaviorInject GomaxprocsInjectionBehaviorType = "Inject"
-    // GomaxprocsInjectionBehaviorDisabled disables GOMAXPROCS injection
-    GomaxprocsInjectionBehaviorDisabled GomaxprocsInjectionBehaviorType = "Disabled"
+    // ContainerGomaxprocsBehaviorAutosize enables automatic GOMAXPROCS injection based on CPU requests
+    ContainerGomaxprocsBehaviorAutosize ContainerGomaxprocsBehaviorType = "Autosize"
+    // ContainerGomaxprocsBehaviorDisabled disables GOMAXPROCS injection
+    ContainerGomaxprocsBehaviorDisabled ContainerGomaxprocsBehaviorType = "Disabled"
 )
 
 // ContainerRuntimeConfiguration defines the tuneables of the container runtime
 type ContainerRuntimeConfiguration struct {
     // ... existing fields ...
     
-    // gomaxprocsInjectionBehavior controls whether CRI-O automatically injects the GOMAXPROCS environment variable into containers
+    // containerGomaxprocsBehavior controls whether CRI-O automatically injects the GOMAXPROCS environment variable into containers
     // based on their CPU resource requests.
-    // Valid values are "Inject" and "Disabled".
-    // When set to "Inject", CRI-O will automatically set GOMAXPROCS proportional to the container's CPU request,
+    // Valid values are "Autosize" and "Disabled".
+    // When set to "Autosize", CRI-O will automatically set GOMAXPROCS proportional to the container's CPU request,
     // calculated as max(ceil(cpu_request_in_cores * 2), 1). This helps Go applications optimize their runtime parallelism
     // based on the allocated CPU resources rather than the total node capacity.
     // When set to "Disabled", GOMAXPROCS injection is disabled and containers will use Go's default behavior
     // (GOMAXPROCS equals the number of CPUs available on the node).
     // When omitted, this means no opinion and the platform is left to choose a reasonable default, which is subject to change over time.
-    // The current default is "Inject".
+    // The current default is "Disabled".
     //
     // Containers can override the injected GOMAXPROCS value by:
     // - Setting GOMAXPROCS in the container image Dockerfile (ENV GOMAXPROCS=...)
@@ -200,12 +200,12 @@ type ContainerRuntimeConfiguration struct {
     //
     // +openshift:enable:FeatureGate=GomaxprocsInjection
     // +optional
-    // +kubebuilder:validation:Enum=Inject;Disabled
-    GomaxprocsInjectionBehavior GomaxprocsInjectionBehaviorType `json:"gomaxprocsInjectionBehavior,omitempty"`
+    // +kubebuilder:validation:Enum=Autosize;Disabled
+    ContainerGomaxprocsBehavior ContainerGomaxprocsBehaviorType `json:"containerGomaxprocsBehavior,omitempty"`
 }
 ```
 
-The field is optional. When omitted, the platform chooses a reasonable default, which is subject to change over time. The current default is `Inject`.
+The field is optional. When omitted, the platform chooses a reasonable default, which is subject to change over time. The current default is `Disabled`.
 
 **Feature Gate**: This field is controlled by the `GomaxprocsInjection` feature gate:
 
@@ -225,7 +225,7 @@ const (
     // ...
     
     // GomaxprocsInjection enables automatic GOMAXPROCS injection for containers
-    // via ContainerRuntimeConfig.gomaxprocsInjectionBehavior
+    // via ContainerRuntimeConfig.containerGomaxprocsBehavior
     //
     // owner: @openshift/openshift-team-machine-config-operator
     // alpha: v4.18
@@ -234,9 +234,9 @@ const (
 )
 ```
 
-When the feature gate is disabled, the `gomaxprocsInjectionBehavior` field is ignored (validation passes but MCO does not render CRI-O configuration).
+When the feature gate is disabled, the `containerGomaxprocsBehavior` field is ignored (validation passes but MCO does not render CRI-O configuration).
 
-**Design note**: The API uses an enum (`Inject`/`Disabled`) rather than exposing CRI-O's integer `min_injected_gomaxprocs` value directly because setting GOMAXPROCS based on CPU request is the correct behavior for how the Kubernetes scheduler bin-packs nodes. Exposing the raw integer would invite misconfiguration (e.g., setting a high static floor that ignores actual CPU requests). If future use cases require a configurable floor or multiplier, a new field can be added to the API without breaking compatibility.
+**Design note**: The API uses an enum (`Autosize`/`Disabled`) rather than exposing CRI-O's integer `min_injected_gomaxprocs` value directly because setting GOMAXPROCS based on CPU request is the correct behavior for how the Kubernetes scheduler bin-packs nodes. Exposing the raw integer would invite misconfiguration (e.g., setting a high static floor that ignores actual CPU requests). If future use cases require a configurable floor or multiplier, a new field can be added to the API without breaking compatibility.
 
 #### KubeletConfig API
 
@@ -259,6 +259,8 @@ type KubeletConfig struct {
     
     // systemGomaxprocsBehavior controls whether the kubelet-auto-node-size service automatically configures
     // GOMAXPROCS for kubelet and CRI-O system services based on the system reserved CPU allocation.
+    // GOMAXPROCS is calculated from system reserved CPU, which is determined dynamically by autoSizingReserved
+    // when enabled, or from static system reserved values otherwise.
     // Valid values are "Autosize" and "Disabled".
     // When set to "Autosize", the GOMAXPROCS environment variable for kubelet and CRI-O is set to
     // max(ceil(system_reserved_cpu), 1). This optimizes the runtime parallelism of these Go-based system
@@ -285,7 +287,7 @@ const (
     // ...
     
     // GomaxprocsInjection enables automatic GOMAXPROCS configuration for:
-    // - Containers: via ContainerRuntimeConfig.gomaxprocsInjectionBehavior
+    // - Containers: via ContainerRuntimeConfig.containerGomaxprocsBehavior
     // - System services: via KubeletConfig.systemGomaxprocsBehavior
     //
     // owner: @openshift/openshift-team-machine-config-operator
@@ -339,8 +341,8 @@ CRI-O's GOMAXPROCS injection feature (https://github.com/cri-o/cri-o/pull/9860) 
 - Pod with `skip-gomaxprocs.crio.io` annotation: CRI-O skips injection for that pod even when enabled globally
 
 The Machine Config Operator will:
-1. Translate `gomaxprocsInjectionBehavior: Inject` to `min_injected_gomaxprocs = 1` in CRI-O config
-2. Translate `gomaxprocsInjectionBehavior: Disabled` to `min_injected_gomaxprocs = 0` (or omit the setting)
+1. Translate `containerGomaxprocsBehavior: Autosize` to `min_injected_gomaxprocs = 1` in CRI-O config
+2. Translate `containerGomaxprocsBehavior: Disabled` to `min_injected_gomaxprocs = 0` (or omit the setting)
 3. Apply the configuration via the standard MCO reconciliation process
 4. If the feature gate is disabled, the field is silently ignored and CRI-O config remains unchanged
 
@@ -418,7 +420,7 @@ In all cases, applications retain control and can override the injected value.
 
 - **Formula may not be optimal for all workloads**: The 2x multiplier is based on upstream research, but some workloads may benefit from different values. However, users can override via pod spec environment variables if needed.
 
-- **GA default flip impact**: If this feature graduates to GA with `Inject` as the platform default, it creates a **silent behavior change on upgrade** for existing clusters:
+- **GA default flip impact**: If this feature graduates to GA with `Autosize` as the platform default, it creates a **silent behavior change on upgrade** for existing clusters:
   
   **What changes:**
   - Every cluster that does not explicitly set `Disabled` will start injecting GOMAXPROCS on upgrade
@@ -433,9 +435,7 @@ In all cases, applications retain control and can override the injected value.
   **Mitigations:**
   - Applications with explicit GOMAXPROCS settings (via Dockerfile ENV, pod spec, or `runtime.GOMAXPROCS()`) are unaffected
   - Pod-level opt-out via `skip-gomaxprocs.crio.io` annotation
-  - Cluster-wide opt-out via `gomaxprocsInjectionBehavior: Disabled`
-  
-  **Alternative GA strategy:** Default to `Disabled` at GA, requiring explicit opt-in. This provides a safer upgrade path but loses the benefit of automatic optimization for new deployments. The choice between "better defaults with upgrade risk" vs "safer upgrades with manual opt-in" should be made based on Tech Preview feedback and measured impact.
+  - Cluster-wide opt-out via `containerGomaxprocsBehavior: Disabled`
 
 #### System Service GOMAXPROCS
 
@@ -451,11 +451,11 @@ In all cases, applications retain control and can override the injected value.
 
 #### GA Default Behavior
 
-**Question**: Should the platform default at GA be `Inject` or `Disabled`?
+**Question**: Should the platform default at GA be `Autosize` or `Disabled`?
 
-**Context**: During Tech Preview, the feature is opt-in via feature gate. At GA, we need to decide the default value when users don't explicitly configure `gomaxprocsInjectionBehavior`.
+**Context**: During Tech Preview, the feature is opt-in via feature gate. At GA, we need to decide the default value when users don't explicitly configure `containerGomaxprocsBehavior`.
 
-**Option 1 - Default to `Inject`**:
+**Option 1 - Default to `Autosize`**:
 - **Pros**: Better out-of-box experience for new deployments; workloads automatically optimized
 - **Cons**: Silent behavior change on upgrade for existing clusters; workloads relying on default `GOMAXPROCS = node CPU count` will switch to `ceil(2 * request)`
 - **Upgrade impact**: Requires upgrade planning and testing for existing clusters
@@ -478,12 +478,12 @@ In all cases, applications retain control and can override the injected value.
 ### Container GOMAXPROCS Injection Tests
 
 **Unit tests** (Machine Config Operator):
-- Field validation: Accepts `Inject` and `Disabled`, rejects invalid values
+- Field validation: Accepts `Autosize` and `Disabled`, rejects invalid values
 - CRI-O config rendering: Correctly translates API field to `min_injected_gomaxprocs` setting
 
 **Integration tests**:
-- Verify ContainerRuntimeConfig with `gomaxprocsInjectionBehavior: Inject` renders correct CRI-O configuration
-- Verify ContainerRuntimeConfig with `gomaxprocsInjectionBehavior: Disabled` omits or sets `min_injected_gomaxprocs = 0`
+- Verify ContainerRuntimeConfig with `containerGomaxprocsBehavior: Autosize` renders correct CRI-O configuration
+- Verify ContainerRuntimeConfig with `containerGomaxprocsBehavior: Disabled` omits or sets `min_injected_gomaxprocs = 0`
 - Verify feature gate enforcement: field is ignored when `GomaxprocsInjection` feature gate is disabled
 
 **E2E tests**:
@@ -538,7 +538,7 @@ In all cases, applications retain control and can override the injected value.
 - Complete user-facing documentation in openshift-docs
 - Available by default in all cluster profiles
 - **Decision on GA default behavior**: Based on Tech Preview feedback, choose between:
-  - **Option 1 (Inject by default)**: Platform default is `Inject`, optimizing new deployments automatically but requiring upgrade planning for existing clusters
+  - **Option 1 (Autosize by default)**: Platform default is `Autosize`, optimizing new deployments automatically but requiring upgrade planning for existing clusters
   - **Option 2 (Disabled by default)**: Platform default is `Disabled`, providing safer upgrades but requiring manual opt-in for optimization
   - Decision criteria should include:
     - Measured performance impact (positive and negative) from Tech Preview deployments
@@ -554,10 +554,11 @@ Not applicable. This is a new feature with no deprecation planned.
 
 **Upgrades**: 
 - Tech Preview: The feature is opt-in via the `GomaxprocsInjection` feature gate. Upgrading to a version with this feature has no impact unless the feature gate is explicitly enabled.
-- GA: When the feature graduates to GA and is enabled by default, the platform default changes to `Inject`. This is safe because:
+- GA: If the platform default changes to `Autosize` at GA (see GA Default Behavior open question), clusters that do not explicitly configure the field will begin injecting GOMAXPROCS. This is mitigated by:
   - CRI-O only injects GOMAXPROCS if no environment variable is already set
   - Applications that explicitly set GOMAXPROCS (via Dockerfile ENV, pod spec, or `runtime.GOMAXPROCS()`) are unaffected
-  - Applications without explicit GOMAXPROCS will see improved performance in most cases
+  - Pod-level opt-out via `skip-gomaxprocs.crio.io` annotation
+  - If the default remains `Disabled` at GA, no behavior change occurs on upgrade
 
 **Downgrades**: 
 - Downgrading to a version without this feature or with the feature gate disabled will cause the field to be ignored in the API and CRI-O will stop injecting GOMAXPROCS
@@ -621,7 +622,7 @@ ContainerRuntimeConfig and KubeletConfig do not have status subresources. Config
    ```bash
    oc get containerruntimeconfig -o yaml
    ```
-   Look for `gomaxprocsInjectionBehavior: Inject`
+   Look for `containerGomaxprocsBehavior: Autosize`
 
 2. Verify CRI-O configuration on node:
    ```bash
@@ -650,7 +651,7 @@ ContainerRuntimeConfig and KubeletConfig do not have status subresources. Config
        matchLabels:
          pools.operator.machineconfiguration.openshift.io/worker: ''
      containerRuntimeConfig:
-       gomaxprocsInjectionBehavior: Disabled
+       containerGomaxprocsBehavior: Disabled
    ```
 
 2. Wait for MachineConfigPool to roll out updated configuration
@@ -756,6 +757,20 @@ ContainerRuntimeConfig and KubeletConfig do not have status subresources. Config
 - 2026-06-24: Initial proposal and API implementation
 
 ## Alternatives (Not Implemented)
+
+### API Placement Alternatives
+
+#### Use a separate CRD instead of fields in ContainerRuntimeConfig and KubeletConfig
+
+A dedicated GOMAXPROCS CR could centralize both container and system service configuration in one place, with its own status subresource for reporting configuration state.
+
+**Rejected**: Each field belongs in the CR that owns the underlying configuration it controls:
+
+- **ContainerRuntimeConfig**: `containerGomaxprocsBehavior` configures CRI-O's `min_injected_gomaxprocs` setting, which is a CRI-O configuration field. ContainerRuntimeConfig is the standard API for editing CRI-O configuration, so this is the natural home.
+
+- **KubeletConfig**: `systemGomaxprocsBehavior` controls GOMAXPROCS for system services via systemd drop-ins rather than kubelet configuration directly. However, KubeletConfig already owns the closely related `autoSizingReserved` field, which established KubeletConfig as the owner of system slice resource configuration (even though kubelet is only the entity that applies the system reserved values, not the only service affected by them). GOMAXPROCS for system services is calculated from the same system reserved CPU values and delivered through the same kubelet-auto-node-size service, so KubeletConfig is the consistent place for it.
+
+A separate CR would also lose per-pool configuration via `machineConfigPoolSelector`, which both ContainerRuntimeConfig and KubeletConfig already support. Per-pool control matters here because master and worker nodes may have different node sizes and different system reserved allocations.
 
 ### Container GOMAXPROCS Alternatives
 
