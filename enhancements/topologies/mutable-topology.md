@@ -146,7 +146,7 @@ This proposal does not depend on features excluded from the OpenShift Kubernetes
 
 #### Transition: SNO to HA Compact (3-Node)
 
-**Operational guidance**: Administrators should treat topology transitions as a maintenance window. Cluster availability is not guaranteed during the transition — particularly during the 2-member etcd window where any control-plane node failure is fatal. Administrators should reduce non-critical workload risk accordingly. Administrators should take an etcd backup before rand after a successful transition (see [Open Questions](#open-questions) regarding pre-transition backup compatibility).
+**Operational guidance**: Administrators should treat topology transitions as a maintenance window. Cluster availability is not guaranteed during the transition — particularly during the 2-member etcd window where any control-plane node failure is fatal. Administrators should reduce non-critical workload risk accordingly. Administrators should take an etcd backup before and after a successful transition (see [Open Questions](#open-questions) regarding pre-transition backup compatibility).
 
 ##### Pre-Transition
 
