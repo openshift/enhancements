@@ -103,10 +103,10 @@ This is the primary workflow for new must-gather collections with obfuscation.
 
 #### Mode 2: Obfuscate Only (No Gather, No Upload)
 
-This mode allows administrators to redact an existing must-gather bundle stored on a PVC without re-collecting or uploading.
+This mode allows administrators to redact an existing must-gather bundle stored on a PVC without re-collecting or uploading. Since the operator does not support updates to an existing MustGather CR, the administrator must create a **new** MustGather CR for the obfuscation run.
 
 1. The cluster administrator has a previously collected must-gather bundle persisted on a PVC (e.g., from a prior MustGather CR with `spec.storage`)
-2. The administrator creates a MustGather CR with `spec.obfuscate.enabled: true` and `spec.obfuscate.source` referencing the PVC
+2. The administrator creates a **new** MustGather CR with `spec.obfuscate.enabled: true` and `spec.obfuscate.source` referencing the PVC
 3. The operator creates a Job with only an upload container (no gather container)
 4. The upload container mounts the PVC at `/must-gather`
 5. The operator binary is invoked with the appropriate config (custom or default)
@@ -117,10 +117,10 @@ This mode allows administrators to redact an existing must-gather bundle stored 
 
 #### Mode 3: Obfuscate + Upload (No Gather)
 
-This mode allows administrators to redact an existing bundle and upload it to a support case without re-collecting.
+This mode allows administrators to redact an existing bundle and upload it to a support case without re-collecting. As with Mode 2, a **new** MustGather CR must be created (the operator does not support spec updates on existing CRs).
 
 1. The cluster administrator has a previously collected must-gather bundle on a PVC
-2. The administrator creates a MustGather CR with `spec.obfuscate.enabled: true`, `spec.obfuscate.source` referencing the PVC, and `spec.uploadTarget` configured
+2. The administrator creates a **new** MustGather CR with `spec.obfuscate.enabled: true`, `spec.obfuscate.source` referencing the PVC, and `spec.uploadTarget` configured
 3. The operator creates a Job with only an upload container (no gather container)
 4. The upload container mounts the PVC at `/must-gather`
 5. Obfuscation runs on the bundle (using custom or default config)
