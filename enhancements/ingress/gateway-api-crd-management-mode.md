@@ -166,7 +166,7 @@ the OpenShift cluster and configuring ingress.
 2. CIO reads the Ingress (`operator.openshift.io/v1alpha1`) `cluster`
    resource and observes that `spec.gatewayAPI.managementMode`
    is unset (defaults to `Managed`).
-3. CIO deploys Gateway API CRDs, VAPs, the CIO-managed Istio
+3. CIO deploys Gateway API CRDs, VAP, the CIO-managed Istio
    instance, GatewayClass, and Gateway resources as per the existing
    behavior.
 4. CIO sets the following conditions in `status.conditions`:
@@ -199,6 +199,8 @@ the OpenShift cluster and configuring ingress.
       managed by a third-party gateway controller. The cluster
       administrator is responsible for cleaning up these resources
       if desired.
+   d. Leaves proxy pods created as the result of a `Gateway` provisioning 
+      around, not causing traffic disruption.
 4. CIO sets the following conditions in `status.conditions`:
    - `GatewayAPICRDsManaged=False` (reason: `Unmanaged`)
    - `GatewayAPICRDsPresent=True/False` (observational)
@@ -213,6 +215,9 @@ the OpenShift cluster and configuring ingress.
    OpenShift Gateway API implementation. They should adjust their
    behavior accordingly (e.g., not relying on specific CRD
    versions or fields).
+7. The resources previously created by CIO Gateway API controllers (like DNSRecord  
+   and NetworkPolicy for a once managed Gateway) are not removed, unless the parent
+   Gateway is also removed.
 
 #### Workflow 3: Returning to Managed Mode
 
@@ -484,7 +489,8 @@ disabling the CIO-managed Istio instance and CIO Gateway API
 controllers to reclaim resources.
 
 **MicroShift**: Not affected. MicroShift does not use CIO (see
-[MicroShift Gateway API Support](../microshift/gateway-api-support.md)).
+[MicroShift Gateway API Support](../microshift/gateway-api-support.md)) and
+the new ingress operator CRD should not be installed on it.
 
 #### OpenShift Kubernetes Engine
 
@@ -633,6 +639,10 @@ These are out of scope for this enhancement.
 
 Switching to `Unmanaged` leaves GatewayClass, Gateway, and
 HTTPRoute resources without a managing controller.
+
+Additionally, child resources created as a result of a once managed Gateway creation,
+like Deployment, DNSRecord and NetworkPolicy are not removed and must be cleaned by 
+the user. Deleting the parent Gateway may also remove these resources.
 
 **Mitigation**: CIO preserves all Gateway API resources during
 transitions to avoid disruption. The administrator is responsible
