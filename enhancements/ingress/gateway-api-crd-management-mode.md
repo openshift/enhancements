@@ -11,7 +11,7 @@ approvers:
 api-approvers:
   - "@everettraven"
 creation-date: 2026-05-26
-last-updated: 2026-06-18
+last-updated: 2026-09-17
 status: implementable
 tracking-link:
   - https://redhat.atlassian.net/browse/NE-2733
@@ -124,9 +124,6 @@ Introduce a new cluster-scoped singleton API resource in the
 - **Resource**: `ingresses`
 - **Scope**: Cluster (non-namespaced)
 - **Singleton name**: `cluster`
-- **Pattern**: Same as `DNS` in
-  `operator.openshift.io/v1` -- embeds
-  `OperatorSpec`/`OperatorStatus` inline.
 
 The spec contains a `gatewayAPI` struct with a
 `managementMode` enum.
@@ -195,12 +192,16 @@ the OpenShift cluster and configuring ingress.
    b. Removes the VAP protecting Gateway API CRDs.
    c. Does **not** remove the GatewayClass, Gateway resources, or
       Gateway API CRDs. Removing these resources could cause
-      disruptions to existing workloads for gateways that are being
-      managed by a third-party gateway controller. The cluster
-      administrator is responsible for cleaning up these resources
-      if desired.
-   d. Leaves proxy pods created as the result of a `Gateway` provisioning 
-      around, not causing traffic disruption.
+      disruptions to existing workloads served by these Gateways.
+      The cluster administrator is responsible for cleaning up
+      these resources if desired, for example once a third-party
+      Gateway controller has taken over management.
+   d. Leaves any proxy pods created as a result of Gateway
+      provisioning in place, avoiding traffic disruption.
+   e. Leaves resources previously created by CIO Gateway API
+      controllers (like DNSRecord and NetworkPolicy for a
+      previously managed Gateway) in place, unless the parent
+      Gateway is also removed.
 4. CIO sets the following conditions in `status.conditions`:
    - `GatewayAPICRDsManaged=False` (reason: `Unmanaged`)
    - `GatewayAPICRDsPresent=True/False` (observational)
@@ -215,9 +216,6 @@ the OpenShift cluster and configuring ingress.
    OpenShift Gateway API implementation. They should adjust their
    behavior accordingly (e.g., not relying on specific CRD
    versions or fields).
-7. The resources previously created by CIO Gateway API controllers (like DNSRecord  
-   and NetworkPolicy for a once managed Gateway) are not removed, unless the parent
-   Gateway is also removed.
 
 #### Workflow 3: Returning to Managed Mode
 
@@ -332,10 +330,6 @@ type Ingress struct {
 }
 
 type IngressSpec struct {
-	// Inline OperatorSpec for standard operator fields
-	// (managementState, logLevel, etc.)
-	OperatorSpec `json:",inline"`
-
 	// gatewayAPI holds configuration for Gateway API
 	// integration, including how the ingress operator manages
 	// Gateway API CRDs, the Istio instance it deploys, and its
@@ -347,11 +341,13 @@ type IngressSpec struct {
 }
 
 type IngressStatus struct {
-	// Inline OperatorStatus for standard operator status fields
-	// (conditions, version, observedGeneration, etc.).
-	// conditions holds a list of conditions representing the
-	// operator's current state. Gateway API CRD management
-	// conditions are reported here with the "GatewayAPI" prefix:
+	// observedGeneration is the last generation change you've dealt with
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
+	// conditions is a list of conditions and their status.
+	// Gateway API CRD management conditions are reported here
+	// with the "GatewayAPI" prefix:
 	//
 	// "GatewayAPICRDsManaged" indicates whether the ingress operator is
 	// actively managing Gateway API CRDs:
@@ -379,7 +375,10 @@ type IngressStatus struct {
 	//     CRDs do not match the expected version. The message
 	//     includes expected and actual versions and a pointer
 	//     to where valid manifests can be obtained.
-	OperatorStatus `json:",inline"`
+	// +listType=map
+	// +listMapKey=type
+	// +optional
+	Conditions []OperatorCondition `json:"conditions,omitempty"`
 }
 ```
 
@@ -448,7 +447,7 @@ status.conditions
 ```
 
 The following Gateway API conditions are set within
-`status.conditions` (inherited from `OperatorStatus`):
+`status.conditions`:
 
 | Condition Type | Status | Reason | Description |
 |---|---|---|---|
@@ -489,8 +488,9 @@ disabling the CIO-managed Istio instance and CIO Gateway API
 controllers to reclaim resources.
 
 **MicroShift**: Not affected. MicroShift does not use CIO (see
-[MicroShift Gateway API Support](../microshift/gateway-api-support.md)) and
-the new ingress operator CRD should not be installed on it.
+[MicroShift Gateway API Support](../microshift/gateway-api-support.md)),
+and the new `Ingress` (`operator.openshift.io/v1alpha1`) resource
+should not be installed on it.
 
 #### OpenShift Kubernetes Engine
 
@@ -622,14 +622,13 @@ to accommodate future configuration beyond `managementMode`:
    parameters. This would replace the current model where only a
    single default GatewayClass is created by CIO.
 
-2. **Operator and operand logging levels**: The Ingress resource
-   embeds `OperatorSpec`, which includes `logLevel` (for operands)
-   and `operatorLogLevel` (for the operator) fields. These can be
-   used to implement the logging level controls originally proposed
-   in
-   [ingress-operator-operand-logging-level](ingress-operator-operand-logging-level.md),
-   providing a supported API for adjusting CIO and Gateway
-   controller verbosity.
+2. **Operator and operand logging levels**: `OperatorSpec` (which
+   includes `logLevel` for operands and `operatorLogLevel` for the
+   operator) is not embedded in `IngressSpec` today, but could be
+   added if the logging level controls originally proposed in
+   [ingress-operator-operand-logging-level](ingress-operator-operand-logging-level.md)
+   are implemented on this resource, providing a supported API for
+   adjusting CIO and Gateway controller verbosity.
 
 These are out of scope for this enhancement.
 
@@ -640,9 +639,14 @@ These are out of scope for this enhancement.
 Switching to `Unmanaged` leaves GatewayClass, Gateway, and
 HTTPRoute resources without a managing controller.
 
-Additionally, child resources created as a result of a once managed Gateway creation,
-like Deployment, DNSRecord and NetworkPolicy are not removed and must be cleaned by 
-the user. Deleting the parent Gateway may also remove these resources.
+Additionally, child resources created as a result of a previously
+managed Gateway (such as Deployment, DNSRecord, and NetworkPolicy)
+are not removed and must be cleaned up by the user. Deleting the
+parent Gateway will cascade-delete any of these resources that
+carry an `ownerReference` back to the Gateway or one of its
+subresources (e.g., DNSRecord is owned by the Service created for
+the Gateway, which is itself owned by the Gateway), via standard
+Kubernetes garbage collection.
 
 **Mitigation**: CIO preserves all Gateway API resources during
 transitions to avoid disruption. The administrator is responsible
