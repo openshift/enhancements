@@ -14,7 +14,7 @@ approvers:
 api-approvers: 
   - "@joelspeed"
 creation-date: 2023-10-16
-last-updated: 2025-10-01
+last-updated: 2026-07-16
 tracking-link:
   - https://issues.redhat.com/browse/MCO-589
 see-also:
@@ -132,9 +132,7 @@ For the following platforms, the boot image update process was automated via the
 
 >\*OpenShift Dedicated (OSD) on GCP and third-party marketplace clusters on GCP are not supported. 
 >
->\*\*ROSA Classic and third-party marketplace clusters on AWS are not supported. AWS on OSD uses standard OCP bootimages so the existing mechanism can handle them. 
->
->Automation for these variants may be added in a future release. Until then, manual steps have been documented for these cases. ROSA Classic is [planned to be sunset](https://access.redhat.com/articles/7087075) prior to 5.0, so that scenario is not a candidate for automation.
+>\*\*AWS on OSD uses standard OCP bootimages so the existing mechanism can handle them. Third-party marketplace clusters on AWS (OCP, OKE, OPP and their EMEA variants) and ROSA Classic marketplace clusters were initially unsupported, but automated detection and updating for these was added via [MCO-2301](https://github.com/openshift/machine-config-operator/pull/6015) in 5.0 - see the [design document](https://github.com/openshift/machine-config-operator/blob/cb061e1794cc5694ea572c29415506f97e6ba4e4/docs/design/aws-marketplace.md) for the full approach. A monthly Prow periodic to detect marketplace publisher drift is also planned ([MCO-2411](https://redhat.atlassian.net/browse/MCO-2411)). Note that ROSA Classic is [planned to be sunset in 4.x](https://access.redhat.com/articles/7087075).
 
 For the following platforms, the boot image update process was documented in the [official OpenShift documentation](https://docs.redhat.com/en/documentation/openshift_container_platform/latest/html/machine_configuration/mco-update-boot-images-manual) starting in the versions listed below:
 | Platform | OCP Version |
