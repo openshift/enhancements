@@ -947,10 +947,38 @@ This enhancement introduces the following API changes:
   schema bake without API commitments. It is replaced for Tech Preview by
   the structured `BGPVIPConfig` CRD described below.
 
-- **BGPVIPConfig CRD (Tech Preview, machineconfiguration.openshift.io)**: a
-  cluster-scoped, feature-gated CRD replacing both the `bgp-vip-config`
-  ConfigMap and the serialized-JSON ControllerConfig field as the single
-  source of BGP peer configuration:
+- **Structured BGP configuration API (Tech Preview)**: the Dev Preview
+  ConfigMap and serialized-JSON ControllerConfig field are replaced by a
+  single admission-validated API. Two candidate placements are under
+  consideration; the decision is made with the API reviewers before Tech
+  Preview implementation starts.
+
+  **Option A - `Infrastructure.spec.platformSpec.baremetal.bgp`**: a typed
+  struct on the existing Infrastructure CR spec.
+
+  - Precedent: `BareMetalPlatformSpec` already serves day-2 editable
+    on-prem networking (`apiServerInternalIPs`/`ingressIPs` for VIP
+    changes), with the established spec-to-status propagation flow.
+    Secret references from config-group objects are also established
+    (APIServer `servingCerts`, Proxy `trustedCA`).
+  - Pros: no new CRD lifecycle; co-located with `vipManagement` and the
+    VIP fields; discoverable where operators already look for on-prem
+    networking; bootstrap consumes the Infrastructure manifest unchanged.
+  - Cons: Infrastructure is watched by nearly every operator and node
+    agent, so every peer edit fans a full-object update to the fleet -
+    `hostOverrides` scales with host count (multi-rack: per-host peer
+    lists), making the hottest object in the cluster hotter; there is no
+    feature-scoped status/conditions surface (only value mirroring into
+    `platformStatus`), so the day-2 feedback loop is limited; fields in
+    `config.openshift.io/v1` are permanent on arrival, while the peer
+    schema is still young (it changed twice during Dev Preview).
+  - Best fit if the schema is trimmed to essentials (localASN + a short
+    default peer list, no `hostOverrides`).
+
+  **Option B - dedicated `BGPVIPConfig` CRD
+  (machineconfiguration.openshift.io, cluster-scoped, feature-gated)**,
+  replacing both the `bgp-vip-config` ConfigMap and the serialized-JSON
+  ControllerConfig field as the single source of BGP peer configuration:
 
   - The installer generates the `BGPVIPConfig` manifest from
     `install-config.yaml` (the bootstrap MCO render consumes the manifest
@@ -978,6 +1006,19 @@ This enhancement introduces the following API changes:
   - GA hardens the same CRD (no shape change expected): status conditions
     complete, day-2 flows covered by e2e, and the Dev Preview ConfigMap
     path removed.
+  - Pros: watched by exactly two consumers (CNO, MCO operator); native
+    status conditions for the day-2 feedback loop; the feature-gated CRD
+    can iterate while the schema matures; room for the full multi-rack
+    `hostOverrides` shape, which the GA test criteria require.
+  - Cons: a new CRD lifecycle to own (shipped and reconciled via MCO's
+    payload manifests); one more object to discover, mitigated by
+    cross-references from the `vipManagement` field documentation.
+
+  The current preference is Option B, driven by the multi-rack
+  `hostOverrides` requirement (Option A's fan-out cost grows with exactly
+  the deployments this feature targets) and the conditions-based day-2
+  feedback loop. Option A remains preferable if API review trims the Tech
+  Preview schema to the essentials.
 
 This enhancement does not modify the behavior of any existing API resources.
 
