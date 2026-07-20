@@ -943,6 +943,41 @@ This enhancement introduces the following API changes:
   ConfigMap's `config.json` payload (validated and compacted by the MCO
   operator) so the template controller can render the node peer file. Not
   a user-facing API; only populated when BGP VIP management is active.
+  **Dev Preview only**: the serialized-JSON form exists to let the payload
+  schema bake without API commitments. It is replaced for Tech Preview by
+  the structured `BGPVIPConfig` CRD described below.
+
+- **BGPVIPConfig CRD (Tech Preview, machineconfiguration.openshift.io)**: a
+  cluster-scoped, feature-gated CRD replacing both the `bgp-vip-config`
+  ConfigMap and the serialized-JSON ControllerConfig field as the single
+  source of BGP peer configuration:
+
+  - The installer generates the `BGPVIPConfig` manifest from
+    `install-config.yaml` (the bootstrap MCO render consumes the manifest
+    file exactly as it consumes the ConfigMap manifest today, so the
+    bootstrap flow is unchanged).
+  - CNO and the MCO operator both watch the CR: CNO renders the
+    `FRRConfiguration` from it, MCO populates an operator-internal typed
+    copy on `ControllerConfigSpec` (replacing `BGPVIPPeersJSON`) for the
+    template render. One schema, admission-validated, no hand-mirrored
+    JSON contracts.
+  - Typed shape fixes the Dev Preview payload warts: `metav1.Duration`
+    for hold/keepalive times, booleans instead of `"true"` strings,
+    list-map `hostOverrides`, CEL validation for ASNs and peer addresses,
+    and `passwordSecretRef` (a `kubernetes.io/basic-auth` Secret
+    reference) instead of an inline plaintext password. The
+    `apiVIPs`/`ingressVIPs` duplication is dropped: templates read VIPs
+    from the Infrastructure CR as they do for keepalived.
+  - Day-2 reconfiguration becomes a first-class flow: `oc edit
+    bgpvipconfig cluster` is validated at admission, both consumers react
+    via watches, and the CR carries status conditions
+    (`observedGeneration`, rendered/applied) so changes have a feedback
+    loop. A NodeDisruptionPolicy ships alongside so peer-file updates do
+    not reboot nodes (after the bootstrap-to-CRD handover the on-disk
+    config only matters at early boot).
+  - GA hardens the same CRD (no shape change expected): status conditions
+    complete, day-2 flows covered by e2e, and the Dev Preview ConfigMap
+    path removed.
 
 This enhancement does not modify the behavior of any existing API resources.
 
@@ -1615,6 +1650,11 @@ Testing strategy will cover the following areas:
 - End user documentation for `install-config.yaml` BGP configuration.
 - Metrics exposed for BGP session state monitoring.
 - Symptoms-based alerts for BGP session failures.
+- Structured `BGPVIPConfig` CRD replaces the `bgp-vip-config` ConfigMap and
+  the serialized-JSON `ControllerConfigSpec.BGPVIPPeersJSON` field (see API
+  Extensions), including `passwordSecretRef` for peer passwords.
+- NodeDisruptionPolicy for the rendered peer file so day-2 BGP
+  reconfiguration does not reboot nodes.
 
 ### Tech Preview -> GA
 
@@ -1632,6 +1672,8 @@ Testing strategy will cover the following areas:
   [openshift-docs](https://github.com/openshift/openshift-docs/).
 - Feedback from Tech Preview users incorporated.
 - BFD fast failover validated under realistic failure scenarios.
+- `BGPVIPConfig` CRD status conditions complete and day-2 reconfiguration
+  flows covered by e2e; the Dev Preview ConfigMap ingestion path removed.
 
 ### Removing a deprecated feature
 
