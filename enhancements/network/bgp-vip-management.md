@@ -972,8 +972,10 @@ This enhancement introduces the following API changes:
     `platformStatus`), so the day-2 feedback loop is limited; fields in
     `config.openshift.io/v1` are permanent on arrival, while the peer
     schema is still young (it changed twice during Dev Preview).
-  - Best fit if the schema is trimmed to essentials (localASN + a short
-    default peer list, no `hostOverrides`).
+  - The cons are mitigated by keeping the schema lean where possible and
+    accepting value mirroring into `platformStatus` as the feedback
+    mechanism; `hostOverrides` size at multi-rack scale is the one factor
+    that could tip the decision to Option B.
 
   **Option B - dedicated `BGPVIPConfig` CRD
   (machineconfiguration.openshift.io, cluster-scoped, feature-gated)**,
@@ -1014,11 +1016,13 @@ This enhancement introduces the following API changes:
     payload manifests); one more object to discover, mitigated by
     cross-references from the `vipManagement` field documentation.
 
-  The current preference is Option B, driven by the multi-rack
-  `hostOverrides` requirement (Option A's fan-out cost grows with exactly
-  the deployments this feature targets) and the conditions-based day-2
-  feedback loop. Option A remains preferable if API review trims the Tech
-  Preview schema to the essentials.
+  The current preference is Option A: it keeps the BGP configuration on
+  the API object that already owns the on-prem VIP surface, reuses the
+  established day-2 editing and spec-to-status flow, and adds no new CRD
+  lifecycle. Option B is the fallback if API review concludes the
+  Infrastructure CR should not grow this schema (the watch fan-out of
+  `hostOverrides` at multi-rack scale being the main reason to make that
+  call).
 
 This enhancement does not modify the behavior of any existing API resources.
 
@@ -1691,9 +1695,11 @@ Testing strategy will cover the following areas:
 - End user documentation for `install-config.yaml` BGP configuration.
 - Metrics exposed for BGP session state monitoring.
 - Symptoms-based alerts for BGP session failures.
-- Structured `BGPVIPConfig` CRD replaces the `bgp-vip-config` ConfigMap and
-  the serialized-JSON `ControllerConfigSpec.BGPVIPPeersJSON` field (see API
-  Extensions), including `passwordSecretRef` for peer passwords.
+- The structured BGP configuration API (preferred:
+  `Infrastructure.spec.platformSpec.baremetal.bgp`; fallback: dedicated
+  `BGPVIPConfig` CRD - see API Extensions) replaces the `bgp-vip-config`
+  ConfigMap and the serialized-JSON `ControllerConfigSpec.BGPVIPPeersJSON`
+  field, including `passwordSecretRef` for peer passwords.
 - NodeDisruptionPolicy for the rendered peer file so day-2 BGP
   reconfiguration does not reboot nodes.
 
@@ -1713,8 +1719,8 @@ Testing strategy will cover the following areas:
   [openshift-docs](https://github.com/openshift/openshift-docs/).
 - Feedback from Tech Preview users incorporated.
 - BFD fast failover validated under realistic failure scenarios.
-- `BGPVIPConfig` CRD status conditions complete and day-2 reconfiguration
-  flows covered by e2e; the Dev Preview ConfigMap ingestion path removed.
+- Day-2 BGP reconfiguration flows covered by e2e; the Dev Preview
+  ConfigMap ingestion path removed.
 
 ### Removing a deprecated feature
 
