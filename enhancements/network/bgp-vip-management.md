@@ -781,33 +781,22 @@ type BareMetalPlatformStatus struct {
 
     // vipManagement indicates which VIP management mechanism is active
     // on this cluster. Valid values are "Keepalived" and "BGP".
+    // Immutable once set.
     // +openshift:enable:FeatureGate=BGPBasedVIPManagement
     // +optional
     VIPManagement string `json:"vipManagement,omitempty"`
-
-    // bgpVIPStatus reports the observed state of BGP-based VIP management.
-    // This field is only populated when vipManagement is "BGP".
-    // +openshift:enable:FeatureGate=BGPBasedVIPManagement
-    // +optional
-    BGPVIPStatus *BGPVIPStatus `json:"bgpVIPStatus,omitempty"`
-}
-
-// BGPVIPStatus reports the observed state of BGP-based VIP management.
-type BGPVIPStatus struct {
-    // localASN is the Autonomous System Number configured for this cluster.
-    // +optional
-    LocalASN int64 `json:"localASN,omitempty"`
-
-    // peers reports the configured BGP peer addresses.
-    // +optional
-    // +listType=atomic
-    Peers []string `json:"peers,omitempty"`
 }
 ```
 
-This status is populated by CNO after the bootstrap-to-CRD handover completes,
-providing a single API-level signal for whether the cluster uses BGP or
-keepalived for VIP management.
+`vipManagement` is the single API-level signal for whether the cluster uses
+BGP or keepalived for VIP management (implemented in openshift/api#2923,
+installer-set, immutable in the first iteration). An earlier draft also
+carried a `BGPVIPStatus` struct here echoing `localASN` and the peer
+addresses; it was dropped: status must not restate configuration, the
+useful observation - per-node, per-peer session health - lives in frr-k8s's
+`BGPSessionState`/`FRRNodeState` resources (plus the metrics and alerts
+required for Tech Preview), and populating it would have made CNO a second
+writer to Infrastructure status.
 
 ```go
 // Platform stores the platform-specific configuration for the
