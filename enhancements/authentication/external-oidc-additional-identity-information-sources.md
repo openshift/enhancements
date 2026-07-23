@@ -413,8 +413,11 @@ externalClaims:
 
 #### Hypershift / Hosted Control Planes
 
-No unique considerations for making this change work with HyperShift beyond updates to the appropriate controllers
-to deploy and configure the oauth-apiserver component in its new mode of operation when necessary based on configuration options.
+In HyperShift, control plane components (such as the kube-apiserver and oauth-apiserver) are configured
+by the Control Plane Operator rather than dedicated cluster operators. While the oauth-apiserver and
+kube-apiserver changes for this feature apply to both Standalone and HyperShift clusters, configuration
+of these components will differ between the two topologies. More details on the changes needed
+for HyperShift are described in the _Implementation Details_ section below.
 
 #### Standalone Clusters
 
@@ -541,7 +544,7 @@ This enables us to tear down the `oauth-apiserver` `Service` when configuring th
 without requiring a configuration change on the kube-apiserver.
 This new `Service` will be created in all modes of operation for the oauth-apiserver.
 
-##### Cluster Authentication Operator / Cluster Kube-APIServer Operator / HyperShift Control Plane Operator
+##### Cluster Authentication Operator / Cluster Kube-APIServer Operator
 
 ###### Changes to existing external OIDC behavior
 
@@ -561,7 +564,58 @@ so that the kube-apiserver is _always_ configured to call the oauth-apiserver as
     will be reused.
     - The `oauth-apiserver/token-review` `Service`. The `cluster-authentication-operator` will be updated to ensure this always exists.
     - The webhook configuration controller will be reverted to standard operation of always applying the webhook secret for the KAS. 
-- The HyperShift Control Plane Operator will be updated as appropriate to perform the same behavior.
+- The HyperShift Control Plane Operator will be updated as appropriate to perform the same behavior (see relevant section below).
+
+##### HyperShift Control Plane Operator
+
+In HyperShift, external OIDC is configured via the `HostedCluster` resource (`.spec.configuration.authentication`), unlike standalone clusters where the admin configures `authentication.config.openshift.io/cluster` directly. The Control Plane Operator (CPO) reads this configuration and the goal is the same: deploy a webhook authenticator that sources external claims and configure the kube-apiserver to use it.
+
+Unlike standalone clusters where the existing oauth-apiserver deployment is reconfigured into the new mode, in HyperShift a **new dedicated component** will be deployed for this purpose. The new component uses the oauth-apiserver binary (with its `external-oidc` subcommand) but runs as a separate deployment with its own Service, independent of the existing `openshift-oauth-apiserver` deployment. The existing oauth-apiserver teardown behavior in External OIDC mode is preserved.
+
+This separation is preferred for HyperShift because:
+- Clean separation of concerns: the integrated OAuth functionality and the external OIDC webhook authenticator are fundamentally different functions with different lifecycles.
+- No implicit assumptions broken: existing consumers of the `openshift-oauth-apiserver` Service are unaffected.
+- Simpler operator logic: the CPO deploys or tears down the new component based on each component's predicate, without mode-switching on a shared deployment.
+- Future flexibility: the dedicated deployment can be backed by a different binary in the future without any topology changes to HyperShift.
+
+In particular, the following CPO changes are needed:
+- Update the CPO kube-apiserver configuration generation to keep the webhook authenticator configuration and
+drop configuration via the structured authentication file (i.e. flag `--authentication-config`).
+- Add a new component for the external OIDC webhook authenticator with its own deployment, Service, and configuration.
+The component is deployed when authentication type is `OIDC` in the `HostedCluster` resource.
+- Generate the AuthenticationConfiguration object using the API introduced with this EP and provide it as the component's configuration.
+- Ensure that secrets required by the new component (e.g. `clientCredential.secret`, TLS CA bundles) are available on the management cluster and projected into its pod.
+
+#### Aligning API types, generation and validation between Standalone and HyperShift
+
+HyperShift is currently using an [internal copy](https://github.com/openshift/hypershift/blob/2d2b2d0805d36dcf401fdb5f3d913b9f7984ce42/control-plane-operator/controllers/hostedcontrolplane/v2/kas/auth_types.go#L5-L20)
+of the [upstream AuthenticationConfiguration](https://github.com/kubernetes/kubernetes/blob/7ee6abccd9829cce8049eabff372f339f03a1679/staging/src/k8s.io/apiserver/pkg/apis/apiserver/types.go#L168)
+type, which is currently used in CAO. As indicated in [a comment on the internal HyperShift type definition](https://github.com/openshift/hypershift/blob/2d2b2d0805d36dcf401fdb5f3d913b9f7984ce42/control-plane-operator/controllers/hostedcontrolplane/v2/kas/auth_types.go#L6-L8),
+this was done due to potential incompatibility of changes across multiple Kubernetes API Server versions due to missing JSON tags on the unversioned upstream internal types.
+The versioned `v1beta1` types have since matured, carry proper JSON tags, and should be safe to adopt; CAO already uses them without issue.
+Additionally, the oauth-apiserver introduces its own `AuthenticationConfiguration` type (`externaloidc/apis/authentication/v1alpha1`) for its `external-oidc` mode config file format, which extends the upstream structure with `externalClaimsSources` and other structural differences (pointer fields, `omitempty` on `JWT`).
+
+While replacing the internal type with upstream `v1beta1` would bring benefits (type alignment with CAO, reduced maintenance burden, simplified validation), the internal copy does not interfere with the implementation of this feature, nor is causing any issues in the current implementation. Since HyperShift is moving toward a dedicated component for external OIDC (which will eventually use its own configuration type), the internal copy will be dropped naturally as part of that transition. For now, it will be left as-is.
+
+##### Configuration generation alignment
+
+As part of the CAO implementation of this feature, the CAO uses an [oauth-apiserver generator](https://github.com/openshift/cluster-authentication-operator/blob/28632f237aa003bb191100eabdc46c3e20c1fb49/pkg/controllers/externaloidc/generation/oauthapiserver/generate.go) that produces the oauth-apiserver's `AuthenticationConfiguration` type (including the `externalClaimsSources` fields introduced with this EP). Since both topologies need to generate the same configuration for the new dedicated component, this generator should be extracted to a shared library and reused in HyperShift.
+
+Both consumers take the same input (`configv1.Authentication`) and produce the same output type, so the interface is a natural fit. To make this work, some minor abstractions are needed before extracting to a lib, such as CA cert & secret resolution.
+
+##### Validation alignment
+
+There is currently a difference in how HyperShift and Standalone validate the generated configuration. CAO does inline validation during generation (CEL expression compilation, `email_verified` enforcement, SA issuer URL overlap check, CA cert reachability), while HyperShift defers to upstream `ValidateAuthenticationConfiguration`. Where possible, CAO should be aligned with HyperShift and rely on the upstream validations provided by the components being configured (both the KAS and the oauth-apiserver validate their own configuration). This reduces duplicated validation logic and ensures both topologies are consistent.
+
+##### Open Question: Version skew between the CPO and control plane components
+
+Our current understanding is that the CPO is baked into the payload alongside the control plane components it configures (kube-apiserver, oauth-apiserver), meaning there is no version skew between them within a given payload. If this holds, the feature gate alone is sufficient to prevent the CPO from generating a configuration that the deployed component cannot understand, and no version-aware generation logic is needed.
+
+However, it is not clear whether this is always the case. If a newer CPO could end up deploying an older oauth-apiserver that does not support the new configuration format, we would need version-aware generation logic to avoid deploying incompatible configurations.
+
+Additionally, version skew affects admission-time validation: HyperShift currently compiles CEL expressions at admission time using a CEL environment pinned to the minimum supported OCP version, to avoid generating configurations that the target KAS cannot parse. If there is no version skew, validation could use the actual target version instead, reducing false rejections of valid CEL expressions.
+
+We would like HyperShift maintainers to confirm whether version skew between the CPO and the components it deploys is a scenario we need to account for.
 
 ##### Full Architecture Diagram
 
@@ -580,7 +634,7 @@ flowchart TD
         end
 
         E("authentications.config.openshift.io/cluster")
-        F("Cluster Authentication Operator") -- Reads --> E
+        F("Cluster Authentication Operator / Control Plane Operator") -- Reads --> E
         F -- Configures --> B
         F -- Configures --> C
         F -- Deploys --> G
