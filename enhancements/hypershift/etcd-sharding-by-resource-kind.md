@@ -326,7 +326,7 @@ type ManagedEtcdShardSpec struct {
     // +kubebuilder:validation:Enum=1;3
     // +kubebuilder:validation:Minimum=1
     // +kubebuilder:validation:XValidation:rule="self == oldSelf",message="replicas is immutable"
-    Replicas int32 `json:"replicas"`
+    Replicas int32 `json:"replicas,omitzero"`
 
     // scheduling configures per-shard pod placement constraints. These
     // constraints are merged with the framework's control plane node
@@ -651,7 +651,7 @@ top-level fields, which apply only to the default shard.
       Storage ManagedEtcdShardStorageSpec `json:"storage,omitzero"`
 
       // +kubebuilder:validation:XValidation:rule="self == oldSelf",message="replicas is immutable"
-      Replicas int32 `json:"replicas"`
+      Replicas int32 `json:"replicas,omitzero"`
 
       Scheduling EtcdShardSchedulingSpec `json:"scheduling,omitzero"`
   }
