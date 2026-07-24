@@ -42,7 +42,8 @@ The gap arises due to how the ACME HTTP01 challenge works. The following scenari
 2. **Compact Clusters**: The node hosting the API VIP may also host an OpenShift Router. If no router is present on the node hosting the VIP, the challenge will fail.
 3. **SNO (Single Node OpenShift)**: The same nodes host both the ingress and API components. Both FQDNs (`api` and wildcard) resolve to the same IP, making the challenge feasible.
 
-To address this gap, a MachineConfig-based solution was developed. The cert-manager-operator creates a MachineConfig that deploys nftables DNAT rules and a systemd oneshot service on control plane master nodes. These rules use DNAT (Destination Network Address Translation) to forward TCP port 80 traffic arriving at the API VIP directly to the Ingress VIP, allowing the OpenShift Router to serve the ACME HTTP01 challenge response. MASQUERADE (SNAT) rules handle return traffic routing.
+To address this gap, a MachineConfig-based solution was developed. The cert-manager-operator creates a MachineConfig that deploys nftables DNAT rules and a systemd oneshot service on control plane master nodes.
+These rules use DNAT (Destination Network Address Translation) to forward TCP port 80 traffic arriving at the API VIP directly to the Ingress VIP, allowing the OpenShift Router to serve the ACME HTTP01 challenge response. MASQUERADE (SNAT) rules handle return traffic routing.
 
 This enhancement aims to provide a robust solution for managing certificates for the API endpoint, particularly for baremetal customers using non cloud-ready DNS servers. Cloud providers typically offer cloud provider DNS services that integrate directly with cert-manager for DNS01 challenges, but baremetal environments often lack these integrations and rely on HTTP01 challenges instead.
 
@@ -207,7 +208,7 @@ This design ensures that:
 The MachineConfig delivers two components to master nodes via Ignition:
 
 1. **nftables config file** at `/etc/sysconfig/nftables-crtmgr-http01.conf`:
-   ```
+   ```text
    table inet crtmgr_http01_dnat
    delete table inet crtmgr_http01_dnat
    table inet crtmgr_http01_dnat {
@@ -228,8 +229,8 @@ The MachineConfig delivers two components to master nodes via Ignition:
    - Uses `RemainAfterExit=yes` to keep the rules active
 
 **Why iptables FORWARD rules alongside nftables NAT:** OpenShift's FORWARD chain uses iptables-nft with `policy DROP`. The kernel evaluates both iptables-nft and native nftables hooks, so both must ACCEPT for forwarded packets to pass. Two FORWARD rules are added:
-  - `-p tcp -d <INGRESS_VIP>/32 --dport 80 -j ACCEPT` — allows new TCP connections to port 80 on the Ingress VIP
-  - `-m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT` — allows return traffic for established connections
+- `-p tcp -d <INGRESS_VIP>/32 --dport 80 -j ACCEPT` — allows new TCP connections to port 80 on the Ingress VIP
+- `-m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT` — allows return traffic for established connections
 
 **MachineConfig Rollout:** The MCO (Machine Config Operator) handles rolling out the MachineConfig to master nodes. This involves a rolling reboot of master nodes, managed by the MCO with proper drain/cordon to maintain cluster availability.
 
@@ -267,7 +268,8 @@ The MachineConfig delivers two components to master nodes via Ignition:
 
 ### DaemonSet + Reverse Proxy (Superseded)
 
-The original implementation design used a DaemonSet running a Go reverse proxy binary on control plane nodes. The proxy listened on port 8888 with `hostNetwork: true`, and nftables `redirect` rules sent API_VIP:80 traffic to localhost:8888. The proxy performed path-based filtering, only forwarding requests matching `/.well-known/acme-challenge/*` to the Ingress VIP, and returning 400 Bad Request for all other paths.
+The original implementation design used a DaemonSet running a Go reverse proxy binary on control plane nodes. The proxy listened on port 8888 with `hostNetwork: true`, and nftables `redirect` rules sent API_VIP:80 traffic to localhost:8888.
+The proxy performed path-based filtering, only forwarding requests matching `/.well-known/acme-challenge/*` to the Ingress VIP, and returning 400 Bad Request for all other paths.
 
 This approach was superseded by the MachineConfig-based DNAT approach because:
 1. **Operational simplicity**: No container image, DaemonSet, ServiceAccount, ClusterRole, ClusterRoleBinding, SCC RoleBinding, or NetworkPolicies to manage
@@ -314,7 +316,8 @@ More information about the investigation can be found in the [certificate manage
      - Monitor for certificate expiry and configure alerts to notify administrators before expiry occurs.
    - **Detection**: Configure alerts for expiring certificates. Warning alerts should be triggered when certificates are close to expiry, and critical alerts when certificates have expired. This allows administrators to take action before cluster API access is impacted.
 
-2. **Traffic Interference**: The DNAT rules forward all TCP port 80 traffic destined for the API VIP. In standard OpenShift deployments, nothing listens on API VIP port 80, so this is not a concern. However, if custom services are configured to listen on API VIP port 80, they would be affected. **Mitigation**: The API VIP port 80 is not used by any standard OpenShift component. Users should verify no custom services use this port before enabling the feature.
+2. **Traffic Interference**: The DNAT rules forward all TCP port 80 traffic destined for the API VIP. In standard OpenShift deployments, nothing listens on API VIP port 80, so this is not a concern. However, if custom services are configured to listen on API VIP port 80, they would be affected.
+   **Mitigation**: The API VIP port 80 is not used by any standard OpenShift component. Users should verify no custom services use this port before enabling the feature.
 
 3. **Node Reboot Impact**: Deploying or removing the MachineConfig requires MCO-managed node reboots. On a 3-node control plane, this results in rolling reboots of all master nodes. **Mitigation**: MCO handles rolling reboots with proper drain/cordon, ensuring cluster availability during rollout.
 
