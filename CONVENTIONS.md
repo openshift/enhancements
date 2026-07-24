@@ -405,6 +405,69 @@ Resource request review history:
 * [BZ 1920159](https://bugzilla.redhat.com/show_bug.cgi?id=1920159) --
   for tracking changes in 4.7/4.8 for single-node RAN
 
+#### Binary Size
+
+Container image size directly impacts node disk usage, pull times, and
+upgrade duration. Larger images are especially costly for DaemonSets,
+where every node in the cluster pulls and stores the image.
+
+Image size is particularly critical during node bootstrapping. Some
+DaemonSets (e.g. SDN/CNI, kube-proxy) block the node from reaching
+`Ready` status — oversized images directly delay how quickly a node
+becomes schedulable. Other DaemonSets may not gate `NodeReady` but
+still contend for disk I/O and network bandwidth while their images
+are pulled and extracted, slowing the pulls of the DaemonSets that
+do block `NodeReady` and increasing overall node bootstrap time.
+
+* All binaries shipped in DaemonSet images **MUST** be stripped of
+  debug symbols and symbol tables (e.g. using `go build -ldflags
+  '-s -w'` for Go binaries).
+* All other component binaries **SHOULD** be stripped. Exceptions
+  require justification (e.g. a component that relies on runtime
+  symbol resolution).
+* Stripping should be done at build time in the Dockerfile or build
+  system; do not rely on post-build tooling that may be skipped.
+
+For Go binaries, pass `-ldflags '-s -w'` to `go build`:
+
+* `-s` omits the symbol table
+* `-w` omits the DWARF debugging information
+
+These flags typically reduce Go binary size by 20-30% with no impact
+on runtime behavior.
+
+##### Impact on debugging and profiling
+
+Stripping debug symbols does **not** affect the following runtime
+capabilities:
+
+* **pprof**: Go's `net/http/pprof` and `runtime/pprof` endpoints
+  continue to work normally. CPU profiles, heap profiles, goroutine
+  dumps, and all other pprof-based profiling are fully functional in
+  stripped binaries because pprof uses runtime instrumentation, not
+  debug symbols.
+* **Stack traces**: Go embeds enough metadata for `runtime` to produce
+  readable stack traces (function names, file names, and line numbers)
+  regardless of whether DWARF or symbol table data is present. Panics
+  and `runtime.Stack()` output are unaffected.
+* **Logging and metrics**: No impact.
+
+Stripping debug symbols **does** affect the following, none of which
+are expected to be performed against production binaries:
+
+* **External debuggers** (e.g. `dlv`, `gdb`): without DWARF info,
+  debuggers cannot resolve local variables, display source lines, or
+  evaluate expressions. If live debugging of a running binary is
+  required, attach using a non-stripped build or use `delve`'s support
+  for separate debuginfo files.
+* **Core dump analysis**: DWARF data is needed to fully interpret core
+  dumps. For post-mortem analysis, the corresponding non-stripped
+  binary (or a separate `.debuginfo` file) is required.
+
+In practice, debugging production issues in OpenShift relies on logs,
+metrics, pprof profiles, and stack traces from panics — all of which
+remain fully available in stripped binaries.
+
 #### Taints and Tolerations
 
 An operator deployed by the CVO should run on control plane nodes and therefore should
