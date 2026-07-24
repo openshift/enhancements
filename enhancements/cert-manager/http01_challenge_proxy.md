@@ -264,7 +264,7 @@ The MachineConfig delivers two components to master nodes via Ignition:
 3. **Node-Level Network Modification**: The solution modifies node-level network configuration via MachineConfig, adding nftables rules and a systemd service. While lightweight, this introduces kernel-level packet forwarding that must be coordinated with other networking components.
 4. **No Path-Based Filtering**: Unlike a reverse proxy approach, the DNAT rules forward all port 80 traffic to the API VIP, not just ACME challenge paths. This is acceptable in standard deployments where nothing else listens on API VIP port 80.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### DaemonSet + Reverse Proxy (Superseded)
 
