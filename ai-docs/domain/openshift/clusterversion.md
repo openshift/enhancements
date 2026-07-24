@@ -79,15 +79,20 @@ status:
 3. CVO sets status.conditions.Progressing=True
    ↓
 4. CVO applies manifests in runlevel order:
-   - Runlevel 00-09: Core platform (network, DNS, certs)
-   - Runlevel 10-29: Kubernetes operators (API server, controllers, scheduler)
-   - Runlevel 30+: Other operators (Machine API, OLM, OpenShift core)
+   - Runlevel 00-04: CVO itself
+   - Runlevel 10-29: Kubernetes operators (cluster-config, etcd, kube-apiserver, etc. — in parallel at same runlevel)
+   - Runlevel 30-39: Machine API
+   - Runlevel 50: Non-order-specific operators (OLM, monitoring, samples)
+   - Runlevel 60-69: OpenShift core operators
+   - Runlevel 70: Disruptive node-level components (DNS, network/SDN, multus)
+   - Runlevel 80: Machine operators
    - Components at same runlevel apply in parallel
    ↓
 5. CVO waits for each operator to reach expected state:
-   - Operator version matches desired version
-   - Operator reports Progressing=False
    - Operator reports Available=True
+   - Operator reports Degraded=False
+   - Operator version matches desired version
+   - Note: Progressing is NOT checked by CVO for runlevel advancement
    ↓
 6. Once all operators reach expected state:
    - CVO sets status.conditions.Progressing=False
@@ -147,9 +152,9 @@ oc logs -n openshift-cluster-version deployment/cluster-version-operator
 ### EUS (Extended Update Support) Releases
 
 **What EUS provides:**
-- **Extended support lifecycle**: Designated releases receive ~14 months additional support
+- **Extended support lifecycle**: EUS releases receive 24 months total support (6 months beyond the standard 18-month lifecycle). An optional paid add-on ("EUS Term 2", available from 4.14+) extends to 36 months.
   - **OCP 4.x**: Even-numbered releases (4.8, 4.10, 4.12, 4.14, 4.16, etc.)
-  - **OCP 5.x**: Every third release (5.2, 5.5, 5.8, etc.)
+  - **OCP 5.x**: Every third release (5.2, 5.5, 5.8, etc.) — planned, subject to change
 - **EUS-to-EUS upgrade path**: Streamlined upgrade with reduced worker node reboots
 
 **What EUS does NOT provide:**
@@ -176,16 +181,22 @@ oc logs -n openshift-cluster-version deployment/cluster-version-operator
 4.16.0 → 4.16.1 → 4.16.2
 ```
 
-**CVO validates**: Upgrade path exists in Cincinnati graph
+**CVO validates**: Upgrade path exists in the OpenShift Update Service (OSUS, also known as Cincinnati) graph
 
 ## Upgrade Conditions
 
 | Condition | Meaning | True When |
 |-----------|---------|-----------|
-| **Available** | CVO is functional | CVO pod running |
-| **Progressing** | Upgrade in progress | Operators being updated |
-| **Failing** | Upgrade failed | Operator reconciliation failed |
-| **RetrievedUpdates** | Update graph fetched | Cincinnati API reachable |
+| **Available** | CVO is functional | Desired cluster version reached |
+| **Progressing** | Upgrade in progress | CVO actively applying new version |
+| **Failing** | CVO cannot reconcile cluster to desired release image | Payload download/extraction failure, image verification failure, manifest reconciliation error, ClusterOperator health check failure, or precondition check failure |
+| **RetrievedUpdates** | Update graph fetched | OSUS API reachable |
+| **ReleaseAccepted** | Release payload loaded | Payload verified without errors |
+| **Upgradeable** | Safe to upgrade | No in-progress update, no blockers |
+| **ImplicitlyEnabledCapabilities** | Enabled capabilities diverge from spec | Capabilities auto-enabled beyond explicit request |
+| **Invalid** | Error in cluster version | Prevents CVO from taking action |
+
+**Note**: ClusterVersion uses `Failing` (not `Degraded`) to indicate the cluster cannot reach its desired state. `Degraded` is a [ClusterOperator condition](clusteroperator.md), not a ClusterVersion condition.
 
 ## History
 
@@ -211,19 +222,19 @@ status:
 CVO applies manifests in lexicographic order by filename during upgrades. Manifests use the naming convention:
 `0000_<runlevel>_<component>_<manifest>.yaml`
 
-**Assigned runlevels** (from [CVO dev docs](https://github.com/openshift/enhancements/blob/master/dev-guide/cluster-version-operator/dev/operators.md)):
+**Assigned runlevels** (from [CVO dev docs: operators.md](https://github.com/openshift/enhancements/blob/master/dev-guide/cluster-version-operator/dev/operators.md) and [upgrades.md](https://github.com/openshift/enhancements/blob/master/dev-guide/cluster-version-operator/dev/upgrades.md)):
 - **00-04**: CVO itself
-- **05**: cluster-config-operator
-- **07**: Network operator
-- **08**: DNS operator
-- **09**: Service certificate authority, machine approver
-- **10-29**: Kubernetes operators (e.g., kube-apiserver, kube-controller-manager, kube-scheduler)
+- **10-29**: Kubernetes operators (cluster-config at 10; etcd, kube-apiserver, kube-controller-manager, kube-scheduler at 20+)
 - **30-39**: Machine API
-- **50-59**: Operator Lifecycle Manager (OLM)
+- **50**: Non-order-specific operators (default runlevel; includes OLM, monitoring, samples, service-ca, machine-approver)
 - **60-69**: OpenShift core operators
+- **70**: Disruptive node-level components (DNS, network/SDN, multus)
+- **80**: Machine operators
+
+**Note**: The [operators.md](https://github.com/openshift/enhancements/blob/master/dev-guide/cluster-version-operator/dev/operators.md) dev guide contains stale runlevel assignments for several operators. Actual release image manifest prefixes differ: Network and DNS are at 70 (not 07/08), cluster-config is at 10 (not 05), and service-ca/machine-approver are at 50/default (not 09). The list above reflects actual manifest prefixes.
 
 **Key behaviors**:
-- Components at same runlevel execute in **parallel**
+- Components at same runlevel execute in **parallel** (e.g., etcd and kube-apiserver are both at runlevel 20)
 - Lower runlevels complete before higher runlevels start
 - Ordering only applies during **upgrades** (not initial install or reconciliation)
 - Within a component, manifests apply in alphabetical order
