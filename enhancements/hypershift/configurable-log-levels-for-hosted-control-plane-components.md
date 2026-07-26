@@ -8,14 +8,16 @@ authors:
   - "@vismishr"
   - "@vsolanki12"
 reviewers:
-  - "@ahmed"
+  - "@devguyio"
+  - "@celebdor"
 approvers:
   - "@csrwng"
-  - "@ahmed"
+  - "@devguyio"
 api-approvers:
   - "@joelspeed"
+  - "@enxebre"
 creation-date: 2026-06-09
-last-updated: 2026-06-15
+last-updated: 2026-07-26
 status: provisional
 tracking-link:
   - https://issues.redhat.com/browse/OCPSTRAT-3156
@@ -40,11 +42,12 @@ kube-controller-manager, kube-scheduler, etcd, openshift-apiserver,
 openshift-controller-manager, openshift-oauth-apiserver, and oauth-server. The CPO will
 translate these intent-based levels into component-specific mechanisms (`--v=N` for
 klog-based components, `ETCD_LOG_LEVEL` env var for etcd), achieving operational parity
-with standard OCP's `operatorv1.OperatorSpec.LogLevel` pattern. The new fields are added
-as structured `*ComponentLogLevelSpec` pointers in the existing `OperatorConfiguration`
-type. The design is intentionally generic to extend to all remaining CPO-managed components
-in future phases. This feature ships ungated (no feature gate) as a low-risk operational
-knob that extends an already-GA framework.
+with standard OCP's `operatorv1.OperatorSpec.LogLevel` pattern. Each component gets a
+dedicated per-component type (e.g., `KubeAPIServerOperatorSpec`) that embeds the shared
+`ComponentLogLevelSpec` via struct embedding, added to the existing `OperatorConfiguration`
+type. This design is future-proof — each component type can be independently extended
+without breaking changes. The new fields are gated behind a feature gate and follow a
+**gate first, promote when ready** lifecycle.
 
 ## Motivation
 
@@ -88,20 +91,13 @@ as "crucial even for the most minimal troubleshooting."
   temporarily set `Trace` level on openshift-apiserver and openshift-controller-manager so
   that I can capture detailed component behavior before promoting changes to production.
 
-- As an **SRE** operating hosted clusters at scale, I want to monitor which hosted clusters
-  have non-default log levels active so that I can identify clusters with elevated log
-  volume and ensure log storage capacity is not exceeded.
-
 ### Goals
 
-This enhancement is delivered in phases:
-
-**Phase 1 — kube-apiserver (initial delivery)**
-
-1. Enable administrators to configure log verbosity for kube-apiserver via the HostedCluster
-   CR, replacing the existing ad-hoc annotation-based mechanism.
+1. Enable administrators to configure log verbosity for all 8 core control plane components
+   via the HostedCluster CR, replacing the existing ad-hoc annotation-based mechanism for
+   kube-apiserver.
 2. Establish the `ComponentLogLevelSpec` pattern and `LogLevelToKlogVerbosity()` utility
-   that all subsequent phases reuse.
+   reused across all klog-based components.
 3. Provide a deprecation path for the existing
    `hypershift.openshift.io/kube-apiserver-verbosity-level` annotation.
 4. Achieve operational parity with standard OCP's `operatorv1.LogLevel` pattern using
@@ -109,28 +105,14 @@ This enhancement is delivered in phases:
 5. Ensure log level changes take effect via rolling restart without cluster disruption or
    downtime.
 
-**Phase 2 — remaining core control plane components**
-
-6. Extend log level configuration to: kube-controller-manager, kube-scheduler, etcd,
-   openshift-apiserver, openshift-controller-manager, openshift-oauth-apiserver, and
-   oauth-server, using the same pattern established in Phase 1.
-
-**Phase 3 — all remaining CPO-managed components (future)**
-
-7. Extend log level configuration to all remaining klog-based CPO-managed components,
-   including components with hardcoded `--v=N` values in their asset manifests and
-   components using klog defaults, as well as zap-based operator components (HCCO,
-   PKI-operator) and karpenter via custom level mappings.
-8. The `ComponentLogLevelSpec` API design is intentionally generic to enable this extension
-   with only additive, backward-compatible changes to `OperatorConfiguration`.
-
 ### Non-Goals
 
-1. **Configuring all ~50 CPO-managed components in Phases 1 and 2.** Phases 1 and 2 cover
-   the 8 core control plane components. Phase 3 (future) covers remaining components.
+1. **Configuring all CPO-managed components in this enhancement.** This enhancement covers
+   the 8 core control plane components. Additional components may be addressed in follow-up
+   enhancements.
 
-2. **The following components are permanently out of scope** due to their logging model not
-   supporting a standard configurable verbosity interface compatible with the
+2. **The following components are out of scope for this enhancement** due to their logging
+   model not supporting a standard configurable verbosity interface compatible with the
    `Normal/Debug/Trace/TraceAll` abstraction:
    - `control-plane-operator` self-log-level: the CPO binary is deployed by the
      *hypershift-operator*, not by CPO's own reconciliation loop. CPO cannot configure its
@@ -165,26 +147,18 @@ mapping to the following glog/klog verbosity levels:
 |------------------|------------|----------------------|---------------------------------------------------|
 | Normal (default) | 2          | info                 | Production                                        |
 | Debug            | 4          | debug                | Troubleshooting                                   |
-| Trace            | 6          | debug                | Deep investigation                                |
-| TraceAll         | 8          | debug                | Full dumps — perf impact, may expose secrets      |
+| Trace            | 6          | debug¹               | Deep investigation                                |
+| TraceAll         | 8          | debug¹               | Full dumps — perf impact, may expose secrets      |
 
-The chosen API design is **Option B — Structured fields** in `OperatorConfiguration`. This
-extends the existing pattern (which already has `ClusterVersionOperator`,
-`ClusterNetworkOperator`, and `IngressOperator` fields) with new optional
-`*ComponentLogLevelSpec` pointer fields. Each component uses `*ComponentLogLevelSpec`
-directly.
+¹ etcd uses zap logging which has no granularity below `debug` — Trace and TraceAll both
+map to `debug`.
 
-> **Why etcd uses `ETCD_LOG_LEVEL` env var and not `--log-level` flag:** etcd is started
-> via a shell one-liner (`/bin/sh -c "... /usr/bin/etcd"`). Injecting a CLI flag means
-> string-manipulating the shell command — fragile and breaks if the command format changes.
-> `ETCD_LOG_LEVEL` matches all 15 existing etcd config values and uses the existing
-> `util.UpsertEnvVar()` utility (from `support/util/containers.go`). etcd internally maps
-> `ETCD_*` env vars to their `--*` flag equivalents.
-
-> **Why Trace and TraceAll both map to `debug` for etcd:** etcd uses zap, which supports:
-> debug, info, warn, error, panic, fatal. There is no finer granularity below debug. klog
-> has numeric levels (2/4/6/8) giving four distinct settings; etcd only gives two useful
-> ones (info and debug).
+The chosen API design uses **structured per-component fields** in `OperatorConfiguration`.
+This extends the existing pattern (which already has `ClusterVersionOperator`,
+`ClusterNetworkOperator`, and `IngressOperator` fields) with new per-component types, each
+embedding the shared `ComponentLogLevelSpec` via `json:",inline"`. Each component gets a
+dedicated Go type (e.g., `KubeAPIServerOperatorSpec`) that can be independently extended in
+the future without breaking vendoring consumers.
 
 When no log level is specified for a component, the default (`Normal`) is used, preserving
 backward compatibility.
@@ -212,10 +186,8 @@ reconciles hosted control plane components.
 5. The CPO updates the component's deployment/statefulset with the new verbosity flag,
    triggering a rolling restart.
 6. The component pods restart with the updated verbosity level.
-7. The CPO sets a `NonDefaultLogLevel` status condition on the HostedCluster indicating
-   that non-default log levels are active.
-8. The cluster administrator collects the verbose logs for diagnosis.
-9. After troubleshooting, the administrator resets the log level to `Normal` (or removes
+7. The cluster administrator collects the verbose logs for diagnosis.
+8. After troubleshooting, the administrator resets the log level to `Normal` (or removes
    the override), and the CPO triggers another rolling restart to restore default verbosity.
 
 #### Entry Point & Data Flow
@@ -251,19 +223,17 @@ sequenceDiagram
     CPO->>Deploy: Update container args
     Deploy->>Pod: Rolling restart
     Pod-->>Pod: Starts with new verbosity
-    CPO-->>HC: Set NonDefaultLogLevel condition = True
     Admin->>Pod: Collect verbose logs for diagnosis
     Admin->>HC: Reset log level to Normal
     HC->>CPO: Reconcile event
     CPO->>Deploy: Restore default args (--v=2)
     Deploy->>Pod: Rolling restart
-    CPO-->>HC: Clear NonDefaultLogLevel condition
 ```
 
 ### API Extensions
 
 This enhancement modifies the `HostedCluster` and `HostedControlPlane` CRDs by adding new
-optional pointer fields to the existing `OperatorConfiguration` struct. The existing
+fields to the existing `OperatorConfiguration` struct. The existing
 `hypershift.openshift.io/kube-apiserver-verbosity-level` annotation is deprecated in favor
 of the new structured API.
 
@@ -273,15 +243,64 @@ Added to `api/hypershift/v1beta1/operator.go` (where `LogLevel` is already defin
 
 ```go
 // ComponentLogLevelSpec specifies the log verbosity for a control plane component.
+// +kubebuilder:validation:MinProperties=1
 type ComponentLogLevelSpec struct {
-    // logLevel configures the log verbosity for the component.
+    // logLevel sets the log verbosity for the component.
     // Valid values are: "Normal", "Debug", "Trace", "TraceAll".
-    // Defaults to "Normal".
-    //
+    // Setting this field triggers a rolling restart of the component.
+    // When omitted, this means the user has no opinion and the platform
+    // defaults to Normal, which is subject to change over time.
     // +optional
-    // +kubebuilder:default=Normal
-    // +kubebuilder:validation:Enum="";Normal;Debug;Trace;TraceAll
-    LogLevel LogLevel `json:"logLevel,omitempty"`
+    LogLevel *LogLevel `json:"logLevel,omitempty"`
+}
+```
+
+#### Per-Component Wrapper Types
+
+Each component gets a dedicated type that embeds `ComponentLogLevelSpec`. This allows
+future per-component extension (e.g., adding `resourceOverrides` to
+`KubeAPIServerOperatorSpec`) without breaking Go types for vendoring consumers. The YAML
+wire format is unchanged.
+
+```go
+// KubeAPIServerOperatorSpec configures the kube-apiserver component.
+type KubeAPIServerOperatorSpec struct {
+    ComponentLogLevelSpec `json:",inline"`
+}
+
+// KubeControllerManagerOperatorSpec configures the kube-controller-manager component.
+type KubeControllerManagerOperatorSpec struct {
+    ComponentLogLevelSpec `json:",inline"`
+}
+
+// KubeSchedulerOperatorSpec configures the kube-scheduler component.
+type KubeSchedulerOperatorSpec struct {
+    ComponentLogLevelSpec `json:",inline"`
+}
+
+// EtcdOperatorSpec configures the etcd component.
+type EtcdOperatorSpec struct {
+    ComponentLogLevelSpec `json:",inline"`
+}
+
+// OpenShiftAPIServerOperatorSpec configures the openshift-apiserver component.
+type OpenShiftAPIServerOperatorSpec struct {
+    ComponentLogLevelSpec `json:",inline"`
+}
+
+// OpenShiftControllerManagerOperatorSpec configures the openshift-controller-manager component.
+type OpenShiftControllerManagerOperatorSpec struct {
+    ComponentLogLevelSpec `json:",inline"`
+}
+
+// OpenShiftOAuthAPIServerOperatorSpec configures the openshift-oauth-apiserver component.
+type OpenShiftOAuthAPIServerOperatorSpec struct {
+    ComponentLogLevelSpec `json:",inline"`
+}
+
+// OAuthServerOperatorSpec configures the oauth-server component.
+type OAuthServerOperatorSpec struct {
+    ComponentLogLevelSpec `json:",inline"`
 }
 ```
 
@@ -294,37 +313,53 @@ Added to `api/hypershift/v1beta1/hostedcluster_types.go`, extending the existing
 type OperatorConfiguration struct {
     // ...existing ClusterVersionOperator, ClusterNetworkOperator, IngressOperator fields...
 
-    // kubeAPIServer configures the log verbosity of the kube-apiserver component.
+    // kubeAPIServer configures the kube-apiserver component.
+    // Setting the logLevel field triggers a rolling restart of the component.
+    // kube-apiserver runs with 3 replicas (HA) — 2 continue serving while 1 restarts.
     // +optional
-    KubeAPIServer *ComponentLogLevelSpec `json:"kubeAPIServer,omitempty"`
+    KubeAPIServer KubeAPIServerOperatorSpec `json:"kubeAPIServer,omitzero"`
 
-    // kubeControllerManager configures the log verbosity of the kube-controller-manager component.
+    // kubeControllerManager configures the kube-controller-manager component.
+    // Setting the logLevel field triggers a rolling restart of the component.
+    // kube-controller-manager uses leader election — the standby takes over during restart.
     // +optional
-    KubeControllerManager *ComponentLogLevelSpec `json:"kubeControllerManager,omitempty"`
+    KubeControllerManager KubeControllerManagerOperatorSpec `json:"kubeControllerManager,omitzero"`
 
-    // kubeScheduler configures the log verbosity of the kube-scheduler component.
+    // kubeScheduler configures the kube-scheduler component.
+    // Setting the logLevel field triggers a rolling restart of the component.
+    // kube-scheduler uses leader election — the standby takes over during restart.
     // +optional
-    KubeScheduler *ComponentLogLevelSpec `json:"kubeScheduler,omitempty"`
+    KubeScheduler KubeSchedulerOperatorSpec `json:"kubeScheduler,omitzero"`
 
-    // etcd configures the log verbosity of the etcd component.
+    // etcd configures the etcd component.
+    // Setting the logLevel field triggers a rolling restart of the component.
+    // etcd runs with 3 replicas — Raft quorum is maintained during rolling update.
     // +optional
-    Etcd *ComponentLogLevelSpec `json:"etcd,omitempty"`
+    Etcd EtcdOperatorSpec `json:"etcd,omitzero"`
 
-    // openShiftAPIServer configures the log verbosity of the openshift-apiserver component.
+    // openShiftAPIServer configures the openshift-apiserver component.
+    // Setting the logLevel field triggers a rolling restart of the component.
+    // openshift-apiserver runs with 3 replicas (HA) — 2 continue serving while 1 restarts.
     // +optional
-    OpenShiftAPIServer *ComponentLogLevelSpec `json:"openShiftAPIServer,omitempty"`
+    OpenShiftAPIServer OpenShiftAPIServerOperatorSpec `json:"openShiftAPIServer,omitzero"`
 
-    // openShiftControllerManager configures the log verbosity of the openshift-controller-manager component.
+    // openShiftControllerManager configures the openshift-controller-manager component.
+    // Setting the logLevel field triggers a rolling restart of the component.
+    // openshift-controller-manager uses leader election — the standby takes over during restart.
     // +optional
-    OpenShiftControllerManager *ComponentLogLevelSpec `json:"openShiftControllerManager,omitempty"`
+    OpenShiftControllerManager OpenShiftControllerManagerOperatorSpec `json:"openShiftControllerManager,omitzero"`
 
-    // openShiftOAuthAPIServer configures the log verbosity of the openshift-oauth-apiserver component.
+    // openShiftOAuthAPIServer configures the openshift-oauth-apiserver component.
+    // Setting the logLevel field triggers a rolling restart of the component.
+    // openshift-oauth-apiserver runs with 3 replicas (HA) — 2 continue serving while 1 restarts.
     // +optional
-    OpenShiftOAuthAPIServer *ComponentLogLevelSpec `json:"openShiftOAuthAPIServer,omitempty"`
+    OpenShiftOAuthAPIServer OpenShiftOAuthAPIServerOperatorSpec `json:"openShiftOAuthAPIServer,omitzero"`
 
-    // oAuthServer configures the log verbosity of the oauth-server component.
+    // oauthServer configures the oauth-server component.
+    // Setting the logLevel field triggers a rolling restart of the component.
+    // oauth-server runs with 3 replicas (HA) — 2 continue serving while 1 restarts.
     // +optional
-    OAuthServer *ComponentLogLevelSpec `json:"oAuthServer,omitempty"`
+    OAuthServer OAuthServerOperatorSpec `json:"oauthServer,omitzero"`
 }
 ```
 
@@ -332,7 +367,7 @@ type OperatorConfiguration struct {
 
 | Direction                  | Behavior                                                                              |
 |----------------------------|---------------------------------------------------------------------------------------|
-| N+1 (new code, old data)   | Old data has no log level fields → nil pointers → defaults apply                      |
+| N+1 (new code, old data)   | Old data has no log level fields → zero-value structs → defaults apply                |
 | N-1 (old code, new data)   | New data has log level fields → old code ignores unknown JSON keys → no error         |
 
 **Propagation is automatic:** `OperatorConfiguration` is already embedded in
@@ -348,9 +383,11 @@ level configuration is set on the HostedCluster CR in the management cluster and
 to the hosted control plane components running in the management cluster namespace. No
 changes are required in the guest cluster.
 
-For managed services (ROSA HCP, ARO HCP), service-level guardrails may be needed to
-restrict `TraceAll` log level, as glog level 8 can dump sensitive data including request
-bodies and secrets in component logs.
+For managed services (ROSA HCP, ARO HCP), service-level guardrails are required before
+promoting this feature to GA. The feature gate prevents the fields from being available on
+managed service clusters until promoted. The `TraceAll` access policy (CEL rule or
+admission webhook) for managed services is a promotion prerequisite — see Graduation
+Criteria.
 
 #### Standalone Clusters
 
@@ -385,18 +422,15 @@ already targets the main container.
 
 Phase 1 delivers:
 
-1. **API types:** `ComponentLogLevelSpec` struct and the `KubeAPIServer` field in
-   `OperatorConfiguration`.
+1. **API types:** `ComponentLogLevelSpec` struct, `KubeAPIServerOperatorSpec` wrapper type,
+   and the `KubeAPIServer` field in `OperatorConfiguration`.
 2. **Mapping utility:** `LogLevelToKlogVerbosity()` in `support/util/loglevel.go`.
 3. **CPO integration for KAS:** Replace the existing annotation logic at
    `v2/kas/deployment.go` with structured API field reading. Annotation fallback with lower
    precedence during transition.
 4. **Annotation deprecation:** Both annotation and API field honored; new field wins.
    Deprecation warning condition emitted when annotation is used.
-5. **Status reporting:** `NonDefaultLogLevel` condition on HostedCluster when any component
-   has a non-default log level.
-6. **Unit + E2E tests** for KAS log level propagation, annotation precedence, and HA
-   rolling restart.
+5. **Unit tests** for KAS log level propagation and annotation precedence.
 
 #### Phase 2: remaining 7 components (in parallel, after Phase 1 approval)
 
@@ -415,43 +449,12 @@ since they all follow the same pattern established by KAS:
 |------------------------------|-------|----------------|-----------------------------------------|----------------------------------------------|
 | **kube-apiserver**           | **1** | klog           | `v2/kas/deployment.go`                  | `--v=N` (replaces annotation logic)          |
 | kube-controller-manager      | 2     | klog           | `v2/kcm/deployment.go`                  | `--v=N` appended to args                     |
-| kube-scheduler               | 2     | klog           | `v2/kube_scheduler/deployment.go`       | `--v=N` appended to args                     |
+| kube-scheduler               | 2     | klog           | `v2/kube_scheduler/deployment.go`       | `--v=N` (replaces hardcoded `--v=2`)         |
 | etcd                         | 2     | zap (non-klog) | `v2/etcd/statefulset.go`                | `ETCD_LOG_LEVEL` env var                     |
 | openshift-apiserver          | 2     | klog           | `v2/oapi/deployment.go`                 | `--v=N` appended to args                     |
 | openshift-controller-manager | 2     | klog           | `v2/ocm/component.go`                   | `--v=N` appended to args via adapt function  |
 | openshift-oauth-apiserver    | 2     | klog           | `v2/oauth_apiserver/deployment.go`      | `--v=N` (overrides hardcoded `--v=2`)        |
 | oauth-server                 | 2     | klog           | `v2/oauth/deployment.go`                | `--v=N` appended to args                     |
-
-#### Full Component Scope by Phase
-
-The table below captures the holistic scope of log level configurability across all
-CPO-managed components, per the architect's guidance to design this feature comprehensively.
-This enhancement covers all phases end-to-end; the initial implementation (this EP) delivers
-Phases 1 and 2. Phase 3 components are explicitly in scope for the enhancement at the
-holistic level and are deferred only as a sequencing decision. The `ComponentLogLevelSpec`
-API is designed to accommodate all phases with only additive, backward-compatible changes to
-`OperatorConfiguration`. The logging model column explains the per-component translation
-mechanism — it is an implementation detail, not a scope boundary.
-
-| Phase | Components | Logging Model | Count |
-|---|---|---|---|
-| **Phase 1** | kube-apiserver | klog (`--v=N`) | 1 |
-| **Phase 2** | kube-controller-manager, kube-scheduler, etcd, openshift-apiserver, openshift-controller-manager, openshift-oauth-apiserver, oauth-server | klog (`--v=N`) / zap (`ETCD_LOG_LEVEL` env var for etcd) | 7 |
-| **Phase 3 — klog-based managed components** | cluster-network-operator, cluster-version-operator, cluster-autoscaler, cluster-image-registry-operator, cluster-storage-operator, cluster-node-tuning-operator, cluster-policy-controller, csi-snapshot-controller-operator, dns-operator, ingress-operator, cloud-credential-operator, capi-provider, capi-manager, cluster-api, kubevirt-cloud-controller-manager, gcp-cloud-controller-manager, powervs-cloud-controller-manager, openstack-cloud-controller-manager, aws-cloud-controller-manager, azure-cloud-controller-manager, kubevirt-csi-controller, machine-approver, karpenter-operator, konnectivity-agent, olm-operator, catalog-operator, packageserver, openshift-route-controller-manager, endpoint-resolver | klog (`--v=N`); same `LogLevelToKlogVerbosity()` utility as Phases 1 & 2 | ~29 |
-| **Phase 3 — zap-based managed components** | hosted-cluster-config-operator (HCCO), control-plane-pki-operator, karpenter, ignition-server | zap (`--zap-log-level` / `--log-level`); requires `LogLevelToZapLevel()` mapping utility, analogous to `LogLevelToEtcdLevel()` introduced in Phase 2. ignition-server uses controller-runtime's zap integration via `ctrl.SetLogger(zap.New(...))` | 4 |
-| **Permanent non-goals** | `control-plane-operator` self, `certified-operators-catalog`, `community-operators-catalog`, `redhat-operators-catalog`, `redhat-marketplace-catalog`, `router`, `ignition-server-proxy`, `aws-node-termination-handler`, `olm-collect-profiles`, `featuregate-generator`, `metrics-proxy` | No standard configurable verbosity interface — excluded by design, not by sequencing | 11 |
-
-#### Phase 3 API Note: Components with Existing OperatorConfiguration Fields
-
-Three Phase 3 klog-based components — `cluster-version-operator`, `cluster-network-operator`,
-and `ingress-operator` — already have dedicated typed configuration structs in
-`OperatorConfiguration` (`ClusterVersionOperatorSpec`, `ClusterNetworkOperatorSpec`,
-`IngressOperatorSpec`). For these components, log level configuration will be added by
-embedding a `LogLevel` field within their existing typed structs rather than introducing
-parallel `*ComponentLogLevelSpec` fields. This avoids creating two configuration entry points
-for the same component while keeping a single, natural location for all per-component
-configuration. The `LogLevel` field will use the same `LogLevel` type and follow the same
-semantics as `ComponentLogLevelSpec.LogLevel`, ensuring uniform behavior across all phases.
 
 #### HA Rolling Restart — Zero Downtime
 
@@ -466,26 +469,46 @@ semantics as `ComponentLogLevelSpec.LogLevel`, ensuring uniform behavior across 
 | openshift-oauth-apiserver    | 3             | Load balanced                                          |
 | oauth-server                 | 3             | Load balanced — request-serving component              |
 
-**ROSA HCP / ARO HCP:** Always HighlyAvailable. `SingleReplica` is never used. Zero
-downtime guaranteed.
+**ROSA HCP / ARO HCP:** `controllerAvailabilityPolicy` is always `HighlyAvailable` for
+managed services — control plane components run with full HA replica counts. Zero downtime
+guaranteed during rolling restarts.
+
+**Multi-component changes:** When multiple components are changed in a single `oc patch`,
+the CPO does not explicitly serialize rollouts across all components. Instead, the CPOv2
+dependency graph provides natural layer-based ordering:
+
+- **Layer 0:** etcd (no dependencies) — updated immediately
+- **Layer 1:** kube-apiserver (depends on etcd `Available=True` + `RolloutComplete=True`)
+- **Layer 2:** KCM, kube-scheduler, openshift-apiserver (implicit KAS dependency)
+- **Layer 3:** oauth-apiserver, oauth-server, openshift-controller-manager (depend on
+  openshift-apiserver)
+
+Components at the same dependency layer are updated in the same reconciliation pass. HA
+safety is guaranteed **per-component** — each component has sufficient replicas (3 for
+load-balanced, 2 for leader-elected) to handle rolling restarts without downtime.
+Cross-component serialization is not required because each component's rollout is
+independent, handled by Kubernetes' own rolling update strategy with proper pod disruption
+budgets.
 
 ### Risks and Mitigations
 
 **Risk:** `TraceAll` (glog level 8) can dump sensitive data including request bodies and
 secrets in component logs.
-**Mitigation:** Document operational warnings for `TraceAll` in API docs and release notes.
-Consider adding validation warnings or status conditions when `TraceAll` is set. Managed
-services may restrict this level via admission webhooks.
+**Mitigation:** The feature is gated — `TraceAll` cannot reach managed service clusters
+until promoted. The `TraceAll` access policy for managed services (CEL rule or admission
+webhook) is a prerequisite for promotion to GA. Document operational warnings for
+`TraceAll` in API docs and release notes.
 
 **Risk:** High verbosity levels significantly increase log volume, potentially impacting log
 storage and cluster performance.
-**Mitigation:** Add status conditions when non-default log levels are active so SREs can
-monitor and alert on elevated verbosity. Document storage impact guidance per log level.
+**Mitigation:** Document storage impact guidance per log level. Administrators can inspect
+the HostedCluster spec directly to identify clusters with non-default log levels.
 
 **Risk:** `TraceAll` on managed services (ROSA HCP, ARO HCP) could expose secrets in logs
 flowing to CloudWatch or Azure Monitor (customer-visible).
-**Mitigation:** Add admission policy or CEL rule blocking `TraceAll` on managed service
-clusters. Access model (customer self-service vs SRE/CEE only) to be decided with PM.
+**Mitigation:** The feature gate prevents exposure on managed services until promoted.
+Before promotion, the specific enforcement mechanism (CEL rule or admission webhook
+blocking `TraceAll` on managed clusters) must be implemented and validated.
 
 **Risk:** High verbosity on managed services (ROSA HCP, ARO HCP) increases log volume
 flowing to CloudWatch or Azure Monitor, potentially impacting storage costs.
@@ -494,8 +517,10 @@ auto-revert to `Normal` after a configurable timeout if needed.
 
 **Risk:** Rolling restarts during log level changes could cause brief API unavailability if
 multiple components are changed simultaneously.
-**Mitigation:** The CPO should apply changes sequentially across components to avoid
-simultaneous restarts.
+**Mitigation:** The CPOv2 dependency graph provides natural layer-based ordering across
+components (etcd → KAS → controllers → remaining). Each component's HA guarantees (3
+replicas for load-balanced, 2 for leader-elected) ensure zero downtime during its own
+rolling restart. See "Multi-component changes" under HA Rolling Restart for details.
 
 ### Drawbacks
 
@@ -523,14 +548,17 @@ simultaneous restarts.
    because not all target components support it, and the rolling restart approach provides
    consistent behavior across all components.
 
+4. **Flat scalar fields (e.g., `kubeAPIServerLogLevel *LogLevel`):** Simpler for users but
+   inconsistent with the existing CVO/CNO/Ingress nested pattern in `OperatorConfiguration`,
+   and creates a namespace problem if per-component configuration needs to grow beyond just
+   log level. The per-component wrapper type approach was chosen for consistency and
+   future-proofing.
+
 ## Open Questions
 
 1. Should managed services (ROSA HCP, ARO HCP) expose log level configuration to customers
-   via ROSA CLI / OCM, or restrict it to SRE/CEE only? Access model to be decided with PM.
-
-2. What is the appropriate deprecation timeline for the existing
-   `hypershift.openshift.io/kube-apiserver-verbosity-level` annotation? Current
-   recommendation: deprecated on merge, removed in N+2.
+   via ROSA CLI / OCM, or restrict it to SRE/CEE only? Access model to be resolved before
+   feature promotion to GA.
 
 ## Test Plan
 
@@ -548,69 +576,79 @@ The testing strategy covers the following areas:
   level values.
 - **KAS-specific unit tests:** Annotation fallback, API field precedence over annotation,
   invalid annotation handling.
-- **E2E tests:** Set KAS LogLevel to Debug → verify pod restarts with `--v=4`; cluster
-  stays healthy.
-- **E2E tests:** Remove KAS LogLevel (nil) → verify pod rolls back to `--v=2`.
-- **E2E tests:** Set etcd LogLevel to Debug → verify pod restarts with
-  `ETCD_LOG_LEVEL=debug`.
-- **E2E tests:** KAS annotation deprecation path — annotation works, API field overrides,
-  annotation ignored when both set.
-- **E2E tests:** HA rolling restart — no API downtime during rollout (health checks pass
-  continuously).
 
-Tests should include `[Jira:"Hosted Control Planes"]` labels for the component. Since this
-feature ships ungated, no `[OCPFeatureGate:...]` label is needed.
+Tests should include `[Jira:"Hosted Control Planes"]` and
+`[OCPFeatureGate:HCPUserFacingOperatorLogs]` labels for the component.
 
 ## Graduation Criteria
 
-This feature ships **GA in the target release** with no feature gate. Dev Preview and Tech
-Preview stages are skipped because this enhancement adds optional, backward-compatible fields
-to an already-GA API surface (`OperatorConfiguration`) using an already-GA type (`LogLevel`).
-The feature is a low-risk operational knob — nil fields preserve existing behavior, and the
-CPO reconciliation path is well-established. There is no new controller, no new CRD, and no
-behavioral change for clusters that do not opt in.
+This feature follows a **gate first, promote when ready** lifecycle. The new fields are
+gated behind the `HCPUserFacingOperatorLogs` feature gate, consistent with the existing `ClusterVersionOperator` field in
+`OperatorConfiguration` which is gated behind
+`+openshift:enable:FeatureGate=ClusterVersionOperatorConfiguration`.
+
+Under the continuous release model, promotion does not need to wait for the next OCP
+release — it happens when the feature is validated. This is already practiced in OCP
+(e.g., dualstack support, Karpenter).
 
 ### Dev Preview -> Tech Preview
 
-N/A. This feature skips Dev Preview and Tech Preview. See rationale above.
+N/A. This feature ships directly as Tech Preview behind the
+`HCPUserFacingOperatorLogs` feature gate.
+
+### Tech Preview
+
+- All 8 per-component wrapper types and `ComponentLogLevelSpec` merged behind feature gate.
+- `LogLevelToKlogVerbosity()` and `LogLevelToEtcdLevel()` mapping utilities implemented.
+- CPO integration for all 8 components complete, including KAS annotation deprecation path.
+- Unit tests for all mapping utilities and per-component integration points.
+- Envtest (CEL) validation tests pass.
 
 ### Tech Preview -> GA
-
-N/A. This feature ships directly as GA. See rationale above.
-
-### GA Criteria
-
-- Ability to set log levels for all 8 core control plane components via the HostedCluster
-  CR end to end.
-- Log level changes propagate correctly and components restart with the expected verbosity.
-- Unit tests for LogLevel-to-flag mapping (klog and etcd).
-- Serialization compatibility tests (N-1/N+1 roundtrip).
-- Envtest cases for CEL/enum validation.
-- E2E tests for propagation, reset, annotation deprecation path, and HA rolling restart
-  with zero downtime.
-- Deprecation notice published for the existing KAS verbosity annotation.
-- Verification on all supported platforms: AWS/ROSA, Azure/ARO, KubeVirt, IBM, OpenStack,
-  and Agent.
+- Serialization compatibility tests (N-1/N+1 roundtrip) pass.
+- `TraceAll` access policy for managed services resolved and implemented (CEL rule or
+  admission webhook blocking `TraceAll` on ROSA HCP / ARO HCP clusters).
+- Managed service access model resolved (customer self-service vs SRE/CEE only).
+- Verification on all supported platforms.
 - CEE validation with [RFE-7777](https://issues.redhat.com/browse/RFE-7777) reporter
   confirms the feature solves their problem.
 - User-facing documentation created in
   [openshift-docs](https://github.com/openshift/openshift-docs/)
   ([OSDOCS-19157](https://issues.redhat.com/browse/OSDOCS-19157)).
+- Deprecation notice published for the existing KAS verbosity annotation.
+- Feature gate promoted — fields available on all cluster types including managed services.
 
 ### Removing a deprecated feature
 
 The existing `hypershift.openshift.io/kube-apiserver-verbosity-level` annotation is
-deprecated on merge of this feature and will be removed in N+2 (two minor releases after
-GA).
+deprecated in OCP 5.0 and will be removed in OCP 5.2.
+
+**Deprecation phase (5.0):** Both the annotation and the new
+`operatorConfiguration.kubeAPIServer.logLevel` field are honored. When the annotation is
+present, the CPO emits a deprecation warning condition on the HostedCluster. If both the
+annotation and the API field are set, the API field takes precedence.
+
+**Removal (5.2):** A follow-up PR will:
+
+1. Delete the annotation-reading code path in the KAS reconciler
+   (`v2/kas/deployment.go`) — the fallback that checks
+   `hypershift.openshift.io/kube-apiserver-verbosity-level` and maps it to `--v=N`.
+2. Remove the deprecation warning condition logic that fires when the annotation is
+   detected.
+3. Update release notes to state the annotation is no longer honored.
+
+After removal, the annotation becomes inert metadata on any HostedCluster that still
+carries it — the CPO simply stops reading it. No CRD schema change is required since
+annotations are not schema-defined.
 
 ## Upgrade / Downgrade Strategy
 
-**Upgrade:** The new log level fields are optional pointer types with `omitempty`. Clusters
-upgrading from a version without this feature will have `nil` log level fields, and the CPO
-will continue to use default verbosity (`Normal`). No action is required from the
-administrator to maintain previous behavior. The existing KAS verbosity annotation will
-continue to be honored during the transition period; if both the annotation and the new API
-field are set, the API field takes precedence.
+**Upgrade:** The new log level fields use `omitzero` (non-pointer struct with
+`json:",omitzero"`). Clusters upgrading from a version without this feature will have
+zero-value structs, and the CPO will continue to use default verbosity (`Normal`). No
+action is required from the administrator to maintain previous behavior. The existing KAS
+verbosity annotation will continue to be honored during the transition period; if both the
+annotation and the new API field are set, the API field takes precedence.
 
 **Downgrade:** If a cluster is downgraded to a version that does not support the new log
 level fields, the fields will be ignored by the older CPO. Components will revert to
@@ -639,16 +677,6 @@ control plane components are still at version N. This is safe because:
 This enhancement adds optional fields to the existing `HostedCluster` and
 `HostedControlPlane` CRDs. No new webhooks, aggregated API servers, or finalizers are
 introduced.
-
-**SLIs — detecting health of log level configuration:**
-
-The CPO reports a `NonDefaultLogLevel` status condition on the HostedCluster:
-
-- `HostedCluster` condition `NonDefaultLogLevel=True` — one or more components are running
-  with elevated verbosity. Administrators and SREs can alert on this to track clusters with
-  non-standard log volume.
-- `HostedCluster` condition `NonDefaultLogLevel=False` — all components running at default
-  verbosity.
 
 **Impact on existing SLIs:**
 
@@ -683,13 +711,7 @@ related to log level configuration.
 
 **Detecting non-default log levels:**
 
-Check the HostedCluster status conditions for `NonDefaultLogLevel=True`:
-
-```bash
-oc get hostedcluster my-cluster -o jsonpath='{.status.conditions[?(@.type=="NonDefaultLogLevel")]}'
-```
-
-Alternatively, inspect the spec directly:
+Inspect the spec directly:
 
 ```bash
 oc get hostedcluster my-cluster -o jsonpath='{.spec.operatorConfiguration}'
@@ -736,9 +758,23 @@ independently. Log level configuration is part of the standard CPO reconciliatio
 effectively disable the feature, reset all log level fields to `Normal` or remove them from
 the HostedCluster spec.
 
+## Future Work
+
+Additional CPO-managed components (e.g., cluster-autoscaler, dns-operator, cloud
+controller managers) can be added via follow-up enhancements using the same
+`ComponentLogLevelSpec` embedding pattern. Components that already have dedicated typed
+structs in `OperatorConfiguration` (CVO, CNO, Ingress) would add a `LogLevel` field within
+their existing struct. The per-component wrapper type approach scales to these additions
+with only additive, backward-compatible changes.
+
 ## Implementation History
 
 - 2026-06-09: EP created (provisional)
+- 2026-07-22: EP updated to address API review feedback — feature gating, per-component
+  wrapper types, Phase 3 removed
+- 2026-07-26: Removed NonDefaultLogLevel status condition, removed E2E tests, removed Dev
+  Preview phase, consolidated Goals into single delivery, updated feature gate name to
+  HCPUserFacingOperatorLogs
 
 ## Infrastructure Needed
 
