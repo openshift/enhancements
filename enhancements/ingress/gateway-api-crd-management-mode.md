@@ -314,6 +314,8 @@ the `openshift/api` repository (e.g.,
 // +kubebuilder:resource:path=ingresses,scope=Cluster
 // +kubebuilder:subresource:status
 // +openshift:capability=Ingress
+// +kubebuilder:validation:XValidation:rule="self.metadata.name == 'cluster'",message="ingress is a singleton, .metadata.name must be 'cluster'"
+// +openshift:enable:FeatureGate=GatewayAPIManagementMode
 type Ingress struct {
 	metav1.TypeMeta `json:",inline"`
 
@@ -322,11 +324,11 @@ type Ingress struct {
 
 	// spec holds user settable values for configuration.
 	// +required
-	Spec IngressSpec `json:"spec"`
+	Spec IngressSpec `json:"spec,omitzero"`
 
 	// status holds observed values from the cluster.
 	// +optional
-	Status IngressStatus `json:"status"`
+	Status IngressStatus `json:"status,omitzero"`
 }
 
 type IngressSpec struct {
@@ -336,8 +338,7 @@ type IngressSpec struct {
 	// Gateway API controllers.
 	//
 	// +required
-	// +openshift:enable:FeatureGate=GatewayAPIManagementMode
-	GatewayAPI GatewayAPIIngressConfig `json:"gatewayAPI"`
+	GatewayAPI GatewayAPIIngressConfig `json:"gatewayAPI,omitzero"`
 }
 
 type IngressStatus struct {
@@ -434,8 +435,8 @@ type GatewayAPIIngressConfig struct {
 	//
 	// +kubebuilder:default:="Managed"
 	// +default="Managed"
-	// +required
-	ManagementMode GatewayAPIManagementMode `json:"managementMode"`
+	// +optional
+	ManagementMode GatewayAPIManagementMode `json:"managementMode,omitempty"`
 }
 ```
 
