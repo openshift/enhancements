@@ -246,6 +246,11 @@ components:
   * Ensure that MachineConfigs are only served to attested nodes
   * Option: Store MachineConfigs as Trustee resources, stop serving configs via
     the MCS
+  * How exactly MCO will change is deferred. It may have another Enhancement
+    in the future.
+  * The relatively new
+    [bootc-operator](https://github.com/bootc-dev/bootc-operator)
+    also affects MCO
 
 * Cluster Machine Approver
   * Ensure that the logic in the CMA guarantees that only nodes passing
@@ -294,6 +299,10 @@ The cluster administrator flow should not change when adding new nodes to the
 cluster. The Confidential Cluster Operator will perform the necessary
 configuration to allow new nodes to join the cluster.
 
+In case of an external Trustee that is manually managed, the cluster admin needs
+to update Trustee configuration for the new node (e.g. upload a secret for
+the new node rootfs LUKS encryption/decryption).
+
 For more information about the implementation, see
 subsection "Adding a new node to the cluster"
 of section "Implementation Details/Notes/Constraints" below.
@@ -303,6 +312,9 @@ of section "Implementation Details/Notes/Constraints" below.
 The cluster administrator flow should not change when updating a cluster. The
 Confidential Cluster Operator will perform the necessary configuration to allow
 nodes to attest to the cluster using new version of RHCOS.
+
+In case of an external Trustee that is manually managed, the cluster admin needs
+to update Trustee configuration to allow the new CoreOS image.
 
 ##### Shutting down and restarting Confidential Clusters
 
