@@ -337,7 +337,7 @@ type IngressSpec struct {
 	// Gateway API CRDs, the Istio instance it deploys, and its
 	// Gateway API controllers.
 	//
-	// +required
+	// +optional
 	GatewayAPI GatewayAPIIngressConfig `json:"gatewayAPI,omitzero"`
 }
 
@@ -351,31 +351,14 @@ type IngressStatus struct {
 	// with the "GatewayAPI" prefix:
 	//
 	// "GatewayAPICRDsManaged" indicates whether the ingress operator is
-	// actively managing Gateway API CRDs:
-	//   - status: True, reason: "ManagedByIngressOperator" — the
-	//     ingress operator is installing, protecting (via VAP), and
-	//     upgrading CRDs.
-	//   - status: False, reason: "Unmanaged" — the administrator
-	//     chose Unmanaged mode, or a conflict prevents the ingress
-	//     operator from taking control of the CRDs; the ingress
-	//     operator does not manage CRDs or run the OpenShift
-	//     Gateway API implementation.
+	// actively managing Gateway API CRDs
 	//
 	// "GatewayAPICRDsPresent" indicates whether Gateway API CRDs
-	// exist on the cluster:
-	//   - status: True, reason: "CRDsFound" — Gateway API CRDs
-	//     are present on the cluster.
-	//   - status: False, reason: "CRDsNotFound" — Gateway API
-	//     CRDs are not present on the cluster.
+	// exist on the cluster.
 	//
 	// "GatewayAPICRDsCompliant" indicates whether the installed
-	// CRDs match the version expected by this ingress operator release:
-	//   - status: True, reason: "VersionMatch" — installed CRDs
-	//     match the expected version.
-	//   - status: False, reason: "VersionMismatch" — installed
-	//     CRDs do not match the expected version. The message
-	//     includes expected and actual versions and a pointer
-	//     to where valid manifests can be obtained.
+	// CRDs match the version expected by this ingress operator release.
+	//
 	// +listType=map
 	// +listMapKey=type
 	// +optional
@@ -414,13 +397,14 @@ const (
 
 // GatewayAPIIngressConfig holds configuration for Gateway API
 // integration in the Cluster Ingress Operator.
+// +kubebuilder:validation:MinProperties=1
 type GatewayAPIIngressConfig struct {
 	// managementMode specifies how the Cluster Ingress
 	// Operator manages Gateway API Custom Resource Definitions
 	// (CRDs), the OpenShift Gateway API implementation, and its
 	// Gateway API controllers.
 	//
-	// When set to "Managed" (the default), the ingress operator
+	// When empty or set to "Managed", the ingress operator
 	// installs, owns, and upgrades the Gateway API CRDs, protects
 	// them with a Validating Admission Policy, and deploys the
 	// OpenShift Gateway API implementation and its Gateway API
@@ -433,8 +417,6 @@ type GatewayAPIIngressConfig struct {
 	// product is responsible for providing their own CRDs and
 	// Gateway controller.
 	//
-	// +kubebuilder:default:="Managed"
-	// +default="Managed"
 	// +optional
 	ManagementMode GatewayAPIManagementMode `json:"managementMode,omitempty"`
 }
