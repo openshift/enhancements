@@ -1,110 +1,149 @@
 ---
-
-## title: must-gather-agentic-debugging
-
+title: must-gather-adapter-for-agentic-ols
 authors:
-
-- "@spatidar"
-- "@shivprakashmuley"
+  - "@spatidar"
+  - "@shivprakashmuley"
 reviewers:
-- TBD
+  - TBD
 approvers:
-- TBD
+  - TBD
 api-approvers:
-- TBD
+  - TBD
 creation-date: 2026-07-16
-last-updated: 2026-07-16
+last-updated: 2026-08-12
 status: provisional
 tracking-link:
-- [https://redhat.atlassian.net/browse/OAPE-688](https://redhat.atlassian.net/browse/OAPE-688)
+  - "https://redhat.atlassian.net/browse/OAPE-688"
+---
 
-# Must-Gather Agentic Debugging via MCP Server
+# Must-Gather Adapter for Agentic OLS
 
 ## Summary
 
-Integrate the must-gather-operator with OpenShift Lightspeed to enable automated root-cause analysis (RCA) on must-gather diagnostic bundles. When a user sets `agenticDebuggingEnabled: true` on a MustGather CR, the operator - after a successful gather Job - deploys a shared MCP server (using the `openshift-mcp-server` image with the `openshift/mustgather` toolset) that mounts the same PVC, and creates a Lightspeed Proposal CR. The Lightspeed agentic platform spawns a sandboxed agent that connects to the MCP server, fetches diagnostic data through structured MCP tool calls, and runs the IntelliAide RCA pipeline - producing a structured AnalysisResult without requiring cluster-admin privileges for the analysis agent.
+Automate root-cause analysis (RCA) of must-gather diagnostic data so operators no longer need to manually download and interpret large diagnostic bundles. After a successful must-gather collection, an optional integration with agentic OLS runs the IntelliAide RCA pipeline in a sandboxed agent and surfaces results as an AnalysisResult.
+
+The analysis agent does not require cluster-admin access: it reads diagnostic data only through structured MCP tool calls served by openshift-mcp-server, not direct PVC or API access.
+
+**Phase 1 (this proposal):** must-gather-operator orchestrates gather → MCP access layer → Lightspeed agent → AnalysisResult, using a pragmatic PoC integration (see "Phased Approach").
+
+**Phase 2 (future):** declarative MCP lifecycle (MCPServer CR, DiagnosticArchive), stronger per-collection authorization, and reduced custom infrastructure in must-gather-operator (see "Future Direction" and "Gaps and Blockers Today").
 
 ## Motivation
 
-When customers experience cluster issues, they create MustGather CRs to collect diagnostic data. Today this pipeline ends at data collection: the bundle is written to a PVC or uploaded via SFTP, and a human SRE must manually download, navigate, and analyze the data. This is slow, error-prone, and requires deep OpenShift expertise.
+Customers use MustGather to collect cluster diagnostics when something goes wrong. Today that workflow typically ends at collection: data is stored or uploaded, and a human expert must download, navigate, and interpret it.
 
-IntelliAide is a multi-stage RCA pipeline that can automate this analysis. It will run in a sandboxed agent pod in `openshift-lightspeed` with limited permissions. It cannot directly access the must-gather data on a PVC in the `must-gather-operator` namespace (PVCs are namespace-scoped), and giving it cluster-admin to re-collect data defeats the purpose of a security-constrained sandbox.
+Agentic OLS can run automated RCA (IntelliAide) in a security-constrained sandbox. That sandbox cannot safely be given broad cluster access or direct access to diagnostic storage in another namespace.
 
-A Model Context Protocol (MCP) server bridges this gap: it mounts the PVC in the operator namespace and exposes the data as structured, read-only tool calls over HTTP - a protocol the Lightspeed agent sandbox already supports.
+**Why MCP:** A dedicated MCP server mounts the collected diagnostic data and exposes it as scoped, read-only tool calls over HTTP—the same protocol agentic OLS already uses for tools. This keeps the agent sandbox least-privileged while still enabling automated analysis.
 
 ### User Stories
 
-- As an OpenShift cluster administrator, I want to set `agenticDebuggingEnabled: true` on my MustGather CR so that after diagnostic data is collected, an AI agent automatically analyzes it and produces a root-cause analysis report - without me having to manually sift through logs and events.
-- As an SRE at a large enterprise, I want the analysis agent to never require cluster-admin privileges so that automated diagnostics do not introduce security risks or privilege escalation.
-- As a Red Hat support engineer, I want RCA results surfaced as an AnalysisResult CR on the cluster so that I can programmatically retrieve them or integrate them into case management workflows.
-- As a cluster administrator managing multiple must-gather collections on the same PVC, I want each collection analyzed independently so that different failure scenarios are diagnosed without interference.
-- As an operator administrator, I want the agentic debugging feature gated behind a TechPreview flag so that I can control rollout and opt in only when my cluster has the Lightspeed agentic platform installed.
+- As a cluster administrator, I want must-gather collection to optionally trigger automated RCA so I receive an analysis report without manually reviewing raw logs.
+- As a SRE, I want the analysis agent to run with least privilege and never require cluster-admin to read diagnostics.
+- As a support engineer, I want RCA output as a cluster API object (AnalysisResult) for automation and case workflows.
+- As an administrator running multiple collections, I want each analysis scoped to the intended collection only—not other tenants' or other runs' data.
+- As a platform admin, I want this capability behind a feature gate until the integration is stable.
 
 ### Goals
 
-1. After a successful must-gather collection with `agenticDebuggingEnabled: true`, the agent automatically runs IntelliAide RCA - no human intervention required
-2. The agent never needs cluster-admin privileges - it reads data only through MCP
-3. A single shared MCP server serves multiple MustGather collections via subPath isolation on the PVC
-4. The feature is opt-in (`agenticDebuggingEnabled` defaults to `false`) and gated behind TechPreview for initial releases
-5. No changes required to the Lightspeed agentic platform - we use its existing Proposal/AnalysisResult APIs
-6. The operator is idempotent - concurrent MustGather completions do not race on MCP server creation
-7. The user retains full responsibility for PVC lifecycle management (creation, sizing, cleanup)
+1. After a successful must-gather collection with agentic analysis enabled, IntelliAide RCA runs automatically (High-priority pass in v1) with no human intervention.
+2. The analysis agent never needs cluster-admin privileges—it reads data only through MCP.
+3. **Collection isolation:** Each analysis is scoped to a single must-gather collection. The agent must not enumerate or query across unrelated collections (e.g. broad "list all must-gathers" access is out of scope). v1 enforces this by binding the agent to one path in the analysis request and serializing shared MCP access when multiple collections share storage.
+4. A single shared MCP server serves collections on the same PVC via path isolation; concurrent analyses are serialized when they would conflict.
+5. The feature is opt-in (defaults off) and gated behind a cluster **FeatureGate** before Tech Preview graduation.
+6. No changes required to the Lightspeed agentic platform APIs beyond consuming existing Proposal/AnalysisResult (or AgenticRun successor).
+7. The user retains responsibility for PVC lifecycle (creation, sizing, cleanup).
 
 ### Non-Goals
 
-1. Changes to the Lightspeed agentic operator, sandbox, or agent behavior
-2. Changes to the openshift-mcp-server toolset itself
-3. Remediation execution (we produce an AnalysisResult; execution is a Lightspeed concern)
-4. Multi-namespace PVC access (MCP server runs in operator namespace, mounts PVC from same namespace only)
-5. Custom must-gather images for user workload namespaces (separate concern of `origin-must-gather`)
-6. Multiple PVC support in the initial implementation (single PVC per operator namespace is the initial scope)
+1. Changes to the Lightspeed agentic operator, sandbox, or core agent behavior.
+2. Changes to the openshift-mcp-server toolset (this feature consumes the existing `openshift/mustgather` toolset).
+3. Remediation execution (we produce an AnalysisResult; execution is a Lightspeed concern).
+4. Multi-namespace storage/MCP layout in v1 (MustGather, PVC, and MCP server must be in the operator namespace).
+5. Multiple concurrent PVCs per shared MCP server in v1.
+6. Custom must-gather images for user workload namespaces (separate concern).
+
+## Design Overview
+
+```
+User → MustGather CR → gather Job → diagnostic data on storage
+                              ↓
+                    MCP access layer (openshift-mcp-server)
+                              ↓
+              Proposal → agent sandbox (IntelliAide) → AnalysisResult
+```
+
+| Component | Role |
+|-----------|------|
+| **must-gather-operator** | Triggers gather; after success, enables MCP access and creates a Lightspeed analysis request |
+| **openshift-mcp-server** | Serves read-only `mustgather_*` tools over the collected archive |
+| **agentic OLS** | Runs IntelliAide in a sandbox; consumes MCP URL from the analysis request |
+| **IntelliAide skills** | RCA pipeline (extract → analyze → report) |
+
+Data flow: gather writes to storage → MCP server reads that storage → agent is assigned **one** collection path and calls MCP for that archive only → AnalysisResult is written.
+
+## Phased Approach
+
+### Phase 1 — Must-Gather Adapter for Agentic OLS (this EP)
+
+**Goal:** End-to-end automated RCA after must-gather, with minimal new platform APIs.
+
+| Area | Phase 1 approach |
+|------|------------------|
+| MCP pod lifecycle | must-gather-operator ensures a shared MCP server (Deployment/Service) |
+| Storage | User-provided PVC; operator mounts it for MCP; collection path passed to agent in analysis request |
+| Analysis trigger | Lightspeed Proposal (or successor AgenticRun) with IntelliAide skills |
+| Authorization | Namespace isolation + one active collection at a time on shared MCP (see "Security Model") |
+| Feature exposure | Opt-in field on MustGather; **gated behind cluster FeatureGate** before Tech Preview |
+| API surface | One optional boolean on existing MustGather CR |
+
+### Phase 2 — Platform-aligned lifecycle (future)
+
+**Goal:** Replace bespoke MCP Deployment management with shared platform patterns.
+
+| Area | Phase 2 direction |
+|------|-------------------|
+| MCP lifecycle | MCPServer CR reconciled by MCP Lifecycle Operator |
+| Collection metadata | DiagnosticArchive CR (path, ownership, auth boundary) |
+| Authorization | Token impersonation + RBAC per collection |
+| Storage lifecycle | Coordinated PVC/directory lifecycle (upstream + operator) |
+
+Phase 2 depends on upstream gaps in "Gaps and Blockers Today"; Phase 1 does not block on them.
+
+## Gaps and Blockers Today
+
+| Gap | Why it matters | Phase 1 workaround | Phase 2 fix |
+|-----|----------------|-------------------|-------------|
+| **MCPServer CR has no PVC storage type** | Cannot declare PVC mount on MCPServer CR | Operator creates Deployment with PVC directly | Upstream: PVC in `spec.config.storage` |
+| **No DiagnosticArchive CR** | Collection path only in operator logic / analysis request | Runtime path resolution + prompt | New CR + RBAC |
+| **Per-collection auth** | Shared MCP could expose wrong collection if misconfigured | Serialize analyses; scope agent to one path per request | Impersonation + DiagnosticArchive |
+| **Catalog MCP image / toolset** | Image must include `openshift/mustgather` toolset | Pin `MCP_SERVER_IMAGE` explicitly until catalog validated | Validated catalog tag |
+
+Detailed implementation notes and per-repository impact are tracked in the companion design document for this feature.
 
 ## Proposal
 
-Add an `agenticDebuggingEnabled` boolean field to the MustGather CR spec. When set to `true` (and storage is configured), the operator performs two additional steps after a successful gather Job completes:
+Add an optional boolean field to the MustGather CR. When enabled and storage is configured, after a successful gather Job the operator:
 
-1. **Ensure shared MCP server** - creates (or verifies existence of) a Deployment and Service for the `openshift-mcp-server` container image, configured with only the `openshift/mustgather` toolset and mounting the user's PVC at `/data`.
-2. **Create Lightspeed Proposal** - creates a `Proposal` CR in the `openshift-lightspeed` namespace containing the MCP server URL, IntelliAide skill configuration, and a prompt instructing the agent to run the IntelliAide pipeline against the specific must-gather collection path.
+1. **Ensures an MCP access layer** — a shared openshift-mcp-server instance with only the `openshift/mustgather` toolset, mounting the user's PVC read-only at `/data`.
+2. **Creates a Lightspeed analysis request** — a Proposal CR (or AgenticRun successor) with the MCP URL, IntelliAide skill reference, and instructions scoped to **one** collection path on that volume.
 
-The MCP server container image is the `openshift-mcp-server` published via Red Hat's ART/Konflux pipeline. Only the `openshift/mustgather` toolset is enabled to keep the footprint minimal.
+If agentic OLS is not installed, or MCP/analysis setup fails, must-gather collection still completes normally (best-effort integration).
 
-### Workflow Description
+### Workflow
 
-**Cluster administrator** is the human user responsible for creating MustGather CRs.
+1. Administrator creates PVC and a MustGather CR with storage and agentic analysis enabled.
+2. Operator runs gather Job; output is written to the PVC under a per-run subdirectory.
+3. On successful completion, operator ensures the shared MCP server is running with the PVC mounted.
+4. Operator creates a Lightspeed analysis request pointing the agent at the MCP server and the specific collection path.
+5. Agentic OLS spawns a sandbox; the agent runs IntelliAide (High-priority pass in v1) via MCP tool calls.
+6. AnalysisResult is produced for the administrator to retrieve.
 
-**Must-gather-operator** is the controller managing the MustGather lifecycle.
-
-**Lightspeed agentic operator** is the controller managing Proposals and agent sandboxes.
-
-#### Primary Flow: Gather + Analyze
-
-1. The cluster administrator creates a PVC in the `must-gather-operator` namespace.
-2. The cluster administrator creates a MustGather CR with `agenticDebuggingEnabled: true` and `storage.persistentVolume.claim.name` referencing the PVC.
-3. CRD validation verifies that `storage` is configured (rejects the CR otherwise).
-4. The must-gather-operator creates a gather Job. The Job runs `oc adm must-gather` and writes output to the PVC under `{subPath}/{podName}/`.
-5. The gather Job completes successfully. The operator calls `handleJobCompletion()`.
-6. The operator checks `agenticDebuggingEnabled == true`.
-7. The operator validates that OpenShift Lightspeed is installed (checks API discovery for the Proposal CRD). If not installed, logs and skips - does not block MustGather completion.
-8. `ensureMCPServer()` creates (or confirms existence of) the `must-gather-mcp` Deployment + Service. The Deployment mounts the PVC at `/data` as read-only.
-9. `resolveMustGatherDataPath()` determines the specific collection path: `{subPath}/{podName}`.
-10. `createIntelliAideProposal()` creates a Proposal CR in `openshift-lightspeed` with the MCP server URL and IntelliAide instructions.
-11. The Lightspeed agentic operator processes the Proposal, spawns a sandboxed agent pod.
-12. The agent connects to `http://must-gather-mcp.must-gather-operator.svc:8080/mcp`.
-13. The agent calls `mustgather_use("/data/{subPath}/{podName}")` to select the archive.
-14. The agent runs the IntelliAide pipeline (extract → select → fetch via MCP → analyze → RCA).
-15. The agent writes an AnalysisResult CR.
-16. The cluster administrator retrieves the AnalysisResult.
-
-#### Error Cases
-
-- **Lightspeed not installed**: Operator logs info and skips Proposal creation. MustGather completes normally.
-- **MCP server creation fails**: Operator logs error and continues (best-effort). Proposal may be created but agent cannot connect.
-- **Gather Job fails/times out**: No MCP or Proposal flow is triggered.
-- **Agent sandbox crashes** (missing LLMProvider, etc.): Lightspeed operator concern; no impact on must-gather-operator.
+**Error handling:** Lightspeed absent → skip analysis, gather succeeds. MCP or Proposal failure → logged, gather succeeds. Gather failure → no analysis path triggered.
 
 ### API Extensions
 
-One new field added to the existing `MustGatherSpec` in the `mustgathers.operator.openshift.io` CRD:
+One optional boolean field on `MustGatherSpec` (default `false`). When enabled, the operator requires configured storage so diagnostic data is available to the MCP layer.
 
 ```go
 type MustGatherSpec struct {
@@ -112,20 +151,15 @@ type MustGatherSpec struct {
 
     // AgenticDebuggingEnabled, when true, automatically creates a Lightspeed
     // Proposal CR for agentic root-cause analysis after a successful
-    // must-gather collection. Requires storage to be configured (PVC) so the
-    // shared MCP server can serve the collected data to the analysis agent.
+    // must-gather collection. Requires storage to be configured so the
+    // MCP layer can serve the collected data to the analysis agent.
     // +kubebuilder:default:=false
     // +optional
     AgenticDebuggingEnabled *bool `json:"agenticDebuggingEnabled,omitempty"`
 }
 ```
 
-CRD validation rule (CEL):
-
-```
-rule: "!(has(self.agenticDebuggingEnabled) && self.agenticDebuggingEnabled && !has(self.storage))"
-message: "storage is required when agenticDebuggingEnabled is true (MCP server needs PVC-backed data)"
-```
+*Validation note:* Strict CRD CEL tying this field to a specific storage shape is deferred to avoid locking the API before storage options are finalized for GA. The operator enforces the storage requirement at reconcile time; admission/webhook validation may be added in Tech Preview if the storage contract stabilizes.
 
 Example CR:
 
@@ -146,209 +180,128 @@ spec:
       subPath: collections
 ```
 
-No new CRDs are introduced. The operator creates resources in other namespaces (Proposal CR in `openshift-lightspeed`) using an unstructured client with dynamic GVR.
+No new CRDs in Phase 1. The operator creates a Proposal in `openshift-lightspeed` via an unstructured client.
+
+**Feature gating:** The field and post-gather agentic behavior will be behind a cluster **FeatureGate** (TechPreview), consistent with other volatile OpenShift APIs—not only an operator environment variable.
 
 ### Topology Considerations
 
-#### Hypershift / Hosted Control Planes
+**Primary target:** standalone OpenShift clusters with agentic OLS installed. All components (operator, MCP server, Lightspeed) run on the same cluster. Hypershift/management-cluster deployments follow the same pattern on the management cluster.
 
-No unique considerations. The must-gather-operator runs in the management cluster. The MCP server and Lightspeed components also run in the management cluster. No guest cluster components are affected.
+**Not supported:** MicroShift and OpenShift Kubernetes Engine (agentic OLS not available). On SNO, MCP and agent sandbox pods add modest resource pressure (MCP requests ~128Mi/50m CPU).
 
-#### Standalone Clusters
+## Security Model
 
-This is the primary target topology. All components (operator, MCP server, Lightspeed) run on the same cluster.
+**Principle:** The analysis agent is untrusted relative to cluster data; it only receives MCP tool access scoped to one diagnostic collection at a time.
 
-#### Single-node Deployments or MicroShift
+| Layer | Phase 1 | Phase 2 |
+|-------|---------|---------|
+| Agent privileges | Sandboxed; no cluster-admin | Same |
+| Data access | MCP read-only tools only | Same |
+| MCP server cluster API | Disabled (`--cluster-provider disabled`) | Same |
+| MCP pod identity | Dedicated `must-gather-mcp` SA, no RBAC, `automountServiceAccountToken: false` | Same |
+| Network | In-namespace Service reachability | + optional hardening |
+| Collection boundary | One path per analysis request; shared MCP serialized per active analysis | RBAC on DiagnosticArchive via token impersonation |
 
-On SNO, the MCP server pod and agent sandbox pod add resource pressure. The MCP server requests are minimal (128Mi memory, 50m CPU). The agent sandbox resource usage depends on the Lightspeed configuration. This should be documented as a consideration for resource-constrained environments.
+**Explicit non-capability:** Generic cross-collection queries (e.g. "fetch from all must-gathers on this volume") are not supported and must not be exposed to the agent.
 
-MicroShift: Not applicable. OpenShift Lightspeed is not available on MicroShift.
+When multiple MustGather CRs share a PVC, the operator serializes MCP access so a second analysis does not start until the first completes or is judged stale—preventing one agent from reading another collection's data mid-run.
 
-#### OpenShift Kubernetes Engine
+## Implementation Notes (Phase 1)
 
-This feature depends on OpenShift Lightspeed (agentic), which is not part of OKE. The `agenticDebuggingEnabled` field can be set but will be a no-op if Lightspeed is not installed (the operator gracefully skips).
-
-### Implementation Details/Notes/Constraints
-
-#### MCP Server Image
-
-The MCP server uses the `openshift-mcp-server` container image published via Red Hat's build pipelines. Two image sources are available:
-
-
-| Environment                  | Image                                                              | Notes                                                                                                                                           |
-| ---------------------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| Production (Red Hat catalog) | `registry.redhat.io/openshift-mcp-beta/openshift-mcp-server-rhel9` | Certified, validated via Red Hat pipelines. Currently in beta.                                                                                  |
-| CI (latest builds)           | `registry.ci.openshift.org/ocp/5.0:openshift-mcp-server`           | Requires CI registry credentials ([docs](https://docs.ci.openshift.org/how-tos/use-registries-in-build-farm/#summary-of-available-registries)). |
-
-
-The image reference is configurable via the `MCP_SERVER_IMAGE` environment variable on the operator Deployment. The default will be set to the Red Hat catalog image once it moves out of beta.
-
-The MCP server is configured with:
-
-```
-args: ["--port", "8080", "--toolsets", "openshift/mustgather",
-       "--cluster-provider", "disabled", "--stateless"]
-```
-
-- `--toolsets openshift/mustgather` limits the exposed toolset to only must-gather analysis, keeping the footprint minimal.
-- `--cluster-provider disabled` ensures no live cluster API queries.
-- `--stateless` prepares for future stateless operation.
-
-#### Shared MCP Server Design
-
-A single MCP server Deployment (`must-gather-mcp`) serves all MustGather collections on the same PVC. Each collection is identified by its path (`{subPath}/{podName}`), which is passed to the agent via the Proposal prompt.
-
-The initial implementation supports a single PVC. Multiple PVCs with multiple MustGather CRs referencing different PVCs is deferred (see Open Questions). The shared server approach avoids resource waste from per-CR server pods.
-
-#### Idempotency and Concurrency
-
-`ensureMCPServer()` uses a get-then-create pattern with explicit `AlreadyExists` handling. If two MustGather Jobs complete simultaneously, both reconcilers attempt to create the Deployment - the second receives `AlreadyExists` and treats it as success.
-
-#### Feature Gating
-
-For the initial release, this feature will be gated behind a TechPreview mechanism. The operator will check a feature gate (environment variable or cluster FeatureGate resource) before processing `agenticDebuggingEnabled: true`. If the gate is off, the field is ignored.
-
-#### Lightspeed Detection
-
-The operator detects OpenShift Lightspeed presence by querying API discovery for the Proposal CRD (`agentic.openshift.io/v1alpha1`). If the CRD is not found, the operator skips Proposal creation gracefully. This avoids hard coupling and allows the must-gather-operator to function normally on clusters without Lightspeed.
-
-#### PVC Lifecycle
-
-The operator does not create or delete PVCs. The user is responsible for PVC creation before creating a MustGather CR and cleanup after analysis is complete. This is consistent with the existing `storage` behavior in the operator.
+- **MCP image:** `openshift-mcp-server` with `--toolsets openshift/mustgather`, `--cluster-provider disabled`, `--stateless`. Image reference configurable via `MCP_SERVER_IMAGE` on the operator until a catalog tag including `openshift/mustgather` is validated.
+- **Shared MCP server:** One Deployment/Service per operator namespace; collections distinguished by path on the PVC.
+- **Namespace:** MustGather CR, PVC, and MCP server must reside in the operator namespace in v1.
+- **PVC lifecycle:** User-managed; operator does not create or delete PVCs.
+- **Lightspeed detection:** Operator checks for Proposal CRD; skips gracefully if absent.
+- **IntelliAide adapter:** Skills in `intelliaide-lightspeed-skills` bridge IntelliAide's filesystem-oriented pipeline to MCP tool calls via a client-side adapter (implementation detail outside this EP).
+- **Analysis depth:** v1 runs High-priority pass only; Medium/Low deferred.
 
 ### Risks and Mitigations
 
-
-| Risk                                                                   | Impact                                          | Mitigation                                                                                                                       |
-| ---------------------------------------------------------------------- | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| Lightspeed not installed but user sets `agenticDebuggingEnabled: true` | Proposal creation fails silently                | Operator checks API discovery and logs info message; MustGather still completes normally                                         |
-| MCP server image not pullable (registry auth, image not published)     | MCP pod in ImagePullBackOff                     | Image confirmed: `registry.redhat.io/openshift-mcp-beta/openshift-mcp-server-rhel9`; configurable via `MCP_SERVER_IMAGE` env var |
-| Concurrent MustGather completions race on MCP Deployment creation      | Transient AlreadyExists errors                  | `ensureMCPServer()` explicitly handles AlreadyExists as success                                                                  |
-| origin-must-gather skips user namespaces                               | User workload failures not in bundle            | Document limitation; support `imageStreamRef` for custom gather images                                                           |
-| openshift-mcp-server footprint is large for this use case              | Over-engineering concern                        | Only enable the `openshift/mustgather` toolset; consider a thinner alternative if footprint is unacceptable                      |
-| MCP server PVC can only mount from operator namespace                  | Cannot serve data from PVCs in other namespaces | Acceptable for initial design; document as limitation                                                                            |
-
+| Risk | Mitigation |
+|------|------------|
+| Lightspeed not installed | API discovery check; skip analysis; gather completes |
+| MCP image missing `openshift/mustgather` toolset | Pin `MCP_SERVER_IMAGE`; verify toolset before setting operator default |
+| Cross-collection data exposure on shared MCP | Collection path scoping in analysis request + serialized MCP access |
+| Agentic API volatility | FeatureGate before Tech Preview |
+| Hardcoded MCP URL (PoC) | Build URL from operator namespace at request-creation time (follow-up) |
 
 ### Drawbacks
 
-- The `openshift-mcp-server` is a full-featured MCP server; using it only for the `openshift/mustgather` toolset may be considered over-engineering. However, it avoids writing and maintaining a custom server.
-- The temp cache in the agent sandbox duplicates some data from the PVC. Future optimization via MCP resource URIs or IntelliAide changes could eliminate this.
+- Using full `openshift-mcp-server` for one toolset may seem heavy, but avoids a custom server.
+- Phase 1 uses hand-built Deployment/Service rather than MCPServer CR until upstream PVC support exists.
+
+## Future Direction
+
+Phase 1 uses a hand-built MCP Deployment/Service managed by must-gather-operator. The longer-term direction delegates MCP pod lifecycle to the **MCP Lifecycle Operator** via a declarative **`MCPServer` CR**, and introduces a **`DiagnosticArchive` CR** to record collection path and ownership (replacing implicit path resolution today).
+
+**Confirmed blocker:** `MCPServer.spec.config.storage[].source.type` (developer-preview API) supports only `ConfigMap`, `Secret`, and `EmptyDir`—not `PersistentVolumeClaim`. Until upstream adds PVC storage, an MCPServer CR cannot express the mount this feature depends on. Phase 1 proceeds without waiting on this.
+
+Post-v1 token impersonation (agent token forwarded; MCP authorizes per DiagnosticArchive) depends on DiagnosticArchive and stronger platform lifecycle—documented in Phase 2 above, not required for Phase 1 graduation.
 
 ## Alternatives (Not Implemented)
 
-### Alternative 1: Per-CR MCP Server (one pod per MustGather)
-
-Each MustGather CR gets its own MCP server pod.
-
-Resource waste (most collections are analyzed once then deleted), complex lifecycle management (who deletes the per-CR MCP pod?), no benefit over a shared server with subPath isolation.
-
-### Alternative 2: Mount PVC Directly in Agent Sandbox
-
-Skip the MCP server; mount the PVC directly into the agent sandbox pod.
-
-PVCs are namespace-scoped - the PVC lives in `must-gather-operator`, the sandbox runs in `openshift-lightspeed`. Cross-namespace PVC mounts are not supported in Kubernetes.
-
-### Alternative 3: Build a Custom Lightweight MCP Server
-
-Write a minimal Go service that only exposes must-gather file access.
-
-The `openshift-mcp-server` already has a production-quality `openshift/mustgather` toolset with proper archive parsing, namespace queries, pod log extraction, and event filtering. The selected-toolset approach (`--toolsets openshift/mustgather`) keeps the deployment lightweight without reimplementing.
-
-### Alternative 5: Trigger MCP Server at Operator Boot
-
-Start the MCP server when the operator starts, not lazily on Job completion.
-
-The PVC and subPath don't exist until a MustGather CR with storage is reconciled. Lazy creation ensures data exists before the server starts.
+1. **Per-CR MCP server** — rejected: resource waste and lifecycle complexity vs. shared server with path isolation.
+2. **Mount PVC directly in agent sandbox** — rejected: PVCs are namespace-scoped; sandbox runs in `openshift-lightspeed`.
+3. **Custom lightweight MCP server** — rejected: `openshift-mcp-server` already provides production-quality `openshift/mustgather` tooling.
+4. **Start MCP at operator boot** — rejected: PVC data does not exist until after gather completes.
 
 ## Open Questions
 
-1. **Multiple PVCs / Multiple MustGather CRs**: If different MustGather CRs reference different PVCs, the shared MCP server can only mount one PVC at a time. Should we support PVC hot-swapping, multiple MCP Deployments, or mandate a single PVC? Initial approach: single PVC support only. Multiple PVCs deferred to a future iteration.
-2. **Feature gate mechanism**: Should the TechPreview gate be an environment variable on the operator Deployment, or should it integrate with the cluster-level `FeatureGate` resource?
-3. **MCP server footprint**: Is the openshift-mcp-server image acceptable for this use case, or should we consider a thinner alternative? Can the `openshift/mustgather` toolset will be enabled to minimize footprint.
+1. **Multi-PVC concurrent serving:** Is serialized access on one shared MCP sufficient for v1, or should Phase 2 invest in per-PVC MCP instances?
+2. **User-supplied analysis query:** Should MustGather accept an optional query string to narrow RCA scope (vs. fixed comprehensive analysis)?
+3. **MCP server idle lifecycle:** Should the shared MCP server scale down when no analysis is active?
+4. **IntelliAide analysis depth:** Is High-priority-only acceptable for Tech Preview, or must all three passes run before GA?
 
 ## Test Plan
 
-**Unit tests:**
+**Unit tests:** MCP server ensure logic (idempotency, PVC-swap guard), Proposal creation and path resolution, storage required when agentic analysis enabled.
 
-- `mcp_server.go`: Deployment/Service creation, idempotent handling of AlreadyExists, PVC claim name update logic
-- `proposal.go`: Proposal CR structure validation, dynamic path resolution, graceful Lightspeed-not-installed handling
-- `mustgather_types.go`: CRD validation - storage required when `agenticDebuggingEnabled` is true
+**Integration tests:** MCP/Proposal created when enabled; skipped when disabled or Lightspeed absent; second MustGather defers when shared MCP is busy.
 
-**Integration tests:**
-
-- Operator creates MCP Deployment + Service when MustGather CR has `agenticDebuggingEnabled: true` and storage configured
-- Operator skips MCP/Proposal when `agenticDebuggingEnabled: false`
-- Operator skips Proposal creation when Lightspeed CRD is not present
-
-**End-to-End tests:**
-
-- MustGather CR → gather Job → PVC data → MCP server running → Proposal created → agent sandbox launched → MCP tools called → IntelliAide pipeline executes → AnalysisResult produced
-- Negative: MustGather CR without storage + `agenticDebuggingEnabled: true` is rejected at admission
-- Negative: Lightspeed not installed - MustGather completes, no Proposal created
+**End-to-end:** MustGather → gather → MCP → Proposal → IntelliAide → AnalysisResult. Negative: no storage when enabled; Lightspeed absent.
 
 ## Graduation Criteria
 
-### Dev Preview -> Tech Preview
+### Dev Preview → Tech Preview
 
-- `agenticDebuggingEnabled` field available in MustGather CRD
-- Feature gated behind TechPreview flag
-- End-to-end flow works: gather → MCP server → Proposal → agent → AnalysisResult
-- Single PVC support validated
-- Operator gracefully handles missing Lightspeed
-- Documentation of prerequisites and limitations
+- `agenticDebuggingEnabled` field in MustGather CRD
+- Cluster FeatureGate implemented and documented
+- End-to-end flow validated (High-priority IntelliAide pass)
+- Single-PVC / serialized MCP access documented
+- Graceful behavior when Lightspeed absent
+- Proposal/AgenticRun CR must not be created until the MCP Deployment reports Ready and its Service has at least one endpoint
 
-### Tech Preview -> GA
+### Tech Preview → GA
 
-- Feature gate removed; `agenticDebuggingEnabled` is generally available
-- Multiple PVC / multiple CR scenarios tested and documented
-- Upgrade/downgrade tested
-- Performance benchmarked (time from Job completion to AnalysisResult)
-- User-facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/)
-- MCP server image published and validated via official pipelines
-- Feedback from users incorporated
-
-### Removing a deprecated feature
-
-Not applicable.
+- Feature gate removed for general availability
+- Multi-collection scenarios tested; upgrade/downgrade validated
+- Validated catalog MCP image with `openshift/mustgather`
+- User-facing documentation in [openshift-docs](https://github.com/openshift/openshift-docs/)
 
 ## Upgrade / Downgrade Strategy
 
-- **Upgrade**: Existing MustGather CRs continue to work unchanged. The `agenticDebuggingEnabled` field defaults to `false` (disabled), so no behavioral change occurs for existing users. The MCP server Deployment is only created when a new CR with `agenticDebuggingEnabled: true` is reconciled.
-- **Downgrade**:
-  - If only the operator is downgraded (CRD still includes `agenticDebuggingEnabled`), the older operator version ignores the field and collection proceeds without analysis.
-  - If the CRD is also downgraded, the field may be pruned from existing CRs. No data migration needed.
-  - The MCP server Deployment/Service created by the newer operator will remain but serve no new requests. Manual cleanup is acceptable.
-  - No data loss occurs; must-gather data on the PVC is unaffected.
+- **Upgrade:** Field defaults to `false`; existing CRs unchanged. MCP server created only when a new CR enables agentic analysis.
+- **Downgrade:** Older operator ignores the field. Leftover MCP Deployment/Service may remain; manual cleanup acceptable. No data loss on PVC.
 
 ## Version Skew Strategy
 
-The agentic debugging feature is self-contained within the must-gather-operator. The only external interaction is creating a Proposal CR in `openshift-lightspeed` - this uses an unstructured client with a dynamic GVR, so version skew with the Lightspeed operator is handled gracefully (if the CRD doesn't exist or has a different shape, creation fails and the operator logs the error without blocking MustGather completion).
+Self-contained in must-gather-operator. Proposal creation uses dynamic GVR; missing or changed Lightspeed APIs fail gracefully without blocking gather. MCP server version is operator-configured only.
 
-The MCP server is deployed by the operator and runs the same version as configured in the operator's environment. No coordination with other component versions is required.
+## Operational Aspects
 
-## Operational Aspects of API Extensions
-
-The `agenticDebuggingEnabled` field is an optional addition to the existing `mustgathers.operator.openshift.io` CRD. No new webhooks, finalizers, aggregated API servers, or additional CRDs are introduced.
-
-- **Impact on existing SLIs**: None. The field is optional and only triggers additional behavior on newly created CRs that explicitly enable it. Existing CRs and the operator's core gather/upload functionality are unaffected.
-- **Failure modes**:
-  - MCP Deployment creation fails → logged, MustGather still completes
-  - Proposal creation fails → logged, MustGather still completes
-  - MCP server pod crashes → Proposal exists but agent cannot connect; Lightspeed operator handles timeout
-  - Agent sandbox fails → AnalysisResult not produced; no impact on must-gather-operator
-- **Escalation teams**: Must-gather operator team for MCP server and Proposal creation issues. Lightspeed team for agent sandbox and AnalysisResult issues.
+- **SLI impact:** None for existing gather/upload workflows; optional field only.
+- **Failure modes:** MCP or Proposal failures are logged; gather completes. Agent/sandbox failures are Lightspeed-owned.
+- **Escalation:** must-gather-operator team (MCP, Proposal); Lightspeed team (sandbox, AnalysisResult).
 
 ## Support Procedures
 
-- **Detecting issues**:
-  - Check operator logs for `"failed to ensure MCP server"` or `"failed to create IntelliAide proposal"` messages
-  - Check `oc get deployment must-gather-mcp -n must-gather-operator` - should be `1/1 Ready` after first agentic MustGather
-  - Check `oc get proposal -n openshift-lightspeed` for the Proposal corresponding to the MustGather name
-  - Check agent sandbox pod logs in `openshift-lightspeed` for MCP connection errors
-- **Disabling**: Set `agenticDebuggingEnabled: false` on new CRs, or remove the TechPreview feature gate to disable cluster-wide. The MCP server Deployment can be manually deleted if no longer needed.
-- **Consequences of disabling**: Must-gather collection continues normally. No RCA is produced. No data loss.
-- **Graceful failure**: All agentic debugging steps are best-effort. Failures in MCP server creation or Proposal creation do not block MustGather completion or resource cleanup.
+- Operator logs: `failed to ensure MCP server`, `failed to create IntelliAide proposal`
+- `oc get deployment must-gather-mcp -n <operator-ns>`
+- `oc get proposal -n openshift-lightspeed`
+- Disable: set field false on new CRs or turn off FeatureGate
 
 ## Infrastructure Needed
 
-No new subprojects or repos are required. The implementation lives in the existing `openshift/must-gather-operator` repository. The MCP server uses the existing `openshift/openshift-mcp-server` container image.
+Implementation in `openshift/must-gather-operator`. MCP server image from `openshift/openshift-mcp-server`. IntelliAide skills in `openshift/intelliaide-lightspeed-skills`. No new operator subprojects required for Phase 1.
