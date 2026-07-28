@@ -6,15 +6,17 @@ reviewers:
   - "@Miciah"
   - "@gcs278"
   - "@everettraven"
+  - "@crswng" # Hypershift SME
 approvers:
   - "@Miciah"
+  - "@gcs278"
 api-approvers:
   - "@everettraven"
 creation-date: 2026-05-26
-last-updated: 2026-09-17
+last-updated: 2026-07-28
 status: implementable
 tracking-link:
-  - https://redhat.atlassian.net/browse/NE-2733
+  - https://redhat.atlassian.net/browse/NE-2732
 see-also:
   - "/enhancements/ingress/gateway-api-with-cluster-ingress-operator.md"
   - "/enhancements/ingress/gateway-api-crd-life-cycle-management.md"
@@ -424,7 +426,7 @@ type GatewayAPIIngressConfig struct {
 
 The field paths are:
 
-```
+```text
 spec.gatewayAPI.managementMode
 status.conditions
 ```
@@ -459,6 +461,10 @@ Same semantics as standalone clusters. The Ingress Operator runs
 on the management cluster but manages resources on the guest
 cluster. The mode is configured per-guest-cluster and does not
 affect the management cluster.
+
+The new `Ingress` (`operator.openshift.io/v1alpha1`) resource 
+will be created in the hosted cluster's API, and will be 
+managed entirely by the owner/admin of the hosted cluster.
 
 #### Standalone Clusters
 
@@ -576,9 +582,9 @@ Procedures) instead of only from the upstream Gateway API release.
 When transitioning between modes, CIO must follow a specific order
 to avoid leaving the cluster in an inconsistent state:
 
-- **Managed to Unmanaged**: Remove VAP, stop CRD management, shut
-  down the CIO-managed Istio instance and the CIO Gateway API
-  controllers. GatewayClass and Gateway resources are left in
+- **Managed to Unmanaged**: Shut down the CIO-managed Istio instance, 
+  shutdown the CIO Gateway API controllers, remove VAP, stop CRD management.
+  GatewayClass and Gateway resources are left in
   place; administrator is responsible for cleanup.
 - **Unmanaged to Managed**: Verify CRDs match expected version (or
   are absent), install CRDs if absent, deploy VAP, start the
@@ -899,16 +905,21 @@ oc get ingress.operator.openshift.io cluster \
   jq '.[] | select(.type=="GatewayAPICRDsCompliant")'
 
 # Authenticate to the release image registry using the cluster's
-# pull secret
+# pull secret. Use a private temporary file and remove it once
+# extraction completes (or fails) to avoid leaving credentials in
+# the working directory.
+PULL_SECRET=$(mktemp)
+chmod 600 "${PULL_SECRET}"
+trap 'rm -f "${PULL_SECRET}"' EXIT
 oc get secret/pull-secret -n openshift-config \
-  -o jsonpath='{.data.\.dockerconfigjson}' | base64 -d > pull-secret.json
+  -o jsonpath='{.data.\.dockerconfigjson}' | base64 -d > "${PULL_SECRET}"
 
 # Extract the Gateway API CRD manifests from the
 # cluster-ingress-operator image in the cluster's current
 # release payload
 CIO_IMAGE=$(oc adm release info --image-for=cluster-ingress-operator \
-  --registry-config=pull-secret.json)
-oc image extract "${CIO_IMAGE}" --registry-config=pull-secret.json \
+  --registry-config="${PULL_SECRET}")
+oc image extract "${CIO_IMAGE}" --registry-config="${PULL_SECRET}" \
   --path /gateway-api-manifests/:./gateway-api-manifests --confirm
 
 # Apply the extracted CRDs to upgrade to the expected version
