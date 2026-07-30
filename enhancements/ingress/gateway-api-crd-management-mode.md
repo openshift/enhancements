@@ -164,8 +164,11 @@ the OpenShift cluster and configuring ingress.
 
 1. The cluster administrator installs or upgrades OpenShift.
 2. CIO reads the Ingress (`operator.openshift.io/v1alpha1`) `cluster`
-   resource and observes that `spec.gatewayAPI.managementMode`
-   is unset (defaults to `Managed`).
+   resource. If `spec.gatewayAPI.managementMode` is unset, CIO
+   treats this the same as `Managed` (see [API
+   Extensions](#api-extensions) for why the field is currently set
+   explicitly on the CVO-created singleton, and why CIO must not
+   assume it always will be).
 3. CIO deploys Gateway API CRDs, VAP, the CIO-managed Istio
    instance, GatewayClass, and Gateway resources as per the existing
    behavior.
@@ -332,13 +335,14 @@ the `openshift/api` repository (e.g.,
 // +kubebuilder:resource:path=ingresses,scope=Cluster
 // +kubebuilder:subresource:status
 // +openshift:capability=Ingress
-// +kubebuilder:validation:XValidation:rule="self.metadata.name == 'cluster'",message="ingress is a singleton, .metadata.name must be 'cluster'"
 // +openshift:enable:FeatureGate=GatewayAPIManagementMode
+// +kubebuilder:validation:XValidation:rule="self.metadata.name == 'cluster'",message="Ingress is a singleton; the .metadata.name field must be 'cluster'"
 type Ingress struct {
 	metav1.TypeMeta `json:",inline"`
 
 	// metadata is the standard object's metadata.
-	metav1.ObjectMeta `json:"metadata,omitempty"`
+	// +required
+	metav1.ObjectMeta `json:"metadata"`
 
 	// spec holds user settable values for configuration.
 	// +required
@@ -349,6 +353,8 @@ type Ingress struct {
 	Status IngressStatus `json:"status,omitzero"`
 }
 
+// IngressSpec is the specification of the desired behavior of the Ingress Operator.
+// +kubebuilder:validation:MinProperties=1
 type IngressSpec struct {
 	// gatewayAPI holds configuration for Gateway API
 	// integration, including how the ingress operator manages
@@ -359,11 +365,10 @@ type IngressSpec struct {
 	GatewayAPI GatewayAPIIngressConfig `json:"gatewayAPI,omitzero"`
 }
 
+// IngressStatus defines the observed status of the Ingress Operator.
+// +kubebuilder:validation:MinProperties=1
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.observedGeneration) || (has(self.observedGeneration) && self.observedGeneration >= oldSelf.observedGeneration)",message="observedGeneration must remain set and only increase once set"
 type IngressStatus struct {
-	// observedGeneration is the last generation change you've dealt with
-	// +optional
-	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
-
 	// conditions is a list of conditions and their status.
 	// Gateway API CRD management conditions are reported here
 	// with the "GatewayAPI" prefix:
@@ -379,10 +384,36 @@ type IngressStatus struct {
 	//
 	// +listType=map
 	// +listMapKey=type
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=32
 	// +optional
-	Conditions []OperatorCondition `json:"conditions,omitempty"`
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// observedGeneration represents the most recent generation
+	// observed by the operator.
+	//
+	// When omitted, the operator has not yet observed the resource.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 }
 ```
+
+`IngressSpec` and `IngressStatus` each carry
+`+kubebuilder:validation:MinProperties=1`. Since `gatewayAPI` is
+currently the only field in `IngressSpec`, and `managementMode` is
+currently the only field in `GatewayAPIIngressConfig`, this means
+that, as the API is defined today, any persisted `Ingress` object
+must have `spec.gatewayAPI.managementMode` explicitly set to
+`Managed` or `Unmanaged` -- an empty `spec: {}` or `gatewayAPI: {}`
+is rejected by the API server. This is a structural side effect of
+`MinProperties=1` on single-field structs, not a semantic
+guarantee: if either struct gains additional fields in the future
+([Future Work](#future-work-on-the-ingress-resource)),
+`managementMode` could again be absent from a valid object while
+another sibling field satisfies `MinProperties=1`. CIO's
+defaulting logic (treat an absent `managementMode` as `Managed`)
+must not assume the field will always be present.
 
 The `GatewayAPIIngressConfig` type:
 
@@ -472,9 +503,12 @@ review both this enhancement and the implementation PR in
 
 **Singleton creation:** The `cluster` singleton instance is
 created via a static manifest in the `manifests/` directory of
-`cluster-ingress-operator`, and CVO applies it automatically. See
-the HyperShift callout under Topology Considerations regarding
-manifest application ordering.
+`cluster-ingress-operator`, and CVO applies it automatically. As
+of today's API (see above), the manifest must explicitly set
+`spec.gatewayAPI.managementMode: Managed`, since an empty `spec`
+would be rejected by the API server. See the HyperShift callout
+under Topology Considerations regarding manifest application
+ordering.
 
 ### Topology Considerations
 
@@ -924,9 +958,10 @@ When upgrading from a version that does not have the Ingress
 upgrading from 4.17 to 4.18 with the backport applied):
 
 - CVO installs the new Ingress CRD. The `cluster` singleton is
-  created without `spec.gatewayAPI.managementMode` set, preserving
-  the existing implicit `Managed` behavior. No action is required
-  from the cluster administrator.
+  created with `spec.gatewayAPI.managementMode` explicitly set to
+  `Managed` (see [API Extensions](#api-extensions)), preserving the
+  existing behavior. No action is required from the cluster
+  administrator.
 - Existing clusters with CIO-managed CRDs continue to work
   identically.
 
