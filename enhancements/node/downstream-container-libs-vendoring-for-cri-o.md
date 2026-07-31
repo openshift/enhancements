@@ -108,21 +108,16 @@ replace (
 **OpenShift Node Team member** is a developer responsible for maintaining `openshift/cri-o`.
 
 1. A new downstream container-libs release is tagged, aligned with the target RHEL version.
-2. The `replace` directives in `openshift/cri-o`'s `go.mod` are updated to reference the new version. TODO: Evaluate automating this step (e.g., a bot that opens a PR when a new downstream container-libs release is tagged). In the interim, an OpenShift Node Team member performs this manually.
-3. The maintainer runs `go mod tidy` and `go mod vendor`.
-4. The maintainer submits a PR to `openshift/cri-o` with the updated vendor directory and `go.mod`/`go.sum`.
-5. CI validates the build and runs tests.
-6. The PR is reviewed and merged.
+2. A Prow job detects the new downstream container-libs release, updates the `replace` directives in `openshift/cri-o`'s `go.mod`, runs `go mod tidy` and `go mod vendor`, and opens a PR with the updated vendor directory and `go.mod`/`go.sum`. The Prow job has access to `gitlab.cee` to pull the downstream container-libs source.
+3. CI validates the build and runs tests, including a presubmit check that the vendored container-libs version matches the version shipped in Podman for the target RHEL release.
+4. The PR is reviewed and merged.
 7. ART automatically detects the change and builds a new CRI-O RPM.
 
 #### Upstream CRI-O Rebase Workflow
 
 When downstream CRI-O is rebased to a new upstream release (e.g., `release-1.36` to `release-1.37`):
 
-1. Remove the existing downstream `replace` directives for container-libs.
-2. Add new `replace` directives pointing to the container-libs version for the target RHEL release of the new OCP version.
-3. Run `go mod tidy` and `go mod vendor`.
-4. Standard PR and CI process follows.
+The commit adding the container-libs `replace` directives is treated as a carry patch. The rebase bot automatically reapplies carry patches on top of the new upstream release, so the `replace` directives are preserved across rebases without manual intervention. If the new upstream release changes the container-libs module paths or versions in a way that conflicts with the carry patch, the rebase bot flags the conflict for manual resolution. In that case, the maintainer updates the `replace` directives to point to the container-libs version for the target RHEL release of the new OCP version, runs `go mod tidy` and `go mod vendor`, and submits the resolution as part of the rebase PR.
 
 #### Security Fix Workflow
 
@@ -200,6 +195,10 @@ The `replace` directives are a standard Go modules feature that redirect module 
 - The `vendor/` directory will contain the downstream container-libs source.
 - `go mod tidy` and `go mod vendor` handle the update.
 
+#### CI Access to gitlab.cee
+
+Prow CI jobs for `openshift/cri-o` require network access to `gitlab.cee.redhat.com` when vendoring the downstream container-libs source. This is achieved by adding the `intranet` capability to the ci-operator configuration for `openshift/cri-o`. The `intranet` capability schedules CI pods on clusters with Red Hat intranet access, allowing `go mod` operations to reach `gitlab.cee`. The build environment sets `GOPRIVATE=gitlab.cee.redhat.com/*` to prevent Go from routing requests to the public module proxy.
+
 #### Downstream container-libs Fork
 
 The downstream fork is hosted at [gitlab.cee.redhat.com/sustaining-engineering/container-tools/src-git/container-libs](https://gitlab.cee.redhat.com/sustaining-engineering/container-tools/src-git/container-libs).
@@ -234,26 +233,11 @@ TODO: Determine the RHEL version to container-libs version mapping.
 **Mitigation:** A CI check or `gitlab.cee` pipeline can alert when the container-libs version in CRI-O diverges from the version shipped in Podman for the same RHEL release, providing early warning before the drift causes runtime issues.
 
 **Risk:** Container-libs versions diverge across RHEL major version boundaries during dual-stream periods (e.g., OCP targeting both RHEL 10 and RHEL 11), requiring `openshift/cri-o` to support two different container-libs versions from a single branch.
-**Mitigation:** OCP 5.0–5.2 targets both RHEL 9.8 and RHEL 10.2, but Podman on both RHEL versions currently vendors the same container-libs version, so no special handling is needed — a single set of `replace` directives works for both `.el9` and `.el10` RPM builds. When container-libs versions do diverge in the future (e.g., RHEL 10 to RHEL 11), `openshift/cri-o` can maintain a single branch using two build-time mechanisms:
-
-1. **`go.mod` patching:** The committed `go.mod` targets the newer RHEL version (e.g., RHEL 11). For the older RHEL version, the `replace` directives are patched and re-vendored before the RPM build (e.g., in a pre-build script or dist-git prep step).
-
-2. **Go build tags:** When a container-libs API change is incompatible between RHEL versions, CRI-O isolates the affected code behind Go build tags:
-
-   ```go
-   // storage_el10.go
-   //go:build el10
-
-   // storage_el11.go
-   //go:build !el10
-   ```
-
-   The RPM spec for the older RHEL build passes the appropriate tag (e.g., `go build -tags el10`). The default (no tag) compiles the newer RHEL code path.
+**Mitigation:** The RHEL team is responsible for maintaining container-libs version compatibility across dual-stream RHEL versions. No special handling is expected in `openshift/cri-o` — a single set of `replace` directives should work for both RHEL version RPM builds.
 
 **Risk:** Moving to a downstream fork changes CRI-O's versioning scheme from upstream-aligned (e.g., `1.36.x`) to the OpenShift NVR (Name-Version-Release) scheme (e.g., `openshift-5.0.0-202606091635.p2.gd8d517e.assembly.stream.el9`). Tooling and processes that parse the CRI-O version string — `crictl version` output, monitoring dashboards, must-gather scripts, alerting rules, documentation, and support procedures — may break or produce incorrect results.
 **Mitigation:** Audit all tooling that parses CRI-O version strings and update to handle the NVR format.
 
-TODO: Confirm acceptability of this versioning scheme with stakeholders and identify all affected tooling.
 
 ### Drawbacks
 
@@ -310,9 +294,7 @@ Cons:
 ## Open Questions
 
 1. What is the RHEL version to container-libs version mapping? Which RHEL version does each OCP release target (e.g., OCP 5.0 on RHEL 9.x vs. RHEL 10)?
-2. Can the container-libs version update in downstream CRI-O be automated (e.g., a bot that opens a PR on new downstream container-libs releases)?
-3. What is the expected turnaround time for security fixes flowing from upstream to downstream container-libs to downstream CRI-O?
-4. How will the downstream container-libs be made accessible from the public `openshift/cri-o` repository? The internal `gitlab.cee` fork cannot be referenced directly from public repos. Options under consideration include a GitHub mirror with CI sync, an internal go.mod patch applied during RPM builds, or committing vendored source directly.
+2. What is the expected turnaround time for security fixes flowing from upstream to downstream container-libs to downstream CRI-O?
 
 ## Test Plan
 
@@ -323,7 +305,7 @@ Existing CI coverage validates CRI-O built with the downstream container-libs:
 
 ### Detecting container-libs Version Divergence
 
-A CI test in origin could detect when the container-libs version vendored in CRI-O diverges from the version RHEL ships in Podman. The test would compare the container-libs module versions in CRI-O's `go.mod` against Podman's `go.mod` on the same RHEL release.
+A presubmit Prow job on `openshift/cri-o` checks that the container-libs version vendored in CRI-O matches the version RHEL ships in Podman. The job compares the container-libs module versions in CRI-O's `go.mod` against Podman's `go.mod` on the same RHEL release. The Prow job has access to `gitlab.cee` to retrieve the Podman source for comparison.
 
 Pros:
 - Simple to implement — a script comparing version strings in `go.mod` files.
@@ -332,8 +314,7 @@ Pros:
 
 Cons:
 - May produce false positives — version differences do not always indicate behavioral incompatibilities.
-- Requires a reliable source of truth for Podman's container-libs version on the target RHEL release.
-- Does not catch behavioral regressions introduced within the same version (e.g., downstream patches).
+- OCP release will be blocked until the container-libs version is updated.
 
 ### Sync Drift Detection via Internal Pipeline
 
@@ -387,4 +368,6 @@ This change does not introduce new failure modes visible to cluster administrato
 ## Infrastructure Needed
 
 - The downstream container-libs repository at [gitlab.cee.redhat.com/sustaining-engineering/container-tools/src-git/container-libs](https://gitlab.cee.redhat.com/sustaining-engineering/container-tools/src-git/container-libs).
-- CI configuration for `openshift/cri-o` to build and test with the downstream container-libs vendored.
+- The `intranet` capability added to `openshift/cri-o` ci-operator configuration, granting CI jobs network access to `gitlab.cee.redhat.com` for pulling downstream container-libs source during vendoring.
+- A Prow job that monitors downstream container-libs releases, runs `go mod tidy`/`go mod vendor`, and opens PRs to `openshift/cri-o` with the updated vendored source.
+- A presubmit Prow job on `openshift/cri-o` that validates the vendored container-libs version matches the version shipped in Podman for the target RHEL release.
