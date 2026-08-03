@@ -105,10 +105,16 @@ correctness without directly accessing the guest cluster.
    cluster-admins can already override the default ingress certificate by
    setting `spec.defaultCertificate` on the
    [IngressController CR](https://github.com/openshift/api/blob/master/operator/v1/types_ingresscontroller.go#L163).
-   In HyperShift, however, the IngressController is continuously reconciled
-   by HCCO, which overwrites such changes. This enhancement does not change
-   that behavior — the management plane remains the source of truth for
-   HyperShift-managed clusters.
+   In HyperShift, however, HCCO's `ReconcileDefaultIngressController` skips
+   reconciliation of the IngressController CR after its initial creation
+   (when its `ResourceVersion` is already set), so day-2 edits to the CR
+   itself are preserved. What *is* continuously reconciled is the
+   `default-ingress-cert` Secret (via `ReconcileDefaultIngressControllerCertSecret`),
+   which backs the IngressController's `spec.defaultCertificate` reference.
+   Because HCCO overwrites this Secret's data on every reconciliation loop,
+   directly editing the Secret in the guest cluster has no lasting effect.
+   This enhancement does not change that behavior — the management plane
+   remains the source of truth for HyperShift-managed clusters.
 2. **Per-route certificate management**: This enhancement covers only the
    *default* ingress certificate. Per-route TLS configuration remains the
    responsibility of route owners.
