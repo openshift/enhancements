@@ -27,8 +27,7 @@ superseded-by:
 ## Summary
 
 This enhancement adds a `defaultCertificate` field to `IngressOperatorSpec` in
-the HyperShift HostedCluster and HostedControlPlane APIs. This allows cluster
-administrators and managed-service operators (e.g. ARO, ROSA) to specify a
+the HyperShift HostedCluster and HostedControlPlane APIs. This allows managed-service operators (e.g. ARO, ROSA) to specify a
 custom TLS certificate for the default ingress controller through the
 management-plane API, instead of relying on the auto-generated wildcard
 certificate or requiring day-2 guest-cluster mutations that are continuously
@@ -52,9 +51,9 @@ any direct edits to it in the guest cluster are overwritten. There is no
 first-class API field on the HostedCluster or HostedControlPlane to override
 this behavior.
 
-Managed-service operators (ARO, ROSA) and enterprise platform teams need to
-supply their own TLS certificates — signed by their corporate or public CA —
-for customer-facing ingress endpoints. Without a management-plane API for this,
+Managed-service operators (ARO, ROSA) need to supply their own TLS
+certificates — signed by a trusted public CA — for customer-facing ingress
+endpoints. Without a management-plane API for this,
 they must either:
 
 - Patch the guest cluster directly (which gets reverted by reconciliation), or
@@ -72,17 +71,17 @@ HostedCluster API, so that customer-facing routes are served with a certificate
 signed by a trusted public or corporate CA without requiring day-2
 guest-cluster modifications that get overwritten.
 
-#### Story 2: Enterprise Platform Engineer
+#### Story 2: Managed-Service Certificate Provisioning
 
-As an enterprise platform engineer managing HyperShift clusters, I want to
-supply my organization's TLS certificate for the default ingress controller at
-cluster creation time through the management plane, so that all routes
-immediately use the correct certificate without manual post-deployment steps.
+As a managed-service operator (ARO or ROSA), I want to supply a TLS
+certificate for the default ingress controller at cluster creation time through
+the management plane, so that all customer routes immediately use the correct
+certificate without manual post-deployment steps.
 
 #### Story 3: Certificate Rotation
 
-As a cluster administrator, I want to rotate the default ingress certificate by
-updating the source Secret in the HostedCluster namespace, so that the new
+As a managed-service operator, I want to rotate the default ingress certificate
+by updating the source Secret in the HostedCluster namespace, so that the new
 certificate automatically propagates to the guest cluster without downtime or
 manual intervention.
 
@@ -105,8 +104,8 @@ correctness without directly accessing the guest cluster.
    CPO-generated wildcard certificate is used.
 4. Support certificate rotation by detecting changes to the source Secret and
    propagating the updated certificate data through the sync chain.
-5. Enable managed-service operators and enterprise platform teams to configure
-   ingress certificates entirely through the management plane.
+5. Enable managed-service operators to configure ingress certificates entirely
+   through the management plane.
 
 ### Non-Goals
 
@@ -154,8 +153,8 @@ wildcard certificate is used as the default ingress certificate.
 
 ### Workflow Description
 
-**Management-cluster administrator** is a human user or automation system
-responsible for managing HostedClusters.
+**Managed-service operator** is a human user or automation system (e.g. ARO or
+ROSA service infrastructure) responsible for managing HostedClusters.
 
 **HyperShift operator** is the controller running in the management cluster
 that reconciles HostedCluster resources.
@@ -165,7 +164,7 @@ control plane namespace that reconciles guest cluster resources.
 
 #### Initial Setup
 
-1. The management-cluster administrator creates a TLS Secret in the
+1. The managed-service operator creates a TLS Secret in the
    HostedCluster namespace containing `tls.crt` (certificate chain) and
    `tls.key` (private key):
 
@@ -181,7 +180,7 @@ control plane namespace that reconciles guest cluster resources.
      tls.key: <base64-encoded-private-key>
    ```
 
-2. The management-cluster administrator sets the `defaultCertificate` field on
+2. The managed-service operator sets the `defaultCertificate` field on
    the HostedCluster's `spec.configuration.ingress`:
 
    ```yaml
@@ -213,7 +212,7 @@ control plane namespace that reconciles guest cluster resources.
 
 #### Certificate Rotation
 
-1. The management-cluster administrator updates the TLS Secret referenced by
+1. The managed-service operator updates the TLS Secret referenced by
    `defaultCertificate` with new `tls.crt` and `tls.key` data.
 
 2. The HyperShift operator detects the Secret change and re-syncs the updated
@@ -366,7 +365,7 @@ Mitigation: The HyperShift Operator validates that `tls.crt` and `tls.key`
 exist in the referenced Secret. However, it does not validate certificate
 expiry or chain completeness. This is consistent with how standalone OpenShift
 handles user-supplied certificates — the responsibility for certificate
-validity lies with the administrator. Monitoring and alerting for certificate
+validity lies with the managed-service operator. Monitoring and alerting for certificate
 expiry should be handled by the user's certificate management tooling.
 
 **Risk: Secret deleted after being referenced.**
@@ -400,17 +399,16 @@ versions) prevents data corruption from concurrent updates.
   trade-off to avoid scope creep and to remain consistent with how standalone
   OpenShift handles user-supplied certificates.
 
-- **Management-plane-only control**: Guest cluster administrators cannot
-  override the default ingress certificate independently. This is by design
-  for managed-service scenarios (ARO, ROSA) where the management plane is the
-  authoritative source, but could be a limitation for self-managed HyperShift
-  deployments where more guest autonomy is desired.
+- **Management-plane-only control**: Guest cluster users cannot override the
+  default ingress certificate independently. This is by design for
+  managed-service scenarios (ARO, ROSA) where the management plane is the
+  authoritative source.
 
 ## Alternatives (Not Implemented)
 
 ### Alternative 1: Guest-Cluster-Side Configuration
 
-Allow guest cluster administrators to configure the default ingress certificate
+Allow guest cluster users to configure the default ingress certificate
 directly on the IngressController CR, with HCCO respecting (not overwriting)
 user-supplied values.
 
@@ -537,7 +535,7 @@ not recognize the field:
 - The ingress controller will begin serving the wildcard certificate again.
 
 This is a graceful degradation — the cluster remains functional with the
-default wildcard certificate. Administrators should be aware that their custom
+default wildcard certificate. Managed-service operators should be aware that their custom
 certificate will no longer be served after downgrade.
 
 ## Version Skew Strategy
