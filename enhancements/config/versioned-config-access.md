@@ -3,10 +3,10 @@ title: versioned-config-access
 authors:
   - "@sanchezl"
 reviewers:
-  - "@deads2k, for library-go operator patterns, please review the generic accessor interface design"
+  - "@JoelSpeed, for openshift/api conventions, please review the generic accessor interface design"
   - "@everettraven, for openshift/api conventions and type design"
 approvers:
-  - "@deads2k"
+  - "@JoelSpeed"
 api-approvers:
   - "None"
 creation-date: 2026-08-04

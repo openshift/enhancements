@@ -3,14 +3,13 @@ title: tls-versioned-config
 authors:
   - "@sanchezl"
 reviewers:
-  - "@deads2k, for library-go accessor pattern and VersionedConfigAccess design"
+  - "@JoelSpeed, for openshift/api conventions and APIServerStatus type additions"
   - "@damdo, for TLS profile domain expertise, please review version-indexed cipher evolution"
   - "@p0lyn0mial, for TLS config observer code being replaced by the accessor"
   - "@everettraven, for openshift/api type changes and APIServerStatus additions"
 approvers:
-  - "@deads2k"
+  - "@JoelSpeed"
 api-approvers:
-  - "@deads2k"
   - "@JoelSpeed"
 creation-date: 2026-08-04
 last-updated: 2026-08-04

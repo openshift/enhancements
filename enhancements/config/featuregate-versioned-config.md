@@ -3,10 +3,10 @@ title: featuregate-versioned-config
 authors:
   - "@sanchezl"
 reviewers:
-  - "@deads2k, for FeatureGateAccess backward compatibility, please review the adapter pattern"
+  - "@JoelSpeed, for openshift/api conventions, please review the adapter pattern and feature gate types"
   - "@everettraven, for openshift/api conventions and feature gate declaration patterns"
 approvers:
-  - "@deads2k"
+  - "@JoelSpeed"
 api-approvers:
   - "None"
 creation-date: 2026-08-04

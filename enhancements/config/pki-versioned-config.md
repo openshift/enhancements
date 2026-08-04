@@ -4,12 +4,12 @@ authors:
   - "@sanchezl"
 reviewers:
   - "@benluddy, for PKI profile resolution and certificate rotation domain expertise"
-  - "@deads2k, for library-go accessor pattern and VersionedConfigAccess design"
+  - "@JoelSpeed, for openshift/api conventions and PKI CRD status type additions"
   - "@everettraven, for openshift/api type changes and PKI CRD status additions"
 approvers:
-  - "@deads2k"
+  - "@JoelSpeed"
 api-approvers:
-  - "@deads2k"
+  - "@JoelSpeed"
 creation-date: 2026-08-04
 last-updated: 2026-08-04
 tracking-link:
