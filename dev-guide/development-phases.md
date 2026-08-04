@@ -16,6 +16,11 @@ focusing on what’s most important.
 3. Increase focus on release blocking features, and normalize deferring non-blocking features to the next release. 
 4. Reduce pressure to land non-blocking features by allowing backports to early z-stream releases.
 
+
+## Guidelines
+
+NOTE: See [How to file an SBAR](https://docs.google.com/document/d/1-Lq4p7KhHRUFhkhpZ1ntDOcvDZgj9YVIBOmLSRlNkq0/edit?usp=sharing) and the template linked within if you need to file an SBAR per the guidelines below.
+
 | Phase | Development | Stabilization | Post-Branching / Feature Freeze | Post GA |
 | :--- | :--- | :--- | :--- | :--- |
 | **Focus** | Ranked/prioritized feature development.<br>Getting features to done and limiting WIP.<br>Relatively rapid response to regressions. | Bug fixes, stabilizing CI.<br>Landing release blocking features, if possible.<br>Exercising caution on anything merging at this time.<br>Ack critical fixes or staff eng approved label requirements may be turned on if CI is struggling. | Bug fixes.<br>Ack critical fixes may be turned on if the pending release blocking bug count is too high, to allow for fixes to land smoothly for backporting.<br>Proceed with feature work for next release, avoid getting anchored to prior whenever possible. | Bug fixes.<br>Minimal backporting of feature gates and promotion for features that nearly made it in for GA.<br>Proceed with feature work for next release, avoid getting anchored to prior whenever possible. |
@@ -27,4 +32,5 @@ focusing on what’s most important.
 ## What does it mean if I have to defer?
 
 Once the release is GA, teams can pursue a backport to land in an early z-stream for a deferred feature by submitting an SBAR. We encourage this to only be pursued when absolutely necessary to avoid getting anchored to the prior release.
+
 
