@@ -116,13 +116,24 @@ would require an additional kube-vip change and is not part of this iteration.
    pod, maintaining compatibility with the existing BGP integration work (see
    [bgp-ovn-kubernetes.md](/enhancements/network/bgp-ovn-kubernetes.md)).
 
-5. Support BFD-backed fast failover for VIPs.
+5. Ensure that MetalLB operates correctly alongside BGP VIP management:
+   MetalLB in frr-k8s mode must be able to share the cluster's frr-k8s
+   instances (the static pods on control plane nodes and the DaemonSet on
+   workers) as an additional `FRRConfiguration` producer, including peering
+   with the same upstream routers the VIPs use. (Validated in the reference
+   implementation: a day-2 MetalLB operator install in `frr-k8s-external`
+   mode coexists with VIP management and OVN-Kubernetes route
+   advertisements on one cluster -- three producers, with MetalLB's
+   configuration merging into the same BGP neighbor the VIP configuration
+   declares, without session duplication or flap.)
 
-6. Support dual-stack (IPv4 and IPv6) VIP advertisement from the first
+6. Support BFD-backed fast failover for VIPs.
+
+7. Support dual-stack (IPv4 and IPv6) VIP advertisement from the first
    iteration. The BGP configuration must support both address families
    simultaneously.
 
-7. Provide day-2 observability for VIP BGP sessions through FRRNodeState CRs,
+8. Provide day-2 observability for VIP BGP sessions through FRRNodeState CRs,
    BGP session metrics, and standard FRR diagnostic tools.
 
 ### Non-Goals
@@ -236,9 +247,12 @@ In this architecture, data flows as follows:
 
 1. kube-vip writes VIP `/32` (or `/128`) routes into Linux routing table 198
    via netlink.
-2. frr-k8s (zebra) imports routes from table 198 via `ip import-table 198`
-   and BGP redistributes them to external peers via `redistribute table-direct
-   198`.
+2. frr-k8s redistributes routes from table 198 to external peers via
+   `redistribute table-direct 198`; the `table-direct` source reads the
+   kernel table directly, so no `ip import-table` directive is needed
+   (implementation experience: an earlier revision paired the two, but
+   `import-table` copies the routes into the main table as a side effect
+   and is unnecessary for redistribution).
 3. For BGP-learned routes from external peers (inbound), FRR installs them
    into the main kernel routing table or VRF-specific tables with protocol
    `RTPROT_BGP`.
@@ -345,8 +359,9 @@ Changes required:
 
   2. **Handover (owner: CNO):** Once the API server is available and frr-k8s
      CRDs are registered, CNO performs the transition:
-     - CNO creates a `FRRConfiguration` CR (named with a `bgp-vip-` prefix
-       and labeled with `app.kubernetes.io/managed-by: cluster-network-operator`)
+     - CNO creates a single cluster-wide `FRRConfiguration` CR (named
+       `bgp-vip`, no node selector, labeled with
+       `app.kubernetes.io/managed-by: cluster-network-operator`)
        that carries the BGP **sessions** from the bootstrap configuration:
        neighbors, passwords, BFD profiles.
      - VIP **advertisement is deliberately not expressed through the CRD
@@ -355,18 +370,28 @@ Changes required:
        regardless of kube-vip's health gate in routing table 198
        (implementation experience: this steered ECMP traffic to nodes with
        failed backends). Instead, the CR's `spec.raw.rawConfig` reproduces
-       the bootstrap advertisement semantics: `ip import-table 198` (zebra
-       only tracks non-main kernel tables when instructed), per-address-
-       family `redistribute table-direct 198` filtered through the VIP
-       route-maps and prefix-lists, and high-sequence permit entries
-       appended to frr-k8s's generated per-neighbor `<peer-address>-out`
-       route-maps. The latter is needed because frr-k8s renders deny-any
-       outbound prefix-lists when `toAdvertise` is absent; a prefix-list
-       deny is a route-map no-match, so evaluation falls through to the
-       appended permits -- egress opens exactly for the VIP prefixes and
-       everything else remains implicitly denied. An upstream frr-k8s
-       feature for advertising redistributed routes would remove this raw
-       route-map coupling.
+       the bootstrap advertisement semantics: per-address-family
+       `redistribute table-direct 198` filtered through the VIP route-maps
+       and prefix-lists (`table-direct` reads the kernel table directly --
+       no `ip import-table` directive is required), and high-sequence
+       permit entries appended to frr-k8s's generated per-neighbor
+       `<peer-address>-out` route-maps. The latter is needed because
+       frr-k8s renders deny-any outbound prefix-lists when `toAdvertise`
+       is absent; a prefix-list deny is a route-map no-match, so evaluation
+       falls through to the appended permits -- egress opens exactly for
+       the VIP prefixes and everything else remains implicitly denied.
+     - `spec.raw.rawConfig` is declared by the frr-k8s API as unsupported
+       and available for experimentation only, so the raw carrier is an
+       **interim mechanism, not the end state**. The committed migration
+       path is a first-class frr-k8s redistribution API: filed as
+       [metallb/frr-k8s#469](https://github.com/metallb/frr-k8s/issues/469)
+       with a design proposal under review in
+       [metallb/frr-k8s#470](https://github.com/metallb/frr-k8s/pull/470)
+       (health-gated advertisement of kernel-table routes with filtering,
+       including outbound policy, expressed in the CRD). Once available,
+       the raw snippet -- both the redistribution and the `-out` route-map
+       permits -- is deleted and the whole configuration becomes structured
+       CRD content.
      - CNO waits for the `FRRNodeState` CR on each node to report that the
        CRD-based configuration has been applied and BGP sessions are
        established.
@@ -388,14 +413,41 @@ Changes required:
        reports a degraded condition. The static config acts as a safety net.
 
   3. **Steady state (owners: CNO for VIP config, OVN-K and MetalLB for their
-     respective configs):** frr-k8s runs from CRD-based configuration. Each
-     consumer owns its own `FRRConfiguration` CRs, identified by distinct
-     name prefixes and `managed-by` labels:
-     - `bgp-vip-*` owned by CNO (VIP advertisement)
-     - `route-advertisements-*` owned by OVN-Kubernetes
-     - `metallb-*` owned by MetalLB operator
+     respective configs):** frr-k8s runs from the configuration described in
+     the handover phase above -- the same `FRRConfiguration` CR (sessions +
+     raw advertisement snippet) continues to be reconciled; nothing new is
+     introduced at steady state. Each consumer owns its own
+     `FRRConfiguration` CRs, identified by distinct names and `managed-by`
+     labels:
+     - `bgp-vip` owned by CNO (VIP sessions + advertisement; a single
+       cluster-wide CR with no node selector -- the masters' static pods and
+       the workers' DaemonSet instances consume the same CR)
+     - `ovnk-generated-*` owned by OVN-Kubernetes (route advertisements)
+     - `metallb-*` owned by the MetalLB operator
      frr-k8s merges all applicable CRs for the node into a single FRR
-     configuration. Consumers must not modify or delete CRs they do not own.
+     configuration -- including merging multiple producers' definitions of
+     the *same* BGP neighbor into one session (validated live with MetalLB
+     declaring the same peer the VIP CR declares). Consumers must not
+     modify or delete CRs they do not own.
+
+     **Node reboot** does not reintroduce an ordering problem: the static
+     pod starts from the on-disk bootstrap `frr.conf` before kubelet/API
+     recovery (the node advertises the VIPs as soon as kube-vip re-gates
+     them), and the frr-k8s controller container re-merges the CRD-based
+     configuration as soon as the API server is reachable -- the same
+     sequence as the original bootstrap-to-CRD handover, exercised on
+     every reboot.
+
+     **Future direction (pre-GA):** replace the bootstrap `frr.conf` +
+     handover seam with a **file-form `FRRConfiguration` source** in
+     frr-k8s -- the static pod reads an `FRRConfiguration` manifest from
+     local disk through the same parse/validate/merge pipeline as API CRs
+     and merges it with API-server CRs once available. One configuration
+     language end to end, an immutable bootstrap config, and reboot
+     behavior falls out of the merge semantics. This is complementary to
+     the redistribution API (metallb/frr-k8s#469/#470 cover *what* the CRD
+     can express; the file source covers *where* configuration comes
+     from) and will be proposed upstream once #469/#470 conclude.
 
 - **Single frr-k8s instance per node**: There must be exactly one frr-k8s
   instance running on each node. When frr-k8s is deployed as a static pod on
@@ -413,13 +465,19 @@ Changes required:
 
 #### 2. kube-vip -- Routing Table Mode Deployment
 
-kube-vip is deployed as **two separate static pods** on each control plane
-node, one for the API VIP and one for the Ingress VIP. Each instance manages
-a single VIP address, since kube-vip's `address` environment variable accepts
-only one IP address -- there is no upstream support for multiple control plane
-VIPs in a single kube-vip instance. As with frr-k8s, the installer generates
-the initial manifests for bootstrap, and MCO owns the manifests post-bootstrap
-via MachineConfig resources for control plane nodes.
+kube-vip is deployed as **two separate static pods**: `kube-vip-api` on
+each control plane node, and `kube-vip-ingress` on **every node** (control
+plane and workers -- delivered via MCO's `templates/common`, matching
+today's keepalived scoping where the ingress VIP is advertised from
+whichever nodes host healthy router pods; on typical topologies that is
+the workers). Each instance manages a single VIP address, since kube-vip's
+`address` environment variable accepts only one IP address -- there is no
+upstream support for multiple control plane VIPs in a single kube-vip
+instance. As with frr-k8s, the installer generates the initial manifests
+for bootstrap, and MCO owns the manifests post-bootstrap via MachineConfig
+resources. On workers, the ingress VIP route in table 198 is redistributed
+by the CNO-managed frr-k8s DaemonSet instance -- same table, same
+route-maps, different frr-k8s delivery vehicle.
 
 **`kube-vip-api.yaml` -- API VIP (deployed from bootstrap):**
 
@@ -463,10 +521,12 @@ via MachineConfig resources for control plane nodes.
   healthy router keep advertising. This is functionally equivalent to
   keepalived's `vrrp_script` mechanism.
 - This manifest is **not** present during bootstrap. The ingress VIP is not
-  needed until the ingress controller is operational (a day-2 concern). CNO
-  deploys the `kube-vip-ingress.yaml` static pod manifest via MCO
-  MachineConfig update once the cluster is fully operational and the
-  ingress controller is running.
+  needed until the ingress controller is operational (a day-2 concern). MCO
+  renders the `kube-vip-ingress.yaml` static pod manifest for **all nodes**
+  via `templates/common` (keepalived parity); the health gate keeps the
+  route out of table 198 until a local router pod answers, so rendering
+  the manifest early is harmless -- no node advertises the ingress VIP
+  until it actually has a healthy router.
 
 Each instance has its own independent Kubernetes Lease for leader election,
 so the API VIP and Ingress VIP can reside on different nodes simultaneously.
@@ -489,18 +549,24 @@ rather than a DaemonSet managed by CNO. The key changes:
   masters the static pod is the single frr-k8s instance serving all
   consumers, and on workers it is the DaemonSet.
 
-- **FRRConfiguration CR management**: When creating `FRRConfiguration` CRs for
-  route advertisements (as described in
-  [bgp-ovn-kubernetes.md](/enhancements/network/bgp-ovn-kubernetes.md)),
-  OVN-Kubernetes must account for the pre-existing BGP peering configuration
-  that was established during bootstrap. The CRs must be additive and not
-  conflict with the VIP advertisement configuration. OVN-Kubernetes's
-  RouteAdvertisements controller currently tracks ownership of
-  `FRRConfiguration` CRs via annotations and may garbage-collect unrecognized
-  CRs. During implementation, the VIP advertisement `FRRConfiguration` CRs
-  will use distinct naming conventions and labels (e.g., prefixed with
-  `bgp-vip-`) so that OVN-Kubernetes's reconciliation loop does not interfere
-  with them.
+- **FRRConfiguration CR management**: OVN-Kubernetes needs **no awareness
+  of the VIP configuration at all** -- neither of the bootstrap `frr.conf`
+  (a file on the node it cannot see, already loaded by the FRR daemon
+  before OVN-K's CRs exist) nor of the VIP `FRRConfiguration` CR. The
+  contract is purely additive CR ownership: each producer reconciles only
+  its own CRs and frr-k8s merges everything applicable per node. The one
+  hard requirement is on the garbage-collection side: OVN-Kubernetes's
+  RouteAdvertisements controller tracks ownership of `FRRConfiguration`
+  CRs and may garbage-collect unrecognized CRs -- it must scope collection
+  to CRs it created (its `ovnk-generated-*` naming/ownership markers) so
+  that the VIP CR (`bgp-vip`, owned by CNO) and MetalLB's CRs
+  (`metallb-*`, owned by the MetalLB operator) are never collected. The
+  same requirement applies symmetrically to MetalLB's operator, which must
+  not touch CRs outside its own set. Validated in the reference
+  implementation: route advertisements enabled on a live BGP-VIP-managed
+  cluster produced `ovnk-generated-*` CRs that were merged by the masters'
+  static pods alongside the VIP CR (and later MetalLB's CRs) with no
+  interference in either direction.
 
 - **Netlink route monitoring**: No changes needed. OVN-Kubernetes already
   monitors netlink for routes with protocol `bgp` and programs them into OVN
@@ -1064,19 +1130,28 @@ features excluded from OKE.
 #### Implementation Experience
 
 The design in this document has been implemented across all affected
-repositories and validated end to end on a dev-scripts bare metal cluster:
-installation completes with the API VIP advertised via BGP from the
-bootstrap phase, both VIPs are advertised with health-gated ECMP, the
-CRD handover works, and the console is reachable over the BGP-routed
-ingress path (35 of 36 cluster operators available; the exception was a
-platform bug unrelated to this feature). The reference implementation --
-a per-repository patch series, the full run ledger of the 14 validation
-installs, an operational runbook and the isolated FRR reproduction -- is
-available at <https://github.com/mkowalski/bgp-vip-demo>. Supporting
-changes are in flight upstream: dev-scripts ToR BGP speaker support
-(openshift-metal3/dev-scripts#1929) and the kube-vip kubeconfig fixes
-(kube-vip/kube-vip#1627). Statements in this document marked "validated"
-refer to that work.
+repositories and validated end to end on dev-scripts bare metal clusters
+(27 validation installs at the time of writing): installation completes
+with the API VIP advertised via BGP from the bootstrap phase, both VIPs
+are advertised with health-gated ECMP (the ingress VIP from every node
+with a healthy router pod), the CRD handover works, failover and
+full-metrics coverage are demonstrated, and the console is reachable
+over the BGP-routed ingress path. Coexistence has been validated live
+with **three FRRConfiguration producers on one cluster**: the VIP
+configuration, OVN-Kubernetes route advertisements, and a day-2 MetalLB
+operator install in frr-k8s-external mode -- including MetalLB merging
+into the same BGP neighbor the VIP configuration declares, with no
+session duplication or flap. The reference implementation -- patch
+series, the full run ledger, an operational runbook and the isolated FRR
+reproductions -- is available at
+<https://github.com/mkowalski/bgp-vip-demo>. Much of the supporting work
+has since merged upstream: the `BGPBasedVIPManagement` gate and API
+fields (openshift/api#2923), dev-scripts ToR + one-click knob
+(openshift-metal3/dev-scripts#1929, #1939), kube-vip fixes
+(kube-vip/kube-vip#1627, #1636), the second zebra fix
+(FRRouting/frr#22676), and CI lanes including the coexistence jobs
+(openshift/release#82698, #82912). Statements in this document marked
+"validated" refer to that work.
 
 #### Feature Gate
 
@@ -1219,10 +1294,6 @@ frr defaults traditional
 hostname <node-hostname>
 log syslog informational
 
-! Import routes from kube-vip's routing table (198) into zebra's RIB.
-! Without this, 'redistribute kernel' only reads the main table (254).
-ip import-table 198
-
 router bgp <localASN>
  bgp router-id <node-primary-ip>
  neighbor <peer1-ipv4-address> remote-as <peer1-asn>
@@ -1259,15 +1330,15 @@ ipv6 prefix-list KUBE-VIP-PREFIXES-V6 seq 20 permit <ingress-vip-v6>/128
 
 The key configuration elements are:
 
-- **`ip import-table 198`**: Instructs zebra to import routes from kernel
-  routing table 198 (where kube-vip writes VIP routes) into FRR's RIB.
-  Without this directive, FRR only sees routes from the main kernel table
-  (table 254) and would never observe kube-vip's routes.
-
-- **`redistribute table-direct 198`**: Redistributes routes imported from
-  table 198 into BGP, filtered through route-maps. The `table-direct`
-  variant directly references the imported table rather than relying on
-  `redistribute kernel` which only covers the main table.
+- **`redistribute table-direct 198`**: Redistributes routes from kernel
+  table 198 (where kube-vip writes VIP routes) into BGP, filtered through
+  route-maps. The `table-direct` source reads the kernel table directly --
+  unlike `redistribute kernel`, which only covers the main table (254),
+  and without requiring an `ip import-table` directive. (An earlier
+  revision of this document paired `import-table` with the
+  redistribution; implementation experience showed `import-table` is
+  unnecessary for this purpose and has the side effect of copying the VIP
+  routes into the main table.)
 
 - **Route-maps with explicit deny**: Each route-map ends with a `deny 20`
   entry to ensure that only VIP prefixes matching the prefix-lists are
@@ -1433,24 +1504,40 @@ When `bgpVIPConfig` is set in `install-config.yaml`, the installer will:
 3. CNO will still create the frr-k8s namespace and CRDs so that day-2
    `FRRConfiguration` management works.
 
-#### FRR zebra import-table fix required
+#### FRR zebra fixes required
 
 FRR versions before 10.7 carry a zebra bug that breaks this design's day-2
 phase: `zebra_add_import_table_entry` clears the `ZEBRA_FLAG_SELECTED` flag
 on the *source* route while importing it, so any route that already exists
-in the kube-vip routing table at the moment the `ip import-table` /
-`redistribute table-direct` configuration is (re)applied is never
-redistributed -- and a configuration reload actively de-selects previously
-selected routes. Bootstrap is unaffected (kube-vip writes the route after
-FRR starts, and live netlink events process correctly), but the CRD
-handover re-applies the configuration while the VIP route already exists,
-silently stopping advertisement. Fixed upstream by FRRouting/frr commit
-`b2c17ad52` ("zebra: Do not clear selected flag on route about to be
-imported", first released in FRR 10.7). OpenShift currently ships FRR
-10.4.x in the frr-k8s image, so the fix must be backported to the shipped
-FRR (RPM or image) as a prerequisite for this enhancement. An isolated
-container reproduction and the backport are part of the reference
-implementation.
+in the kube-vip routing table at the moment the redistribution
+configuration is (re)applied is never redistributed -- and a configuration
+reload actively de-selects previously selected routes. Bootstrap is
+unaffected (kube-vip writes the route after FRR starts, and live netlink
+events process correctly), but the CRD handover re-applies the
+configuration while the VIP route already exists, silently stopping
+advertisement. Fixed upstream by FRRouting/frr commit `b2c17ad52`
+("zebra: Do not clear selected flag on route about to be imported",
+first released in FRR 10.7). An isolated container reproduction and the
+backport are part of the reference implementation.
+
+A second zebra bug was found and fixed during implementation:
+[FRRouting/frr#22654](https://github.com/FRRouting/frr/issues/22654) --
+when an interface address and a table-198 route arrive in the same
+netlink batch, zebra's early route-queue cleanup drops the route for the
+wrong table, so a VIP route written at exactly the wrong moment is never
+redistributed. Root-caused in the reference implementation and fixed
+upstream via
+[FRRouting/frr#22676](https://github.com/FRRouting/frr/pull/22676)
+(merged to master; first release expected after 10.7). Until a
+#22676-containing FRR ships, kube-vip's level-triggered route
+re-assertion (upstream kube-vip/kube-vip#1636, merged) papers over the
+race as optional hardening.
+
+OpenShift currently ships FRR 10.4.x (the FDP `frr10` RPM inside the
+frr-k8s image), so until FDP ships FRR >= 10.7 plus the #22676 fix, both
+fixes must be backported to the shipped FRR (RPM-level backport
+requested as RHEL-193997). Once FDP ships a release containing both,
+stock FRR satisfies this enhancement with no downstream patches.
 
 #### Static pod API access (RBAC)
 
@@ -1497,7 +1584,8 @@ implementation:
 | Route leaking -- kube-vip advertising unintended routes | The FRR configuration uses strict route-maps and prefix-lists to only advertise VIP `/32` routes. |
 | Upstream kube-vip project stability | OpenShift will vendor a specific, tested version of kube-vip. The Routing Table Mode is the simplest mode with minimal moving parts. |
 | FRR-K8s API gaps for bootstrap scenario | Bootstrap uses static `frr.conf` to avoid dependency on the API server. CRD-based management takes over post-bootstrap. |
-| FRR silently not redistributing pre-existing table routes (FRR < 10.7) | Requires the zebra fix FRRouting/frr `b2c17ad52` backported to the shipped FRR (see "FRR zebra import-table fix required"). |
+| FRR silently not redistributing pre-existing table routes (FRR < 10.7) | Requires the zebra fix FRRouting/frr `b2c17ad52` backported to the shipped FRR (see "FRR zebra fixes required"). |
+| kube-vip restart on a settled cluster | Known gap: `/etc/kubernetes/kubeconfig` on a settled node points at the node IP, which the apiserver serving certificate does not cover; a restarted kube-vip-api can block in client discovery and manage no routes. Upstream kube-vip/kube-vip#1627 (merged) makes kube-vip honor the configured kubeconfig; the remaining work is pointing it at a TLS-valid server address (or an explicit server/TLS override) before Tech Preview. |
 | Split-brain: network partition causes two nodes to believe they hold the VIP | See detailed analysis below. |
 
 #### Multi-Advertiser Operation and Network Partitions
@@ -1659,11 +1747,17 @@ Testing strategy will cover the following areas:
 
 - **E2E tests**:
   - Full cluster installation with BGP-based VIP management using
-    containerlab or similar to simulate BGP peers.
+    containerlab or similar to simulate BGP peers. (Implemented: the
+    `e2e-metal-ipi-bgp-vip` lane -- dev-scripts install with a top-of-rack
+    FRR speaker on the hypervisor and an acceptance-criteria verify step.)
   - VIP failover scenarios (control plane node failure, BGP session loss).
   - BFD-backed fast failover timing validation.
-  - Coexistence with MetalLB FRR-K8S mode.
-  - Coexistence with OVN-Kubernetes BGP route advertisements.
+  - Coexistence with MetalLB FRR-K8S mode. (Implemented:
+    `e2e-metal-ipi-bgp-vip-metallb` -- day-2 MetalLB operator install in
+    frr-k8s-external mode peering with the same ToR.)
+  - Coexistence with OVN-Kubernetes BGP route advertisements. (Implemented:
+    `e2e-metal-ipi-bgp-vip-ovn-bgp`, plus a combined three-producer lane
+    `e2e-metal-ipi-bgp-vip-ovn-bgp-metallb`.)
   - Dual-stack (IPv4 + IPv6) VIP advertisement with both address families.
 
 - **Scale testing**: Impact of frr-k8s static pod on bootstrap timing. BGP
