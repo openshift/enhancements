@@ -465,7 +465,7 @@ Changes required:
 
 #### 2. kube-vip -- Routing Table Mode Deployment
 
-kube-vip is deployed as **two separate static pods**: `kube-vip-api` on
+kube-vip is deployed as **one static pod per VIP**: `kube-vip-api` on
 each control plane node, and `kube-vip-ingress` on **every node** (control
 plane and workers -- delivered via MCO's `templates/common`, matching
 today's keepalived scoping where the ingress VIP is advertised from
@@ -473,7 +473,11 @@ whichever nodes host healthy router pods; on typical topologies that is
 the workers). Each instance manages a single VIP address, since kube-vip's
 `address` environment variable accepts only one IP address -- there is no
 upstream support for multiple control plane VIPs in a single kube-vip
-instance. As with frr-k8s, the installer generates the initial manifests
+instance. On dual-stack clusters this means a **second instance per
+role** (`kube-vip-api-secondary`, `kube-vip-ingress-secondary`) manages
+the secondary address family's VIP (the VIPs slices' second entry),
+mirroring keepalived's per-family VRRP instances; single-stack clusters
+render the secondary manifests into the disabled-manifests path. As with frr-k8s, the installer generates the initial manifests
 for bootstrap, and MCO owns the manifests post-bootstrap via MachineConfig
 resources. On workers, the ingress VIP route in table 198 is redistributed
 by the CNO-managed frr-k8s DaemonSet instance -- same table, same
@@ -484,11 +488,18 @@ route-maps, different frr-k8s delivery vehicle.
 - Configured with `cp_enable=true`, `address=<api-vip>`,
   `vip_leaderelection=true`, `vip_routingtable=true`,
   `k8s_config_file=/etc/kubernetes/kubeconfig` and
-  `kubernetes_addr=https://localhost:6443`. The last two direct kube-vip's
+  `kubernetes_addr=https://127.0.0.1:6443`. The last two direct kube-vip's
   Kubernetes client at the node kubeconfig and the *local* API server:
   Lease traffic must not depend on the very VIP kube-vip manages, or
   leader-election renewal deadlocks when the VIP moves (for example at
-  bootstrap teardown).
+  bootstrap teardown). The address is the IPv4 loopback *literal*
+  deliberately: kube-apiserver serves the localhost serving certificate
+  only on the IPv4 loopback listener ([::1] and the node IPs present
+  certificates without matching SANs), and `localhost` may resolve to
+  ::1. kube-vip honors the same override for its routing-table backend
+  health check -- without that, a kube-vip started on a settled cluster
+  health-checks the Node object's addresses and fails TLS verification
+  forever, managing no routes (the restart gap listed under Risks).
 - Runs a continuous backend health check loop: it periodically probes the
   local kube-apiserver (via the Kubernetes API discovery endpoint on
   `localhost:6443`) and maintains the API VIP `/32` route in Linux routing
