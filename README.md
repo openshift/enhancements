@@ -24,7 +24,7 @@ For a quick-start, FAQ, and template references, see [the guidelines](guidelines
 
 ## Why are Enhancements Tracked?
 
-As the project evolves, its important that the OpenShift community understands how we
+As the project evolves, it's important that the OpenShift community understands how we
 build, test, and document our work.  Individually it is hard to understand how
 all parts of the system interact, but as a community we can lean on each other
 to build the right design and approach before getting too deep into an
