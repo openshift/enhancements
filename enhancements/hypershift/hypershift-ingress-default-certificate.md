@@ -219,8 +219,13 @@ control plane namespace that reconciles guest cluster resources.
 1. The managed service provider updates the TLS Secret referenced by
    `defaultCertificate` with new `tls.crt` and `tls.key` data.
 
-2. The HyperShift operator detects the Secret change and re-syncs the updated
-   data into the control plane namespace.
+2. The HyperShift operator detects the Secret change via reactive
+   reconciliation using `ensureReferencedResourceAnnotation`. This function
+   hashes the referenced Secret's content and stores the hash as an
+   annotation on the HostedCluster. When the Secret content changes, the
+   annotation hash changes, which triggers re-reconciliation via the
+   controller's watch on the HostedCluster resource. The operator then
+   re-syncs the updated data into the control plane namespace.
 
 3. HCCO propagates the updated data to the guest cluster.
 
@@ -261,6 +266,16 @@ type IngressDefaultCertificateReference struct {
     Name string `json:"name"`
 }
 ```
+
+A dedicated `IngressDefaultCertificateReference` type is used instead of
+`corev1.LocalObjectReference` because it carries kubebuilder validation
+markers (`MinLength=1`, `MaxLength=253`) that `LocalObjectReference` does
+not have. These markers enable CRD-level validation without requiring an
+admission webhook. The dedicated type also provides clearer API
+documentation (the field doc explicitly requires a `kubernetes.io/tls`
+Secret with `tls.crt` and `tls.key` entries) and allows future extensibility
+(e.g., adding a `namespace` field for cross-namespace references) without
+modifying a shared upstream type.
 
 CEL validation ensures the `name` field is non-empty when the
 `defaultCertificate` object is present. The field uses `omitempty` and
@@ -344,6 +359,14 @@ resources from the management cluster to the guest cluster:
    is propagated, the observer syncs the corresponding CA data back to the
    management cluster as `observed-default-ingress-cert` ConfigMap.
 
+**Note on ingress capability**: In managed services deployments (ARO/ROSA),
+the ingress capability is always enabled, so the interaction between
+`defaultCertificate` and a disabled ingress capability does not arise in the
+target use case. For completeness, if the ingress capability were disabled,
+the `defaultCertificate` field would have no effect since no
+IngressController would be created to consume it. The HyperShift Operator
+would still sync the Secret data, but it would remain unused.
+
 #### Prior Art
 
 - The `endpointPublishingStrategy` field is already exposed on
@@ -376,10 +399,11 @@ expiry should be handled by the user's certificate management tooling.
 Mitigation: If the referenced Secret is deleted, the sync chain will not have
 new data to propagate. The existing certificate in the guest cluster remains in
 place until the Secret is recreated or the `defaultCertificate` field is
-cleared. The HyperShift Operator reports the sync status via an
-`IngressCertificateSynced` condition on the HostedCluster status conditions.
+cleared. As part of this proposal, the HyperShift Operator sets an
+`IngressDefaultCertificateSynced` condition on the HostedCluster status.
 When the referenced Secret is missing, this condition is set to `False` with a
-descriptive reason indicating the Secret cannot be found.
+descriptive reason indicating the Secret cannot be found. When the Secret is
+successfully synced, the condition is set to `True`.
 
 **Risk: Privilege escalation via Secret access.**
 Mitigation: The referenced Secret must exist in the same HostedCluster
@@ -451,10 +475,6 @@ ConfigMap-watching tools.
    expected behavior is that the system reverts to using the CPO-generated
    wildcard certificate, but this path needs explicit testing.
 
-2. **Status reporting**: Should the HostedCluster status include a condition
-   reflecting the state of the certificate sync (e.g. `IngressCertificateSynced`)?
-   The current implementation relies on existing reconciliation health reporting.
-
 ## Test Plan
 
 The test plan covers the following areas:
@@ -490,6 +510,31 @@ The E2E test suite (implemented in PR openshift/hypershift#9132) covers:
 4. **Observability**: Verify that the `observed-default-ingress-cert` ConfigMap
    is synced back to the management cluster and contains the expected CA data.
 
+#### Negative and Edge Case Tests
+
+The E2E test suite should also cover the following negative and edge case
+scenarios:
+
+- **Invalid certificate data**: Supply a Secret with malformed or non-PEM
+  `tls.crt`/`tls.key` data and verify the operator reports an appropriate
+  error condition without disrupting the existing certificate.
+- **Mismatched key and certificate**: Supply a `tls.key` that does not
+  correspond to the `tls.crt` and verify the system detects or surfaces the
+  mismatch.
+- **Partial Secret update**: Update only `tls.crt` or only `tls.key` in the
+  source Secret and verify the sync chain handles the partial update
+  correctly (either syncing the full Secret or reporting an error).
+- **Source Secret deletion while field is set**: Delete the referenced Secret
+  while `defaultCertificate` is still set on the HostedCluster. Verify that
+  the existing certificate in the guest cluster is preserved and the
+  `IngressDefaultCertificateSynced` condition reports the missing Secret.
+- **Secret delete and recreate vs. update**: Compare the behavior of
+  deleting and recreating the source Secret versus updating it in place.
+  Both paths should result in the new certificate being propagated.
+- **Certificate chain ordering**: Supply a certificate chain with
+  intermediate certificates in different orders and verify the router
+  presents the correct chain to clients.
+
 ### Known Test Gaps
 
 - **Removal/revert**: The E2E suite does not currently test removing the
@@ -510,7 +555,8 @@ The E2E test suite (implemented in PR openshift/hypershift#9132) covers:
 
 - Removal/revert test coverage (clearing `defaultCertificate` reverts to
   wildcard certificate).
-- Soak time in ARO/ROSA staging environments.
+- At least 30 days of soak time in ARO/ROSA staging environments with active
+  certificate rotation testing.
 - User-facing documentation in [openshift-docs](https://github.com/openshift/openshift-docs/).
 - Confirmation from ARO and ROSA teams that the feature meets their
   requirements for custom ingress certificate support.
