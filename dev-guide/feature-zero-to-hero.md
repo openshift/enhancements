@@ -69,6 +69,8 @@ Please use the [`#forum-api-review`](https://redhat.enterprise.slack.com/archive
 
 ## Implementing Your New Feature
 
+Before diving into implementation, familiarize yourself with the [OpenShift Development Phases](development-phases.md) to understand what is expected during each phase of a release cycle and how it affects merging code.
+
 This section is a high-level overview of some of the common things that any new feature will likely need to do during the implementation process and is not prescriptive as to how features are implemented end-to-end.
 
 ### Creating a New Feature Gate
