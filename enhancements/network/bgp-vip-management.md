@@ -1009,86 +1009,93 @@ This enhancement introduces the following API changes:
   ConfigMap's `config.json` payload (validated and compacted by the MCO
   operator) so the template controller can render the node peer file. Not
   a user-facing API; only populated when BGP VIP management is active.
-  **Dev Preview only**: the serialized-JSON form exists to let the payload
-  schema bake without API commitments. It is replaced for Tech Preview by
-  the structured `BGPVIPConfig` CRD described below.
+  **Dev Preview only as a user-facing surface**: the serialized-JSON form
+  exists to let the payload schema bake without API commitments. For Tech
+  Preview it is demoted to an internal transport between the MCO operator
+  and its template controller, fed from the structured `BGPVIPConfig`
+  CRD described below.
 
 - **Structured BGP configuration API (Tech Preview)**: the Dev Preview
   ConfigMap and serialized-JSON ControllerConfig field are replaced by a
-  single admission-validated API. Two candidate placements are under
-  consideration; the decision is made with the API reviewers before Tech
-  Preview implementation starts.
+  single admission-validated API. Two candidate placements were
+  considered: Option A, a typed struct on
+  `Infrastructure.spec.platformSpec.baremetal.bgp`, and Option B, a
+  dedicated feature-gated CRD. **Option B is selected.** The decisive
+  factors against Option A: Infrastructure is watched by nearly every
+  operator and node agent, so every peer edit would fan a full-object
+  update to the fleet (`hostOverrides` scales with host count at
+  multi-rack scale); `config.openshift.io/v1` fields are permanent on
+  arrival while the peer schema changed twice during Dev Preview; and
+  Infrastructure offers no feature-scoped status/conditions surface for
+  the day-2 feedback loop the graduation criteria require.
 
-  **Option A - `Infrastructure.spec.platformSpec.baremetal.bgp`**: a typed
-  struct on the existing Infrastructure CR spec.
+  **The selected API - `BGPVIPConfig` CRD**
+  (`bgpvipconfigs.machineconfiguration.openshift.io/v1alpha1`,
+  cluster-scoped singleton named `cluster`, gated by
+  `BGPBasedVIPManagement`), replacing both the `bgp-vip-config` ConfigMap
+  and the serialized-JSON ControllerConfig field as the single source of
+  BGP peer configuration. This design is implemented in the reference
+  implementation and validated live (a day-2 peer edit propagates to all
+  masters without node disruption; the Dev Preview ConfigMap was deleted
+  with no effect). Summary of the shape and the openshift/api conventions
+  applied:
 
-  - Precedent: `BareMetalPlatformSpec` already serves day-2 editable
-    on-prem networking (`apiServerInternalIPs`/`ingressIPs` for VIP
-    changes), with the established spec-to-status propagation flow.
-    Secret references from config-group objects are also established
-    (APIServer `servingCerts`, Proxy `trustedCA`).
-  - Pros: no new CRD lifecycle; co-located with `vipManagement` and the
-    VIP fields; discoverable where operators already look for on-prem
-    networking; bootstrap consumes the Infrastructure manifest unchanged.
-  - Cons: Infrastructure is watched by nearly every operator and node
-    agent, so every peer edit fans a full-object update to the fleet -
-    `hostOverrides` scales with host count (multi-rack: per-host peer
-    lists), making the hottest object in the cluster hotter; there is no
-    feature-scoped status/conditions surface (only value mirroring into
-    `platformStatus`), so the day-2 feedback loop is limited; fields in
-    `config.openshift.io/v1` are permanent on arrival, while the peer
-    schema is still young (it changed twice during Dev Preview).
-  - The cons are mitigated by keeping the schema lean where possible and
-    accepting value mirroring into `platformStatus` as the feedback
-    mechanism; `hostOverrides` size at multi-rack scale is the one factor
-    that could tip the decision to Option B.
-
-  **Option B - dedicated `BGPVIPConfig` CRD
-  (machineconfiguration.openshift.io, cluster-scoped, feature-gated)**,
-  replacing both the `bgp-vip-config` ConfigMap and the serialized-JSON
-  ControllerConfig field as the single source of BGP peer configuration:
-
+  - `spec`: `localASN`, list-map `defaultPeers` (keyed by `peerAddress`),
+    optional `communities`, and list-map `hostOverrides` (keyed by
+    `hostname`, replacing - not merging with - `defaultPeers` for the
+    named nodes). Per-peer fields: `peerAddress`, `peerASN`, `password`,
+    `port`, `bfd`, `ebgpMultiHop`, `holdTimeSeconds`,
+    `keepaliveTimeSeconds`.
+  - Conventions: `bfd`/`ebgpMultiHop` are `Enabled|Disabled` enums, not
+    booleans (booleans are forbidden by openshift/api conventions);
+    timers are integer seconds with the unit in the field name (matching
+    BGP's uint16-seconds wire format), not `metav1.Duration`; no schema
+    defaults - omitted-value behavior (port 179, BFD/multihop disabled,
+    FRR timer defaults) is applied by the consumers and documented as
+    subject to change; validation is kubebuilder markers plus CEL
+    (singleton name, ASN/port ranges, IP-typed peer addresses, community
+    format, timer relation, list-map uniqueness, size caps) with no
+    webhook.
+  - The peer password stays an **inline field** (MetalLB's `BGPPeer` CRD
+    is the precedent); a Secret-reference variant is reserved as a pre-GA
+    follow-up and, when added, arrives as a discriminated union (e.g.
+    `authentication.type: Inline|SecretReference`) that deprecates the
+    inline field rather than as a parallel optional field.
+  - The `apiVIPs`/`ingressVIPs` duplication from the Dev Preview JSON is
+    dropped: consumers read VIPs from the Infrastructure CR (single
+    source of truth); MCO re-adds them to the internal wire format for
+    the unchanged runtimecfg contract.
   - The installer generates the `BGPVIPConfig` manifest from
     `install-config.yaml` (the bootstrap MCO render consumes the manifest
-    file exactly as it consumes the ConfigMap manifest today, so the
-    bootstrap flow is unchanged).
+    file exactly as it consumed the ConfigMap manifest, so the bootstrap
+    flow is unchanged).
   - CNO and the MCO operator both watch the CR: CNO renders the
-    `FRRConfiguration` from it, MCO populates an operator-internal typed
-    copy on `ControllerConfigSpec` (replacing `BGPVIPPeersJSON`) for the
-    template render. One schema, admission-validated, no hand-mirrored
-    JSON contracts.
-  - Typed shape fixes the Dev Preview payload warts: `metav1.Duration`
-    for hold/keepalive times, booleans instead of `"true"` strings,
-    list-map `hostOverrides`, CEL validation for ASNs and peer addresses,
-    and `passwordSecretRef` (a `kubernetes.io/basic-auth` Secret
-    reference) instead of an inline plaintext password. The
-    `apiVIPs`/`ingressVIPs` duplication is dropped: templates read VIPs
-    from the Infrastructure CR as they do for keepalived.
-  - Day-2 reconfiguration becomes a first-class flow: `oc edit
-    bgpvipconfig cluster` is validated at admission, both consumers react
-    via watches, and the CR carries status conditions
-    (`observedGeneration`, rendered/applied) so changes have a feedback
-    loop. A NodeDisruptionPolicy ships alongside so peer-file updates do
-    not reboot nodes (after the bootstrap-to-CRD handover the on-disk
-    config only matters at early boot).
-  - GA hardens the same CRD (no shape change expected): status conditions
-    complete, day-2 flows covered by e2e, and the Dev Preview ConfigMap
-    path removed.
-  - Pros: watched by exactly two consumers (CNO, MCO operator); native
-    status conditions for the day-2 feedback loop; the feature-gated CRD
-    can iterate while the schema matures; room for the full multi-rack
-    `hostOverrides` shape, which the GA test criteria require.
-  - Cons: a new CRD lifecycle to own (shipped and reconciled via MCO's
-    payload manifests); one more object to discover, mitigated by
-    cross-references from the `vipManagement` field documentation.
-
-  The current preference is Option A: it keeps the BGP configuration on
-  the API object that already owns the on-prem VIP surface, reuses the
-  established day-2 editing and spec-to-status flow, and adds no new CRD
-  lifecycle. Option B is the fallback if API review concludes the
-  Infrastructure CR should not grow this schema (the watch fan-out of
-  `hostOverrides` at multi-rack scale being the main reason to make that
-  call).
+    `FRRConfiguration` from it, MCO serializes the resolved spec into
+    `ControllerConfigSpec.BGPVIPPeersJSON`, which is thereby demoted from
+    a user-facing Dev Preview surface to an internal transport between
+    the MCO operator and its template controller.
+  - Day-2 reconfiguration is a first-class flow: `oc edit bgpvipconfig
+    cluster` is validated at admission, both consumers react via watches,
+    and the CR carries `status.observedGeneration` plus two conditions:
+    `Rendered` (owner: MCO - the peers-file content has been rendered and
+    applied) and `SessionsConfigured` (owner: CNO - the `bgp-vip`
+    FRRConfiguration reflecting the spec has been applied). Each operator
+    owns only its condition type via server-side apply with distinct
+    field managers. Note on current semantics: `SessionsConfigured` is
+    reported at render/apply of the FRRConfiguration, not after
+    confirming session state post-apply; post-apply semantics are a
+    pre-graduation follow-up. A NodeDisruptionPolicy (`none` action for
+    the peers file) ships alongside so peer-file updates do not reboot or
+    drain nodes (after the bootstrap-to-CRD handover the on-disk config
+    only matters at early boot).
+  - The Dev Preview ConfigMap ingestion path (installer asset, MCO
+    ConfigMap sync, CNO ConfigMap read) is deleted in the same change-set:
+    the feature gate is NoUpgrade in both preview sets, so no cluster can
+    carry the old objects across an upgrade - no dual path, no migration.
+  - Trade-off accepted: a new CRD lifecycle to own (shipped and
+    reconciled via MCO's payload manifests) and one more object to
+    discover, mitigated by cross-references from the `vipManagement`
+    field documentation.
 
 This enhancement does not modify the behavior of any existing API resources.
 
@@ -1358,7 +1365,11 @@ The key configuration elements are:
 
 The configuration supports both IPv4 and IPv6 address families for dual-stack
 deployments. When only single-stack is configured, the installer will generate
-only the relevant address family block.
+only the relevant address family block. Implementation experience: each
+neighbor additionally needs `disable-connected-check` (as frr-k8s emits for
+the same peers) - without it, IPv6 sessions fail FRR's EBGP nexthop
+connected-check after a node reboot (the RA-assigned /128 on br-ex is not a
+connected prefix) and the IPv6 VIPs are silently no longer advertised.
 
 #### Runtime FRR Configuration Rendering
 
@@ -1789,11 +1800,16 @@ Testing strategy will cover the following areas:
 - End user documentation for `install-config.yaml` BGP configuration.
 - Metrics exposed for BGP session state monitoring.
 - Symptoms-based alerts for BGP session failures.
-- The structured BGP configuration API (preferred:
-  `Infrastructure.spec.platformSpec.baremetal.bgp`; fallback: dedicated
-  `BGPVIPConfig` CRD - see API Extensions) replaces the `bgp-vip-config`
-  ConfigMap and the serialized-JSON `ControllerConfigSpec.BGPVIPPeersJSON`
-  field, including `passwordSecretRef` for peer passwords.
+- The structured BGP configuration API (the dedicated `BGPVIPConfig` CRD
+  selected in API Extensions) replaces the `bgp-vip-config` ConfigMap as
+  the source of BGP peer configuration and demotes the serialized-JSON
+  `ControllerConfigSpec.BGPVIPPeersJSON` field to an internal transport.
+  Peer passwords remain an inline field for Tech Preview (MetalLB
+  precedent); a Secret-reference variant is a pre-GA follow-up, added as
+  a discriminated union that deprecates the inline field.
+- The Dev Preview ConfigMap ingestion path removed (deleted in the same
+  change-set as the CRD swap; the gate is NoUpgrade in both preview sets,
+  so no migration is needed).
 - NodeDisruptionPolicy for the rendered peer file so day-2 BGP
   reconfiguration does not reboot nodes.
 
@@ -1813,8 +1829,7 @@ Testing strategy will cover the following areas:
   [openshift-docs](https://github.com/openshift/openshift-docs/).
 - Feedback from Tech Preview users incorporated.
 - BFD fast failover validated under realistic failure scenarios.
-- Day-2 BGP reconfiguration flows covered by e2e; the Dev Preview
-  ConfigMap ingestion path removed.
+- Day-2 BGP reconfiguration flows covered by e2e.
 
 ### Removing a deprecated feature
 
