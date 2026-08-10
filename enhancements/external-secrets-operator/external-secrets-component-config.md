@@ -31,7 +31,10 @@ superseded-by: []
 
 The External Secrets Operator for Red Hat OpenShift provides limited configuration options via its `ExternalSecretsConfig` API, constraining user customization. This enhancement proposes extending the `ExternalSecretsConfig` API to allow comprehensive customization of the external-secrets deployment. The extended configuration options—including annotations, environment variables, and deployment/pod specifications will be available for all core components (Controller, Webhook, CertController, BitwardenSDKServer). This change provides administrators with greater control over the resource management and operational parameters of each component.
 
-This enhancement further adds first-class fields for **core controller concurrency** (`concurrent`) and **core controller replica count** (`replicas`) so GitOps-managed clusters can tune throughput and high availability without unsupported workarounds. It also introduces an **`experimentalOverrides`** escape hatch (`runtime.RawExtension`) on per-component configuration that applies a strategic merge patch to the component `Deployment` `spec`, covering knobs that are not yet first-class (for example pod anti-affinity or topology spread constraints) while making clear that incorrect patches degrade the operand.
+This enhancement further adds a first-class field for **core controller replica count** (`replicas`) so GitOps-managed clusters can tune high availability without unsupported workarounds. It also introduces an **`advancedOverrides`** escape hatch (`runtime.RawExtension`) on per-component configuration that applies a strategic merge patch to the component `Deployment`, covering knobs that are not yet first-class (for example pod anti-affinity, topology spread constraints, or core controller concurrency via `--concurrent`) while making clear that incorrect patches degrade the operand.
+
+> **WARNING: DO NOT USE `advancedOverrides` UNLESS YOU KNOW EXACTLY WHAT YOU ARE DOING.** This field can overwrite your own first-class CRD settings. You must NOT use this field to add or modify containers, initContainers, or ports, as doing so breaks the structural integrity of the operand and will fail deployment reconciliation.
+
 
 This enhancement proposal also adds support for injecting a custom PKI CA bundle into the `external-secrets` operand **core controller** pod via a `ConfigMap` reference in the `ExternalSecretsConfig` custom resource, enabling the controller to verify **TLS** (HTTPS) connections to external secret management systems (such as IBM/Thycotic Secret Server or HashiCorp Vault) without depending on cluster-wide proxy configuration. The operator mounts the referenced `ConfigMap` under `/etc/pki/tls/user-certs` and sets `SSL_CERT_DIR` so Go trusts both that directory and the default system location without replacing `/etc/pki/tls/certs`. Administrators may populate the `ConfigMap` manually or with projects such as `cert-manager`.
 
@@ -41,7 +44,7 @@ Administrators often need to control core operational parameters, lifecycle sett
 
 Administrators also frequently run external secret management systems (for example IBM Secret Server, Thycotic, HashiCorp Vault) that use certificates signed by external PKI; the CA certificates must be available to the `external-secrets` controller for **TLS server certificate verification** on outbound HTTPS. On OpenShift, the Cluster Network Operator (CNO) injects the merged trusted CA bundle into `ConfigMaps` that carry the label **`config.openshift.io/inject-trusted-cabundle: "true"`**. That mechanism is wired to the cluster **`Proxy`** object: administrators distribute user-configured CA certificates cluster-wide by setting `Proxy.spec.trustedCA` (and related proxy fields when they use an HTTP/HTTPS proxy). Asking administrators to edit the `Proxy` CR solely to attach a CA bundle when they do not use an HTTP/HTTPS proxy is a poor fit for clusters that otherwise do not operate `Proxy`. Some `external-secrets` providers expose per-store CA options, but not all do, and repeating configuration across many stores increases maintenance overhead. This enhancement extends `ExternalSecretsConfig` with an operator-local `trustedCABundle` for controller-wide trust when that model is appropriate.
 
-Large-scale deployments also need higher reconcile parallelism. The operand supports `--concurrent`, but the operator hardcodes `--concurrent=1` in container args; `overrideEnv` cannot change it, and any manual Deployment patch is reverted on reconcile, blocking GitOps workflows such as Argo CD. A single controller replica also means downtime during node failures or disruptions, so a supported **`replicas`** field with proper **leader election** is needed for HA. Finally, until first-class API fields cover every Deployment knob (affinity, topology spread, etc.), an **`experimentalOverrides`** escape hatch lets administrators apply a strategic merge patch to a component Deployment spec under explicit unsupported/Degraded semantics.
+A single controller replica also means downtime during node failures or disruptions, so a supported **`replicas`** field with proper **leader election** is needed for HA. Until first-class API fields cover every Deployment knob (affinity, topology spread, concurrency, etc.), an **`advancedOverrides`** escape hatch lets administrators apply a strategic merge patch to a component Deployment under explicit Degraded semantics. For example, large-scale deployments needing higher reconcile parallelism (`--concurrent`) can use `advancedOverrides` to tune the core controller container args.
 
 ### User Stories
 
@@ -52,7 +55,6 @@ Large-scale deployments also need higher reconcile parallelism. The operand supp
 - As an OpenShift Administrator, I want to reference a `ConfigMap` of custom CA bundle in `ExternalSecretsConfig`, so that the `external-secrets` controller can sync secrets from external secret management systems over **TLS** (HTTPS) using enterprise or private PKI.
 - As a platform engineer, I want to configure controller TLS trust without touching the Proxy CR when our cluster has no HTTP/HTTPS proxy, so that we do not misuse or hollow out a cluster-wide object just to ship a PEM bundle.
 - As a security engineer, I want custom roots added without replacing the container system trust store, so that the controller still trusts public CAs (for example cloud secret managers) while also trusting internal enterprise CAs.
-- As an OpenShift administrator, I want to set the core controller reconcile concurrency via `ExternalSecretsConfig` so that large-scale secret sync workloads can use `--concurrent` flag without unsupported Deployment patches that GitOps tools and the operator would revert.
 - As an OpenShift administrator, I want to set the core controller replica count via `ExternalSecretsConfig` so that the controller can run highly available with leader election and survive node or pod disruption.
 - As a platform engineer, I want an explicit experimental escape hatch to strategic-merge-patch a component `Deployment` `spec` for knobs that are not yet first-class (for example pod anti-affinity), accepting that invalid patches mark the operand **Degraded**.
 
@@ -64,30 +66,28 @@ Large-scale deployments also need higher reconcile parallelism. The operand supp
 - Allow optional, supported injection of a user-supplied CA bundle so the `external-secrets` **core controller** can verify **TLS** to external HTTPS backends (enterprise PKI, private CAs).
 - Automatically mount the referenced ConfigMap into the ESO core controller pod at `/etc/pki/tls/user-certs`, without overriding the system trust store at `/etc/pki/tls/certs`.
 - Existing proxy-based CA bundle injection behavior (CNO-managed) is preserved unchanged and can coexist with new user configured CA bundle.
-- Provide a declarative API `concurrent` field that the operator translates to the core controller `--concurrent=<N>` argument and preserves across reconcile cycles.
 - Provide a declarative API `replicas` field for the core controller `Deployment`, with leader election enabled so only one active reconciler runs when `replicas > 1`.
-- Provide `experimentalOverrides` (`runtime.RawExtension`) on per-component configuration as a strategic merge patch of that component's `Deployment` `spec`, with **Degraded** status on invalid or broken patch application.
-- Preserve backward-compatible defaults when `concurrent` / `replicas` are unset (`--concurrent=1`, `replicas=1`).
+- Provide `advancedOverrides` (`runtime.RawExtension`) on per-component configuration as a strategic merge patch of that component's `Deployment`, with **Degraded** (`UserConfigurationError`) status on invalid or broken patch application.
+- Preserve backward-compatible defaults when `replicas` is unset (`replicas=1`).
 
 ### Non-Goals
 
-- Exhaustive validation of individual configured values (e.g., validating that an environment variable value is semantically correct). Users should consult upstream documentation. Only basic structural validation (non-empty strings, list length limits, numeric bounds on `concurrent` / `replicas`) will be performed.
-- Setting resource limits (CPU/memory requests/limits) as dedicated API fields on a per-component basis. Resource limits are out of scope for this proposal.
+- Exhaustive validation of individual configured values (e.g., validating that an environment variable value is semantically correct). Users should consult upstream documentation. Only basic structural validation (non-empty strings, list length limits, numeric bounds on `replicas`) will be performed.
+- Setting resource limits (CPU/memory requests/limits) as dedicated API fields on a per-component basis. Resource limits are not available as first-class fields in this proposal; however, they can be configured via `advancedOverrides`.
 - Applying the user configured CA bundle to webhook or unrelated sidecars unless a follow-up explicitly requires it.
 - Automatic CA certificate rotation or lifecycle management. The operator mounts the ConfigMap as-is; certificate updates are the cluster administrator's responsibility.
 - Supporting ConfigMaps from namespaces other than the `external-secrets` operand namespace (`external-secrets`), as Kubernetes does not allow pods to mount ConfigMaps from other namespaces.
-- Guaranteeing that `experimentalOverrides` patches produce a supportable configuration. The field is unsupported; the administrator is responsible for providing correct patch data.
-- Allowing `experimentalOverrides` to add or modify `containers`, `initContainers`, or `volumes`. These lists are operator-owned and cannot be changed through the escape hatch.
+- Guaranteeing that `advancedOverrides` patches produce a supportable configuration. The administrator is responsible for providing correct patch data.
+- Allowing `advancedOverrides` to add or modify `containers`, `initContainers`, or `volumes`. These lists are operator-owned and cannot be changed through the escape hatch.
 
 
 ## Proposal
 
 Extend the ExternalSecretsConfig API with:
 1. A new `annotations` field for adding custom annotations globally to Deployments and Pod templates.
-2. A new `componentConfigs` field for per-component deployment lifecycle overrides (`revisionHistoryLimit`, `overrideEnv`) and the `experimentalOverrides` escape hatch.
+2. A new `componentConfigs` field for per-component deployment lifecycle overrides (`revisionHistoryLimit`, `overrideEnv`) and the `advancedOverrides` escape hatch.
 3. A new `trustedCABundle` field for adding trusted CA bundle.
-4. A new `concurrent` field on `controllerConfig` for core-controller reconcile parallelism (`--concurrent`).
-5. A new `replicas` field on `controllerConfig` for core-controller `Deployment` replica count (HA with leader election).
+4. A new `replicas` field on `controllerConfig` for core-controller `Deployment` replica count (HA with leader election).
 
 **For trusted CA bundle**
 
@@ -105,22 +105,13 @@ Both proxy-based CA injection (CNO-managed, at `/etc/pki/tls/certs`) and `truste
 
 **`ConfigMap` with the CNO injection label:** If the `ConfigMap` referenced by `trustedCABundle` is labeled with `config.openshift.io/inject-trusted-cabundle: "true"`, operator **skips** mounting that reference for `trustedCABundle`.
 
-**Interaction with `overrideEnv`:** The operator owns **`SSL_CERT_DIR`** (and, when applicable, **`SSL_CERT_FILE`**) on the **External Secrets core controller** for proxy/CNO trust and for **`trustedCABundle`** injection. **`overrideEnv`** therefore **must not** set **`SSL_CERT_DIR`** or **`SSL_CERT_FILE`** on **any** operand component: the **`ExternalSecretsConfig`** CRD extends the existing **`overrideEnv`** CEL rule so the API server **rejects** those names up front (same pattern as reserved prefixes such as `KUBERNETES_`). No runtime “ignore vs reject” choice is required for a valid CR. Concurrency is **not** configurable via `overrideEnv`; use the first-class **`concurrent`** field (the operator builds container `args`, not an env var, for `--concurrent`).
-
+**Interaction with `overrideEnv`:** The operator owns **`SSL_CERT_DIR`** (and, when applicable, **`SSL_CERT_FILE`**) on the **External Secrets core controller** for proxy/CNO trust and for **`trustedCABundle`** injection. **`overrideEnv`** therefore **must not** set **`SSL_CERT_DIR`** or **`SSL_CERT_FILE`** on **any** operand component: the **`ExternalSecretsConfig`** CRD extends the existing **`overrideEnv`** CEL rule so the API server **rejects** those names up front (same pattern as reserved prefixes such as `KUBERNETES_`). No runtime “ignore vs reject” choice is required for a valid CR.
 | Situation | Expected behaviour |
 |-----------|---------------------|
 | `optional: false` (default) and missing `ConfigMap` or key | **Degraded**; do not patch the controller `Deployment` until valid. |
 | `optional: true` and missing `ConfigMap` or key | Skip user bundle; no error for the missing reference alone. |
 | Present key with **invalid PEM** | **Degraded** regardless of `optional`. |
 | Referenced `ConfigMap` has **`config.openshift.io/inject-trusted-cabundle: "true"`** | A `ConfigMap` is already created, when proxy is configured, and its contents are mounted at `/etc/pki/tls/certs` path. Mounting it again under `/etc/pki/tls/user-certs` would be a duplicate. The operator **skips** the trustedCABundle volume mount. |
-
-**For `concurrent` (core controller only)**
-
-The operand `--concurrent` flag controls how many reconciles run in parallel. The operator currently hardcodes `--concurrent=1`. This proposal adds `spec.controllerConfig.concurrent`:
-
-- **Unset:** defaults to `--concurrent=1` (backward compatible).
-- **Set:** renders `--concurrent=<N>` on the core controller container.
-- CRD validation: minimum `1`, maximum `100`.
 
 **For `replicas` (core controller only)**
 
@@ -129,30 +120,35 @@ Adds `spec.controllerConfig.replicas` to set the core controller Deployment repl
 - **Unset:** defaults to `1`.
 - **Set:** applies the given replica count on every reconcile.
 - CRD validation: minimum `1`, maximum `10`.
-- **Leader election:** the operator forces `--enable-leader-election=true` on the core controller. With `replicas > 1`, only the lease holder actively reconciles; other pods stand by for failover. This flag is re-asserted after any `experimentalOverrides` patch.
-- Webhook / cert-controller / Bitwarden replica counts are out of scope; use `experimentalOverrides` for those components if needed.
+- **Leader election:** the operator forces `--enable-leader-election=true` on the core controller. With `replicas > 1`, only the lease holder actively reconciles; other pods stand by for failover. This flag is re-asserted after any `advancedOverrides` patch.
+- Webhook / cert-controller / Bitwarden replica counts are out of scope; use `advancedOverrides` for those components if needed.
 
-**For `experimentalOverrides` (per component)**
+**For `advancedOverrides` (per component)**
 
-Adds `spec.controllerConfig.componentConfigs[].experimentalOverrides` (`runtime.RawExtension`). The value is applied as a **strategic merge patch** to the component's `Deployment.spec`.
+Adds `spec.controllerConfig.componentConfigs[].advancedOverrides` (`runtime.RawExtension`). The value is applied as a **strategic merge patch** to the component's `Deployment`.
 
 - **Allowed paths** (scheduling / placement fields), for example:
-  - `template.spec.affinity`
-  - `template.spec.tolerations`
-  - `template.spec.nodeSelector`
-  - `template.spec.topologySpreadConstraints`
-- **Forbidden paths** — the operator rejects patches targeting these and sets **Degraded**:
-  - `template.spec.containers`, `initContainers`, `ephemeralContainers`
-  - `template.spec.volumes`
-  - `template.spec.containers[*].volumeMounts` / `volumeDevices` (same for init containers)
-  - Operator-owned scalars that conflict with dedicated fields on the **core controller**: `replicas` (use the dedicated field instead), container `image`, `args` / `command`, `SSL_CERT_DIR` / `SSL_CERT_FILE`. For non-core components (webhook, cert-controller, Bitwarden), `replicas` is allowed via `experimentalOverrides` since no dedicated field exists.
+  - `spec.template.spec.affinity`
+  - `spec.template.spec.tolerations`
+  - `spec.template.spec.nodeSelector`
+  - `spec.template.spec.topologySpreadConstraints`
+- **Forbidden paths** — the operator rejects patches targeting these and sets **Degraded** with `UserConfigurationError`:
+  - `spec.template.spec.containers`, `initContainers`, `ephemeralContainers`
+  - `spec.template.spec.volumes`
+  - `spec.template.spec.containers[*].volumeMounts` / `volumeDevices` (same for init containers)
+  - `spec.selector`
+  - `spec.template.metadata`
+  - `spec.template.spec.automountServiceAccountToken`
+  - `spec.template.spec.securityContext`
+  - `spec.template.spec.serviceAccountName`
+  - Operator-owned scalars that conflict with dedicated fields on the **core controller**: `spec.replicas` (use the dedicated field instead), container `image`, `SSL_CERT_DIR` / `SSL_CERT_FILE`. For non-core components (webhook, cert-controller, Bitwarden), `replicas` is allowed via `advancedOverrides` since no dedicated field exists.
 - **Apply order** per component Deployment:
   1. Start from the operator baseline (bindata).
-  2. Apply operator-managed settings (image, args, trusted CA mounts, labels, annotations, `revisionHistoryLimit`, `overrideEnv`, `concurrent`, `replicas`).
-  3. Check `experimentalOverrides` against forbidden paths; if violated, set **Degraded** and skip the patch.
-  4. Strategic-merge-patch `Deployment.spec` with the allowed overrides.
+  2. Apply operator-managed settings (image, args, trusted CA mounts, labels, annotations, `revisionHistoryLimit`, `overrideEnv`, `replicas`).
+  3. Check `advancedOverrides` against forbidden paths; if violated, set **Degraded** (`UserConfigurationError`) and skip the patch.
+  4. Strategic-merge-patch `Deployment` with the allowed overrides.
   5. Re-assert protected fields and operator-owned lists (`containers`, `initContainers`, `volumes`, mounts, image, leader-election flag, trust-related env).
-- **Error handling:** if the patch is not valid JSON/YAML, the merge fails, or the API server rejects the result, the operator sets **Degraded** (e.g. `ExperimentalOverridesInvalid` / `ExperimentalOverridesApplyFailed`) and does not leave the operand in an inconsistent state.
+- **Error handling:** if the patch is not valid JSON/YAML, the merge fails, or the API server rejects the result, the operator sets **Degraded** (`UserConfigurationError`, e.g. `AdvancedOverridesInvalid` / `AdvancedOverridesApplyFailed`) and does not leave the operand in an inconsistent state.
 
 ### Workflow Description
 
@@ -179,17 +175,17 @@ sequenceDiagram
         Op->>Op: Validate componentName enum,<br/>uniqueness, reserved env var names (CEL)
         Op->>Deps: Set revisionHistoryLimit on<br/>matched component Deployment
         Op->>Deps: Merge overrideEnv into<br/>matched component container spec
-        Op->>Deps: Set core controller replicas<br/>and concurrent from controllerConfig
+        Op->>Deps: Set core controller replicas<br/>from controllerConfig
         Op->>Deps: Keep enable-leader-election true<br/>on core controller
     end
 
     rect rgb(120, 60, 140)
-        Note over Op,Deps: 2b — experimentalOverrides (per component)
-        Op->>Op: Reject forbidden nested lists<br/>(containers / initContainers / volumes / mounts)
+        Note over Op,Deps: 2b — advancedOverrides (per component)
+        Op->>Op: Reject forbidden paths<br/>(containers / initContainers / volumes /<br/>mounts / metadata / securityContext / selector)
         alt forbidden path or invalid patch
             Op-->>CR: Set Degraded condition
         else allowed patch
-            Op->>Deps: Strategic merge patch on<br/>allowed Deployment.spec paths
+            Op->>Deps: Strategic merge patch on<br/>allowed Deployment paths
             Op->>Deps: Re-assert protected fields<br/>and owned nested lists
         end
     end
@@ -239,26 +235,25 @@ sequenceDiagram
    - `SSL_CERT_DIR=/etc/pki/tls/certs:/etc/pki/tls/user-certs` on the core controller container.
 4. **Rollout:** Kubernetes performs a rolling update when the `Deployment` spec changes.
 
-**For `concurrent` and `replicas`**
+**For `replicas`**
 
-1. **User Configuration:** Administrator sets `spec.controllerConfig.concurrent` and/or `spec.controllerConfig.replicas` on the singleton `ExternalSecretsConfig` named `cluster`.
+1. **User Configuration:** Administrator sets `spec.controllerConfig.replicas` on the singleton `ExternalSecretsConfig` named `cluster`.
 2. **Validation:** API server enforces numeric bounds via CRD validation.
 3. **Reconciliation:** For the core controller `Deployment` only, the operator:
    - Sets `spec.replicas` from `replicas` when present (else default `1`).
-   - Renders `--concurrent=<N>` from `concurrent` when present (else `--concurrent=1`).
    - Ensures `--enable-leader-election=true` remains on the core controller args.
 4. **Rollout:** Deployment rolling update; with `replicas > 1`, standby pods acquire the lease on failover.
 
-**For `experimentalOverrides`**
+**For `advancedOverrides`**
 
-1. **User Configuration:** Administrator adds a `componentConfigs` entry with `experimentalOverrides` containing a partial `Deployment` `spec` (e.g. affinity, topology spread).
-2. **Validation:** At reconcile time the operator rejects forbidden paths (`containers`, `initContainers`, `volumes`, and related mounts) and checks that the patch can be merged cleanly.
-3. **Reconciliation:** The operator applies supported API fields first, then strategic-merge-patches the Deployment spec with the allowed overrides. If the patch targets a forbidden path, is invalid, or fails to apply, the operator sets **Degraded**. After a successful patch, protected fields and operator-owned lists are re-asserted before updating the Deployment.
+1. **User Configuration:** Administrator adds a `componentConfigs` entry with `advancedOverrides` containing a partial `Deployment` manifest (e.g. affinity, topology spread, container args for `--concurrent`).
+2. **Validation:** At reconcile time the operator rejects forbidden paths (`containers`, `initContainers`, `volumes`, mounts, `metadata`, `securityContext`, `serviceAccountName`, `automountServiceAccountToken`, `selector`) and checks that the patch can be merged cleanly.
+3. **Reconciliation:** The operator applies supported API fields first, then strategic-merge-patches the Deployment with the allowed overrides. If the patch targets a forbidden path, is invalid, or fails to apply, the operator sets **Degraded** (`UserConfigurationError`). After a successful patch, protected fields and operator-owned lists are re-asserted before updating the Deployment.
 4. **Rollout:** Standard Deployment rollout for the affected component.
 
 ### Implementation Details/Notes/Constraints
 
-This enhancement extends the `ExternalSecretsConfig` for **operand customization**: administrators set **global annotations** on managed `Deployment`s and pod templates, **per-component** knobs (`deploymentConfigs` such as `revisionHistoryLimit`, `overrideEnv`, and `experimentalOverrides`), first-class **`concurrent`** / **`replicas`** for the core controller, and optionally **`trustedCABundle`** for core-controller TLS trust—without editing generated workloads by hand.
+This enhancement extends the `ExternalSecretsConfig` for **operand customization**: administrators set **global annotations** on managed `Deployment`s and pod templates, **per-component** knobs (`deploymentConfigs` such as `revisionHistoryLimit`, `overrideEnv`, and `advancedOverrides`), first-class **`replicas`** for the core controller, and optionally **`trustedCABundle`** for core-controller TLS trust—without editing generated workloads by hand.
 
 - **Operand namespace:** `trustedCABundle` references must resolve to a `ConfigMap` in the **operand** namespace (fixed to `external-secrets`).
 - **Volume semantics:** Mount the trusted CA `ConfigMap` as a **directory** volume on the core controller. Go's trust loading expects PEM files under the directories listed in `SSL_CERT_DIR`; the operator should surface a predictable filename such as **`ca-bundle.crt`** under `/etc/pki/tls/user-certs`. When the `ConfigMap` **key** is not already named `ca-bundle.crt`, use the volume's **`items`** list to **project** that key to the path `ca-bundle.crt` inside the mount (same pattern as other operators that must normalize key names):
@@ -300,15 +295,14 @@ type ComponentConfig struct {
     // +optional
     OverrideEnv []corev1.EnvVar `json:"overrideEnv,omitempty"`
 
-    // experimentalOverrides is an unsupported escape hatch: a strategic merge patch applied to this
-    // component's Deployment.spec after first-class fields are rendered. Intended for scheduling
-    // fields (affinity, tolerations, nodeSelector, topologySpreadConstraints). Patches that touch
-    // operator-owned nested lists — containers, initContainers, ephemeralContainers, volumes, or
-    // volumeMounts/volumeDevices — are rejected and cause Degraded. Invalid or unusable patch data
-    // also causes Degraded. Prefer first-class fields (concurrent, replicas, revisionHistoryLimit,
-    // overrideEnv, trustedCABundle) when available.
-    // +optional
-    ExperimentalOverrides *runtime.RawExtension `json:"experimentalOverrides,omitempty"`
+    // advancedOverrides applies raw patches on top of the final operator generated Deployment spec.
+    // WARNING: DO NOT USE UNLESS YOU KNOW EXACTLY WHAT YOU ARE DOING.
+    // This field can overwrite your own first-class CRD settings. You must NOT use this
+    // field to add or modify containers, initContainers, or ports, as doing so breaks
+    // the structural integrity of the operand and will fail deployment reconciliation.
+    // +kubebuilder:validation:Optional
+    // +kubebuilder:pruning:PreserveUnknownFields
+    AdvancedOverrides *runtime.RawExtension `json:"advancedOverrides,omitempty"`
 }
 
 // ControllerConfig is for specifying the configurations for the controller to use while installing the `external-secrets` operand and the plugins.
@@ -325,13 +319,6 @@ type ControllerConfig struct {
 	// +kubebuilder:validation:MaxProperties=20
 	// +optional
 	Annotations map[string]string `json:"annotations,omitempty"`
-
-	// concurrent sets the core controller --concurrent flag (max concurrent reconciles).
-	// When omitted, defaults to 1 for backward compatibility.
-	// +kubebuilder:validation:Minimum:=1
-	// +kubebuilder:validation:Maximum:=100
-	// +optional
-	Concurrent *int32 `json:"concurrent,omitempty"`
 
 	// replicas sets the desired replica count for the external-secrets core controller Deployment.
 	// When omitted, defaults to 1. When greater than 1, leader election keeps a single active reconciler.
@@ -440,7 +427,7 @@ spec:
             value: "4"
 ```
 
-**Configure core controller concurrency and replicas:**
+**Configure core controller replicas:**
 
 ```yaml
 apiVersion: operator.openshift.io/v1alpha1
@@ -449,11 +436,10 @@ metadata:
   name: cluster
 spec:
   controllerConfig:
-    concurrent: 20
     replicas: 2
 ```
 
-**Use `experimentalOverrides` for pod anti-affinity**
+**Use `advancedOverrides` for pod anti-affinity**
 
 ```yaml
 apiVersion: operator.openshift.io/v1alpha1
@@ -465,12 +451,13 @@ spec:
     replicas: 2
     componentConfigs:
       - componentName: ExternalSecretsCoreController
-        experimentalOverrides:
-          template:
-            spec:
-              affinity:
-                podAntiAffinity:
-                  requiredDuringSchedulingIgnoredDuringExecution:
+        advancedOverrides:
+          spec:
+            template:
+              spec:
+                affinity:
+                  podAntiAffinity:
+                    requiredDuringSchedulingIgnoredDuringExecution:
                     - labelSelector:
                         matchLabels:
                           app.kubernetes.io/name: external-secrets
@@ -512,7 +499,7 @@ spec:
       optional: false
 ```
 
-**Combined: annotations (global) with scale/HA, component-specific deployment config, overrideEnv, experimentalOverrides, and trustedCABundle:**
+**Combined: annotations (global) with scale/HA, component-specific deployment config, overrideEnv, advancedOverrides, and trustedCABundle:**
 
 ```yaml
 apiVersion: operator.openshift.io/v1alpha1
@@ -523,7 +510,6 @@ spec:
   controllerConfig:
     annotations:
       "example.com/custom-annotation": "my-value"
-    concurrent: 20
     replicas: 2
     componentConfigs:
       - componentName: ExternalSecretsCoreController
@@ -532,16 +518,17 @@ spec:
         overrideEnv:
           - name: GOMAXPROCS
             value: "4"
-        experimentalOverrides:
-          template:
-            spec:
-              topologySpreadConstraints:
-                - maxSkew: 1
-                  topologyKey: topology.kubernetes.io/zone
-                  whenUnsatisfiable: ScheduleAnyway
-                  labelSelector:
-                    matchLabels:
-                      app.kubernetes.io/name: external-secrets
+        advancedOverrides:
+          spec:
+            template:
+              spec:
+                topologySpreadConstraints:
+                  - maxSkew: 1
+                    topologyKey: topology.kubernetes.io/zone
+                    whenUnsatisfiable: ScheduleAnyway
+                    labelSelector:
+                      matchLabels:
+                        app.kubernetes.io/name: external-secrets
       - componentName: Webhook
         deploymentConfigs:
           revisionHistoryLimit: 3
@@ -591,24 +578,24 @@ This is the primary topology for this enhancement. The feature is fully applicab
 * **Risk:** User sets `SSL_CERT_DIR` or `SSL_CERT_FILE` in `overrideEnv`, conflicting with operator-managed trust.
     * **Mitigation:** CRD **CEL** on `overrideEnv` rejects those names at create/update (see **Interaction with `overrideEnv`**); document in user-facing docs; add API validation tests.
 
-* **Risk:** Setting a very high `concurrent` value overwhelms the API server or external providers.
-    * **Mitigation:** CRD maximum bound; document that operators should raise concurrency gradually and watch API/QPS metrics; prefer first-class field over ad-hoc args.
+* **Risk:** Setting a very high `--concurrent` value via `advancedOverrides` overwhelms the API server or external providers.
+    * **Mitigation:** Document that administrators should raise concurrency gradually and watch API/QPS metrics.
 
 * **Risk:** Multiple replicas without leader election would double-reconcile.
-    * **Mitigation:** Operator always enables `--enable-leader-election=true` on the core controller and re-asserts it after `experimentalOverrides`.
+    * **Mitigation:** Operator always enables `--enable-leader-election=true` on the core controller and re-asserts it after `advancedOverrides`.
 
-* **Risk:** `experimentalOverrides` produces an unsupportable or broken Deployment.
+* **Risk:** `advancedOverrides` produces an unsupportable or broken Deployment.
     * **Mitigation:** Treat the field as unsupported/experimental; on patch/apply failure set **Degraded** with a descriptive message; re-assert protected fields; document that users own patch correctness; prefer promoting common knobs to first-class fields later.
 
 * **Risk:** Users add sidecars, init containers, or volumes via strategic merge on nested lists, creating unsupported or insecure runtime shape.
-    * **Mitigation:** Explicitly forbid `containers` / `initContainers` / `ephemeralContainers` / `volumes` / mount paths in `experimentalOverrides`; reject with **Degraded**; re-assert operator-owned nested lists after any allowed patch.
+    * **Mitigation:** Explicitly forbid `containers` / `initContainers` / `ephemeralContainers` / `volumes` / mount paths in `advancedOverrides`; reject with **Degraded**; re-assert operator-owned nested lists after any allowed patch.
 
 ### Drawbacks
 
 - Increased API surface complexity for users who don't need customization.
 - Potential for misconfiguration leading to operational issues.
 - Administrators must create, update, and delete ConfigMap contents themselves; there is no operator-managed CA rotation beyond what Kubernetes volume updates provide.
-- `experimentalOverrides` is explicitly unsupported; incorrect patches may cause **Degraded** conditions that require support engagement to resolve.
+- `advancedOverrides` is explicitly unsupported; incorrect patches may cause **Degraded** conditions that require support engagement to resolve.
 
 ## Test Plan
 
@@ -626,13 +613,12 @@ This is the primary topology for this enhancement. The feature is fully applicab
     11. Test PEM validation logic; assert **Degraded** for invalid PEM regardless of `optional`.
     12. Test optional field behavior for missing ConfigMap and missing key.
     13. When referenced `ConfigMap` has `config.openshift.io/inject-trusted-cabundle: "true"`, assert reconcile **skips** user-bundle mount and does **not** set **Degraded** solely for that reason.
-    14. Test that `concurrent` renders `--concurrent=<N>` on the core controller; unset defaults to `1`.
-    15. Test that `replicas` sets `Deployment.spec.replicas` on the core controller; unset defaults to `1`.
-    16. Test that valid `experimentalOverrides` are merged into `Deployment.spec` for allowed paths.
-    17. Test that invalid `experimentalOverrides` sets **Degraded**.
-    18. Test that protected fields (`image`, `--enable-leader-election`, `concurrent`, `replicas`) are not overridden by `experimentalOverrides`.
-    19. Test that `experimentalOverrides` targeting `containers`, `initContainers`, or `volumes` is rejected with **Degraded**.
-    20. Test that operator-owned fields are restored after an allowed patch is applied.
+    14. Test that `replicas` sets `Deployment.spec.replicas` on the core controller; unset defaults to `1`.
+    15. Test that valid `advancedOverrides` are merged into the `Deployment` for allowed paths.
+    16. Test that invalid `advancedOverrides` sets **Degraded** (`UserConfigurationError`).
+    17. Test that protected fields (`image`, `--enable-leader-election`, `replicas`) are not overridden by `advancedOverrides`.
+    18. Test that `advancedOverrides` targeting forbidden paths (`containers`, `initContainers`, `volumes`, `metadata`, `securityContext`, `serviceAccountName`, `automountServiceAccountToken`, `selector`) is rejected with **Degraded** (`UserConfigurationError`).
+    19. Test that operator-owned fields are restored after an allowed patch is applied.
 
 * **Integration Tests:**
     1. Deploy the operator and create an `ExternalSecretsConfig` with component configuration.
@@ -646,8 +632,8 @@ This is the primary topology for this enhancement. The feature is fully applicab
     9. Test environment variable override behavior when user variable conflicts with operator default.
     10. Deploy with `trustedCABundle`; assert volume mount and `SSL_CERT_DIR` exist only on the core controller container; assert Degraded when reference invalid with `optional: false`; assert silent skip when `optional: true` and reference missing; assert Degraded for invalid PEM even when `optional: true`.
     11. With proxy configured and `trustedCABundle` referencing a ConfigMap labeled `config.openshift.io/inject-trusted-cabundle: "true"`, assert the operator does not add the trustedCABundle volume mount (since the bundle is already handled for the proxy path), does not set Degraded.
-    12. Set `concurrent` and `replicas`; assert args and replica count survive multiple reconcile loops (no revert to hardcoded defaults).
-    13. Apply `experimentalOverrides` affinity/topology patch; assert merged into live Deployment; assert **Degraded** for malformed RawExtension; assert **Degraded** and no Deployment change when the patch adds `containers`, `initContainers`, or `volumes`.
+    12. Set `replicas`; assert replica count survives multiple reconcile loops (no revert to hardcoded defaults).
+    13. Apply `advancedOverrides` affinity/topology patch; assert merged into live Deployment; assert **Degraded** (`UserConfigurationError`) for malformed RawExtension; assert **Degraded** and no Deployment change when the patch targets forbidden paths (`containers`, `initContainers`, `volumes`, `metadata`, `securityContext`, `serviceAccountName`, `automountServiceAccountToken`, `selector`).
 
 * **End-to-End (E2E) Tests:**
     1. Test each component type (Controller, Webhook, CertController, BitwardenSDKServer) individually.
@@ -657,7 +643,6 @@ This is the primary topology for this enhancement. The feature is fully applicab
     5. Configure ESO to connect to an internal test secret store (self-signed cert, e.g., vault); verify secrets sync successfully after setting trustedCABundle. Verify no regression for stores using public CAs (e.g., AWS Secrets Manager).
     6. Verify proxy-based CA injection still works when both proxy and trustedCABundle are configured.
     7. Scale core controller `replicas` to `>1`; verify leader election (single active reconciler / lease) and failover when the leader pod is deleted; verify secret sync continues.
-    8. Raise `concurrent` above `1` and verify the running pod args contain the configured value and ExternalSecrets continue to reconcile.
 
 ## Graduation Criteria
 
@@ -667,8 +652,8 @@ This feature will be delivered as GA directly, as it uses stable Kubernetes APIs
 * Deployment config application logic is complete (e.g., `revisionHistoryLimit`).
 * Annotation merging logic is complete and applies to both Deployment and Pod template.
 * Environment variable merging logic is complete and applies to the container spec.
-* `concurrent` and `replicas` are applied to the core controller and persist across reconcile.
-* `experimentalOverrides` strategic merge and **Degraded** failure paths are implemented.
+* `replicas` is applied to the core controller and persists across reconcile.
+* `advancedOverrides` strategic merge and **Degraded** failure paths are implemented.
 * Leader election remains enabled for multi-replica core controller deployments.
 * All tests outlined in the Test Plan are passing.
 * Documentation includes examples for common use cases.
@@ -687,11 +672,11 @@ Not applicable.
 
 ## Upgrade / Downgrade Strategy
 
-* **Upgrade:** On upgrade, the new `annotations`, `componentConfigs` (including `deploymentConfigs`, `overrideEnv`, and `experimentalOverrides`), `trustedCABundle`, `concurrent`, and `replicas` fields will be available. Existing installations without these configurations continue with defaults (`concurrent=1`, `replicas=1`). Users can optionally add scale/HA and escape-hatch settings after upgrade.
+* **Upgrade:** On upgrade, the new `annotations`, `componentConfigs` (including `deploymentConfigs`, `overrideEnv`, and `advancedOverrides`), `trustedCABundle`, and `replicas` fields will be available. Existing installations without these configurations continue with defaults (`replicas=1`). Users can optionally add scale/HA and escape-hatch settings after upgrade.
 
 * **Downgrade:** If a user downgrades to a version that does not support these fields, the older operator **ignores** unknown `spec.controllerConfig` keys (or they are pruned from stored objects depending on CRD schema). Effects include:
-  * **`annotations` / `componentConfigs`:** Deployments revert toward operator defaults; user annotations, `overrideEnv`, and `experimentalOverrides` from the newer schema are lost.
-  * **`concurrent` / `replicas`:** Core controller returns to hardcoded `--concurrent=1` and single replica; HA and throughput tuning are lost.
+  * **`annotations` / `componentConfigs`:** Deployments revert toward operator defaults; user annotations, `overrideEnv`, and `advancedOverrides` from the newer schema are lost.
+  * **`replicas`:** Core controller returns to single replica; HA tuning is lost.
   * **`trustedCABundle`:** The custom CA volume and `SSL_CERT_DIR` user path are no longer applied. TLS to backends that require enterprise-only roots may fail with `x509: certificate signed by unknown authority` until the cluster is upgraded again or trust is supplied via another supported path (for example `Proxy.spec.trustedCA` and the CNO-injected bundle when `Proxy` is in use).
 
   Treat downgrade across this API split as an **availability risk** for external secret sync wherever custom trust, HA, or elevated concurrency was required.
@@ -710,22 +695,22 @@ Not applicable.
 
 The External Secrets Operator and its operands (controller, webhook, cert-controller, BitwardenSDKServer) are delivered as a single OLM bundle and upgraded atomically. The operator image and all operand images advance together; there is no supported configuration where an older operand runs against a newer operator version or vice versa.
 
-Because the new `annotations`, `componentConfigs`, `trustedCABundle`, `concurrent`, `replicas`, and `experimentalOverrides` fields are applied by the operator during reconciliation after the bundle upgrade completes, there is no window in which an operand pod would attempt to read or act on these fields independently. The fields are purely operator-consumed: the operator reads them and patches the operand `Deployment` specs accordingly.
+Because the new `annotations`, `componentConfigs`, `trustedCABundle`, `replicas`, and `advancedOverrides` fields are applied by the operator during reconciliation after the bundle upgrade completes, there is no window in which an operand pod would attempt to read or act on these fields independently. The fields are purely operator-consumed: the operator reads them and patches the operand `Deployment` specs accordingly.
 
 No version skew handling is therefore required for this enhancement.
 
 ## Operational Aspects of API Extensions
 
-The `annotations`, `componentConfigs`, `concurrent`, `replicas`, and `experimentalOverrides` API extensions follow standard Kubernetes patterns:
+The `annotations`, `componentConfigs`, `replicas`, and `advancedOverrides` API extensions follow standard Kubernetes patterns:
 
 * **Failure Modes:**
-  * Invalid configurations will be rejected by the API server validation (annotations, `componentConfigs`, CEL rules, numeric bounds on `concurrent` / `replicas`).
+  * Invalid configurations will be rejected by the API server validation (annotations, `componentConfigs`, CEL rules, numeric bounds on `replicas`).
   * Invalid annotation formats will be rejected at the API level.
   * Invalid environment variable names will be rejected at the API level (including **`SSL_CERT_DIR`** and **`SSL_CERT_FILE`** in `overrideEnv` per CEL, alongside existing reserved-prefix rules).
   * For **`trustedCABundle`:** If the referenced `ConfigMap` or key is missing when `optional: false`, or the key contains invalid PEM, the operator sets **`Degraded`** on `ExternalSecretsConfig`, logs a clear error, and **does not** apply a broken controller `Deployment` patch—the running controller keeps its prior trust configuration until the spec is valid. If the referenced `ConfigMap` carries `config.openshift.io/inject-trusted-cabundle: "true"`, it is already created and mounted at `/etc/pki/tls/certs` when a proxy is configured. The operator **skips** the trustedCABundle volume mount to avoid a duplicate.
-  * For **`experimentalOverrides`:** malformed RawExtension, forbidden nested-list paths (`containers` / `initContainers` / `volumes` / mounts), or failed strategic merge/apply sets **`Degraded`** with a descriptive reason; protected operator fields and owned nested lists continue to be re-asserted on successful patches.
+  * For **`advancedOverrides`:** malformed RawExtension, forbidden paths (`containers` / `initContainers` / `volumes` / mounts / `metadata` / `securityContext` / `serviceAccountName` / `automountServiceAccountToken` / `selector`), or failed strategic merge/apply sets **`Degraded`** (`UserConfigurationError`) with a descriptive reason; protected operator fields and owned nested lists continue to be re-asserted on successful patches.
 
-* **Support Procedures:** Administrators can verify the applied configuration by inspecting operand `Deployment` objects and comparing them to `ExternalSecretsConfig`. For the trusted CA path, also verify the referenced `ConfigMap`, controller pod env `SSL_CERT_DIR`, and files under `/etc/pki/tls/user-certs`. For scale/HA, verify `--concurrent`, `spec.replicas`, and the leader-election lease in the operand namespace.
+* **Support Procedures:** Administrators can verify the applied configuration by inspecting operand `Deployment` objects and comparing them to `ExternalSecretsConfig`. For the trusted CA path, also verify the referenced `ConfigMap`, controller pod env `SSL_CERT_DIR`, and files under `/etc/pki/tls/user-certs`. For scale/HA, verify `spec.replicas` and the leader-election lease in the operand namespace.
 
 ## Support Procedures
 
@@ -733,17 +718,17 @@ Support personnel debugging configuration issues should:
 
 1. Verify the `ExternalSecretsConfig` resource (resource name is commonly `cluster`; plural resource is `externalsecretsconfigs`, short names include `esc`):
    `oc get externalsecretsconfigs cluster -o yaml`
-2. Inspect status conditions (including **Degraded** reasons for `trustedCABundle` or `experimentalOverrides`):
+2. Inspect status conditions (including **Degraded** reasons for `trustedCABundle` or `advancedOverrides`):
    `oc get externalsecretsconfigs cluster -o jsonpath='{.status.conditions}'`
 3. Compare the operand deployment spec to the expected configuration (deployment name may vary by release; confirm in-namespace):
    `oc get deployment -n external-secrets -o yaml`
 4. Verify custom annotations on Deployment and Pod template: `.metadata.annotations` and `.spec.template.metadata.annotations`.
 5. Verify custom environment variables: `.spec.template.spec.containers[*].env`.
-6. Verify core controller args include the expected `--concurrent` value and `--enable-leader-election=true`:
+6. Verify core controller args include `--enable-leader-election=true`:
    `oc get deployment external-secrets -n external-secrets -o jsonpath='{.spec.template.spec.containers[0].args}'`
 7. Verify replica count and ready replicas; for HA, inspect the leader election lease:
    `oc get lease -n external-secrets`
 8. Check pod logs for TLS errors (`x509: certificate signed by unknown authority`) or env merge issues.
 9. Review events: `oc get events -n external-secrets`
 10. If a pod fails to start, check the container termination message and logs.
-11. If **Degraded** mentions `experimentalOverrides`, treat the patch payload as unsupported user config; validate JSON and strategic-merge semantics before escalating. If the reason indicates a forbidden path, remove `containers` / `initContainers` / `volumes` (or mounts) from the patch and keep only allowed scheduling fields.
+11. If **Degraded** mentions `advancedOverrides`, treat the patch payload as user config error; validate JSON and strategic-merge semantics before escalating. If the reason indicates a forbidden path, remove `containers` / `initContainers` / `volumes` / mounts / `metadata` / `securityContext` / `serviceAccountName` / `automountServiceAccountToken` / `selector` from the patch and keep only allowed scheduling fields.
