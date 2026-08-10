@@ -597,6 +597,18 @@ This is the primary topology for this enhancement. The feature is fully applicab
 - Administrators must create, update, and delete ConfigMap contents themselves; there is no operator-managed CA rotation beyond what Kubernetes volume updates provide.
 - `advancedOverrides` is explicitly unsupported; incorrect patches may cause **Degraded** conditions that require support engagement to resolve.
 
+### Temporary Operand Args Override (v1.1–v1.3 only, removed in v1.4)
+
+Until `advancedOverrides` lands in v1.3, administrators need a way to override operand container args (for example `--concurrent`, `--loglevel`) without unsupported Deployment patches that the operator reverts. A **temporary, operator-level env-var escape hatch** bridges this gap and is backported to v1.1/v1.2.
+
+**Migration path:** In v1.3, `advancedOverrides` provides per-component Deployment overrides through the `ExternalSecretsConfig` CRD (the supported, declarative API). Administrators should migrate from env-var overrides to `advancedOverrides` during the v1.3 release window. These env vars are **removed in v1.4**.
+
+| Version | Env-var escape hatch | `advancedOverrides` | Action required |
+|---------|---------------------|---------------------|-----------------|
+| v1.1–v1.2 | Available | Not available | Use env vars if needed. |
+| v1.3 | Available (deprecated) | Available | Migrate to `advancedOverrides`. |
+| v1.4+ | **Removed** | Available | Env vars no longer work; use `advancedOverrides`. |
+
 ## Test Plan
 
 * **Unit Tests:**
@@ -619,7 +631,6 @@ This is the primary topology for this enhancement. The feature is fully applicab
     17. Test that protected fields (`image`, `--enable-leader-election`, `replicas`) are not overridden by `advancedOverrides`.
     18. Test that `advancedOverrides` targeting forbidden paths (`containers`, `initContainers`, `volumes`, `metadata`, `securityContext`, `serviceAccountName`, `automountServiceAccountToken`, `selector`) is rejected with **Degraded** (`UserConfigurationError`).
     19. Test that operator-owned fields are restored after an allowed patch is applied.
-
 * **Integration Tests:**
     1. Deploy the operator and create an `ExternalSecretsConfig` with component configuration.
     2. Verify that `deploymentConfigs.revisionHistoryLimit` is correctly applied to the deployment's `spec.revisionHistoryLimit`.
@@ -643,7 +654,6 @@ This is the primary topology for this enhancement. The feature is fully applicab
     5. Configure ESO to connect to an internal test secret store (self-signed cert, e.g., vault); verify secrets sync successfully after setting trustedCABundle. Verify no regression for stores using public CAs (e.g., AWS Secrets Manager).
     6. Verify proxy-based CA injection still works when both proxy and trustedCABundle are configured.
     7. Scale core controller `replicas` to `>1`; verify leader election (single active reconciler / lease) and failover when the leader pod is deleted; verify secret sync continues.
-
 ## Graduation Criteria
 
 This feature will be delivered as GA directly, as it uses stable Kubernetes APIs and provides essential operational flexibility.
