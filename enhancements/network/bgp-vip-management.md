@@ -1056,11 +1056,15 @@ This enhancement introduces the following API changes:
     (singleton name, ASN/port ranges, IP-typed peer addresses, community
     format, timer relation, list-map uniqueness, size caps) with no
     webhook.
-  - The peer password stays an **inline field** (MetalLB's `BGPPeer` CRD
-    is the precedent); a Secret-reference variant is reserved as a pre-GA
-    follow-up and, when added, arrives as a discriminated union (e.g.
-    `authentication.type: Inline|SecretReference`) that deprecates the
-    inline field rather than as a parallel optional field.
+  - Peer authentication is **Secret-only**: `passwordSecret` is a
+    name-only reference to a `kubernetes.io/basic-auth` Secret in the
+    `openshift-config` namespace (`password` key, 80-byte TCP MD5 limit).
+    Passwords never appear in the API; the shape mirrors the frr-k8s
+    `FRRConfiguration` neighbor `passwordSecret` that CNO maps it onto,
+    MCO resolves the reference when rendering the node-local peer file,
+    and the installer generates the Secret from the install-config's
+    inline password (plaintext at install time is unavoidable — no API
+    server exists during bootstrap).
   - The `apiVIPs`/`ingressVIPs` duplication from the Dev Preview JSON is
     dropped: consumers read VIPs from the Infrastructure CR (single
     source of truth); MCO re-adds them to the internal wire format for
@@ -1804,9 +1808,9 @@ Testing strategy will cover the following areas:
   selected in API Extensions) replaces the `bgp-vip-config` ConfigMap as
   the source of BGP peer configuration and demotes the serialized-JSON
   `ControllerConfigSpec.BGPVIPPeersJSON` field to an internal transport.
-  Peer passwords remain an inline field for Tech Preview (MetalLB
-  precedent); a Secret-reference variant is a pre-GA follow-up, added as
-  a discriminated union that deprecates the inline field.
+  Peer passwords are carried exclusively by `passwordSecret` references
+  (`kubernetes.io/basic-auth` Secrets in `openshift-config`); the API
+  never stores a password.
 - The Dev Preview ConfigMap ingestion path removed (deleted in the same
   change-set as the CRD swap; the gate is NoUpgrade in both preview sets,
   so no migration is needed).
