@@ -253,14 +253,15 @@ type IngressOperatorSpec struct {
     // and tls.key are used as the default certificate for the ingress
     // controller, replacing the auto-generated wildcard certificate.
     // +optional
-    DefaultCertificate *IngressDefaultCertificateReference `json:"defaultCertificate,omitempty"`
+    DefaultCertificate IngressDefaultCertificateReference `json:"defaultCertificate,omitzero,omitempty"`
 }
 
 // IngressDefaultCertificateReference references a TLS Secret by name.
+// +kubebuilder:validation:XValidation:rule="self.name.matches('^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$')",message="name must be a valid DNS-1123 subdomain"
 type IngressDefaultCertificateReference struct {
     // name is the name of a kubernetes.io/tls Secret in the HostedCluster
     // namespace. The Secret must contain tls.crt and tls.key entries.
-    // +kubebuilder:validation:Required
+    // +required
     // +kubebuilder:validation:MinLength=1
     // +kubebuilder:validation:MaxLength=253
     Name string `json:"name"`
@@ -270,12 +271,15 @@ type IngressDefaultCertificateReference struct {
 A dedicated `IngressDefaultCertificateReference` type is used instead of
 `corev1.LocalObjectReference` because it carries kubebuilder validation
 markers (`MinLength=1`, `MaxLength=253`) that `LocalObjectReference` does
-not have. These markers enable CRD-level validation without requiring an
-admission webhook. The dedicated type also provides clearer API
-documentation (the field doc explicitly requires a `kubernetes.io/tls`
-Secret with `tls.crt` and `tls.key` entries) and allows future extensibility
-(e.g., adding a `namespace` field for cross-namespace references) without
-modifying a shared upstream type.
+not have. A CEL `XValidation` rule using `self.name.matches()` additionally
+validates that the name conforms to DNS-1123 subdomain format, providing
+more accurate validation than length constraints alone. These markers
+enable CRD-level validation without requiring an admission webhook. The
+dedicated type also provides clearer API documentation (the field doc
+explicitly requires a `kubernetes.io/tls` Secret with `tls.crt` and
+`tls.key` entries) and allows future extensibility (e.g., adding a
+`namespace` field for cross-namespace references) without modifying a
+shared upstream type.
 
 CEL validation ensures the `name` field is non-empty when the
 `defaultCertificate` object is present. The field uses `omitempty` and
