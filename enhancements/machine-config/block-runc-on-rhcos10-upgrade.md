@@ -11,7 +11,7 @@ approvers:
 api-approvers:
   - None
 creation-date: 2026-06-03
-last-updated: 2026-06-03
+last-updated: 2026-07-31
 status: provisional
 tracking-link:
   - https://issues.redhat.com/browse/OCPNODE-4443
@@ -42,6 +42,15 @@ OpenShift 5.0 introduces per-pool OS image selection via OS image streams
 to RHCOS 10. If the pool still has `runc` configured, every node that
 picks up the new OS will become NotReady. This guard catches the
 incompatible combination before any node is affected.
+
+### User Personas
+
+| Persona | Concern |
+|---------|---------|
+| Cluster Administrator | Upgrading from a 4.x-based cluster and may still have `runc` configured via a legacy `ContainerRuntimeConfig`; needs to know before a pool moves to RHCOS 10. |
+| Platform SRE | Runs automation that patches a pool's OS image stream; needs an unambiguous, actionable signal to halt that automation and remediate, rather than let nodes boot into a broken state. |
+| OpenShift Test Verification / CI | Must be able to verify that the guard reliably fires (`RenderDegraded`) and recovers across releases, without manual intervention. |
+| Customers | Run workloads on cluster nodes; a silent `runc` failure on RHCOS 10 would take their applications down with no warning. The guard's pool-level block, rather than a full cluster outage, limits this blast radius. |
 
 ### User Stories
 
@@ -248,6 +257,19 @@ at the API level for immediate feedback. However, VAP cannot express the
 cross-resource validation required (MCP OS stream + rendered
 MachineConfig CRI-O configuration).
 
+**Surfacing guard status on `ContainerRuntimeConfig`**: In addition to
+the `MachineConfigPool` `RenderDegraded` condition, report the guard
+status directly on the `ContainerRuntimeConfig` object that configured
+the runtime, for a more direct signal to the administrator who edited
+it. Rejected: the CRC controller's sole responsibility is generating
+the MachineConfig; teaching it to detect this conflict would require
+duplicating the RHEL 10/stream-class-inspection logic already
+implemented in the render controller (rendering the MachineConfig and
+inspecting the resolved OS image). Since this would be purely a
+quality-of-life improvement over the existing `MachineConfigPool`
+`RenderDegraded` signal, it is not worth the additional implementation
+and maintenance cost right now.
+
 ## Open Questions [optional]
 
 1. Should a CFE-based upgrade gate be added in a future
@@ -267,24 +289,169 @@ MachineConfig CRI-O configuration).
   Table-driven tests for `validateNoRuncOnRHEL10()` covering the full
   matrix of runtime, stream, and configuration combinations.
 
+### Integration Tests
+
+N/A.
+
 ### E2E Test Scenarios
 
-Each scenario is tested with both ContainerRuntimeConfig and
-MachineConfig drop-in configuration methods.
+The full matrix below — every combination of RHCOS version, runtime,
+and CRI-O drop-in ordering — is exercised by the render controller's
+table-driven unit tests (see [Unit Tests](#unit-tests)), which cover
+`OSImageStream`- and `OSImageURL`-based targeting identically via two
+dedicated test functions (`TestValidateNoRuncOnRHEL10` and
+`TestValidateNoRuncOnRHEL10FromOSImageURL`), since the two mechanisms
+only differ in how the render controller resolves the target RHEL
+version and share the same downstream runtime-detection and blocking
+logic.
 
-| Scenario | RHCOS | Runtime | Result |
-|----------|-------|---------|--------|
-| RHCOS 9, default runtime | 9 | crun | Succeed |
-| RHCOS 9, runc configured | 9 | runc | Succeed |
-| RHCOS 9→10 migration, crun | 9→10 | crun | Succeed |
-| RHCOS 9→10 migration, runc | 9→10 | runc | Blocked |
-| RHCOS 10, crun | 10 | crun | Succeed |
-| RHCOS 10, runc | 10 | runc | Blocked |
-| RHCOS 10→9 rollback | 10→9 | Any | Succeed |
-| Multiple drop-ins, last wins | Any | Mixed | Last wins |
+Because this suite is disruptive and long-running (see
+[Skip Environment](#skip-environment)), it does not re-run the entire
+matrix live; it automates only the scenarios needed to confirm the
+guard's end-to-end, observable behavior on a real cluster
+(`RenderDegraded`, `Upgradeable=False`, and the node's actual OS/runtime
+afterward), using `ContainerRuntimeConfig` to set the runtime:
+
+- **RHCOS 9→10 migration, crun**: via `MachineConfigPool.Spec.OSImageStream`.
+- **RHCOS 9→10 migration, runc**: via both `OSImageStream` and
+  `OSImageURL`, to independently confirm each OS-target mechanism
+  reaches the identical blocked outcome on a live cluster.
+
+The "Automated Coverage" column in the table below states, per
+scenario, whether it is exercised end-to-end (and via which
+mechanism) or only at the unit-test level.
+
+The `OSImageURL` e2e scenario only fires the guard when the override is
+genuine, i.e. the `OSImageURL` differs from the pool's resolved
+`OSImageStream` default — otherwise it would silently fall through to
+the `OSImageStream`-based validator instead, and since both validators
+raise an identical error message, this would not be observable from
+the render error alone. The e2e implementation guarantees a genuine
+override by mirroring the target image into a distinct internal
+registry pull spec, so the scenario runs correctly regardless of the
+cluster's default `OSImageStream`.
+
+**"Succeed" means:** the MachineConfigPool reaches `Updated=True` with
+`RenderDegraded=False`; if the target OS changed, the node reboots onto
+the resolved OS image and the configured runtime is confirmed running;
+`co/machine-config` and `ClusterVersion` do not report
+`Upgradeable=False` for reason `DegradedPool`.
+
+**"Blocked" means:** the render step fails before any node is touched —
+`RenderDegraded=True` with an actionable error message naming the pool
+and directing the administrator to switch to `crun`; the node never
+reboots and keeps running its current OS image and runtime unchanged;
+`co/machine-config` and `ClusterVersion` report `Upgradeable=False`
+(reason `DegradedPool`) until the pool renders successfully again —
+either because the runtime is switched away from `runc`, or because the
+pool's target is no longer RHEL 10 (e.g. rolling back to RHCOS 9, where
+the guard does not apply regardless of the configured runtime).
+`Upgradeable=False` here is MCO's existing signal for *any* degraded
+`MachineConfigPool`, not a mechanism introduced by this guard; it only
+prevents *new* minor-version upgrades from being accepted while the pool
+is unhealthy — it does not halt an upgrade already in progress or block
+same-minor (z-stream) upgrades, and is therefore consistent with this
+guard operating only at the per-pool render level (see
+[Non-Goals](#non-goals)).
+
+| Scenario | RHCOS | Runtime | Result | Automated Coverage | What is validated |
+|----------|-------|---------|--------|---------------------|--------------------|
+| RHCOS 9, default runtime | 9 | crun | Succeed | Unit tests only | Pool renders and rolls out normally; the guard has no effect because the target is not RHEL 10. |
+| RHCOS 9, runc configured | 9 | runc | Succeed | Unit tests only | `runc` is explicitly allowed on RHCOS 9; the guard only evaluates runtime when the resolved target is RHEL 10. |
+| RHCOS 9→10 migration, crun | 9→10 | crun | Succeed | E2E (`OSImageStream`) | Pool moves to RHCOS 10, node reboots, runtime stays `crun`, `RenderDegraded` stays `False` throughout the migration. |
+| RHCOS 9→10 migration, runc | 9→10 | runc | Blocked | E2E (`OSImageStream` and `OSImageURL`) | Render is rejected before any reboot; node stays on RHCOS 9 with `runc` still configured. Automated twice at the e2e layer — once per OS-target mechanism — to independently confirm both reach the identical blocked outcome on a live cluster; the `OSImageURL` variant uses a registry-mirrored image to guarantee a genuine override (see note above). |
+| RHCOS 10, crun | 10 | crun | Succeed | Unit tests only | Pool is already on RHCOS 10; the guard does not fire because `crun` is configured. |
+| RHCOS 10, runc | 10 | runc | Blocked | Unit tests only | Admin tries to switch an RHCOS-10 pool's runtime to `runc` directly (no OS change involved); render is rejected the same way as the 9→10 migration case. |
+| RHCOS 10→9 rollback | 10→9 | Any | Succeed | Unit tests only | The guard only fires when the resolved target is RHEL 10; once the pool's target is RHCOS 9 again, rolling back succeeds regardless of the configured runtime. |
+| Multiple drop-ins, final runtime `runc` | 10 | runc (alphabetically-last drop-in) | Blocked | Unit tests only | Two CRI-O drop-ins are present with conflicting `default_runtime`, an earlier one setting `crun` and the alphabetically-last one setting `runc`. `DetectRuncInMachineConfig()` must resolve to the alphabetically-last drop-in's value; render is rejected exactly as in the single-drop-in `runc` case, proving a stale `crun` drop-in cannot mask an effective `runc` configuration (false negative). |
+| Multiple drop-ins, final runtime `crun` | 10 | crun (alphabetically-last drop-in) | Succeed | Unit tests only | Same setup, reversed: an earlier drop-in sets `runc`, the alphabetically-last one sets `crun`. Render succeeds, proving a stale/orphaned `runc` drop-in cannot trigger the guard when it is not the effective configuration (false positive). |
+
+Scenarios marked "Unit tests only" are covered for both `OSImageStream`
+and `OSImageURL` targeting by the table-driven tests referenced above;
+they are not separately re-run against a live cluster because they
+exercise the same render-controller validation function already
+proven end-to-end by the two automated e2e scenarios, just with
+different inputs to the shared runtime-detection logic.
 
 When the guard blocks, the pool becomes degraded and nodes remain on
-the current OS until the administrator removes the `runc` configuration.
+the current OS until either the `runc` configuration is removed or the
+pool's target is changed away from RHEL 10.
+
+### Skip Environment
+
+The e2e suite is disruptive, long-running, and requires a pool that can
+independently move between RHEL 9 and RHEL 10, so it skips automatically
+rather than failing on environments where those preconditions do not
+hold:
+
+- **MicroShift** — MicroShift does not use the MCO and already requires
+  `crun`; the runc guard cannot be exercised.
+- **Hypershift (external control plane)** — NodePool-based clusters are
+  not managed through the standalone MachineConfigPool/render-controller
+  path this guard targets.
+- **Single Node OpenShift (SNO)** — the suite requires a pure worker
+  node it can isolate into a custom MachineConfigPool without affecting
+  control-plane availability; SNO has no such node.
+- **Missing dual OS image streams** — if the `OSImageStream` API is not
+  present (`OSStreams` feature gate disabled) the suite skips; if the
+  API is present but does not advertise both `rhel-9` and `rhel-10`
+  streams, the precondition check fails rather than silently skipping,
+  since a cluster claiming OSImageStream support should offer both.
+
+### Release Testing Strategy
+
+Because this guard changes render-time behavior for every pool moving
+to RHEL 10, its validation spanned both the implementation
+(`machine-config-operator`) and consumer (`origin` e2e) repositories,
+and relied on disruptive, long-running, payload-based testing in
+addition to unit coverage:
+
+1. **Implementation validation (machine-config-operator).** The render
+   controller change was covered by unit tests (see
+   [Unit Tests](#unit-tests)) and additionally validated manually on a
+   live cluster prior to merge, exercising both the `OSImageStream` and
+   `OSImageURL` guard paths against real RHCOS 9 and RHCOS 10 images to
+   confirm the render-degraded behavior, error messaging, and recovery
+   path matched the design.
+
+2. **E2E automation (origin).** The manual pre-merge validation informed
+   automated e2e coverage for the scenarios in
+   [E2E Test Scenarios](#e2e-test-scenarios), implemented as
+   `Informing`-lifecycle tests in the
+   `disruptive-longrunning` suite. Because these tests are disruptive
+   and long-running, they cannot be validated on every commit through
+   normal presubmits; instead, the e2e change was exercised through
+   multiple manual runs of the full disruptive, long-running payload
+   jobs to confirm the guard's observable behavior (`RenderDegraded`,
+   `Upgradeable=False`, node remaining on its prior OS/runtime) held up
+   consistently across runs.
+
+3. **Cross-repository validation.** Since the e2e suite targets
+   behavior introduced by the still-unmerged `machine-config-operator`
+   change, the `origin` e2e PR was validated against a custom release
+   payload built from the corresponding `machine-config-operator` pull
+   request, rather than against a stable release. This required
+   additional payload jobs beyond what either PR would normally consume
+   on its own, to confirm the guard and its e2e coverage agreed before
+   either side merged.
+
+4. **Merge sequencing.** The `machine-config-operator` implementation
+   PR merged once its unit tests and the cross-repository e2e
+   validation above passed reliably. The `origin` e2e PR followed
+   shortly after, so the `disruptive-longrunning` suite carries
+   permanent coverage for this guard going forward and will catch
+   regressions in subsequent release payloads.
+
+### Infrastructure Needed [optional]
+
+No new cluster infrastructure or environment types are required — the
+e2e suite runs on a standard cluster using the existing
+`disruptive-longrunning` CI job definitions. Cross-repository validation
+prior to merge did require custom release payloads built from the
+in-flight `machine-config-operator` pull request, consuming additional
+payload jobs beyond normal per-PR presubmits (see
+[Release Testing Strategy](#release-testing-strategy)); no further
+custom payload jobs are expected once both changes have merged.
 
 ## Graduation Criteria
 
@@ -345,7 +512,3 @@ N/A. No API extensions.
 **Disabling the guard**: Not independently possible. To bypass (not
 recommended), revert the pool's OS stream to RHCOS 9, apply the runtime
 change, then switch back to RHCOS 10.
-
-## Infrastructure Needed [optional]
-
-None. Testing uses existing MCO CI jobs.
