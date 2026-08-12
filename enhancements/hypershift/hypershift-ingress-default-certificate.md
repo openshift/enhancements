@@ -257,13 +257,13 @@ type IngressOperatorSpec struct {
 }
 
 // IngressDefaultCertificateReference references a TLS Secret by name.
-// +kubebuilder:validation:XValidation:rule="self.name.matches('^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$')",message="name must be a valid DNS-1123 subdomain"
 type IngressDefaultCertificateReference struct {
     // name is the name of a kubernetes.io/tls Secret in the HostedCluster
     // namespace. The Secret must contain tls.crt and tls.key entries.
     // +required
     // +kubebuilder:validation:MinLength=1
     // +kubebuilder:validation:MaxLength=253
+    // +kubebuilder:validation:XValidation:rule="self.matches('^[a-z0-9]([a-z0-9\\-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9\\-]*[a-z0-9])?)*$')",message="name must be a valid DNS subdomain name: contain no more than 253 characters, contain only lowercase alphanumeric characters, '-' or '.', and start and end with an alphanumeric character"
     Name string `json:"name"`
 }
 ```
@@ -271,7 +271,7 @@ type IngressDefaultCertificateReference struct {
 A dedicated `IngressDefaultCertificateReference` type is used instead of
 `corev1.LocalObjectReference` because it carries kubebuilder validation
 markers (`MinLength=1`, `MaxLength=253`) that `LocalObjectReference` does
-not have. A CEL `XValidation` rule using `self.name.matches()` additionally
+not have. A CEL `XValidation` rule on the `name` field using `self.matches()` additionally
 validates that the name conforms to DNS-1123 subdomain format, providing
 more accurate validation than length constraints alone. These markers
 enable CRD-level validation without requiring an admission webhook. The
