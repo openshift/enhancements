@@ -701,7 +701,7 @@ Assuming ~50 well-known certificates cluster-wide:
 - Comprehensive CEL validation rules prevent most invalid configurations at admission time
 - Invalid configurations are rejected before being persisted (fail-fast)
 - Operators report detailed errors in status conditions and events
-- Fallback to platform defaults if configuration cannot be applied
+- Operators will not generate certificates until the PKI configuration is available; if it cannot be read, the operator reports `Degraded` and blocks certificate generation until the issue is resolved
 - Support procedures document how to identify and fix configuration issues
 
 **Risk: Incompatible cryptographic parameters across certificate hierarchy**
@@ -1039,15 +1039,15 @@ However, there are some considerations:
 
 2. **Operator Cannot Read PKI Resource**:
    - *Symptom*: Operator logs show errors watching or reading PKI resource
-   - *Impact*: Operator falls back to hardcoded defaults for certificate generation
-   - *Mitigation*: Operator continues functioning with defaults, RBAC/API server issues should be investigated
-   - *Detection*: Operator logs show watch/get errors, operator status may show Degraded condition
+   - *Impact*: Certificate generation is blocked. The operator will not generate certificates without a valid PKI configuration
+   - *Mitigation*: Investigate and resolve the underlying RBAC or API server issue. Once the operator can read the PKI resource, certificate generation proceeds with the configured parameters.
+   - *Detection*: Operator status shows `Degraded=True`, operator emits a warning event and logs errors
 
 3. **Unsupported Configuration**:
    - *Symptom*: PKI configuration specifies parameters that an older operator doesn't support
-   - *Impact*: Operator falls back to defaults and reports Degraded condition
-   - *Mitigation*: Status condition explains what's unsupported, suggests upgrade
-   - *Detection*: Operator status condition, events, logs
+   - *Impact*: Operator falls back to platform defaults for certificate generation to ensure availability, and reports a `Degraded` status condition. This fallback is non-silent: the `Degraded` condition and an event ensure administrators are aware that certificates may not match the declared policy.
+   - *Mitigation*: Upgrade the operator to a version that supports the configured parameters. Once the operator supports the configuration, certificates generated on the next rotation cycle will use the configured parameters.
+   - *Detection*: Operator status shows `Degraded=True` with a message indicating unsupported PKI configuration, operator emits a warning event and logs the unsupported parameters
 
 **Teams for Escalation:**
 - **Security Team**: Configuration policy questions, cryptographic parameter selection
