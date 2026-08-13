@@ -585,7 +585,7 @@ The choice of algorithm and key size has performance implications for key genera
 - Use ECDSA P-384 for compliance with CNSA 2.0 while maintaining good performance
 - Avoid RSA 8192 until operator memory limits are evaluated; RSA 4096 is the practical upper bound for RSA on default instance types
 
-Benchmark source: [`pki-benchmarks/`](pki-benchmarks/) in this repository. These tradeoffs will be documented in user-facing documentation to help administrators make informed choices.
+These tradeoffs will be documented in user-facing documentation to help administrators make informed choices.
 
 ### Risks and Mitigations
 
