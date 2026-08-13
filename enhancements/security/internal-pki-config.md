@@ -409,7 +409,7 @@ When generating a certificate, the cryptographic parameters are determined by th
 
 1. **Category Override**: If the corresponding category field (`signerCertificates`, `servingCertificates`, or `clientCertificates`) is set, use those parameters
 2. **Default Configuration**: Use the `defaults` configuration
-3. **Platform Defaults**: Use hardcoded platform defaults (typically RSA 2048)
+3. **Hardcoded Defaults**: Use hardcoded defaults (typically RSA 2048)
 
 #### Day-1 (Installer) Integration
 
@@ -437,7 +437,7 @@ Rationale for limiting Day-1 configuration:
 
 The installer will:
 1. Generate all signer certificates (10-year, 1-year, and 1-day) using the specified parameters (or defaults if not configured)
-2. Generate serving and client certificates using platform defaults
+2. Generate serving and client certificates using hardcoded defaults
 3. Create the initial PKI resource with the `signerCertificates` field matching the install-config
 4. Document that administrators should configure `servingCertificates` and `clientCertificates` fields post-installation
 
