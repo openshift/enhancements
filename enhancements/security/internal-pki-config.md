@@ -986,18 +986,20 @@ However, there are some considerations:
 
 ### Reverting to Default State
 
-1. Set the PKI resource to Default mode to revert to platform defaults:
+1. Set the PKI resource to Unmanaged mode to revert to hardcoded defaults:
    ```bash
-   oc patch pki cluster --type merge -p '{"spec":{"certificateManagement":{"mode":"Default"}}}'
+   oc patch pki cluster --type merge -p '{"spec":{"certificateManagement":{"mode":"Unmanaged","custom":null}}}'
    ```
 
-2. Operators will use hardcoded platform defaults (typically RSA 2048) for new certificate generation
+2. Operators will use hardcoded defaults (typically RSA 2048) for new certificate generation
 
 3. **Certificates transition gradually:**
    - Existing certificates continue to function unchanged
-   - New certificates generated during rotation use platform defaults
+   - New certificates generated during rotation use hardcoded defaults
    - Natural rotation applies defaults over time (varies by certificate lifetime)
    - Force rotation by deleting certificate secrets if immediate change is needed
+
+**Note:** Do not delete the PKI resource. Operators block certificate generation when the PKI resource cannot be read. Always patch the resource to `Unmanaged` mode instead.
 
 ### Recovery Procedures
 
@@ -1009,9 +1011,9 @@ However, there are some considerations:
    # Remove or fix invalid configuration, or set mode to Default
    ```
 
-2. Alternatively, patch the PKI resource to revert to platform defaults:
+2. Alternatively, patch the PKI resource to revert to hardcoded defaults:
    ```bash
-   oc patch pki cluster --type merge -p '{"spec":{"certificateManagement":{"mode":"Default"}}}'
+   oc patch pki cluster --type merge -p '{"spec":{"certificateManagement":{"mode":"Unmanaged","custom":null}}}'
    ```
 
 3. Wait for natural certificate rotation, or force rotation by deleting certificate secrets:
@@ -1059,9 +1061,9 @@ However, there are some considerations:
 
 **Scenario: Need to revert all certificates to defaults**
 
-1. Delete the PKI resource:
+1. Set the PKI resource to Unmanaged mode:
    ```bash
-   oc delete pki cluster
+   oc patch pki cluster --type merge -p '{"spec":{"certificateManagement":{"mode":"Unmanaged","custom":null}}}'
    ```
 
 2. Wait for natural certificate rotation, or force rotation by deleting certificate secrets:
@@ -1072,7 +1074,7 @@ However, there are some considerations:
    # Repeat for other certificates as needed
    ```
 
-3. Certificates will be regenerated with platform defaults
+3. Certificates will be regenerated with hardcoded defaults
 
 ## Infrastructure Needed [optional]
 
