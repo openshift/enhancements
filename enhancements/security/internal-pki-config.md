@@ -604,7 +604,7 @@ These tradeoffs will be documented in user-facing documentation to help administ
 - Comprehensive CEL validation rules prevent most invalid configurations at admission time
 - Invalid configurations are rejected before being persisted (fail-fast)
 - Operators report detailed errors in status conditions and events
-- Operators will not generate certificates until the PKI configuration is available; if it cannot be read, the operator reports `Degraded` and blocks certificate generation until the issue is resolved
+- Operators will not generate certificates until the PKI configuration is available; transient API server errors cause the operator to report `Degraded` and block certificate generation until the error is resolved
 - Support procedures document how to identify and fix configuration issues
 
 **Risk: Incompatible cryptographic parameters across certificate hierarchy**
@@ -827,7 +827,7 @@ When downgrading from a version with this feature to a version without it:
 2. Operators revert to hardcoded defaults for new certificate generation
 3. Existing certificates continue to function (they don't change on downgrade)
 4. Certificate rotation uses hardcoded defaults
-5. The PKI resource can be deleted manually if desired, or left in place for future upgrade
+5. The PKI resource remains in the cluster (cluster-scoped singleton resources are protected by admission and cannot be deleted)
 
 No manual intervention is required for downgrade. Certificates generated with non-default parameters continue to work (certificate verification doesn't change).
 
@@ -898,10 +898,10 @@ However, there are some considerations:
    - *Mitigation*: CEL validation errors clearly identify the problem with specific field and rule
    - *Detection*: Client (oc, console) receives error message with CEL validation failure details
 
-2. **Operator Cannot Read PKI Resource**:
-   - *Symptom*: Operator logs show errors watching or reading PKI resource
-   - *Impact*: Certificate generation is blocked. The operator will not generate certificates without a valid PKI configuration
-   - *Mitigation*: Investigate and resolve the underlying RBAC or API server issue. Once the operator can read the PKI resource, certificate generation proceeds with the configured parameters.
+2. **Transient API Server Errors Reading PKI Resource**:
+   - *Symptom*: Operator logs show transient errors watching or reading PKI resource
+   - *Impact*: Certificate generation is blocked until the operator can read the PKI resource. The PKI resource always exists (created at install or upgrade, protected by admission), so this indicates a transient API server or network issue.
+   - *Mitigation*: Investigate and resolve the underlying API server issue. The operator resumes certificate generation automatically once it can read the PKI resource.
    - *Detection*: Operator status shows `Degraded=True`, operator emits a warning event and logs errors
 
 3. **Unsupported Configuration**:
@@ -999,7 +999,7 @@ However, there are some considerations:
    - Natural rotation applies defaults over time (varies by certificate lifetime)
    - Force rotation by deleting certificate secrets if immediate change is needed
 
-**Note:** Do not delete the PKI resource. Operators block certificate generation when the PKI resource cannot be read. Always patch the resource to `Unmanaged` mode instead.
+**Note:** The PKI resource is a cluster-scoped singleton protected by admission and cannot be deleted. To revert to hardcoded defaults, patch the resource to `Unmanaged` mode.
 
 ### Recovery Procedures
 
