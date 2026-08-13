@@ -502,10 +502,10 @@ The PKI API uses **CRD-level CEL validation** for comprehensive validation.
 4. **CertificateConfig minimum properties:**
    - `+kubebuilder:validation:MinProperties=1` ensures at least one field is set in override certificate configs
 
-4. **DefaultCertificateConfig required fields:**
+5. **DefaultCertificateConfig required fields:**
    - `key` is required in defaults to ensure all certificates have a well-defined key configuration
 
-5. **Enum and range constraints:**
+6. **Enum and range constraints:**
    - `mode`: Unmanaged, Default, Custom
    - `algorithm`: RSA, ECDSA
    - `keySize`: Multiples of 1024 from 2048 to 8192
