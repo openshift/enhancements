@@ -625,7 +625,7 @@ Example: Signing a certificate with a stronger key than the CA itself
 **Risk: Upgrade disruption if PKI configuration is misconfigured**
 
 *Mitigation:*
-- Empty/absent PKI configuration preserves existing behavior
+- PKI resource is created with `mode: Unmanaged` during upgrade, preserving existing behavior
 - Changes only apply at next rotation, not immediately
 - Forced rotation requires explicit annotation, not automatic
 
