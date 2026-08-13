@@ -906,8 +906,8 @@ However, there are some considerations:
 
 3. **Unsupported Configuration**:
    - *Symptom*: PKI configuration specifies parameters that an older operator doesn't support
-   - *Impact*: Operator falls back to platform defaults for certificate generation to ensure availability, and reports a `Degraded` status condition. This fallback is non-silent: the `Degraded` condition and an event ensure administrators are aware that certificates may not match the declared policy.
-   - *Mitigation*: Upgrade the operator to a version that supports the configured parameters. Once the operator supports the configuration, certificates generated on the next rotation cycle will use the configured parameters.
+   - *Impact*: Certificate generation is blocked. The operator will not generate certificates with parameters it does not support.
+   - *Mitigation*: Upgrade the operator to a version that supports the configured parameters, or update the PKI configuration to use parameters the operator supports.
    - *Detection*: Operator status shows `Degraded=True` with a message indicating unsupported PKI configuration, operator emits a warning event and logs the unsupported parameters
 
 **Teams for Escalation:**
