@@ -790,9 +790,9 @@ Before the M.N release, all of the following criteria must be met:
   - Troubleshooting guide
   - **API migration guide (v1alpha1 → v1)** if breaking changes were made
 - SLIs defined and documented:
-  - Certificate generation success rate
-  - Certificate generation duration
-  - Configuration application success rate
+  - Operator `Degraded` condition rate for PKI-related failures
+  - PKI resource readability (operators can watch and read the PKI resource)
+  - Certificate rotation completes without PKI-related errors (observed via operator status conditions and events)
 - Support procedures documented for common failure modes
 - Feature gate enabled by default
 - Hypershift integration tested and documented
