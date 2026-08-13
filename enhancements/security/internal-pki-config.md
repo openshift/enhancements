@@ -466,9 +466,9 @@ The [service-ca-operator](https://github.com/openshift/service-ca-operator) gene
 
 - **Signer certificate (`service-ca`)**: Can be configured via the `signerCertificates` field to specify cryptographic parameters for the service CA itself
 - **Service serving certificates**: Generated on-demand and will use:
-  - **Defaults** configuration if specified in the PKI resource
   - **`servingCertificates`** field if specified in the PKI resource
-  - Platform defaults (RSA 2048) if no PKI configuration exists
+  - **Defaults** configuration if specified in the PKI resource
+  - Hardcoded defaults (RSA 2048) when mode is `Unmanaged`
 
 **Important limitation**: Individual service serving certificates cannot be configured independently because:
 - They are generated dynamically in response to service annotations
