@@ -852,7 +852,7 @@ Version skew is not a concern for this feature because:
 - Each operator independently manages its own certificates without coordination
 
 During upgrades:
-- The empty PKI resource created during upgrade ensures all operators (old and new) use consistent defaults
+- The PKI resource created during upgrade with `mode: Unmanaged` ensures all operators (old and new) use consistent defaults
 - Administrators can update PKI configuration after upgrade completes
 - Certificate rotation is gradual and asynchronous per existing mechanisms
 - Mixed certificate parameters across the cluster are explicitly supported
