@@ -298,26 +298,15 @@ can tear down the operand.
   [Karpenter CR on HCP](#karpenter-cr-on-hcp).
 
   **spec:**
-  - `provider`: provider-specific configuration using a
-    discriminated union.
-    The `type` field acts as the discriminator. On standalone
-    the only valid type is `ClusterAPI`.
+  - `logLevel`: `Info` | `Debug` | `Error`. The operator maps
+    it to CAPI's klog verbosity. HCP uses the same enum on
+    `HostedCluster.spec.autoNode.logLevel`.
 
     ```yaml
     spec:
-      provider:
-        type: ClusterAPI
-        clusterAPI:
-          logLevel: Info  # Info | Debug | Error
+      logLevel: Info  # Info | Debug | Error
     ```
 
-    `logLevel` is a PascalCase enum. The operator maps it to
-    the operand's native verbosity (klog numbers for CAPI).
-    HCP uses the same enum on `HostedCluster.spec.autoNode.logLevel`
-    and maps it to the cloud-native operand's `--log-level` flag.
-
-    The operator installs a ValidatingAdmissionPolicy that
-    rejects any `spec.provider.type` other than `ClusterAPI`.
   - `deployment.requests` / `deployment.limits`: resource
     requests and limits for the Karpenter operand Deployment.
 
@@ -326,8 +315,7 @@ can tear down the operand.
     `Progressing`, `Degraded`. These mirror the
     `ClusterOperator` conditions.
 
-  Future fields: additional provider-specific fields in the
-  provider union as needed.
+  Future fields: additional operand configuration as needed.
 
 **`HostedCluster.spec.autoNode` (HCP):**
 
@@ -799,18 +787,12 @@ A VAP rejects deletion of the `Karpenter` CR while any
 `NodeClaim` resources still exist, forcing the user to drain
 nodes first (described in [Workflow](#workflow-description)).
 
-**4. Karpenter CR provider constraint (standalone only)**
-
-A VAP constrains `spec.provider.type` to `ClusterAPI`, as
-described in [API Extensions](#api-extensions).
-
 ---
 
 Not all VAPs apply to all topologies. On HCP, the Karpenter CR VAPs are not
 used because there is no `Karpenter` CR. On standalone,
 `ClusterAPINodeClass` is fully user-managed with no field
-protection. Only the Karpenter CR deletion guard and provider
-constraint VAPs apply.
+protection. Only the Karpenter CR deletion guard VAP applies.
 
 Note that VAPs which exist on the hosted cluster can be subject to user 
 deletion/modification. This can techincally result in users deleting
