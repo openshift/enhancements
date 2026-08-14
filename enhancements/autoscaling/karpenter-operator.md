@@ -178,8 +178,10 @@ into the `openshift-karpenter` namespace.
 #### Karpenter CR lifecycle
 
 On HCP, there is no `Karpenter` CR. The operator will always deploy the Karpenter operand.
-In the future, subfields on the `HostedCluster.spec.autoNode` field will be used to scale down the Karpenter
-operand, as well as configure Karpenter settings. For now, this is out of scope for this enhancement.
+`HostedCluster.spec.autoNode` carries an allowlisted feature-gate
+field (see [Upstream Karpenter feature gates](#upstream-karpenter-feature-gates)).
+In the future, additional subfields on `autoNode` may be used to
+scale down the operand or configure other Karpenter settings.
 
 Reading the HostedCluster directly avoids deploying a new management-cluster CRD.
 It also avoids a separate unnecessary layer in between the operator and the HostedCluster.
@@ -321,8 +323,6 @@ can tear down the operand.
   - `conditions`. Standard operator conditions: `Available`,
     `Progressing`, `Degraded`. These mirror the
     `ClusterOperator` conditions.
-  - `enabledFeatureGates`. List of upstream Karpenter feature
-    gates currently enabled on the operand.
 
   Future fields: additional provider-specific fields in the
   provider union as needed.
@@ -352,7 +352,9 @@ fields or restrictions. See
 details. Write permissions for each actor are listed in
 [RBAC and write contract](#rbac-and-write-contract).
 
-This enhancement does not modify existing OpenShift resources.
+This enhancement does not modify existing OpenShift resources
+except an allowlisted feature-gate field on
+`HostedCluster.spec.autoNode` (HCP).
 Karpenter-provisioned nodes are standard Kubernetes nodes with
 Karpenter-specific labels and annotations.
 
@@ -489,6 +491,8 @@ After the refactor:
   [`HostedCluster.spec.autoNode`](https://github.com/openshift/hypershift/blob/main/api/hypershift/v1beta1/hostedcluster_types.go).
   The operator reads that field directly. There is no
   intermediate `Karpenter` CR on the management cluster.
+  Feature gates for the operand are set here as an allowlisted
+  field (see [Upstream Karpenter feature gates](#upstream-karpenter-feature-gates)).
 - On HCP, the operator will mount a hosted-cluster kubeconfig and
   pass it to the Karpenter operand Deployment so the operand
   targets the hosted cluster. This plumbing will be disabled on
@@ -661,13 +665,21 @@ All other upstream feature gates will be registered in
 They will graduate through the standard OpenShift feature gate
 lifecycle as validation is completed.
 
-Users control which Karpenter feature gates are active through
-the OpenShift feature gate mechanism, not through fields on the
-`Karpenter` CR or direct operand configuration. On HCP, this is
-`HostedCluster.spec.configuration.featureGate` (same
-`configv1.FeatureGateSpec`). On standalone,
-this is the cluster-scoped `FeatureGate` CR. The operator reads the enabled
-gates and translates them to the appropriate operand arguments.
+On standalone, users enable Karpenter feature gates through the
+cluster-scoped `FeatureGate` CR. The `Karpenter` CR does not
+expose feature gates. The operator reads the enabled gates and
+translates them to operand arguments.
+
+On HCP, `HostedCluster.spec.autoNode` will carry an allowlisted feature-gate
+field. Managed Services (and self-managed HCP admins) can enable
+gates without a HyperShift code change, so a gate no longer has
+to roll to every ROSA/ARO and self-managed HCP cluster at once.
+Only gates the Autoscale team and Managed Services have officially approved
+and gone through the QA and documentation processes for GA-ing them in OpenShift
+are Tech Preview or GA are accepted. Unknown or unapproved names
+are rejected. This field lives on the management-cluster
+`HostedCluster` object under `spec.autoNode.featureGates`.
+The operator will read this field and propagate them as arguments to the operand Deployment.
 
 OpenShift official documentation will list which upstream Karpenter
 feature gates are available, enabled by default, and at what
@@ -1254,9 +1266,11 @@ webhooks.
 - Upstream Karpenter feature gates available and enabled by
   default will also be documented per release (see
   [Upstream Karpenter feature gates](#upstream-karpenter-feature-gates)).
-  Admins can check which gates are active via
-  `status.enabledFeatureGates` on the `Karpenter` CR (standalone), or by
-  inspecting the args on the Karpenter operand Deployment.
+  Admins can check which gates are active by inspecting the
+  args on the Karpenter operand Deployment. On standalone the
+  cluster-scoped `FeatureGate` CR is the source of truth. On
+  HCP the allowlisted field on `HostedCluster.spec.autoNode`
+  is the source of truth.
 
 **Detecting failure:**
 
