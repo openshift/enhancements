@@ -271,15 +271,15 @@ managing the OpenShift workload cluster.
    configuration (i.e. [`spec.autoNode`](https://github.com/openshift/hypershift/blob/main/api/hypershift/v1beta1/hostedcluster_types.go)).
 
 3. The operator reconciles the CR, deploys the Karpenter
-   operand on the management cluster (with a guest-cluster kubeconfig),
-   manages CRDs and NodeClass on the guest cluster, and runs a special
+   operand on the management cluster (with a hosted-cluster kubeconfig),
+   manages CRDs and NodeClass on the hosted cluster, and runs a special
    Karpenter-specific machine approver controller on the management cluster.
 
 4. A KarpenterIgnition controller generates
    userData secrets. The operator's NodeClass controller reads
    those secrets and writes userData into the NodeClass.
 
-5. Customers create `NodePool` resources in the guest cluster
+5. Customers create `NodePool` resources in the hosted cluster
    and later creates unschedulable workloads for Karpenter.
    Karpenter provisions nodes through the cloud provider API
    and the machine approver verifies identity before approving CSRs.
@@ -402,8 +402,8 @@ Karpenter-specific labels and annotations.
 
 In HCP, the control plane (API server, etcd, controllers)
 runs in a management cluster, while customer workloads run in
-a separate guest cluster. Operators like karpenter-operator
-run on the management cluster and interact with the guest
+a separate hosted cluster. Operators like karpenter-operator
+run on the management cluster and interact with the hosted
 cluster via a kubeconfig.
 
 HyperShift already deploys Karpenter on AWS HCP clusters
@@ -438,7 +438,7 @@ Karpenter this means the HO deploys two Deployments:
 
 - A **karpenter Deployment** using the
   `aws-karpenter-provider-aws` payload image. This is the
-  Karpenter operand. It targets the guest cluster via a
+  Karpenter operand. It targets the hosted cluster via a
   kubeconfig mounted by the HO.
 - A **karpenter-operator Deployment** using the Hypershift
   image itself, running a different binary entrypoint. This
@@ -531,10 +531,10 @@ After the refactor:
   (e.g. [`spec.autoNode`](https://github.com/openshift/hypershift/blob/main/api/hypershift/v1beta1/hostedcluster_types.go)),
   which feeds into creating a `Karpenter` CR that the operator
   reconciles.
-- On HCP, the operator will mount a guest-cluster kubeconfig and
+- On HCP, the operator will mount a hosted-cluster kubeconfig and
   pass it to the Karpenter operand Deployment so the operand
-  targets the guest cluster. This plumbing will be disabled on
-  standalone where there is no management/guest distinction.
+  targets the hosted cluster. This plumbing will be disabled on
+  standalone where there is no management/hosted distinction.
 
 The karpenter-operator controlPlaneComponent will use
 `.MonitorOperandsRolloutStatus()` to track the karpenter
@@ -570,7 +570,7 @@ not touch in an OpenShift context (`amiFamily`, `userData`,
 karpenter-operator in HCP reconciles from
 `OpenshiftEC2NodeClass` to the upstream `EC2NodeClass`,
 filling in the removed fields (AMI, userData) from
-platform-managed sources automatically. This wrapper exists because HCP customers interact with NodeClasses directly in the guest cluster and need a surface that is both simplified and compatible for RHCOS-based nodes.
+platform-managed sources automatically. This wrapper exists because HCP customers interact with NodeClasses directly in the hosted cluster and need a surface that is both simplified and compatible for RHCOS-based nodes.
 
 > **Note:** The Autoscale team is exploring deprecating
 > `OpenshiftEC2NodeClass` in favour of using the upstream
@@ -728,9 +728,9 @@ OpenShift graduation level.
 | Machine approver (HCP) | CSR | Read / approve / deny |
 | Machine approver (HCP) | Cloud API (e.g. `ec2:DescribeInstances`) | Read |
 
-On HCP, the operator and operand use a guest-cluster kubeconfig
-for guest-cluster resources. RBAC for HCP KO is reused from
-existing manifests in `v2/assets/karpenter-operator/`. The guest-cluster kubeconfig follows
+On HCP, the operator and operand use a hosted-cluster kubeconfig
+for hosted-cluster resources. RBAC for HCP KO is reused from
+existing manifests in `v2/assets/karpenter-operator/`. The hosted-cluster kubeconfig follows
 the standard HO-minted kubeconfig secret pattern. HCP-specific
 code paths in karpenter-operator are disabled on standalone.
 
@@ -752,7 +752,7 @@ On HCP, Karpenter launches instances directly via the cloud
 provider, which passes userData from the NodeClass to the
 instance at boot. For RHCOS nodes, the userData is a small Ignition "pointer
 config" that tells the node where to fetch its full
-configuration. There is no MCO or MCS on the guest cluster.
+configuration. There is no MCO or MCS on the hosted cluster.
 The KarpenterIgnition controller creates userData secrets via
 the existing HyperShift NodePool ignition pipeline. The
 resulting pointer config authenticates to the HyperShift
@@ -794,9 +794,9 @@ The operator reconciles the following categories of VAPs:
 **1. NodeClass field protection (HCP only)**
 
 The upstream provider NodeClass (`EC2NodeClass`,
-`AzureNodeClass`) lives in the guest cluster because
-Karpenter runs against the guest API server. Customers have
-full API access to the guest cluster, so VAPs are needed to
+`AzureNodeClass`) lives in the hosted cluster because
+Karpenter runs against the hosted API server. Customers have
+full API access to the hosted cluster, so VAPs are needed to
 prevent tampering with operator-managed fields.
 
 On AWS HCP, the `OpenshiftEC2NodeClass` wrapper exists as the
@@ -835,7 +835,7 @@ Not all VAPs apply to all topologies. On standalone,
 protection. Only the Karpenter CR deletion guard and provider
 constraint VAPs apply.
 
-Note that VAPs which exist on the guest cluster can be subject to user 
+Note that VAPs which exist on the hosted cluster can be subject to user 
 deletion/modification. This can techincally result in users deleting
 the VAPs and modifying the protected resources in an unsafe manner.
 However, the operator mitigates this race condition by continually reconciling
@@ -1309,7 +1309,7 @@ webhooks.
     `oc logs -n <hcp-namespace> -l app=karpenter-operator`
     and `oc logs -n <hcp-namespace> -l app=karpenter`
 - Karpenter resources to inspect:
-  `oc get nodepools,nodeclaims,ec2nodeclasses` (HCP guest
+  `oc get nodepools,nodeclaims,ec2nodeclasses` (HCP hosted
   cluster) or `oc get nodepools,nodeclaims,clusterapinodeclasses`
   (standalone).
 - On HCP, AutoNode issues may originate in the HyperShift
@@ -1325,7 +1325,7 @@ webhooks.
   deletion while `NodeClaim` resources still exist.
 - On HCP, disable AutoNode through the `HostedCluster` spec.
   The HyperShift operator will remove the `Karpenter` CR subject
-  to `NodeClaim` resources still existing in the guest cluster.
+  to `NodeClaim` resources still existing in the hosted cluster.
   After a graceful timeout period, the Karpenter Operator will begin
   to forcefully terminate `NodeClaim` resources to unblock the deletion of the `Karpenter` CR.
 
