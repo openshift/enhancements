@@ -30,7 +30,7 @@ see-also:
 This enhancement proposes `karpenter-operator`, a Cluster Version
 Operator (CVO)-managed component in the OpenShift release payload
 that deploys and manages [Karpenter](https://karpenter.sh/) across
-standalone OpenShift and Hosted Control Planes (HCP). On HCP,
+Hosted Control Planes (HCP) and standalone OpenShift. On HCP,
 Karpenter is already shipped as AutoNode, Red Hat's managed node
 autoprovisioning offering. This enhancement covers refactoring
 the existing HCP implementation into the new operator binary, and
@@ -87,7 +87,7 @@ dependency conflict resolution. This enhancement also covers
 extracting that logic into a standalone karpenter-operator
 binary so the team can develop and iterate on Karpenter
 independently of HyperShift's codebase, enabling code reuse
-across standalone and HCP topologies.
+across HCP and standalone topologies.
 
 ### User Stories
 
@@ -99,11 +99,6 @@ across standalone and HCP topologies.
   Autoscaler and Karpenter, I
   want OpenShift to let me run both so I can migrate workloads
   from one to the other without downtime.
-
-- As a cluster admin running self-managed OpenShift, I want
-  Karpenter available as a platform component so I can use its
-  scheduling and instance selection capabilities without
-  deploying and maintaining it outside of the platform.
 
 - As a cluster admin, I want Karpenter installed, upgraded, and
   monitored as part of the platform so I do not have to manage
@@ -118,11 +113,16 @@ across standalone and HCP topologies.
   karpenter-operator migration to be transparent. Existing
   AutoNode behavior should not change.
 
+- As a cluster admin running self-managed OpenShift, I want
+  Karpenter available as a platform component so I can use its
+  scheduling and instance selection capabilities without
+  deploying and maintaining it outside of the platform.
+
 ### Goals
 
 - Establish `karpenter-operator` as an OpenShift payload
-  component that works across standalone (CVO-managed) and
-  HCP (HO-managed) topologies, gated by a
+  component that works across HCP (HO-managed) and
+  standalone (CVO-managed) topologies, gated by a
   `KarpenterOperator` feature gate in each topology's
   respective feature gate registry.
 
@@ -136,7 +136,7 @@ across standalone and HCP topologies.
 - Define the how Karpenter is deployed by the operator.
 
 - Define the build, test, and release process for delivering
-  karpenter-operator to both OCP and Managed Services (i.e. ROSA/ARO HCP).
+  karpenter-operator to both Managed Services (i.e. ROSA/ARO HCP) and OCP.
 
 ### Non-Goals
 
@@ -166,21 +166,15 @@ across standalone and HCP topologies.
 Karpenter Operator on startup will auto-discover the cluster's cloud infrastructure,
 and deploy/configure the corresponding Karpenter operand depending on the platform.
 Additionally, the operator will reconcile CRDs and related resources.
-On standalone, it maintains the lifecycle of the `Karpenter` CR.
 On HCP, it watches `HostedCluster.spec.autoNode` to manage the lifecycle of the Karpenter operand.
-The same operator binary will run on both standalone and HCP.
-On standalone, CVO will deploy the operator
-into the `openshift-karpenter` namespace. On HCP, the HyperShift Operator (HO) will
+On standalone, it maintains the lifecycle of the `Karpenter` CR.
+The same operator binary will run on both HCP and standalone.
+On HCP, the HyperShift Operator (HO) will
 deploy it into the hosted control plane namespace on the management cluster.
+On standalone, CVO will deploy the operator
+into the `openshift-karpenter` namespace.
 
 #### Karpenter CR lifecycle
-
-On standalone, the `Karpenter` CR is a cluster-scoped lifecycle object.
-The operator only reconciles a CR named
-`default`. A `ValidatingAdmissionPolicy`
-rejects any other name so users get an admission error instead
-of a silently ignored object. The cluster administrator
-creates the CR to deploy the operand.
 
 On HCP, there is no `Karpenter` CR. The operator will always deploy the Karpenter operand.
 In the future, subfields on the `HostedCluster.spec.autoNode` field will be used to scale down the Karpenter
@@ -191,6 +185,13 @@ It also avoids a separate unnecessary layer in between the operator and the Host
 As a result, each karpenter-operator version is responsible for understanding the `autoNode` field, including
 any breaking changes to it.
 
+On standalone, the `Karpenter` CR is a cluster-scoped lifecycle object.
+The operator only reconciles a CR named
+`default`. A `ValidatingAdmissionPolicy`
+rejects any other name so users get an admission error instead
+of a silently ignored object. The cluster administrator
+creates the CR to deploy the operand.
+
 #### Provider strategy
 
 On HCP, the operator will deploy the cloud-native [AWS][karpenter-aws] provider
@@ -198,7 +199,7 @@ for ROSA HCP and self-managed HCP on AWS, and the [Azure][karpenter-azure] provi
 for ARO HCP and self-managed HCP on Azure. They are mature upstream projects with vendor backing (AWS maintains the AWS provider,
 Microsoft maintains the Azure provider).
 Karpenter [CAPI][karpenter-capi] is the planned provider for standalone OpenShift, covered in a separate enhancement.
-GCP on both standalone and HCP is expected to be served by the CAPI provider.
+GCP on both HCP and standalone is expected to be served by the CAPI provider.
 
 Regardless of provider or platform/topology, the operator deploys the Karpenter
 operand (Deployment, RBAC) and the provider-specific CRDs. On HCP it additionally manages a default NodeClass and
@@ -225,6 +226,25 @@ NodeClass. Users will be expected to create their own sets of `ClusterAPINodeCla
 
 **cluster administrator** is a human user responsible for
 managing the OpenShift workload cluster.
+
+#### HCP workflow
+
+1. The HO deploys karpenter-operator into the hosted control
+   plane namespace on the management cluster.
+
+2. The operator deploys the Karpenter
+   operand on the management cluster (with a hosted-cluster kubeconfig),
+   manages CRDs and NodeClass on the hosted cluster, and runs a special
+   Karpenter-specific machine approver controller on the management cluster.
+
+3. A KarpenterIgnition controller generates
+   userData secrets. The operator's NodeClass controller reads
+   those secrets and writes userData into the NodeClass.
+
+4. Customers create `NodePool` resources in the hosted cluster
+   and later creates unschedulable workloads for Karpenter.
+   Karpenter provisions nodes through the cloud provider API
+   and the machine approver verifies identity before approving CSRs.
 
 #### Standalone workflow
 
@@ -255,25 +275,6 @@ managing the OpenShift workload cluster.
 7. Karpenter will observe unschedulable pods and scale up a
    matching MachineDeployment. The Cluster API infrastructure
    provider provisions the node through its normal flow.
-
-#### HCP workflow
-
-1. The HO deploys karpenter-operator into the hosted control
-   plane namespace on the management cluster.
-
-2. The operator deploys the Karpenter
-   operand on the management cluster (with a hosted-cluster kubeconfig),
-   manages CRDs and NodeClass on the hosted cluster, and runs a special
-   Karpenter-specific machine approver controller on the management cluster.
-
-3. A KarpenterIgnition controller generates
-   userData secrets. The operator's NodeClass controller reads
-   those secrets and writes userData into the NodeClass.
-
-4. Customers create `NodePool` resources in the hosted cluster
-   and later creates unschedulable workloads for Karpenter.
-   Karpenter provisions nodes through the cloud provider API
-   and the machine approver verifies identity before approving CSRs.
 
 On standalone, if the `Karpenter` CR is deleted, a
 ValidatingAdmissionPolicy will reject the deletion while any
@@ -462,11 +463,11 @@ detect the topology at startup (e.g. from the `Infrastructure` CR
 or by a flag/env var) and enable the appropriate controller
 set:
 
-- **Standalone-only:** ClusterOperator status reporting,
-  `Karpenter` CR lifecycle.
 - **HCP-only:** `HostedCluster.spec.autoNode` watch,
   `OpenshiftEC2NodeClass` reconciliation, HCP lifecycle
   management, machine approver.
+- **Standalone-only:** ClusterOperator status reporting,
+  `Karpenter` CR lifecycle.
 - **Both:** operand deployment and RBAC, CRD management.
 
 ##### HCP deployment model (target)
@@ -562,9 +563,9 @@ The operator detects the cloud provider from the
 image. It manages the `Karpenter` CR lifecycle, deploys
 provider-specific CRDs, and maintains a `ClusterOperator` CR
 with standard conditions, version reporting, and related-object
-references for `oc adm must-gather`. The `ClusterOperator` is
-standalone-only; on HCP, status is reported through the hosted
-control plane infrastructure.
+references for `oc adm must-gather`. On HCP, status is reported through the hosted
+control plane infrastructure. The `ClusterOperator` is
+standalone-only.
 
 #### Single-node Deployments or MicroShift
 
@@ -664,10 +665,10 @@ lifecycle as validation is completed.
 
 Users control which Karpenter feature gates are active through
 the OpenShift feature gate mechanism, not through fields on the
-`Karpenter` CR or direct operand configuration. On standalone,
-this is the cluster-scoped `FeatureGate` CR. On HCP, this is
+`Karpenter` CR or direct operand configuration. On HCP, this is
 `HostedCluster.spec.configuration.featureGate` (same
-`configv1.FeatureGateSpec`). The operator reads the enabled
+`configv1.FeatureGateSpec`). On standalone,
+this is the cluster-scoped `FeatureGate` CR. The operator reads the enabled
 gates and translates them to the appropriate operand arguments.
 
 OpenShift official documentation will list which upstream Karpenter
@@ -679,7 +680,7 @@ OpenShift graduation level.
 | Actor | Resources | Verbs / fields |
 | ----- | --------- | -------------- |
 | karpenter-operator | `Infrastructure` | Read |
-| karpenter-operator | `Karpenter` status (standalone), default NodeClass (HCP), operand `Deployment`, VAPs (HCP), `ClusterOperator` (standalone only) | Write / reconcile |
+| karpenter-operator | default NodeClass (HCP), VAPs (HCP), operand `Deployment`, `Karpenter` status (standalone), `ClusterOperator` (standalone only) | Write / reconcile |
 | karpenter-operator (HCP) | `HostedCluster` / `HostedControlPlane` (`spec.autoNode`) | Read |
 | Karpenter operand | `NodePool` status, `NodeClaim` | Read / write |
 | Karpenter operand | `[...]NodeClass` | Read |
@@ -696,14 +697,6 @@ code paths in karpenter-operator are disabled on standalone.
 #### RHCOS Bootstrap and Ignition userData
 
 OpenShift nodes use RHCOS and require Ignition-based bootstrap.
-
-**Standalone:**
-
-On standalone, Karpenter CAPI scales MachineDeployment replicas
-rather than launching instances directly, so RHCOS bootstrapping
-is handled by the Cluster API infrastructure provider and the
-OpenShift platform. Neither the operator nor the operand
-has any role in userData generation or image selection.
 
 **HCP:**
 
@@ -746,6 +739,14 @@ value as the drift hash instead of hashing the full userData.
 Token rotation does not trigger drift, but a `NodeClass` upgrade
 or `NodePool/NodeClass` field change does.
 
+**Standalone:**
+
+On standalone, Karpenter CAPI scales MachineDeployment replicas
+rather than launching instances directly, so RHCOS bootstrapping
+is handled by the Cluster API infrastructure provider and the
+OpenShift platform. Neither the operator nor the operand
+has any role in userData generation or image selection.
+
 #### ValidatingAdmissionPolicies
 
 The operator reconciles the following categories of VAPs:
@@ -770,29 +771,29 @@ operator-managed fields (image reference, custom data) while
 leaving other fields (subnets, instance types, tags) open for
 user customization.
 
-**2. Karpenter CR deletion guard (standalone only)**
+**2. Default NodeClass deletion protection (HCP only)**
+
+A VAP prevents customers from deleting/modifying the operator-managed
+default NodeClass.
+
+**3. Karpenter CR deletion guard (standalone only)**
 
 A VAP rejects deletion of the `Karpenter` CR while any
 `NodeClaim` resources still exist, forcing the user to drain
 nodes first (described in [Workflow](#workflow-description)).
 
-**3. Karpenter CR provider constraint (standalone only)**
+**4. Karpenter CR provider constraint (standalone only)**
 
 A VAP constrains `spec.provider.type` to `ClusterAPI`, as
 described in [API Extensions](#api-extensions).
 
-**4. Default NodeClass deletion protection (HCP only)**
-
-A VAP prevents customers from deleting/modifying the operator-managed
-default NodeClass.
-
 ---
 
-Not all VAPs apply to all topologies. On standalone,
+Not all VAPs apply to all topologies. On HCP, the Karpenter CR VAPs are not
+used because there is no `Karpenter` CR. On standalone,
 `ClusterAPINodeClass` is fully user-managed with no field
 protection. Only the Karpenter CR deletion guard and provider
-constraint VAPs apply. On HCP, the Karpenter CR VAPs are not
-used because there is no `Karpenter` CR.
+constraint VAPs apply.
 
 Note that VAPs which exist on the hosted cluster can be subject to user 
 deletion/modification. This can techincally result in users deleting
@@ -828,9 +829,9 @@ After the refactor, development happens in
 Builds go through ART's Konflux pipeline with two release
 streams from the same source repo:
 
-1. **OCP stream** - standard OCP release cadence (standalone).
-2. **HCP stream** - tied to main, shipped at the Autoscale
+1. **HCP stream** - tied to main, shipped at the Autoscale
    team's own cadence (ROSA/ARO).
+2. **OCP stream** - standard OCP release cadence (standalone).
 
 Development on main targets HCP; changes also flow into the
 OCP stream. OCP backports do not affect the HCP stream.
@@ -891,8 +892,8 @@ backports it to the relevant OCP release branch(es). HCP
 consumes the fix from main automatically on the next release.
 Backports to previous OCP release branches (4.x, 5.x, etc.)
 are invisible to HCP and managed services. Each stream ships
-through its own mechanism (OCP z-stream release for standalone,
-hypershift-operator digest bump for HCP).
+through its own mechanism (hypershift-operator digest bump for HCP,
+OCP z-stream release for standalone).
 
 ##### Standalone-only fix
 The fix goes to the relevant OCP release branch and can potentially
@@ -904,12 +905,12 @@ Regression periodic e2es targetting HCP platform will still be run to confirm no
 
 ##### QE and testing
 
-Autoscale QE tests bugs and features pre-merge on standalone
-and self-managed HCP, using regression e2es and automated
+Autoscale QE tests bugs and features pre-merge on self-managed
+HCP and standalone, using regression e2es and automated
 suites. Bug cards assigned to the Autoscale team targeting the
 `autoscaling / karpenter` component should and
-will be closed after standalone and self-managed
-HCP QE validation and signoff, irrespective of ROSA/ARO.
+will be closed after self-managed HCP and standalone
+QE validation and signoff, irrespective of ROSA/ARO.
 
 ROSA/ARO validation is handled separately by Managed
 Services QE in their own staging environments, post-merge.
@@ -1046,10 +1047,10 @@ breaking changes. The `Karpenter` CR remains standalone-only.
 
 3. ~~What is the gating mechanism for the HCP refactor
    transition?~~ Resolved: A `KarpenterOperator` feature gate
-   in each topology's registry: `openshift/api` for standalone
-   (`DevPreviewNoUpgrade`), HO's internal feature gate framework
+   in each topology's registry: HO's internal feature gate framework
    for HCP (`TechPreviewNoUpgrade`, controlled by
-   `HYPERSHIFT_FEATURESET`).
+   `HYPERSHIFT_FEATURESET`), `openshift/api` for standalone
+   (`DevPreviewNoUpgrade`).
 
 4. ~~How is the bidirectional API dependency between
    `karpenter-operator/api` and `hypershift/api` managed?~~
@@ -1112,31 +1113,17 @@ current OCP and n-1.
 Both topologies are gated by a `KarpenterOperator` feature
 gate, but the gate lives in different registries:
 
-- **Standalone:** Defined in `openshift/api` and controlled
-  via the cluster's "cluster" `FeatureGate` CR. The CVO deploys the
-  operator when the gate is enabled.
 - **HCP:** Defined in the HyperShift Operator's
   [internal feature gate framework](https://github.com/openshift/hypershift/blob/main/hypershift-operator/featuregate/feature.go)
   and controlled via the `HYPERSHIFT_FEATURESET` environment
   variable. This makes the HCP gate independent of the
   management cluster's OCP version. HO itself will deploy different versions of KO
   depending on the feature gate state.
+- **Standalone:** Defined in `openshift/api` and controlled
+  via the cluster's "cluster" `FeatureGate` CR. The CVO deploys the
+  operator when the gate is enabled.
 
 ### Dev Preview -> Tech Preview
-
-**Standalone (OCP):**
-
-- karpenter-operator payload component deployed on standalone
-  via the `KarpenterOperator` feature gate.
-- Karpenter CAPI provider image added to the payload and deployable by the operator.
-- `Karpenter` CR lifecycle working (user-created).
-- Karpenter CAPI enhancement submitted for review.
-- ClusterOperator conditions reliable.
-- Operand deployment and CRD management functional
-  (ClusterAPINodeClass CRD deployed, CAPI operand running).
-- Sufficient e2e coverage validating CAPI-based provisioning.
-- End user documentation published.
-- Feedback gathered from users and field teams.
 
 **HCP (refactor rollout, feature-gated):**
 
@@ -1161,6 +1148,20 @@ worked through karpenter-operator once the AWS HCP refactoring
 is complete. The operator refactor is a prerequisite. Azure
 graduation criteria will be defined in a follow-up enhancement.
 
+**Standalone (OCP):**
+
+- karpenter-operator payload component deployed on standalone
+  via the `KarpenterOperator` feature gate.
+- Karpenter CAPI provider image added to the payload and deployable by the operator.
+- `Karpenter` CR lifecycle working (user-created).
+- Karpenter CAPI enhancement submitted for review.
+- ClusterOperator conditions reliable.
+- Operand deployment and CRD management functional
+  (ClusterAPINodeClass CRD deployed, CAPI operand running).
+- Sufficient e2e coverage validating CAPI-based provisioning.
+- End user documentation published.
+- Feedback gathered from users and field teams.
+
 ### Tech Preview -> GA
 
 - Documentation published explaining how Karpenter
@@ -1169,9 +1170,10 @@ graduation criteria will be defined in a follow-up enhancement.
   conflicting scale decisions.
 - Sufficient feedback across multiple releases.
 - `KarpenterOperator` feature gates graduate to GA in both
-  registries (operator is present on all standalone clusters,
-  idle until a `Karpenter` CR is created; HO deploys
-  karpenter-operator unconditionally on AWS HCP clusters).
+  registries (HO deploys
+  karpenter-operator unconditionally on AWS HCP clusters;
+  operator is present on all standalone clusters,
+  idle until a `Karpenter` CR is created).
 - Load testing (large NodePool counts, high churn).
 - User-facing documentation in
   [openshift-docs](https://github.com/openshift/openshift-docs/).
@@ -1189,12 +1191,13 @@ as part of the normal payload rollout. The operator performs a
 rolling update of the Karpenter Deployment. No administrator
 action is required.
 
+On HCP, the gate follows the same progression
+in the HO's feature gate framework (`TechPreviewNoUpgrade`
+initially).
 In Dev Preview the standalone `KarpenterOperator` feature gate
 is part of the `DevPreviewNoUpgrade` feature set, which
 prevents upgrades and downgrades. Downgrade is not applicable
-at this stage. On HCP, the gate follows the same progression
-in the HO's feature gate framework (`TechPreviewNoUpgrade`
-initially).
+at this stage.
 
 ## Version Skew Strategy
 
@@ -1247,10 +1250,9 @@ webhooks.
 
 **Version compatibility:**
 
-- OCP documentation will list which upstream Karpenter version
-  is packaged with each OCP release. HCP/ROSA/ARO
-  documentation will do the same for each managed services
-  version. Some upstream Karpenter features may not exist in
+- HCP/ROSA/ARO documentation will list which upstream Karpenter
+  version is packaged with each managed services version. OCP
+  documentation will do the same for each OCP release. Some upstream Karpenter features may not exist in
   the version shipped with a given release.
 - Upstream Karpenter feature gates available and enabled by
   default will also be documented per release (see
@@ -1261,11 +1263,6 @@ webhooks.
 
 **Detecting failure:**
 
-- On standalone, `oc get clusteroperator karpenter` shows
-  `Degraded=True` or `Available=False` when the operator
-  cannot reconcile. The `Karpenter` CR
-  (`oc get karpenter default -o yaml`) has
-  more granular conditions.
 - On HCP, there is no `ClusterOperator` and no `Karpenter` CR.
   Check karpenter-operator logs in the hosted control plane
   namespace on the management cluster, and
@@ -1280,13 +1277,18 @@ webhooks.
   AMI, no userData) usually points to the operator failing an
   intermediate reconciliation step. Check karpenter-operator
   logs for errors.
+- On standalone, `oc get clusteroperator karpenter` shows
+  `Degraded=True` or `Available=False` when the operator
+  cannot reconcile. The `Karpenter` CR
+  (`oc get karpenter default -o yaml`) has
+  more granular conditions.
 - Operator and operand logs:
-  - Standalone:
-    `oc logs -n openshift-karpenter -l app=karpenter-operator`
-    and `oc logs -n openshift-karpenter -l app=karpenter`
   - HCP (management cluster):
     `oc logs -n <hcp-namespace> -l app=karpenter-operator`
     and `oc logs -n <hcp-namespace> -l app=karpenter`
+  - Standalone:
+    `oc logs -n openshift-karpenter -l app=karpenter-operator`
+    and `oc logs -n openshift-karpenter -l app=karpenter`
 - Karpenter resources to inspect:
   `oc get nodepools,nodeclaims,ec2nodeclasses` (HCP hosted
   cluster) or `oc get nodepools,nodeclaims,clusterapinodeclasses`
@@ -1298,11 +1300,11 @@ webhooks.
 
 **Disabling the feature:**
 
+- On HCP, disablement is currently not in scope for this enhancement.
 - On standalone, delete all `NodePool` resources and wait for
   Karpenter to drain and terminate the associated nodes. Then
   delete the `Karpenter` CR. A ValidatingAdmissionPolicy blocks
   CR deletion while `NodeClaim` resources still exist.
-- On HCP, disablement is currently not in scope for this enhancement.
 
 **Consequences of disabling:**
 
@@ -1314,8 +1316,8 @@ webhooks.
   until a new `Karpenter` CR is created (standalone).
 **Recovery:**
 
-- Create a new `Karpenter` CR (standalone) or re-enable
-  AutoNode on the `HostedCluster` (HCP). The operator
+- Re-enable AutoNode on the `HostedCluster` (HCP) or create a new
+  `Karpenter` CR (standalone). The operator
   reconciles and redeploys the operand.
 
 ## Infrastructure Needed [optional]
@@ -1324,8 +1326,8 @@ webhooks.
   [openshift/karpenter-operator](https://github.com/openshift/karpenter-operator).
 - ART team adds the `karpenter-operator` image to the OCP release payload.
 - ART team maintains two release streams for `karpenter-operator`:
-  the regular OCP stream and an HCP/Managed Services stream
-  tied to main (see
+  an HCP/Managed Services stream tied to main and the regular
+  OCP stream (see
   [Build, Release, and Delivery to HCP](#build-release-and-delivery-to-hcp)).
 
 [karpenter-aws]: https://github.com/aws/karpenter-provider-aws
