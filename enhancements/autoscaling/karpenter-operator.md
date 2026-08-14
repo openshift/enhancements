@@ -179,7 +179,8 @@ into the `openshift-karpenter` namespace.
 
 On HCP, there is no `Karpenter` CR. The operator will always deploy the Karpenter operand.
 `HostedCluster.spec.autoNode` carries an allowlisted feature-gate
-field (see [Upstream Karpenter feature gates](#upstream-karpenter-feature-gates)).
+field (see [Upstream Karpenter feature gates](#upstream-karpenter-feature-gates))
+and a `logLevel` field (`Info` | `Debug` | `Error`).
 In the future, additional subfields on `autoNode` may be used to
 scale down the operand or configure other Karpenter settings.
 
@@ -307,12 +308,13 @@ can tear down the operand.
       provider:
         type: ClusterAPI
         clusterAPI:
-          logLevel: 1  # integer 0-9
+          logLevel: Info  # Info | Debug | Error
     ```
 
-    CAPI uses klog-style numeric verbosity. HCP operand
-    configuration is not on this CR. It comes from
-    `HostedCluster.spec.autoNode`.
+    `logLevel` is a PascalCase enum. The operator maps it to
+    the operand's native verbosity (klog numbers for CAPI).
+    HCP uses the same enum on `HostedCluster.spec.autoNode.logLevel`
+    and maps it to the cloud-native operand's `--log-level` flag.
 
     The operator installs a ValidatingAdmissionPolicy that
     rejects any `spec.provider.type` other than `ClusterAPI`.
@@ -326,6 +328,13 @@ can tear down the operand.
 
   Future fields: additional provider-specific fields in the
   provider union as needed.
+
+**`HostedCluster.spec.autoNode` (HCP):**
+
+- `featureGates`: allowlisted upstream Karpenter feature gates.
+  See [Upstream Karpenter feature gates](#upstream-karpenter-feature-gates).
+- `logLevel`: `Info` | `Debug` | `Error`.
+  The operator maps it to the cloud-native operand's `--log-level` flag.
 
 **Deployed programmatically by the operator at runtime:**
 
@@ -353,7 +362,7 @@ details. Write permissions for each actor are listed in
 [RBAC and write contract](#rbac-and-write-contract).
 
 This enhancement does not modify existing OpenShift resources
-except an allowlisted feature-gate field on
+except allowlisted `featureGates` and `logLevel` fields on
 `HostedCluster.spec.autoNode` (HCP).
 Karpenter-provisioned nodes are standard Kubernetes nodes with
 Karpenter-specific labels and annotations.
@@ -493,6 +502,8 @@ After the refactor:
   intermediate `Karpenter` CR on the management cluster.
   Feature gates for the operand are set here as an allowlisted
   field (see [Upstream Karpenter feature gates](#upstream-karpenter-feature-gates)).
+  Operand log verbosity is `spec.autoNode.logLevel`
+  (`Info` | `Debug` | `Error`).
 - On HCP, the operator will mount a hosted-cluster kubeconfig and
   pass it to the Karpenter operand Deployment so the operand
   targets the hosted cluster. This plumbing will be disabled on
@@ -666,19 +677,16 @@ They will graduate through the standard OpenShift feature gate
 lifecycle as validation is completed.
 
 On standalone, users enable Karpenter feature gates through the
-cluster-scoped `FeatureGate` CR. The `Karpenter` CR does not
-expose feature gates. The operator reads the enabled gates and
+cluster-scoped `FeatureGate` CR. The operator reads the enabled gates and
 translates them to operand arguments.
 
 On HCP, `HostedCluster.spec.autoNode` will carry an allowlisted feature-gate
-field. Managed Services (and self-managed HCP admins) can enable
+field under `spec.autoNode.featureGates`. Managed Services (and self-managed HCP admins) can enable
 gates without a HyperShift code change, so a gate no longer has
 to roll to every ROSA/ARO and self-managed HCP cluster at once.
-Only gates the Autoscale team and Managed Services have officially approved
-and gone through the QA and documentation processes for GA-ing them in OpenShift
-are Tech Preview or GA are accepted. Unknown or unapproved names
-are rejected. This field lives on the management-cluster
-`HostedCluster` object under `spec.autoNode.featureGates`.
+Only features the Autoscale team and Managed Services have officially approved
+that have gone through the QA and documentation processes for promotion 
+are accepted. Unknown or unapproved names are ignored by the operator.
 The operator will read this field and propagate them as arguments to the operand Deployment.
 
 OpenShift official documentation will list which upstream Karpenter
