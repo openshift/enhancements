@@ -163,8 +163,9 @@ across HCP and standalone topologies.
 
 ### Overview
 
-Karpenter Operator on startup will auto-discover the cluster's cloud infrastructure,
-and deploy/configure the corresponding Karpenter operand depending on the platform.
+Karpenter Operator is configured at deploy time with the
+platform and topology via environment variables,
+and deploys/configures the corresponding Karpenter operand.
 Additionally, the operator will reconcile CRDs and related resources.
 On HCP, it watches `HostedCluster.spec.autoNode` to manage the lifecycle of the Karpenter operand.
 On standalone, it maintains the lifecycle of the `Karpenter` CR.
@@ -256,8 +257,7 @@ managing the OpenShift workload cluster.
    namespace, CRDs, RBAC, operator Deployment, and
    `ClusterOperator` CR.
 
-3. The operator will start, read the `Infrastructure` CR to detect topology, and
-   wait for a `Karpenter` CR.
+3. The operator will start and wait for a `Karpenter` CR.
 
 4. The cluster administrator will create a `Karpenter` CR:
 
@@ -387,8 +387,8 @@ the refactoring, and the target architecture.
   [`karpenter-operator` directory][hcp-karpenter-operator]
   will move to the karpenter-operator repository.
   The operator will contain both common and HCP-specific code
-  paths, toggled by topology detection from the
-  `Infrastructure` CR.
+  paths, toggled by a environment variable on the
+  operator Deployment.
 
 ##### Current state
 
@@ -458,10 +458,9 @@ karpenter-operator repository.
 
 ##### Topology detection
 
-The same binary will run on both topologies. The operator will
-detect the topology at startup (e.g. from the `Infrastructure` CR
-or by a flag/env var) and enable the appropriate controller
-set:
+The same binary will run on both topologies. Provider and
+topology are injected at deploy time via environment
+variables on the operator Deployment.
 
 - **HCP-only:** `HostedCluster.spec.autoNode` watch,
   `OpenshiftEC2NodeClass` reconciliation, HCP lifecycle
@@ -558,9 +557,8 @@ Standalone self-managed OpenShift is supported behind the
 [Provider strategy](#provider-strategy) for the standalone
 provider path.
 
-The operator detects the cloud provider from the
-`Infrastructure` CR and deploys the corresponding operand
-image. It manages the `Karpenter` CR lifecycle, deploys
+The operator deploys the corresponding operand
+image from the injected provider flag. It manages the `Karpenter` CR lifecycle, deploys
 provider-specific CRDs, and maintains a `ClusterOperator` CR
 with standard conditions, version reporting, and related-object
 references for `oc adm must-gather`. On HCP, status is reported through the hosted
@@ -597,7 +595,7 @@ The following images are used by the operator:
   [Azure/karpenter-provider-azure](https://github.com/Azure/karpenter-provider-azure)).
   Used on Azure HCP (ARO HCP). This image is not yet in the payload.
 
-The operator selects the correct image at runtime based on the `Infrastructure` CR and topology.
+The operator selects the correct image at runtime based on injected provider and topology env vars.
 
 `aws-karpenter-provider-aws` is already part of the OpenShift
 release payload today. HyperShift uses it as the Karpenter
@@ -613,11 +611,11 @@ CAPI enhancement.
 Internally the operator uses a provider interface.
 Cloud-specific logic lives in per-provider packages. Adding a
 provider means implementing the interface and supplying
-provider-specific CRDs. At startup the operator reads the
-`Infrastructure` CR's `status.platformStatus.type` to
-determine the cloud provider and selects the corresponding
-operand image (e.g. `aws-karpenter-provider-aws` for AWS)
-and enables/disables topology specfific controllers.
+provider-specific CRDs. Provider and topology are injected via
+environment variables on the Deployment. At startup
+the operator selects the corresponding operand image
+(e.g. `aws-karpenter-provider-aws` for AWS) and enables or
+disables topology-specific controllers.
 
 On HCP, cloud credentials are provided through the HO's
 credential management. On standalone with CAPI, the operand
@@ -679,7 +677,6 @@ OpenShift graduation level.
 
 | Actor | Resources | Verbs / fields |
 | ----- | --------- | -------------- |
-| karpenter-operator | `Infrastructure` | Read |
 | karpenter-operator | default NodeClass (HCP), VAPs (HCP), operand `Deployment`, `Karpenter` status (standalone), `ClusterOperator` (standalone only) | Write / reconcile |
 | karpenter-operator (HCP) | `HostedCluster` / `HostedControlPlane` (`spec.autoNode`) | Read |
 | Karpenter operand | `NodePool` status, `NodeClaim` | Read / write |
