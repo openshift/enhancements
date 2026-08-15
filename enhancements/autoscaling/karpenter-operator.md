@@ -3,6 +3,7 @@ title: karpenter-operator
 authors:
   - "@maxcao13"
 reviewers:
+  - "@adalrsjr1" ## reviewer for ARO
   - "@elmiko" ## reviewer for autoscaling component
   - "@enxebre" ## reviewer for architecture
   - "@jkyros" ## reviewer for autoscaling component
@@ -17,6 +18,7 @@ last-updated: 2026-08-14
 status: provisional
 tracking-link:
   - https://redhat.atlassian.net/browse/OCPSTRAT-3109
+  - https://redhat.atlassian.net/browse/AUTOSCALE-522
 see-also:
   - "/enhancements/machine-api/cluster-autoscaler-operator.md"
   - "Karpenter CAPI standalone enhancement (TBD)"
