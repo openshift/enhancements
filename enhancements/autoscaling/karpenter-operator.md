@@ -1232,15 +1232,15 @@ graduation criteria will be defined in a follow-up enhancement.
 
 - karpenter-operator payload component deployed on standalone
   via the `KarpenterOperator` feature gate.
-- Karpenter CAPI provider image added to the payload and deployable by the operator.
 - `Karpenter` CR lifecycle working (user-created).
-- Karpenter CAPI enhancement submitted for review.
 - ClusterOperator conditions reliable.
-- Operand deployment and CRD management functional
-  (ClusterAPINodeClass CRD deployed, CAPI operand running).
-- Sufficient e2e coverage validating CAPI-based provisioning.
+- Operand deployment and CRD management functional.
+- Sufficient e2e coverage of operator lifecycle.
 - End user documentation published.
 - Feedback gathered from users and field teams.
+
+Standalone CAPI provider graduation is defined in the CAPI
+enhancement.
 
 ### Tech Preview -> GA
 
