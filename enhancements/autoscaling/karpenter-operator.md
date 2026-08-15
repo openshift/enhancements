@@ -260,8 +260,10 @@ managing the OpenShift workload cluster.
    feature set).
 
 2. The CVO will apply the operator manifests from the payload:
-   namespace, CRDs, RBAC, operator Deployment, and
-   `ClusterOperator` CR.
+   namespace, the `Karpenter` CRD (`karpenters.autoscaling.openshift.io`),
+   RBAC, operator Deployment, and `ClusterOperator` CR.
+   The CVO does not apply `NodePool`, `NodeClaim`, or provider
+   NodeClass CRDs.
 
 3. The operator will start and wait for a `Karpenter` CR.
 
@@ -357,6 +359,13 @@ except allowlisted `featureGates` and `logLevel` fields on
 `HostedCluster.spec.autoNode` (HCP).
 Karpenter-provisioned nodes are standard Kubernetes nodes with
 Karpenter-specific labels and annotations.
+
+Karpenter CRD ownership are as follows:
+
+| CRD | Owner | Field manager | Where |
+| --- | ----- | ------------- | ----- |
+| `karpenters.autoscaling.openshift.io` | CVO | `cluster-version-operator` | Standalone payload only. Not installed on HCP. |
+| `nodepools.karpenter.sh`, `nodeclaims.karpenter.sh`, provider NodeClass CRDs | karpenter-operator | `karpenter-operator` | Applied at runtime. Hosted cluster on HCP; the OCP cluster on standalone. |
 
 ### Topology Considerations
 
@@ -1267,9 +1276,15 @@ Not applicable.
 ### Operator and Operand Upgrade
 
 During a cluster upgrade the CVO updates the operator manifests
-as part of the normal payload rollout. The operator performs a
-rolling update of the Karpenter Deployment. No administrator
-action is required.
+as part of the normal payload rollout, including the `Karpenter`
+CRD on standalone. The operator then applies the operand CRD
+version that matches the incoming operand, and only after those
+CRDs are established does it roll the Karpenter
+Deployment. Downgrade uses the same order: operand CRDs first,
+then the Deployment.
+
+On HCP there is no `Karpenter` CRD. The operator applies
+operand CRDs to the hosted cluster before rolling the operand.
 
 On HCP, the gate follows the same progression
 in the HO's feature gate framework (`TechPreviewNoUpgrade`
