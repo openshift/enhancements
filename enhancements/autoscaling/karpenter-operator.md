@@ -241,8 +241,9 @@ managing the OpenShift workload cluster.
    manages CRDs and NodeClass on the hosted cluster, and runs a special
    Karpenter-specific machine approver controller on the management cluster.
 
-3. A KarpenterIgnition controller generates
-   userData secrets. The operator's NodeClass controller reads
+3. A HyperShift-built KarpenterIgnition container generates
+   userData secrets by watching `OpenshiftEC2NodeClass` on the
+   hosted cluster. The operator's NodeClass controller reads
    those secrets and writes userData into the NodeClass.
 
 4. Customers create `NodePool` resources in the hosted cluster
@@ -382,9 +383,12 @@ the refactoring, and the target architecture.
 - **Target:** The HO will deploy karpenter-operator from an image
   referenced in the image overrides file (see
   [Build, Release, and Delivery to HCP](#build-release-and-delivery-to-hcp)).
-  Everything currently in HyperShift's
+  Most controllers currently in HyperShift's
   [`karpenter-operator` directory][hcp-karpenter-operator]
   will move to the karpenter-operator repository.
+  KarpenterIgnition stays in HyperShift as an HCP-only
+  container built from the HyperShift image (see
+  [KarpenterIgnition (HCP)](#karpenterignition-hcp)).
   The operator will contain both common and HCP-specific code
   paths, toggled by a environment variable on the
   operator Deployment.
@@ -417,7 +421,10 @@ never see or manage these processes.
 ##### HCP Karpenter Operator refactoring
 
 All HCP karpenter-operator controllers and logic will be moved to
-[openshift/karpenter-operator](https://github.com/openshift/karpenter-operator).
+[openshift/karpenter-operator](https://github.com/openshift/karpenter-operator),
+except KarpenterIgnition. That controller stays in HyperShift
+and runs as a HyperShift-built container next to the operator.
+See [KarpenterIgnition (HCP)](#karpenterignition-hcp).
 Topology-specific controllers are disabled when running on
 the other topologies. The operator will ship as its own payload
 image, deployed by the HO via CPOv2 controlPlaneComponents. HyperShift
@@ -463,7 +470,8 @@ variables on the operator Deployment.
 
 - **HCP-only:** `HostedCluster.spec.autoNode` watch,
   `OpenshiftEC2NodeClass` reconciliation, HCP lifecycle
-  management, machine approver.
+  management, machine approver. KarpenterIgnition runs in a
+  HyperShift-built container, not in the operator binary.
 - **Standalone-only:** ClusterOperator status reporting,
   `Karpenter` CR lifecycle.
 - **Both:** operand deployment and RBAC, CRD management.
@@ -496,6 +504,8 @@ After the refactor:
   pass it to the Karpenter operand Deployment so the operand
   targets the hosted cluster. This plumbing will be disabled on
   standalone where there is no management/hosted distinction.
+- On HCP, hypershift-operator deploys a KarpenterIgnition container from the
+  HyperShift image as part of the karpenter-operator component as a sidecar container.
 
 The karpenter-operator controlPlaneComponent will use
 `.MonitorOperandsRolloutStatus()` to track the karpenter
@@ -517,6 +527,57 @@ so the HO gate can be toggled without depending on the
 management cluster's OCP version. On HCP, this gate
 controls the rollout of the standalone karpenter-operator
 binary on existing AWS HCP clusters.
+
+##### KarpenterIgnition (HCP)
+
+KarpenterIgnition generates RHCOS Ignition userData for
+Karpenter nodes. It uses HyperShift's NodePool ignition
+pipeline (`ConfigGenerator`, rotating bearer tokens, release
+metadata). Those packages are HyperShift internals, not a
+formal API, and are not exported for other binaries to import.
+Porting or duplicating them in karpenter-operator would skew
+from NodePool ignition whenever HyperShift changes the
+pipeline.
+
+The controller therefore stays in HyperShift. The important
+property is that the process is built from the HyperShift
+image, not from karpenter-operator.
+The controller will run as a sidecar container in the karpenter-operator pod.
+
+The controller continues to watch `OpenshiftEC2NodeClass` on the hosted cluster,
+writes userData Secrets on the management cluster, and the operator consumes that Secret
+and writes `userData` into the underlying NodeClass. The Secret's labels, annotations,
+and data keys are the contract that must stay stable across operator and HyperShift
+cadences. Secret *name* is not the lookup key.
+
+In particular we need to make sure:
+
+**Lookup (how the operator finds the Secret).** All of these must stay aligned.
+The operator lists Secrets in the HCP namespace; it does not match on name.
+
+- Label `hypershift.openshift.io/managed-by-karpenter: "true"`. The HyperShift
+  NodePool secret janitor skips Secrets with this label when there is no real
+  NodePool object (Karpenter uses an in-memory NodePool named
+  `<OpenshiftEC2NodeClass.Name>-karpenter`). Dropping the label lets the janitor
+  delete the Secret.
+- Annotation `hypershift.openshift.io/nodePool` set to
+  `<hcp-namespace>/<OpenshiftEC2NodeClass.Name>-karpenter`. This is how the
+  operator binds a Secret to a NodeClass.
+- Annotation `hypershift.openshift.io/ignition-config: "true"` marks the
+  *token* Secret, not userData. The operator must keep skipping those.
+
+**Payload (what the operator copies).**
+
+- Data key `value`: the Ignition pointer-config JSON. Copied verbatim into
+  `EC2NodeClass.spec.userData`. The operator must not rewrite it.
+- Labels `hypershift.openshift.io/ami` (amd64) and
+  `hypershift.openshift.io/ami-<arch>` (other arches, currently `arm64`): AMI
+  IDs. Copied into `EC2NodeClass.spec.amiSelectorTerms`.
+- Inside `value`, `ignition.config.merge[0].httpHeaders` must keep a
+  `TargetConfigVersionHash` header.
+
+This controller only exists in HyperShift. On Azure HCP, `AzureNodeClass` will require the same Secret contract.
+On OCP this is unnecessary since Karpenter node bootstrapping is handled by Cluster API infrastructure providers.
 
 ##### OpenshiftEC2NodeClass
 
@@ -719,7 +780,10 @@ goes through `spec.kubelet` on `OpenshiftEC2NodeClass`.
 KarpenterIgnition reads the kubelet settings, generates a
 KubeletConfig manifest stored in a ConfigMap on the
 management cluster, and incorporates it into the rendered
-Ignition. The `spec.kubelet` field supports both explicitly
+Ignition. The operator does not generate Ignition. It only
+reads the resulting Secret. See
+[KarpenterIgnition (HCP)](#karpenterignition-hcp).
+The `spec.kubelet` field supports both explicitly
 typed fields (with CEL validation) and an overflow mechanism
 for arbitrary kubelet settings that pass through to the node
 (see [PR #8192](https://github.com/openshift/hypershift/pull/8192)).
@@ -731,7 +795,7 @@ nodes as "Drifted" and replaces them. On HCP, the
 ignition-server rotates the bearer token approximately every
 5.5 hours, which changes the userData JSON. A naive hash of
 the full userData would trigger false drift on every rotation.
-To avoid this, the operator configures a
+To avoid this, the KarpenterIgnition producer configures a
 `TargetConfigVersionHash` header in the Ignition merge source
 URL. When a node fetches its config, this value is sent as an
 HTTP request header to the ignition-server. The
@@ -1035,6 +1099,20 @@ Instead, karpenter-operator on HCP reads
 is responsible for understanding that field, including any
 breaking changes. The `Karpenter` CR remains standalone-only.
 
+### Port KarpenterIgnition into karpenter-operator
+
+We considered moving KarpenterIgnition into the
+karpenter-operator binary so HyperShift would retain no
+Karpenter-related controllers.
+
+KarpenterIgnition uses HyperShift's NodePool ignition pipeline
+(`ConfigGenerator`, token rotation, release metadata). Those
+packages are unexported implementation details, not a formal
+API. Duplicating them would drift from NodePool ignition.
+Keeping the controller in a HyperShift-built container, with
+Secrets as the contract, avoids that skew. See
+[KarpenterIgnition (HCP)](#karpenterignition-hcp).
+
 ## Open Questions [optional]
 
 1. What is the cleanup procedure when the `Karpenter` CR is
@@ -1059,8 +1137,9 @@ breaking changes. The `Karpenter` CR remains standalone-only.
    (for `HostedControlPlane`, `AutoNode`, `AutoNodeStatus`,
    etc.) and reads `HostedCluster.spec.autoNode` directly.
    `OpenshiftEC2NodeClass` API types still live in a
-   `karpenter-operator/api` Go sub-module. There is no
-   circular dependency.
+   `karpenter-operator/api` Go sub-module. The HyperShift
+   KarpenterIgnition producer imports that API module to watch
+   `OpenshiftEC2NodeClass`.
 
 5. ~~Should upstream Karpenter CRDs (`NodePool`, `NodeClaim`,
    provider-specific NodeClass) be deployed by the CVO from
