@@ -3,11 +3,16 @@ title: vsphere-per-component-credential-overrides
 authors:
   - "@rvanderp3"
 reviewers:
-  - TBD
+  - "@jcpowermac"
+  - "@dlom"
+  - "@jstuever"
+  - "@patrickdillon"
 approvers:
-  - TBD
+  - "@dlom"
+  - "@jstuever"
+  - "@patrickdillon"
 api-approvers:
-  - TBD
+  - "none"
 creation-date: 2026-08-17
 last-updated: 2026-08-17
 tracking-link:
@@ -112,15 +117,19 @@ No CRD or API changes are required. The feature uses two new well-known annotati
 
 Fully supported. The override mechanism operates entirely within the CCO reconciliation loop, which runs on standalone clusters without modification.
 
-#### Hypershift / Hosted Clusters
+#### Hypershift / Hosted Control Planes
 
 Not in scope for this phase. Hypershift uses a different credential management model where the management cluster holds credentials for hosted clusters. The annotation-based pattern could be adapted for Hypershift in a future phase, but the credential topology is sufficiently different to warrant separate design work.
 
-#### Single-node Deployments (SNO)
+#### Single-node Deployments or MicroShift
 
 Supported — the same mechanism applies. The CCO runs on SNO clusters identically to multi-node clusters, and the override secret resolution is purely a control-plane operation with no node-count dependency.
 
-### Implementation Details
+#### OpenShift Kubernetes Engine
+
+Not applicable. This enhancement targets the CCO vSphere actuator, which is specific to vSphere platform deployments and does not apply to OKE deployments.
+
+### Implementation Details/Notes/Constraints
 
 **Changed Components:**
 
@@ -178,7 +187,7 @@ Mitigation: The watch on `openshift-config` triggers requeue of all CredentialsR
 - Annotation-based mapping is not validated at admission time — misconfigurations are only detected at reconciliation time and surfaced through CCO logs
 - The feature introduces a dependency on the `openshift-config` namespace for credential storage, which is a shared namespace used by other platform components
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Naming Convention Approach
 
