@@ -27,7 +27,7 @@ see-also:
 replaces:
   - []
 superseded-by:
-  - []
+  - enhancements/cloud-integration/simplified-olm-token-auth.md
 ---
 
 # Tokenized Authentication for Red Hat Operators on Cloud Providers
