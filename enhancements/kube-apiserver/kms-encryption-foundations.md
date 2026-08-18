@@ -213,7 +213,6 @@ To enable the apiservers to access the KMS plugin, the `/var/run/kmsplugin` dire
        kms:
          type: Vault
          vault:
-           kmsPluginImage: registry.example.com/vault-plugin@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
            vaultAddress: https://vault.example.com:8200
            vaultNamespace: my-namespace
            tls:
@@ -406,7 +405,7 @@ Both KMS providers run as separate sidecar containers without deduplication, mai
 
 #### Pre-flight Checker (Tech Preview v2)
 
-The pre-flight checker validates KMS configuration before any configuration change is applied. The API allows admins to specify a KMS plugin image reference, and the API may add new fields over time in a backward-compatible way (e.g., a new field that maps to a new plugin flag). A new flag is expected to be supported for a range of image versions (say 1.X+), but we do not control which image version the admin provides: they might set a new field while referencing an older image (e.g., 1.X-2) that does not support the corresponding flag. Rather than maintaining a compatibility matrix between API field sets and image versions, we run the pre-flight checker unconditionally — the cost of an extra pod is acceptable compared to the risk of deploying an incompatible configuration.
+The pre-flight checker validates KMS configuration before any configuration change is applied. The API may add new fields over time in a backward-compatible way (e.g., a new field that maps to a new plugin flag). A new flag is expected to be supported for a range of image versions (say 1.X+). Although plugin images are sourced through controlled channels (see [KMS Plugin Image Sourcing](#kms-plugin-image-sourcing)), compatibility gaps can still occur — for example, an OLM-managed plugin image may lag behind newly added API fields, or a payload image update and an API change may land in different z-stream releases. Rather than maintaining a compatibility matrix between API field sets and image versions, we run the pre-flight checker unconditionally — the cost of an extra pod is acceptable compared to the risk of deploying an incompatible configuration.
 
 The checker consists of two parts: a preflight binary that tests the KMS provider end-to-end via the plugin, and a controller that coordinates the check with the key-controller.
 
@@ -480,6 +479,75 @@ When KMS is enabled, the injection reads the encryption-configuration secret, ex
 Each KMS provider type has a sidecar builder that constructs the container spec from the provider configuration, credentials, and KMS endpoint. Currently, Vault is the only implemented provider. Adding a new provider requires implementing a sidecar builder and adding its configuration fields to the provider config union.
 
 Credentials and ConfigMap data (`kms-plugin-secret-{secretName}_{dataKey}-{keyID}` and `kms-plugin-configmap-{configMapName}_{dataKey}-{keyID}`) are carried automatically by the encryption controllers through the encryption-configuration secret, so the sidecar builder can consume them without additional plumbing.
+
+#### KMS Plugin Image Sourcing
+
+In order to actually deploy the KMS plugin to the cluster, a user needs to configure the cluster to source the correct supported plugin image. In tech preview v1, this was accomplished by including an image field in the KMS config so that a user could directly point to an image reference and the encryption controller would use whatever image was specified. However, there are a number of reasons why this is not ideal and in order to manage those limitations we will provide more robust sourcing mechanisms to ensure supported and compatible KMS plugins are actually installed on the cluster.
+
+To accomplish this, we will instead source plugin images through one of two different mechanisms. For third party certified plugins that are closed source, we will provide an interface where an OLM operator can set the image reference for the plugin image. For source available or upstream plugins, we will compile the plugin images directly and include them in the OpenShift release payload.
+
+This approach solves several problems related to a user specifying the image reference directly in the kms configuration spec:
+- Users will have a simple way to install KMS plugins that are tested with the version of OCP they are running. Either they are installing a version of an open source plugin that has been tested directly with that version of OCP in CI, or they will have a version that is tested and marked as supported with OLM metadata.
+- The plugin needs to have a well supported upgrade path. If a user specifies the image, they are responsible for ensuring that updates for version or API incompatibilities or CVEs are handled manually. Now either the plugin has a 1:1 mapping with a specific version of the OCP payload or the OLM upgrade controls enforce compatible upgrades across minor and major cluster version boundaries.
+- Similarly, there is now first class support for disconnected mirroring. In the previous case, a user would have to manually mirror the image by generating their own IDMS and mirroring each plugin image to their mirror registry. Now, either the plugin is mirrored as part of the paylod mirroring, or it is mirrored when the certified OLM catalog is mirrored.
+
+To accomplish this, we will make several implementation changes in the API surface and controllers.:
+- We will remove the kmsPluginImage field from the vault encryption spec for the vault plugin. Future encryption plugin implementations will not include a field that takes an image reference.
+- The KMS encryption configuration fields will remain in the API Server config object in the encryption spec.
+- To source the image reference for the vault plugin, we will query a well known hardcoded provider specific configmap named `ibm-kms-vault-plugin-provider` that contains an `image:` field. The value of that image field is the KMS plugin image reference. Future plugins will also map to unique configmap names to ensure that there is no overlap.
+- For all plugins, that configmap will be stored in the `openshift-kms-plugin-provider` namespace.
+- For each third party plugin provider, there will be a kms plugin provider operator. The purpose of that operator is only to ensure that the configmap with the correct mapping is created and enforced on the cluster. That operator will run in the `openshift-kms-plugin-provider` namespace in single namespace mode.
+- If the vault kms encryption configuration is defined in the API server config API, the encryption controllers will read the configmap to generate the plugin sidecar.
+- In a future iteration, if the plugin is built into the payload, there will be an environment variable that will be passed into the operator to source the correct plugin image for other provider configurations (AWS, Azure, etc).
+
+##### OLM-Managed Plugins (Certified Third-Party Providers)
+
+When a KMS plugin is developed and maintained by a certified third-party provider, the provider ships an OLM operator that manages the plugin image lifecycle. The OLM operator writes the plugin image reference to a well-known ConfigMap in a hardcoded namespace  following a defined naming and labeling convention.
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ibm-kms-vault-plugin-provider
+  namespace: openshift-kms-plugin-provider
+  labels:
+    config.openshift.io/kms-plugin-image: "true"
+data:
+  image: registry.example.com/vault-plugin@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+```
+
+The encryption controllers will periodically sync on ConfigMaps matching the `config.openshift.io/kms-plugin-image` label. When the KMS configuration references a provider type whose image is OLM-managed, the encryption controllers read the image reference from the corresponding ConfigMap and include it in the `kms-plugin-config` written to the encryption key secret.
+
+The OLM operator is responsible for:
+- Publishing an immutable image reference (digest pinned) that is compatible with the installed OpenShift version and specifying corresponding OLM update graph metadata
+- Updating the image reference when the operator is updated (e.g., bug fixes, CVE patches) -- there is a 1:1 relationship between Operator version and plugin version
+- Ensuring the ConfigMap exists when the user enables the KMS provider type
+
+If the ConfigMap is missing when the user specifies KMS plugin configuration in the encryption spec, the keyController goes degraded with a clear status message indicating which ConfigMap is expected. This tells the user when the encryption controllers cannot find an image for the configured provider type. If the image is specified but is invalid (cannot be pulled, not a valid KMS plugin image), preflight will catch this and prevent the plugin from being deployed.
+
+When the OLM operator updates the ConfigMap with a new image reference, the encryption controllers detect the change and apply it through the existing [non-migration update flow](#variation-updates-not-requiring-migration-tech-preview-v2). The pre-flight checker validates the new image before it is deployed.
+
+This model ensures that:
+- The third-party provider controls the plugin image lifecycle independently of the OpenShift release cadence
+- Image compatibility with the OpenShift version is the provider's responsibility, enforced through the OLM operator's version-gated subscription channels
+- The pre-flight checker validates the image before it is deployed, catching incompatibilities regardless of the image source
+- Disconnected plugins are managed by OLM disconnected mirroring
+
+##### Payload-Included Plugins
+
+When a KMS plugin is open source and maintained as part of the OpenShift ecosystem, the plugin image is built from source, included in the OpenShift release payload, and referenced by the encryption controllers through the operator's image environment variables (e.g., `RELATED_IMAGE_KMS_VAULT_PLUGIN`). This follows the same pattern used by other payload-managed images in OpenShift — the CVO injects image references into operator deployments, and the operators use those references when building workload pod specs.
+
+This model guarantees that:
+- The plugin image is tested against the specific OpenShift version it ships with
+- Image updates are delivered automatically during OpenShift upgrades
+- The image reference is immutable for a given release (digest-pinned in the payload)
+- No user configuration is required for the image
+
+For non-migration updates (e.g., a CVE fix in the plugin image delivered via a z-stream release), the operator detects the new image reference from its environment after a CVO-driven operator rollout, and the existing [non-migration update flow](#variation-updates-not-requiring-migration-tech-preview-v2) applies: keyController updates the encryption key secret in-place, and stateController triggers a new revision.
+
+##### Overrides
+
+It is possible with the provider plugin configmap for a user to override the plugin image. They would need to disable the OLM operator and then manually modify the configmap. That is unavoidable, and we will need to document this edge case to make it clear that only valid tested plugins are supported by OpenShift.
 
 #### Multiple Concurrent Sidecars
 
@@ -582,6 +650,12 @@ We propose to extend `KMSConfig` with `VaultKMSConfig`, also adding
 `VaultKMSProvider` as new `KMSProviderType`.
 We propose that the existing `KMSEncryption` feature gate be extended to include
 the Vault KMS Plugin API.
+
+The `VaultKMSConfig` will also no longer include the kmsPluginImage field. Plugin 
+images are sourced through controlled delivery channels rather than user
+configuration — see [KMS Plugin Image Sourcing](#kms-plugin-image-sourcing) for the 
+two supported delivery mechanisms (payload-included and OLM-managed) and the
+rationale for this design choice.
 
 The full structure of the proposed Vault KMS Plugin configuration API can be
 found in [this pull request](https://github.com/openshift/api/pull/2805).
