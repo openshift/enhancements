@@ -92,19 +92,28 @@ The new `tlsAdherence` field is a **sibling** to the existing `tlsSecurityProfil
 
 **Implementation Note:** Component implementors should use the `ShouldHonorClusterTLSProfile` helper function from library-go rather than checking the `tlsAdherence` field values directly. This helper encapsulates the logic for handling empty values and future enum additions.
 
-### TLS 1.3 Cipher Behavior
+### Cipher Suite Behavior
 
-When the minimum TLS version is set to TLS 1.3, the following behavior applies:
+The behavior of Go's `crypto/tls` library limits the effect of configuring a custom cipher suites list. This behavior started with Go 1.17 and is well [documented and justified](https://go.dev/blog/tls-cipher-suites), but might still be surprising to developers used to less opinionated TLS stacks.
 
-**Hardcoded Cipher Suites:** Go's `crypto/tls` library does not allow cipher suite configuration for TLS 1.3. When TLS 1.3 is the minimum version, the following cipher suites are automatically used and cannot be overridden:
+**Cipher Suites preference:** Go's `crypto/tls` library does not take the cipher suite order into account, using a [hardcoded priority](https://github.com/golang/go/blob/go1.26.4/src/crypto/tls/cipher_suites.go#L219-L312) instead.
+
+**Hardcoded Cipher Suites:** Go's `crypto/tls` library does not allow configuring TLS1.3 cipher suites, using this [hardcoded list](https://github.com/golang/go/blob/go1.26.4/src/crypto/tls/cipher_suites.go#L203-L217) when TLS 1.3 is negotiated during handshake:
 
 - `TLS_AES_128_GCM_SHA256`
 - `TLS_AES_256_GCM_SHA384`
 - `TLS_CHACHA20_POLY1305_SHA256`
 
-**Validation:** The APIServer TLS configuration will reject attempts to specify custom cipher suites when `minTLSVersion` is set to `VersionTLS13`. This validation prevents the "silent failure" scenario where users believe they have configured specific ciphers but the Go runtime ignores them.
+**Go Evolutions:** While remarkably stable, the Go implementation can evolve, for example to bump the priority of AES_256 or to support the CCM variants. So the particular list and order described here should not be relied upon.
 
-**Rationale:** This behavior is mandated by [Go's crypto/tls implementation](https://github.com/golang/go/issues/29349), which intentionally does not expose TLS 1.3 cipher suite configuration. The TLS 1.3 cipher suites are considered secure and the Go team has decided that allowing configuration could lead to weaker security postures.
+**Other TLS stacks:** While upstream K8S and OS components use Go's TLS stack, 3rd-party component can use a different language and/or stack, for example rustls which allows specifying ciphersuite list and order regardless of protocol version. Our implementation should not push Go's opinions onto other stacks.
+
+Therefore, the following applies to OpenShift:
+
+**Validation:** The APIServer TLS configuration will warn about (but allow) configuring TLS 1.3 cipher suites. It should also warn about suites that upstream Go considers vulnerable, or doesn't currently implement.
+
+**Rationale:** This validation prevents the "silent failure" scenario where users believe they have configured specific ciphers but the Go runtime ignores them.
+
 
 ### Scope and Component Expectations
 
