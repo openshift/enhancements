@@ -100,6 +100,8 @@ Additionally, feature gate definitions will be updated to allow specifying the g
 This will allow openshift/api to maintain a library implementation that, given a set of enabled feature gates, will return the appropriate
 API group-version-resource pairings to be enabled on the kube-apiserver via the `--runtime-config` flag.
 
+Proof-of-Concept PR: https://github.com/openshift/api/pull/2994
+
 #### openshift/cluster-kube-apiserver-operator
 
 Instead of maintaining a [static list of feature-gate name -> group-version pairing](https://github.com/openshift/cluster-kube-apiserver-operator/blob/9c413cd4dc8c3876cc40ee85c207bf9b143f106f/pkg/operator/configobservation/apienablement/observe_runtime_config.go#L18-L32), this operator will be updated to utilize the new openshift/api owned library.
