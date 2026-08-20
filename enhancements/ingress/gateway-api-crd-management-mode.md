@@ -223,9 +223,9 @@ the OpenShift cluster and configuring ingress.
 
    If any action in step 3 fails (e.g., VAP removal fails),
    `GatewayAPICRDsManaged` stays `True` and CIO's `ingress`
-   `ClusterOperator` reports `Progressing=True` or `Degraded=True`
-   as described under [VAP Management](#vap-management), until the
-   transition completes.
+   `ClusterOperator` keeps reporting `Progressing=True` (never
+   `Degraded=True`) as described under [VAP
+   Management](#vap-management), until the transition completes.
 5. The cluster administrator installs their third-party Gateway
    controller and optionally their own CRD version.
 6. Layered products observe the `GatewayAPICRDsManaged=False`
@@ -607,10 +607,10 @@ installing CRDs), the Istio instance and CIO Gateway API
 controllers are not started. These three conditions being not
 `True` does not, by itself, contribute to the operator's `Degraded`
 status condition, and does not block cluster upgrades -- they are
-informational signals about Gateway API CRD readiness. This is
-distinct from a failure during an explicit mode transition (e.g.,
-VAP removal failing), which can independently set `Degraded=True`,
-as described under [VAP Management](#vap-management).
+informational signals about Gateway API CRD readiness. A failure
+during an explicit mode transition (e.g., VAP removal failing) is
+handled the same way: it never sets `Degraded=True`, as described
+under [VAP Management](#vap-management).
 
 #### VAP Management
 
@@ -625,10 +625,15 @@ clears once the transition completes.
 
 If an operation required by a mode transition fails -- for
 example, VAP removal fails when transitioning to `Unmanaged` --
-CIO's `ingress` `ClusterOperator` reports `Degraded=True`, with
-reason `ReconciliationFailed` and a message explaining which
-operation failed (e.g., that the CRDs remain locked by the VAP).
-`Degraded` clears once the operation succeeds.
+CIO's `ingress` `ClusterOperator` does **not** report
+`Degraded=True`. It keeps reporting `Progressing=True`, with a
+message explaining which operation failed (e.g., that the CRDs
+remain locked by the VAP), and CIO retries the operation on
+subsequent reconciles. In parallel, CIO reports the failure via the
+`ingress_controller_gateway_api_mode_transition_failed` Prometheus
+metric (see [Telemetry](#telemetry)), which is the durable signal
+for alerting on a stuck transition. Both `Progressing=True` and the
+metric clear once the operation succeeds.
 
 #### Telemetry
 
@@ -665,6 +670,22 @@ reported, since CIO cannot vouch for a version it does not
 control. This metric is also added to the Telemetry allowlist. CRD
 compliance is not included in telemetry; it remains observable
 in-cluster only, via the `Ingress` resource's `status.conditions`.
+
+CIO also exposes a third metric,
+`ingress_controller_gateway_api_mode_transition_failed`, a
+`GaugeVec` with a `target` label (the management mode the
+transition is trying to reach). It is set to `1` for the failing
+target while a required mode transition operation (VAP delete,
+Sail uninstall, CRD/RBAC ensure) is failing, and removed entirely
+once the operation succeeds -- see [VAP
+Management](#vap-management). This metric, not `Degraded`, is the
+supported signal for detecting a stuck mode transition, and is
+added to the Telemetry allowlist so fleet administrators can detect
+clusters with a stuck transition (Story 3, Operational Monitoring).
+CIO also ships an in-cluster `GatewayAPIModeTransitionFailed`
+`PrometheusRule` alert (`severity: warning`) that fires on this
+metric after 15 minutes, following the same pattern as CIO's
+existing single-condition alerts (e.g. `OrphanedOSSMSubscription`).
 
 #### CRD Validity Definition
 
@@ -820,14 +841,16 @@ for each management mode and mode transitions.
   be added in the future) are started, stopped, or have their
   reconciliation inhibited as appropriate for each mode.
 - `cluster-ingress-operator`: `ingress` `ClusterOperator`
-  `Progressing`/`Degraded` computation logic for in-progress and
-  failed mode transitions (e.g., `ReconciliationFailed` on VAP
-  removal failure), as described under [VAP
+  `Progressing` computation logic for in-progress and failed mode
+  transitions, verifying `Degraded` is never set on a failed
+  transition (e.g., VAP removal failure), as described under [VAP
   Management](#vap-management).
 - `cluster-ingress-operator`: the
-  `ingress_controller_gateway_api_management_mode` and
-  `ingress_controller_gateway_api_info` metrics report the correct
-  values for each mode and CRD/OSSM version.
+  `ingress_controller_gateway_api_management_mode`,
+  `ingress_controller_gateway_api_info`, and
+  `ingress_controller_gateway_api_mode_transition_failed` metrics
+  report the correct values for each mode, CRD/OSSM version, and
+  transition failure/recovery.
 
 ### Integration Tests
 
@@ -1010,15 +1033,19 @@ resource read during CIO reconciliation.
 
 - **SLIs**: `status.conditions` (`GatewayAPICRDsManaged`,
   `GatewayAPICRDsPresent`, `GatewayAPICRDsCompliant`); CIO's
-  `ingress` `ClusterOperator` `Progressing`/`Degraded` conditions
-  during mode transitions (see [VAP Management](#vap-management));
-  the `ingress_controller_gateway_api_management_mode` and
-  `ingress_controller_gateway_api_info` metrics (see
-  [Telemetry](#telemetry)).
+  `ingress` `ClusterOperator` `Progressing` condition during mode
+  transitions, including failed ones (see [VAP
+  Management](#vap-management) -- transition failures never set
+  `Degraded`); the `ingress_controller_gateway_api_management_mode`,
+  `ingress_controller_gateway_api_info`, and
+  `ingress_controller_gateway_api_mode_transition_failed` metrics
+  (see [Telemetry](#telemetry)).
 
 - **Failure modes**:
   - VAP removal failure during mode transition: CRDs remain locked.
-    CIO retries and reports in status.
+    CIO retries, keeps reporting `Progressing=True` (not
+    `Degraded`), and reports the failure via the
+    `ingress_controller_gateway_api_mode_transition_failed` metric.
   - Conflicting CRDs when going from `Unmanaged` to `Managed`: CIO
     does not overwrite non-compliant CRDs (see [Risk: Incompatible
     Mode Transition](#risk-incompatible-mode-transition) and
