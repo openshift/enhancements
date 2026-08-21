@@ -148,8 +148,11 @@ wrong.
    from-hub allow-list are shown in `--help` and accepted; any other inherited
    core CLI flag is rejected with a clear error.
 4. `hcp from-hub edit` decodes the proxy GET response and sends a **PUT** with
-   the full updated `HostedCluster`. `hcp from-hub delete` decodes the proxy
-   GET response correctly.
+   the full updated `HostedCluster`, including the live
+   `metadata.resourceVersion` from the GET. The proxy applies the update with
+   optimistic concurrency on the hosting cluster; HTTP **409 Conflict** is
+   returned to the CLI and surfaced to the user so they re-fetch and retry
+   instead of overwriting newer controller or operator changes.
 5. The from-hub trust model (hub identity + `managedcluster:admin` RBAC +
    impersonation through the HCP proxy) remains the default and only
    supported path for the from-hub subcommand; no code change introduces an
@@ -187,7 +190,7 @@ wrong.
 
 Introduce `hcp from-hub` on top of the existing HCP proxy architecture:
 
-```
+```text
 hcp CLI → hub kube-apiserver → HCP proxy (hcp.ocm.io/v1alpha1) → cluster-proxy → hosting cluster
 ```
 
@@ -317,8 +320,12 @@ impersonates the caller toward the hosting cluster via cluster-proxy.
    object when the proxy wraps the body.
 3. The operator edits the opened YAML and saves.
 4. `from-hub edit` sends a **PUT** with the full updated `HostedCluster` to
-   the proxy (`Content-Type: application/json`), replacing the object on the
-   hosting cluster.
+   the proxy (`Content-Type: application/json`), including the
+   `metadata.resourceVersion` returned by the GET. The proxy updates the
+   hosting cluster with optimistic concurrency. If the hosting apiserver
+   returns **409 Conflict** (the object changed since the GET), the CLI exits
+   with an error telling the operator to re-run `from-hub edit` and merge
+   their changes against the latest object.
 
 #### Delete (target behavior)
 
@@ -364,6 +371,17 @@ component outside `openshift/hypershift`'s API group) with:
        ExtraObjects  []runtime.RawExtension             `json:"extraObjects,omitempty"`
    }
    ```
+
+   The proxy **must** validate every `ExtraObjects` entry before apply:
+
+   - **Allow-list only:** decode only explicit supported
+     `GroupVersionKind`s (initial allow-list: `Role`, `RoleBinding`,
+     `ConfigMap`; extend deliberately when a platform needs a new kind).
+   - **Namespace match:** every namespaced object must use the same namespace
+     as the create request (`HostedCluster` namespace).
+   - **Reject out of scope:** reject cluster-scoped objects and any object in
+     a different namespace before processing. Do not accept arbitrary
+     `RawExtension` payloads based on impersonated RBAC alone.
 
 3. A finalizer-removal endpoint for `from-hub delete aws` cleanup (exact
    route TBD with the `hypershift-addon-operator` maintainers).
@@ -440,7 +458,8 @@ shared core-CLI reuse.
   `{ "hostedCluster": ... }` wrapping.
 - **Requirement B — `edit` uses PUT, not PATCH:** After the user edits the
   YAML, `from-hub edit` must send the full updated `HostedCluster` in a PUT
-  request. Do not use PATCH or partial merge semantics.
+  request, including the live `metadata.resourceVersion` from the GET. Do not
+  use PATCH or partial merge semantics. Surface HTTP 409 conflicts to the user.
 - **Requirement C — single `--namespace` source of truth:** One flag binding
   shared across all from-hub subcommands.
 - **Requirement D — `delete aws` finalizer cleanup via proxy:** Finalizer
@@ -470,7 +489,7 @@ Summary of planned client-side and server-side work:
 | 9 | Core CLI argument allow-list (not full inherited flag set) | Client | Planned — `supportedFlags` / reject unknown inherited flags on initial ship |
 | 10 | Hosting existence/arch checks via proxy or fail closed | Client + Proxy | Planned — proxy endpoint or documented gap |
 | A | `edit`/`delete` share one GET decoder | Client | Planned |
-| B | `edit` sends PUT with full `HostedCluster` body | Client + Proxy | Planned |
+| B | `edit` sends PUT with full `HostedCluster` body and `resourceVersion`; 409 surfaced | Client + Proxy | Planned |
 | C | `--namespace` has single source of truth | Client | Planned |
 | D | `delete aws` finalizer cleanup via proxy | Client + Proxy | Planned — proxy endpoint ([ACM-39226](https://redhat.atlassian.net/browse/ACM-39226)) |
 
@@ -487,7 +506,7 @@ extension of the existing proxy contract.
 | Risk | Impact | Mitigation |
 |------|--------|------------|
 | A hosting-cluster metadata/passthrough endpoint is unavailable or lags behind the CLI | Flags that depend on it (`--version-check`, `--release-stream`) must fail closed or remain rejected until the endpoint ships; a naive implementation could silently check the hub instead | Client always forces `VersionCheck=false`/clears `ReleaseStream` before calling `core.CreateCluster`, regardless of endpoint availability, and treats a failed/unavailable proxy call as a hard error, never a silent skip |
-| New `ExtraObjects` passthrough lets the proxy create arbitrary object kinds on the hosting cluster | Expands the proxy's effective write surface beyond `HostedCluster`/`NodePool`/`Secret` | Proxy decodes and creates `ExtraObjects` using the same impersonated, RBAC-checked identity as everything else — it does not grant privilege beyond what the caller's impersonated hosting-cluster RBAC already allows; scope decoding to a known allow-list of kinds (Role, RoleBinding, ConfigMap) rather than accepting arbitrary GroupVersionKinds |
+| New `ExtraObjects` passthrough lets the proxy create arbitrary object kinds on the hosting cluster | Expands the proxy's effective write surface beyond `HostedCluster`/`NodePool`/`Secret` | Proxy validates `ExtraObjects` with a strict GVK allow-list, namespace equality with the request, and rejection of cluster-scoped or cross-namespace objects before any apply |
 
 ### Drawbacks
 
@@ -511,11 +530,10 @@ decode/apply, which needs to be revisited whenever a platform's
    implementation detail for `hypershift-addon-operator` maintainers to
    decide, but affects the exact client call sites in
    `product-cli/cmd/fromhub/client.go`.
-2. Should `ExtraObjects` decoding on the proxy use a strict allow-list of
-   `GroupVersionKind`s (Role, RoleBinding, ConfigMap) or a broader
-   "anything with an RBAC-checked apply" model? A strict allow-list is
-   simpler to reason about but requires a proxy code change every time a
-   platform starts emitting a new kind.
+2. Which additional `GroupVersionKind`s belong on the initial `ExtraObjects`
+   allow-list beyond `Role`, `RoleBinding`, and `ConfigMap` for Dev Preview
+   `aws`/`kubevirt`? New kinds require an explicit proxy allow-list update —
+   there is no generic "RBAC-checked apply any object" mode.
 3. Does the HCP proxy expose PUT for `HostedCluster` update on the existing
    from-hub edit route, or does it need a new/extended route? Confirm with
    `hypershift-addon-operator` maintainers before implementation.
@@ -547,8 +565,8 @@ decode/apply, which needs to be revisited whenever a platform's
   `HostedCluster` body, to lock in the proxy response contract (Requirement
   A).
 - New test for `edit.runEdit` verifying the update uses **PUT** with the full
-  `HostedCluster` body (`Content-Type: application/json`), not PATCH
-  (Requirement B).
+  `HostedCluster` body and preserved `metadata.resourceVersion`, and that
+  HTTP 409 responses are surfaced to the user (Requirement B).
 - New test verifying `--namespace` has one source of truth across
   create/edit/delete (Requirement C).
 
@@ -606,8 +624,8 @@ the core feature set:
   *(platform-specific; validate for `aws`/`kubevirt` Dev Preview objects in e2e)*
 - [ ] `from-hub edit`/`from-hub delete` share one GET decoder matching the
   proxy response contract
-- [ ] `from-hub edit` sends a PUT with the full updated `HostedCluster`, not
-  a PATCH
+- [ ] `from-hub edit` sends a PUT with the full updated `HostedCluster` and
+  live `metadata.resourceVersion`; HTTP 409 conflicts are surfaced to the user
 - [ ] `--namespace` has a single source of truth shared by all from-hub
   subcommands
 - [ ] `from-hub delete aws` finalizer cleanup affects the hosting-cluster
@@ -665,14 +683,18 @@ version skew after introduction:
   `ExtraObjects`-aware create, or finalizer-removal endpoints against an
   `hypershift-addon-operator` that has not yet added them must fail closed
   with a clear "unsupported by proxy" error (e.g. on a 404), not silently
-  fall back to hub-checking behavior.
+  fall back to hub-checking behavior. If the CLI sends a create request with
+  non-empty `ExtraObjects` and the proxy does not advertise support for that
+  field, the proxy must **reject** the request (e.g. 400/422) — it must not
+  ignore `ExtraObjects` and return success while omitting Roles/ConfigMaps.
 - **Older CLI, newer proxy:** An older `hcp` CLI simply never calls endpoints
   the proxy already exposes; behavior matches whatever that CLI version
   shipped with.
-- **`ExtraObjects` field addition:** Purely additive on the wire
-  (`omitempty`); proxies that do not yet decode the field ignore it — no
-  wire breakage, but Roles/ConfigMaps are not created until both sides support
-  `ExtraObjects`.
+- **`ExtraObjects` capability:** The wire field remains optional (`omitempty`).
+  Support requires both sides: when supported, the proxy validates and applies
+  `ExtraObjects` per the allow-list rules above. When unsupported, the proxy
+  rejects requests that include non-empty `ExtraObjects` rather than silently
+  skipping them.
 
 Users adopt `hcp from-hub` by upgrading `hcp` and `hypershift-addon-operator`
 to versions that implement the client and proxy contract described here.
@@ -701,11 +723,13 @@ existing ones (HTTP latency/availability of `hcp.ocm.io/v1alpha1` routes).
   error identifying the proxy call that failed; it does not fall back to
   checking the hub, and it does not silently skip the check.
 - **Failure mode — `ExtraObjects` decode/apply fails on the proxy for one
-  object:** The proxy should fail the whole create request rather than
-  partially create some hosting-cluster objects and not others, to avoid an
-  `HostedCluster` referencing a ConfigMap/Role that was supposed to exist but
-  doesn't (the exact partial-failure/rollback semantics are an open
-  implementation detail for `hypershift-addon-operator`).
+  object:** The proxy fails the whole create request rather than partially
+  creating some hosting-cluster objects and not others. If any step fails after
+  earlier objects were created in the same request, the proxy performs
+  **compensating cleanup** (delete the `Secrets`/`ExtraObjects` it created for
+  this request) before returning an error to the CLI. Retries must be safe:
+  recreate/idempotent apply semantics avoid leaving orphaned objects or permanent
+  `AlreadyExists` failures on the operator's second attempt.
 - **Failure mode — finalizer-removal endpoint fails:** Surfaced to the CLI
   caller as a real, non-zero-exit error, so a stuck-terminating
   `HostedCluster` is visible to the operator running `from-hub delete`
