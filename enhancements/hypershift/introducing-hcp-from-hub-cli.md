@@ -3,9 +3,23 @@ title: introducing-hcp-from-hub-cli
 authors:
   - "@yiraeChristineKim"
 reviewers:
-  - "@csrwng, HyperShift CLI and core create/destroy path expertise"
-  - "@enxebre, HyperShift expertise"
-  - "@sjenning, HyperShift expertise"
+  - "@csrwng, HyperShift CLI and product-cli core paths (OWNERS core-approvers)"
+  - "@enxebre, HyperShift / product-cli (OWNERS core-approvers)"
+  - "@sjenning, HyperShift / product-cli (OWNERS core-approvers)"
+  - "@muraee, product-cli (OWNERS core-reviewers)"
+  - "@bryan-cox, product-cli (OWNERS core-reviewers)"
+  - "@cblecker, product-cli (OWNERS core-reviewers)"
+  - "@jparrill, product-cli (OWNERS core-reviewers)"
+  - "@devguyio, product-cli (OWNERS core-approvers / core-reviewers)"
+  - "@sdminonne, product-cli (OWNERS core-reviewers)"
+  - "@clebs, product-cli (OWNERS core-reviewers)"
+  - "@Nirshal, product-cli (OWNERS core-reviewers)"
+  - "@ironcladlou, product-cli (OWNERS core-reviewers)"
+  - "@nunnatsa, kubevirt platform (OWNERS kubevirt-reviewers; Dev Preview platform)"
+  - "@orenc1, kubevirt platform (OWNERS kubevirt-reviewers; Dev Preview platform)"
+  - "@awels, kubevirt platform (OWNERS kubevirt-reviewers; Dev Preview platform)"
+  - "@akalenyu, kubevirt platform (OWNERS kubevirt-reviewers; Dev Preview platform)"
+  - "@qinqon, kubevirt platform (OWNERS kubevirt-reviewers; Dev Preview platform)"
   - TBD, hypershift-addon-operator / HCP proxy (ACM/MCE) expertise
 approvers:
   - "@csrwng"
