@@ -13,7 +13,7 @@ approvers:
 api-approvers:
   - "@everettraven"
 creation-date: 2026-05-26
-last-updated: 2026-07-29
+last-updated: 2026-08-21
 status: implementable
 tracking-link:
   - https://redhat.atlassian.net/browse/NE-2732
@@ -655,23 +655,10 @@ metrics `cluster-monitoring-operator` forwards to Red Hat's
 Telemeter service) so that the configured mode is visible in
 fleet-wide telemetry, addressing Story 3 (Operational Monitoring).
 
-CIO also exposes a second metric,
-`ingress_controller_gateway_api_info`, an info-style `GaugeVec`
-(the same pattern used by, e.g., `cluster_version_info`), with
-labels `gateway_api_version` and `ossm_version` and value fixed at
-`1`. This metric is only reported in `Managed` mode: CIO sets the
-labels to the exact CRD and OSSM/Istio versions it installs itself
-(the same fixed values referenced in [CRD Validity
-Definition](#crd-validity-definition)), so label cardinality is
-bounded to the small set of versions CIO ships, never to arbitrary
-third-party CRD versions. In `Unmanaged` mode, or while
-`GatewayAPICRDsCompliant` is not `True`, this metric is not
-reported, since CIO cannot vouch for a version it does not
-control. This metric is also added to the Telemetry allowlist. CRD
-compliance is not included in telemetry; it remains observable
+CRD compliance is not included in telemetry; it remains observable
 in-cluster only, via the `Ingress` resource's `status.conditions`.
 
-CIO also exposes a third metric,
+CIO also exposes a second metric,
 `ingress_controller_gateway_api_mode_transition_failed`, a
 `GaugeVec` with a `target` label (the management mode the
 transition is trying to reach). It is set to `1` for the failing
@@ -846,11 +833,10 @@ for each management mode and mode transitions.
   transition (e.g., VAP removal failure), as described under [VAP
   Management](#vap-management).
 - `cluster-ingress-operator`: the
-  `ingress_controller_gateway_api_management_mode`,
-  `ingress_controller_gateway_api_info`, and
+  `ingress_controller_gateway_api_management_mode` and
   `ingress_controller_gateway_api_mode_transition_failed` metrics
-  report the correct values for each mode, CRD/OSSM version, and
-  transition failure/recovery.
+  report the correct values for each mode and transition
+  failure/recovery.
 
 ### Integration Tests
 
@@ -897,9 +883,7 @@ The following e2e test scenarios are required:
    is preserved, and the Gateway API CRDs are not modified by CIO
    during the upgrade (e.g., by comparing the CRDs'
    `bundle-version` annotation and resourceVersion before and after
-   the upgrade). The viability of running this as an automated
-   upgrade-lane test (versus a manual/periodic check) is still to
-   be discussed.
+   the upgrade). This scenario must be executed manually.
 
 ## Graduation Criteria
 
@@ -947,18 +931,15 @@ ownership with no opt-out. Backporting lets customers set
 version requires SBAR (Situation, Background, Assessment,
 Recommendation) with architect approval. The SBAR must justify
 the backport (customer upgrade path continuity) and demonstrate
-bounded risk, including the feature gate exception described below.
+bounded risk.
 
 Backport scope:
 - Ingress CRD manifest for `operator.openshift.io/v1alpha1`.
 - `gatewayAPI` spec/status structs with both enum values.
 - `status.conditions` inside `ingresses.operator.openshift.io` reporting Gateway API management conditions.
-- Feature gate `GatewayAPIManagementMode`, added directly to the
-  `Default` feature set as part of this backport (not
-  `TechPreviewNoUpgrade` first). This is required so customers who
-  have not opted into `TechPreviewNoUpgrade` can still set
-  `Unmanaged` on 4.18 before a 4.18-to-4.19 upgrade, where Gateway
-  API itself moves into the `Default` feature set.
+- Feature gate `GatewayAPIManagementMode`, added first to
+  `TechPreviewNoUpgrade` and promoted to the `Default` feature set
+  as part of the promotion process.
 - CIO controller changes.
 
 **E2E requirements**: 95%+ pass rate, 7 runs/week on supported
@@ -1036,10 +1017,9 @@ resource read during CIO reconciliation.
   `ingress` `ClusterOperator` `Progressing` condition during mode
   transitions, including failed ones (see [VAP
   Management](#vap-management) -- transition failures never set
-  `Degraded`); the `ingress_controller_gateway_api_management_mode`,
-  `ingress_controller_gateway_api_info`, and
-  `ingress_controller_gateway_api_mode_transition_failed` metrics
-  (see [Telemetry](#telemetry)).
+  `Degraded`); the `ingress_controller_gateway_api_management_mode`
+  and `ingress_controller_gateway_api_mode_transition_failed`
+  metrics (see [Telemetry](#telemetry)).
 
 - **Failure modes**:
   - VAP removal failure during mode transition: CRDs remain locked.
