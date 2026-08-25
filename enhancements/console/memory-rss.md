@@ -14,15 +14,15 @@ tracking-link:
 
 ## Summary
 
-The OpenShift Container Platform (OCP) web console shows a "Memory" column for pods that maps to `container_memory_working_set_bytes`. This Working Set Size (WSS) is useful but it includes active file cache and reclaimable kernel slab, both of which are reclaimable if needed, and this may cause user confusion and concern about potential memory leaks and sizing.
+The OpenShift Container Platform (OCP) web console shows a "Memory" column for pods that maps to `container_memory_working_set_bytes`. This Working Set Size (WSS) is useful but it includes active file cache and reclaimable kernel slab on Linux, both of which are reclaimable if needed, and this may cause user confusion and concern about potential memory leaks and sizing.
 
-This proposal is to rename the "Memory" column to "Memory (WSS)" and add an additional column "Memory (RSS)" that maps to `container_memory_rss` that is the anonymous Resident Set Size (RSS).
+This proposal is to rename the "Memory" column to "Memory (WSS)" and add an additional column "Memory (RSS)" on Linux that maps to `container_memory_rss` that is the anonymous Resident Set Size (RSS). The RSS column is not added for Windows pods.
 
 ![Pod memory example](images/pod-memory.png)
 
 ## Background info
 
-The following is my understanding of the issue and should be reviewed and verified by the relevant experts.
+The following is my understanding of the issue and should be reviewed and verified by the relevant experts. The following applies to Linux and not Windows.
 
 By clicking a pod in the OpenShift Container Platform (OCP) web console, then clicking Metrics and then clicking on the Memory plot, the PromQL defaults to `sum(container_memory_working_set_bytes{pod='...',namespace='...',container='',}) BY (pod, namespace)` which uses `container_memory_working_set_bytes`.
 
@@ -79,7 +79,7 @@ This feature does not aim to address potential users confusion around [the use o
 
 ## Proposal
 
-The proposal is to change the "Memory" column to "Memory (WSS)" and add another column "Memory (RSS)" to show `container_memory_rss`. 
+The proposal is to change the "Memory" column to "Memory (WSS)" and add another column "Memory (RSS)" on Linux to show `container_memory_rss`. The RSS column is not added for Windows pods.
 
 ### API Design Details
 
@@ -100,7 +100,8 @@ N/A
 ## Test Plan
 
 The following tests will be added:
- - Verify the data for the two columns each come from the relevant Prometheus statistics.
+ - On Linux, verify the data for the two columns each come from the relevant Prometheus statistics.
+ - On Windows, verify there is no additional RSS column.
 
 ## Graduation Criteria
 
