@@ -42,11 +42,7 @@ if v, ok := s.MemoryStats.Stats[inactiveFileKeyName]; ok {
 
 Where `Memory.Usage` comes from cgroups [V1 = memory.usage_in_bytes](https://github.com/opencontainers/cgroups/blob/v0.0.6/fs/memory.go#L212) or [V2 = memory.current](https://github.com/opencontainers/cgroups/blob/main/fs2/memory.go#L143).
 
-The available raw memory breakdown may be displayed with the memory.stat pseudo-file inside any container in a pod (this checks both cgroups [V1](https://docs.kernel.org/admin-guide/cgroup-v1/memory.html) and [V2](https://docs.kernel.org/admin-guide/cgroup-v2.html)):
-
-```
-cat /sys/fs/cgroup/*/*/memory.stat /sys/fs/cgroup/memory.stat 2>/dev/null
-```
+The available raw memory breakdown may be displayed with the memory.stat pseudo-file inside any container in a pod (this checks both cgroups [V1](https://docs.kernel.org/admin-guide/cgroup-v1/memory.html) and [V2](https://docs.kernel.org/admin-guide/cgroup-v2.html)).
 
 "rss" (cgroups V1) and "anon" (cgroups V2) include the anonymous memory allocated by programs that we normally think of as mostly driving RSS.
 
