@@ -139,7 +139,7 @@ N/A
 
 N/A
 
-#### Hypershift / Hosted Control Planes
+#### HyperShift / Hosted Control Planes
 
 N/A
 
