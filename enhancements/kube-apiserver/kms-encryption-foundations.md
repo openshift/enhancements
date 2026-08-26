@@ -437,7 +437,7 @@ Each instance coordinates with its operator's key-controller using a hash-based 
 1. The key-controller computes a hash of the current KMS configuration including the contents of the referenced Secrets/ConfigMaps and sets `EncryptionKMSPreflightRequired` (hash in the message).
 2. The preflight controller reads that hash, deploys the preflight pod, and runs the checks.
 3. On success, the preflight controller sets `EncryptionKMSPreflightSucceeded` (same hash in the message), including the observed `kekId` from the **Status** check.
-4. The key-controller waits for the two hashes to match, then creates an encryption key and writes `encryption.apiserver.operator.openshift.io/target-kek-id` on the write-key secret from the `kekId` reported by pre-flight.
+4. The key-controller waits for the two hashes to match, then creates an encryption key and writes `encryption.apiserver.operator.openshift.io/target-remote-key-id` on the write-key secret from the `kekId` reported by pre-flight.
 
 This follows the same pattern as the revision and installer controllers.
 
@@ -449,54 +449,54 @@ Each controller writing its own condition prevents this. If the config changes m
 
 #### KMS Key Rotation
 
-When the remote KMS rotates backing key material (for example, a new Vault Transit key version), the KMS v2 plugin reports a new opaque `key_id` in `Status` (called `kekId` below) and `Encrypt` responses. Cluster admins need etcd data re-encrypted under the new key without minting a new encryption key secret or extra static pod revisions for every external rotation.
+When the remote KMS rotates backing key material (for example, a new Vault TransitKey version), the KMS v2 plugin reports a new opaque `key_id` in `Status` (called `RemoteKeyID` below) and `Encrypt` responses. Cluster admins need etcd data re-encrypted under the new key without minting a new encryption key secret or extra static pod revisions for every external rotation.
 
 Two controllers cooperate on the write-key secret:
 
-- **keyController** handles the target state: reads cluster-converged `kekId` from health input (`ConvergedKEKReporter`), maintains the [KEP-3299](https://github.com/kubernetes/enhancements/blob/master/keps/sig-auth/3299-kms-v2-improvements/README.md) 5-minute convergence clock, and promotes `target-kek-id` when allowed. It is the only writer of `target-kek-id` and the `kek-converged-*` annotations.
-- **migrationController** handles the migration: runs storage migration when `needsMigration` is true and sets `migrated-kek-id` on completion. At bootstrap only, **keyController** sets `migrated-kek-id = target-kek-id` in one update.
+- **keyController** handles the target state: reads cluster-converged `RemoteKeyId` from health input (`ConvergedRemoteKeyReporter`), maintains the [KEP-3299](https://github.com/kubernetes/enhancements/blob/master/keps/sig-auth/3299-kms-v2-improvements/README.md) 5-minute convergence clock, and promotes `target-remote-key-id` when allowed. It is the only writer of `target-remote-key-id` and the `remote-key-converged-*` annotations.
+- **migrationController** handles the migration: runs storage migration when `needsMigration` is true and sets `migrated-remote-key-id` from the `RemoteKeyId` encoded in the completed SVM’s write-key annotation, not from a fresh read of `target-remote-key-id` on the secret. At bootstrap only, **keyController** sets `migrated-remote-key-id = target-remote-key-id` in one update.
 
-Keeping target promotion in **keyController** — the same sync loop that already blocks new key minting while `NeedsKekMigration()` — avoids two controllers racing to update the same secret. Rotation progress is recorded as annotations on the write-key secret.
+Keeping target promotion in **keyController** — the same sync loop that already blocks new key minting while `NeedsRemoteKeyMigration()` — avoids two controllers racing to update the same secret. Rotation progress is recorded as annotations on the write-key secret.
 
 **Responsibilities:**
-- **keyController** writes `encryption.apiserver.operator.openshift.io/target-kek-id` (initial value from [pre-flight](#pre-flight-checker-tech-preview-v2), then post-5m promotion on external KEK rotation), bootstraps **`migrated-kek-id = target-kek-id`** after initial migration completes, and maintains `kek-converged-at` / `kek-converged-id`. Already blocks new key minting while `NeedsKekMigration()` and skips time-based rotation for KMS.
-- **migrationController** executes migration when `needsMigration` and writes `encryption.apiserver.operator.openshift.io/migrated-kek-id` on completion.
+- **keyController** writes `encryption.apiserver.operator.openshift.io/target-remote-key-id` (initial value from [pre-flight](#pre-flight-checker-tech-preview-v2), then post-5m promotion on external KEK rotation), bootstraps **`migrated-remote-key-id = target-remote-key-id`** after initial migration completes, and maintains `remote-key-converged-at` / `remote-key-converged-id`. Already blocks new key minting while `NeedsRemoteKeyMigration()` and skips time-based rotation for KMS.
+- **migrationController** executes migration when `needsMigration` and writes `encryption.apiserver.operator.openshift.io/migrated-remote-key-id` on completion.
 
-**`needsMigration`** — `migrated-kek-id` is set, `target-kek-id` is non-empty, and **≠** `migrated-kek-id`. While `migrated-kek-id` is unset, **migrationController** uses the first-enablement path (`write-key={keyName}`). When both are equal, the cluster is in steady state.
+**`needsMigration`** — `migrated-remote-key-id` is set, `target-remote-key-id` is non-empty, and **≠** `migrated-remote-key-id`. While `migrated-remote-key-id` is unset, **migrationController** uses the first-enablement path (`write-key={keyName}`). When both are equal, the cluster is in steady state.
 
 **Constraints:**
-- **KEP-3299:** ≥ 5 minutes of cluster-wide converged `kekId` before **keyController** may promote `target-kek-id` (not at bootstrap).
-- **Migration gate:** **keyController** promotes `target-kek-id` only when **`migrated-kek-id = target-kek-id`**. While `needsMigration` is true, a converged candidate `kekId` may start or continue the 5m clock, but **`target-kek-id` is not changed** until the in-flight migration completes. This prevents **migrationController** from reading a newer `target-kek-id` than the migration it is executing toward.
-- **Bootstrap:** a single **keyController** update sets **`migrated-kek-id = target-kek-id`** after initial migration completes and health shows a converged `kekId`.
+- **KEP-3299:** ≥ 5 minutes of cluster-wide converged `remote-key-id` before **keyController** may promote `target-remote-key-id` (not at bootstrap).
+- **Migration gate:** **keyController** promotes `target-remote-key-id` only when **`migrated-remote-key-id = target-remote-key-id`**. While `needsMigration` is true, a converged candidate `RemoteKeyId` may start or continue the 5m clock, but **`target-remote-key-id` is not changed** until the in-flight migration completes. This prevents **migrationController** from reading a newer `target-remote-key-id` than the migration it is executing toward.
+- **Bootstrap:** a single **keyController** update sets **`migrated-remote-key-id = target-remote-key-id`** after initial migration completes and health shows a converged `RemoteKeyId`.
 - No operator status API, no prune+clear, no new EncryptionKey secret on KMS KEK rotation.
-- kekId annotations apply only when KMS encryption is active; existing encryption types are not affected by the changes below.
+- RemoteKeyID annotations apply only when KMS encryption is active; existing encryption types are not affected by the changes below.
 
-##### Pre-flight and first `target-kek-id`
+##### Pre-flight and first `target-remote-key-id`
 
-Before **keyController** creates the first encryption key, [pre-flight](#pre-flight-checker-tech-preview-v2) validates the KMS configuration. The preflight binary's **Status** check reads `kekId` from the plugin's KMS v2 `StatusResponse` and returns it to **KMSPreflightController**, which records it in `EncryptionKMSPreflightSucceeded`. **keyController** then writes **`encryption.apiserver.operator.openshift.io/target-kek-id = {kekId}`** on the write-key secret when it creates the encryption key. **`migrated-kek-id` is not set yet** — initial storage migration still runs on the first-enablement path.
+Before **keyController** creates the first encryption key, [pre-flight](#pre-flight-checker-tech-preview-v2) validates the KMS configuration. The preflight binary's **Status** check reads `key_id` from the plugin's KMS v2 `StatusResponse` and returns it to **KMSPreflightController**, which records it in `EncryptionKMSPreflightSucceeded`. **keyController** then writes **`encryption.apiserver.operator.openshift.io/target-remote-key-id = {kekId}`** on the write-key secret when it creates the encryption key. **`migrated-remote-key-id` is not set yet** — initial storage migration still runs on the first-enablement path.
 
 ##### Secret and SVM annotations
 
-All kekId annotations use the prefix **`encryption.apiserver.operator.openshift.io/`** on the write-key Secret in `openshift-config-managed`.
+All `RemoteKeyId` annotations use the prefix **`encryption.apiserver.operator.openshift.io/`** on the write-key Secret in `openshift-config-managed`.
 
 **Write-key Secret**
 
-| Full annotation key | Writer | Value | Meaning |
-|---------------------|--------|-------|---------|
-| `encryption.apiserver.operator.openshift.io/target-kek-id` | keyController | `kekId` | Target kekId to migrate toward; equals `migrated-kek-id` in steady state |
-| `encryption.apiserver.operator.openshift.io/migrated-kek-id` | keyController (bootstrap); migrationController (rotation) | `kekId` | Last fully migrated kekId |
-| `encryption.apiserver.operator.openshift.io/kek-converged-at` | keyController | RFC3339 | When candidate `kekId` first achieved cluster convergence |
-| `encryption.apiserver.operator.openshift.io/kek-converged-id` | keyController | `kekId` | Candidate `kekId` the `kek-converged-at` timestamp belongs to |
+| Full annotation key                                                  | Writer                                                    | Value         | Meaning                                                                                 |
+|----------------------------------------------------------------------|-----------------------------------------------------------|---------------|-----------------------------------------------------------------------------------------|
+| `encryption.apiserver.operator.openshift.io/target-remote-key-id`    | keyController                                             | `RemoteKeyId` | Target `RemoteKeyId` to migrate toward; equals `migrated-remote-key-id` in steady state |
+| `encryption.apiserver.operator.openshift.io/migrated-remote-key-id`  | keyController (bootstrap); migrationController (rotation) | `RemoteKeyId` | Last fully migrated `RemoteKeyId`                                                       |
+| `encryption.apiserver.operator.openshift.io/remote-key-converged-at` | keyController                                             | RFC3339       | When candidate `RemoteKeyId` first achieved cluster convergence                         |
+| `encryption.apiserver.operator.openshift.io/remote-key-converged-id` | keyController                                             | `RemoteKeyId` | Candidate `RemoteKeyId` the `remote-key-converged-at` timestamp belongs to              |
 
 **StorageVersionMigration CR (cluster-scoped)**
 
-| Full annotation key | Writer | Value | Meaning |
-|---------------------|--------|-------|---------|
-| `encryption.apiserver.operator.openshift.io/write-key` | Migrator | `{keyName}` or `{keyName}-{kekId}` | Idempotency key for this migration run |
+| Full annotation key                                    | Writer   | Value                                    | Meaning                                |
+|--------------------------------------------------------|----------|------------------------------------------|----------------------------------------|
+| `encryption.apiserver.operator.openshift.io/write-key` | Migrator | `{keyName}` or `{keyName}-{RemoteKeyId}` | Idempotency key for this migration run |
 
-When `target-kek-id` is set, the migrator sets `write-key = {keyName}-{kekId}` where `{kekId}` is the value of `target-kek-id`. The migrator replaces an SVM when this annotation differs.
+When `target-remote-key-id` is set, the migrator sets `write-key = {keyName}-{RemoteKeyId}` where `{RemoteKeyId}` is the value of `target-remote-key-id`. The migrator replaces an SVM when this annotation differs.
 
-**5m convergence clock:** **keyController** sets `kek-converged-id` + `kek-converged-at` when a new candidate `kekId` converges; clears both on divergence or after promoting `target-kek-id` (subject to the migration gate).
+**5m convergence clock:** **keyController** sets `remote-key-converged-id` + `remote-key-converged-at` when a new candidate `RemoteKeyId` converges; clears both on divergence or after promoting `target-remote-key-id` (subject to the migration gate).
 
 
 ##### End-to-end cases
@@ -509,13 +509,13 @@ When `target-kek-id` is set, the migrator sets `write-key = {keyName}-{kekId}` w
 
 1. **cluster admin** enables KMS encryption in the APIServer spec.
 2. **keyController** triggers pre-flight. **KMSPreflightController** runs the preflight pod; **Status** reads `kekId` and reports success to **keyController**.
-3. **keyController** creates the encryption key secret and writes **`encryption.apiserver.operator.openshift.io/target-kek-id = {kekId}`** on the write-key secret.
+3. **keyController** creates the encryption key secret and writes **`encryption.apiserver.operator.openshift.io/target-remote-key-id = {RemoteKeyId}`** on the write-key secret.
 4. **stateController** + deployer roll out encryption config until revision is stable.
-5. **migrationController** migrates each GR via **migrator** → SVM with `encryption.apiserver.operator.openshift.io/write-key={keyName}` only (`migrated-kek-id` unset).
+5. **migrationController** migrates each GR via **migrator** → SVM with `encryption.apiserver.operator.openshift.io/write-key={keyName}` only (`migrated-remote-key-id` unset).
 6. **Health aggregation** reports per-node `kekId`.
-7. When **initial migration is complete** and health shows a converged `kekId` matching `target-kek-id`, **keyController** sets **`encryption.apiserver.operator.openshift.io/migrated-kek-id = target-kek-id`** (bootstrap). Does **not** start the convergence clock.
+7. When **initial migration is complete** and health shows a converged `kekId` matching `target-remote-key-id`, **keyController** sets **`encryption.apiserver.operator.openshift.io/migrated-remote-key-id = target-remote-key-id`** (bootstrap). Does **not** start the convergence clock.
 
-**End state:** initial migration complete; `target-kek-id = migrated-kek-id = kek-old`.
+**End state:** initial migration complete; `target-remote-key-id = migrated-remote-key-id = kek-old`.
 
 ```mermaid
 sequenceDiagram
@@ -530,28 +530,28 @@ sequenceDiagram
     Admin->>KeyCtrl: enable KMS encryption
     KeyCtrl->>Preflight: pre-flight required
     Preflight->>KeyCtrl: EncryptionKMSPreflightSucceeded (kekId)
-    KeyCtrl->>Secret: target-kek-id from pre-flight
+    KeyCtrl->>Secret: target-remote-key-id from pre-flight
     KeyCtrl->>KeyCtrl: create encryption key
     MigCtrl->>SVM: EnsureMigration per GR
     Health->>KeyCtrl: converged kekId
-    KeyCtrl->>Secret: migrated-kek-id = target-kek-id
+    KeyCtrl->>Secret: migrated-remote-key-id = target-remote-key-id
 ```
 
-###### 2. Rotation when kekId changes (happy path)
+###### 2. Rotation when RemoteKeyId changes (happy path)
 
-**Starting state:** `encryption.apiserver.operator.openshift.io/migrated-kek-id = kek-old`; `encryption.apiserver.operator.openshift.io/target-kek-id = kek-old`; no SVM running.
+**Starting state:** `encryption.apiserver.operator.openshift.io/migrated-remote-key-id = kek-old`; `encryption.apiserver.operator.openshift.io/target-remote-key-id = kek-old`; no SVM running.
 
 **What happens, and who drives it:**
 
 1. **cluster admin / KMS** rotates remote KEK.
 2. **Health aggregation** converges on **`kek-new`** → **keyController** reads it.
-3. **keyController** sees `kek-new ≠ target-kek-id`. Writes **`encryption.apiserver.operator.openshift.io/kek-converged-id = kek-new`** and **`encryption.apiserver.operator.openshift.io/kek-converged-at = now`**. Does not update `target-kek-id` yet.
-4. For **≥ 5m** converged on `kek-new`: if health diverges, clears `kek-converged-id` and `kek-converged-at`; if stable **and** `migrated-kek-id = target-kek-id` (migration gate), sets **`encryption.apiserver.operator.openshift.io/target-kek-id = kek-new`** and clears convergence pair.
+3. **keyController** sees `kek-new ≠ target-remote-key-id`. Writes **`encryption.apiserver.operator.openshift.io/remote-key-converged-id = kek-new`** and **`encryption.apiserver.operator.openshift.io/remote-key-converged-at = now`**. Does not update `target-remote-key-id` yet.
+4. For **≥ 5m** converged on `kek-new`: if health diverges, clears `remote-key-converged-id` and `remote-key-converged-at`; if stable **and** `migrated-remote-key-id = target-remote-key-id` (migration gate), sets **`encryption.apiserver.operator.openshift.io/target-remote-key-id = kek-new`** and clears convergence pair.
 5. **migrationController** sees `needsMigration`. **Migrator** runs with `encryption.apiserver.operator.openshift.io/write-key = {keyName}-kek-new`.
 6. **State machine** and **keyController** hold while `needsMigration`.
-7. **migrationController** completes all GRs → **`encryption.apiserver.operator.openshift.io/migrated-kek-id = kek-new`**.
+7. **migrationController** completes all GRs → **`encryption.apiserver.operator.openshift.io/migrated-remote-key-id = kek-new`**.
 
-**End state:** `target-kek-id` and `migrated-kek-id` both `kek-new`.
+**End state:** `target-remote-key-id` and `migrated-remote-key-id` both `kek-new`.
 
 ```mermaid
 sequenceDiagram
@@ -563,29 +563,29 @@ sequenceDiagram
     participant SVM as Migrator
 
     KMS->>Health: KEK rotates to kek-new
-    KeyCtrl->>Secret: kek-converged-id, kek-converged-at
+    KeyCtrl->>Secret: remote-key-converged-id, remote-key-converged-at
     Note over KeyCtrl: wait ≥ 5m stable
-    KeyCtrl->>Secret: target-kek-id=kek-new
+    KeyCtrl->>Secret: target-remote-key-id=kek-new
     MigCtrl->>SVM: write-key=keyName-kek-new
-    MigCtrl->>Secret: migrated-kek-id=kek-new
+    MigCtrl->>Secret: migrated-remote-key-id=kek-new
 ```
 
 ###### 3. Rotation while migration is ongoing (deferred promotion)
 
-**Starting state:** `encryption.apiserver.operator.openshift.io/migrated-kek-id = kek-old`; **`encryption.apiserver.operator.openshift.io/target-kek-id = kek-A`**; SVM in flight with `write-key = {keyName}-kek-A`.
+**Starting state:** `encryption.apiserver.operator.openshift.io/migrated-remote-key-id = kek-old`; **`encryption.apiserver.operator.openshift.io/target-remote-key-id = kek-A`**; SVM in flight with `write-key = {keyName}-kek-A`.
 
 **What happens, and who drives it:**
 
 1. **cluster admin / KMS** rotates to **`kek-B`** before kek-A migration finishes.
-2. **keyController** sees converged `kek-B ≠ target-kek-id`. Starts or maintains `kek-converged-id` + `kek-converged-at` for kek-B. **Does not** change `target-kek-id` while `needsMigration` (`target = kek-A`, `migrated = kek-old`).
+2. **keyController** sees converged `kek-B ≠ target-remote-key-id`. Starts or maintains `remote-key-converged-id` + `remote-key-converged-at` for kek-B. **Does not** change `target-remote-key-id` while `needsMigration` (`target = kek-A`, `migrated = kek-old`).
 3. After **≥ 5m** on kek-B, promotion is **held** until kek-A migration completes (migration gate).
-4. **migrationController** completes kek-A migration → sets **`encryption.apiserver.operator.openshift.io/migrated-kek-id = kek-A`**. Brief steady state: `target = migrated = kek-A`.
-5. **keyController** promotes **`encryption.apiserver.operator.openshift.io/target-kek-id = kek-B`** on the next sync (no second 5m wait if the clock already expired).
-6. **migrationController** migrates to kek-B → **`encryption.apiserver.operator.openshift.io/migrated-kek-id = kek-B`**.
+4. **migrationController** completes kek-A migration → sets **`encryption.apiserver.operator.openshift.io/migrated-remote-key-id = kek-A`**. Brief steady state: `target = migrated = kek-A`.
+5. **keyController** promotes **`encryption.apiserver.operator.openshift.io/target-remote-key-id = kek-B`** on the next sync (no second 5m wait if the clock already expired).
+6. **migrationController** migrates to kek-B → **`encryption.apiserver.operator.openshift.io/migrated-remote-key-id = kek-B`**.
 
-**End state:** `target-kek-id = migrated-kek-id = kek-B`.
+**End state:** `target-remote-key-id = migrated-remote-key-id = kek-B`.
 
-**Health diverges during 5m wait:** **keyController** clears `kek-converged-at` and `kek-converged-id`; holds `target-kek-id = kek-A`.
+**Health diverges during 5m wait:** **keyController** clears `remote-key-converged-at` and `remote-key-converged-id`; holds `target-remote-key-id = kek-A`.
 
 ```mermaid
 sequenceDiagram
@@ -596,13 +596,13 @@ sequenceDiagram
     participant SVM as Migrator
 
     Note over MigCtrl,SVM: migrating kek-A
-    KeyCtrl->>Secret: kek-converged-id, kek-converged-at for kek-B
+    KeyCtrl->>Secret: remote-key-converged-id, remote-key-converged-at for kek-B
     Note over KeyCtrl: 5m elapsed but needsMigration
     Note over KeyCtrl: hold target=kek-A
-    MigCtrl->>Secret: migrated-kek-id=kek-A
-    KeyCtrl->>Secret: target-kek-id=kek-B
+    MigCtrl->>Secret: migrated-remote-key-id=kek-A
+    KeyCtrl->>Secret: target-remote-key-id=kek-B
     MigCtrl->>SVM: write-key=keyName-kek-B
-    MigCtrl->>Secret: migrated-kek-id=kek-B
+    MigCtrl->>Secret: migrated-remote-key-id=kek-B
 ```
 
 ### KMS Plugin Lifecycle Management (Tech Preview v2)
