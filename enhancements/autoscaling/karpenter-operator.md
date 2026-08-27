@@ -745,9 +745,15 @@ field under `spec.autoNode.featureGates`. Managed Services (and self-managed HCP
 gates without a HyperShift code change, so a gate no longer has
 to roll to every ROSA/ARO and self-managed HCP cluster at once.
 Only features the Autoscale team and Managed Services have officially approved
-that have gone through the QA and documentation processes for promotion 
-are accepted. Unknown or unapproved names are ignored by the operator.
-The operator will read this field and propagate them as arguments to the operand Deployment.
+that have gone through the QA and documentation processes for promotion
+are accepted. Unknown or unapproved names are rejected at
+admission on `HostedCluster`. A request that includes any
+invalid name is denied, so those values never persist. Names
+that pass admission are propagated as arguments on the
+operand Deployment. Adding a newly approved name to the
+allowlist ships in the HostedCluster API with the HO that
+pins the matching operator version. Enabling a name already
+on the allowlist does not require a HyperShift code change.
 
 OpenShift official documentation will list which upstream Karpenter
 feature gates are available, enabled by default, and at what
