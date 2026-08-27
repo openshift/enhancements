@@ -445,19 +445,29 @@ API types will move to the `karpenter-operator/api` sub-module.
 
 ##### Migration period
 
-Existing HyperShift control planes will continue running the embedded code path until
-the Managed Service fleets upgrade to a HyperShift Operator version that enables
-the standalone karpenter-operator path by default. 
+Existing HyperShift control planes keep the embedded code path until
+the Managed Service fleets upgrade to a HyperShift Operator version that
+enables the standalone karpenter-operator path by default.
 
-- Existing HyperShift control planes will automatically switch to the standalone
-  karpenter-operator when the Managed Service fleet upgrades to a release where the migration has GA'd.
-  The hypershift-operator handles this transition by deploying the new karpenter-operator and scaling down the old legacy Deployment.
+- The HO does not run two operator Deployments. The existing
+  `karpenteroperator` controlPlaneComponent Deployment is updated in
+  place: pod template switches from the HyperShift embedded binary to
+  the openshift/karpenter-operator image (with the HyperShift adapter
+  container for guest-cluster controllers).
+- Handoff uses the Deployment's normal rolling update. With
+  `replicas: 1`, Kubernetes brings the new pod up and waits for it to
+  become ready before terminating the old pod. If the new pod never
+  becomes ready, the old pod keeps running.
+- The controlPlaneComponent reports `RolloutComplete` only after its
+  Deployment is ready. The karpenter-operator component also uses
+  `.MonitorOperandsRolloutStatus()` so the control plane does not
+  finish the upgrade until the Karpenter operand is ready.
 
-The old embedded code will be removed from HyperShift when the
-refactor reaches GA. Since HO does not backport and ships from
-main, there is no version-dependent migration window. Once
-the feature gate graduates, the embedded path is dead code and
-will be removed completely. New development will only land in the
+The old embedded binary path is removed from HyperShift when the
+refactor reaches GA. Since HO does not backport and ships from main,
+there is no version-dependent migration window. Once the feature gate
+graduates, the embedded path is dead code and will be removed
+completely. New development will only land in the
 `openshift/karpenter-operator` repository.
 
 ##### Topology detection
