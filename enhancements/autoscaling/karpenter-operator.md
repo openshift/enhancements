@@ -189,10 +189,9 @@ any breaking changes to it.
 
 On standalone, the `Karpenter` CR is a cluster-scoped lifecycle object.
 The operator only reconciles a CR named
-`default`. A `ValidatingAdmissionPolicy`
-rejects any other name so users get an admission error instead
-of a silently ignored object. The cluster administrator
-creates the CR to deploy the operand.
+`default`. The `Karpenter` CRD will carry a CEL validation rule
+on `metadata.name` that rejects any other name at admission.
+The cluster administrator creates the CR to deploy the operand.
 
 #### Provider strategy
 
@@ -270,7 +269,9 @@ managing the OpenShift workload cluster.
      name: default
    ```
 
-5. The operator will reconcile and only look for a Karpenter CR with the name `default`. It will then deploy the operand and related objects.
+5. The operator reconciles the `Karpenter` CR named `default`
+   (the CRD rejects any other name) and deploys the operand
+   and related objects.
 
 6. The cluster administrator will create and configure a `ClusterAPINodeClass` and `NodePool`.
 
@@ -294,7 +295,9 @@ removes the finalizer, and the CR is removed.
 - **`Karpenter`** (`autoscaling.openshift.io/v1alpha1`):
   cluster-scoped lifecycle trigger. Creating it deploys the
   operand; deleting it tears down after draining nodes. The
-  administrator creates it directly.
+  administrator creates it directly. Only the name `default`
+  is valid; the CRD enforces this with a CEL rule on
+  `metadata.name`.
   This CR is not deployed on HCP. See
   [Karpenter CR on HCP](#karpenter-cr-on-hcp).
 
@@ -782,8 +785,11 @@ user customization.
 A VAP prevents customers from deleting/modifying the operator-managed
 default NodeClass.
 
-VAPs apply on HCP only. On standalone, `ClusterAPINodeClass` is
-fully user-managed with no field protection.
+VAPs in this section apply on HCP only (NodeClass field and
+deletion protection). On standalone, `ClusterAPINodeClass`
+is fully user-managed with no VAP field protection. The
+`Karpenter` CR singleton name is enforced by a CEL rule on
+the CRD, not by a VAP.
 
 Note that VAPs which exist on the hosted cluster can be subject to user 
 deletion/modification. This can techincally result in users deleting
