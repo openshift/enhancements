@@ -278,12 +278,14 @@ managing the OpenShift workload cluster.
    matching MachineDeployment. The Cluster API infrastructure
    provider provisions the node through its normal flow.
 
-On standalone, if the `Karpenter` CR is deleted, a
-ValidatingAdmissionPolicy will reject the deletion while any
-`NodeClaim` resources still exist, forcing the user to remove
-all NodePools and wait for Karpenter nodes to drain first. Once all
-NodeClaims are gone, the CR deletion proceeds and the operator
-can tear down the operand.
+On standalone, if the `Karpenter` CR is deleted, the operator
+holds deletion with a finalizer until all `NodeClaim` resources
+are gone. Delete all `NodePool` resources first and wait for
+Karpenter to drain and terminate nodes. While NodeClaims
+remain, the CR keeps a `deletionTimestamp` and the operator
+sets a `Progressing` condition with the remaining count. Once
+NodeClaims are gone, the operator tears down the operand,
+removes the finalizer, and the CR is removed.
 
 ### API Extensions
 
@@ -483,7 +485,7 @@ After the refactor:
   hypershift-operator source and delivered through the
   HCP/managed-services release stream (see
   [Build, Release, and Delivery to HCP](#build-release-and-delivery-to-hcp)).
-  The OCP payload carries the image for standalone only or as a fallback for HCP.
+  The OCP payload carries the image for standalone only.
 - Karpenter configuration on HCP flows through
   [`HostedCluster.spec.autoNode`](https://github.com/openshift/hypershift/blob/main/api/hypershift/v1beta1/hostedcluster_types.go).
   The operator reads that field directly. There is no
@@ -780,18 +782,8 @@ user customization.
 A VAP prevents customers from deleting/modifying the operator-managed
 default NodeClass.
 
-**3. Karpenter CR deletion guard (standalone only)**
-
-A VAP rejects deletion of the `Karpenter` CR while any
-`NodeClaim` resources still exist, forcing the user to drain
-nodes first (described in [Workflow](#workflow-description)).
-
----
-
-Not all VAPs apply to all topologies. On HCP, the Karpenter CR VAPs are not
-used because there is no `Karpenter` CR. On standalone,
-`ClusterAPINodeClass` is fully user-managed with no field
-protection. Only the Karpenter CR deletion guard VAP applies.
+VAPs apply on HCP only. On standalone, `ClusterAPINodeClass` is
+fully user-managed with no field protection.
 
 Note that VAPs which exist on the hosted cluster can be subject to user 
 deletion/modification. This can techincally result in users deleting
@@ -802,10 +794,17 @@ the VAPS and the protected resources upon a deletion/update event.
 To fully prevent this any tampering, we are exploring Kubernetes 1.36
 [manifest-based admission control](https://kubernetes.io/blog/2026/05/04/kubernetes-v1-36-manifest-based-admission-control/)
 to bake policies into the API server configuration on the
-management cluster. This would make VAPs a hard security
+hosted control plane. This would make VAPs a hard security
 boundary on HCP. Customers cannot delete or modify them
 because the policies are enforced by the API server itself,
 outside customer access.
+
+#### Karpenter CR deletion guard (standalone)
+
+The operator adds a finalizer to the `Karpenter` CR. On delete,
+the operator blocks removal while any `NodeClaim` resources
+exist. The operator reconciles the delete, watches NodeClaims, and removes the finalizer only
+after they are gone (see [Workflow](#workflow-description)).
 
 #### Build, Release, and Delivery to HCP
 
@@ -842,23 +841,28 @@ JIRA ticket (5 working days lead time), identifies and tests
 a staged build, and ART promotes it to production.
 
 The karpenter-operator image is pinned as a digest in an
-overrides file in hypershift-operator source. On promotion,
-renovate opens a PR bumping the digest. AutoNode presubmits
-validate the build; the Autoscale team manually approves the
-merge and notifies Managed Services of the new version.
+overrides file in hypershift-operator source. After ART
+promotes an HCP build, the Autoscale team opens a manual PR
+bumping the digest to that exact build. AutoNode presubmits
+validate the bump; the team merges after review and notifies
+Managed Services of the new version.
 
 ##### Image stream overlap risk
 
 Both streams publish to the same Red Hat Registry image
-stream. The most recently published image is not necessarily
-the most recent HCP build. Digest pinning mitigates this: the
-HO always deploys the exact tested build. The risk is that an
-automated PR could propose a "stale" OCP stream digest instead
-of the intended HCP build since the bot would only create a PR
-based on a new "latest" build in that image stream.
-This can potentially be fragile.
+stream. Digest pinning does not prove a digest came from the
+intended HCP build: the most recently published image may be
+from the OCP stream.
 
-This is an evolving workflow and will require feedback over time.
+**Interim mitigation:** do not use Renovate (or any bot that
+selects "latest" from the shared stream) for HCP digest bumps.
+The team opens manual hypershift-operator PRs with the digest
+from the HCP build they cut and tested via ART.
+
+**Follow-up:** separate image streams, or provenance plus CI
+validation that a proposed digest is an approved HCP build
+compatible with the target HO version. Document that in a
+follow-up change to this enhancement.
 
 ##### Impact on Managed Services
 
@@ -875,8 +879,8 @@ Maintaining two release streams means changes to the karpenter-operator image fl
 ##### HCP-only change (e.g. OpenshiftEC2NodeClass API field update)
 
 The fix goes to main branch only. The team cuts an
-HCP stream release via ART, and renovate bumps the digest in
-hypershift-operator.
+HCP stream release via ART, then opens a manual digest-bump PR
+in hypershift-operator.
 
 The change will still appear in the OCP
 payload changelog since both streams build from the same repo,
@@ -1050,8 +1054,15 @@ Secrets as the contract, avoids that skew. See
 
 ## Open Questions [optional]
 
-1. What is the cleanup procedure when the `Karpenter` CR is
-   deleted on a cluster with active Karpenter nodes?
+1. ~~What is the cleanup procedure when the `Karpenter` CR is
+   deleted on a cluster with active Karpenter nodes?~~
+   Resolved: the operator adds a finalizer to the `Karpenter`
+   CR. Deletion is accepted but blocked until all `NodeClaim`
+   resources are gone. The user deletes `NodePool` resources
+   and waits for Karpenter to drain nodes. The operator sets a
+   `Progressing` condition with the remaining NodeClaim count,
+   tears down the operand when the list is empty, then removes
+   the finalizer.
 
 2. What is the node upgrade model for Karpenter-provisioned
    nodes? Covered in topology-specific enhancements (HCP
@@ -1116,7 +1127,7 @@ Pre-merge (karpenter-operator repo): `e2e-aws-hypershift`
 presubmit runs `TestKarpenter` and
 `TestKarpenterUpgradeControlPlane` against the PR's image
 and latest HyperShift operator. Pre-merge (hypershift repo):
-renovate digest-bump PR runs standard HyperShift operator
+manual digest-bump PRs run standard HyperShift operator
 presubmits including Karpenter e2e. Post-merge periodics:
 daily AutoNode jobs run the full Karpenter test suite on
 current OCP and n-1.
@@ -1335,8 +1346,14 @@ webhooks.
 - On HCP, disablement is currently not in scope for this enhancement.
 - On standalone, delete all `NodePool` resources and wait for
   Karpenter to drain and terminate the associated nodes. Then
-  delete the `Karpenter` CR. A ValidatingAdmissionPolicy blocks
-  CR deletion while `NodeClaim` resources still exist.
+  delete the `Karpenter` CR. The operator finalizer blocks
+  removal while `NodeClaim` resources still exist. Check
+  `oc get karpenter default -o yaml` for `deletionTimestamp`
+  and the `Progressing` condition for the remaining count.
+  If deletion is stuck, list NodeClaims and NodePools; remove
+  any remaining NodePools and wait for Karpenter to finish
+  draining. Do not remove the operator finalizer unless you
+  accept orphaned nodes.
 
 **Consequences of disabling:**
 
@@ -1344,7 +1361,7 @@ webhooks.
   terminated. Workloads running on those nodes are
   rescheduled onto other nodes (MachineSet-backed or
   otherwise).
-- The operator and operand Deployments remain but are idle
+- The operator Deployment remains but the operator removes the operand
   until a new `Karpenter` CR is created (standalone).
 **Recovery:**
 
