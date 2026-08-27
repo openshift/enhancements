@@ -29,9 +29,8 @@ see-also:
 
 ## Summary
 
-This enhancement proposes `karpenter-operator`, a Cluster Version
-Operator (CVO)-managed component in the OpenShift release payload
-that deploys and manages [Karpenter](https://karpenter.sh/) across
+This enhancement proposes `karpenter-operator`, a component in the 
+OpenShift release payload that deploys and manages [Karpenter](https://karpenter.sh/) across
 Hosted Control Planes (HCP) and standalone OpenShift. On HCP,
 Karpenter is already shipped as AutoNode, Red Hat's managed node
 autoprovisioning offering. This enhancement covers refactoring
@@ -1200,32 +1199,50 @@ Not applicable.
 
 ### Operator and Operand Upgrade
 
-During a cluster upgrade the CVO updates the operator manifests
-as part of the normal payload rollout, including the `Karpenter`
-CRD on standalone. The operator then applies the operand CRD
-version that matches the incoming operand, and only after those
-CRDs are established does it roll the Karpenter
-Deployment. Downgrade uses the same order: operand CRDs first,
-then the Deployment.
+**HCP:**
 
-On HCP there is no `Karpenter` CRD. The operator applies
-operand CRDs to the hosted cluster before rolling the operand.
+- There is no `Karpenter` CRD on the management cluster.
+- Rollout is gated by the `KarpenterOperator` feature gate in
+  the HO's framework (`TechPreviewNoUpgrade` initially).
+- On a hosted control plane upgrade, the operator applies
+  operand CRDs to the hosted cluster, then rolls the operand
+  Deployment. Downgrade uses the same order.
 
-On HCP, the gate follows the same progression
-in the HO's feature gate framework (`TechPreviewNoUpgrade`
-initially).
-In Dev Preview the standalone `KarpenterOperator` feature gate
-is part of the `DevPreviewNoUpgrade` feature set, which
-prevents upgrades and downgrades. Downgrade is not applicable
-at this stage.
+**Standalone:**
+
+- During a cluster upgrade, the CVO updates operator manifests
+  from the payload: namespace, `Karpenter` CRD, RBAC, operator
+  Deployment, and `ClusterOperator` CR.
+- The operator applies operand CRDs matching the incoming
+  operand, then rolls the Karpenter Deployment. Downgrade uses
+  the same order.
+- In Dev Preview, the `KarpenterOperator` feature gate is part
+  of `DevPreviewNoUpgrade`, which prevents cluster upgrades
+  and downgrades. Downgrade is not applicable at that stage.
 
 ## Version Skew Strategy
 
-The operator and operand are part of the same payload and
-upgraded together by the CVO. Karpenter nodes may run a
-previous kubelet during upgrades, covered by standard
-Kubernetes version skew guarantees (control plane N,
-kubelet N-2).
+**HCP:**
+
+The karpenter-operator image is decoupled from the hosted
+cluster's OCP version. The same operator build is developed
+and tested across supported control plane versions (for
+example, one image serving both 4.22 and 5.3 hosted clusters).
+
+The operand and operator-applied CRDs are not decoupled. They
+must match the hosted cluster's OCP release. The operator
+ships versioned CRD bundles per release in its codebase,
+and deploys the operand from the OCP payload. When the control plane
+version changes, the operator, detects the new version,
+and re-applies CRDs to the hosted cluster while rolling out the new operand.
+
+**Standalone:**
+
+The operator and operand ship in the same OCP payload and are
+upgraded together by the CVO. Karpenter-provisioned nodes may
+run a previous kubelet during upgrades, covered by standard
+Kubernetes version skew guarantees (control plane N, kubelet
+N-2).
 
 ## Operational Aspects of API Extensions
 
