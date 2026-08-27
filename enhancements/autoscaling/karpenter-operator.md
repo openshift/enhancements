@@ -125,8 +125,7 @@ across HCP and standalone topologies.
 - Establish `karpenter-operator` as an OpenShift payload
   component that works across HCP (HO-managed) and
   standalone (CVO-managed) topologies, gated by a
-  `KarpenterOperator` feature gate in each topology's
-  respective feature gate registry.
+  feature gate in each topology's respective feature gate registry.
 
 - Refactor the [existing karpenter-operator logic][hcp-karpenter-operator] out of the
   HyperShift repository into
@@ -180,9 +179,7 @@ into the `openshift-karpenter` namespace.
 #### Karpenter CR lifecycle
 
 On HCP, there is no `Karpenter` CR. The operator will always deploy the Karpenter operand.
-`HostedCluster.spec.autoNode` carries an allowlisted feature-gate
-field (see [Upstream Karpenter feature gates](#upstream-karpenter-feature-gates))
-and a `logLevel` field (`Info` | `Debug` | `Error`).
+`HostedCluster.spec.autoNode` will contain a `logLevel` field (`Info` | `Debug` | `Error`).
 In the future, additional subfields on `autoNode` may be used to
 scale down the operand or configure other Karpenter settings.
 
@@ -259,11 +256,9 @@ managing the OpenShift workload cluster.
    the cluster (initially part of the `DevPreviewNoUpgrade`
    feature set).
 
-2. The CVO will apply the operator manifests from the payload:
-   namespace, the `Karpenter` CRD (`karpenters.autoscaling.openshift.io`),
-   RBAC, operator Deployment, and `ClusterOperator` CR.
-   The CVO does not apply `NodePool`, `NodeClaim`, or provider
-   NodeClass CRDs.
+2. The CVO will apply operator manifests from the payload.
+   This includes the operator Deployment, RBAC, `ClusterOperator` CR, and `Karpenter` CRD.
+   The operator itself deploys the operand Deployment, operand RBAC, and upstream CRDs.
 
 3. The operator will start and wait for a `Karpenter` CR.
 
@@ -324,8 +319,6 @@ can tear down the operand.
 
 **`HostedCluster.spec.autoNode` (HCP):**
 
-- `featureGates`: allowlisted upstream Karpenter feature gates.
-  See [Upstream Karpenter feature gates](#upstream-karpenter-feature-gates).
 - `logLevel`: `Info` | `Debug` | `Error`.
   The operator maps it to the cloud-native operand's `--log-level` flag.
 
@@ -448,36 +441,26 @@ API types will move to the `karpenter-operator/api` sub-module.
 
 ##### Migration period
 
-The refactoring cannot happen atomically. Existing HCP
-clusters will continue running the embedded code path until
-they upgrade to a version with `KarpenterOperator`
-enabled by default. During this transition period, both code paths must
-be maintained, but features and bug fixes will no longer be merged into the
-old karpenter-operator code path in HyperShift unless absolutely necessary.
+Existing HyperShift control planes will continue running the embedded code path until
+the Managed Service fleets upgrade to a HyperShift Operator version that enables
+the standalone karpenter-operator path by default. 
 
-- The embedded Karpenter logic in HyperShift remains the
-  production path for clusters that have not yet upgraded.
-  Critical fixes will be cherry-picked into the embedded
-  code in hypershift/karpenter-operator when necessary to support those clusters.
-- New clusters created after the feature gate is enabled will
-  use the standalone karpenter-operator image from the start.
-- Existing clusters will switch to karpenter-operator when
-  they upgrade to a release where the gate is enabled. The
-  HO handles this transition by deploying karpenter-operator
-  and scaling down the embedded controllers.
+- Existing HyperShift control planes will automatically switch to the standalone
+  karpenter-operator when the Managed Service fleet upgrades to a release where the migration has GA'd.
+  The hypershift-operator handles this transition by deploying the new karpenter-operator and scaling down the old legacy Deployment.
 
 The old embedded code will be removed from HyperShift when the
 refactor reaches GA. Since HO does not backport and ships from
 main, there is no version-dependent migration window. Once
 the feature gate graduates, the embedded path is dead code and
-will be removed completely. New development will land in the
-karpenter-operator repository.
+will be removed completely. New development will only land in the
+`openshift/karpenter-operator` repository.
 
 ##### Topology detection
 
 The same binary will run on both topologies. Provider and
-topology are injected at deploy time via environment
-variables on the operator Deployment.
+topology are injected at deploy time via environment variables on the
+operator Deployment which controls which controllers/functions are enabled.
 
 - **HCP-only:** `HostedCluster.spec.autoNode` watch,
   `OpenshiftEC2NodeClass` reconciliation, HCP lifecycle
@@ -492,11 +475,10 @@ variables on the operator Deployment.
 After the refactor:
 
 - `v2/karpenter/` (operand controlPlaneComponent) will be
-  removed. karpenter-operator will manage the operand Deployment
-  in both topologies.
+  removed. karpenter-operator will manage the operand Deployment.
 - `v2/karpenteroperator/` (the HO's controlPlaneComponent for
-  karpenter-operator) will deploy the `karpenter-operator`
-  image instead of the HyperShift image.
+  karpenter-operator) will continue to be the source of truth
+  for the `karpenter-operator` Deployment.
 - On HCP, the karpenter-operator image will not be sourced from the
   hosted cluster's OCP payload. It will be pinned as a digest in
   hypershift-operator source and delivered through the
@@ -507,8 +489,6 @@ After the refactor:
   [`HostedCluster.spec.autoNode`](https://github.com/openshift/hypershift/blob/main/api/hypershift/v1beta1/hostedcluster_types.go).
   The operator reads that field directly. There is no
   intermediate `Karpenter` CR on the management cluster.
-  Feature gates for the operand are set here as an allowlisted
-  field (see [Upstream Karpenter feature gates](#upstream-karpenter-feature-gates)).
   Operand log verbosity is `spec.autoNode.logLevel`
   (`Info` | `Debug` | `Error`).
 - On HCP, the operator will mount a hosted-cluster kubeconfig and
@@ -697,67 +677,6 @@ credential management. On standalone with CAPI, the operand
 does not call cloud APIs directly (CAPI infrastructure
 providers handle that), so no cloud credentials are needed
 for the Karpenter operator or operand.
-
-#### Upstream Karpenter feature gates
-
-Upstream Karpenter has its own set of
-[feature gates](https://karpenter.sh/docs/reference/settings/#feature-gates)
-independent of OpenShift feature gates. The operator controls
-which upstream gates are enabled on the operand Deployment.
-All providers share the same Karpenter core feature gate set
-since they all import the same core library.
-
-OpenShift follows the upstream Karpenter feature gate lifecycle
-but applies its own graduation criteria:
-
-- **Upstream GA and default-on features** are considered GA in
-  OpenShift from the start.
-- **Upstream beta features** can be considered for GA in
-  OpenShift. The upstream project tends to keep features in
-  beta for a long time, and beta features are relatively
-  stable (e.g. ReservedCapacity is default-on but still beta
-  upstream). The Autoscale team will go through QA and documentation
-  processes for beta features before GA-ing them in OpenShift.
-- **Upstream alpha features** can be considered for TechPreview
-  in OpenShift but cannot be GA until the upstream project
-  graduates them to at least beta. Alpha APIs can change
-  upstream at any time, making them unsuitable for a GA
-  supported product.
-
-At GA of karpenter-operator for OCP, the following upstream
-features will be considered GA (on by default and does not require
-an openshift/api feature gate):
-
-- **Drift**
-- **ReservedCapacity**
-
-All other upstream feature gates will be registered in
-`openshift/api`, started at DevPreview/TechPreview, and off by default.
-They will graduate through the standard OpenShift feature gate
-lifecycle as validation is completed.
-
-On standalone, users enable Karpenter feature gates through the
-cluster-scoped `FeatureGate` CR. The operator reads the enabled gates and
-translates them to operand arguments.
-
-On HCP, `HostedCluster.spec.autoNode` will carry an allowlisted feature-gate
-field under `spec.autoNode.featureGates`. Managed Services (and self-managed HCP admins) can enable
-gates without a HyperShift code change, so a gate no longer has
-to roll to every ROSA/ARO and self-managed HCP cluster at once.
-Only features the Autoscale team and Managed Services have officially approved
-that have gone through the QA and documentation processes for promotion
-are accepted. Unknown or unapproved names are rejected at
-admission on `HostedCluster`. A request that includes any
-invalid name is denied, so those values never persist. Names
-that pass admission are propagated as arguments on the
-operand Deployment. Adding a newly approved name to the
-allowlist ships in the HostedCluster API with the HO that
-pins the matching operator version. Enabling a name already
-on the allowlist does not require a HyperShift code change.
-
-OpenShift official documentation will list which upstream Karpenter
-feature gates are available, enabled by default, and at what
-OpenShift graduation level.
 
 #### RBAC and write contract
 
@@ -1355,14 +1274,7 @@ webhooks.
   version is packaged with each managed services version. OCP
   documentation will do the same for each OCP release. Some upstream Karpenter features may not exist in
   the version shipped with a given release.
-- Upstream Karpenter feature gates available and enabled by
-  default will also be documented per release (see
-  [Upstream Karpenter feature gates](#upstream-karpenter-feature-gates)).
-  Admins can check which gates are active by inspecting the
-  args on the Karpenter operand Deployment. On standalone the
-  cluster-scoped `FeatureGate` CR is the source of truth. On
-  HCP the allowlisted field on `HostedCluster.spec.autoNode`
-  is the source of truth.
+- Upstream Karpenter feature gate compatibility and enablement will be discussed in a follow-up enhancement.
 
 **Detecting failure:**
 
