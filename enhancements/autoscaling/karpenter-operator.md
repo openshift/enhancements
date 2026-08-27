@@ -694,6 +694,11 @@ for the Karpenter operator or operand.
 | Machine approver (HCP) | CSR | Read / approve / deny |
 | Machine approver (HCP) | Cloud API (e.g. `ec2:DescribeInstances`) | Read |
 
+On HCP, the operand and the machine approver use separate
+cloud credentials. The operand keeps the broader provisioning
+permissions; the approver uses a narrower identity for
+instance lookup only.
+
 On HCP, the operator and operand use a hosted-cluster kubeconfig
 for hosted-cluster resources. RBAC for HCP KO is reused from
 existing manifests in `v2/assets/karpenter-operator/`. The hosted-cluster kubeconfig follows
@@ -956,9 +961,9 @@ no `NodeClaim` are ignored.
 
 On HCP, the operand requires broad cloud permissions (e.g.
 EC2 and IAM on AWS). Credentials are provisioned by HyperShift
-at cluster install time using STS web identity. Both the
-operand and the operator's machine approver share the same
-credentials.
+at cluster install time using STS web identity. The machine
+approver uses a separate credential with instance-lookup
+permissions only.
 
 On standalone with CAPI, the operand does not call cloud APIs
 directly because CAPI infrastructure providers handle that.
@@ -1186,7 +1191,7 @@ graduation criteria will be defined in a follow-up enhancement.
 - ClusterOperator conditions reliable.
 - Operand deployment and CRD management functional.
 - Sufficient e2e coverage of operator lifecycle.
-- End user documentation published.
+- End-user documentation published.
 - Feedback gathered from users and field teams.
 
 Standalone CAPI provider graduation is defined in the CAPI
