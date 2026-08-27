@@ -458,6 +458,12 @@ enables the standalone karpenter-operator path by default.
   `replicas: 1`, Kubernetes brings the new pod up and waits for it to
   become ready before terminating the old pod. If the new pod never
   becomes ready, the old pod keeps running.
+- Both the embedded and standalone karpenter-operator binaries use
+  leader election on a shared Lease in the hosted control plane
+  namespace (same `LeaderElectionID`). During the rolling update,
+  at most one pod holds the lease and runs overlapping reconcilers.
+  The non-leader waits; when the old pod terminates it releases the
+  lease and the new pod takes over.
 - The controlPlaneComponent reports `RolloutComplete` only after its
   Deployment is ready. The karpenter-operator component also uses
   `.MonitorOperandsRolloutStatus()` so the control plane does not
