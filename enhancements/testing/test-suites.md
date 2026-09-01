@@ -557,6 +557,19 @@ the new metadata vocabulary.
   suites or jobs.
 - **Monitoring**: Monitortests collect data but avoid generating
   failure JUnits to prevent alerts on known specialized configs.
+- **Approval**: Because spot-check suites bring dedicated jobs and
+  specialized cluster configs, adding one is not unchecked. The suite
+  and its job configuration land through the normal config pull-request
+  review, giving reviewers a predictable, agreed environment for the
+  test rather than an ad-hoc one.
+- **Longevity**: Spot-check suites are not expected to retire. Rather
+  than being removed after a feature matures, a suite settles into its
+  minimum run interval (see the maintenance-phase cadence above) and
+  continues to run indefinitely, with its health tracked through
+  Component Readiness (see
+  [Risks and Mitigations](#risks-and-mitigations)). This keeps the
+  total number of active configurations bounded through low-frequency
+  steady-state execution rather than through eventual deletion.
 
 #### Shard Balancing
 
@@ -569,7 +582,13 @@ the new metadata vocabulary.
   2. Move tests between shards by changing each test's single `Shard`
      tag value (one change to preserve exclusive shard membership).
   3. Create new shards when existing ones cannot be rebalanced below
-     runtime thresholds.
+     runtime thresholds, up to a configurable per-suite maximum shard
+     count. This ceiling bounds the number of shards (and therefore the
+     number of prow jobs) a suite can spawn so that an unexpected influx
+     of tests, or a bug in the balancing logic, cannot trigger unbounded
+     shard creation. When the maximum is reached and shards still exceed
+     the runtime threshold, the agent stops creating shards and instead
+     flags the suite for human attention rather than silently degrading.
 
 #### The Lifecycle Agent
 
@@ -860,6 +879,20 @@ Remaining open questions:
    defined and likely requires manual, per-component evaluation to start.
    Defining a repeatable rule is an open question (see
    [Minimal-Suite Membership](#minimal-suite-membership)).
+
+   As a starting point for that discussion, the following candidate
+   conditions could be used (individually or combined) to qualify a
+   downstream test for `Criticality: Core`; they are illustrative, not
+   yet agreed, and need a broader audience to refine:
+
+   - Short runtime (e.g. test duration under a couple of minutes), so
+     the `minimal` suite stays fast.
+   - High blast radius: covers a GA feature whose breakage would render
+     a large fraction of clusters unusable if the test were removed.
+   - No external dependencies beyond the core Kubernetes API.
+   - A demonstrated track record of stability (e.g. sustained `>= 99%`
+     pass rate across multiple releases).
+   - Explicit sign-off from an architect or equivalent reviewer.
 2. Confirm the pass-rate parameters with TRT: the measurement window
    (proposed 14 days), the minimum sample count (proposed 20), and the
    exact retry/flake attribution the agent should adopt from Sippy /
