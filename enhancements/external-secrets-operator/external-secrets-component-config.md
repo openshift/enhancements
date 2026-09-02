@@ -632,8 +632,11 @@ This is the primary topology for this enhancement. The feature is fully applicab
     16. Test that invalid `advancedOverrides` sets **Degraded** (`UserConfigurationError`).
     17. Test that first-class fields (`image`, `replicas`, `--enable-leader-election` when core `replicas > 1`) are not overridden by `advancedOverrides`.
     18. Test that `advancedOverrides` targeting a path not on the allowlist is rejected with **Degraded** (`UserConfigurationError`).
-    19. Test that `--enable-leader-election` is set on the core controller only when `replicas > 1`, and is absent when `replicas` is `1`.
-    20. Test that the temporary env-var args hatch (v1.1–v1.3) and `advancedOverrides` args patches produce the same operand args when both are used on overlapping versions, and that `advancedOverrides` wins after the env-var hatch is removed.
+    19. Test that unexpected user combinations in `advancedOverrides` (e.g., attempting to set unsupported container arguments, modifying protected fields like `volumes` or `image`, appending unexpected sidecars/initContainers, or mutating nested arrays like `env` or `ports`) are explicitly detected and rejected.
+    20. Test that `advancedOverrides` patches containing null or empty values for protected fields are rejected and do not clear those fields from the resulting Deployment.
+    21. Test that `advancedOverrides` targeting an incorrect or non-existent container name in the `containers` array is safely ignored or rejected without affecting the core component container.
+    22. Test that `--enable-leader-election` is set on the core controller only when `replicas > 1`, and is absent when `replicas` is `1`.
+    23. Test that the temporary env-var args hatch (v1.1–v1.3) and `advancedOverrides` args patches produce the same operand args when both are used on overlapping versions, and that `advancedOverrides` wins after the env-var hatch is removed.
 
 * **Integration Tests:**
     1. Deploy the operator and create an `ExternalSecretsConfig` with component configuration.
@@ -649,7 +652,13 @@ This is the primary topology for this enhancement. The feature is fully applicab
     11. With proxy configured and `trustedCABundle` referencing a ConfigMap labeled `config.openshift.io/inject-trusted-cabundle: "true"`, assert the operator does not add the trustedCABundle volume mount (since the bundle is already handled for the proxy path), does not set Degraded.
     12. Set `deploymentConfigs.replicas` on multiple components; assert replica counts survive multiple reconcile loops (no revert to hardcoded defaults).
     13. Apply `advancedOverrides` for allowlisted paths (affinity/topology and `--concurrent` / `--client-burst` / `--client-qps` args); assert merged into live Deployment; assert **Degraded** (`UserConfigurationError`) for malformed RawExtension; assert **Degraded** and no Deployment change when the patch targets a path not on the allowlist.
-    14. On a version that still supports the env-var args hatch, set both the env-var hatch and `advancedOverrides` args; assert the resulting container args and that the hatch can be used as a fallback after downgrade (see Upgrade / Downgrade).
+    14. Assert that `advancedOverrides` containing unexpected user combinations (such as unsupported overrides buried in nested objects, extra container arguments, duplicated fields, or mutations to fields outside the explicit allowlist) fails cleanly with a **Degraded** status and leaves the existing Deployment intact.
+    15. Assert that rapid, consecutive updates to `advancedOverrides` patches trigger appropriate reconciliations and do not leave the operator stuck in a crash loop or the operand in an unrecoverable state if an invalid patch is pushed midway.
+    16. Assert that `advancedOverrides` applied to the `Webhook` or `CertController` components properly affect only their respective Deployments without cross-contamination.
+    17. Deploy an `ExternalSecretsConfig` providing a comprehensive `advancedOverrides` object containing valid configurations for `affinity`, `tolerations`, `nodeSelector`, `topologySpreadConstraints`, `args`, and `resources` simultaneously; assert all merge successfully into the live component Deployment.
+    18. Apply an `advancedOverrides` patch containing explicit disallowed top-level deployment fields (`spec.replicas`, `spec.selector`, `volumes`, `restartPolicy`, `initContainers`, etc.) and verify that the operator correctly rejects the entire patch, transitions to **Degraded** (`UserConfigurationError`), and does not apply a partial update.
+    19. Apply an `advancedOverrides` patch containing explicit disallowed container-level fields (`env`, `ports`, `volumeMounts`, `image`, `command`, etc.) and verify the patch is completely rejected, resulting in a **Degraded** state without modifying the running container specification.
+    20. On a version that still supports the env-var args hatch, set both the env-var hatch and `advancedOverrides` args; assert the resulting container args and that the hatch can be used as a fallback after downgrade (see Upgrade / Downgrade).
 
 * **End-to-End (E2E) Tests:**
     1. Test each component type (Controller, Webhook, CertController, BitwardenSDKServer) individually.
@@ -659,6 +668,7 @@ This is the primary topology for this enhancement. The feature is fully applicab
     5. Configure ESO to connect to an internal test secret store (self-signed cert, e.g., vault); verify secrets sync successfully after setting trustedCABundle. Verify no regression for stores using public CAs (e.g., AWS Secrets Manager).
     6. Verify proxy-based CA injection still works when both proxy and trustedCABundle are configured.
     7. Scale core controller `deploymentConfigs.replicas` to `>1`; verify leader election (single active reconciler / lease) and failover when the leader pod is deleted; verify secret sync continues. Scale webhook `replicas` independently and verify the webhook Service still serves.
+    8. Deploy an `ExternalSecretsConfig` with a comprehensive `advancedOverrides` configuration (including `affinity`, `topologySpreadConstraints`, and elevated container `args` like `--concurrent`); verify that the operator successfully patches the target deployments, pods schedule according to the defined constraints on the cluster, and the external-secrets functionality remains fully operational under the custom scheduling rules.
 ## Graduation Criteria
 
 This feature will be delivered as GA directly, as it uses stable Kubernetes APIs and provides essential operational flexibility.
