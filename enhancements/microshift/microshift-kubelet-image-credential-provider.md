@@ -391,8 +391,7 @@ no new plumbing is required:
 
 The typed fields hold the canonical paths produced by validation, so kubelet
 receives symlink-resolved paths; the log line records those canonical paths. The
-values the user configured remain available from `microshift show-config`. The
-log line records that MicroShift applied the configuration to kubelet. It is emitted
+values the user configured remain available from `microshift show-config`. It is emitted
 before kubelet registers providers, so it does not by itself indicate that the
 providers are usable; a missing or non-executable provider binary is reported by
 kubelet as a startup error after this line. Because MicroShift calls
