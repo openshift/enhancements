@@ -31,7 +31,7 @@ superseded-by: []
 
 The External Secrets Operator for Red Hat OpenShift provides limited configuration options via its `ExternalSecretsConfig` API, constraining user customization. This enhancement proposes extending the `ExternalSecretsConfig` API to allow comprehensive customization of the external-secrets deployment. The extended configuration options—including annotations, environment variables, and deployment/pod specifications will be available for all core components (Controller, Webhook, CertController, BitwardenSDKServer). This change provides administrators with greater control over the resource management and operational parameters of each component.
 
-This enhancement further adds a first-class **`replicas`** field on per-component `deploymentConfigs` so GitOps-managed clusters can tune high availability without unsupported workarounds. It also introduces an `advancedOverrides` escape hatch on per-component configuration. This field applies a strategic merge patch to the component `Deployment`, covering scheduling knobs not yet available as first-class fields — for example pod anti-affinity, topology spread constraints, and core controller concurrency via `--concurrent`. Invalid patches cause the operator to set a `Degraded` condition. API godoc and product documentation warn administrators that `advancedOverrides` can overwrite first-class CRD settings and must not be used to add or modify containers, initContainers, or ports.
+This enhancement further adds a first-class **`replicas`** field on per-component `deploymentConfigs` so GitOps-managed clusters can tune high availability without unsupported workarounds. It also introduces an **`advancedOverrides`** escape hatch on per-component configuration. This field applies a strategic merge patch to the component `Deployment`, covering knobs not yet available as first-class fields — for example pod anti-affinity, topology spread constraints, and core controller concurrency via `--concurrent`. Invalid patches cause the operator to set a **Degraded** condition. Strong usage warnings are documented in API godoc and product documentation.
 
 This enhancement proposal also adds support for injecting a custom PKI CA bundle into the `external-secrets` operand **core controller** pod via a `ConfigMap` reference in the `ExternalSecretsConfig` custom resource, enabling the controller to verify **TLS** (HTTPS) connections to external secret management systems (such as IBM/Thycotic Secret Server or HashiCorp Vault) without depending on cluster-wide proxy configuration. The operator mounts the referenced `ConfigMap` under `/etc/pki/tls/user-certs` and sets `SSL_CERT_DIR` so Go trusts both that directory and the default system location without replacing `/etc/pki/tls/certs`. Administrators may populate the `ConfigMap` manually or with projects such as `cert-manager`.
 
@@ -139,7 +139,8 @@ Any other path — including `spec.replicas` (use the first-class `deploymentCon
   2. Apply operator-managed settings (image, args, trusted CA mounts, labels, annotations, `revisionHistoryLimit`, `overrideEnv`, `replicas`).
   3. Check `advancedOverrides` against the allowlist above; if any path is not allowed, set **Degraded** (`UserConfigurationError`) and skip the patch.
   4. Strategic-merge-patch `Deployment` with the allowed overrides.
-- **Error handling:** if the patch is not valid YAML, the merge fails, or the API server rejects the result, the operator sets **Degraded** (`UserConfigurationError`, e.g. `AdvancedOverridesInvalid` / `AdvancedOverridesApplyFailed`) and does not leave the operand in an inconsistent state.
+  5. Re-assert `--enable-leader-election=true` on the core controller when `replicas > 1`. This step is necessary because `containers[*].args` is an allowlisted path and strategic merge replaces the args list wholesale — a user patch such as `args: ["--concurrent=20"]` would otherwise silently remove the leader-election flag that the operator injected in step 2 (Apply operator-managed settings).
+- **Error handling:** if the patch is not valid YAML or json, the merge fails, or the API server rejects the result, the operator sets **Degraded** (`UserConfigurationError`, e.g. `AdvancedOverridesInvalid` / `AdvancedOverridesApplyFailed`) and does not leave the operand in an inconsistent state.
 
 ### Workflow Description
 
@@ -177,7 +178,7 @@ sequenceDiagram
             Op-->>CR: Set Degraded condition
         else allowed patch
             Op->>Deps: Strategic merge patch on<br/>allowed Deployment paths
-            Op->>Deps: Re-assert protected fields<br/>and owned nested lists
+            Op->>Deps: Re-assert --enable-leader-election<br/>on core controller when replicas > 1
         end
     end
 
@@ -628,7 +629,7 @@ This is the primary topology for this enhancement. The feature is fully applicab
     12. Test optional field behavior for missing ConfigMap and missing key.
     13. When referenced `ConfigMap` has `config.openshift.io/inject-trusted-cabundle: "true"`, assert reconcile **skips** user-bundle mount and does **not** set **Degraded** solely for that reason.
     14. Test that `replicas` sets `Deployment.spec.replicas` on the core controller; unset defaults to `1`.
-    15.Test that valid `advancedOverrides` are merged into the `Deployment` for allowlisted paths (including `--concurrent` / `--client-burst` / `--client-qps` args).s.
+    15.Test that valid `advancedOverrides` are merged into the `Deployment` for allowlisted paths (including `--concurrent` / `--client-burst` / `--client-qps` args).
     16. Test that invalid `advancedOverrides` sets **Degraded** (`UserConfigurationError`).
     17. Test that first-class fields (`image`, `replicas`, `--enable-leader-election` when core `replicas > 1`) are not overridden by `advancedOverrides`.
     18. Test that `advancedOverrides` targeting a path not on the allowlist is rejected with **Degraded** (`UserConfigurationError`).
@@ -669,6 +670,7 @@ This is the primary topology for this enhancement. The feature is fully applicab
     6. Verify proxy-based CA injection still works when both proxy and trustedCABundle are configured.
     7. Scale core controller `deploymentConfigs.replicas` to `>1`; verify leader election (single active reconciler / lease) and failover when the leader pod is deleted; verify secret sync continues. Scale webhook `replicas` independently and verify the webhook Service still serves.
     8. Deploy an `ExternalSecretsConfig` with a comprehensive `advancedOverrides` configuration (including `affinity`, `topologySpreadConstraints`, and elevated container `args` like `--concurrent`); verify that the operator successfully patches the target deployments, pods schedule according to the defined constraints on the cluster, and the external-secrets functionality remains fully operational under the custom scheduling rules.
+    
 ## Graduation Criteria
 
 This feature will be delivered as GA directly, as it uses stable Kubernetes APIs and provides essential operational flexibility.
