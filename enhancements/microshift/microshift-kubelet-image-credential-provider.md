@@ -209,8 +209,9 @@ The `kubelet:` section is annotated `+kubebuilder:validation:Schemaless`, so no
 change to the generated configuration schema or a schema version bump is
 required. As a consequence, the configuration generator cannot emit the keys as
 schema entries; they are documented through the doc comment on the `Kubelet`
-field, which the generator propagates into the sample configuration file and the
-configuration reference (see Sample configuration and documentation below).
+field, which the generator propagates into the sample configuration file
+(`packaging/microshift/config.yaml`) and the OpenAPI description (see Sample
+configuration and documentation below).
 
 `microshift show-config --mode effective` displays the keys under `kubelet:` as
 set by the user, since the underlying map is not modified. Kubelet receives the
@@ -253,7 +254,7 @@ Add two internal, non-serialized fields to the `Config` struct in
 `pkg/config/config.go`, following the existing convention for internal fields
 (e.g. `userSettings`). The `Kubelet` field's doc comment is extended to describe
 the two keys, because the configuration generator propagates it into the sample
-configuration and reference documentation:
+configuration file and the OpenAPI description:
 
 ```go
     // Settings specified in this section are transferred as-is into the
@@ -389,9 +390,9 @@ no new plumbing is required:
 ```
 
 The typed fields hold the canonical paths produced by validation, so kubelet
-receives symlink-resolved paths. When a configured path differs from its
-canonical form, the log line additionally records the configured value. The log
-line records that MicroShift applied the configuration to kubelet. It is emitted
+receives symlink-resolved paths; the log line records those canonical paths. The
+values the user configured remain available from `microshift show-config`. The
+log line records that MicroShift applied the configuration to kubelet. It is emitted
 before kubelet registers providers, so it does not by itself indicate that the
 providers are usable; a missing or non-executable provider binary is reported by
 kubelet as a startup error after this line. Because MicroShift calls
@@ -403,13 +404,17 @@ authoritative signal that the keys were applied.
 
 #### Sample configuration and documentation
 
-`packaging/microshift/config.yaml` and `docs/user/howto_config.md` are generated
+`packaging/microshift/config.yaml`, `docs/user/howto_config.md`, and the OpenAPI
+description in `cmd/generate-config/config/config-openapi-spec.json` are generated
 by `scripts/generate-config.sh` and kept in sync by
 `scripts/verify/verify-config.sh`; they must not be edited by hand. Because the
 `kubelet:` section is schemaless, the generator cannot emit the two keys as
 schema entries. They are documented by extending the doc comment on the
-`Kubelet` field in `pkg/config/config.go` (shown above), which the generator
-propagates into both files. After changing the comment, run
+`Kubelet` field in `pkg/config/config.go` (shown above). That comment is rendered
+into the sample configuration file (`config.yaml`) and the OpenAPI description;
+`howto_config.md` renders the sample configuration without comments, so the keys
+are not separately described there. End-user documentation is tracked in OSDOCS
+(see Documentation requirements). After changing the comment, run
 `make generate-config` and commit the regenerated files.
 
 #### Image-based deployments (bootc and rpm-ostree)
@@ -464,7 +469,14 @@ OSDOCS-20657 (MicroShift-side input in OCPEDGE-2976):
 3. Image-based deployments: the credential provider binary must be present in
    every OS image build (on rpm-ostree, delivered as the user's own RPM);
    a missing binary on a new image fails validation and triggers greenboot
-   rollback — check the failed boot's journal.
+   rollback — check the failed boot's journal. The bin directory must sit at a
+   location that carries the `bin_t` SELinux label (`/usr/libexec` or
+   `/usr/local/bin`); the confined kubelet (`kubelet_t`) may only execute
+   `bin_t` files. A bin directory under `/etc/microshift` (`kubernetes_file_t`)
+   or `/opt` (`usr_t`) passes MicroShift's path validation but is denied
+   execution under SELinux enforcing — the provider never runs and the only
+   trace is an AVC denial (`ausearch -m AVC -ts recent`). MicroShift does not
+   validate SELinux labels, so RPM packaging must place the binary accordingly.
 4. `defaultCacheDuration`: keep it comfortably shorter than the registry
    token lifetime (Amazon ECR: 12 hours).
 
@@ -753,8 +765,8 @@ rpm-ostree.
 ## Support Procedures
 
 - Confirm the keys were applied: `journalctl -u microshift` at startup contains
-  `Kubelet image credential provider configured` with the configured
-  `configPath` and `binDir`. Kubelet does not log `FLAG:` lines in MicroShift
+  `Kubelet image credential provider configured` with the canonical
+  (symlink-resolved) `configPath` and `binDir`. Kubelet does not log `FLAG:` lines in MicroShift
   and logs nothing at default verbosity on successful provider registration, so
   this MicroShift log line is the authoritative signal that the keys reached
   kubelet. It does not confirm that the provider binaries are usable.
@@ -773,6 +785,14 @@ rpm-ostree.
   microshift` for provider execution errors, verify the provider binary runs
   successfully when invoked manually with a `CredentialProviderRequest` on
   stdin, and verify the device's cloud identity has registry pull permissions.
+- Image pull failures with no provider execution error in the journal: check for
+  an SELinux denial with `ausearch -m AVC -ts recent`. MicroShift runs confined
+  as `kubelet_t` and may only execute files labeled `bin_t`. A bin directory
+  under `/etc/microshift` (`kubernetes_file_t`) or `/opt` (`usr_t`) passes
+  MicroShift's path validation but is denied execution under SELinux enforcing;
+  the provider never runs and the only trace is the AVC. Move the bin directory
+  under `/usr/libexec` or `/usr/local/bin`, or restore the label with
+  `restorecon -Rv`, so the binaries carry `bin_t`.
 - A lenient-decode warning in the kubelet logs referencing either key indicates
   a MicroShift version that does not support the feature, or a misspelled key.
 - On bootc or rpm-ostree systems, a greenboot rollback after an image update
