@@ -224,7 +224,7 @@ To enable the apiservers to access the KMS plugin, the `/var/run/kmsplugin` dire
              type: AppRole
              appRole:
                secret:
-                 name: vault-approle # Secret in openshift-config namespace with roleID and secretID keys
+                 name: vault-approle # Secret in openshift-config namespace with role-id and secret-id keys
            transitMount: transit
            transitKey: my-encryption-key
    ```
@@ -723,6 +723,263 @@ An aggregator controller reads the per-node `KMSHealthReporter_<nodeName>` condi
 These rollup conditions (`KMSPluginsDegraded`, and any future `KMSPluginsAvailable` / `KMSPluginsProgressing`) are the admin-facing signal: they surface through `ClusterOperator` so that `oc get co kube-apiserver` is sufficient to learn KMS plugin health. The per-node `KMSHealthReporter_<nodeName>` conditions are plumbing for the aggregator and tooling, not intended for direct admin consumption.
 
 The plan is to extend the existing [`conditionController`](https://github.com/openshift/library-go/blob/master/pkg/operator/encryption/controllers/condition_controller.go) in library-go's encryption controllers, which already emits the `Encrypted` condition on the same operator CR. It sits in the right call path (operator CR → ClusterOperator) and runs on the informer set the rollup needs. If extending it turns out to be a poor fit (conflicting sync triggers, unrelated dependencies that make the rollup hard to reason about), a dedicated controller will be introduced instead.
+
+#### KMS Plugin Image Verification and Certification
+
+Vendors must sign their images using cosign, and run the certification
+test suite described in this document before Red Hat can officially support
+the vendor's KMS plugin.
+
+##### Image Signature and Verification
+
+We advise vendors to sign their images with cosign using public key encryption.
+OpenShift must be able to verify image signatures in air-gapped clusters, and
+public key encryption is best suited for this scenario.
+
+###### Signing Images with cosign v3
+
+cosign v3 defaults to storing signatures as OCI 1.1 referrers (which are not
+visible as tags). To create signatures compatible with OpenShift, vendors must
+use the `--new-bundle-format=false` and `--use-signing-config=false` flags to
+force creation of legacy `.sig` tags.
+
+**Step-by-step signing process:**
+
+1. **Generate cosign key pair**:
+   ```bash
+   cosign generate-key-pair
+   # Creates cosign.key (private, keep secure) and cosign.pub (public, distribute to customers)
+   ```
+
+2. **Build and push your KMS plugin image**:
+   ```bash
+   # Build the image
+   podman build -t registry.example.com/kms-plugin:v1.0.0 .
+
+   # Push to registry
+   podman push registry.example.com/kms-plugin:v1.0.0
+   ```
+
+3. **Get the image digest**:
+   ```bash
+   DIGEST=$(skopeo inspect docker://registry.example.com/kms-plugin:v1.0.0 | jq -r '.Digest')
+   echo "Image digest: $DIGEST"
+   ```
+
+4. **Sign the image with compatibility flags**:
+   ```bash
+   COSIGN_PASSWORD=<your-password> cosign sign \
+     --key cosign.key \
+     --new-bundle-format=false \
+     --use-signing-config=false \
+     registry.example.com/kms-plugin@${DIGEST} \
+     --yes
+   ```
+
+5. **Verify the .sig tag was created**:
+   ```bash
+   # Check for signature tag (should show sha256-<digest>.sig)
+   skopeo list-tags docker://registry.example.com/kms-plugin | jq -r '.Tags[]' | grep ".sig"
+   ```
+
+**Why these flags are required:**
+- `--new-bundle-format=false`: Forces cosign to use the legacy tag-based signature format instead of OCI 1.1 referrers
+- `--use-signing-config=false`: Required when using `--new-bundle-format=false` to disable TUF-provided signing configuration
+
+**Note:** These flags will be removed in cosign v4. When containers/image adds
+OCI 1.1 referrers support in future OpenShift versions, vendors can use cosign
+v3+ default behavior without compatibility flags.
+
+###### Customer Configuration
+
+Users must create a `ClusterImagePolicy` resource to configure OpenShift to
+verify the image signature every time CRI-O pulls a plugin image. Users should
+obtain the vendor's public key from the vendor's official documentation (e.g.,
+HashiCorp's documentation for the Vault KMS plugin).
+
+`ClusterImagePolicy` example:
+```yaml
+apiVersion: config.openshift.io/v1
+kind: ClusterImagePolicy
+metadata:
+  name: vault-kms-plugin
+  labels:
+    config.openshift.io/type: kms
+spec:
+  scopes:
+    - docker.io/hashicorp/vault-plugin-kms # this must match the kmsPluginImage in the APIServer config
+  policy:
+    rootOfTrust:
+      policyType: PublicKey
+      publicKey:
+        # base64-encoded cosign public key (cosign.pub)
+        keyData: LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUZrd0V3WUhLb1pJemowQ0FRWUlLb1pJemowREFRY0RRZ0FFLi4uCi0tLS0tRU5EIFBVQkxJQyBLRVktLS0tLQo=
+    signedIdentity:
+      matchPolicy: MatchRepository
+```
+
+To generate the base64-encoded public key for the `keyData` field:
+```bash
+cat cosign.pub | base64 -w 0
+```
+
+When vendors release images signed with a new key, users must create a new
+`ClusterImagePolicy` resource with the updated public key. During the transition
+period, both old and new `ClusterImagePolicy` resources must exist in the
+cluster until the previous `ClusterImagePolicy` is no longer needed (i.e when
+migration to the new plugin image is finished).
+
+Users should refer to the vendor's official documentation for the most current
+public key to use in their `ClusterImagePolicy`.
+
+##### Certification
+
+KMS plugin certification follows the CSI driver certification model. A
+dedicated test suite will be added to the `openshift-tests` binary, which
+vendors can extract from an OpenShift release payload and run in a test cluster
+with their KMS plugin installed.
+
+The certification test suite validates:
+- KMS plugin compliance with the Kubernetes KMS v2 API
+- Encrypt/decrypt operations under various conditions
+- Plugin behavior during upgrades and migrations
+
+###### Extracting the Test Binary and Running the Test Suite
+
+The KMS encryption test suite may take several hours to finish and is marked as
+disruptive (it may affect cluster stability during testing). Vendors are
+advised to run it in a dedicated test cluster within a CI/CD environment where
+test output is persisted. The test output is required to validate KMS plugin
+compatibility with OpenShift.
+
+**Prerequisites:**
+- An OpenShift cluster (version matching the target certification version)
+- KMS plugin configured via OpenShift APIServer configuration API
+- `oc` CLI tool installed and authenticated to the cluster
+- At least 1GB of disk space for test binary extraction and test output
+
+**Step 1: Extract the openshift-tests binary from the release payload**
+
+```bash
+# Set the release image you want to certify against
+RELEASE_IMAGE="quay.io/openshift-release-dev/ocp-release:4.22.0-x86_64"
+
+# Get the tests image reference from the release payload
+TESTS_IMAGE=$(oc adm release info ${RELEASE_IMAGE} --image-for=tests)
+echo "Tests image: ${TESTS_IMAGE}"
+
+# Extract the openshift-tests binary
+mkdir -p ./kms-certification
+oc image extract ${TESTS_IMAGE} \
+  --path /usr/bin/openshift-tests:./kms-certification \
+  --confirm
+
+# Make the binary executable
+chmod +x ./kms-certification/openshift-tests
+
+# Verify extraction
+./kms-certification/openshift-tests version
+```
+
+**Step 2: Run the KMS certification test suite**
+
+```bash
+# Set your kubeconfig (if not already set)
+export KUBECONFIG=/path/to/your/kubeconfig
+
+# Run the full KMS test suite
+# Note: This may take several hours and is disruptive to the cluster
+./kms-certification/openshift-tests run openshift/kms \
+  --junit-dir=./kms-certification/junit \
+  -o ./kms-certification/kms-test-output.log
+
+# The exit code indicates success (0) or failure (non-zero)
+echo "Test run exit code: $?"
+```
+
+**Step 3: Review test results**
+
+```bash
+# Check the test output log
+less ./kms-certification/kms-test-output.log
+
+# Review JUnit XML results (for CI integration)
+ls -lh ./kms-certification/junit/
+
+# Count passed/failed tests
+grep -c "PASS:" ./kms-certification/kms-test-output.log
+grep -c "FAIL:" ./kms-certification/kms-test-output.log
+```
+
+**Test Suite Configuration:**
+
+The `openshift/kms` test suite is configured with the following parameters:
+- **Parallelism:** 1 (tests run sequentially to avoid conflicts)
+- **Timeout:** 4 hours
+- **Stability:** Disruptive (may affect cluster operations)
+- **Scope:** Aggregates all KMS encryption tests across kube-apiserver, openshift-apiserver, and oauth-apiserver
+- **Exclusions:** Automatically excludes tests marked as `[Flaky]` or `[Disabled:]`
+
+**What the Test Suite Validates:**
+
+The test suite performs comprehensive validation including:
+
+1. **KMS v2 API Compliance:**
+   - Status, Encrypt, and Decrypt gRPC method correctness
+   - Proper error handling and timeout behavior
+   - Health check responses
+
+2. **Encryption Operations:**
+   - Successful encryption and decryption of secrets and configmaps
+   - Concurrent encrypt/decrypt operations under load
+   - Round-trip data integrity verification
+
+3. **Migration Scenarios:**
+   - identity → KMS migration
+   - KMS → identity migration
+   - KMS → KMS migration
+   - aesgcm/aescbc ↔ KMS migrations
+
+4. **Operational Behaviors:**
+   - Plugin startup and initialization
+   - Graceful handling of KMS service unavailability
+   - API server restart with KMS encryption enabled
+   - Multi-plugin scenarios during migration
+
+5. **OpenShift Integration:**
+   - Sidecar container lifecycle
+   - Credential management from Secrets
+   - ConfigMap integration for CA bundles
+   - Pre-flight checker validation
+
+**Submitting Certification Results:**
+
+After successful completion, vendors should provide:
+1. Full test output log (`kms-test-output.log`)
+2. JUnit XML files from the `junit/` directory
+3. OpenShift version and KMS plugin version tested
+4. Any test failures with root cause analysis and remediation plans
+
+**Troubleshooting Common Issues:**
+
+```bash
+# If tests fail to connect to the cluster
+export KUBECONFIG=/path/to/correct/kubeconfig
+oc whoami  # Verify authentication
+
+# If tests timeout
+# Increase timeout with: --timeout=6h
+./kms-certification/openshift-tests run openshift/kms --timeout=6h
+
+# To run a subset of tests for debugging
+# First, list the tests with --dry-run, then filter specific ones
+./kms-certification/openshift-tests run openshift/kms \
+  --dry-run | grep "specific-test-name" | \
+  ./kms-certification/openshift-tests run -f -
+
+# For verbose output during test run
+./kms-certification/openshift-tests run openshift/kms -v=4
+```
 
 ### Risks and Mitigations
 
