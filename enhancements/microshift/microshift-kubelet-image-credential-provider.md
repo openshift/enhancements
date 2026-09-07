@@ -476,8 +476,11 @@ OSDOCS-20657 (MicroShift-side input in OCPEDGE-2976):
    execution under SELinux enforcing — the provider never runs and the only
    trace is an AVC denial (`ausearch -m AVC -ts recent`). MicroShift does not
    validate SELinux labels, so RPM packaging must place the binary accordingly.
-4. `defaultCacheDuration`: keep it comfortably shorter than the registry
-   token lifetime (Amazon ECR: 12 hours).
+4. `defaultCacheDuration` guidance for providers that do not return their own
+   cache duration: keep it comfortably shorter than the registry token lifetime.
+   The ECR provider returns its own `cacheDuration` (6 hours) and kubelet honors
+   it over `defaultCacheDuration`, so for ECR the field has no effect (6-hour
+   cache against a 12-hour token).
 
 ### Risks and Mitigations
 
@@ -533,11 +536,13 @@ immediately attributed to the missing binary.
 must be present in every image build. The validation error names the bin
 directory path, and the failure is visible in the journal of the failed boot.
 
-**Risk:** Users may set `defaultCacheDuration` in the provider configuration
-longer than the registry token lifetime, causing kubelet to serve expired
-credentials.
-**Mitigation:** Documentation for Amazon ECR (12-hour tokens) recommends a cache
-duration comfortably shorter than the token lifetime.
+**Risk:** For providers that do not return their own cache duration, users may
+set `defaultCacheDuration` in the provider configuration longer than the registry
+token lifetime, causing kubelet to serve expired credentials.
+**Mitigation:** Documentation recommends a cache duration comfortably shorter than
+the token lifetime. Note that the ECR provider returns its own `cacheDuration`
+(6 hours), which kubelet honors over `defaultCacheDuration`, so for ECR the field
+has no effect (6-hour cache against a 12-hour token).
 
 ### Drawbacks
 
