@@ -340,13 +340,12 @@ one rule to both paths, implemented once as a helper in the `config` package:
    final object, must be owned by root (uid 0) and must not have group or other
    write permission. Checking ancestors prevents an unprivileged user who owns a
    parent directory from replacing the validated file or directory after
-   startup. No component may carry an extended POSIX ACL
-   (`system.posix_acl_access`): an ACL can grant write access that the mode bits
-   do not show (`setfacl -m u:x:rwx dir` leaves the mode at `0755`). Root-owned
-   system directories do not carry extended ACLs, so this does not affect
-   standard layouts.
+   startup. POSIX ACLs cannot grant write access that this check misses: when an
+   extended ACL is present, Linux reports the ACL mask in the group permission
+   bits, so any ACL entry with effective write access makes the group write bit
+   visible and the object is rejected. No separate ACL check is needed.
 3. If the final object is a directory, every entry in it must satisfy the same
-   ownership, permission, and no-ACL requirement. A symlinked entry is resolved
+   ownership and permission requirement. A symlinked entry is resolved
    and the full rule, including ancestors, is applied to its target, so an entry
    cannot point into a location an unprivileged user controls.
 4. The canonical path, not the configured path, is what MicroShift passes to
@@ -397,9 +396,7 @@ and before storing the canonical paths:
   (`k8s.io/kubernetes/pkg/kubelet/apis/config` and its `v1`, `v1beta1`, and
   `v1alpha1` sub-packages). Unknown fields are rejected and all three API
   versions kubelet accepts are accepted, so the check cannot diverge from the
-  kubelet in the same build. An unreadable file (`EACCES`, typical of
-  `show-config` run as non-root against a `0600` file) is reported as needing
-  root, not as invalid.
+  kubelet in the same build.
 - Every `providers[].name` resolves to an executable in the bin directory using
   `exec.LookPath(filepath.Join(binDir, name))`, the same call kubelet makes at
   registration.
@@ -535,15 +532,11 @@ OSDOCS-20657 (MicroShift-side input in OCPEDGE-2976):
    `NO_PROXY` for the provider through the `env` list in its entry in the
    `CredentialProviderConfig`, and include the cloud metadata service
    (`169.254.169.254`, the IMDS endpoint) in `NO_PROXY` so identity lookups are
-   not routed through the proxy. When a provider must read static cloud
-   credentials from a file (for example AWS shared credentials), do not place
-   the file under `/root/.aws`: that path carries the `admin_home_t` SELinux
-   label, which the confined kubelet (`kubelet_t`) cannot read, so the provider
-   sees no credentials and the only trace is an AVC denial. Place the file under
-   `/etc/microshift/` instead and point the provider at it with an explicit
-   `env` entry (for AWS, `AWS_SHARED_CREDENTIALS_FILE`). Verify by confirming a
-   successful pull in `journalctl -u microshift` and the absence of denials in
-   `ausearch -m AVC -ts recent`.
+   not routed through the proxy. Static AWS credentials in
+   `/root/.aws/credentials` are readable by the confined kubelet on RHEL 9
+   (verified); an instance role or IAM Roles Anywhere is still preferred because
+   no long-lived secret is stored on the device. If pulls fail with no provider
+   error in the journal, check `ausearch -m AVC -ts recent`.
 
 ### Risks and Mitigations
 
@@ -669,10 +662,6 @@ locations pass as installed.
   path; a symlink to a writable or non-root-owned target fails; a symlinked
   entry inside the bin directory is checked at its target including the target's
   ancestors.
-- Validation, trusted path, extended ACL: an extended ACL on the final object,
-  an ancestor, or a directory entry fails naming the component; a chain with no
-  extended ACL passes. The ACL probe is exercised through an overridable hook so
-  the suite runs without `setfacl` or root.
 - Validation: neither key set passes (backward compatibility).
 - Validation, structural: configuration directory with no `.json/.yaml/.yml`
   fails; a file that does not decode as `CredentialProviderConfig` (wrong kind,
@@ -883,12 +872,8 @@ rpm-ostree.
   start-rate limit (`Start request repeated too quickly`).
 - Confirm the effective configuration: `microshift show-config --mode effective`
   displays both keys under `kubelet:`.
-- `microshift show-config` runs the same validation, including the structural
-  provider-config decode. Run as a non-root user against a provider config file
-  that is not world-readable (for example `0600`), it reports
-  `error validating kubelet.imageCredentialProviderConfigPath (...): cannot read "..." : permission denied (run as root)`.
-  This does not mean the configuration is invalid; it means the reader lacks
-  permission. Re-run `microshift show-config` as root (or with `sudo`).
+- `microshift show-config` requires root; it runs the same validation as
+  startup, including the provider configuration decode.
 - Startup validation failures are logged with the field name, the configured
   path, and where applicable the offending component, e.g.
   `error validating kubelet.imageCredentialProviderConfigPath ("/etc/microshift/credential-providers.yaml"): file or directory does not exist`
@@ -913,7 +898,7 @@ rpm-ostree.
   with a validation error naming `imageCredentialProviderBinDir` indicates the
   new image was built without the provider binary. greenboot loads the same
   MicroShift configuration and therefore runs the same validation, so any of the
-  validation errors above (missing path, trusted-path violation, extended ACL,
+  validation errors above (missing path, trusted-path violation,
   undecodable provider config, unresolvable provider name) will fail the health
   check and trigger the normal rollback; the rollback outcome is unchanged, and
   the specific error is in `journalctl -u microshift -b` for the failed boot.
