@@ -16,7 +16,7 @@ approvers:
 api-approvers:
   - None
 creation-date: 2026-09-02
-last-updated: 2026-09-03
+last-updated: 2026-09-08
 tracking-link:
   - https://redhat.atlassian.net/browse/OCPSTRAT-3456
 see-also:
@@ -102,11 +102,12 @@ devices.
    `ecr-credential-provider`). These are standalone upstream binaries that users
    install separately, and which binary is needed depends on the registry in
    use.
-3. Validating the contents of the credential provider configuration file, or the
-   presence and executability of the binaries it names. Kubelet validates the
-   configuration file and the presence of each configured binary when it
-   registers providers. MicroShift validates ownership and permissions of both
-   paths and their contents, but not their semantics.
+3. Semantic validation of the credential provider configuration (for example
+   `matchImages` patterns or cache durations). Kubelet validates these when it
+   registers providers. MicroShift validates only the structural conditions that
+   would otherwise terminate the process (see *Provider configuration structural
+   checks* under Config validation), plus ownership and permissions of both paths
+   and their contents.
 4. Runtime reconfiguration of the two keys without restarting MicroShift.
 5. Protection against a user who already holds root privileges. The validation
    described here defends against unprivileged local users only.
@@ -156,8 +157,12 @@ to `KubeletConfiguration` unchanged.
    resolves to a directory, and that both paths satisfy the trusted-path rule
    described under Config validation: after resolving symlinks, every path
    component, the final object, and every file inside a directory must be owned
-   by root and not writable by group or others. The canonical (symlink-resolved)
-   paths are stored in the typed fields.
+   by root and not writable by group or others. MicroShift then performs the
+   structural checks on the provider configuration: a configuration directory
+   contains at least one configuration file, each file decodes as a
+   `CredentialProviderConfig`, and every named provider resolves to an executable
+   in the bin directory. The canonical (symlink-resolved) paths are stored in the
+   typed fields.
 4. If validation fails, MicroShift exits with a descriptive error message naming
    the field and the path.
 5. If validation succeeds, the kubelet component sets
@@ -167,9 +172,13 @@ to `KubeletConfiguration` unchanged.
    both the configured and the canonical values.
 6. The keys in the `kubelet:` section other than the two reserved keys are
    marshaled into the `KubeletConfiguration` file as today.
-7. Kubelet reads the provider configuration file and verifies that each
-   configured provider binary exists in the bin directory. Failures here are
-   kubelet startup errors, reported in the MicroShift journal.
+7. Kubelet reads the provider configuration file and performs its own full
+   validation when it registers providers. Because MicroShift already verified
+   the structural conditions, the only failures that can remain are semantic ones
+   (for example an invalid `matchImages` pattern). On such a failure upstream
+   kubelet logs `Failed to register CRI auth plugins` and calls `os.Exit(1)`; in
+   MicroShift this terminates the whole process after the other components have
+   started (see Risks and Mitigations).
 8. At image pull time, kubelet consults the credential provider configuration;
    for images matching a configured provider, kubelet executes the provider
    binary, caches the returned credentials in memory for the returned or default
@@ -359,15 +368,43 @@ e.g. `error validating kubelet.imageCredentialProviderBinDir ("/opt/providers"):
 "/opt/providers/ecr-credential-provider" must be owned by root and not writable
 by group or others`.
 
-MicroShift deliberately does **not** validate the contents of the credential
-provider configuration file, nor the presence or executability of the binaries
-it names. Kubelet validates the configuration file and checks that each
-configured provider binary exists (`exec.LookPath`) when it registers providers;
-failures surface as kubelet startup errors in the journal. Duplicating that
-validation would require keeping MicroShift in sync with upstream kubelet
-behavior. Checking ownership and permissions of every entry in the bin
-directory, rather than only the configured providers, avoids parsing the
-configuration file at all.
+#### Provider configuration structural checks
+
+Upstream kubelet handles a failure to register credential providers by logging
+`Failed to register CRI auth plugins` and calling `os.Exit(1)`
+(`pkg/kubelet/kuberuntime/kuberuntime_manager.go`). In a standalone kubelet that
+ends one process; in MicroShift, where kubelet is a goroutine, it terminates the
+entire MicroShift process after etcd, the API server, and the other components
+have already started, and systemd restarts it into the same failure. The
+upstream error for a missing binary also does not name the binary (`plugin binary
+executable  did not exist`, with an empty path). To turn these into ordinary
+fail-fast configuration errors, MicroShift verifies, after the trusted-path rule
+and before storing the canonical paths:
+
+- If `imageCredentialProviderConfigPath` is a directory, it contains at least
+  one file with a `.json`, `.yaml`, or `.yml` extension (kubelet requires this
+  and merges them in lexicographical order).
+- Each configuration file decodes as a `CredentialProviderConfig` using the
+  vendored `k8s.io/kubelet/config/v1` types, with `apiVersion` and `kind`
+  checked. Decoding with the vendored types means the check cannot drift from
+  the kubelet in the same build.
+- Every `providers[].name` resolves to an executable in the bin directory using
+  `exec.LookPath(filepath.Join(binDir, name))`, the same call kubelet makes at
+  registration.
+
+Error messages name the field, the file, and the provider, e.g. `error
+validating kubelet.imageCredentialProviderConfigPath
+("/etc/microshift/credential-providers.yaml"): provider "ecr-credential-provider"
+has no executable at
+"/usr/libexec/microshift/credential-providers/ecr-credential-provider"`.
+
+MicroShift does **not** replicate kubelet's semantic validation of the
+configuration (`validateCredentialProviderConfig` is unexported; it covers
+`matchImages` syntax, cache durations, and similar). Those failures still reach
+the upstream `os.Exit` path and are documented as such. Checking ownership and
+permissions of every entry in the bin directory, rather than only the configured
+providers, remains the rule for the trusted-path check; it is stricter and
+independent of the configuration contents.
 
 #### Kubelet flag injection
 
@@ -520,6 +557,17 @@ objects, and root is outside the threat model (see Non-Goals). Kubelet receives
 the canonical path, so re-pointing a symlink in the configured path after
 startup has no effect. The checks run again at every restart.
 
+**Risk:** Upstream kubelet terminates the process with `os.Exit(1)` when
+credential provider registration fails. In MicroShift this kills the whole
+process after other components are running, and systemd restarts it into the
+same failure until the start-rate limit is reached. The upstream message for a
+missing binary carries an empty path.
+**Mitigation:** MicroShift pre-validates the structural conditions that cause
+registration to fail (empty configuration directory, undecodable configuration,
+unresolvable provider name) with clear messages, so they fail at configuration
+load. Semantic failures kubelet detects itself still exit the process; the
+`Failed to register CRI auth plugins` line in the journal identifies them.
+
 **Risk:** On image-based (ostree/bootc) systems, a validation failure at startup
 causes greenboot health checks to fail, triggering an automatic rollback to the
 previous deployment.
@@ -552,6 +600,11 @@ treated differently from all others, and the generated schema cannot express
 them. This is accepted because the OCPSTRAT acceptance criteria specify
 placement under `kubelet:`, and the alternative of a generic flag passthrough
 was explicitly ruled out of scope.
+
+Decoding the provider configuration in MicroShift duplicates a small part of
+what kubelet does at registration. This is accepted because the alternative is a
+process exit with an unhelpful message; using the vendored API types keeps the
+duplication to structure only, with no independent schema.
 
 The trusted-path rule goes beyond what upstream kubelet enforces and rejects
 some unusual but deliberate layouts, such as a bin directory under a non-root
@@ -591,6 +644,13 @@ locations pass as installed.
   entry inside the bin directory is checked at its target including the target's
   ancestors.
 - Validation: neither key set passes (backward compatibility).
+- Validation, structural: configuration directory with no `.json/.yaml/.yml`
+  fails; a file that does not decode as `CredentialProviderConfig` (wrong kind,
+  wrong apiVersion, malformed YAML) fails naming the file; a file declaring no
+  providers fails; a provider whose name has no executable in the bin directory
+  fails naming the provider and the joined path; a non-executable file of that
+  name fails; a valid file and a valid directory pass; structural checks run
+  after the trusted-path rule.
 - `generateConfig()`: the two keys never appear in the generated
   `KubeletConfiguration` YAML; other user-provided keys still do.
 - `configure()`: `KubeletFlags` carries both canonical values when set, and
@@ -642,9 +702,15 @@ injected `stat` function, since tests do not run as root and cannot `chown`.
 - Only one key set: verify MicroShift fails to start with the both-or-neither
   error.
 - Missing provider binary: valid keys, provider configuration naming a binary
-  that is not present in the bin directory, verify the "configured" log line is
-  present and kubelet reports a startup error for the missing plugin binary in
-  the journal.
+  that is not present in the bin directory, verify MicroShift fails to start
+  with an error naming the provider and the resolved path, and that the
+  "configured" log line is absent (validation fails before kubelet is
+  configured). Restore, verify recovery.
+- Empty configuration directory: `imageCredentialProviderConfigPath` set to a
+  directory with no configuration files, verify MicroShift fails to start with
+  an error naming the directory.
+- Malformed configuration file: verify MicroShift fails to start with an error
+  naming the file.
 - Recovery: restore valid configuration, restart, verify MicroShift starts.
 - Upgrade with pre-staged keys: on the previous minor version (Y-1) with the
   keys present in the configuration, verify MicroShift starts with a kubelet
@@ -774,9 +840,16 @@ rpm-ostree.
   and logs nothing at default verbosity on successful provider registration, so
   this MicroShift log line is the authoritative signal that the keys reached
   kubelet. It does not confirm that the provider binaries are usable.
-- Confirm the providers registered: the absence of a kubelet startup error
-  following the "configured" line. A missing or non-executable provider binary
-  is reported by kubelet as a startup error naming the plugin binary path.
+- Confirm the providers registered: the absence of `Failed to register CRI auth
+  plugins` following the "configured" line. Structural problems (missing binary,
+  undecodable file, empty directory) are caught earlier by MicroShift validation
+  and never reach kubelet. If the line does appear, the configuration is
+  structurally valid but semantically rejected by kubelet (for example an invalid
+  `matchImages` pattern); the process exits and systemd restarts it, so check
+  `journalctl -u microshift -b` for the line and fix the configuration. After
+  fixing any startup failure, run `systemctl reset-failed microshift` before
+  `systemctl start microshift`; repeated fast failures trip systemd's
+  start-rate limit (`Start request repeated too quickly`).
 - Confirm the effective configuration: `microshift show-config --mode effective`
   displays both keys under `kubelet:`.
 - Startup validation failures are logged with the field name, the configured
