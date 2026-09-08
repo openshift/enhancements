@@ -376,9 +376,14 @@ All preflight-generated `conditionalUpdateRisks` entries **MUST** use a structur
 - **Backwards compatibility**: Preserve existing risk processing for non-preflight generated risks (no Preflight prefix required)
 
 **Operator implementation requirements**:
-- Preflight check implementations in operators should generate risks with proper Preflight prefix
+
+Initially, preflight checks will be implemented only in the target CVO.
+Operator owners should contribute their component-specific checks to CVO.
+Running checks in individual operators is deferred to future releases.
+
+- Component-specific preflight checks should generate risks with proper Preflight prefix
 - **Avoid version duplication**: Use generic terms like "target version" in descriptive text rather than repeating the specific version number
-- Standard format ensures consistent parsing across all operator-generated preflight results
+- Standard format ensures consistent parsing across all component-specific preflight results
 
 #### CLI Command Extensions
 
