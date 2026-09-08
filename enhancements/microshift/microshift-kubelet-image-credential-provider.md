@@ -387,7 +387,11 @@ and before storing the canonical paths:
 
 - If `imageCredentialProviderConfigPath` is a directory, it contains at least
   one file with a `.json`, `.yaml`, or `.yml` extension (kubelet requires this
-  and merges them in lexicographical order).
+  and merges them in lexicographical order). A dangling symlink or non-regular
+  file with a matching extension is an error, as kubelet would fail on it:
+  kubelet does not resolve symlinks and reads every matching entry with
+  `os.ReadFile`, so a broken link errors at registration and a FIFO blocks
+  startup forever.
 - Each configuration file decodes as a `CredentialProviderConfig` using the same
   strict decoder kubelet uses, built from the same vendored kubelet packages
   (`k8s.io/kubernetes/pkg/kubelet/apis/config` and its `v1`, `v1beta1`, and
@@ -675,8 +679,9 @@ locations pass as installed.
   wrong apiVersion, malformed YAML) fails naming the file; a file declaring no
   providers fails; a provider whose name has no executable in the bin directory
   fails naming the provider and the joined path; a non-executable file of that
-  name fails; a valid file and a valid directory pass; structural checks run
-  after the trusted-path rule.
+  name fails; a dangling `.yaml` symlink alongside a valid file fails naming the
+  link; a FIFO named `x.yaml` fails as "not a regular file"; a valid file and a
+  valid directory pass; structural checks run after the trusted-path rule.
 - `generateConfig()`: the two keys never appear in the generated
   `KubeletConfiguration` YAML; other user-provided keys still do.
 - `configure()`: `KubeletFlags` carries both canonical values when set, and
