@@ -1,7 +1,8 @@
 ---
 title: neat-enhancement-idea
 authors:
-  - TBD
+  - "@tchap"
+  - "@wouldgo"
 reviewers: # Include a comment about what domain expertise a reviewer is expected to bring and what area of the enhancement you expect them to focus on. For example: - "@networkguru, for networking aspects, please look at IP bootstrapping aspect"
   - TBD
 approvers: # This should be a single approver. The role of the approver is to raise important questions, ensure the enhancement receives reviews from all applicable areas/SMEs, and determine when consensus is achieved such that the EP can move forward to implementation.  Having multiple approvers makes it difficult to determine who is responsible for the actual approval. Team leads and staff engineers often make good approvers.
@@ -14,11 +15,11 @@ status: provisional|implementable|implemented|deferred|rejected|withdrawn|replac
 tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
   - TBD
 see-also:
-  - "/enhancements/this-other-neat-thing.md"
+  - "/enhancements/authentication/direct-external-oidc-provider.md"
+  - "/enhancements/authentication/external-oidc-additional-identity-information-sources.md"
+  - "/enhancements/authentication/proxy-support-for-integrated-auth-stack.md"
 replaces:
-  - "/enhancements/that-less-than-great-idea.md"
 superseded-by:
-  - "/enhancements/our-past-effort.md"
 ---
 
 About the enhancement process:
