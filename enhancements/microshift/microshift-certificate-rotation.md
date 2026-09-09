@@ -30,15 +30,15 @@ forces an unplanned process exit when any certificate enters the "red zone"
 deployed in environments where maintenance windows must be tightly controlled,
 such as telecommunications networks.
 
-This enhancement introduces controlled, on-demand certificate and CA renewal
-via the `microshift certs` CLI subcommand family, allowing administrators to
-check certificate status and trigger renewal during planned maintenance windows.
-The forced process exit on red-zone certificates is made configurable via a
+This enhancement introduces controlled, on-demand certificate and CA renewal via
+the `microshift certs` CLI subcommand family, allowing administrators to check
+certificate status and trigger renewal during planned maintenance windows. The
+forced process exit on red-zone certificates is made configurable via a
 `certificates.autoRotate` configuration option. By default, MicroShift switches
-to a warn-only policy logging warnings and surfacing certificate zone status
-via `certs status` and healthcheck while giving administrators control over
-when renewals and the associated service restart occur. Administrators who prefer
-the existing auto-restart behavior can re-enable it through the configuration.
+to a warn-only policy logging warnings and surfacing certificate zone status via
+`certs status` and healthcheck while giving administrators control over when
+renewals and the associated service restart occur. Administrators who prefer the
+existing auto-restart behavior can re-enable it through the configuration.
 
 ## Motivation
 
@@ -71,11 +71,11 @@ communicate the expected downtime to stakeholders.
 
 #### Story 5: Configurable Red-Zone Behavior
 
-As a MicroShift administrator running MicroShift at edge sites, I want
-the red-zone forced process exit to be disabled by default and configurable, so
-that I can maintain my SLA commitments and renew certificates during planned
-maintenance windows, while organizations that prefer automatic restarts can
-opt in to that behavior.
+As a MicroShift administrator running MicroShift at edge sites, I want the
+red-zone forced process exit to be disabled by default and configurable, so that
+I can maintain my SLA commitments and renew certificates during planned
+maintenance windows, while organizations that prefer automatic restarts can opt
+in to that behavior.
 
 ### Goals
 
@@ -93,8 +93,8 @@ opt in to that behavior.
    execution.
 
 5. Make the forced process exit on red-zone certificates configurable. By
-   default, switch to a warn-only policy (log warnings, surface status in
-   `certs status` and healthcheck). Provide a configuration option
+   default, switch to a warn-only policy (log warnings, surface status in `certs
+status` and healthcheck). Provide a configuration option
    (`certificates.autoRotate`) for administrators who prefer the existing
    auto-restart behavior.
 
@@ -128,8 +128,8 @@ opt in to that behavior.
 ### CLI Design
 
 The `microshift certs` subcommand family follows existing CLI patterns
-established by `microshift backup`, `microshift restore`, and
-`microshift healthcheck`.
+established by `microshift backup`, `microshift restore`, and `microshift
+healthcheck`.
 
 All commands require root privileges and operate on the MicroShift data
 directory.
@@ -201,6 +201,31 @@ $ sudo systemctl start microshift
 
 ### Certificate Zone Model
 
+MicroShift identifies a short term and long term certificate and automatically
+regenerates them when _manually restarted_ **and** _if_ they are near expiry.
+
+Formula to determine renewals:
+
+```
+Short_Term = < 5 years
+Long_Term = > 5 years
+Earliest_Restart = 4 Months Before Short_Term Expires OR 12 Months Before Long_Term Expires
+
+if Short_Term has less then 7 Months left
+   renew Short_Term
+
+if Long_Term has less then 18 Months left
+   renew Long_Term
+
+start Earliest_Restart deadline to force restart MicroShift
+```
+
+| Zone   | Criteria                                                             |
+| ------ | -------------------------------------------------------------------- |
+| Red    | 1 Year left on _long term_ **or** 4 Months left on _short term_      |
+| Yellow | 18 Months left on _long term_ **or** 7 Months left on _short term_   |
+| Green  | 19+ Months left on _long term_ **or** 8+ Months left on _short term_ |
+
 Certificates are classified into zones based on their remaining validity:
 
 | Certificate Type            | Total Validity | Green               | Yellow              | Red               |
@@ -213,9 +238,10 @@ Certificates are classified into zones based on their remaining validity:
 - **Green zone**: No action needed. Certificates are valid and not approaching
   expiry.
 - **Yellow zone**: Warning logged. Certificates in this zone are automatically
-  regenerated when MicroShift is manually started (preserving existing behavior).
-- **Red zone (changed)**: Behavior is now governed by the `certificates.autoRotate`
-  configuration option:
+  regenerated when MicroShift is manually started (preserving existing
+  behavior).
+- **Red zone (changed)**: Behavior is now governed by the
+  `certificates.autoRotate` configuration option:
   - **`autoRotate: false`** (new default): Warning logged; MicroShift does _not_
     force a process exit. The cluster continues to run until certificates are
     actually invalid. Near-expiry is visible in logs, `certs status` output
@@ -229,10 +255,9 @@ Certificates are classified into zones based on their remaining validity:
     unplanned downtime.
 
   > **Note:** The existing yellow-zone behavior where certificates are
-  > automatically regenerated on manual service start (`certsToRegenerate`)
-  > is _not_ affected by this configuration. The `autoRotate` setting controls
-  > only the in-process red-zone deadline, not the "regenerate on start"
-  > behavior.
+  > automatically regenerated on manual service start (`certsToRegenerate`) is
+  > _not_ affected by this configuration. The `autoRotate` setting controls only
+  > the in-process red-zone deadline, not the "regenerate on start" behavior.
 
 ### PKI Inventory
 
@@ -242,15 +267,16 @@ parent-child relationships between CAs and their issued certificates.
 
 Current MicroShift PKI layout:
 
-- **12 Certificate Authorities**: including service-ca, kube-apiserver-lb-signer,
-  kube-apiserver-localhost-signer, kube-apiserver-service-network-signer,
-  admin-kubeconfig-signer, and others.
-- **10 client certificates**: kubelet, admin-kubeconfig, controller-manager, etc.
+- **12 Certificate Authorities**: including service-ca,
+  kube-apiserver-lb-signer, kube-apiserver-localhost-signer,
+  kube-apiserver-service-network-signer, admin-kubeconfig-signer, and others.
+- **10 client certificates**: kubelet, admin-kubeconfig, controller-manager,
+  etc.
 - **6 serving certificates**: kube-apiserver (multiple signers), etcd,
   openshift-controller-manager, openshift-router.
 - **2 peer certificates**: etcd peer, kubelet peer.
 
-**Rotatable CAs** (renewed by `--ca`):
+**Example Rotatable CAs** (renewed by `--ca`):
 
 - `service-ca`
 - `kube-apiserver-lb-signer`
@@ -258,9 +284,9 @@ Current MicroShift PKI layout:
 - `kube-apiserver-service-network-signer`
 - `admin-kubeconfig-signer`
 
-This inventory abstraction decouples the CLI from the specific certificate layout,
-enabling the parallel CA consolidation effort (OCPSTRAT-2900) to reduce the
-number of CAs without modifying the CLI commands.
+This inventory abstraction decouples the CLI from the specific certificate
+layout, enabling the parallel CA consolidation effort (OCPSTRAT-2900) to reduce
+the number of CAs without modifying the CLI commands.
 
 ### Workflow Description
 
@@ -291,8 +317,8 @@ number of CAs without modifying the CLI commands.
 
 ### API Extensions
 
-N/A This enhancement is CLI-only and does not introduce or modify Kubernetes
-API resources.
+N/A This enhancement is CLI-only and does not introduce or modify Kubernetes API
+resources.
 
 ### Topology Considerations
 
@@ -307,9 +333,13 @@ N/A Not applicable to MicroShift.
 #### Single-node Deployments or MicroShift
 
 This enhancement is exclusively for MicroShift. MicroShift runs as a single
-process on a single node, so certificate renewal affects the entire cluster.
-The service restart during CA renewal causes a brief, planned outage of the
-control plane and all hosted workloads.
+process on a single node, so certificate renewal affects the entire cluster. The
+service restart during CA renewal causes a brief, planned outage of the control
+plane and all hosted workloads.
+
+#### OpenShift Kubernetes Engine
+
+N/A
 
 ### Implementation Details/Notes/Constraints
 
@@ -332,8 +362,9 @@ microshift certs
 microshift certs status
 microshift certs renew
 microshift certs renew --serving
+microshift certs renew --serving --dry-run
 microshift certs renew --ca
-microshift certs renew --dry-run
+microshift certs renew --ca --dry-run
 ```
 
 #### Service Stop Requirement
@@ -375,11 +406,12 @@ permitted while the service is active.
 
 ---
 
-**Risk**: PKI layout changes (e.g., CA consolidation) break the renewal commands.
+**Risk**: PKI layout changes (e.g., CA consolidation) break the renewal
+commands.
 
-**Mitigation**: The PKI inventory abstraction decouples the CLI from the specific
-certificate layout. The inventory is the single source of truth for which
-certificates exist and their parent-child relationships.
+**Mitigation**: The PKI inventory abstraction decouples the CLI from the
+specific certificate layout. The inventory is the single source of truth for
+which certificates exist and their parent-child relationships.
 
 ### Drawbacks
 
@@ -387,10 +419,10 @@ certificates exist and their parent-child relationships.
   However, this is strictly better than the current behavior of unplanned forced
   exits.
 - The CLI-only approach requires SSH access to the edge device, which may not be
-  available in all deployment models. Future work could expose this functionality
-  via an API.
+  available in all deployment models. Future work could expose this
+  functionality via an API.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 ### Alternative A: Hot-Reload of Certificates
 
@@ -399,7 +431,8 @@ was rejected because:
 
 1. Vendor code (etcd, kube-apiserver libraries) initializes TLS at startup and
    does not expose runtime reload hooks.
-2. Implementing hot-reload would require significant upstream changes or forking.
+2. Implementing hot-reload would require significant upstream changes or
+   forking.
 3. The maintenance window approach aligns with telecommunications operator
    workflows where planned maintenance is standard practice.
 
@@ -422,8 +455,8 @@ rejected because:
 Keep the existing behavior of forcing a process exit when certificates enter the
 red zone. This was rejected because:
 
-1. Telecommunications customers reported that unplanned restarts may
-   violate their SLA commitments.
+1. Telecommunications customers reported that unplanned restarts may violate
+   their SLA commitments.
 2. Forced exits provide no administrator control over timing.
 3. The warning-based approach preserves observability while respecting operator
    maintenance windows.
@@ -478,8 +511,8 @@ N/A This feature is targeted for GA directly.
 
 ### Tech Preview -> GA
 
-- All CLI commands implemented and tested (`certs status`, `certs renew --serving`,
-  `certs renew --ca`, `--dry-run`).
+- All CLI commands implemented and tested (`certs status`, `certs renew
+--serving`, `certs renew --ca`, `--dry-run`).
 - Red-zone forced exit replaced with warnings.
 - PKI inventory abstraction implemented and validated.
 - ProdSec review completed (OCPEDGE-3002).
@@ -524,8 +557,8 @@ N/A No API extensions are introduced.
 ### Diagnosing Certificate Issues
 
 1. Run `sudo microshift certs status` to view all certificate states.
-2. Check MicroShift logs for certificate-related warnings:
-   `journalctl -u microshift -g "certificate"`.
+2. Check MicroShift logs for certificate-related warnings: `journalctl -u
+microshift -g "certificate"`.
 3. If certificates are in red zone, plan a maintenance window and use the
    renewal commands.
 
