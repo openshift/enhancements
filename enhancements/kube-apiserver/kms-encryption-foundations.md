@@ -30,6 +30,7 @@ This allows encryption keys to be stored and managed outside the cluster for enh
 
 This enhancement:
 - Uses existing `config.openshift.io/v1/APIServer` resource `encryption.type` field to enable KMS mode
+- Defines a CRD-based interface for KMS plugins where provider-specific configuration and image references are managed through custom resources reconciled by OLM operators
 - Extends encryption controllers in `openshift/library-go` to support KMS as a new encryption mode
 - Maintains feature parity with existing encryption modes (migration, monitoring, key rotation)
 - Provider-agnostic implementation supporting any KMS v2-compatible plugin
@@ -54,7 +55,8 @@ KMS support enables integration with external key management systems where encry
 - Credential/ConfigMap validation with degraded status reporting
 - Periodic sync of referenced Secrets and ConfigMaps to all active key secrets
 - KMS plugin deployment/lifecycle management (see [KMS Plugin Lifecycle Management](#kms-plugin-lifecycle-management-tech-preview-v2))
-- API field definitions for KMS provider configuration in APIServer resource
+- CRD-based KMS plugin configuration interface with OLM operator lifecycle management (see [KMS Plugin Delivery and Configuration Interface](#kms-plugin-delivery-and-configuration-interface))
+- API reference field in APIServer resource pointing to provider-managed custom resources
 
 **Tech Preview v3 — Goals:**
 - Report current KMS encryption status to platform users (e.g., active KMS plugins, migration progress)
@@ -86,11 +88,12 @@ Encryption controllers use the static endpoint in EncryptionConfiguration. KMS-t
 
 **Tech Preview v2 (Managed Plugin Lifecycle):**
 
-Users specify plugin-specific configuration for managed KMS provider types (e.g. Vault) via the APIServer resource.
+Users create a provider-specific custom resource (e.g. `VaultKMSConfig`) with their KMS plugin configuration and reference it from the APIServer resource.
+An OLM operator reconciles the custom resource, copying the spec to the status and adding the plugin image reference associated with that version of the operator.
 Encryption controllers split the KMS configuration API into multiple parts stored atomically in encryption key secrets:
 
 1. `kms-encryption-config` — structured Kubernetes KMS v2 provider configuration used to generate the EncryptionConfiguration provider entry (apiVersion: v2, name, endpoint, timeout)
-2. `kms-plugin-config` — serialized `KMSConfig` resource ([config.openshift.io/v1](https://github.com/openshift/api/blob/master/config/v1/types_kmsencryption.go)), giving consumers access to provider-specific configuration (image, vault-address, transit-mount, transit-key, etc.)
+2. `kms-plugin-config` — serialized resolved configuration from the KMS plugin custom resource status, giving consumers access to provider-specific configuration including the image reference (image, vault-address, vaultKeyPath, etc.)
 3. `kms-plugin-secret-{secretName}_{dataKey}` — individual keys from the referenced Secret are stored as separate entries, where `secretName` is the Kubernetes secret name and `dataKey` is the individual data key within that secret, separated by `_` (underscore is forbidden in Kubernetes resource names, preventing collisions). The underscore also disambiguates entries that would otherwise collide when concatenated: secret `vault-approle` with key `secret-role-id` produces `vault-approle_secret-role-id`, while secret `vault-approle-secret` with key `role-id` produces `vault-approle-secret_role-id` — without the separator both would yield `vault-approle-secret-role-id`. Only the specific data keys required by each provider type are carried; any other keys in the referenced secret are ignored. As a concrete example, Vault AppRole credentials produce `kms-plugin-secret-vault-approle-secret_role-id` and `kms-plugin-secret-vault-approle-secret_secret-id` (carrying only the `role-id` and `secret-id` keys).
 4. `kms-plugin-configmap-{configMapName}_{dataKey}` — individual keys from the referenced ConfigMap are stored as separate entries, following the same `_` separator convention as secret data. For example, a Vault CA bundle ConfigMap produces `kms-plugin-configmap-vault-ca-bundle_ca-bundle.crt`.
 
@@ -135,12 +138,14 @@ The keyID is appended to the UDS path (`unix:///var/run/kmsplugin/kms-{keyID}.so
 
 **KMS plugin** is a gRPC service implementing Kubernetes KMS v2 API. In Tech Preview v1, it runs as a static pod on each control plane node. In Tech Preview v2, it runs as a sidecar container alongside with API Servers (kube-apiserver, oauth-apiserver, openshift-apiservers) managed by the APIServer operators. It communicates with the external KMS to encrypt/decrypt data encryption keys .
 
+**KMS plugin OLM operator** is a provider-specific OLM operator (e.g. the Vault KMS plugin operator) that defines the plugin's CRD, reconciles custom resources by copying the spec to the status and adding the plugin image reference, and manages the plugin image lifecycle. Users install this operator before enabling KMS encryption.
+
 **API server operator** is the OpenShift operator (kube-apiserver-operator, openshift-apiserver-operator, or authentication-operator) managing API server deployments.
 
 #### Encryption Controllers
 
 **keyController** manages encryption key lifecycle. Creates encryption key secrets in `openshift-config-managed` namespace. For KMS mode, creates secrets storing KMS configuration.
-For Tech Preview v2, also propagates updates from the API configuration, splits configuration into `kms-encryption-config`, `kms-plugin-config`, `kms-plugin-secret-{secretName}_{dataKey}`, and `kms-plugin-configmap-{configMapName}_{dataKey}`, performs field-level comparison, validates credential secrets, and periodically syncs referenced Secrets/ConfigMaps to all active key secrets.
+For Tech Preview v2, also reads the resolved configuration from the KMS plugin custom resource status referenced by the APIServer resource, splits configuration into `kms-encryption-config`, `kms-plugin-config`, `kms-plugin-secret-{secretName}_{dataKey}`, and `kms-plugin-configmap-{configMapName}_{dataKey}`, performs field-level comparison, validates credential secrets, and periodically syncs referenced Secrets/ConfigMaps to all active key secrets.
 
 **stateController** generates EncryptionConfiguration for API server consumption. Implements distributed state machine ensuring all API servers converge to same revision.
 For KMS mode, generates EncryptionConfiguration using the KMS configuration.
@@ -203,7 +208,63 @@ To enable the apiservers to access the KMS plugin, the `/var/run/kmsplugin` dire
 
 #### Steps for Enabling KMS Encryption (Tech Preview v2)
 
-1. Cluster admin configures KMS provider in the APIServer resource with Vault-specific configuration:
+1. Cluster admin installs the OLM operator for their KMS plugin provider (e.g. the Vault KMS plugin operator) and creates a provider-specific custom resource with the KMS plugin configuration:
+   ```yaml
+   apiVersion: vault.hashicorp.io/v1
+   kind: VaultKMSConfig
+   metadata:
+     name: my-vault-kms
+   spec:
+     vaultAddress: https://vault.example.com:8200
+     vaultNamespace: my-namespace
+     tls:
+       caBundle:
+         name: vault-ca-bundle  # ConfigMap in openshift-config namespace
+       serverName: vault.example.com
+     authentication:
+       type: AppRole
+       appRole:
+         secret:
+           name: vault-approle # Secret in openshift-config namespace with roleID and secretID keys
+     vaultKeyPath: transit/keys/kms-key
+   ```
+
+2. The OLM operator reconciles the custom resource and writes the status, which mirrors the spec but also includes the plugin image reference hardcoded for that version of the operator:
+   ```yaml
+   apiVersion: vault.hashicorp.io/v1
+   kind: VaultKMSConfig
+   metadata:
+     name: my-vault-kms
+   spec:
+     vaultAddress: https://vault.example.com:8200
+     vaultNamespace: my-namespace
+     tls:
+       caBundle:
+         name: vault-ca-bundle  # ConfigMap in openshift-config namespace
+       serverName: vault.example.com
+     authentication:
+       type: AppRole
+       appRole:
+         secret:
+           name: vault-approle # Secret in openshift-config namespace with roleID and secretID keys
+     vaultKeyPath: transit/keys/kms-key
+   status:
+     vaultAddress: https://vault.example.com:8200
+     vaultNamespace: my-namespace
+     tls:
+       caBundle:
+         name: vault-ca-bundle
+       serverName: vault.example.com
+     authentication:
+       type: AppRole
+       appRole:
+         secret:
+           name: vault-approle
+     vaultKeyPath: transit/keys/kms-key
+     image: registry.example.com/vault-plugin@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+   ```
+
+3. Cluster admin configures the APIServer resource with the KMS encryption type and a reference to the custom resource GVK and name:
    ```yaml
    apiVersion: config.openshift.io/v1
    kind: APIServer
@@ -212,24 +273,13 @@ To enable the apiservers to access the KMS plugin, the `/var/run/kmsplugin` dire
        type: KMS
        kms:
          type: Vault
-         vault:
-           kmsPluginImage: registry.example.com/vault-plugin@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
-           vaultAddress: https://vault.example.com:8200
-           vaultNamespace: my-namespace
-           tls:
-             caBundle:
-               name: vault-ca-bundle  # ConfigMap in openshift-config namespace
-             serverName: vault.example.com
-           authentication:
-             type: AppRole
-             appRole:
-               secret:
-                 name: vault-approle # Secret in openshift-config namespace with roleID and secretID keys
-           transitMount: transit
-           transitKey: my-encryption-key
+         pluginConfig:
+           apiVersion: vault.hashicorp.io/v1
+           kind: VaultKMSConfig
+           name: my-vault-kms
    ```
 
-2. keyController detects the configuration, fetches the referenced Secret from `openshift-config` namespace, validates that required data keys are present, and creates an encryption key secret containing `kms-encryption-config`, `kms-plugin-config`, individual `kms-plugin-secret-{secretName}_{dataKey}` entries, and individual `kms-plugin-configmap-{configMapName}_{dataKey}` entries:
+4. keyController detects the configuration, reads the referenced custom resource's status to obtain the resolved plugin configuration (including the image), fetches the referenced Secret from `openshift-config` namespace, validates that required data keys are present, and creates an encryption key secret containing `kms-encryption-config`, `kms-plugin-config`, individual `kms-plugin-secret-{secretName}_{dataKey}` entries, and individual `kms-plugin-configmap-{configMapName}_{dataKey}` entries:
    ```yaml
    apiVersion: v1
    kind: Secret
@@ -247,7 +297,7 @@ To enable the apiservers to access the KMS plugin, the `/var/run/kmsplugin` dire
      kms-plugin-configmap-vault-ca-bundle_ca-bundle.crt: <base64-encoded CA bundle>
    ```
 
-3. stateController uses `kms-encryption-config` to generate the EncryptionConfiguration (with keyID in the endpoint and provider name):
+5. stateController uses `kms-encryption-config` to generate the EncryptionConfiguration (with keyID in the endpoint and provider name):
    ```yaml
    apiVersion: apiserver.config.k8s.io/v1
    kind: EncryptionConfiguration
@@ -262,7 +312,7 @@ To enable the apiservers to access the KMS plugin, the `/var/run/kmsplugin` dire
              timeout: 10s
    ```
 
-4. stateController copies `kms-plugin-config`, `kms-plugin-secret` entries, and `kms-plugin-configmap` entries with keyID suffix to the encryption-configuration secret:
+6. stateController copies `kms-plugin-config`, `kms-plugin-secret` entries, and `kms-plugin-configmap` entries with keyID suffix to the encryption-configuration secret:
    ```yaml
    apiVersion: v1
    kind: Secret
@@ -278,17 +328,17 @@ To enable the apiservers to access the KMS plugin, the `/var/run/kmsplugin` dire
      kms-plugin-configmap-vault-ca-bundle_ca-bundle.crt-1: <base64-encoded CA bundle for keyID 1>
    ```
 
-5. The encryption-configuration secret is revisioned, triggering a new rollout. The respective operator configures sidecars accordingly (see [KMS Plugin Lifecycle Management](#kms-plugin-lifecycle-management-tech-preview-v2)).
+7. The encryption-configuration secret is revisioned, triggering a new rollout. The respective operator configures sidecars accordingly (see [KMS Plugin Lifecycle Management](#kms-plugin-lifecycle-management-tech-preview-v2)).
 
-6. migrationController initiates re-encryption (no code changes - works with any mode).
+8. migrationController initiates re-encryption (no code changes - works with any mode).
 
-7. conditionController updates status conditions: `EncryptionInProgress`, then `EncryptionCompleted`.
+9. conditionController updates status conditions: `EncryptionInProgress`, then `EncryptionCompleted`.
 
 For first-time KMS enablement, keyController runs pre-flight checks by deploying a pod with the KMS plugin to verify status and encrypt/decrypt capability before generating the first encryption key.
 
 #### Variation: Updates Requiring Migration (Tech Preview v2)
 
-If a field affecting the KEK is changed (**vault-address**, **vault-namespace**, **transit-key**, **transit-mount**), keyController creates a new encryption key secret with the next keyID (see [Preconditions for Configuration Changes](#preconditions-for-configuration-changes-tech-preview-v2) for invariants and pre-flight checks that apply before a new key is generated).
+If a field affecting the KEK is changed on the KMS plugin custom resource (**vault-address**, **vault-namespace**, **vaultKeyPath**), the OLM operator propagates the change to the custom resource's status. The keyController detects the status change and creates a new encryption key secret with the next keyID (see [Preconditions for Configuration Changes](#preconditions-for-configuration-changes-tech-preview-v2) for invariants and pre-flight checks that apply before a new key is generated).
 
 stateController generates an EncryptionConfiguration with both providers — new as write key, old as read key:
 
@@ -335,7 +385,7 @@ Both providers run as separate sidecar containers with different unix domain soc
 
 #### Variation: Updates Not Requiring Migration (Tech Preview v2)
 
-Fields that only affect the container spec (e.g., image for CVE fixes) do not change the KEK:
+Fields that only affect the container spec (e.g., the plugin image updated by the OLM operator for CVE fixes) do not change the KEK. The OLM operator updates the custom resource's status with the new image, the encryption controllers detect the change and triggers an in-place field update:
 
 1. keyController runs pre-flight checks to validate the new configuration (see [Pre-flight Checker](#pre-flight-checker-tech-preview-v2)).
 2. keyController updates the existing encryption key secret in-place. No new secret is created.
@@ -392,13 +442,13 @@ Both KMS providers run as separate sidecar containers without deduplication, mai
 **Invariants:**
 1. Once an encryption key is generated, it must propagate through the entire state machine. Each key has a monotonically increasing ID that determines provider ordering in the EncryptionConfiguration.
 3. Once a write key has been read by a single instance, it must be assumed that it may be used to encrypt data. 
-  Encryption keys for KMS are derived from the API configuration. 
+  Encryption keys for KMS are derived from the KMS plugin custom resource status. 
   Because the configuration can change over time, a new key cannot be generated until the current rollout is fully completed.
-3. The API configuration must resolve to the same encryption key instance.
+3. The custom resource status must resolve to the same encryption key instance.
 
 **Pre-flight checks:** Before applying any configuration change, a dedicated controller deploys a pod with the KMS plugin to verify status and encrypt/decrypt capability. Configuration changes are only applied after pre-flight checks succeed. This prevents deadlocks where a misconfigured key (e.g., typo in transit-key) is deployed but non-functional, and the system cannot recover because the key must complete its cycle. See [Pre-flight Checker](#pre-flight-checker-tech-preview-v2) for the detailed mechanism.
 
-**Blocked operations during promotion:** keyController will not generate a new encryption key while the in-progress key is being promoted. If the admin overwrites the configuration (e.g., switches from KMS1 to KMS2 while KMS1 is still rolling out), the new key is not generated. To fix the in-progress configuration, admin must provide the same KMS configuration — this associates the fix with the existing encryption key.
+**Blocked operations during promotion:** keyController will not generate a new encryption key while the in-progress key is being promoted. If the admin overwrites the custom resource configuration (e.g., switches from KMS1 to KMS2 while KMS1 is still rolling out), the new key is not generated. To fix the in-progress configuration, admin must provide the same KMS configuration on the custom resource — this associates the fix with the existing encryption key.
 
 **Recovery from incorrect configuration:**
 - Migration-triggering fields: prevented by pre-flight checks (misconfiguration is caught before key generation).
@@ -406,7 +456,7 @@ Both KMS providers run as separate sidecar containers without deduplication, mai
 
 #### Pre-flight Checker (Tech Preview v2)
 
-The pre-flight checker validates KMS configuration before any configuration change is applied. The API allows admins to specify a KMS plugin image reference, and the API may add new fields over time in a backward-compatible way (e.g., a new field that maps to a new plugin flag). A new flag is expected to be supported for a range of image versions (say 1.X+), but we do not control which image version the admin provides: they might set a new field while referencing an older image (e.g., 1.X-2) that does not support the corresponding flag. Rather than maintaining a compatibility matrix between API field sets and image versions, we run the pre-flight checker unconditionally — the cost of an extra pod is acceptable compared to the risk of deploying an incompatible configuration.
+The pre-flight checker validates KMS configuration before any configuration change is applied. The API may add new fields over time in a backward-compatible way (e.g., a new field that maps to a new plugin flag). A new flag is expected to be supported for a range of image versions (say 1.X+). Although plugin images are sourced through controlled channels (see [KMS Plugin Delivery and Configuration Interface](#kms-plugin-delivery-and-configuration-interface)), compatibility gaps can still occur — for example, an OLM-managed plugin image may lag behind newly added API fields, or a payload image update and an API change may land in different z-stream releases. Rather than maintaining a compatibility matrix between API field sets and image versions, we run the pre-flight checker unconditionally — the cost of an extra pod is acceptable compared to the risk of deploying an incompatible configuration.
 
 The checker consists of two parts: a preflight binary that tests the KMS provider end-to-end via the plugin, and a controller that coordinates the check with the key-controller.
 
@@ -434,7 +484,7 @@ After a successful check the preflight pod is kept for a short period (e.g., 1 h
 Like all other encryption controllers, a `KMSPreflightController` instance runs in each API server operator (cluster-kube-apiserver-operator, cluster-openshift-apiserver-operator, and cluster-authentication-operator). 
 Each instance coordinates with its operator's key-controller using a hash-based handshake protocol:
 
-1. The key-controller computes a hash of the current KMS configuration including the contents of the referenced Secrets/ConfigMaps and sets `EncryptionKMSPreflightRequired` (hash in the message).
+1. The key-controller computes a hash of the current KMS configuration from the custom resource status including the contents of the referenced Secrets/ConfigMaps and sets `EncryptionKMSPreflightRequired` (hash in the message).
 2. The preflight controller reads that hash, deploys the preflight pod, and runs the checks.
 3. On success, the preflight controller sets `EncryptionKMSPreflightSucceeded` (same hash in the message), including the observed `key_id` from the **Status** check.
 4. The key-controller waits for the two hashes to match, then creates an encryption key secret (initially as backup key) and writes `encryption.apiserver.operator.openshift.io/target-remote-key-id` on it from the `remoteKeyId` reported by pre-flight.
@@ -682,9 +732,64 @@ When KMS is enabled, the injection reads the encryption-configuration secret, ex
 
 #### Provider Abstraction
 
-Each KMS provider type has a sidecar builder that constructs the container spec from the provider configuration, credentials, and KMS endpoint. Currently, Vault is the only implemented provider. Adding a new provider requires implementing a sidecar builder and adding its configuration fields to the provider config union.
+Each KMS provider type has a sidecar builder that constructs the container spec from the resolved configuration in the custom resource's status, credentials, and KMS endpoint. Currently, Vault is the only implemented provider. Adding a new provider requires implementing a CRD that follows the plugin configuration interface (spec for user config, status for resolved config including image), an OLM operator to reconcile the CRD, and a sidecar builder in library-go.
 
 Credentials and ConfigMap data (`kms-plugin-secret-{secretName}_{dataKey}-{keyID}` and `kms-plugin-configmap-{configMapName}_{dataKey}-{keyID}`) are carried automatically by the encryption controllers through the encryption-configuration secret, so the sidecar builder can consume them without additional plumbing.
+
+#### KMS Plugin Delivery and Configuration Interface
+
+In order to deploy and manage KMS plugins on the cluster, we define a CRD-based interface that separates plugin configuration from the platform's APIServer resource. Rather than embedding provider-specific configuration and image references directly in the APIServer config, each KMS plugin provider defines a custom resource that encapsulates the full plugin configuration. The APIServer resource references this custom resource, and the encryption controllers read the resolved configuration from its status.
+
+This approach solves several problems:
+- Clean separation of concerns. The APIServer resource only needs to know *which* plugin to use (via a reference), not *how* to configure it. Provider-specific configuration lives in the provider's own CRD, where it can evolve independently of the platform API.
+- Plugin images are never specified by the user. They are embedded in the OLM operator for the plugin provider, ensuring that the image is tested and compatible with the version of OCP being run. OLM upgrade controls enforce compatible upgrades across minor and major cluster version boundaries. This will ensure that the plugin images that users are installing have been tested with the specific version of OCP they are being installed on top of.
+- The OLM operator manages the plugin image lifecycle, ensuring that updates for version compatibility, API changes, or CVE patches are delivered through the OLM update graph rather than relying on users to manually update image references. With OLM, the plugin providers can express when an update needs to happen and even update automatically if the cluster is configured that way.
+- Similarly, there is now first class support for disconnected mirroring. In the previous case, a user would have to manually mirror the image by generating their own IDMS and mirroring each plugin image to their mirror registry. Now, the plugin is mirrored when the certified OLM catalog is mirrored.
+
+We also explored several other options to deliver the plugin. The first iteration involved users just specifying the KMS plugin image ref as a field on the API. This was ruled out because it means that customers would have to manually lifecycle and upgrade the plugin themselves and the platform could not guarantee compatibility and safe upgrades. We also attempted to package the plugin image directly with the OCP payload so that it was lifecycled with the CVO in the same way that other core OCP components are installed and upgraded. This was ultimately ruled out because the Vault KMS plugin (and potential other future third party integrations) are not open source and as a result cannot be packaged directly with OpenShift itself. We settled on the OLM operator approach because it is the default mechanism that third party integrations are delivered with OpenShift and many of the above concerns are resolved directly with OLM and the certification process. However, there are also some drawbacks to this approach that are enumerated below:
+
+- Users will have to install the OLM operator, write the provider specific config to a bespoke CR, then update the APIServer config to point to that configuration. That is a more complex UX than requiring the user to interact with a single API.
+- Lifecycling the OLM operator is more complex than just upgrading the cluster with the default controls. They will be required to keep the Vault plugin up to date in lockstep with the cluster via OLM's upgrade mechanisms.
+- The encryption controllers will need to have a more complex integration abstraction instead of just importing APIs directly at compile time.
+
+Keep in mind that for the initial implementation, there are still other problems that need to be solved for this interface to be truly generic. For initial GA, there will be logic embedded in the encryption controllers specific to the Vault KMS provider plugin. This is because there are specific concerns around when and how to rotate the KEK and do a new API server rollout that has already been built and implemented in a previous iteration. In a future iteration, we will design a more generic interface and eventually migrate future provider plugins so that there isn't any need for the encryption controllers to have field specific knowledge embedded in the controllers.
+
+##### Plugin Configuration CRD Interface
+
+Each KMS plugin provider defines a cluster scoped CRD with a set of provider-specific configuration fields (e.g. for the Vault KMS provider: Vault address, key path, authentication credentials). When the user configures the provider plugin, they create a CR with the necessary configuration values in the spec.
+- The OLM operator with the provider plugin CRD controller writes a status that mirrors the spec and includes additional configuration defined by the operator itself. For now, that is just the image field that is appended to the status.
+
+The status is the contract between the plugin provider and the encryption controllers. The encryption controllers read the status to obtain the resolved plugin configuration including the image. This ensures the controllers always work with a complete, validated configuration snapshot that includes both the user provided settings and the operator-provided image.
+
+##### OLM-Managed Plugins (Certified Third-Party Providers)
+
+For each KMS plugin provider, there is an OLM operator that:
+1. Defines the provider-specific CRD (e.g. `VaultKMSConfig`)
+2. Watches for custom resources of that CRD type
+3. Reconciles each CR by reading the spec and writing a status that mirrors the spec fields plus the plugin image reference hardcoded for that version of the operator
+4. Runs in a provider-specific namespace (e.g. `vault-kms-provider` for the Vault KMS plugin operator) and ensures that the controller is a cluster singleton by only supporting AllNamespaces install mode with OLM
+
+The OLM operator is responsible for:
+- Publishing an immutable image reference (digest pinned) that is compatible with the installed OpenShift version and specifying corresponding OLM update graph metadata
+- Updating the image reference in the CR status when the operator is updated (e.g., bug fixes, CVE patches) — there is a 1:1 relationship between operator version and plugin image version
+- Validating that the CR spec is well-formed before writing the status
+
+If the custom resource referenced by the APIServer config does not have a populated status (e.g. the OLM operator is not installed or has not yet reconciled), the keyController goes degraded with a clear status message indicating which custom resource status is missing. If the image in the status is invalid (cannot be pulled, not a valid KMS plugin image), the pre-flight checker catches this and prevents the plugin from being deployed.
+
+When the OLM operator is upgraded and writes a new image reference to the CR status, the encryption controllers detect the status change and apply it through the existing [non-migration update flow](#variation-updates-not-requiring-migration-tech-preview-v2). The pre-flight checker validates the new image before it is deployed.
+
+The OLM operator creates a cluster scoped CRD and is installed in AllNamespaces mode. This is to ensure that the plugin configuration controller is a cluster singleton and to ensure that the encryption configuration is unique.
+
+This model ensures that:
+- The third-party provider controls the plugin image lifecycle independently of the OpenShift release cadence
+- Image compatibility with the OpenShift version is the provider's responsibility, enforced through the OLM operator's version-gated subscription channels
+- The pre-flight checker validates the image before it is deployed, catching incompatibilities regardless of the image source
+- Disconnected plugins are managed by OLM disconnected mirroring
+
+
+##### Overrides
+
+It is possible for a user to override the plugin image by disabling the OLM operator and manually editing the CR status. That is unavoidable, and we will need to document this edge case to make it clear that only valid tested plugins are supported by OpenShift. We should make it clear in our documentation that any rbac granted to modify these cluster scoped resources is highly privileged and should only be given to users that are also allowed to modify encryption configuration.
 
 #### Multiple Concurrent Sidecars
 
@@ -746,8 +851,9 @@ operator CR (kubeapiservers.operator.openshift.io/cluster):
 
 ### User Stories
 
-- As a cluster admin, I want to enable KMS encryption by updating the APIServer resource, so I can declaratively configure encryption without manually managing keys.
+- As a cluster admin, I want to enable KMS encryption by creating a provider-specific custom resource and referencing it from the APIServer resource, so I can declaratively configure encryption without manually managing keys or plugin images.
 - As a cluster admin, I want the same migration and monitoring experience for KMS as local encryption, so I don't need to learn new procedures.
+- As a KMS plugin provider, I want to ship an OLM operator that manages the plugin image lifecycle and configuration through a custom resource, so my plugin integrates with OpenShift's upgrade and disconnected mirroring mechanisms.
 - As a security admin, I want encryption keys stored outside the cluster, so compromised control plane nodes cannot access keys.
 
 ### API Extensions
@@ -768,11 +874,11 @@ and deploy KMS plugins at the hardcoded endpoint `unix:///var/run/kmsplugin/kms.
 
 **Tech Preview V2**
 
-In Tech Preview v2 we propose to extend the existing `KMSConfig`, adding
-support to OCP-managed Vault KMS Plugin. The Vault KMS Plugin communicates
-with Vault Enterprise to encrypt and decrypt resources. Users are expected to
-fully configure and support Vault Enterprise themselves. OCP is responsible for
-deploying and managing the Vault KMS Plugin.
+In Tech Preview v2 we propose to restructure the KMS configuration API to support
+an OCP-managed Vault KMS Plugin through a CRD-based plugin interface. The Vault
+KMS Plugin communicates with Vault Enterprise to encrypt and decrypt resources.
+Users are expected to fully configure and support Vault Enterprise themselves.
+OCP is responsible for deploying and managing the Vault KMS Plugin.
 
 Vault KMS Plugin configuration documentation can be found [here](https://github.com/hashicorp/web-unified-docs/blob/ab6191e4856b52a59a87fe0f17703671a7317ec6/content/vault/v1.21.x/content/docs/deploy/kubernetes/kms/configuration.mdx)
 
@@ -783,13 +889,22 @@ related `AWSKMSConfig`. We also propose removing the unused
 `KMSEncryptionProvider` feature gate. We propose to keep the union
 discriminator in preparation for future requests to support other KMS Plugins.
 
-We propose to extend `KMSConfig` with `VaultKMSConfig`, also adding
-`VaultKMSProvider` as new `KMSProviderType`.
+We propose to extend `KMSConfig` with `VaultKMSProvider` as new `KMSProviderType`.
+Rather than embedding Vault-specific configuration fields directly in the
+APIServer resource, the `KMSConfig` for the Vault provider type contains a
+`pluginConfig` reference field with `name` that points to a
+user-created cluster-scoped `VaultKMSConfig` custom resource. This custom resource is defined
+by the Vault KMS plugin OLM operator and contains the provider-specific
+configuration in its spec. The OLM operator reconciles the custom resource,
+copying the spec to the status and adding the plugin image reference — see
+[KMS Plugin Delivery and Configuration Interface](#kms-plugin-delivery-and-configuration-interface)
+for the CRD interface pattern, delivery mechanisms, and rationale.
+
 We propose that the existing `KMSEncryption` feature gate be extended to include
 the Vault KMS Plugin API.
 
-The full structure of the proposed Vault KMS Plugin configuration API can be
-found in [this pull request](https://github.com/openshift/api/pull/2805).
+
+The full structure of the proposed Vault KMS Plugin configuration API can be found in [this pull request](https://github.com/openshift/api/pull/2805). In the future, this will be replaced with a pointer to the CRD status block from the Vault KMS provider.
 
 ### Topology Considerations
 
@@ -1089,7 +1204,7 @@ No special handling required.
 **Non-Migration Update Fallback:**
 - Only the active provider's sidecar config is updated; older providers retain their original configuration as fallback
 - Detection: Revision rollout failure in operator status
-- Recovery: Provide corrected configuration via APIServer resource
+- Recovery: Provide corrected configuration via the KMS plugin custom resource
 
 ## Support Procedures
 
