@@ -62,9 +62,11 @@ This is approach is consistent with other workload components like
 [KubeScheduler](https://github.com/openshift/api/blob/master/operator/v1/types_scheduler.go) / [Scheduler](https://github.com/openshift/api/blob/master/config/v1/types_scheduling.go).
 
 Example:
-```
+```yaml
 apiVersion: config.openshift.io/v1alpha1
 kind: ControllerManager
+metadata:
+  name: cluster
 spec:
   forceDetachOnTimeout: Disabled
 ```
@@ -75,19 +77,24 @@ API PR: <https://github.com/openshift/api/pull/2668>
 
 #### Hypershift / Hosted Control Planes
 
-Nothing special for HCP.
+There is no `cluster-kube-controller-manager-operator` in hypershift, so this enhancement will also introduce `hostedCluster.spec.configuration.controllerManager`, similar to what already exists for
+[APIServer](https://github.com/openshift/hypershift/blob/c56bbe4183aff452636ae03ab008e929a061019d/api/hypershift/v1beta1/hostedcluster_types.go#L2818) and
+[Scheduler](https://github.com/openshift/hypershift/blob/c56bbe4183aff452636ae03ab008e929a061019d/api/hypershift/v1beta1/hostedcluster_types.go#L2871).
+control-plane-operator will then pass this option to KCM.
 
 #### Standalone Clusters
 
-Nothing special for standalone clusters.
+Standalone clusters are handled by this enhancement and the code in `cluster-kube-controller-manager-operator`.
 
 #### Single-node Deployments or MicroShift
 
-Nothing special for SNO.
+Single-node Deployments are handled by this enhancement and the code in `cluster-kube-controller-manager-operator`.
+
+MicroShift, however, does not run `cluster-kube-controller-manager-operator` and is not covered by this enhancement. KCM runs as an internal goroutine in a unified binary instead of a standalone service.
 
 #### OpenShift Kubernetes Engine
 
-Nothing special for OKE.
+Nothing special for OKE compared to standalone clusters.
 
 ### Implementation Details/Notes/Constraints
 
@@ -95,7 +102,7 @@ None
 
 ### Risks and Mitigations
 
-None
+Disabling force detach leaves the related `VolumeAttachment` undeleted after an unhealthy node exceeds the timeout. Recovery then requires the non-graceful node shutdown procedure ([ref](https://kubernetes.io/docs/concepts/cluster-administration/node-shutdown/)).
 
 ### Drawbacks
 
@@ -120,7 +127,6 @@ None
 | `.spec.forceDetachOnTimeout="Disabled"` should disable force detach on the cluster. | Manual |  |  | |
 | `.spec.forceDetachOnTimeout="Enabled"` should enable force detach on the cluster. | Manual |  |  | |
 | Default behavior should remain the same (force detach enabled). | Manual |  |  | |
-expectations).
 
 ## Graduation Criteria
 
@@ -150,7 +156,7 @@ N/A
 
 ## Upgrade / Downgrade Strategy
 
-The ForceDetachOnTimeout API field will be optional. If it is unspecified or empty, it will behave the same as "Enabled" (current default). So upgraded clusters will still have this option enabled unless the admin decides to set it explicitly to "Disabled".
+The ForceDetachOnTimeout API field will be optional. If it is omitted, it will behave the same as "Enabled" (current default). So upgraded clusters will still have this option enabled unless the admin decides to set it explicitly to "Disabled".
 
 ## Version Skew Strategy
 
