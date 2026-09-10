@@ -3,17 +3,17 @@ title: neat-enhancement-idea
 authors:
   - "@tchap"
   - "@wouldgo"
-reviewers: # Include a comment about what domain expertise a reviewer is expected to bring and what area of the enhancement you expect them to focus on. For example: - "@networkguru, for networking aspects, please look at IP bootstrapping aspect"
-  - TBD
-approvers: # This should be a single approver. The role of the approver is to raise important questions, ensure the enhancement receives reviews from all applicable areas/SMEs, and determine when consensus is achieved such that the EP can move forward to implementation.  Having multiple approvers makes it difficult to determine who is responsible for the actual approval. Team leads and staff engineers often make good approvers.
-  - TBD
-api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None". Once your EP is published, ask in #forum-api-review to be assigned an API approver.
+reviewers:
+  - "@liouk" # The author of the original External OIDC EP, to review the whole EP.
+approvers: 
+  - "@benluddy"
+api-approvers:
   - "None"
-creation-date: yyyy-mm-dd
+creation-date: 2026-09-10
 last-updated: yyyy-mm-dd
 status: provisional|implementable|implemented|deferred|rejected|withdrawn|replaced|informational
-tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
-  - TBD
+tracking-link:
+  - "https://redhat.atlassian.net/browse/OCPSTRAT-3721"
 see-also:
   - "/enhancements/authentication/direct-external-oidc-provider.md"
   - "/enhancements/authentication/external-oidc-additional-identity-information-sources.md"
