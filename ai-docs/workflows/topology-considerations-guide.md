@@ -122,13 +122,14 @@ graph TD
 | **Distributed quorum** | No quorum with 1 member | Use single-member mode or disable |
 | **Network partitions** | Can't happen (1 node) | Simplifies some failure modes |
 
-**Topology detection**:
+**Topology detection** (API-level, used by operators at runtime):
 ```bash
-oc get node -l node.openshift.io/single-node-cluster
+oc get infrastructure cluster -o jsonpath='{.status.controlPlaneTopology}'
+# Returns "SingleReplica" for SNO, "HighlyAvailable" for multi-node
 ```
 
 **Good example**:
-> **SNO impact**: This adds a DaemonSet consuming 100MB RAM and 50m CPU per node. In SNO, this is 100MB total. The feature detects single-node topology (via `node.openshift.io/single-node-cluster` label) and reduces replica count from 3 to 1 for the StatefulSet.
+> **SNO impact**: This adds a DaemonSet consuming 100MB RAM and 50m CPU per node. In SNO, this is 100MB total. The feature detects single-node topology (via `Infrastructure.Status.ControlPlaneTopology == SingleReplica`) and reduces replica count from 3 to 1 for the StatefulSet.
 
 **Bad example**:
 > No special considerations for single-node deployments.
@@ -266,7 +267,7 @@ When reviewing enhancement PRs, verify:
 - [ ] Quantifies per-node memory/CPU overhead
 - [ ] Addresses replica count assumptions (if any)
 - [ ] Documents behavior if HA is assumed
-- [ ] Tests with `node.openshift.io/single-node-cluster` label
+- [ ] Tests with SNO topology (`Infrastructure.Status.ControlPlaneTopology == SingleReplica`)
 
 **MicroShift**:
 - [ ] Lists operator dependencies (are they in MicroShift?)

@@ -76,7 +76,15 @@ status:
 | **Available** | Component functional | Pods ready, API serving | Pods not ready, API down |
 | **Progressing** | Reconciliation in progress | Upgrade/rollout active | Desired state reached |
 | **Degraded** | Impaired functionality | Partial failure | Fully healthy |
+
+## Optional Conditions
+
+| Condition | Meaning | True When | False When |
+|-----------|---------|-----------|------------|
 | **Upgradeable** | Safe to upgrade | No blockers | Manual intervention needed |
+| **EvaluationConditionsDetected** | Detects impact of invasive changes | Deprecated/risky config detected | No issues detected |
+
+**Note**: `Upgradeable` defaults to allowing upgrades when missing, True, or Unknown — only `False` blocks minor upgrades. `EvaluationConditionsDetected` is set by individual operators on their own ClusterOperator resources to report the results of detection logic for invasive changes; the CVO monitors it generically for metrics but does not exclusively manage it.
 
 See [status-conditions.md](../../platform/operator-patterns/status-conditions.md) for detailed semantics.
 
@@ -119,47 +127,14 @@ oc get co -o json | jq '.items[] | select(.status.conditions[] | select(.type=="
 
 ## Creating ClusterOperator
 
-```go
-import (
-    configv1 "github.com/openshift/api/config/v1"
-    metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-)
+**Two-step process** — ClusterOperator has a status subresource (`+kubebuilder:subresource:status`), so the resource and its status must be updated via separate API calls:
 
-func ensureClusterOperator(ctx context.Context, client client.Client, name string) error {
-    co := &configv1.ClusterOperator{
-        ObjectMeta: metav1.ObjectMeta{
-            Name: name,
-        },
-    }
-    
-    _, err := controllerutil.CreateOrUpdate(ctx, client, co, func() error {
-        // Set conditions
-        setCondition(&co.Status.Conditions,
-            configv1.OperatorAvailable,
-            configv1.ConditionTrue,
-            "AsExpected",
-            "Component is available")
-        
-        // Set versions
-        co.Status.Versions = []configv1.OperandVersion{
-            {Name: "operator", Version: os.Getenv("RELEASE_VERSION")},
-        }
-        
-        // Set related objects
-        co.Status.RelatedObjects = []configv1.ObjectReference{
-            {
-                Group:    "",
-                Resource: "namespaces",
-                Name:     "my-operator-namespace",
-            },
-        }
-        
-        return nil
-    })
-    
-    return err
-}
-```
+1. Create/update the ClusterOperator resource via the main endpoint (`controllerutil.CreateOrUpdate` or `client.Create`)
+2. Update status (conditions, versions, relatedObjects) via `client.Status().Update()` or `client.Status().Patch()`
+
+**Key types**: `configv1.ClusterOperator`, `configv1.OperatorAvailable`, `configv1.ConditionTrue`, `configv1.OperandVersion`, `configv1.ObjectReference` (all in `github.com/openshift/api/config/v1`)
+
+**Caution**: Status mutations inside a `CreateOrUpdate` mutate function are silently discarded by the API server. Always use `Status().Update()` for status changes.
 
 ## Versions
 
