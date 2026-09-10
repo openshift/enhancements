@@ -12,7 +12,7 @@ approvers:
 api-approvers:
   - None
 creation-date: 2026-09-08
-last-updated: 2026-09-09
+last-updated: 2026-09-10
 tracking-link:
   - https://redhat.atlassian.net/browse/OCPSTRAT-2899
 see-also:
@@ -141,6 +141,11 @@ requirements.
    CAs. User-provided `apiServer.namedCertificates`, ingress certificate
    secrets, and workload certificates are not affected.
 
+6. Selecting certificates for renewal by service or function. Renewal operates
+   on the complete certificate category: `--serving` renews all managed leaf
+   certificates, and `--ca` renews all managed CAs and their descendants. For
+   example, this enhancement does not provide an etcd-only renewal operation.
+
 ## Proposal
 
 ### CLI Design
@@ -154,17 +159,18 @@ directory.
 
 #### `microshift certs status`
 
-Reports the status of all managed certificates. Safe to run while MicroShift is
-running.
+Reports the status of all managed certificates, grouped and sorted by service or
+function and then by certificate name. Safe to run while MicroShift is running.
 
 ```console
 $ sudo microshift certs status
-CERTIFICATE              STATUS    EXPIRY                  REASON          MESSAGE
-kube-apiserver-serving    Green     2027-03-15T10:30:00Z    NotExpiring     Valid for 553 days
-etcd-serving              Yellow    2026-11-01T08:00:00Z    Expiring        Expires in 54 days
-kubelet-client            Green     2027-03-15T10:30:00Z    NotExpiring     Valid for 553 days
-admin-kubeconfig-signer   Green     2035-09-08T10:30:00Z    NotExpiring     Valid for 3287 days
-service-ca                Green     2035-09-08T10:30:00Z    NotExpiring     Valid for 3287 days
+SERVICE            CERTIFICATE              STATUS    EXPIRY                  REASON          MESSAGE
+authentication     admin-kubeconfig-signer   Green     2035-09-08T10:30:00Z    NotExpiring     Valid for 3287 days
+etcd               etcd-signer               Green     2035-09-08T10:30:00Z    NotExpiring     Valid for 3287 days
+etcd               etcd-serving              Yellow    2026-11-01T08:00:00Z    Expiring        Expires in 54 days
+kube-apiserver     kube-apiserver-serving    Green     2027-03-15T10:30:00Z    NotExpiring     Valid for 553 days
+kubelet            kubelet-client            Green     2027-03-15T10:30:00Z    NotExpiring     Valid for 553 days
+service-ca         service-ca                Green     2035-09-08T10:30:00Z    NotExpiring     Valid for 3287 days
 ...
 ```
 
@@ -566,6 +572,11 @@ retained as defaults instead.
 
 3. Should the ProdSec review (OCPEDGE-3002) identify any certificates that
    require different rotation policies?
+
+4. Should administrators be able to configure the spans of the green, yellow,
+   and red zones, or should MicroShift define fixed proportional thresholds for
+   all installations? If configurable, what validation prevents overlapping or
+   unsafe zone boundaries?
 
 ## Test Plan
 
