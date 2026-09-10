@@ -8,7 +8,7 @@ reviewers: # Include a comment about what domain expertise a reviewer is expecte
 approvers: # This should be a single approver. The role of the approver is to raise important questions, ensure the enhancement receives reviews from all applicable areas/SMEs, and determine when consensus is achieved such that the EP can move forward to implementation.  Having multiple approvers makes it difficult to determine who is responsible for the actual approval. Team leads and staff engineers often make good approvers.
   - TBD
 api-approvers: # In case of new or modified APIs or API extensions (CRDs, aggregated apiservers, webhooks, finalizers). If there is no API change, use "None". Once your EP is published, ask in #forum-api-review to be assigned an API approver.
-  - TBD
+  - "None"
 creation-date: yyyy-mm-dd
 last-updated: yyyy-mm-dd
 status: provisional|implementable|implemented|deferred|rejected|withdrawn|replaced|informational
