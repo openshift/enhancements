@@ -13,7 +13,7 @@ approvers:
 api-approvers:
   - "@JoelSpeed"
 creation-date: 2026-08-19
-last-updated: 2026-08-31
+last-updated: 2026-09-10
 tracking-link:
   - "https://issues.redhat.com/browse/CNTRLPLANE-3527"
 status: provisional
@@ -24,101 +24,220 @@ replaces:
 superseded-by: []
 ---
 
-# Service Publishing API Evolution: Replacing
-# `spec.services[]` with `spec.publishing`
+# Service Publishing API Evolution: Replacing `spec.services[]` with `spec.publishing`
 
 ## Summary
 
-Replace the `spec.services[]` heterogeneous list on
-`HostedCluster` with a new `spec.publishing` field that uses
-a discriminated union of three topology presets:
-`DedicatedIngress` (all services through a single ingress
-point), `DedicatedAPIEndpoint` (API server on a dedicated
-LoadBalancer, rest through management cluster ingress), and
-`NodePort` (all services on node ports). The preset model
-eliminates structural API problems (ordering ambiguity,
-duplicate entries, MaxItems coupling, unvalidatable
-constraints), makes router deployment an explicit
-user-visible decision, and covers all documented
-platform x configuration topologies. Initial migration
-(Phase 1) leverages the HO-to-HCP copy boundary to
-translate between APIs without mutating existing
-HostedClusters. A later optional phase (Phase 2.5)
-allows clusters to adopt `spec.publishing` directly via
-an atomic swap that clears `spec.services[]` and sets
-`spec.publishing` in a single update.
+HostedClusters cannot expose the hosted control plane
+router as anything other than a cloud LoadBalancer: the
+router Service is created unconditionally as type
+`LoadBalancer`, so on management clusters without a cloud
+load-balancer provider (Agent, KubeVirt) it stays `Pending`
+indefinitely (OCPBUGS-77856). Fixing this requires letting
+users choose how the router is exposed — and two attempts to
+add that capability to the existing `spec.services[]` API
+failed review, because the field cannot be extended cleanly.
+
+The underlying problem is that `spec.services[]` advertises
+arbitrary per-service publishing combinations while the
+controllers implement only a small, fixed set of platform
+topologies. That mismatch is papered over with a growing tax
+of CEL rules (several disabled because they exceed the cost
+budget), controller-time validation, recurring bug fixes,
+and a ~1,200-line reference document that tells users which
+combinations are actually allowed.
+
+This enhancement replaces `spec.services[]` with a new
+`spec.publishing` field built from a small set of topology
+presets: `DedicatedIngress` (all services through a single
+ingress point), `DedicatedAPIEndpoint` (API server on a
+dedicated LoadBalancer, the rest through management-cluster
+ingress), and `NodePort` (all services on node ports).
+Because the presets encode only the topologies the
+controllers support, the set of valid configurations is
+expressed structurally: the API is self-documenting and
+rejects unsupported topologies at admission instead of after
+the fact, and router exposure becomes an explicit,
+user-visible field rather than an emergent side effect.
+
+Initial migration (Phase 1) leverages the HO-to-HCP copy
+boundary to translate between APIs without mutating existing
+HostedClusters. A later optional phase (Phase 2.5) lets
+clusters adopt `spec.publishing` directly via an atomic swap
+that clears `spec.services[]` and sets `spec.publishing` in
+a single update.
 
 ## Motivation
 
-### Current problems with `spec.services[]`
+The `spec.services[]` API was designed to be maximally
+flexible: any control plane service can, in principle, be
+published with any strategy. In practice the controllers
+implement only a handful of platform-specific topologies.
+Every time that gap is exercised — by a bug, a new platform
+requirement, or a new feature — we respond by adding more
+validation, more controller checks, and more documentation
+to steer users away from the combinations that don't work.
+The API cannot express what it actually supports, so we
+compensate everywhere else. The router exposure bug below is
+the latest example, and the reason this enhancement exists.
 
-#### Structural issues
+### The trigger: the router exposure bug (OCPBUGS-77856)
 
-1. **Heterogeneous list.** `spec.services[]` is a
-   `[]ServicePublishingStrategyMapping` — a list of structs
-   where each entry binds a `ServiceType` enum to a
-   publishing strategy. This creates ordering ambiguity, no
-   schema-level uniqueness (duplicate entries are possible),
-   and `MaxItems` must be bumped every time a new service is
-   added (currently 6, would need 7 for Router).
+The hosted control plane router Service is created
+unconditionally as type `LoadBalancer`
+(`hypershift-operator/controllers/sharedingress/router.go`).
+On management clusters that have no cloud load-balancer
+provider — Agent and KubeVirt in particular — that Service
+never receives an address and stays `Pending`, which blocks
+route status propagation and KAS resolution. The fix is
+conceptually simple: let the user expose the router as a
+NodePort instead. Delivering it through the current API was
+not:
 
-2. **Immutability.** The field is immutable after creation
-   (enforced by CEL). If an operator didn't configure
-   something at creation time, they can't change it without
-   recreating the cluster.
+- PR [openshift/hypershift#8439](https://github.com/openshift/hypershift/pull/8439)
+  tried platform auto-detection and was closed after review.
+- PR [openshift/enhancements#2024](https://github.com/openshift/enhancements/pull/2024)
+  proposed a dedicated `spec.routerPublishing` field, which
+  this enhancement supersedes.
 
-3. **MaxItems coupling.** Both `HostedCluster` and
-   `HostedControlPlane` CRDs have `MaxItems` on
-   `services[]`. The HO copies services from HC to HCP
-   directly, so both must be bumped in lockstep or
-   reconciliation silently breaks.
+Two properties of the current API made a clean fix
+impossible. First, the router is not a service in
+`spec.services[]` at all — whether it is even deployed is
+derived implicitly from platform, endpoint access, KAS
+strategy, and whether a dedicated DNS hostname is set
+(`support/netutil/visibility.go`, `LabelHCPRoutes`). There
+is no field that says "deploy the router," let alone "expose
+it this way." Second, `spec.services[]` is immutable after
+creation for every platform except IBMCloud, so even if
+router exposure were representable, existing clusters could
+not adopt it without being recreated.
 
-4. **Validation gaps.** There is no `MinItems` on
-   `spec.services[]` — count validation is absent entirely.
-   A user could submit any number of entries (up to
-   `MaxItems=6`) of any type, including duplicates, and pass
-   validation. Rules to validate required service types were
-   designed but never shipped — they are commented out
-   (prefixed with `-kubebuilder`) at line 673 of
-   `hostedcluster_types.go` because they exceed the CEL
-   cost budget.
+### Root cause: flexibility the controllers don't implement
 
-5. **Dead/vestigial values.** `S3` and `None` publishing
-   strategies, and `OIDC` and `OVNSbDb` service types, are
-   defined in the API enum with CEL rules but no controller
-   code handles them.
+`spec.services[]` is a `[]ServicePublishingStrategyMapping`
+that binds each `ServiceType` (APIServer, OAuthServer,
+Konnectivity, Ignition) to an arbitrary
+`ServicePublishingStrategy` (LoadBalancer, Route, NodePort,
+…). The schema permits any combination. The controllers do
+not: the supported configurations are a fixed matrix of
+platform × endpoint access × external-DNS, enumerated in
+"Supported topologies today" below and in the reference
+documentation. A user who submits a combination outside
+that matrix does not get a working cluster — they get silent
+misbehavior or a degraded condition, after admission has
+already accepted the write.
 
-#### Flexibility without controller support
+This is the core problem. It is not any single structural
+defect; it is that the shape of the API promises something
+the implementation cannot honor.
 
-The current API allows arbitrary per-service strategy
-combinations, but controllers only support three topologies.
-Users who specify unsupported combinations get silent
-misbehavior or confusing controller errors, not working
-clusters. The API's "flexibility" is a validation gap, not
-a feature.
+### The cost of the mismatch
 
-#### Semantic issues with extending it
+Because the API cannot express what is actually supported,
+the constraints have to be enforced — and explained —
+everywhere else:
 
-Enhancement PR
-[openshift/enhancements#2024](https://github.com/openshift/enhancements/pull/2024)
-proposed adding a `Router` ServiceType to `spec.services[]`
-to allow configuring the HCP router's NodePort exposure.
-This exposed further problems:
+- **Validation admission can't run.** The rules that would
+  enforce required service types and unique Route/NodePort
+  endpoints are written but commented out on the `services`
+  field in `hostedcluster_types.go` because they exceed the
+  CEL cost budget. Uniqueness is instead checked at
+  controller time (`validatePublishingStrategyMapping`), and
+  Route capability likewise
+  (`validateConfigAndClusterCapabilities`). Both run after
+  the write is admitted, so the user learns of the problem
+  from a condition, not a rejection.
+- **Recurring bug fixes.** OCPBUGS-77856 is one instance;
+  each new platform or exposure requirement tends to surface
+  another combination the controllers must be taught to
+  reject or special-case.
+- **Documentation standing in for the type system.** The
+  reference guide
+  (`docs/content/reference/service-publishing-strategies.md`,
+  ~1,200 lines) exists largely to tell users, per platform
+  and per endpoint-access mode, which service/strategy
+  combinations are valid. That document is the API
+  constraint the schema can't express.
+- **Testing can't be systematic.** Because the set of valid
+  configurations isn't derivable from the type — it lives in
+  the platform × endpoint-access × external-DNS matrix in
+  documentation — tests have to replicate that matrix by hand
+  to know which combinations to exercise, and drift from it as
+  the controllers change. And because invalid combinations are
+  admitted and then fail silently, negative testing ("this
+  configuration is rejected") can't be done at admission; it
+  requires standing up controllers and asserting on degraded
+  conditions.
 
-- **Router is infrastructure, not a service.** The private
-  router is a single HAProxy deployment per HCP namespace
-  that serves ALL Route-type services via SNI routing.
-  Putting it alongside APIServer/OAuth/Konnectivity implies
-  it's a peer, which it isn't.
-- **Router deployment is conditional.** The router only
-  deploys under specific conditions. A `Router` ServiceType
-  can be configured when the router won't exist, with no
-  clean admission-time validation.
-- **Redundant information.** On most platforms,
-  OAuth/Konnectivity/Ignition are required to use Route.
-  Adding a `Router` entry doesn't tell the system anything
-  new — the only new information is how to expose the
-  router itself.
+A preset model collapses this: the valid topologies are the
+type, so admission enforces them for free, the configuration
+is self-documenting, and testing becomes tractable — the
+valid set is finite and enumerable directly from the API, and
+invalid configurations are rejected deterministically at
+admission (envtest asserts accept/reject on YAML, with no
+controllers in the loop).
+
+### Structural symptoms of the same mismatch
+
+These follow from modeling a constrained topology as an
+open-ended list. Each is individually fixable — some via
+CRD ratcheting — but they recur because the shape is wrong:
+
+1. **Open-ended list for a closed set.** Ordering is
+   ambiguous, there is no schema-level uniqueness (duplicate
+   entries are possible), and `MaxItems` must be raised
+   whenever a new service is added.
+2. **MaxItems coupling.** Both `HostedCluster` and
+   `HostedControlPlane` cap `services[]` at `MaxItems=6`,
+   and the HO copies the list verbatim from HC to HCP
+   (`hcp.Spec.Services = hcluster.Spec.Services`). The two
+   caps must be raised in lockstep; otherwise the copy is
+   rejected by HCP admission at reconcile time. (A test
+   asserting the two limits stay equal would be a cheap
+   interim guard.)
+3. **Count without content.** A minimum count is enforced
+   (`size(self.services) >= 4`, or `>= 3` for IBMCloud), but
+   *which* services are present, and whether their endpoints
+   are unique, is not — those are exactly the checks that
+   exceed the CEL budget and were disabled.
+4. **Dead values kept for compatibility.** The `S3` and
+   `None` strategies and the `OIDC` and `OVNSbDb` service
+   types remain in the enums with CEL rules but no controller
+   support; the `MaxItems=6` cap exists partly to keep room
+   for these no-op values.
+5. **Immutability.** As above, the field is immutable
+   (except IBMCloud), so misconfigurations and missing
+   capabilities can only be corrected by recreating the
+   cluster.
+
+### Why extending `spec.services[]` doesn't work
+
+The natural way to fix the router bug within the current API
+would be to add the router to `spec.services[]`. An earlier
+revision of #2024 proposed exactly that — a `Router`
+`ServiceType` — and review rejected it, for reasons that
+generalize to any extension of this field:
+
+- **The router is shared infrastructure, not a service.** It
+  is a single HAProxy deployment per HCP namespace that
+  fronts all Route-type services via SNI. Listing it beside
+  APIServer/OAuth/Konnectivity models it as a peer of the
+  things it serves.
+- **Its lifecycle is conditional.** The router only deploys
+  under specific conditions, so a `Router` entry can be
+  configured when no router will exist — with no clean way to
+  validate that at admission.
+- **It carries no new per-service information.** When
+  services already use Route, a `Router` entry adds nothing
+  except how to expose the router itself — which is a
+  property of the topology, not of any one service.
+
+#2024 responded by moving the router out of the list into a
+dedicated `spec.routerPublishing` field. This enhancement
+generalizes that instinct: rather than bolt one more special
+case onto the list, model the whole publishing topology as a
+small set of presets that includes router exposure by
+construction.
 
 ### User Stories
 
@@ -128,21 +247,18 @@ configuring 4 individual services, so that I can't
 accidentally create invalid combinations that the
 controllers don't support.
 
-As a platform engineer deploying on bare metal, I want to
-expose the HCP router as a NodePort instead of the hardcoded
-LoadBalancer, so that I can run HyperShift without a cloud
-load balancer provider.
+As a platform engineer running HyperShift on a management
+cluster with no cloud load-balancer provider (Agent or
+KubeVirt, e.g. bare metal), I want to expose the HCP router
+as a NodePort instead of the hardcoded LoadBalancer, so that
+the router Service does not stay `Pending` and block route
+status and KAS resolution (OCPBUGS-77856).
 
 As an SRE managing a fleet of hosted clusters, I want the
 API to reject unsupported service publishing configurations
 at admission time, so that I don't discover
 misconfigurations through controller errors or degraded
 conditions after creation.
-
-As a tooling developer (ROSA CLI, OCM, ACM), I want a
-stable publishing API that doesn't require MaxItems bumps or
-lockstep CRD updates when new services are added, so that my
-integration code is not fragile.
 
 As an Azure self-managed cluster operator, I want to give
 the OAuth server its own dedicated LoadBalancer while keeping
@@ -154,30 +270,32 @@ configure all-Route publishing without deploying an HCP
 router, so that the platform's existing shared ingress
 infrastructure handles service exposure.
 
-As an SRE operating a fleet of hosted clusters at scale, I
-want to monitor clusters that still use the deprecated
-`spec.services[]` field via a
-`ServicePublishingDeprecated` condition and track migration
-failures via `ServicePublishingMigrationSkipped`, so that I
-can plan and execute the migration to `spec.publishing`
-across my fleet without disruption.
-
 ### Goals
 
 1. Replace `spec.services[]` with a preset-based
    `spec.publishing` field that covers all documented,
    recommended topologies.
-2. Make router deployment an explicit, preset-determined
+2. Express the set of supported topologies structurally, so
+   that the API is self-documenting and unsupported
+   configurations are rejected at admission — removing the
+   need for the current controller-time checks and for the
+   platform/strategy compatibility matrix that today lives
+   only in documentation.
+3. Make the supported configuration space finite and directly
+   testable: the valid set is enumerable from the type, and
+   invalid configurations can be asserted rejected
+   deterministically at admission (envtest) rather than
+   through controller runs and degraded conditions.
+4. Make router deployment an explicit, preset-determined
    decision — not an implicit consequence of service
    strategy combinations.
-3. Enable admission-time validation of all publishing
-   configurations (no more commented-out CEL rules).
-4. Support the Router NodePort exposure use case from
-   enhancement PR #2024 without adding a new ServiceType.
-5. Provide a safe, rollback-compatible migration path from
+5. Support the Router NodePort exposure use case from
+   enhancement PR #2024 (OCPBUGS-77856) without adding a new
+   `ServiceType`.
+6. Provide a safe, rollback-compatible migration path from
    `spec.services[]` to `spec.publishing` using the
    HO-to-HCP copy boundary.
-6. Deprecate and eventually remove `spec.services[]`.
+7. Deprecate and eventually remove `spec.services[]`.
 
 ### Non-Goals
 
@@ -185,9 +303,12 @@ across my fleet without disruption.
    connectivity (PrivateLink, Private Service Connect,
    Swift) is configured — these are orthogonal platform
    concerns.
-2. Supporting arbitrary per-service strategy combinations —
-   the preset model intentionally restricts to documented
-   topologies.
+2. Supporting *unconstrained* per-service strategy
+   combinations. The presets deliberately encode only the
+   per-service variations the controllers support (for
+   example, the Azure self-managed OAuth LoadBalancer case);
+   they do not reopen the arbitrary combination space that
+   `spec.services[]` nominally allowed.
 3. Changing the HCP router's internal architecture or SNI
    routing behavior.
 4. Automatically migrating existing HostedClusters'
@@ -257,7 +378,8 @@ older Control Plane Operators (CPO) by writing both fields.
    `spec.services[]`.
 5. If translation fails (unrepresentable configuration), HO
    skips translation, copies `spec.services[]` only, and
-   emits a `ServicePublishingMigrationSkipped` condition.
+   reports the failure on the HC's `ValidConfiguration`
+   condition. The cluster keeps working on `spec.services[]`.
 
 ```mermaid
 sequenceDiagram
@@ -288,7 +410,7 @@ sequenceDiagram
         CPO->>HCP: Read spec.publishing (new CPO)<br/>or spec.services[] (old CPO)
     else Unrepresentable config
         HO->>HCP: Write spec.services[] only
-        HO->>HO: Emit ServicePublishingMigrationSkipped
+        HO->>HO: Set ValidConfiguration=False (untranslatable)
     end
 ```
 
@@ -365,40 +487,50 @@ spec:
       # exposure=External: platform handles routing
       # (IBMCloud)
 
-      # oauthEndpoint: controls how OAuth is exposed
-      # (Azure self-managed only)
-      oauthEndpoint: LoadBalancer
+      # services: list keyed by service name. An APIServer
+      # entry with a hostname is required; the other
+      # services' hostnames are derived when omitted.
+      services:
+      - name: APIServer      # required — KAS hostname required
+        hostname: api.custom.com
+      - name: OAuthServer    # optional — derived if omitted
+        hostname: oauth.custom.com
+        # exposure: promote OAuth onto its own dedicated LB
+        # (Azure self-managed only)
+        exposure: DedicatedLoadBalancer
+      - name: Konnectivity
+        hostname: konnectivity.custom.com
+      - name: Ignition       # optional — omit if no Ignition
+        hostname: ignition.custom.com
 
-      services:  # required — per-service hostname config
-        apiServer:  # required — KAS hostname
-          hostname: api.custom.com
-        oAuthServer:  # optional — derived if omitted
-          hostname: oauth.custom.com
-        konnectivity:
-          hostname: konnectivity.custom.com
-        ignition:  # optional — omit if no Ignition
-          hostname: ignition.custom.com
-
-    # type=DedicatedAPIEndpoint: KAS (and optionally
-    # OAuth) on dedicated LBs
+    # type=DedicatedAPIEndpoint: KAS on a dedicated LB;
+    # OAuth via Route through the management ingress
     dedicatedAPIEndpoint:
-      apiServer:  # optional — hostname override for LB
+      # services: only APIServer and OAuthServer are
+      # configurable. Konnectivity/Ignition are served by the
+      # management ingress with derived, non-overridable
+      # hostnames. All entries optional (hostnames derived).
+      services:
+      - name: APIServer      # optional — override LB hostname
         hostname: api.example.com
-      oAuthServer:  # optional — presence → OAuth gets LB
+      - name: OAuthServer    # optional
         hostname: oauth.example.com
+        # exposure: OAuth on its own dedicated LB
+        # (Azure self-managed only)
+        exposure: DedicatedLoadBalancer
 
     # type=NodePort: all services directly on node ports
     nodePort:
       address: 10.0.0.5  # required — shared address
       services:  # optional — per-service port overrides
-        apiServer:
-          port: 30443
-        oAuthServer:
-          port: 30444
-        konnectivity:
-          port: 30445
-        ignition:
-          port: 30446
+      - name: APIServer
+        port: 30443
+      - name: OAuthServer
+        port: 30444
+      - name: Konnectivity
+        port: 30445
+      - name: Ignition
+        port: 30446
 ```
 
 #### Go types (sketch)
@@ -412,7 +544,8 @@ spec:
 type ServicePublishing struct {
     // +unionDiscriminator
     // +kubebuilder:validation:Enum=DedicatedIngress;DedicatedAPIEndpoint;NodePort
-    Type ServicePublishingType `json:"type"`
+    // +required
+    Type ServicePublishingType `json:"type,omitempty"`
 
     // +optional
     DedicatedIngress DedicatedIngressPublishing `json:"dedicatedIngress,omitzero"`
@@ -424,13 +557,50 @@ type ServicePublishing struct {
     NodePort NodePortPublishing `json:"nodePort,omitzero"`
 }
 
-// DedicatedIngressPublishing configures all services
-// through a single ingress point.
+// IngressServiceName is the closed set of services published
+// through the HCP ingress router in the DedicatedIngress
+// preset. All four are served by the router, so each supports
+// a hostname in the cluster's external DNS domain. New
+// services are added by extending this enum.
+// +kubebuilder:validation:Enum=APIServer;OAuthServer;Konnectivity;Ignition
+// +kubebuilder:validation:MaxLength=16
+type IngressServiceName string
+
+// APIEndpointServiceName is the closed set of services whose
+// endpoints are user-configurable in the DedicatedAPIEndpoint
+// preset. Konnectivity and Ignition are intentionally absent:
+// in this topology they are served by the management-cluster
+// ingress with the external-DNS annotation stripped, so a
+// custom hostname would be unreachable.
+// +kubebuilder:validation:Enum=APIServer;OAuthServer
+// +kubebuilder:validation:MaxLength=16
+type APIEndpointServiceName string
+
+// NodePortServiceName is the closed set of services published
+// on node ports in the NodePort preset.
+// +kubebuilder:validation:Enum=APIServer;OAuthServer;Konnectivity;Ignition
+// +kubebuilder:validation:MaxLength=16
+type NodePortServiceName string
+
+// ServiceExposureOverride promotes a single service off its
+// default exposure onto a dedicated LoadBalancer. The only
+// supported value is DedicatedLoadBalancer, valid only for
+// OAuthServer on Azure self-managed (enforced by CEL).
+// +kubebuilder:validation:Enum=DedicatedLoadBalancer
+// +kubebuilder:validation:MaxLength=24
+type ServiceExposureOverride string
+
+// DedicatedIngressPublishing configures all services through
+// a single ingress point. The exposure sub-union describes
+// how the HCP router itself is exposed.
 // +union
+// +kubebuilder:validation:XValidation:rule="self.services.exists(s, s.name == 'APIServer' && has(s.hostname))",message="DedicatedIngress requires an APIServer entry with a hostname"
+// +kubebuilder:validation:XValidation:rule="self.services.all(s, !has(s.exposure) || s.name == 'OAuthServer')",message="exposure override is only valid for the OAuthServer entry"
 type DedicatedIngressPublishing struct {
     // +unionDiscriminator
     // +kubebuilder:validation:Enum=LoadBalancer;NodePort;External
-    Exposure IngressExposureType `json:"exposure"`
+    // +required
+    Exposure IngressExposureType `json:"exposure,omitempty"`
 
     // +optional
     LoadBalancer IngressLoadBalancerConfig `json:"loadBalancer,omitzero"`
@@ -438,29 +608,59 @@ type DedicatedIngressPublishing struct {
     // +optional
     NodePort IngressNodePortConfig `json:"nodePort,omitzero"`
 
-    // OAuthEndpoint controls how OAuth is exposed.
-    // LoadBalancer: OAuth gets its own dedicated LB.
-    // Only supported on Azure self-managed.
-    // +optional
-    // +kubebuilder:validation:Enum=LoadBalancer;Default
-    OAuthEndpoint OAuthEndpointType `json:"oauthEndpoint,omitempty"`
-
+    // services lists per-service hostname (and optional OAuth
+    // exposure) overrides. Services omitted from the list have
+    // their hostname derived. An APIServer entry with a
+    // hostname is required (KAS route hostname is
+    // non-derivable).
+    // +listType=map
+    // +listMapKey=name
+    // +kubebuilder:validation:MinItems=1
+    // +kubebuilder:validation:MaxItems=4
     // +required
-    Services IngressServices `json:"services,omitzero"`
+    Services []DedicatedIngressService `json:"services,omitempty"`
+}
+
+// DedicatedIngressService configures one service published
+// through the HCP ingress router. It carries only endpoint
+// metadata; the preset determines the exposure strategy.
+type DedicatedIngressService struct {
+    // name identifies the control-plane service this entry
+    // configures.
+    // +required
+    Name IngressServiceName `json:"name,omitempty"`
+
+    // hostname is the external DNS name for this service,
+    // served by the router. Required for APIServer (enforced
+    // on the parent); derived from the cluster's ingress
+    // domain for the other services when omitted.
+    // +kubebuilder:validation:MinLength=1
+    // +kubebuilder:validation:MaxLength=253
+    // +optional
+    Hostname string `json:"hostname,omitempty"`
+
+    // exposure optionally promotes this service onto its own
+    // dedicated LoadBalancer instead of the shared router.
+    // Only valid for OAuthServer on Azure self-managed.
+    // +optional
+    Exposure ServiceExposureOverride `json:"exposure,omitempty"`
 }
 
 type IngressLoadBalancerConfig struct {
-    Hostname string `json:"hostname"`
+    // +kubebuilder:validation:MinLength=1
+    // +kubebuilder:validation:MaxLength=253
+    // +optional
+    Hostname string `json:"hostname,omitempty"`
 }
 
 type IngressNodePortConfig struct {
-    // +kubebuilder:validation:MinLength=1
-    // +kubebuilder:validation:MaxLength=253
     // Same address validation as existing
     // NodePortPublishingStrategy.Address — hostname,
     // IPv4, or IPv6 (full regex in hostedcluster_types.go)
+    // +kubebuilder:validation:MinLength=1
+    // +kubebuilder:validation:MaxLength=253
     // +required
-    Address string `json:"address"`
+    Address string `json:"address,omitempty"`
 
     // +optional
     // +kubebuilder:validation:Minimum=30000
@@ -468,70 +668,73 @@ type IngressNodePortConfig struct {
     Port *int32 `json:"port,omitempty"`
 }
 
-type IngressServices struct {
-    // +required
-    APIServer ServiceHostnameConfig `json:"apiServer,omitzero"`
-    // +optional
-    OAuthServer ServiceHostnameConfig `json:"oAuthServer,omitzero"`
-    // +optional
-    Konnectivity ServiceHostnameConfig `json:"konnectivity,omitzero"`
-    // +optional
-    Ignition ServiceHostnameConfig `json:"ignition,omitzero"`
-}
-
-type ServiceHostnameConfig struct {
-    // +kubebuilder:validation:MinLength=1
-    // +required
-    Hostname string `json:"hostname,omitempty"`
-}
-
-// DedicatedAPIEndpointPublishing configures KAS with a
-// dedicated LB. No HCP router is deployed for public
-// access.
+// DedicatedAPIEndpointPublishing publishes KAS on a dedicated
+// LoadBalancer and OAuth via Route through the management
+// ingress. Konnectivity and Ignition are served by the
+// management ingress with derived, non-overridable hostnames
+// and are therefore not configurable in this preset.
+// +kubebuilder:validation:XValidation:rule="self.services.all(s, !has(s.exposure) || s.name == 'OAuthServer')",message="exposure override is only valid for the OAuthServer entry"
 type DedicatedAPIEndpointPublishing struct {
+    // services optionally overrides the APIServer and/or
+    // OAuthServer endpoints. The preset is fully functional
+    // with the list absent (all hostnames derived).
+    // +listType=map
+    // +listMapKey=name
+    // +kubebuilder:validation:MaxItems=2
     // +optional
-    APIServer DedicatedEndpointConfig `json:"apiServer,omitzero"`
-
-    // When present, OAuth gets a dedicated LB.
-    // Only Azure self-managed.
-    // +optional
-    OAuthServer *DedicatedEndpointConfig `json:"oAuthServer,omitempty"`
+    Services []DedicatedAPIEndpointService `json:"services,omitempty"`
 }
 
-type DedicatedEndpointConfig struct {
-    // +optional
-    Hostname string `json:"hostname,omitempty"`
-}
+// DedicatedAPIEndpointService configures one service in the
+// DedicatedAPIEndpoint preset. Only APIServer and OAuthServer
+// are representable (see APIEndpointServiceName).
+type DedicatedAPIEndpointService struct {
+    // +required
+    Name APIEndpointServiceName `json:"name,omitempty"`
 
-type NodePortPublishing struct {
+    // hostname is the DNS name for this service. For APIServer
+    // it is derived from the dedicated LoadBalancer status when
+    // omitted; for OAuthServer it is derived from the
+    // management ingress domain when omitted.
     // +kubebuilder:validation:MinLength=1
     // +kubebuilder:validation:MaxLength=253
+    // +optional
+    Hostname string `json:"hostname,omitempty"`
+
+    // exposure optionally promotes OAuthServer onto its own
+    // dedicated LoadBalancer. Only valid for OAuthServer on
+    // Azure self-managed.
+    // +optional
+    Exposure ServiceExposureOverride `json:"exposure,omitempty"`
+}
+
+// NodePortPublishing publishes all services on node ports at
+// a shared address.
+// +kubebuilder:validation:XValidation:rule="self.services.all(x, !has(x.port) || self.services.filter(y, has(y.port) && y.port == x.port).size() == 1)",message="explicit port values must be unique across services"
+type NodePortPublishing struct {
     // Same address validation as existing
     // NodePortPublishingStrategy.Address — hostname,
     // IPv4, or IPv6 (full regex in hostedcluster_types.go)
+    // +kubebuilder:validation:MinLength=1
+    // +kubebuilder:validation:MaxLength=253
     // +required
-    Address string `json:"address"`
+    Address string `json:"address,omitempty"`
 
+    // services lists optional per-service NodePort overrides.
+    // Unset ports are dynamically assigned.
+    // +listType=map
+    // +listMapKey=name
+    // +kubebuilder:validation:MaxItems=4
     // +optional
-    Services NodePortServices `json:"services,omitzero"`
+    Services []NodePortPublishedService `json:"services,omitempty"`
 }
 
-// Port uniqueness: unset ports get unique negative
-// sentinels (outside 30000-32767 range) so they never
-// collide. exists_one checks each value appears once.
-// +kubebuilder:validation:XValidation:rule="[[has(self.apiServer) && has(self.apiServer.port) ? self.apiServer.port : -1, has(self.oAuthServer) && has(self.oAuthServer.port) ? self.oAuthServer.port : -2, has(self.konnectivity) && has(self.konnectivity.port) ? self.konnectivity.port : -3, has(self.ignition) && has(self.ignition.port) ? self.ignition.port : -4]].all(arr, arr.all(p, arr.exists_one(x, x == p)))",message="explicit port values must be unique across services"
-type NodePortServices struct {
-    // +optional
-    APIServer NodePortServiceConfig `json:"apiServer,omitzero"`
-    // +optional
-    OAuthServer NodePortServiceConfig `json:"oAuthServer,omitzero"`
-    // +optional
-    Konnectivity NodePortServiceConfig `json:"konnectivity,omitzero"`
-    // +optional
-    Ignition NodePortServiceConfig `json:"ignition,omitzero"`
-}
+type NodePortPublishedService struct {
+    // +required
+    Name NodePortServiceName `json:"name,omitempty"`
 
-type NodePortServiceConfig struct {
+    // port is the NodePort. When omitted it is dynamically
+    // assigned.
     // +optional
     // +kubebuilder:validation:Minimum=30000
     // +kubebuilder:validation:Maximum=32767
@@ -543,8 +746,7 @@ type NodePortServiceConfig struct {
 
 1. **Intent-based naming.** Preset names describe what the
    operator wants, not implementation mechanisms.
-2. **Presets encode topology, not individual service
-   strategies.** Operators think in topologies, not
+2. **Presets encode topology, not individual service strategies.** Operators think in topologies, not
    per-service configurations.
 3. **No contradictions by construction.** Each preset fully
    determines the publishing topology.
@@ -553,8 +755,19 @@ type NodePortServiceConfig struct {
 5. **No `Custom` / escape-hatch preset.** Three presets
    cover all documented topologies. Freeform per-service
    strategy would reproduce `spec.services[]` problems.
-6. **Structured fields over lists.** Named fields for known
-   services instead of enum-keyed lists.
+6. **Closed-enum keyed map-lists.** Per-service config uses
+   `+listType=map` lists keyed by a closed service-name enum —
+   not free-form lists, and not named-field structs. The enum
+   makes each preset's configurable service set visible in the
+   schema (`kubectl explain`); the map key gives name
+   uniqueness for free (no CEL cost); and entries carry only
+   endpoint metadata (hostname/port/exposure), never a
+   strategy — so the `spec.services[]` `{service × strategy}`
+   explosion cannot recur. Because the reachable service set
+   genuinely differs by preset, each preset has its own enum
+   (`IngressServiceName` = all four; `APIEndpointServiceName`
+   = APIServer/OAuthServer only), so the schema never
+   advertises a hostname the controllers cannot honor.
 7. **Consistent field naming.** LoadBalancer uses `hostname`;
    NodePort uses `address` and `port` — matching existing
    API types.
@@ -643,11 +856,11 @@ rather than as a third enum value.
 | Preset | KAS | OAuth | Konnectivity | Ignition | Ingress infrastructure | Platforms |
 |--------|-----|-------|-------------|----------|----------------------|-----------|
 | `DedicatedIngress` (LB) | Route | Route | Route | Route | HCP Router + cloud LB | AWS+ExtDNS, AWS Private+ExtDNS, Azure (all), GCP+ExtDNS, KubeVirt+ExtDNS, PowerVS+ExtDNS |
-| `DedicatedIngress` (LB) + `oauthEndpoint` | Route | **LB** | Route | Route | HCP Router + cloud LB; OAuth on dedicated LB | Azure self-managed + ExtDNS |
+| `DedicatedIngress` (LB) + OAuth `exposure` | Route | **LB** | Route | Route | HCP Router + cloud LB; OAuth on dedicated LB | Azure self-managed + ExtDNS |
 | `DedicatedIngress` (NodePort) | Route | Route | Route | Route | HCP Router as NodePort | Bare metal use case |
 | `DedicatedIngress` (External) | Route | Route | Route | opt | Platform handles routing | IBMCloud (Route path) |
 | `DedicatedAPIEndpoint` | LB | Route | Route | Route | KAS on dedicated LB; rest through mgmt ingress; no HCP router | AWS (no ExtDNS, all endpoint access modes), GCP PublicAndPrivate (no ExtDNS), KubeVirt Ingress, Agent production, OpenStack, PowerVS, None (LB) |
-| `DedicatedAPIEndpoint` + `oAuthServer` | LB | **LB** | Route | Route | KAS+OAuth on dedicated LBs | Azure self-managed (no ExtDNS) |
+| `DedicatedAPIEndpoint` + OAuth `exposure` | LB | **LB** | Route | Route | KAS+OAuth on dedicated LBs | Azure self-managed (no ExtDNS) |
 | `NodePort` | NP | NP | NP | NP | None | Agent default, KubeVirt NP, None, IBMCloud (legacy) |
 
 Endpoint access (`Public` / `PublicAndPrivate` / `Private`)
@@ -772,8 +985,8 @@ gives OAuth its own dedicated LoadBalancer:
 
 | ExternalDNS | KAS | OAuth | Preset |
 |-------------|-----|-------|--------|
-| No | LB | LB | `DedicatedAPIEndpoint` + `oAuthServer` |
-| Yes | Route | LB | `DedicatedIngress` + `oauthEndpoint` |
+| No | LB | LB | `DedicatedAPIEndpoint`, OAuthServer entry `exposure: DedicatedLoadBalancer` |
+| Yes | Route | LB | `DedicatedIngress`, OAuthServer entry `exposure: DedicatedLoadBalancer` |
 
 #### Preset validation by platform and endpoint access
 
@@ -785,11 +998,16 @@ time.
 **Key constraints:**
 
 - `DedicatedIngress` requires KAS to use Route, which
-  requires a hostname. The CLI derives hostnames from the
-  ExternalDNS domain when configured, or the user provides
-  them explicitly. The API always requires hostname values
-  when the service field is present — the CLI materializes
-  them before submission.
+  requires a hostname. The API enforces this structurally:
+  the APIServer entry must be present with a hostname (CEL),
+  because the KAS Route hostname is non-derivable — the
+  controller errors on an empty value (verified:
+  `kas/service.go`, `hostedcluster_controller.go`). The other
+  services' hostnames are optional and derived from the
+  cluster's ingress domain when omitted (verified:
+  `netutil.ReconcileExternalRoute`). The CLI may still
+  materialize hostnames from the ExternalDNS domain, but the
+  API only hard-requires the APIServer hostname.
 - `DedicatedAPIEndpoint` requires a KAS LoadBalancer. On
   private clusters, the KAS LB must be reachable through
   the platform's private connectivity mechanism. AWS
@@ -815,7 +1033,9 @@ time.
   services as NodePort but reach them through IBM's shared
   ingress rather than directly (see "IBMCloud special
   cases").
-- `oauthEndpoint: LoadBalancer` is Azure self-managed only.
+- OAuthServer `exposure: DedicatedLoadBalancer` is Azure
+  self-managed only, and valid only on the OAuthServer entry
+  (both structurally — a per-service field — and by CEL).
 
 **Platform validation matrix:**
 
@@ -840,10 +1060,10 @@ time.
 
 | EndpointAccess | ExternalDNS | Valid presets |
 |----------------|-------------|--------------|
-| Public | Yes | `DedicatedIngress` (LB), +`oauthEndpoint` |
-| Public | No | `DedicatedAPIEndpoint`, +`oAuthServer` |
-| PublicAndPrivate | Yes | `DedicatedIngress` (LB), +`oauthEndpoint` |
-| PublicAndPrivate | No | `DedicatedAPIEndpoint`, +`oAuthServer` |
+| Public | Yes | `DedicatedIngress` (LB), + OAuth `exposure` |
+| Public | No | `DedicatedAPIEndpoint`, + OAuth `exposure` |
+| PublicAndPrivate | Yes | `DedicatedIngress` (LB), + OAuth `exposure` |
+| PublicAndPrivate | No | `DedicatedAPIEndpoint`, + OAuth `exposure` |
 | Private | Yes | `DedicatedIngress` (LB) |
 | Private | No | `DedicatedIngress` (LB) |
 
@@ -916,9 +1136,15 @@ false), so no private-only row is needed.
 
 These constraints are enforced by CEL rules on
 `HostedClusterSpec`. Unlike the commented-out
-`spec.services[]` rules which exceeded the CEL cost budget
-due to list iteration, the `spec.publishing` rules only
-check scalar fields and `has()` — each is O(1).
+`spec.services[]` rules which exceeded the CEL cost budget,
+the `spec.publishing` rules stay well within budget: preset
+and endpoint-access checks are O(1) scalar/`has()` tests, and
+the per-service list rules are O(n) `exists`/`all` over lists
+capped at `MaxItems ≤ 4`. Crucially, per-service name
+uniqueness is enforced for free by `+listType=map`
+(`+listMapKey=name`) at the schema level — with no CEL — which
+is exactly the O(n²) uniqueness check that blew the budget on
+`spec.services[]`.
 
 **Mutual exclusivity and immutability:**
 
@@ -1018,10 +1244,68 @@ message: "DedicatedIngress with NodePort exposure is
   only supported on Agent, KubeVirt, and None"
 ```
 
+**Per-service rules** (on the preset sub-structs; O(n) over
+`MaxItems ≤ 4`):
+
+```cel
+// DedicatedIngress: an APIServer entry with a hostname is
+// required — the KAS Route hostname is non-derivable
+// (verified: kas/service.go, hostedcluster_controller.go).
+rule: self.services.exists(s, s.name == "APIServer"
+      && has(s.hostname))
+message: "DedicatedIngress requires an APIServer entry with
+  a hostname"
+
+// exposure override is valid only on the OAuthServer entry
+// (same rule on the DedicatedIngress and
+// DedicatedAPIEndpoint sub-structs).
+rule: self.services.all(s, !has(s.exposure)
+      || s.name == "OAuthServer")
+message: "exposure override is only valid for the OAuthServer
+  entry"
+```
+
+Per-service name uniqueness needs no CEL: `+listType=map`
+with `+listMapKey=name` rejects duplicate service names at the
+schema level. The per-preset name enums (`IngressServiceName`,
+`APIEndpointServiceName`) forbid unreachable services (e.g. a
+Konnectivity hostname under `DedicatedAPIEndpoint`) at the
+schema level too — no CEL allowlist needed.
+
+**OAuth exposure → Azure self-managed** (top-level
+`HostedClusterSpec`, because the sub-struct cannot see
+`spec.platform`; O(n) over `MaxItems ≤ 4`):
+
+```cel
+// DedicatedIngress: OAuthServer exposure only on Azure
+// self-managed.
+rule: !has(self.publishing)
+      || self.publishing.type != "DedicatedIngress"
+      || !has(self.publishing.dedicatedIngress)
+      || self.publishing.dedicatedIngress.services.all(s,
+           !has(s.exposure))
+      || (self.platform.type == "Azure"
+          && self.platform.?azure.azureAuthenticationConfig
+             .azureAuthenticationConfigType.orValue("")
+             != "ManagedIdentities")
+message: "OAuthServer dedicated LoadBalancer exposure is
+  only supported on Azure self-managed"
+
+// DedicatedAPIEndpoint: analogous rule over
+// self.publishing.dedicatedAPIEndpoint.services.
+```
+
+> **To confirm during implementation:** the exact
+> self-managed predicate
+> (`azureAuthenticationConfigType != "ManagedIdentities"`)
+> must be checked against `visibility.go` `IsAroHCPByHC`,
+> which uses `ManagedIdentities` to detect ARO-managed
+> clusters; self-managed is its complement.
+
 The full set of CEL rules (including Azure ARO HCP vs
-self-managed, oauthEndpoint restrictions, and union
-discriminator enforcement) is documented in the detailed
-analysis and will be implemented in the API PR.
+self-managed and union discriminator enforcement) is
+documented in the detailed analysis and will be implemented
+in the API PR.
 
 **Union discriminator enforcement** (auto-generated by
 `+union`/`+unionDiscriminator` kubebuilder markers, listed
@@ -1116,7 +1400,7 @@ validation matrix and CEL rules above.
 | Risk | Mitigation |
 |------|------------|
 | External tooling (ROSA CLI, OCM, ACM, ARO-HCP) must update to produce `spec.publishing` | Phase 2 migration with per-team timelines; existing clusters work via HO translation |
-| Unrepresentable `spec.services[]` configurations cannot migrate | HO skips translation, copies `spec.services[]` only, emits `ServicePublishingMigrationSkipped` condition |
+| Unrepresentable `spec.services[]` configurations cannot migrate | HO skips translation, copies `spec.services[]` only, and reports the failure via the `ValidConfiguration` condition; the cluster keeps working on `spec.services[]` |
 | New CPO reading `spec.publishing` paired with old HO that doesn't write it | CPO falls back to `spec.services[]` when `spec.publishing` is absent |
 | Old CPO that doesn't understand `spec.publishing` | HO always writes `spec.services[]` to HCP alongside `spec.publishing`; old CPO ignores unknown field |
 
@@ -1138,11 +1422,14 @@ unexpectedly exposed or unreachable.
   three topologies, and unsupported combinations fail
   silently.
 
-- **Azure-specific leak.** The `oauthEndpoint` field on
-  `DedicatedIngress` and the optional `oAuthServer` on
-  `DedicatedAPIEndpoint` are Azure self-managed concerns
-  leaking into the general API. This is contained (single
-  optional enum field, CEL-restricted to Azure).
+- **Azure-specific concern in a general API.** The OAuth
+  `exposure: DedicatedLoadBalancer` override is an Azure
+  self-managed concern expressed through a general per-service
+  field. It is maximally contained: a single optional enum
+  value, valid only on the OAuthServer entry (structurally)
+  and only on Azure self-managed (CEL) — not a top-level
+  platform-specific field (`oauthEndpoint`) as in an earlier
+  draft.
 
 - **Dual code paths during migration.** Carrying both
   `spec.services[]` and `spec.publishing` controller paths
@@ -1227,10 +1514,10 @@ connectivity is not a publishing preset".
 4. **OAuth dedicated LB under Azure `Private`.** Azure
    self-managed can create a second private endpoint for
    OAuth when OAuth uses `LoadBalancer` (never for KAS), so
-   the `oauthEndpoint` / `oAuthServer` LB variants should be
-   permitted under Azure `Private`, not only `Public` /
-   `PublicAndPrivate`. The CEL for these fields must not
-   restrict them to public endpoint access.
+   the OAuthServer `exposure: DedicatedLoadBalancer` variant
+   should be permitted under Azure `Private`, not only
+   `Public` / `PublicAndPrivate`. The CEL gating this field
+   must not restrict it to public endpoint access.
 
 ## Test Plan
 
@@ -1267,11 +1554,17 @@ See dev-guide/test-conventions.md for details. -->
 - Exposure discriminator enforcement:
   `exposure=LoadBalancer` with `nodePort` sub-struct is
   rejected.
-- Required field validation: `DedicatedIngress` without
-  `services.apiServer.hostname` is rejected.
+- Required field validation: `DedicatedIngress` without an
+  APIServer `services` entry — or with one lacking a
+  `hostname` — is rejected.
 - Preset x platform x endpointAccess matrix: all invalid
   combinations are rejected per the validation matrix.
-- `oauthEndpoint` restricted to Azure self-managed.
+- OAuth `exposure: DedicatedLoadBalancer` restricted to the
+  OAuthServer entry and to Azure self-managed.
+- Per-preset service enum: a `Konnectivity` or `Ignition`
+  entry under `DedicatedAPIEndpoint` is rejected.
+- Per-service name uniqueness: duplicate service names in a
+  preset's `services` list are rejected (`+listType=map`).
 - NodePort range validation (30000-32767).
 - NodePort address format validation (hostname/IPv4/IPv6).
 - NodePort port uniqueness across services.
@@ -1298,7 +1591,7 @@ See dev-guide/test-conventions.md for details. -->
 - `DedicatedIngress` (External): IBMCloud (if CI
   available).
 - `DedicatedAPIEndpoint`: AWS Public (no ExternalDNS).
-- `DedicatedAPIEndpoint` + `oAuthServer`: Azure
+- `DedicatedAPIEndpoint` + OAuth `exposure`: Azure
   self-managed (no ExternalDNS).
 - `NodePort`: Agent default.
 - HO translation: create cluster with `spec.services[]`,
@@ -1358,8 +1651,10 @@ NodePort for bare-metal environments).
   endpointAccess matrix (all invalid combinations
   rejected).
 - CLI produces `spec.publishing` for all platforms.
-- `ServicePublishingDeprecated` warning condition emitting
-  on `spec.services[]` clusters.
+- `spec.services[]` marked deprecated (godoc `Deprecated:` +
+  apiserver write-time warning); fleet deprecation tracking
+  handled by the platform's generic deprecation-warning
+  mechanism, not a bespoke condition.
 - Upgrade tested: new HO + old CPO version skew verified.
 - `e2e-aws-upgrade-hypershift-operator` passing with HO
   translation path.
@@ -1386,8 +1681,10 @@ Removal of `spec.services[]` follows four phases:
 5. CPO reads `spec.publishing` when present, falls back to
    `spec.services[]`.
 6. CLI produces `spec.publishing` for new clusters.
-7. `ServicePublishingDeprecated` warning condition on HCs
-   using `spec.services[]`.
+7. `spec.services[]` marked deprecated (apiserver write-time
+   warning); fleet deprecation tracking uses the platform's
+   generic deprecation-warning mechanism — no bespoke
+   condition is added by this enhancement.
 
 **Phase 2: External tooling migration**
 
@@ -1542,8 +1839,8 @@ fields with CEL validation).
   HC's intended topology. Mitigation: `spec.services[]` is
   always written alongside `spec.publishing` on the HCP. If
   a mismatch is detected, the CPO falls back to
-  `spec.services[]`. The HO emits a
-  `ServicePublishingTranslationError` condition on the HC.
+  `spec.services[]`. The HO reports the failure on the HC's
+  `ValidConfiguration` condition.
 
 - **CEL validation bug allows an invalid combination.** The
   controller would receive a configuration it can't
@@ -1554,17 +1851,18 @@ fields with CEL validation).
 - **HO translation skips a cluster it shouldn't.** An
   existing HC's `spec.services[]` maps to a valid preset
   but the translation logic has a bug. Mitigation: the
-  `ServicePublishingMigrationSkipped` condition is visible
-  to operators and SREs. The cluster continues working on
-  `spec.services[]` via CPO fallback.
+  failure is reported on the HC's `ValidConfiguration`
+  condition, visible to operators and SREs. The cluster
+  continues working on `spec.services[]` via CPO fallback.
 
 ### SLIs
 
 No new SLIs. The existing `ValidConfiguration` condition on
-HostedCluster is the primary indicator. The new
-`ServicePublishingDeprecated` and
-`ServicePublishingMigrationSkipped` conditions are
-informational, not alertable.
+HostedCluster is the primary indicator and reports any
+translation failure during migration. Deprecation of
+`spec.services[]` is surfaced through the platform's generic
+deprecation-warning mechanism, which is informational, not
+alertable.
 
 ### Escalation
 
@@ -1576,17 +1874,14 @@ API, HO translation logic, and CPO preset handling.
 ### Detecting misconfiguration
 
 ```bash
-# Check publishing validation
+# Check publishing validation (also reports translation
+# failures during migration)
 oc get hostedcluster <name> \
   -o jsonpath='{.status.conditions[?(@.type=="ValidConfiguration")]}'
 
-# Check for migration skip (existing clusters)
+# Identify clusters still on the deprecated field
 oc get hostedcluster <name> \
-  -o jsonpath='{.status.conditions[?(@.type=="ServicePublishingMigrationSkipped")]}'
-
-# Check for deprecation warning
-oc get hostedcluster <name> \
-  -o jsonpath='{.status.conditions[?(@.type=="ServicePublishingDeprecated")]}'
+  -o jsonpath='{.spec.services}'
 
 # Compare HC and HCP publishing config
 oc get hostedcluster <name> \
@@ -1621,9 +1916,8 @@ If the HO translation logic fails for an existing cluster:
    `spec.publishing`.
 2. CPO falls back to reading `spec.services[]`.
 3. Cluster continues operating with existing behavior.
-4. `ServicePublishingMigrationSkipped` or
-   `ServicePublishingTranslationError` condition emitted
-   on HC.
+4. HO reports the failure on the HC's `ValidConfiguration`
+   condition.
 
 ## Infrastructure Needed [optional]
 
