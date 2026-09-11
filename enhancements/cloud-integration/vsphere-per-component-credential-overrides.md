@@ -40,7 +40,7 @@ superseded-by:
 
 ## Summary
 
-This enhancement adds the cluster-scoped `cloudcredential.openshift.io/v1alpha1` `VSphereCredentialOverride` API for selecting a labeled Secret in `openshift-config` as the source credential for one vSphere `CredentialsRequest` target Secret. Today, vSphere clusters use a single shared credential (`kube-system/vsphere-creds`) for every component. The CRD lets authorized administrators configure distinct, lower-privilege credentials per component without storing credential bytes in the API object. The feature targets OpenShift 5.1.0 and is initially gated by `TechPreviewNoUpgrade`.
+This enhancement adds the cluster-scoped `cloudcredential.openshift.io/v1alpha1` `VSphereComponentScopedCredential` API for selecting the explicitly referenced Secret in `openshift-config` as the source credential for one vSphere `CredentialsRequest` target Secret. Today, vSphere clusters use a single shared credential (`kube-system/vsphere-creds`) for every component. The CRD lets authorized administrators configure distinct, lower-privilege credentials per component without storing credential bytes in the API object. The feature targets OpenShift 5.1.0 and is initially gated by `TechPreviewNoUpgrade`.
 
 This is a reduced-scope first phase of the broader vSphere multi-account credential-management initiative. [SPLAT-2874](https://issues.redhat.com/browse/SPLAT-2874) is the primary tracking item; [SPLAT-2889](https://issues.redhat.com/browse/SPLAT-2889) tracks the CCO implementation, and [SPLAT-2724](https://issues.redhat.com/browse/SPLAT-2724) is the parent initiative.
 
@@ -64,7 +64,7 @@ vSphere clusters today operate with a single set of credentials shared across al
 
 - Provide a cluster-scoped, structured API for mapping one vSphere `CredentialsRequest` target Secret to one source Secret in `openshift-config`.
 - Validate mappings, protect the mapping target from mutation, and make invalid configuration observable through status conditions.
-- Limit CCO source-Secret discovery to explicitly labeled Secrets and give only authorized administrators or delegated service accounts permission to create or update override resources and source Secrets.
+- Limit CCO source-Secret reads to names explicitly referenced by the CR and give only authorized administrators or delegated service accounts permission to create or update override resources and source Secrets.
 - Preserve existing root-credential behavior for managed vSphere `CredentialsRequest` targets only when no override CR exists for that target.
 - Reconcile create, update, deletion, and relevance-removal events through the existing `CredentialsRequest` work queue.
 
@@ -80,11 +80,11 @@ vSphere clusters today operate with a single set of credentials shared across al
 
 ### Workflow Description
 
-An authorized administrator creates a `VSphereCredentialOverride` after creating a source Secret in `openshift-config`. The source Secret has the label `cloudcredential.openshift.io/vsphere-override-source: "true"`; it is not selected by annotations. The Secret contains the complete vCenter credential data map required by the target, with non-empty matching `<vcenter-hostname>.username` and `<vcenter-hostname>.password` entries. Credential bytes are never placed in the override CR or in CCO logs.
+An authorized administrator creates a `VSphereComponentScopedCredential` after creating a source Secret in `openshift-config`. `spec.sourceSecretRef.name` is the sole source-selection mechanism; the Secret contains the complete vCenter credential data map required by the target, with non-empty matching `<vcenter-hostname>.username` and `<vcenter-hostname>.password` entries. Credential bytes are never placed in the override CR or in CCO logs.
 
 ```yaml
 apiVersion: cloudcredential.openshift.io/v1alpha1
-kind: VSphereCredentialOverride
+kind: VSphereComponentScopedCredential
 metadata:
   name: openshift-machine-api-vsphere
 spec:
@@ -101,13 +101,13 @@ The CCO reconciler maps an override event to the `CredentialsRequest` whose `spe
 
 1. In `credentialsMode: Manual`, CCO does not resolve, copy, or manage overrides or target Secrets. It reports `ManualMode` on existing overrides and leaves Manual-mode credential management unchanged.
 2. In managed mode, no override CR for the target preserves the existing root path using `kube-system/vsphere-creds`.
-3. Exactly one override causes CCO to read the named, labeled source Secret from `openshift-config`, validate its data, and synchronize that data to the target Secret.
-4. A missing or invalid source Secret, a source Secret without the required label, or multiple overrides for the same target is fail-closed: CCO does not write root credentials or replacement data to that target. It records the applicable status condition and waits for remediation.
+3. Exactly one override causes CCO to read the source Secret named by `sourceSecretRef` from `openshift-config`, validate its data, and synchronize that data to the target Secret.
+4. A missing or invalid source Secret, or multiple overrides for the same target, is fail-closed: CCO does not write root credentials or replacement data to that target. It records the applicable status condition and waits for remediation.
 5. Deleting the only override CR requeues its target. In managed mode that is the no-override case, so the existing root path resumes. Deleting a source Secret while its override remains is not a no-override case and therefore remains fail-closed.
 
 ### API Extensions
 
-This enhancement adds the cluster-scoped `VSphereCredentialOverride` CRD in the `cloudcredential.openshift.io/v1alpha1` API. The resource defines these structured fields:
+This enhancement adds the cluster-scoped `VSphereComponentScopedCredential` CRD in the `cloudcredential.openshift.io/v1alpha1` API. The resource defines these structured fields:
 
 | Field | Meaning |
 |---|---|
@@ -119,7 +119,7 @@ This enhancement adds the cluster-scoped `VSphereCredentialOverride` CRD in the 
 
 OpenAPI validation requires both references and valid Kubernetes names. A validating admission policy backed by the CCO-maintained vSphere target inventory verifies that `targetSecretRef` names an existing vSphere `CredentialsRequest` target and is not the root Secret. CEL validation makes `targetSecretRef` immutable (`self == oldSelf`); retargeting requires delete and recreate. It also rejects self-reference when the target is `openshift-config/<sourceSecretRef.name>`.
 
-The controller validates source data at reconciliation time because Secret contents cannot be represented safely in this CRD. The source must exist, carry the dedicated label, and contain non-empty matching username/password entries for each vCenter key pair required by the vSphere credential format.
+The controller validates source data at reconciliation time because Secret contents cannot be represented safely in this CRD. The source must exist at `openshift-config/<sourceSecretRef.name>` and contain non-empty matching username/password entries for each vCenter key pair required by the vSphere credential format.
 
 `v1alpha1` is Compatibility Level 4 and will be delivered only when the `TechPreviewNoUpgrade` feature set is enabled. The CRD, admission policy, and CCO manifests must carry the corresponding feature-set gating so the API is not installed or used outside that feature set.
 
@@ -151,17 +151,17 @@ There is no OKE-specific implementation. Availability is limited to supported vS
 
 **Changed components:**
 
-- `openshift/api` — add the cluster-scoped `VSphereCredentialOverride` type, CRD generation, compatibility-level markers, feature-gate metadata, and the API-review approval.
+- `openshift/api` — add the cluster-scoped `VSphereComponentScopedCredential` type, CRD generation, compatibility-level markers, feature-gate metadata, and the API-review approval.
 - CCO API manifests — install the CRD and validating admission policy only under `TechPreviewNoUpgrade`.
-- CCO credentials-request controller — maintain the vSphere target inventory, watch overrides and labeled source Secrets, serialize events through the `CredentialsRequest` queue, and update override status.
+- CCO credentials-request controller — maintain the vSphere target inventory, watch overrides and source-Secret events, serialize events through the `CredentialsRequest` queue, and update override status.
 - CCO vSphere actuator — resolve the override only after validating its source and retain the existing root path only when there is no override.
 - CCO RBAC and tests — scope CCO reads and verify both allowed and denied authoring paths.
 
 **Authorization and Secret discovery:**
 
-CCO uses the label selector `cloudcredential.openshift.io/vsphere-override-source=true` for its `openshift-config` Secret list and watch. Its RBAC grants only the required `get`, `list`, and `watch` access to Secrets in that namespace, with no source-Secret write permission; it separately retains only the target-Secret permissions required by existing `CredentialsRequest` reconciliation. Kubernetes RBAC cannot express a label selector, so the selector limits discovery while namespace-scoped least-privilege RBAC limits the API access boundary.
+CCO reads Secret data only by direct lookup of `openshift-config/<sourceSecretRef.name>` and does not enumerate Secrets to discover candidates. Its RBAC grants only the source-Secret read access required for those referenced names, with no source-Secret write permission; it separately retains only the target-Secret permissions required by existing `CredentialsRequest` reconciliation. The precise mechanism for receiving source-Secret change events without broad Secret-data discovery is an implementation prerequisite: it must map source events by the fixed namespace and `sourceSecretRef.name` and be verified during API/CCO implementation.
 
-Only cluster administrators or explicitly delegated service accounts receive RBAC to create, update, or delete `VSphereCredentialOverride` resources and labeled source Secrets in `openshift-config`. Delegation must be implemented with narrowly scoped Roles/RoleBindings and documented as privileged credential-management access. It is not sufficient for a principal to have general application-namespace Secret permissions.
+Only cluster administrators or explicitly delegated service accounts receive RBAC to create, update, or delete `VSphereComponentScopedCredential` resources and referenced source Secrets in `openshift-config`. Delegation must be implemented with narrowly scoped Roles/RoleBindings and documented as privileged credential-management access. It is not sufficient for a principal to have general application-namespace Secret permissions.
 
 **Resolution algorithm:**
 
@@ -180,12 +180,12 @@ reconcile CredentialsRequest:
         do not modify the target Secret
         return
 
-    source = named Secret in openshift-config, selected with the dedicated label
+    source = direct lookup of openshift-config/<sourceSecretRef.name>
     if source is missing:
         set Ready=False, SourceValid=False, reason=SourceSecretMissing
         do not modify the target Secret
         return
-    if source lacks the label or has incomplete, empty, or unmatched data:
+    if source has incomplete, empty, or unmatched data:
         set Ready=False, SourceValid=False, reason=SourceSecretInvalid
         do not modify the target Secret
         return
@@ -196,17 +196,17 @@ reconcile CredentialsRequest:
 
 **Event handling and serialization:**
 
-Override create, update, and delete events map to the `CredentialsRequest` that owns `targetSecretRef`, rather than directly writing a target Secret. Labeled source-Secret events first map to referencing overrides and then to their target `CredentialsRequest`s. This common queue serializes all writes for a target and avoids concurrent override/root updates.
+Override create, update, and delete events map to the `CredentialsRequest` that owns `targetSecretRef`, rather than directly writing a target Secret. Source-Secret events must map by the fixed namespace and `sourceSecretRef.name` to referencing overrides and then to their target `CredentialsRequest`s. The exact targeted source-event watch implementation is a prerequisite to be verified; it must not enumerate Secrets to discover source candidates. This common queue serializes all writes for a target and avoids concurrent override/root updates.
 
-The watches use `predicate.Funcs`, not `predicate.NewPredicateFuncs`. Their update handler accepts an event when either the old or new object is relevant to an override relationship. This preserves reconciliation when a source Secret loses the dedicated label or relevant metadata, and when an override is changed or removed. Delete events are also accepted so deletion of an override performs no-override cleanup and deletion or relevance-removal of a source is reported as fail-closed. The CRD replaces annotation-only target selection; there is no annotation compatibility path that could silently restore root credentials while an override CR still exists.
+The watches use `predicate.Funcs`, not `predicate.NewPredicateFuncs`. Their update handler accepts an event when either the old or new object is relevant to an override relationship. This preserves reconciliation when a referenced source Secret is updated or deleted and when an override is changed or removed. Delete events are also accepted so deletion of an override performs no-override cleanup and deletion of a referenced source is reported as fail-closed. The CRD replaces annotation-only target selection; there is no annotation compatibility path that could silently restore root credentials while an override CR still exists.
 
 **Status and condition reasons:**
 
 | Situation | `Ready` | Reason | Target behavior |
 |---|---|---|---|
-| Valid labeled source synchronized | `True` | `OverrideApplied` | Target contains the override data. |
+| Valid referenced source synchronized | `True` | `OverrideApplied` | Target contains the override data. |
 | Source Secret does not exist | `False` | `SourceSecretMissing` | Target is left unchanged. |
-| Source lacks the label or has invalid data | `False` | `SourceSecretInvalid` | Target is left unchanged. |
+| Source has invalid data | `False` | `SourceSecretInvalid` | Target is left unchanged. |
 | More than one override targets a Secret | `False` | `DuplicateTarget` | Every conflicting target is left unchanged. |
 | `credentialsMode: Manual` | `False` | `ManualMode` | CCO does not manage the override or target. |
 
@@ -215,16 +215,16 @@ The watches use `predicate.Funcs`, not `predicate.NewPredicateFuncs`. Their upda
 ### Risks and Mitigations
 
 **Risk: An unauthorized principal directs credentials to another component.**
-Mitigation: RBAC limits override and labeled-source Secret create/update/delete operations to cluster administrators or explicitly delegated credential-management service accounts. Admission verifies that a target is a real vSphere `CredentialsRequest` target and rejects the root Secret. Authorization tests cover both create and update denials for unauthorized principals.
+Mitigation: RBAC limits override and referenced-source Secret create/update/delete operations to cluster administrators or explicitly delegated credential-management service accounts. Admission verifies that a target is a real vSphere `CredentialsRequest` target and rejects the root Secret. Authorization tests cover both create and update denials for unauthorized principals.
 
 **Risk: CCO reads unrelated credentials from the shared `openshift-config` namespace.**
-Mitigation: CCO uses the dedicated source label for list/watch selectors and has namespace-scoped, read-only source-Secret RBAC. It does not log Secret data.
+Mitigation: CCO reads data only for names explicitly referenced by `sourceSecretRef` and does not enumerate Secrets to discover candidates. The targeted source-event watch mechanism and its least-privilege RBAC must be verified during implementation. CCO does not log Secret data.
 
 **Risk: Invalid source data or duplicate mappings silently escalates an affected component to root credentials.**
-Mitigation: Missing, invalid, unlabeled, and ambiguous overrides fail closed, leave the target unchanged, and expose `SourceSecretMissing`, `SourceSecretInvalid`, or `DuplicateTarget` conditions. Only the absence of an override CR selects the normal root path.
+Mitigation: Missing, invalid, and ambiguous overrides fail closed, leave the target unchanged, and expose `SourceSecretMissing`, `SourceSecretInvalid`, or `DuplicateTarget` conditions. Only the absence of an override CR selects the normal root path.
 
 **Risk: A source or override update is missed during removal.**
-Mitigation: `predicate.Funcs` evaluates old and new objects, and all events map through the serialized `CredentialsRequest` queue. Tests cover relevance removal followed by deletion.
+Mitigation: `predicate.Funcs` evaluates old and new objects, and all events map through the serialized `CredentialsRequest` queue. Tests cover `sourceSecretRef` changes and source-Secret deletion.
 
 **Risk: Tech Preview APIs are used during a minor update.**
 Mitigation: CRD, policy, and controller behavior are gated by `TechPreviewNoUpgrade`; the documented support posture prohibits minor upgrades while it is enabled.
@@ -239,7 +239,7 @@ Mitigation: CRD, policy, and controller behavior are gated by `TechPreviewNoUpgr
 
 ### Annotation-Based Secret Mapping
 
-Selecting a target through annotations on arbitrary Secrets was rejected. It lacks a structured API, makes admission validation and immutability difficult, permits ambiguous matching, and makes relevance-removal handling error-prone. `VSphereCredentialOverride` provides an explicit, observable mapping instead.
+Selecting a target through annotations on arbitrary Secrets was rejected. It lacks a structured API, makes admission validation and immutability difficult, permits ambiguous matching, and makes relevance-removal handling error-prone. `VSphereComponentScopedCredential` provides an explicit, observable mapping instead.
 
 ### Installer-Native Configuration
 
@@ -263,20 +263,20 @@ The CRD contract resolves the prior questions about duplicate mappings, status, 
 
 - Validate required reference fields, immutable `targetSecretRef`, self-reference rejection, and rejection of non-vSphere or root targets.
 - Verify target-inventory maintenance for vSphere `CredentialsRequest` create, update, delete, and controller-startup rebuild; verify unavailable inventory denies override admission.
-- Verify one valid labeled source synchronizes the target and reports `OverrideApplied`.
-- Verify missing, unlabeled, incomplete, empty, and unmatched source data report `SourceSecretMissing` or `SourceSecretInvalid`, preserve the target, and never use root credentials while the CR exists.
+- Verify one valid referenced source synchronizes the target and reports `OverrideApplied`.
+- Verify missing, incomplete, empty, and unmatched source data report `SourceSecretMissing` or `SourceSecretInvalid`, preserve the target, and never use root credentials while the CR exists.
 - Verify duplicate target matches set `DuplicateTarget` on every conflicting override and leave the target unchanged.
 - Verify no override CR uses the existing root path in managed mode.
 - Verify `credentialsMode: Manual` performs no source read or target write and reports `ManualMode` for an existing override.
 - Verify serialized queue mapping for override and source-Secret create/update/delete events.
-- Verify `predicate.Funcs` accepts relevant old or new objects, including source-label or metadata removal and remove-then-delete; verify override deletion requeues root-path reconciliation.
+- Verify `predicate.Funcs` accepts relevant old or new objects for referenced and unreferenced source-Secret updates and source deletion; verify override deletion requeues root-path reconciliation.
 - Verify allowed cluster-admin/delegated-service-account create and update operations, and denied create and update operations for unauthorized principals in `openshift-config`.
 
 ### Integration / E2E Tests
 
 - On a vSphere cluster with `TechPreviewNoUpgrade`, create the source Secret and one valid override; verify only its `CredentialsRequest` target receives the override data and status becomes ready.
 - Rotate the source data and verify the target is re-synchronized through the serialized queue without affecting other component targets.
-- Exercise source deletion, invalid data, label removal, duplicate overrides, invalid target admission, and target immutability; verify conditions and no silent root fallback.
+- Exercise source deletion, invalid data, unreferenced source-Secret updates, duplicate overrides, invalid target admission, and target immutability; verify conditions and no silent root fallback.
 - Delete the only override in managed mode and verify the normal root path resumes only after the CR is absent.
 - Use authorized and unauthorized identities to verify source-Secret and override CR create/update authorization.
 - Verify Manual mode leaves override and target data unmanaged.
@@ -290,7 +290,7 @@ The CRD contract resolves the prior questions about duplicate mappings, status, 
 - CRD, admission policy, and CCO manifests are correctly gated by `TechPreviewNoUpgrade`.
 - Unit and integration coverage validates API rules, source-data validation, condition reasons, queue serialization, authorization denial, Manual mode, and fail-closed behavior.
 - E2E coverage validates valid synchronization and all no-write failure paths on vSphere.
-- Administrator and support documentation explains privileged authoring, source labels, conditions, and recovery.
+- Administrator and support documentation explains privileged authoring, direct source references, conditions, and recovery.
 
 ### Tech Preview -> GA
 
@@ -315,24 +315,24 @@ The CRD, admission policy, and CCO controller must be introduced and gated as on
 
 ## Operational Aspects of API Extensions
 
-**Failure modes:** A target that is invalid is denied at admission. After admission, missing, invalid, unlabeled, or ambiguous sources are reflected on the override's conditions and do not modify the target. An unavailable target inventory denies new override creation. In Manual mode, CCO does not manage the source, override application, or target.
+**Failure modes:** A target that is invalid is denied at admission. After admission, missing, invalid, or ambiguous sources are reflected on the override's conditions and do not modify the target. An unavailable target inventory denies new override creation. In Manual mode, CCO does not manage the source, override application, or target.
 
-**Monitoring:** Operators use `VSphereCredentialOverride.status.conditions`, `observedGeneration`, and `resolvedSource` to determine whether a target was synchronized. CCO logs and events identify the resource and condition reason but must not log credential bytes.
+**Monitoring:** Operators use `VSphereComponentScopedCredential.status.conditions`, `observedGeneration`, and `resolvedSource` to determine whether a target was synchronized. CCO logs and events identify the resource and condition reason but must not log credential bytes.
 
-**Recovery:** Correct the source Secret data or label, delete duplicate override CRs, or delete the override CR when returning to the normal root path is intended. Reconciliation is event-driven; force-deleting the target Secret is not the prescribed recovery mechanism.
+**Recovery:** Correct the source Secret data, delete duplicate override CRs, or delete the override CR when returning to the normal root path is intended. Reconciliation is event-driven; force-deleting the target Secret is not the prescribed recovery mechanism.
 
 ## Support Procedures
 
-1. List and describe overrides without exposing Secret data: `oc get vspherecredentialoverrides` and `oc describe vspherecredentialoverride <name>`.
+1. List and describe overrides without exposing Secret data: `oc get vspherecomponentscopedcredentials` and `oc describe vspherecomponentscopedcredential <name>`.
 2. Confirm that `targetSecretRef` matches a vSphere `CredentialsRequest.spec.secretRef` and inspect the `Ready`, `SourceValid`, and `TargetSynced` reasons.
-3. Confirm the named source Secret exists in `openshift-config` and carries `cloudcredential.openshift.io/vsphere-override-source=true`; inspect only metadata and required key names, never Secret values.
-4. Confirm delegated access with `oc auth can-i` for both `VSphereCredentialOverride` and source-Secret create/update operations in `openshift-config`; unauthorized principals must be denied.
+3. Confirm the source Secret named by `sourceSecretRef` exists in `openshift-config`; inspect only metadata and required key names, never Secret values.
+4. Confirm delegated access with `oc auth can-i` for both `VSphereComponentScopedCredential` and source-Secret create/update operations in `openshift-config`; unauthorized principals must be denied.
 5. For `SourceSecretMissing`, `SourceSecretInvalid`, or `DuplicateTarget`, correct the reported configuration and wait for reconciliation. Delete the CR only when a deliberate return to the root path is desired.
 6. For `ManualMode`, manage component credentials according to the existing Manual-mode procedure; CCO will not apply the override.
 
 ## Implementation History
 
 - 2026-08-17: Initial annotation-based enhancement proposal.
-- 2026-09-11: Revised the proposal to the `VSphereCredentialOverride` CRD contract, including fail-closed behavior, scoped source discovery, authorization, and Manual-mode decisions.
+- 2026-09-11: Revised the proposal to the `VSphereComponentScopedCredential` CRD contract, including fail-closed behavior, direct source references, authorization, and Manual-mode decisions.
 - Target release: 5.1.0.
 - Primary tracking: [SPLAT-2874](https://issues.redhat.com/browse/SPLAT-2874); CCO implementation: [SPLAT-2889](https://issues.redhat.com/browse/SPLAT-2889); parent initiative: [SPLAT-2724](https://issues.redhat.com/browse/SPLAT-2724).
