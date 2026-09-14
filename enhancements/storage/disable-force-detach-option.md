@@ -25,7 +25,7 @@ superseded-by:
 
 ## Summary
 
-There have been issues with certain drivers where the volume is force detached while the volume is still mounted, leading to data corruption. For drivers directly exposing LUNs, force detach bypasses the unstage flow where multipath -f is invoked and goes straight to unpublish which is unmapping the LUN from the per-node igroup. This enhancement introduces an option to disable force detach of volumes in OCP to avoid this problem.
+There have been issues with certain drivers where the volume is force detached while the volume is still mounted, leading to data corruption. For drivers directly exposing LUNs, force detach bypasses the unstage flow where multipath -f is invoked and goes straight to ControllerUnpublish which is unmapping the LUN from the per-node igroup. This enhancement introduces an option to disable force detach of volumes in OCP to avoid this problem.
 
 ## Motivation
 
@@ -106,7 +106,8 @@ Disabling force detach leaves the related `VolumeAttachment` undeleted after an 
 
 ### Drawbacks
 
-The drawback is adding an extra config option that needs to be tested by us and understood by our users. This is outweighed by the need to avoid data loss caused by force detach.
+* Discoverability: cluster admins will start looking for this option only after they lose data due to force detach. We need to educate CSI driver vendors that can't handle forced detach to document that this option is required by their driver and potentially add a check for it.
+* Adding an extra config option that needs to be tested by us and understood by our users. This is outweighed by the need to avoid data loss caused by force detach.
 
 ## Alternatives (Not Implemented)
 
@@ -120,13 +121,17 @@ None
 
 - Unit tests and API tests
 - Manual validation of code changes
-- e2e: run CSI test suite with force detach disabled
+- e2e test scenarios below when the DisableForceDetachOnTimeout feature gate is enabled
 
 | Test scenario | Type | Where | Test link | Notes |
 | :---- | :---- | :---- | :---- | :---- |
-| `.spec.forceDetachOnTimeout="Disabled"` should disable force detach on the cluster. | Manual |  |  | |
-| `.spec.forceDetachOnTimeout="Enabled"` should enable force detach on the cluster. | Manual |  |  | |
-| Default behavior should remain the same (force detach enabled). | Manual |  |  | |
+| Default behavior should remain the same (force detach enabled). | Automated |  |  | |
+| `.spec.forceDetachOnTimeout="Disabled"` should disable force detach on the cluster. | Automated |  |  | |
+| `.spec.forceDetachOnTimeout="Enabled"` should enable force detach on the cluster. | Automated |  |  | |
+| Disable force detach, create pod, make node NotReady, force delete pod. Volume should NOT be force-detached after the timeout. | Automated |  |  | |
+| Enable force detach, create pod, make node NotReady, force delete pod. Volume should be force-detached after the timeout. | Automated |  |  | |
+
+Test configurations: standalone and hypershift clusters.
 
 ## Graduation Criteria
 
@@ -141,11 +146,10 @@ None
 
 - Ability to utilize the enhancement end to end
 - End user documentation, relative API stability
-- Sufficient test coverage
+- e2e tests implemented
 
 ### Tech Preview -> GA
 
-- e2e tests implemented
 - High severity bugs are fixed.
 - Reliable CI signal, minimal test flakes.
 - User facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/)
