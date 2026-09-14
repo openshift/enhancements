@@ -10,7 +10,7 @@ approvers:
 api-approvers:
   - None
 creation-date: 2026-04-08
-last-updated: 2026-09-14
+last-updated: 2026-09-15
 status: provisional
 tracking-link:
   - https://redhat.atlassian.net/browse/SPIRE-212
@@ -68,10 +68,10 @@ destinations.
   SPIRE components are allowed only required communication.
 
 * As a cluster administrator, I want to attach or update custom
-  NetworkPolicy resources when enabling capabilities (Vault upstream
-  authority, external database, federation, or cluster proxy) on operand
-  CRs, so that environment-specific egress is validated and reported
-  without the operator hardcoding endpoint ports.
+  NetworkPolicy resources on the SpireServer CR when enabling capabilities
+  (Vault upstream authority, external database, or cluster proxy), so that
+  environment-specific egress is validated and reported without the
+  operator hardcoding endpoint ports.
 
 * As a security engineer, I want default-deny network policies enforced
   for all workload identity components, so that only explicitly permitted
@@ -108,7 +108,7 @@ destinations.
   * SPIRE Server federation via OpenShift Router (if enabled)
   * DNS resolution for service discovery (port 5353/TCP+UDP)
   * User-referenced egress for Vault, external databases, and proxy
-    endpoints via `networkPolicyRefs` on operand CRs
+    endpoints via `networkPolicyRefs` on the SpireServer CR
 
 * Ensure network policies do not interfere with normal operation of the
   workload identity management system.
@@ -216,12 +216,17 @@ managing the ZeroTrustWorkloadIdentityManager operator.
 2. The corresponding operand reconciler deploys the operand components and
    creates `ztwim-sys-*` NetworkPolicy resources.
 
-3. During operand CR reconciliation, the reconciler:
+3. During operand CR reconciliation, each reconciler:
    * Applies default-deny and allow policies for the component
    * Creates conditional policies when capabilities are enabled (e.g.,
-     federation)
-   * Validates `networkPolicyRefs` entries exist in the operand namespace
+     federation on SpireServer)
    * Updates status conditions on the operand CR and ZTWIM CR
+
+   The SpireServer reconciler additionally validates `networkPolicyRefs`
+   entries exist in the operand namespace. SpireAgent and
+   SpireOIDCDiscoveryProvider reconcilers do not use `networkPolicyRefs`
+   because their required traffic is fully covered by baseline
+   `ztwim-sys-*` policies.
 
 4. Policy rollout follows a safe ordering: allow rules are applied before
    or overlapping with default-deny replacements. The reconciler retries
@@ -288,7 +293,7 @@ such CNIs are out of scope unless probe-success tests are added.
 * Kubelet: node CIDR ranges for port 10250/TCP
 * OpenShift Routes: ingress namespace selectors (not FQDN-based rules)
 * Vault, external databases, proxy: user-defined via `networkPolicyRefs`
-  on operand CRs with user-specified `ipBlock` and port values
+  on the SpireServer CR with user-specified `ipBlock` and port values
 
 ```mermaid
 sequenceDiagram
@@ -310,7 +315,7 @@ sequenceDiagram
     Admin->>K8s: Create SpireServer / SpireAgent CR
     K8s->>Recon: Notify operand reconciler
     Recon->>K8s: Deploy operand + ztwim-sys-* NetworkPolicies
-    Recon->>K8s: Validate networkPolicyRefs
+    Recon->>K8s: SpireServer reconciler validates networkPolicyRefs
     Note over K8s: Operand default-deny + Allow rules applied
     K8s->>SPIRE: Start components
     SPIRE->>K8s: Register (via allowed egress)
@@ -319,14 +324,17 @@ sequenceDiagram
 
 ### API Extensions
 
-This enhancement adds a `networkPolicyRefs` field to operand CRs (at
-minimum `SpireServer`; `SpireAgent` and `SpireOIDCDiscoveryProvider` as
-needed). Operand reconcilers deploy all baseline `ztwim-sys-*`
+This enhancement adds a `networkPolicyRefs` field to the **SpireServer**
+CR only. Operand reconcilers deploy all baseline `ztwim-sys-*`
 NetworkPolicies automatically. For environment-specific egress (Vault,
 external database, proxy), users create standard Kubernetes NetworkPolicy
-resources and reference them on the operand CR. The reconciler validates
-that referenced policies exist in the **operand namespace** and reports
-status.
+resources and reference them on the SpireServer CR. The SpireServer
+reconciler validates that referenced policies exist in the **operand
+namespace** and reports status.
+
+SpireAgent and SpireOIDCDiscoveryProvider do not expose
+`networkPolicyRefs`. Their network requirements are fully satisfied by
+operator-managed baseline policies with no user-supplied egress.
 
 ```go
 type SpireServerSpec struct {
@@ -342,9 +350,6 @@ type SpireServerSpec struct {
     NetworkPolicyRefs []string `json:"networkPolicyRefs,omitempty"`
 }
 ```
-
-The same field may be added to `SpireAgent` and `SpireOIDCDiscoveryProvider`
-CRs where capability-specific egress is required.
 
 **How it works:**
 
@@ -435,7 +440,7 @@ spec:
 * `ztwim-sys-*` -- operand baseline policies. Created and reconciled by
   operand controllers. Reverted if modified externally.
 * User-created policies -- any name. Referenced via `networkPolicyRefs` on
-  operand CRs. Validated for existence only.
+  the SpireServer CR. Validated for existence only.
 
 **Removing a reference:** When a user removes an entry from
 `networkPolicyRefs`, the reconciler stops validating that policy. The
@@ -448,6 +453,8 @@ NetworkPolicy resource itself is not deleted -- the user owns its lifecycle.
 | ZTWIM CR | `NetworkPoliciesApplied` | All operand baseline policies reconciled | Operand policy apply failed |
 | SpireServer CR | `NetworkPolicyAvailable` | All `networkPolicyRefs` exist | Missing referenced policy |
 | SpireServer CR | `NetworkPoliciesReconciled` | `ztwim-sys-*` applied successfully | Create/update failed |
+| SpireAgent CR | `NetworkPoliciesReconciled` | `ztwim-sys-*` applied successfully | Create/update failed |
+| SpireOIDCDiscoveryProvider CR | `NetworkPoliciesReconciled` | `ztwim-sys-*` applied successfully | Create/update failed |
 
 When `NetworkPolicyAvailable=False`, `NetworkPoliciesReconciled=False`, or
 baseline policy creation fails, the ZTWIM operator reports **Degraded**.
@@ -516,9 +523,11 @@ create and reconcile `ztwim-sys-*` NetworkPolicy resources:
 
 3. Update or delete policies when operand configuration changes.
 
-4. Validate `networkPolicyRefs` during each reconciliation.
+4. Set status conditions and propagate Degraded to ZTWIM on failure.
 
-5. Set status conditions and propagate Degraded to ZTWIM on failure.
+The SpireServer reconciler additionally validates `networkPolicyRefs`
+during each reconciliation. SpireAgent and SpireOIDCDiscoveryProvider
+reconcilers do not validate `networkPolicyRefs`.
 
 ### RBAC Requirements
 
@@ -612,7 +621,7 @@ differently.
 deny-all may still allow unintended egress (NetworkPolicies are additive).
 
 **Mitigation**:
-* Validate `networkPolicyRefs` against enabled capabilities on operand CR
+* Validate `networkPolicyRefs` against enabled capabilities on SpireServer CR
 * Warn when capability is enabled but no reference exists
 * Regular security reviews of user-referenced policies
 
@@ -694,7 +703,7 @@ CRs; validation logic scattered across controllers.
 * Policies updated when operand configuration changes (e.g., federation
   enabled/disabled)
 * Policies deleted when operands are removed
-* `networkPolicyRefs` validation during operand CR reconciliation
+* `networkPolicyRefs` validation during SpireServer CR reconciliation
 * Degraded state when referenced policy is missing
 * Operand `ztwim-sys-*` policies recreated after manual deletion
 * Operator `ztwim-op-*` policies **not** recreated after manual deletion
@@ -812,11 +821,11 @@ NetworkPolicy resources take effect immediately on running pods.
 
 ## Operational Aspects of API Extensions
 
-This enhancement adds `networkPolicyRefs` (`[]string`) to operand CRs
-(SpireServer at minimum). No new CRDs, webhooks, or finalizers.
+This enhancement adds `networkPolicyRefs` (`[]string`) to the SpireServer
+CR only. No new CRDs, webhooks, or finalizers.
 
 * **Failure modes**: Missing referenced policy sets
-  `NetworkPolicyAvailable=False` on operand CR and Degraded on ZTWIM.
+  `NetworkPolicyAvailable=False` on SpireServer CR and Degraded on ZTWIM.
   Baseline `ztwim-sys-*` policy creation failure sets
   `NetworkPoliciesReconciled=False`.
 
@@ -824,8 +833,8 @@ This enhancement adds `networkPolicyRefs` (`[]string`) to operand CRs
   pods. User-created policies take effect immediately at the CNI level.
 
 * **Resource footprint**: ~2 `ztwim-op-*` operator policies plus ~12
-  `ztwim-sys-*` operand policies. Maximum 10 `networkPolicyRefs` per
-  operand CR.
+  `ztwim-sys-*` operand policies. Maximum 10 `networkPolicyRefs` on the
+  SpireServer CR.
 
 ## Support Procedures
 
@@ -835,8 +844,9 @@ This enhancement adds `networkPolicyRefs` (`[]string`) to operand CRs
 CrashLoopBackOff with connection errors.
 
 **Diagnosis**:
-1. Check operand CR conditions (`NetworkPolicyAvailable`,
-   `NetworkPoliciesReconciled`) and ZTWIM Degraded status
+1. Check operand CR conditions (`NetworkPoliciesReconciled` on all
+   operands; `NetworkPolicyAvailable` on SpireServer only) and ZTWIM
+   Degraded status
 2. Check pod logs for connection timeout or refused errors
 3. Verify NetworkPolicy resources: `oc get networkpolicies -n <namespace>`
 4. Distinguish operator-generated (`ztwim-sys-*`) vs user-referenced vs
