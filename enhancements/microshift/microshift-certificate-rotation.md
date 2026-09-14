@@ -12,7 +12,7 @@ approvers:
 api-approvers:
   - None
 creation-date: 2026-09-08
-last-updated: 2026-09-10
+last-updated: 2026-09-14
 tracking-link:
   - https://redhat.atlassian.net/browse/OCPSTRAT-2899
 see-also:
@@ -34,11 +34,10 @@ This enhancement introduces controlled, on-demand certificate and CA renewal via
 the `microshift certs` CLI subcommand family, allowing administrators to check
 certificate status and trigger renewal during planned maintenance windows. The
 forced process exit on red-zone certificates is made configurable via a
-`certificates.autoRotate` configuration option. By default, MicroShift switches
-to a warn-only policy logging warnings and surfacing certificate zone status via
-`certs status` and healthcheck while giving administrators control over when
-renewals and the associated service restart occur. Administrators who prefer the
-existing auto-restart behavior can re-enable it through the configuration.
+`certificates.forceRestartOnRedZone` configuration option. The option defaults
+to `true` to preserve existing behavior on upgrades. Administrators can set it
+to `false` to use a warn-only policy that surfaces certificate zone status via
+`certs status` and healthcheck without forcing an unplanned restart.
 Administrators can also configure the validity of internally generated serving
 and CA certificates; the defaults remain one year and ten years, respectively.
 
@@ -74,10 +73,10 @@ communicate the expected downtime to stakeholders.
 #### Story 5: Configurable Red-Zone Behavior
 
 As a MicroShift administrator running MicroShift at edge sites, I want the
-red-zone forced process exit to be disabled by default and configurable, so that
-I can maintain my SLA commitments and renew certificates during planned
-maintenance windows, while organizations that prefer automatic restarts can opt
-in to that behavior.
+red-zone forced process exit to be configurable so that I can opt out of
+unplanned restarts, maintain my SLA commitments, and renew certificates during
+planned maintenance windows without changing the default behavior of existing
+deployments.
 
 #### Story 6: Configurable Certificate Validity
 
@@ -102,10 +101,10 @@ requirements.
    execution.
 
 5. Make the forced process exit on red-zone certificates configurable. By
-   default, switch to a warn-only policy (log warnings, surface status in `certs
-   status` and healthcheck). Provide a configuration option
-   (`certificates.autoRotate`) for administrators who prefer the existing
-   auto-restart behavior.
+   default, preserve the existing auto-restart behavior. Provide a
+   `certificates.forceRestartOnRedZone` configuration option that administrators
+   can disable to log warnings and surface status in `certs status` and
+   healthcheck without forcing a restart.
 
 6. Preserve the existing behavior where yellow-zone certificates are
    automatically regenerated on service start.
@@ -168,8 +167,8 @@ SERVICE            CERTIFICATE              STATUS    EXPIRY                  RE
 authentication     admin-kubeconfig-signer   Green     2035-09-08T10:30:00Z    NotExpiring     Valid for 3287 days
 etcd               etcd-signer               Green     2035-09-08T10:30:00Z    NotExpiring     Valid for 3287 days
 etcd               etcd-serving              Yellow    2026-11-01T08:00:00Z    Expiring        Expires in 54 days
-kube-apiserver     kube-apiserver-serving    Green     2027-03-15T10:30:00Z    NotExpiring     Valid for 553 days
-kubelet            kubelet-client            Green     2027-03-15T10:30:00Z    NotExpiring     Valid for 553 days
+kube-apiserver     kube-apiserver-serving    Green     2027-03-15T10:30:00Z    NotExpiring     Valid for 188 days
+kubelet            kubelet-client            Green     2027-03-15T10:30:00Z    NotExpiring     Valid for 188 days
 service-ca         service-ca                Green     2035-09-08T10:30:00Z    NotExpiring     Valid for 3287 days
 ...
 ```
@@ -183,16 +182,29 @@ Requires MicroShift to be stopped.
 $ sudo systemctl stop microshift
 $ sudo microshift certs renew --serving --dry-run
 DRY RUN: Would renew the following certificates:
-  - kube-apiserver-serving (expires 2027-03-15)
-  - etcd-serving (expires 2026-11-01)
-  - kubelet-client (expires 2027-03-15)
+SERVICE            CERTIFICATE              CURRENT EXPIRY           PROPOSED EXPIRY
+etcd               etcd-serving              2026-11-01T08:00:00Z    2027-09-08T10:30:00Z
+kube-apiserver     kube-apiserver-serving    2027-03-15T10:30:00Z    2027-09-08T10:30:00Z
+kubelet            kubelet-client            2027-03-15T10:30:00Z    2027-09-08T10:30:00Z
   ...
 No CA certificates will be changed.
+WARNING: Applications that cache certificates or CA bundles may need to be
+reloaded or restarted after renewal.
 
 $ sudo microshift certs renew --serving
 Renewed 18 serving/client certificates.
+SERVICE            CERTIFICATE              STATUS    EXPIRY                  REASON          MESSAGE
+etcd               etcd-serving              Green     2027-09-08T10:30:00Z    NotExpiring     Valid for 365 days
+kube-apiserver     kube-apiserver-serving    Green     2027-09-08T10:30:00Z    NotExpiring     Valid for 365 days
+kubelet            kubelet-client            Green     2027-09-08T10:30:00Z    NotExpiring     Valid for 365 days
+  ...
+WARNING: Applications that cache certificates or CA bundles may need to be
+reloaded or restarted after renewal.
 $ sudo systemctl start microshift
 ```
+
+After a successful renewal, the command prints the same status fields as
+`microshift certs status`, limited to the renewed certificates.
 
 #### `microshift certs renew --ca`
 
@@ -203,25 +215,40 @@ serving and client certificates. Requires MicroShift to be stopped.
 $ sudo systemctl stop microshift
 $ sudo microshift certs renew --ca --dry-run
 DRY RUN: Would renew the following CAs and their descendants:
-  CA: service-ca
-    - openshift-controller-manager-serving
-    - openshift-router-serving
-    ...
-  CA: kube-apiserver-lb-signer
-    - kube-apiserver-lb-serving
-  CA: admin-kubeconfig-signer
-    - admin-kubeconfig-client
-  ...
+TYPE           PARENT CA                    CERTIFICATE                              CURRENT EXPIRY           PROPOSED EXPIRY
+CA             -                            admin-kubeconfig-signer                   2035-09-08T10:30:00Z    2036-09-05T10:30:00Z
+Certificate    admin-kubeconfig-signer      admin-kubeconfig-client                   2035-09-08T10:30:00Z    2027-09-08T10:30:00Z
+CA             -                            kube-apiserver-lb-signer                  2035-09-08T10:30:00Z    2036-09-05T10:30:00Z
+Certificate    kube-apiserver-lb-signer     kube-apiserver-lb-serving                 2027-03-15T10:30:00Z    2027-09-08T10:30:00Z
+CA             -                            service-ca                                2035-09-08T10:30:00Z    2036-09-05T10:30:00Z
+Certificate    service-ca                   openshift-controller-manager-serving      2027-03-15T10:30:00Z    2027-09-08T10:30:00Z
+Certificate    service-ca                   openshift-router-serving                  2027-03-15T10:30:00Z    2027-09-08T10:30:00Z
+...
 WARNING: After CA renewal, kubeconfigs stored outside the MicroShift data
 directory must be manually re-copied.
+WARNING: Applications that cache certificates or CA bundles mounted into pods
+must reload that material or be restarted after renewal.
 
 $ sudo microshift certs renew --ca
 Renewed 5 CAs and 18 descendant certificates.
+SERVICE            TYPE           CERTIFICATE                        EXPIRY
+authentication     CA             admin-kubeconfig-signer             2036-09-05T10:30:00Z
+authentication     Certificate    admin-kubeconfig-client             2027-09-08T10:30:00Z
+kube-apiserver     CA             kube-apiserver-lb-signer            2036-09-05T10:30:00Z
+kube-apiserver     Certificate    kube-apiserver-lb-serving           2027-09-08T10:30:00Z
+service-ca         CA             service-ca                          2036-09-05T10:30:00Z
+service-ca         Certificate    openshift-router-serving            2027-09-08T10:30:00Z
+  ...
 WARNING: Kubeconfigs in /var/lib/microshift/resources/kubeadmin have been
 regenerated. If you have copied kubeconfigs to other locations, you must
 update those copies.
+WARNING: Applications that cache certificates or CA bundles mounted into pods
+must reload that material or be restarted after renewal.
 $ sudo systemctl start microshift
 ```
+
+After a successful CA renewal, the command lists the new expiry date for every
+renewed CA and descendant certificate.
 
 ### Certificate Lifetime Configuration
 
@@ -229,10 +256,15 @@ MicroShift adds the following fields to `/etc/microshift/config.yaml`:
 
 ```yaml
 certificates:
-  autoRotate: false
+  forceRestartOnRedZone: true
   servingValidity: 8760h
   caValidity: 87600h
 ```
+
+`forceRestartOnRedZone` controls only whether entering the red zone forces
+MicroShift to restart. It defaults to `true` to preserve the behavior of
+existing deployments. It does not control regeneration during a later manual
+service start.
 
 `servingValidity` applies to all serving certificates generated and managed by
 MicroShift. `caValidity` applies to all CA certificates generated and managed by
@@ -256,63 +288,61 @@ duration.
 
 ### Certificate Zone Model
 
-MicroShift identifies a short term and long term certificate and automatically
-regenerates them when _manually restarted_ **and** _if_ they are near expiry.
+Zone thresholds are derived from the validity encoded in each certificate so
+they remain meaningful for configured durations such as a six-week serving
+certificate. For each item, total validity is `NotAfter - NotBefore`, remaining
+validity is `NotAfter - now`, and remaining percentage is remaining validity
+divided by total validity.
 
-Formula to determine renewals:
+The PKI inventory records certificate role (CA, serving, client, or peer) and
+rotation policy as separate attributes. Role determines how a certificate is
+reported and selected for renewal; rotation policy determines its zone
+thresholds. Certificate duration is not used to infer either attribute:
 
-```
-Short_Term = < 5 years
-Long_Term = > 5 years
-Earliest_Restart = 4 Months Before Short_Term Expires OR 12 Months Before Long_Term Expires
+| Rotation policy | Assignment                                        | Green           | Yellow                            | Red           |
+| --------------- | ------------------------------------------------- | --------------- | --------------------------------- | ------------- |
+| Standard        | Serving and explicitly assigned client/peer certs | More than 58.3% | More than 33.3% and at most 58.3% | At most 33.3% |
+| Extended        | All CAs and explicitly assigned client/peer certs | More than 15%   | More than 10% and at most 15%     | At most 10%   |
 
-if Short_Term has less then 7 Months left
-   renew Short_Term
+All CAs use the extended policy and all serving certificates use the standard
+policy. This intentionally normalizes existing signer CAs that currently use the
+short-lived constant. Client and peer certificates are not assigned a policy
+solely from their non-CA role: existing long-lived entries such as
+`admin-kubeconfig-client`, `apiserver-etcd-client`, `etcd-peer`, and
+`etcd-serving` retain the extended policy. New client and peer inventory entries
+must declare their policy explicitly.
 
-if Long_Term has less then 18 Months left
-   renew Long_Term
-
-start Earliest_Restart deadline to force restart MicroShift
-```
-
-| Zone   | Criteria                                                             |
-| ------ | -------------------------------------------------------------------- |
-| Red    | 1 Year left on _long term_ **or** 4 Months left on _short term_      |
-| Yellow | 18 Months left on _long term_ **or** 7 Months left on _short term_   |
-| Green  | 19+ Months left on _long term_ **or** 8+ Months left on _short term_ |
-
-Certificates are classified into zones based on their remaining validity:
-
-| Certificate Type            | Total Validity | Green               | Yellow              | Red               |
-| --------------------------- | -------------- | ------------------- | ------------------- | ----------------- |
-| Short-term (serving/client) | 1 year         | 0-5 months elapsed  | 5-8 months elapsed  | 8+ months elapsed |
-| Long-term (CA)              | 10 years       | 0-8.5 years elapsed | 8.5-9 years elapsed | 9+ years elapsed  |
+For the default validity durations, these percentages retain the current
+boundaries of approximately seven and four months remaining for standard-policy
+certificates and 18 and 12 months remaining for extended-policy certificates. A
+certificate that is expired or not yet valid is always in the red zone.
 
 **Behavioral changes by zone:**
 
 - **Green zone**: No action needed. Certificates are valid and not approaching
   expiry.
 - **Yellow zone**: Warning logged. Certificates in this zone are automatically
-  regenerated when MicroShift is manually started (preserving existing
-  behavior).
+  regenerated the next time MicroShift is manually started or restarted
+  (preserving existing behavior). Entering the yellow zone while MicroShift is
+  running does not itself stop or restart the service.
 - **Red zone (changed)**: Behavior is now governed by the
-  `certificates.autoRotate` configuration option:
-  - **`autoRotate: false`** (new default): Warning logged; MicroShift does _not_
+  `certificates.forceRestartOnRedZone` configuration option:
+  - **`forceRestartOnRedZone: true`** (default and legacy behavior): MicroShift
+    cancels the run context via `WhenToRotateAtEarliest` /
+    `context.WithDeadline` in `pkg/cmd/run.go`, causing systemd to restart the
+    process.
+  - **`forceRestartOnRedZone: false`**: Warning logged; MicroShift does _not_
     force a process exit. The cluster continues to run until certificates are
     actually invalid. Near-expiry is visible in logs, `certs status` output
-    (zone, time until `NotAfter`, whether auto-restart would have fired), and
-    healthcheck. The administrator decides when to perform renewal in a
-    maintenance window.
-  - **`autoRotate: true`** (legacy behavior): MicroShift cancels the run context
-    via `WhenToRotateAtEarliest` / `context.WithDeadline` in `pkg/cmd/run.go`,
-    causing systemd to restart the process. This preserves the pre-enhancement
-    behavior for administrators who prefer automatic rotation at the cost of
-    unplanned downtime.
+    (zone, time until `NotAfter`, and whether `forceRestartOnRedZone` is
+    enabled), and healthcheck. The administrator decides when to perform renewal
+    in a maintenance window.
 
   > **Note:** The existing yellow-zone behavior where certificates are
   > automatically regenerated on manual service start (`certsToRegenerate`) is
-  > _not_ affected by this configuration. The `autoRotate` setting controls only
-  > the in-process red-zone deadline, not the "regenerate on start" behavior.
+  > _not_ affected by this configuration. The `forceRestartOnRedZone` setting
+  > controls only the in-process red-zone deadline, not the "regenerate on
+  > start" behavior.
 
 ### PKI Inventory
 
@@ -355,7 +385,9 @@ the number of CAs without modifying the CLI commands.
 5. Administrator stops MicroShift: `systemctl stop microshift`.
 6. Administrator runs `microshift certs renew --serving`.
 7. Administrator starts MicroShift: `systemctl start microshift`.
-8. Workloads resume with renewed certificates. No kubeconfig redistribution
+8. Application owners reload or restart applications that cache affected
+   certificates or CA bundles.
+9. Workloads resume with renewed certificates. No kubeconfig redistribution is
    needed.
 
 #### CA Certificate Renewal
@@ -369,6 +401,8 @@ the number of CAs without modifying the CLI commands.
 6. Administrator copies regenerated kubeconfigs from the MicroShift data
    directory to any external locations where they were previously distributed.
 7. Clients using the old kubeconfigs must obtain the updated copies.
+8. Application owners reload or restart applications that cache certificates or
+   CA bundles mounted into their pods, then verify connectivity.
 
 #### Changing Certificate Validity
 
@@ -378,15 +412,15 @@ the number of CAs without modifying the CLI commands.
    inspect the effective durations. Existing certificates are not changed solely
    because their configured validity changed.
 3. The administrator uses `microshift certs renew --serving` or `microshift
-   certs renew --ca` during a maintenance window when the new validity should
-   take effect.
+   certs renew --ca` during a maintenance window when the new validity should take
+   effect.
 4. Newly issued certificates use the configured duration. `certs status` reports
    their resulting `NotAfter` values and proportionally calculated zones.
 
 ### API Extensions
 
 This enhancement does not introduce or modify Kubernetes API resources. It adds
-the `certificates.autoRotate`, `certificates.servingValidity`, and
+the `certificates.forceRestartOnRedZone`, `certificates.servingValidity`, and
 `certificates.caValidity` fields to the host-local MicroShift configuration
 file.
 
@@ -452,6 +486,23 @@ because:
 The `status` subcommand and `--dry-run` flag are safe to use while MicroShift is
 running.
 
+#### Renewal Transaction and Failure Recovery
+
+Renewal provides transaction-like behavior across all affected files. The
+command first writes certificates, private keys, bundles, and generated
+kubeconfigs to a staging area on the same filesystem without changing active
+material. It validates certificate/key pairs, parent-child chains, validity, and
+generated bundles before committing the renewal.
+
+Before replacing active files, the command creates a recoverable backup and a
+durable transaction marker. A failure before commit leaves active material
+unchanged. A failure or interruption during commit restores the backup; a later
+`certs status` or `certs renew` invocation detects and recovers an incomplete
+transaction before proceeding. The command reports success and the new expiry
+dates only after post-commit validation succeeds. MicroShift remains stopped
+throughout the operation, so running components cannot observe a partially
+updated certificate set.
+
 #### Configurable Certificate Validity
 
 The configuration implementation replaces hard-coded validity values for managed
@@ -461,10 +512,13 @@ is retained.
 
 The PKI inventory records certificate role and rotation policy explicitly. This
 replaces `IsCertShortLived` duration-based classification, which would
-misclassify a CA configured with a validity shorter than five years. Both
-`certsToRegenerate` and `WhenToRotateAtEarliest` calculate their thresholds as
-fractions of each certificate's `NotAfter - NotBefore` validity, using the
-policy recorded in the inventory.
+misclassify a CA configured with a validity shorter than five years and cannot
+represent existing long-lived non-CA certificates safely. CA and serving roles
+select their respective policies directly. Existing client and peer entries
+retain their current standard or extended behavior through explicit inventory
+assignments. Both `certsToRegenerate` and `WhenToRotateAtEarliest` calculate
+their thresholds as fractions of each certificate's `NotAfter - NotBefore`
+validity, using the policy recorded in the inventory.
 
 Configuration generation adds the new fields and their defaults to the sample
 configuration and schema. Configuration merging distinguishes an omitted value
@@ -485,6 +539,25 @@ update external copies.
 **Mitigation**: The `renew` subcommand checks whether the MicroShift process is
 running and refuses to proceed if it is. Only `status` and `--dry-run` are
 permitted while the service is active.
+
+---
+
+**Risk**: A write failure or interruption during renewal leaves certificate
+files from different generations in active paths.
+
+**Mitigation**: Renewal stages and validates the complete output before commit,
+keeps a recoverable backup and transaction marker during replacement, rolls back
+on failure, and recovers interrupted transactions before later status or renewal
+operations.
+
+---
+
+**Risk**: Applications continue using cached certificates or CA bundles after
+MicroShift has renewed the mounted material.
+
+**Mitigation**: Dry-run and renewal output warn that affected applications must
+reload their TLS material or restart. The CA workflow explicitly includes this
+application-owner action and post-renewal connectivity verification.
 
 ---
 
@@ -543,10 +616,11 @@ rejected because:
 3. The controlled approach gives administrators explicit control over when the
    service restart occurs.
 
-### Alternative C: Maintain Forced Exit on Red-Zone
+### Alternative C: Make Forced Exit on Red-Zone Mandatory
 
 Keep the existing behavior of forcing a process exit when certificates enter the
-red zone. This was rejected because:
+red zone without allowing administrators to disable it. This was rejected
+because:
 
 1. Telecommunications customers reported that unplanned restarts may violate
    their SLA commitments.
@@ -585,8 +659,13 @@ retained as defaults instead.
 - PKI inventory construction and parent-child relationship tracking.
 - Zone classification for standard and extended policies across default and
   custom certificate durations.
+- Explicit role and rotation-policy assignment without duration heuristics,
+  including CA policy normalization and preservation of long-lived client and
+  peer behavior.
 - Certificate configuration defaulting and validation, including zero, negative,
   malformed, and serving-validity-greater-than-CA-validity values.
+- Renewal transaction fault injection before and during commit, including
+  rollback and recovery of an interrupted transaction.
 - Dry-run output generation.
 - Service-running detection guard.
 
@@ -600,9 +679,14 @@ retained as defaults instead.
   is renewed, descendant certificates are re-issued, and kubeconfigs are
   regenerated.
 - Dry-run produces accurate output matching what the actual renewal would do.
+- Successful serving and CA renewal output includes the new expiry date for
+  every renewed certificate.
 - Renewal is refused while MicroShift is running.
-- Validation that red-zone certificates produce warnings but do not force a
-  process exit.
+- With `forceRestartOnRedZone: true`, a red-zone certificate preserves the
+  existing forced-restart behavior; with `false`, it produces warnings without
+  forcing a process exit.
+- Entering the yellow zone while running does not restart MicroShift, and the
+  certificate is regenerated on the next manual service start.
 - A custom six-week `servingValidity` is reflected in newly issued serving
   certificates without placing them immediately in the yellow or red zone.
 - A custom `caValidity` is reflected in newly issued CAs, and no descendant
@@ -614,6 +698,8 @@ retained as defaults instead.
   planned renewal, verify recovery.
 - Simulate CA renewal, verify kubeconfig regeneration, verify clients can
   authenticate with new kubeconfig.
+- Verify an application that caches an old certificate or CA bundle is called
+  out by renewal impact messaging and can recover by reloading or restarting.
 
 ## Graduation Criteria
 
@@ -625,7 +711,8 @@ N/A This feature is targeted for GA directly.
 
 - All CLI commands implemented and tested (`certs status`, `certs renew
 --serving`, `certs renew --ca`, `--dry-run`).
-- Red-zone forced exit replaced with warnings.
+- `forceRestartOnRedZone` implemented with a compatibility-preserving `true`
+  default and a warn-only `false` mode.
 - PKI inventory abstraction implemented and validated.
 - Configurable serving and CA validity implemented with one-year and ten-year
   defaults and proportional rotation zones.
@@ -644,7 +731,9 @@ N/A
 On upgrade to a MicroShift version containing this enhancement:
 
 - The `microshift certs` CLI subcommands become available.
-- The red-zone forced exit behavior is replaced with warnings.
+- `certificates.forceRestartOnRedZone` defaults to `true`, so the existing
+  red-zone forced-restart behavior is unchanged unless an administrator
+  explicitly opts out.
 - No certificate renewal is triggered by the upgrade itself.
 - Existing certificates remain valid with their current expiry dates.
 - Omitted lifetime settings resolve to the existing one-year serving and
@@ -656,7 +745,8 @@ On upgrade to a MicroShift version containing this enhancement:
 On downgrade to a MicroShift version without this enhancement:
 
 - The `microshift certs` CLI subcommands are no longer available.
-- The red-zone forced exit behavior is restored.
+- The red-zone forced-restart behavior is unconditional. A previously configured
+  `forceRestartOnRedZone: false` setting is not honored.
 - Certificates renewed by this enhancement remain valid; no rollback of
   certificate state occurs.
 - The older binary ignores the unsupported `certificates` fields and returns to
