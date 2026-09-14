@@ -12,7 +12,7 @@ approvers:
   - "@jstuever"
   - "@patrickdillon"
 api-approvers:
-  - "none"
+  - "@everettraven"
 creation-date: 2026-08-17
 last-updated: 2026-09-11
 tracking-link:
