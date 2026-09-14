@@ -14,13 +14,13 @@ approvers:
 api-approvers:
   - "@everettraven"
 creation-date: 2026-08-17
-last-updated: 2026-09-11
+last-updated: 2026-09-14
 tracking-link:
   - https://issues.redhat.com/browse/SPLAT-2874
   - https://issues.redhat.com/browse/SPLAT-2889
   - https://issues.redhat.com/browse/SPLAT-2724
 see-also:
-  - "/enhancements/cloud-integration/cloud-credentials.md"
+  - "/enhancements/installer/credentials-management-outside-openshift-cluster.md"
 replaces:
   - []
 superseded-by:
@@ -40,96 +40,163 @@ superseded-by:
 
 ## Summary
 
-This enhancement adds the cluster-scoped `cloudcredential.openshift.io/v1alpha1` `VSphereComponentScopedCredential` API for selecting the explicitly referenced Secret in `openshift-config` as the source credential for one vSphere `CredentialsRequest` target Secret. Today, vSphere clusters use a single shared credential (`kube-system/vsphere-creds`) for every component. The CRD lets authorized administrators configure distinct, lower-privilege credentials per component without storing credential bytes in the API object. The feature targets OpenShift 5.1.0 and is initially gated by `TechPreviewNoUpgrade`.
+This enhancement keeps the cluster-scoped `cloudcredential.openshift.io/v1alpha1`
+`VSphereComponentScopedCredential` API in scope while using CCO in
+`credentialsMode: Manual`. On vSphere, an administrator supplies the
+component-scoped credentials required by generated `CredentialsRequest` targets
+after `openshift-install create manifests`, rather than CCO minting, copying, or
+rotating them. The administrator also owns the day-2 credential lifecycle:
+creating least-privilege vCenter identities, updating the corresponding component
+credentials, verifying the affected component, and retiring superseded identities.
+The precise Manual-mode consumer and status semantics of the proposed CRD remain
+open for API and CCO design review. The feature targets OpenShift 5.1.0 and is
+initially gated by `TechPreviewNoUpgrade`.
 
-This is a reduced-scope first phase of the broader vSphere multi-account credential-management initiative. [SPLAT-2874](https://issues.redhat.com/browse/SPLAT-2874) is the primary tracking item; [SPLAT-2889](https://issues.redhat.com/browse/SPLAT-2889) tracks the CCO implementation, and [SPLAT-2724](https://issues.redhat.com/browse/SPLAT-2724) is the parent initiative.
+This is a reduced-scope first phase of the broader vSphere multi-account
+credential-management initiative. [SPLAT-2874](https://issues.redhat.com/browse/SPLAT-2874)
+is the primary tracking item; [SPLAT-2889](https://issues.redhat.com/browse/SPLAT-2889)
+tracks the CCO implementation, and [SPLAT-2724](https://issues.redhat.com/browse/SPLAT-2724)
+is the parent initiative.
 
 ## Motivation
 
-vSphere clusters today operate with a single set of credentials shared across all OpenShift components that interact with the vCenter API. This means Machine API, the CSI driver, and Cloud Controller Manager all authenticate with the same identity. This shared-credential model creates several operational and security challenges:
+vSphere clusters today commonly use one credential for several OpenShift
+components that interact with the vCenter API. This shared-credential model
+creates operational and security challenges:
 
-- **Blast radius**: A compromised credential exposes all vSphere operations, not just the affected component.
-- **Audit opacity**: vCenter audit logs cannot distinguish which OpenShift component performed an action when all components use the same identity.
-- **Rotation risk**: Rotating the shared credential requires coordinated updates across all components simultaneously, increasing the risk of partial failures.
+- **Blast radius**: A compromised credential exposes all vSphere operations, not
+  just the affected component.
+- **Audit opacity**: vCenter audit logs cannot distinguish which OpenShift
+  component performed an action when all components use the same identity.
+- **Rotation risk**: Rotating one shared credential requires coordinated changes
+  across components and makes partial failures harder to isolate.
 
 ### User Stories
 
-**Story 1 - Least-privilege credential separation**: As a cluster administrator, I want to assign distinct vSphere credentials to each OpenShift component so that each component operates with only the permissions it requires, reducing the blast radius of a credential compromise.
+**Story 1 - Least-privilege credential separation**: As a cluster administrator,
+I want to prepare a distinct vSphere identity and component credential for each
+OpenShift component so that each component has only the permissions it requires.
 
-**Story 2 - Credential rotation without full cluster impact**: As a cluster administrator, I want to rotate one component's vSphere credential without affecting other components so that routine rotation is lower-risk and can be performed incrementally.
+**Story 2 - Installation in Manual mode**: As a cluster administrator, I want to
+provide the component credentials after generating installation manifests so that
+the cluster can install with CCO in `credentialsMode: Manual` and without a
+shared in-cluster administrative credential.
 
-**Story 3 - Observable recovery**: As a cluster administrator, I want invalid or ambiguous override configuration to report a clear status without silently changing a component back to root credentials so that I can remediate the intended credential source safely.
+**Story 3 - Safe day-2 rotation**: As a cluster administrator, I want to rotate
+one component credential, verify that component, and then retire its old vSphere
+identity so that routine rotation has a limited blast radius.
 
 ### Goals
 
-- Provide a cluster-scoped, structured API for mapping one vSphere `CredentialsRequest` target Secret to one source Secret in `openshift-config`.
-- Validate mappings, protect the mapping target from mutation, and make invalid configuration observable through status conditions.
-- Limit CCO source-Secret reads to names explicitly referenced by the CR and give only authorized administrators or delegated service accounts permission to create or update override resources and source Secrets.
-- Preserve existing root-credential behavior for managed vSphere `CredentialsRequest` targets only when no override CR exists for that target.
-- Reconcile create, update, deletion, and relevance-removal events through the existing `CredentialsRequest` work queue.
+- Run CCO in `credentialsMode: Manual` for this vSphere workflow.
+- Provide an administrator-owned install-time procedure, beginning after
+  `openshift-install create manifests`, for satisfying each relevant vSphere
+  `CredentialsRequest` target with component-scoped credentials.
+- Keep `VSphereComponentScopedCredential` as the proposed structured,
+  cluster-scoped API for the component-credential association without placing
+  credential bytes in the API object.
+- Document a day-2 lifecycle for creating, rotating, and verifying component
+  credentials without requiring CCO to mint, copy, or rotate those credentials.
+- Preserve the existing Manual-mode responsibility for administrators to review
+  credential requirements when a release changes.
 
 ### Non-Goals
 
-- Installer-native `install-config.yaml` support or automatic provisioning and rotation of per-component credentials.
-- Applying or managing overrides when `credentialsMode: Manual` is configured.
+- Adding installer-native `install-config.yaml` fields, automatic credential
+  provisioning, or automatic credential rotation.
+- Having CCO mint, copy, synchronize, or otherwise reconcile component Secret
+  data in `credentialsMode: Manual`.
 - Extending this API to non-vSphere platforms.
 - Supporting HyperShift / Hosted Control Planes or MicroShift in this phase.
-- Changing the vSphere cloud-provider configuration (`cloud-provider-config` ConfigMap).
+- Changing the vSphere cloud-provider configuration (`cloud-provider-config`
+  ConfigMap).
 
 ## Proposal
 
 ### Workflow Description
 
-An authorized administrator creates a `VSphereComponentScopedCredential` after creating a source Secret in `openshift-config`. `spec.sourceSecretRef.name` is the sole source-selection mechanism; the Secret contains the complete vCenter credential data map required by the target, with non-empty matching `<vcenter-hostname>.username` and `<vcenter-hostname>.password` entries. Credential bytes are never placed in the override CR or in CCO logs.
+CCO is configured with `credentialsMode: Manual`. It does not create component
+credentials from a root credential and it is not the mechanism that applies or
+rotates component Secret data.
 
-```yaml
-apiVersion: cloudcredential.openshift.io/v1alpha1
-kind: VSphereComponentScopedCredential
-metadata:
-  name: openshift-machine-api-vsphere
-spec:
-  targetSecretRef:
-    namespace: openshift-machine-api
-    name: vsphere-cloud-credentials
-  sourceSecretRef:
-    name: vsphere-machine-api-creds
-```
+#### Installation
 
-The API server validates the target reference at creation time against the inventory of vSphere `CredentialsRequest.spec.secretRef` values maintained by CCO. It rejects a target that does not exist or that names `kube-system/vsphere-creds`. CCO maintains that inventory as `CredentialsRequest` objects are created, updated, deleted, and at controller startup; the admission policy fails closed if that inventory is unavailable.
+1. The cluster administrator runs `openshift-install create manifests`.
+2. The administrator uses the generated vSphere `CredentialsRequest` information
+   to identify the component targets that need credentials. The target names,
+   namespaces, Secret key format, and any release-specific requirements come from
+   those generated manifests and the supported vSphere installation procedure;
+   this enhancement does not assign new names or formats.
+3. For each target, the administrator creates or selects a vCenter identity with
+   the least privilege appropriate to that component, outside the cluster.
+4. The administrator adds the corresponding component-scoped credential material
+   to the installation manifest set in the form required by that target, then
+   continues the supported installation workflow.
+5. If the final API contract requires a `VSphereComponentScopedCredential`, the
+   administrator supplies that resource as part of the documented workflow. The
+   relationship between that resource and Manual-mode credential material is not
+   yet defined by this proposal and is an open question below.
 
-The CCO reconciler maps an override event to the `CredentialsRequest` whose `spec.secretRef` matches `targetSecretRef`. It then resolves exactly one applicable override:
+Credential values are never stored in `VSphereComponentScopedCredential` objects
+or written to logs, examples, support bundles, or documentation.
 
-1. In `credentialsMode: Manual`, CCO does not resolve, copy, or manage overrides or target Secrets. It reports `ManualMode` on existing overrides and leaves Manual-mode credential management unchanged.
-2. In managed mode, no override CR for the target preserves the existing root path using `kube-system/vsphere-creds`.
-3. Exactly one override causes CCO to read the source Secret named by `sourceSecretRef` from `openshift-config`, validate its data, and synchronize that data to the target Secret.
-4. A missing or invalid source Secret, or multiple overrides for the same target, is fail-closed: CCO does not write root credentials or replacement data to that target. It records the applicable status condition and waits for remediation.
-5. Deleting the only override CR requeues its target. In managed mode that is the no-override case, so the existing root path resumes. Deleting a source Secret while its override remains is not a no-override case and therefore remains fail-closed.
+#### Day-2 credential lifecycle
+
+1. To add a component credential, the administrator identifies the component's
+   existing `CredentialsRequest` target, creates an appropriately scoped vCenter
+   identity, and supplies the credential material using the same supported target
+   contract used at installation.
+2. To rotate a credential, the administrator first prepares replacement vCenter
+   credentials, updates only the affected component's credential material, and
+   verifies that component before revoking the previous identity. The exact
+   update operation is intentionally not prescribed here because the current
+   proposal does not establish a vSphere-specific Secret name, command, or
+   replacement mechanism.
+3. Verification includes confirming the component's normal health signals and
+   relevant vCenter audit activity without exposing credential values. Where a
+   final CRD contract defines status or conditions, the administrator also uses
+   those documented signals.
+4. When a release adds or changes a vSphere `CredentialsRequest`, the
+   administrator reviews the new requirement and supplies or updates the
+   component credential before allowing the normal Manual-mode upgrade process.
 
 ### API Extensions
 
-This enhancement adds the cluster-scoped `VSphereComponentScopedCredential` CRD in the `cloudcredential.openshift.io/v1alpha1` API. The resource defines these structured fields:
+This enhancement retains the proposed cluster-scoped
+`VSphereComponentScopedCredential` CRD in the
+`cloudcredential.openshift.io/v1alpha1` API. Its purpose is to provide a
+structured component-credential association without placing credential bytes in
+the resource. The current proposal shape includes a target Secret reference and
+a source Secret reference, but the API review must resolve whether a source
+reference is meaningful in a Manual-mode workflow.
 
-| Field | Meaning |
+The following API intent remains in scope:
+
+| API area | Intended constraint |
 |---|---|
-| `spec.targetSecretRef.namespace` | Namespace of the vSphere `CredentialsRequest.spec.secretRef` target. |
-| `spec.targetSecretRef.name` | Name of that target Secret. |
-| `spec.sourceSecretRef.name` | Name of the source Secret in the fixed `openshift-config` namespace. |
-| `status.conditions` | `Ready`, `SourceValid`, `TargetSynced`, and `Progressing` observations for this mapping. |
-| `status.resolvedSource` | `Override` after a successful synchronization or `Unknown` otherwise; root use is not an override status. |
+| Target reference | Identifies the vSphere `CredentialsRequest` target associated with the component. |
+| Source reference | Present in the current proposal, but its Manual-mode meaning and namespace contract remain unresolved. |
+| Credential data | Must not be embedded in the CRD. |
+| Access | Creation and modification are privileged credential-management operations. |
 
-OpenAPI validation requires both references and valid Kubernetes names. A validating admission policy backed by the CCO-maintained vSphere target inventory verifies that `targetSecretRef` names an existing vSphere `CredentialsRequest` target and is not the root Secret. CEL validation makes `targetSecretRef` immutable (`self == oldSelf`); retargeting requires delete and recreate. It also rejects self-reference when the target is `openshift-config/<sourceSecretRef.name>`.
+The final `openshift/api` type and CRD review must define the schema, validation,
+immutability rules, any admission dependency, the consumer of the CR, and any
+status or condition contract. This enhancement does not claim that CCO reads a
+source Secret, writes a target Secret, exposes particular conditions, or performs
+validation while operating in Manual mode. An approved `openshift/api` change and
+its API-review link are prerequisites before implementation proceeds.
 
-The controller validates source data at reconciliation time because Secret contents cannot be represented safely in this CRD. The source must exist at `openshift-config/<sourceSecretRef.name>` and contain non-empty matching username/password entries for each vCenter key pair required by the vSphere credential format.
-
-`v1alpha1` is Compatibility Level 4 and will be delivered only when the `TechPreviewNoUpgrade` feature set is enabled. The CRD, admission policy, and CCO manifests must carry the corresponding feature-set gating so the API is not installed or used outside that feature set.
-
-This is a new OpenShift API and requires an `openshift/api` type/CRD change and API review before implementation proceeds. No API approval PR or API approver has been assigned at the time of this update; the real approved PR link is an explicit prerequisite and must be added when available.
+`v1alpha1` is Compatibility Level 4 and will be delivered only when the
+`TechPreviewNoUpgrade` feature set is enabled. The CRD and any associated
+implementation artifacts must carry the corresponding feature-set gating.
 
 ### Topology Considerations
 
 #### Standalone Clusters
 
-Supported on managed vSphere standalone OpenShift clusters. CCO and the API operate in the cluster control plane; the feature does not add node workloads or depend on worker-node count.
+The proposed workflow applies to supported standalone vSphere OpenShift clusters
+using CCO in Manual mode. It adds no node workload or node-count dependency; the
+administrator provides credentials for the generated component targets.
 
 #### HyperShift / Hosted Control Planes
 
@@ -137,202 +204,280 @@ Supported on managed vSphere standalone OpenShift clusters. CCO and the API oper
 #### Hypershift / Hosted Control Planes
 -->
 
-Unsupported in this phase. HyperShift / Hosted Control Planes use a distinct management-cluster and hosted-control-plane credential topology. No CRD, policy, or source-Secret placement is defined for either cluster until a separate design establishes ownership, access boundaries, and upgrade behavior.
+HyperShift / Hosted Control Planes are unsupported in this phase. Their
+management-cluster and hosted-control-plane credential topology requires a
+separate design for ownership, credential placement, and upgrade behavior.
 
 #### Single-node Deployments or MicroShift
 
-OpenShift SNO is supported: the feature adds no node-level agent or SNO-specific resource requirement. MicroShift is unsupported because this CCO API and its feature-gated control-plane dependencies are not part of the MicroShift contract.
+OpenShift SNO is supported because this proposal adds no node-level agent or
+SNO-specific resource requirement. MicroShift is unsupported because this CCO
+API and its feature-gated control-plane dependencies are not part of the
+MicroShift contract.
 
 #### OpenShift Kubernetes Engine
 
-There is no OKE-specific implementation. Availability is limited to supported vSphere OpenShift deployments that include the CCO vSphere actuator and the required feature set; product support for an OKE offering must be confirmed before enabling the feature there.
+There is no OKE-specific implementation. Availability is limited to supported
+vSphere OpenShift deployments that include the required feature set; product
+support for an OKE offering must be confirmed before enabling the feature there.
 
 ### Implementation Details/Notes/Constraints
 
 **Changed components:**
 
-- `openshift/api` — add the cluster-scoped `VSphereComponentScopedCredential` type, CRD generation, compatibility-level markers, feature-gate metadata, and the API-review approval.
-- CCO API manifests — install the CRD and validating admission policy only under `TechPreviewNoUpgrade`.
-- CCO credentials-request controller — maintain the vSphere target inventory, watch overrides and source-Secret events, serialize events through the `CredentialsRequest` queue, and update override status.
-- CCO vSphere actuator — resolve the override only after validating its source and retain the existing root path only when there is no override.
-- CCO RBAC and tests — scope CCO reads and verify both allowed and denied authoring paths.
+- `openshift/api` — add the proposed cluster-scoped
+  `VSphereComponentScopedCredential` type, CRD generation, compatibility-level
+  markers, feature-gate metadata, and API review approval.
+- CCO configuration and documentation — support and document this vSphere
+  workflow with `credentialsMode: Manual`; CCO must not assume responsibility for
+  minting or rotating component credentials.
+- Installation and day-2 documentation — describe the administrator workflow
+  that begins after manifest generation and uses the target contracts already
+  produced for the release.
+- Tests — cover the final API contract and the Manual-mode installation,
+  rotation, verification, and upgrade procedures.
 
-**Authorization and Secret discovery:**
+**Credential ownership and authorization:**
 
-CCO reads Secret data only by direct lookup of `openshift-config/<sourceSecretRef.name>` and does not enumerate Secrets to discover candidates. Its RBAC grants only the source-Secret read access required for those referenced names, with no source-Secret write permission; it separately retains only the target-Secret permissions required by existing `CredentialsRequest` reconciliation. The precise mechanism for receiving source-Secret change events without broad Secret-data discovery is an implementation prerequisite: it must map source events by the fixed namespace and `sourceSecretRef.name` and be verified during API/CCO implementation.
+The administrator owns the external vCenter identities and the in-cluster
+component credential material. Access to create or modify the proposed CRD and
+to update component credential material must be limited to cluster
+administrators or explicitly delegated credential-management identities. Any
+delegation must be narrowly scoped and documented as privileged access. This
+enhancement does not prescribe Secret names, namespaces beyond what generated
+target references require, or a new RBAC rule set.
 
-Only cluster administrators or explicitly delegated service accounts receive RBAC to create, update, or delete `VSphereComponentScopedCredential` resources and referenced source Secrets in `openshift-config`. Delegation must be implemented with narrowly scoped Roles/RoleBindings and documented as privileged credential-management access. It is not sufficient for a principal to have general application-namespace Secret permissions.
+**Manual-mode boundary:**
 
-**Resolution algorithm:**
+In Manual mode, the administrator—not CCO—creates, updates, rotates, and
+verifies component credentials. CCO must not fall back to a root credential,
+silently replace a component credential, or imply that the proposed CRD causes
+Secret reconciliation until the final API and consumer contract explicitly says
+so.
 
-```text
-reconcile CredentialsRequest:
-    if credentialsMode is Manual:
-        do not read source Secrets or write target Secrets
-        set ManualMode on any matching override and return
+**CRD relationship:**
 
-    overrides = overrides whose targetSecretRef matches this request's secretRef
-    if overrides is empty:
-        use the existing root-credential path
-        return
-    if overrides has more than one item:
-        set Ready=False, reason=DuplicateTarget on every conflicting override
-        do not modify the target Secret
-        return
-
-    source = direct lookup of openshift-config/<sourceSecretRef.name>
-    if source is missing:
-        set Ready=False, SourceValid=False, reason=SourceSecretMissing
-        do not modify the target Secret
-        return
-    if source has incomplete, empty, or unmatched data:
-        set Ready=False, SourceValid=False, reason=SourceSecretInvalid
-        do not modify the target Secret
-        return
-
-    synchronize source data to the target Secret
-    set Ready=True, SourceValid=True, TargetSynced=True, reason=OverrideApplied
-```
-
-**Event handling and serialization:**
-
-Override create, update, and delete events map to the `CredentialsRequest` that owns `targetSecretRef`, rather than directly writing a target Secret. Source-Secret events must map by the fixed namespace and `sourceSecretRef.name` to referencing overrides and then to their target `CredentialsRequest`s. The exact targeted source-event watch implementation is a prerequisite to be verified; it must not enumerate Secrets to discover source candidates. This common queue serializes all writes for a target and avoids concurrent override/root updates.
-
-The watches use `predicate.Funcs`, not `predicate.NewPredicateFuncs`. Their update handler accepts an event when either the old or new object is relevant to an override relationship. This preserves reconciliation when a referenced source Secret is updated or deleted and when an override is changed or removed. Delete events are also accepted so deletion of an override performs no-override cleanup and deletion of a referenced source is reported as fail-closed. The CRD replaces annotation-only target selection; there is no annotation compatibility path that could silently restore root credentials while an override CR still exists.
-
-**Status and condition reasons:**
-
-| Situation | `Ready` | Reason | Target behavior |
-|---|---|---|---|
-| Valid referenced source synchronized | `True` | `OverrideApplied` | Target contains the override data. |
-| Source Secret does not exist | `False` | `SourceSecretMissing` | Target is left unchanged. |
-| Source has invalid data | `False` | `SourceSecretInvalid` | Target is left unchanged. |
-| More than one override targets a Secret | `False` | `DuplicateTarget` | Every conflicting target is left unchanged. |
-| `credentialsMode: Manual` | `False` | `ManualMode` | CCO does not manage the override or target. |
-
-`TargetSynced=SyncPending` may be reported while work is in progress and `TargetSynced=SyncBlocked` when the source or mapping is invalid. Condition messages identify resource names and remediation but never include Secret data.
+The current proposal includes `targetSecretRef` and `sourceSecretRef`, but it
+does not yet establish how those fields participate when credentials are supplied
+by an administrator after manifest generation. The final design must either
+define that relationship and its validation/observability or remove or revise
+the unsupported field. No controller watch, queue behavior, condition reason, or
+Secret synchronization algorithm is specified by this Manual-mode proposal.
 
 ### Risks and Mitigations
 
-**Risk: An unauthorized principal directs credentials to another component.**
-Mitigation: RBAC limits override and referenced-source Secret create/update/delete operations to cluster administrators or explicitly delegated credential-management service accounts. Admission verifies that a target is a real vSphere `CredentialsRequest` target and rejects the root Secret. Authorization tests cover both create and update denials for unauthorized principals.
+**Risk: An administrator supplies credentials to the wrong component target.**
 
-**Risk: CCO reads unrelated credentials from the shared `openshift-config` namespace.**
-Mitigation: CCO reads data only for names explicitly referenced by `sourceSecretRef` and does not enumerate Secrets to discover candidates. The targeted source-event watch mechanism and its least-privilege RBAC must be verified during implementation. CCO does not log Secret data.
+Mitigation: the installation and day-2 procedures identify each target from the
+generated `CredentialsRequest` material. Privileged access is limited to
+credential-management identities, and verification is performed for the affected
+component before the previous credential is retired.
 
-**Risk: Invalid source data or duplicate mappings silently escalates an affected component to root credentials.**
-Mitigation: Missing, invalid, and ambiguous overrides fail closed, leave the target unchanged, and expose `SourceSecretMissing`, `SourceSecretInvalid`, or `DuplicateTarget` conditions. Only the absence of an override CR selects the normal root path.
+**Risk: A component receives credentials with excessive privileges.**
 
-**Risk: A source or override update is missed during removal.**
-Mitigation: `predicate.Funcs` evaluates old and new objects, and all events map through the serialized `CredentialsRequest` queue. Tests cover `sourceSecretRef` changes and source-Secret deletion.
+Mitigation: administrators create distinct vCenter identities with permissions
+appropriate to each component and use vCenter audit records and component health
+signals to verify the result.
+
+**Risk: Rotation interrupts a component.**
+
+Mitigation: prepare replacement credentials first, update one component at a
+time, verify it, and revoke the prior identity only after successful
+verification. CCO does not make an automatic fallback decision in Manual mode.
+
+**Risk: The proposed CRD implies behavior that is not implemented in Manual mode.**
+
+Mitigation: API review must establish the CRD's consumer, validation, and status
+contract before implementation. Until then, documentation must not promise CCO
+Secret synchronization or named status conditions.
 
 **Risk: Tech Preview APIs are used during a minor update.**
-Mitigation: CRD, policy, and controller behavior are gated by `TechPreviewNoUpgrade`; the documented support posture prohibits minor upgrades while it is enabled.
+
+Mitigation: the CRD and its implementation are gated by `TechPreviewNoUpgrade`;
+the documented support posture prohibits minor upgrades while it is enabled.
 
 ### Drawbacks
 
-- This introduces a feature-gated CRD, admission validation, source-Secret inventory, and status surface that must be maintained with the CCO.
-- Fail-closed behavior can retain a component's prior target data until an administrator resolves a bad source or duplicate mapping; it deliberately favors preventing unexpected credential escalation over automatic fallback.
-- Source Secret and CR authors require privileged access to a shared platform namespace, so delegation must be reviewed carefully.
+- Credential management moves administrative work outside CCO. Administrators
+  must prepare credentials before installation and maintain them for day-2
+  changes and upgrades.
+- Component isolation increases the number of vCenter identities and credential
+  updates to manage.
+- The CRD cannot be treated as an automation contract until its Manual-mode
+  consumer and validation behavior are approved.
 
 ## Alternatives (Not Implemented)
 
 ### Annotation-Based Secret Mapping
 
-Selecting a target through annotations on arbitrary Secrets was rejected. It lacks a structured API, makes admission validation and immutability difficult, permits ambiguous matching, and makes relevance-removal handling error-prone. `VSphereComponentScopedCredential` provides an explicit, observable mapping instead.
+Selecting a target through annotations on arbitrary Secrets was rejected. It
+lacks a structured API and makes validation, immutability, and ownership harder
+to review. `VSphereComponentScopedCredential` remains the proposed explicit
+association API, subject to the unresolved Manual-mode contract.
 
 ### Installer-Native Configuration
 
-Per-component credentials configured directly in `install-config.yaml` are deferred to a subsequent phase. This proposal focuses on the CCO-side API and day-2 management; installer integration must define its own source lifecycle and validation contract.
+Adding per-component credentials to `install-config.yaml` is not proposed. The
+chosen workflow deliberately begins after `openshift-install create manifests`,
+where an administrator supplies material that satisfies the generated target
+contracts. It does not define a new installer field, Secret name, or automatic
+installer credential lifecycle.
 
 ### Single Multi-Key Secret
 
-A single Secret with multiple components' credentials was rejected because separate source Secrets provide better access separation, independent lifecycle management, and clearer audit trails.
+A single Secret with several components' credentials is not proposed because
+separate component credential material permits better access separation,
+independent lifecycle management, and clearer audit trails.
 
 ### CredentialsRequest Field Extension
 
-Adding an override reference to `CredentialsRequest.spec` was rejected because `CredentialsRequest` objects are owned by consuming components. A dedicated CRD keeps the user-authored mapping separate from those component-owned requests while allowing CCO to validate the target relationship.
+Adding a component-override reference directly to `CredentialsRequest.spec` was
+rejected because those objects are owned by consuming components. A dedicated
+CRD keeps the proposed user-authored association separate from component-owned
+requests, subject to finalizing its Manual-mode semantics.
 
 ## Open Questions
 
-The CRD contract resolves the prior questions about duplicate mappings, status, and Manual mode. The remaining implementation prerequisite is assignment of an API approver and publication of the approved `openshift/api` change; this enhancement intentionally does not fabricate that approval or its PR URL.
+The following items require resolution before implementation or user-facing
+documentation can describe them as supported behavior:
+
+1. Which component, if any, consumes `VSphereComponentScopedCredential` when
+   CCO runs in Manual mode, and at what point in installation or day-2 operation?
+2. Does `sourceSecretRef` remain part of the API? If so, what does it reference
+   in a Manual-mode workflow, who validates it, and what namespace and data
+   contract apply?
+3. What validation, immutability, status, condition, and observability behavior
+   belongs to the CRD? The current repository evidence does not establish named
+   conditions or a CCO reconciliation contract in Manual mode.
+4. What supported vSphere procedure or tooling produces and updates the exact
+   target credential material after manifests are generated and during rotation?
+5. What API approval PR and final API approver decision define the approved
+   `openshift/api` contract?
 
 ## Test Plan
 
 ### Unit Tests
 
-- Validate required reference fields, immutable `targetSecretRef`, self-reference rejection, and rejection of non-vSphere or root targets.
-- Verify target-inventory maintenance for vSphere `CredentialsRequest` create, update, delete, and controller-startup rebuild; verify unavailable inventory denies override admission.
-- Verify one valid referenced source synchronizes the target and reports `OverrideApplied`.
-- Verify missing, incomplete, empty, and unmatched source data report `SourceSecretMissing` or `SourceSecretInvalid`, preserve the target, and never use root credentials while the CR exists.
-- Verify duplicate target matches set `DuplicateTarget` on every conflicting override and leave the target unchanged.
-- Verify no override CR uses the existing root path in managed mode.
-- Verify `credentialsMode: Manual` performs no source read or target write and reports `ManualMode` for an existing override.
-- Verify serialized queue mapping for override and source-Secret create/update/delete events.
-- Verify `predicate.Funcs` accepts relevant old or new objects for referenced and unreferenced source-Secret updates and source deletion; verify override deletion requeues root-path reconciliation.
-- Verify allowed cluster-admin/delegated-service-account create and update operations, and denied create and update operations for unauthorized principals in `openshift-config`.
+- Verify the final `VSphereComponentScopedCredential` schema, validation, and
+  authorization rules after API review; do not test unapproved status or consumer
+  semantics as though they were a contract.
+- Verify that CCO in `credentialsMode: Manual` does not mint, copy, synchronize,
+  rotate, or fall back to root credentials for component credential data.
+- Verify any eventual CRD consumer against the approved Manual-mode contract.
 
 ### Integration / E2E Tests
 
-- On a vSphere cluster with `TechPreviewNoUpgrade`, create the source Secret and one valid override; verify only its `CredentialsRequest` target receives the override data and status becomes ready.
-- Rotate the source data and verify the target is re-synchronized through the serialized queue without affecting other component targets.
-- Exercise source deletion, invalid data, unreferenced source-Secret updates, duplicate overrides, invalid target admission, and target immutability; verify conditions and no silent root fallback.
-- Delete the only override in managed mode and verify the normal root path resumes only after the CR is absent.
-- Use authorized and unauthorized identities to verify source-Secret and override CR create/update authorization.
-- Verify Manual mode leaves override and target data unmanaged.
-- Verify SNO behavior and that HyperShift / Hosted Control Planes and MicroShift are rejected or omitted from the supported test matrix.
+- On a supported vSphere cluster with `TechPreviewNoUpgrade`, generate manifests,
+  supply component-scoped credentials for the generated targets, and verify a
+  successful Manual-mode installation without CCO credential management.
+- Rotate one component credential using the supported administrator procedure;
+  verify the component and its relevant vCenter activity before retiring the old
+  identity, and verify other component credentials are unaffected.
+- Exercise invalid, missing, or insufficient administrator-supplied credential
+  material and verify that the affected component exposes its supported failure
+  signals without CCO replacing the credentials.
+- Verify that release changes to vSphere `CredentialsRequest` requirements are
+  detected and handled through the documented Manual-mode upgrade procedure.
+- Verify SNO behavior and that HyperShift / Hosted Control Planes and MicroShift
+  are omitted from the supported test matrix.
 
 ## Graduation Criteria
 
 ### Dev Preview -> Tech Preview
 
-- Approved `openshift/api` type/CRD change and assigned API approver are linked from this enhancement.
-- CRD, admission policy, and CCO manifests are correctly gated by `TechPreviewNoUpgrade`.
-- Unit and integration coverage validates API rules, source-data validation, condition reasons, queue serialization, authorization denial, Manual mode, and fail-closed behavior.
-- E2E coverage validates valid synchronization and all no-write failure paths on vSphere.
-- Administrator and support documentation explains privileged authoring, direct source references, conditions, and recovery.
+- An approved `openshift/api` type/CRD change, API approver decision, and final
+  Manual-mode consumer contract are linked from this enhancement.
+- The CRD and implementation artifacts are correctly gated by
+  `TechPreviewNoUpgrade`.
+- Unit and integration coverage validates the approved API contract and confirms
+  that CCO does not manage component credential data in Manual mode.
+- E2E coverage demonstrates installation from generated manifests with
+  administrator-supplied component credentials and a verified single-component
+  rotation.
+- Administrator and support documentation describes installation, privileged
+  access, rotation, verification, and remediation without exposing credentials.
 
 ### Tech Preview -> GA
 
-- The API has an approved compatibility and feature-gate graduation plan, including any version promotion required from Compatibility Level 4.
-- Automated conformance, upgrade, downgrade, and long-running credential-rotation coverage demonstrates safe behavior.
-- At least one release cycle of supported use shows no unresolved credential-synchronization regressions.
-- OpenShift documentation includes supported topologies, RBAC delegation, Manual-mode behavior, and fail-closed remediation.
+- The API has an approved compatibility and feature-gate graduation plan,
+  including any version promotion required from Compatibility Level 4.
+- Automated installation, upgrade, downgrade, and long-running credential
+  rotation coverage demonstrates the supported Manual-mode behavior.
+- At least one release cycle of supported use shows no unresolved credential
+  lifecycle regressions.
+- OpenShift documentation includes supported topologies, privilege boundaries,
+  Manual-mode installation, day-2 rotation, verification, and remediation.
 
 ### Removing a deprecated feature
 
-This is a new API. If it is replaced, a future enhancement must define migration of CRs, source Secrets, feature gating, and the API deprecation period before removal.
+This is a new API. If it is replaced, a future enhancement must define migration
+of CRs and credential-management procedures, feature gating, and the API
+deprecation period before removal.
 
 ## Upgrade / Downgrade Strategy
 
-While the feature is in `TechPreviewNoUpgrade`, minor-version upgrades are not supported. Enabling the feature is opt-in and does not affect a managed target until an override CR is created. On clusters without an override CR, the existing root-credential behavior is unchanged.
+While the feature is in `TechPreviewNoUpgrade`, minor-version upgrades are not
+supported. Before any supported Manual-mode upgrade, an administrator reviews
+the `CredentialsRequest` requirements in the target release, creates or updates
+the required external vCenter identities and component credential material, and
+performs the existing Manual-mode upgrade acknowledgement procedure. This
+enhancement does not prescribe its exact annotation, command, or tooling.
 
-Before disabling the feature, removing its manifests, or attempting a downgrade, an administrator must delete override CRs, verify that the root credential is valid for every affected component, and verify that targets have reconciled through the normal root path. An older CCO does not understand the CRD contract; remaining CRs and source Secrets are inert configuration and are not a supported substitute for that verification. The API-approval implementation must include downgrade tests before Tech Preview promotion.
+Before disabling the feature, removing its manifests, or attempting a downgrade,
+the administrator must follow the final API's documented removal procedure and
+verify that every affected component has supported credentials. An older CCO
+cannot be assumed to consume or reconcile the proposed CRD. Downgrade tests are
+required before Tech Preview promotion.
 
 ## Version Skew Strategy
 
-The CRD, admission policy, and CCO controller must be introduced and gated as one feature-set unit. The controller tolerates no CRD by retaining its existing behavior when the feature is disabled. Consuming components continue to read their `CredentialsRequest` target Secret and do not depend on the source API version. No independent cross-component protocol is introduced.
+The CRD and any implementation that consumes it must be introduced and gated as
+one feature-set unit. Consuming components continue to use their own
+`CredentialsRequest` targets and do not depend on CCO copying credentials in
+Manual mode. The final API design must define how an older component or CCO
+behaves when a new CR is present; this proposal does not claim an unsupported
+cross-component protocol.
 
 ## Operational Aspects of API Extensions
 
-**Failure modes:** A target that is invalid is denied at admission. After admission, missing, invalid, or ambiguous sources are reflected on the override's conditions and do not modify the target. An unavailable target inventory denies new override creation. In Manual mode, CCO does not manage the source, override application, or target.
+The API's final operational behavior is intentionally pending API review. The
+proposal does not introduce a CCO webhook, Secret watch, target-Secret write,
+or named CRD status condition in Manual mode. Administrators use the affected
+component's supported health signals and relevant vCenter audit activity to
+verify credential changes, without exposing credential data.
 
-**Monitoring:** Operators use `VSphereComponentScopedCredential.status.conditions`, `observedGeneration`, and `resolvedSource` to determine whether a target was synchronized. CCO logs and events identify the resource and condition reason but must not log credential bytes.
-
-**Recovery:** Correct the source Secret data, delete duplicate override CRs, or delete the override CR when returning to the normal root path is intended. Reconciliation is event-driven; force-deleting the target Secret is not the prescribed recovery mechanism.
+If the final CRD adds validation, a consumer, conditions, metrics, or alerts,
+the implementation and user-facing documentation must specify its failure modes,
+SLIs, support ownership, and recovery steps before Tech Preview promotion.
 
 ## Support Procedures
 
-1. List and describe overrides without exposing Secret data: `oc get vspherecomponentscopedcredentials` and `oc describe vspherecomponentscopedcredential <name>`.
-2. Confirm that `targetSecretRef` matches a vSphere `CredentialsRequest.spec.secretRef` and inspect the `Ready`, `SourceValid`, and `TargetSynced` reasons.
-3. Confirm the source Secret named by `sourceSecretRef` exists in `openshift-config`; inspect only metadata and required key names, never Secret values.
-4. Confirm delegated access with `oc auth can-i` for both `VSphereComponentScopedCredential` and source-Secret create/update operations in `openshift-config`; unauthorized principals must be denied.
-5. For `SourceSecretMissing`, `SourceSecretInvalid`, or `DuplicateTarget`, correct the reported configuration and wait for reconciliation. Delete the CR only when a deliberate return to the root path is desired.
-6. For `ManualMode`, manage component credentials according to the existing Manual-mode procedure; CCO will not apply the override.
+1. Identify the affected component and its generated or release-specific
+   `CredentialsRequest` target; inspect metadata and health signals without
+   exposing credential values.
+2. Verify that the vCenter identity used for that component has the intended
+   scope and that its audit activity corresponds to the component's operation.
+3. For an installation failure or day-2 rotation failure, correct or replace the
+   administrator-supplied credential material using the supported target
+   procedure, then verify the affected component before retiring any previous
+   identity.
+4. Confirm that the cluster remains in `credentialsMode: Manual`; CCO is not
+   expected to create, replace, or rotate component credentials.
+5. If the final CRD contract defines status or conditions, use only those
+   documented signals. Until then, do not infer CCO synchronization from CRD
+   presence.
+6. Escalate unresolved CRD-consumer, validation, or target-format questions to
+   the API and CCO owners rather than inventing a Secret name or command.
 
 ## Implementation History
 
 - 2026-08-17: Initial annotation-based enhancement proposal.
-- 2026-09-11: Revised the proposal to the `VSphereComponentScopedCredential` CRD contract, including fail-closed behavior, direct source references, authorization, and Manual-mode decisions.
+- 2026-09-11: Revised the proposal to the `VSphereComponentScopedCredential`
+  CRD contract.
+- 2026-09-14: Revised the proposal for a Manual-mode vSphere workflow in which
+  administrators supply installation and day-2 component credentials; retained
+  unresolved CRD consumer and status behavior as open questions.
 - Target release: 5.1.0.
-- Primary tracking: [SPLAT-2874](https://issues.redhat.com/browse/SPLAT-2874); CCO implementation: [SPLAT-2889](https://issues.redhat.com/browse/SPLAT-2889); parent initiative: [SPLAT-2724](https://issues.redhat.com/browse/SPLAT-2724).
+- Primary tracking: [SPLAT-2874](https://issues.redhat.com/browse/SPLAT-2874);
+  CCO implementation: [SPLAT-2889](https://issues.redhat.com/browse/SPLAT-2889);
+  parent initiative: [SPLAT-2724](https://issues.redhat.com/browse/SPLAT-2724).
