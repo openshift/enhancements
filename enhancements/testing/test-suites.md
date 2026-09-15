@@ -23,7 +23,7 @@ Today, OpenShift test suites use a flat model with static string-label
 assignment. This enhancement proposes migrating to a hierarchical suite
 composition built on the OpenShift Tests Extension (OTE) APIs and driven
 by key/value **test metadata tags** rather than opaque string labels.
-A single ordered `LifeCycle` axis (`Draft → Informing → Blocking →
+A single ordered `Lifecycle` axis (`Draft → Informing → Blocking →
 Stable`), together with a `Criticality` overlay, classifies every test
 and determines which suite it lands in. The new model introduces a
 structured test lifecycle,
@@ -75,7 +75,7 @@ that gap from the start.
   lifecycle for my tests (draft → informing → blocking → stable) so
   that I can stabilize new tests without risking release signal.
 * As an OpenShift product development engineer, I want to classify my
-  tests with structured key/value metadata (`LifeCycle`, `Criticality`)
+  tests with structured key/value metadata (`Lifecycle`, `Criticality`)
   rather than opaque string labels so that suite membership is explicit
   and queryable.
 * As a CI infrastructure engineer, I want explicitly sharded suites
@@ -95,20 +95,20 @@ that gap from the start.
 ### Goals
 
 1. Introduce a structured, key/value test-metadata vocabulary
-   (a single ordered `LifeCycle` axis plus a `Criticality` overlay)
+   (a single ordered `Lifecycle` axis plus a `Criticality` overlay)
    expressed via OTE tags, and drive all suite membership from it.
 2. Shrink `openshift/conformance/parallel/minimal` and
    `openshift/conformance/serial/minimal` to contain only core smoke
    tests (`Criticality: Core`).
-3. Introduce `active` suites (`LifeCycle: Informing`/`Blocking`) for new
+3. Introduce `active` suites (`Lifecycle: Informing`/`Blocking`) for new
    and stabilizing tests with a clear graduation path to `stable` suites
-   (`LifeCycle: Stable`).
+   (`Lifecycle: Stable`).
 4. Provide explicit sharding
    (`openshift/conformance/parallel/stable-01`,
    `openshift/conformance/parallel/stable-02`, etc.) instead of
    auto-sharding, enabling scheduling flexibility in constrained
    environments.
-5. Define a test lifecycle flow (`LifeCycle: Draft`, `Informing`,
+5. Define a test lifecycle flow (`Lifecycle: Draft`, `Informing`,
    `Blocking`, `Stable`) with clear pass-rate thresholds and duration
    expectations for each stage.
 6. Introduce `spot-check/<feature>` suites for features requiring
@@ -152,33 +152,33 @@ and handles the exceptions the agent escalates.
 
 1. The test author writes a new test in their component repository
    using the OTE extension framework.
-2. The test author sets its `LifeCycle`. A test that is not yet ready to
-   run in any suite is tagged `LifeCycle: Draft`; a test ready to run
-   non-blocking is tagged `LifeCycle: Informing`. If a test carries no
-   `LifeCycle` tag at all, it defaults to `LifeCycle: Informing` (see
+2. The test author sets its `Lifecycle`. A test that is not yet ready to
+   run in any suite is tagged `Lifecycle: Draft`; a test ready to run
+   non-blocking is tagged `Lifecycle: Informing`. If a test carries no
+   `Lifecycle` tag at all, it defaults to `Lifecycle: Informing` (see
    [Test Metadata](#test-metadata)). An `Informing`/`Blocking` test is
    selected into the `active` suites.
-3. `LifeCycle: Informing` makes failures non-blocking during
+3. `Lifecycle: Informing` makes failures non-blocking during
    stabilization; this is expressed via the OTE `Informing()` annotation
    as well as the tag, which stay in sync.
 4. The test is picked up in CI through the OTE extension binary
    discovery mechanism and runs in the `active` suite for at least the
    minimum stabilization window (2–3 sprints) before it is eligible for
-   promotion. A `LifeCycle: Draft` test is excluded from every suite and
+   promotion. A `Lifecycle: Draft` test is excluded from every suite and
    does not run until its owner promotes it out of `Draft`.
 
 #### Promoting a Test to Blocking
 
 Promotion is performed by the lifecycle agent, not by hand.
 
-1. On its schedule, the agent locates each `LifeCycle: Informing` test
+1. On its schedule, the agent locates each `Lifecycle: Informing` test
    in the `active` suites (see [Locating Tests](#locating-tests)) and
    computes its pass rate over the
    [measurement window](#pass-rate-calculation).
 2. If the test has been in `active` for at least the minimum
    stabilization window, has at least the minimum sample count of
    qualifying runs, and meets the `>= 99%` pass rate, the agent opens a
-   pull request flipping the tag to `LifeCycle: Blocking` (and removing
+   pull request flipping the tag to `Lifecycle: Blocking` (and removing
    the corresponding `Informing()` annotation), making the test blocking
    within the `active` suite. The test stays in `active` (both
    `Informing` and `Blocking` tests are selected there).
@@ -186,7 +186,7 @@ Promotion is performed by the lifecycle agent, not by hand.
    engineer) approves the pull request.
 4. The test remains `Blocking` in `active` until GA + 1 release.
 
-Promotion is one-way. Once a test is `LifeCycle: Blocking`, it is never
+Promotion is one-way. Once a test is `Lifecycle: Blocking`, it is never
 demoted back to `Informing` and it is never moved to a lower-signal
 suite. If its pass rate later degrades, that is treated as a
 **regression to be fixed**, not as grounds for quarantine or downgrade.
@@ -207,10 +207,10 @@ Graduation is also performed by the lifecycle agent.
    form is never written into a suite definition; a concrete shard is
    always chosen.
 2. The agent opens a single pull request that flips the test's
-   `LifeCycle` tag from `Blocking` to `Stable` (moving it from the
+   `Lifecycle` tag from `Blocking` to `Stable` (moving it from the
    `active` selection to the `stable` selection) and assigns its shard
    tag, so metadata and shard membership stay consistent. Because the
-   `active`/`stable` suites are selected by the single-valued `LifeCycle`
+   `active`/`stable` suites are selected by the single-valued `Lifecycle`
    tag, changing that one value atomically moves the test; there is no
    window in which it belongs to both. This consistency requirement is
    why every test must carry the required metadata tags (enforced in CI;
@@ -278,20 +278,20 @@ enhancement defines a single ordered lifecycle axis plus one overlay:
 
 | Key | Valid values | Meaning |
 |-----|--------------|---------|
-| `LifeCycle` | `Draft`, `Informing`, `Blocking`, `Stable` | The one ordered axis describing where a test sits from creation to permanent graduation. `Draft` → in no suite; `Informing` → runs non-blocking in `active`; `Blocking` → runs and gates in `active`; `Stable` → graduated, gates permanently in `stable`. |
+| `Lifecycle` | `Draft`, `Informing`, `Blocking`, `Stable` | The one ordered axis describing where a test sits from creation to permanent graduation. `Draft` → in no suite; `Informing` → runs non-blocking in `active`; `Blocking` → runs and gates in `active`; `Stable` → graduated, gates permanently in `stable`. |
 | `Criticality` | `Core` | The test is a core smoke test and additionally belongs to the `conformance/*/minimal` suites. |
 
-`LifeCycle` is the **single dimension** that drives lifecycle-suite
+`Lifecycle` is the **single dimension** that drives lifecycle-suite
 membership. There is deliberately no separate reliability or maturity
 axis: a test's pass rate is a *measurement* (the input to the
 `Informing → Blocking` transition), not a stored classification, and its
 maturity is captured by the ordered progression itself. Suite membership
-is therefore a pure function of `LifeCycle` (plus the `Shard` and
+is therefore a pure function of `Lifecycle` (plus the `Shard` and
 `Criticality` overlays).
 
 Rules governing the metadata:
 
-- **`LifeCycle` is a single, ordered, one-way progression:**
+- **`Lifecycle` is a single, ordered, one-way progression:**
   `Draft → Informing → Blocking → Stable`. A test carries exactly one
   value, so its lifecycle-suite membership is unambiguous and mutually
   exclusive.
@@ -302,11 +302,11 @@ Rules governing the metadata:
   - `Blocking` — runs in the `active` suites and gates.
   - `Stable` — graduated (after GA + 1); runs in the `stable` suites and
     gates permanently.
-- **Suite membership derives from `LifeCycle`:** `active` selects
+- **Suite membership derives from `Lifecycle`:** `active` selects
   `Informing` or `Blocking`; `stable` selects `Stable`. Suite qualifiers
   exclude `Draft` implicitly (it matches neither selection).
-- **Default `LifeCycle` is `Informing`.** If a test carries no explicit
-  `LifeCycle` tag, it is treated as `LifeCycle: Informing`. Tests are
+- **Default `Lifecycle` is `Informing`.** If a test carries no explicit
+  `Lifecycle` tag, it is treated as `Lifecycle: Informing`. Tests are
   never automatically moved *out* of `Draft` — a test owner does that by
   hand when the test is ready.
 - **`active` holds `Informing` and `Blocking`; `stable` holds only
@@ -315,14 +315,14 @@ Rules governing the metadata:
   tests.
 - **`Criticality: Core` is additive.** It marks a test as a core smoke
   test so it *also* appears in `conformance/*/minimal`. It does not
-  replace the `LifeCycle` membership: a `Core` test still lives in an
-  `active` or `stable` shard according to its `LifeCycle` (see
+  replace the `Lifecycle` membership: a `Core` test still lives in an
+  `active` or `stable` shard according to its `Lifecycle` (see
   [Minimal-Suite Membership](#minimal-suite-membership)).
 
-The `LifeCycle` tag and the OTE `Informing()` annotation express the
+The `Lifecycle` tag and the OTE `Informing()` annotation express the
 same fact for the non-blocking case and are kept in sync: `Informing()`
-present ⇔ `LifeCycle: Informing`; `Informing()` absent ⇔
-`LifeCycle: Blocking` or `Stable`.
+present ⇔ `Lifecycle: Informing`; `Informing()` absent ⇔
+`Lifecycle: Blocking` or `Stable`.
 
 #### Suite Hierarchy
 
@@ -335,17 +335,17 @@ selecting its members by metadata tag:
 | `openshift/conformance/serial` | (aggregate) | Aggregate serial conformance |
 | `openshift/conformance/parallel/minimal` | `Criticality: Core` | Core smoke tests only, parallel execution |
 | `openshift/conformance/serial/minimal` | `Criticality: Core` | Core smoke tests only, serial execution |
-| `openshift/conformance/parallel/active-01` | `LifeCycle: Informing`/`Blocking` | Recent features, parallel, shard 1 |
-| `openshift/conformance/serial/active-01` | `LifeCycle: Informing`/`Blocking` | Recent features, serial, shard 1 |
-| `openshift/conformance/parallel/stable-01` | `LifeCycle: Stable` | Stable tests, parallel, shard 1 |
-| `openshift/conformance/parallel/stable-02` | `LifeCycle: Stable` | Stable tests, parallel, shard 2 |
-| `openshift/conformance/serial/stable-01` | `LifeCycle: Stable` | Stable tests, serial, shard 1 |
+| `openshift/conformance/parallel/active-01` | `Lifecycle: Informing`/`Blocking` | Recent features, parallel, shard 1 |
+| `openshift/conformance/serial/active-01` | `Lifecycle: Informing`/`Blocking` | Recent features, serial, shard 1 |
+| `openshift/conformance/parallel/stable-01` | `Lifecycle: Stable` | Stable tests, parallel, shard 1 |
+| `openshift/conformance/parallel/stable-02` | `Lifecycle: Stable` | Stable tests, parallel, shard 2 |
+| `openshift/conformance/serial/stable-01` | `Lifecycle: Stable` | Stable tests, serial, shard 1 |
 | `openshift/spot-check/<feature>` | (own qualifier) | Uncommon cluster configs |
 
 Every suite name keeps the `conformance` prefix so the naming is
 consistent with the existing `openshift/conformance/parallel/minimal`
 and `openshift/conformance/serial/minimal` suites. Each shard suite's
-qualifier combines the `LifeCycle` selection with the shard tag (see
+qualifier combines the `Lifecycle` selection with the shard tag (see
 [Shard Membership Qualifiers](#shard-membership-qualifiers)).
 
 The `openshift/conformance/parallel` and `openshift/conformance/serial`
@@ -382,7 +382,7 @@ yet fully defined** and remains an open question (see
   for this is tracked as an open question.
 
 Note that a test is not confined to a single membership: a
-`Criticality: Core` test also carries a `LifeCycle` value and so
+`Criticality: Core` test also carries a `Lifecycle` value and so
 participates in an `active` or `stable` shard. Minimal is an additional,
 faster smoke selection layered on top of the lifecycle shard, not a
 mutually exclusive alternative to it (see
@@ -391,7 +391,7 @@ for how this is expressed).
 
 #### Test Lifecycle Flow
 
-| Stage (`LifeCycle`) | Suite | Pass Rate Threshold | Duration |
+| Stage (`Lifecycle`) | Suite | Pass Rate Threshold | Duration |
 |---------------------|-------|---------------------|----------|
 | `Draft` | none (does not run) | N/A | Until owner releases it |
 | `Informing` | `active` | Failures non-blocking | >= 2–3 sprints |
@@ -399,7 +399,7 @@ for how this is expressed).
 | `Stable` | `.../parallel/stable-01`, `.../parallel/stable-02`, `.../serial/stable-01`, … (explicit shard) | Governed by Component Readiness (~95%) | Permanent |
 | Specialized (own qualifier) | `spot-check/<feature>` | N/A (own job) | Own cadence |
 
-The four `LifeCycle` values are the single ordered lifecycle axis; each
+The four `Lifecycle` values are the single ordered lifecycle axis; each
 row above is one value of that axis, not a separate dimension. `active`
 selects `Informing`/`Blocking`; `stable` selects `Stable`.
 
@@ -415,71 +415,112 @@ signal at its configured tolerance (roughly 95%), rather than a fixed
 #### Suite Composition with OTE APIs
 
 Tests are classified with metadata tags, and the lifecycle/shard suites
-select on those tags via CEL qualifiers:
+select on those tags via CEL qualifiers.
+
+**Metadata lives with the test.** For OpenShift-authored tests, the
+preferred and expected form is to declare the metadata *inline on the
+`g.It`*, alongside the test itself, so a reader can see a test's
+lifecycle, criticality, and shard directly at its definition without
+consulting a separate mapping file. This relies on a small OTE API
+extension described in
+[OTE API Extension: Inline Tags](#ote-api-extension-inline-tags): an
+`ote.Tag(key, value)` decorator plus a build-time step that promotes
+these `key:value` labels into the spec's `Tags` map. With it, every
+metadata key is declared right on the `It`:
+
+```go
+// Everything is declared right on the It, so the metadata belongs to
+// this specific test. ote.Informing() is the existing wrapper for the
+// non-blocking lifecycle; ote.Tag(k, v) is the general form for any
+// key/value tag. All of these are promoted into spec.Tags at build
+// time (see OTE API Extension: Inline Tags), so the suite qualifiers
+// can select on test.tags.<key>.
+g.It("should do the thing",
+    ote.Informing(),                 // Lifecycle:Informing -> active, non-blocking
+    ote.Tag("Criticality", "Core"),  // also -> conformance/*/minimal
+    ote.Tag("Shard", "01"),          // initial shard (see Mandatory Metadata)
+    func() { ... },
+)
+```
+
+Because the metadata is attached to the individual test, **promotion is
+per-test, not per-suite**: the lifecycle agent flips a single test's
+`Lifecycle` tag when *that test* meets the criteria. Sibling tests for
+the same feature are unaffected, and a newly added test starts at its
+own `Lifecycle` (`Informing` by default) regardless of how long its
+feature's other tests have been `Blocking` or `Stable`. There is no
+notion of a whole feature suite being promoted as a unit.
+
+The bulk, pattern-matching form below (`Select(NameContains(...))`) is
+**reserved for externally-sourced test sets that cannot be edited
+inline** — chiefly upstream Kubernetes tests imported through
+`k8s-tests-ext` (see
+[Upstream and Externally-Sourced Tests](#upstream-and-externally-sourced-tests)).
+For those, the metadata is applied centrally from a rules table rather
+than test-by-test. It is not the mechanism for OpenShift-authored tests,
+precisely to avoid duplicating test names in a second file and letting
+the two drift out of sync:
 
 ```go
 // Tag tests with structured metadata. Tags are key=value pairs set via
-// AddTag and queried in CEL as test.tags.<key>=="<value>".
+// AddTag and queried in CEL as test.tags.<key>=="<value>". This bulk
+// form is for imported specs we do not own and cannot annotate inline.
 specs.Select(et.NameContains("[sig-foo] my test")).AddTag(map[string]string{
-    "LifeCycle": "Informing", // non-blocking during stabilization -> active
+    "Lifecycle": "Informing", // non-blocking during stabilization -> active
 })
 
-// Mark new tests as non-blocking during stabilization. The Informing()
-// annotation and LifeCycle: Informing tag are kept in sync.
-g.It("should do the thing", ote.Informing(), func() { ... })
-
 // The active/stable suites are defined once (see Shard Membership
-// Qualifiers) and select tests by their single LifeCycle value; a
+// Qualifiers) and select tests by their single Lifecycle value; a
 // component does not add its own Parents to reach them. Every lifecycle
 // transition is expressed purely by changing that one tag:
 //
-//   Draft      -> Informing : LifeCycle Draft     -> Informing (owner)
-//   Informing  -> Blocking  : LifeCycle Informing -> Blocking  (agent)
-//   Blocking   -> Stable    : LifeCycle Blocking  -> Stable    (agent)
+//   Draft      -> Informing : Lifecycle Draft     -> Informing (owner)
+//   Informing  -> Blocking  : Lifecycle Informing -> Blocking  (agent)
+//   Blocking   -> Stable    : Lifecycle Blocking  -> Stable    (agent)
 //
-// Because LifeCycle carries exactly one value, flipping Blocking ->
+// Because Lifecycle carries exactly one value, flipping Blocking ->
 // Stable atomically moves the test from active to stable; there is no
 // window in which it is a member of both.
 ```
 
 ##### Exclusive Membership and Rollout
 
-Lifecycle-suite membership is driven by the single-valued `LifeCycle`
+Lifecycle-suite membership is driven by the single-valued `Lifecycle`
 tag (`Informing`/`Blocking` → `active`, `Stable` → `stable`), so a test
 is a member of exactly one lifecycle suite at any point in time — the tag
 cannot hold two values at once. Graduation is therefore expressed as a
-single edit that changes `LifeCycle` from `Blocking` to `Stable`; there
+single edit that changes `Lifecycle` from `Blocking` to `Stable`; there
 is no window in which the test belongs to both suites, and no additive
 `Parents` advertisement to leave behind. The lifecycle agent changes
-exactly one `LifeCycle` value per transition PR. Reviewers should reject
-any change that would leave a test carrying more than one `LifeCycle`
+exactly one `Lifecycle` value per transition PR. Reviewers should reject
+any change that would leave a test carrying more than one `Lifecycle`
 value or that adds a lifecycle `Parents` entry bypassing the tag
 selection.
 
 ##### Shard Membership Qualifiers
 
-Each shard suite is defined by a qualifier that combines the `LifeCycle`
+Each shard suite is defined by a qualifier that combines the `Lifecycle`
 selection with the shard tag the balancing workflow assigns, e.g.:
 
 ```go
 ext.AddSuite(e.Suite{
     Name: "openshift/conformance/parallel/stable-01",
     Qualifiers: []string{
-        `test.tags.LifeCycle=="Stable" && test.tags.Shard=="01"`,
+        `test.tags.Lifecycle=="Stable" && test.tags.Shard=="01"`,
     },
 })
 ext.AddSuite(e.Suite{
     Name: "openshift/conformance/parallel/stable-02",
     Qualifiers: []string{
-        `test.tags.LifeCycle=="Stable" && test.tags.Shard=="02"`,
+        `test.tags.Lifecycle=="Stable" && test.tags.Shard=="02"`,
     },
 })
 // The active shards accept both Informing and Blocking tests.
 ext.AddSuite(e.Suite{
     Name: "openshift/conformance/parallel/active-01",
     Qualifiers: []string{
-        `(test.tags.LifeCycle=="Informing" || ` +
-            `test.tags.LifeCycle=="Blocking") && test.tags.Shard=="01"`,
+        `(test.tags.Lifecycle=="Informing" || ` +
+            `test.tags.Lifecycle=="Blocking") && test.tags.Shard=="01"`,
     },
 })
 ```
@@ -494,11 +535,11 @@ any `Shard` tag they carry.
 ##### Mandatory Metadata
 
 Every test **must** carry the metadata tags that determine its suite and
-shard membership — at minimum a `Shard` value (`LifeCycle` defaults to
+shard membership — at minimum a `Shard` value (`Lifecycle` defaults to
 `Informing` when absent). This is a hard requirement, not a convention,
 for two reasons:
 
-1. Lifecycle transitions and rebalancing change a test's `LifeCycle` and
+1. Lifecycle transitions and rebalancing change a test's `Lifecycle` and
    `Shard` tags; if a test is untagged, the automation cannot reliably
    move it.
 2. Membership must be deterministic — an untagged test could silently
@@ -507,7 +548,7 @@ for two reasons:
 To enforce this, a validation check runs in CI (in the extension binary
 self-check and/or as a required presubmit) that **fails** if any
 discovered test lacks the required metadata tags, or carries a value
-outside the defined vocabulary (e.g. a `LifeCycle` other than `Draft`
+outside the defined vocabulary (e.g. a `Lifecycle` other than `Draft`
 /`Informing`/`Blocking`/`Stable`). Tests cannot merge without valid
 metadata. This guarantees suite membership stays consistent across the
 lifecycle.
@@ -530,7 +571,7 @@ allSpecs.Walk(func(spec *et.ExtensionTestSpec) {
     // Every imported test still gets a lifecycle stage and a shard so it
     // participates in active/stable in addition to minimal.
     spec.AddTag(map[string]string{
-        "LifeCycle": lifeCycleFor(spec), // Informing / Blocking / Stable
+        "Lifecycle": lifeCycleFor(spec), // Informing / Blocking / Stable
         "Shard":     shardFor(spec),     // e.g. 01, always assigned
     })
 })
@@ -540,6 +581,62 @@ The dedicated `Criticality: Core` step above is the function referenced
 in [Upstream and Externally-Sourced Tests](#upstream-and-externally-sourced-tests):
 it is the single place that maps the upstream `[Conformance]` label onto
 the new metadata vocabulary.
+
+##### OTE API Extension: Inline Tags
+
+The inline metadata form shown earlier (`ote.Tag(key, value)` on a
+`g.It`) requires a small, backward-compatible extension to the
+openshift-tests-extension library. It is included here because the
+enhancement depends on it, and it is a natural generalization of a
+mechanism OTE already has.
+
+**What exists today.** Ginkgo only supports flat string `Label`
+decorators; it has no key/value concept. OTE already encodes one
+key/value pair as a label and parses it back out at build time: the
+existing `ote.Informing()` / `ote.Blocking()` helpers return
+`ginkgo.Label("Lifecycle:Informing")` (respectively `Blocking`), and
+`BuildExtensionTestSpecsFromOpenShiftGinkgoSuite` calls `GetLifecycle()`
+to read that `Lifecycle:<value>` label into the spec's dedicated
+`Lifecycle` field. `ExtensionTestSpec` already carries both a `Labels`
+set (opaque strings) and a `Tags map[string]string` (key/value); the
+ginkgo build path only populates `Labels`.
+
+**What to add.** Two pieces, mirroring the existing lifecycle handling:
+
+1. A general decorator helper that encodes any key/value pair as a
+   `key:value` label, alongside the existing `Informing()`/`Blocking()`:
+
+   ```go
+   // In the OTE ginkgo helpers, next to Informing()/Blocking().
+   func Tag(key, value string) ginkgo.Labels {
+       return ginkgo.Label(fmt.Sprintf("%s:%s", key, value))
+   }
+   ```
+
+2. A build-time promotion step in
+   `BuildExtensionTestSpecsFromOpenShiftGinkgoSuite` that copies every
+   `key:value` label into the spec's `Tags` map (generalizing the
+   special-cased `GetLifecycle` parsing that already runs there):
+
+   ```go
+   // During the per-spec walk, promote key:value labels into Tags so
+   // suite qualifiers can select on test.tags.<key>.
+   for _, l := range spec.Labels() {
+       if k, v, ok := strings.Cut(l, ":"); ok {
+           ets.Tags[k] = v
+       }
+   }
+   ```
+
+With these, `ote.Informing()` continues to work unchanged (it becomes
+`Tags["Lifecycle"] = "Informing"` in addition to setting the dedicated
+`Lifecycle` field), and `ote.Tag("Criticality", "Core")` /
+`ote.Tag("Shard", "01")` populate `Tags["Criticality"]` and
+`Tags["Shard"]`. All suite qualifiers in this enhancement then select on
+the real key/value namespace (`test.tags.<key>=="<value>"`) while
+authors declare everything inline on the test. This work is tracked as a
+required dependency in
+[Infrastructure Needed](#infrastructure-needed-optional).
 
 #### Spot-Check Suite Details
 
@@ -596,17 +693,17 @@ The lifecycle agent is a scheduled prow job (weekly or per-sprint) that
 removes routine suite maintenance from the human path. On each run it:
 
 1. Enumerates the test inventory (see [Locating Tests](#locating-tests)).
-2. For each `LifeCycle: Informing` test in `active`, evaluates promotion
+2. For each `Lifecycle: Informing` test in `active`, evaluates promotion
    eligibility (stabilization window elapsed, sample count met, pass
    rate `>= 99%` over the measurement window) and opens a PR flipping
-   `LifeCycle` to `Blocking` (and removing `Informing()`) when eligible.
-3. For each `LifeCycle: Blocking` `active` test past GA + 1, opens a PR
-   that flips `LifeCycle` from `Blocking` to `Stable` (moving it to the
+   `Lifecycle` to `Blocking` (and removing `Informing()`) when eligible.
+3. For each `Lifecycle: Blocking` `active` test past GA + 1, opens a PR
+   that flips `Lifecycle` from `Blocking` to `Stable` (moving it to the
    chosen explicit `stable` shard) and assigns its `Shard` tag in the
    same change.
 4. Recomputes shard balance from Sippy and opens rebalancing PRs.
 
-The agent never touches `LifeCycle: Draft` tests: advancing a test out
+The agent never touches `Lifecycle: Draft` tests: advancing a test out
 of `Draft` is a manual, owner-driven action. Promotion is one-way: the
 agent never demotes a blocking test back to `Informing` and never moves
 a test to a lower suite. A subsequent pass-rate degradation is a
@@ -620,7 +717,7 @@ pull requests, it does not merge them.
 ##### Locating Tests
 
 Reliable automation requires knowing which tests are
-`LifeCycle: Informing`, which are eligible for promotion, and —
+`Lifecycle: Informing`, which are eligible for promotion, and —
 importantly — where their source
 lives so a PR can be opened against the right repository. Today the CI
 signal knows a test's name and state but not necessarily its source
@@ -646,7 +743,7 @@ To make promotion decisions repeatable, the pass rate is computed as:
   Sippy/Component Readiness definitions rather than a new one.
 
 The pass rate governs promotion only. It is not used to demote a test:
-once `LifeCycle: Blocking`, a degradation is handled as a regression to
+once `Lifecycle: Blocking`, a degradation is handled as a regression to
 be fixed, not as a trigger to relax the test's lifecycle state. The
 specific numeric
 parameters above are proposals and are called out in
@@ -657,7 +754,7 @@ parameters above are proposals and are called out in
 Before assigning any test to a suite, ensure the following:
 
 - Carries the required metadata tags: a `Shard` value, plus
-  `Criticality: Core` if it is a core smoke test. `LifeCycle` defaults to
+  `Criticality: Core` if it is a core smoke test. `Lifecycle` defaults to
   `Informing` when absent and must otherwise be `Draft`, `Informing`,
   `Blocking`, or `Stable`. This is enforced in CI (see
   [Mandatory Metadata](#mandatory-metadata)).
@@ -713,11 +810,11 @@ Plan for these under the new hierarchy:
 - **Upstream tests are added to `active`/`stable` in addition to
   `minimal`**, not instead of it. `Criticality: Core` (mapped from the
   `[Conformance]` label) is an additional, faster smoke layer; the same
-  test also carries a `LifeCycle` value and so participates in a
+  test also carries a `Lifecycle` value and so participates in a
   lifecycle shard. A test is therefore a member of both `minimal` and
   one of the `active`/`stable` shards at the same time.
 - **Tagging is done centrally, not inline.** Because we do not want to
-  edit vendored upstream test source, the `Criticality`/`LifeCycle`
+  edit vendored upstream test source, the `Criticality`/`Lifecycle`
   /`Shard` tags are assigned by a dedicated function that walks the
   imported specs and applies tags from a rules table (see the example in
   [Mandatory Metadata](#mandatory-metadata)). In particular, a single
@@ -913,9 +1010,9 @@ than product functionality. Validation will consist of:
   hierarchy.
 - Confirming that suite membership via CEL qualifiers produces the
   expected test lists.
-- Validating that the `LifeCycle` metadata (and the paired `Informing()`
+- Validating that the `Lifecycle` metadata (and the paired `Informing()`
   annotation) correctly gates test blocking status, and that
-  `LifeCycle: Draft` tests are excluded from every suite.
+  `Lifecycle: Draft` tests are excluded from every suite.
 - Running the new suite hierarchy in parallel with the existing suites
   (non-gating jobs added alongside today's jobs) to compare coverage and
   runtime before cutting over.
@@ -1006,8 +1103,9 @@ owner and an availability gate.
 
 | Dependency | Purpose | Owner | Availability gate |
 |------------|---------|-------|-------------------|
+| OTE inline-tag API extension (`ote.Tag` decorator + `key:value` label→`Tags` promotion in the ginkgo spec builder) | Let tests declare key/value metadata inline on the `g.It` so suite qualifiers can select on `test.tags.<key>` (see [OTE API Extension: Inline Tags](#ote-api-extension-inline-tags)) | TBD (OTE maintainers) | Required before Dev Preview → Tech Preview |
 | Parallel validation jobs in `openshift/release` | Run the new hierarchy alongside existing suites (non-gating) to compare coverage and runtime | TBD (QSE + Test Platform) | Must exist and be green before Dev Preview → Tech Preview |
-| CI metadata-enforcement check | Fail any test that lacks its required metadata tags (`Shard`; `LifeCycle` defaults to `Informing`) or carries an out-of-vocabulary value, keeping suite membership consistent | TBD (QSE + Test Platform) | Required before Tech Preview → GA |
+| CI metadata-enforcement check | Fail any test that lacks its required metadata tags (`Shard`; `Lifecycle` defaults to `Informing`) or carries an out-of-vocabulary value, keeping suite membership consistent | TBD (QSE + Test Platform) | Required before Tech Preview → GA |
 | Sippy queries for pass-rate and shard-runtime analysis | Feed the lifecycle agent's promotion and rebalancing decisions | TBD (TRT) | Required before the agent leaves dry-run |
 | Test-source index / robust test database | Map each test to its owning repo and source so the agent can open PRs in the right place | TBD (TRT) | Required for full agent coverage; agent operates on the resolvable subset until then |
 | Lifecycle agent prow job | Scheduled automation that opens lifecycle PRs | TBD (QSE) | Required before Tech Preview → GA |
