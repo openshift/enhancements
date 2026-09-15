@@ -9,6 +9,24 @@
 - The generator validation tests were updated for the `ProxyResolver` argument and pass with:
   `go test -mod=vendor ./pkg/controllers/externaloidc/generation/oauthapiserver`.
 
+## External OIDC Runtime Traffic
+
+The External OIDC OAuth API server is a JWT verifier, not an OAuth 2.0 client performing an interactive browser flow. It does not call authorization,
+token, userinfo, introspection, revocation, or logout endpoints. Kube-apiserver sends the presented bearer token to it through the TokenReview webhook;
+the OAuth API server validates the token locally after obtaining the issuer's public keys.
+
+- CAO validates the issuer configuration during reconciliation by requesting the OIDC discovery document. It requests either
+  `<issuer URL>/.well-known/openid-configuration` or the configured `discoveryURL`.
+- At runtime the OAuth API server requests that same discovery document, reads its `jwks_uri`, and retrieves/refreshes the JWKS public signing keys.
+  This discovery/JWKS traffic is the ordinary runtime outbound dependency and is what the component proxy must support.
+- If an OIDC provider configures `externalClaimsSources`, the OAuth API server additionally makes runtime HTTP requests to those source URLs while
+  authenticating a token, subject to the configured conditions. A source can use anonymous access, the request-provided token, or client credentials,
+  and has independent TLS settings.
+
+`HTTPS_PROXY` selects the proxy for the required HTTPS discovery/JWKS requests; `HTTP_PROXY` is supplied for complete conventional proxy configuration;
+and `NO_PROXY` preserves direct access to in-cluster endpoints, including an in-cluster `discoveryURL`. The issuer CA in `auth-config.json` validates
+the discovery/JWKS endpoint. The mounted component proxy `TrustedCA` validates TLS to an HTTPS or TLS-intercepting proxy.
+
 ## Open Questions
 
 - Currently, we also support `kube-apiserver` direct auth. There is no simple way to set `kube-apiserver` to proxy on the relevant requests.
@@ -36,7 +54,9 @@
 
    For the External OIDC deployment, which retrieves issuer discovery and JWKS data, the workload also synchronizes the configured `TrustedCA` ConfigMap
    from `openshift-config` to `openshift-oauth-apiserver` and mounts the synchronized copy. The API server watches the mounted CA file, so CA content
-   updates are hot-reloaded and do not require a deployment rollout. Proxy environment changes alter the PodSpec and therefore roll out the deployment.
+   updates are hot-reloaded and do not require a deployment rollout. The External OIDC authentication-config generator writes that mounted
+   `ca-bundle.crt` path to `proxyTrustedCA` when the resolved component proxy has a `TrustedCA`; the operand uses this field to watch the file.
+   Proxy environment changes alter the PodSpec and therefore roll out the deployment.
 
    The component-proxy informer is included in the workload controller inputs so changes to `Authentication.spec.proxy` enqueue reconciliation. Shared
    environment-variable rendering lives in `pkg/controllers/common/deploymentutil`, matching the regular OAuth server's ordering and behavior.
