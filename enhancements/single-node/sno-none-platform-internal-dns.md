@@ -63,9 +63,12 @@ SNO clusters while retaining user-managed DNS and existing installations.
 
 ### Non-Goals
 
-* Adding installer or Infrastructure API fields.
+* Adding platform-agnostic DNS selection to the Infrastructure API. This Dev
+  Preview phase validates CoreDNS on None-platform SNO; a follow-up enhancement
+  will define the long-term API.
 * Adding a cluster capability.
-* Supporting day-2 transitions between DNS modes.
+* Supporting day-2 transitions from dnsmasq to CoreDNS outside a topology
+  transition.
 * Creating API or ingress virtual IPs.
 * Deploying keepalived, HAProxy, or another load balancer.
 * Removing the legacy dnsmasq implementation.
@@ -78,6 +81,10 @@ It renders them when all of the following conditions are true:
 * Control-plane topology is `SingleReplica`.
 * Platform type is `None`.
 * The new FeatureGate is enabled.
+
+MCO applies these conditions when rendering the control-plane MachineConfig
+during bootstrap and in-cluster reconciliation. A topology transition updates
+the rendered DNS assets to match the new topology.
 
 The CoreDNS static pod uses host networking. Its init container runs
 baremetal-runtimecfg without VIPs. Runtimecfg reads the node's primary IP and
@@ -97,10 +104,10 @@ reflected without restarting the pod remains an open question.
                                       host resolver-+       +--> primary-ip
 ```
 
-The existing `sno-dnsmasq.conf.yaml` is unchanged. Assisted Installer selects
-CoreDNS or legacy dnsmasq before bootstrap. When CoreDNS is selected, it passes
-the FeatureGate to bootstrap MCO and does not inject dnsmasq. When legacy DNS
-is selected, it leaves the gate disabled and retains its current MachineConfig.
+The existing `sno-dnsmasq.conf.yaml` is unchanged. Assisted Installer evaluates
+the FeatureGate from `install-config.yaml` before generating its additional
+manifests. When the gate is enabled, it does not add the dnsmasq MachineConfig.
+When the gate is disabled, it retains its current behavior.
 
 For other installers, leaving the gate disabled selects user-managed DNS. MCO
 then renders neither CoreDNS nor another local resolver.
@@ -119,11 +126,11 @@ then renders neither CoreDNS nor another local resolver.
 
 #### Assisted installation
 
-1. Assisted Installer selects CoreDNS or legacy dnsmasq before generating
-   bootstrap assets.
-2. For CoreDNS, it enables the FeatureGate and omits its dnsmasq MachineConfig.
-3. For legacy dnsmasq, it leaves the gate disabled and retains its current
-   MachineConfig.
+1. Assisted Installer evaluates the FeatureGate from `install-config.yaml`.
+2. When the gate is enabled, it omits the dnsmasq MachineConfig from its
+   additional manifests.
+3. When the gate is disabled, it adds the dnsmasq MachineConfig as it does
+   today.
 
 #### User-managed DNS
 
@@ -200,7 +207,9 @@ using CoreDNS before the static pod is ready.
 Assisted Installer generates `install-config.yaml` and invokes
 `openshift-install`. It sets `featureSet: DevPreviewNoUpgrade` through its
 install-config overrides, which enables all Dev Preview gates for the cluster.
-Assisted Installer must omit dnsmasq when the gate is enabled.
+Assisted Installer does not modify MCO's control-plane MachineConfig. It only
+decides whether to add its separate dnsmasq MachineConfig based on the effective
+FeatureGate.
 
 #### Static-pod image
 
@@ -274,6 +283,8 @@ Unit tests cover:
 * Equal bootstrap and in-cluster rendering.
 * Runtimecfg primary-IP discovery and Corefile generation for IPv4, IPv6, and dual-stack.
 * Mutual exclusion of CoreDNS and dnsmasq assets.
+* Assisted Installer omits dnsmasq when the FeatureGate is enabled and retains
+  it when the gate is disabled.
 
 End-to-end tests cover:
 
