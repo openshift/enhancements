@@ -57,7 +57,8 @@ SNO clusters while retaining user-managed DNS and existing installations.
 
 * Deploy MCO-managed CoreDNS on None-platform SNO when the FeatureGate is
   enabled.
-* Resolve `api`, `api-int`, and `*.apps` records to the node's primary IP.
+* Resolve `api`, `api-int`, and `*.apps` records to the node's IPv4 and IPv6
+  addresses, when available.
 * Forward other queries to the node's upstream resolvers.
 * Preserve current behavior when the FeatureGate is disabled.
 
@@ -87,9 +88,10 @@ during bootstrap and in-cluster reconciliation. A topology transition updates
 the rendered DNS assets to match the new topology.
 
 The CoreDNS static pod uses host networking. Its init container runs
-baremetal-runtimecfg without VIPs. Runtimecfg reads the node's primary IP and
-upstream resolvers, then renders the Corefile. CoreDNS returns the primary IP
-for the cluster records and forwards all other queries upstream.
+baremetal-runtimecfg without VIPs. Runtimecfg reads the node's configured IPv4
+and IPv6 addresses and upstream resolvers, then renders the Corefile. CoreDNS
+returns the available node addresses for the cluster records and forwards all
+other queries upstream.
 
 The design reuses only the MCO assets required for DNS. It does not render
 `corednsmonitor`, keepalived, HAProxy, or VIP-related assets. The SNO address
@@ -97,11 +99,11 @@ does not move between nodes. Whether changes to upstream resolvers must be
 reflected without restarting the pod remains an open question.
 
 ```text
- primary-ip --------+
+ node IP files -----+
                     +--> runtimecfg --> Corefile --> CoreDNS :53
  upstream resolvers-+                               ^       |
                                                     |       +--> upstream DNS
-                                      host resolver-+       +--> primary-ip
+                                      host resolver-+       +--> node IPs
 ```
 
 The existing `sno-dnsmasq.conf.yaml` is unchanged. Assisted Installer evaluates
@@ -119,8 +121,8 @@ then renders neither CoreDNS nor another local resolver.
 1. The cluster creator enables the FeatureGate for a None-platform SNO
    installation.
 2. Bootstrap MCO renders the SNO CoreDNS and resolver assets.
-3. Runtimecfg waits for the primary IP, reads upstream resolvers, and renders
-   the Corefile.
+3. Runtimecfg waits for the node-IP configuration, reads upstream resolvers,
+   and renders the Corefile.
 4. The host resolver sends queries to CoreDNS.
 5. CoreDNS answers cluster records locally and forwards other queries.
 
@@ -186,15 +188,18 @@ MCO will:
 
 #### baremetal-runtimecfg
 
-Runtimecfg adds a `--discover-node-ip` option. In this mode it waits for
-`/run/nodeip-configuration/primary-ip`, renders that address into the Corefile,
-and reads upstream resolvers from NetworkManager without requiring VIPs.
+Runtimecfg adds a `--discover-node-ip` option. In this mode it waits for the
+node-IP configuration and reads `/run/nodeip-configuration/ipv4` and
+`/run/nodeip-configuration/ipv6`. It renders an A or AAAA record for each
+available family and reads upstream resolvers from NetworkManager without
+requiring VIPs. `/run/nodeip-configuration/primary-ip` identifies the preferred
+address but does not limit the rendered records.
 
-`nodeip-configuration.service` owns the primary-IP file. It runs after
-NetworkManager is online and before `kubelet-dependencies.target`. It retries
-until it finds a usable address, then writes the file. Kubelet requires that
-target, so it cannot start the CoreDNS static pod before the file exists. The
-file is recreated under `/run` after every boot.
+`nodeip-configuration.service` owns these files. It runs after NetworkManager
+is online and before `kubelet-dependencies.target`. It retries until it finds
+usable addresses, then writes the files. Kubelet requires that target, so it
+cannot start the CoreDNS static pod before the required files exist. The files
+are recreated under `/run` after every boot.
 
 #### Host resolver
 
@@ -222,7 +227,7 @@ on-premise image-pull service.
 | Risk | Mitigation |
 | --- | --- |
 | CoreDNS and dnsmasq both bind port 53       | Assisted Installer omits dnsmasq when the FeatureGate is enabled. |
-| The primary IP is not ready                 | Runtimecfg waits for the file; systemd ordering and bootstrap tests verify the contract. |
+| The node IPs are not ready                  | Runtimecfg waits for the files; systemd ordering and bootstrap tests verify the contract. |
 | The CoreDNS image is unavailable            | Verify release-image caching or reuse MCO's image-pull service. |
 | The host resolver points to stopped CoreDNS | Render resolver and CoreDNS assets together; test reboot and failure behavior. |
 | Upgrade enables CoreDNS unexpectedly        | Keep the gate disabled by default and in existing FeatureSets. |
@@ -281,7 +286,8 @@ Unit tests cover:
 
 * MCO rendering across topology, platform, and FeatureGate combinations.
 * Equal bootstrap and in-cluster rendering.
-* Runtimecfg primary-IP discovery and Corefile generation for IPv4, IPv6, and dual-stack.
+* Runtimecfg node-IP discovery and Corefile generation for IPv4, IPv6, and
+  dual-stack.
 * Mutual exclusion of CoreDNS and dnsmasq assets.
 * Assisted Installer omits dnsmasq when the FeatureGate is enabled and retains
   it when the gate is disabled.
@@ -380,7 +386,7 @@ Support inspects:
 
 * The rendered MachineConfig and CoreDNS static-pod manifest.
 * CoreDNS and runtimecfg logs.
-* `/run/nodeip-configuration/primary-ip`.
+* `/run/nodeip-configuration/{primary-ip,ipv4,ipv6}`.
 * NetworkManager resolver state and `/etc/resolv.conf`.
 * The legacy dnsmasq MachineConfig.
 * The process bound to port 53.
