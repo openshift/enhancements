@@ -366,6 +366,8 @@ There is no separate condition for etcd scaling — that scaling is a preconditi
 **Spec validation**: Field-level enum validation restricts `spec.controlPlaneTopology` to `SingleReplica` and `HighlyAvailable` when set. A `MutableTopology`-gated CEL rule additionally allows omitting or clearing the field, retaining its existing value, setting it to match `status.controlPlaneTopology`, and requesting `HighlyAvailable` when the observed topology is `SingleReplica`.
 Other new transition directions are rejected by the API server. Dynamic preconditions are evaluated by CCO.
 
+The current API allows clearing intent at any state. Before dev preview, the API and controller must implement the state-dependent cancellation contract in [Required State and Upgrade Protocol](#required-state-and-upgrade-protocol). In particular, clearing intent after admission must not be accepted as successful transition completion.
+
 Access to `spec.controlPlaneTopology` is governed by the existing RBAC for the infrastructure CR (`infrastructures.config.openshift.io`). By default, only users with `cluster-admin` or equivalent roles can modify infrastructure spec fields.
 No additional RBAC restrictions are proposed for the initial implementation; a dedicated role for topology transitions may be considered in future iterations if finer-grained access control is needed.
 
@@ -405,6 +407,13 @@ When updating observed topology, the controller must clear or replace discovery 
 
 Because the API does not distinguish omitted from empty and has no observation time, the producer and CLI contract must define a maximum acceptable age and use controller health to identify stale or unavailable discovery. The CLI must define output and exit behavior for omitted, empty, `Unknown`, `Unavailable`, stale, and `Available` data.
 
+##### Current CCO Follow-Up Blockers
+
+Before relying on the CCO follow-up as this enhancement's implementation, it must fail closed in these cases:
+
+- If `MutableTopology` is absent from the feature-gate state, treat it as disabled rather than calling `Enabled` with an unregistered key.
+- If reading operator state fails while validating rendered MachineConfigs, return that error and fail validation. Only a genuinely absent or zero transition condition may use the permissive fallback.
+
 ##### Upgrade Safety Status
 
 The current controller checks whether CVO has already started an upgrade before it begins a transition, then writes its custom conditions before its Infrastructure status update.
@@ -413,6 +422,18 @@ Therefore, it does not establish mutual exclusion between upgrades and topology 
 
 Before dev preview, the controller must write the canonical `Upgradeable=False` condition while a request is pending or a transition is in progress, and restore it to the appropriate idle state after cancellation, rejection, or completion.
 The implementation must protect the sequence against an upgrade or precondition change between preflight and the Infrastructure status update, and must retry status conflicts by re-reading and revalidating the complete sequence.
+
+##### Required State and Upgrade Protocol
+
+The current controller does not implement this protocol. It is required before dev preview so upgrade safety and cancellation do not depend on timing between independent API writes.
+
+1. **Idle**: No transition is requested. `spec.controlPlaneTopology` is omitted or matches observed topology. The canonical `ClusterOperator/config-operator` `Upgradeable` condition is not blocked by mutable topology.
+2. **Pending**: A permitted spec value differs from observed topology, but CCO has not admitted it. CCO evaluates preconditions. A user can withdraw this request by resetting spec to observed topology; CCO clears pending diagnostics without updating topology status.
+3. **Admitted**: CCO writes canonical `Upgradeable=False` with a topology-transition reason and verifies the block is persisted and observable to CVO before committing topology status. CCO then re-reads Infrastructure and ClusterVersion, confirms intent is unchanged, reruns all dynamic preconditions, and performs a resource-version-guarded Infrastructure status update.
+4. **Progressing**: The observed topology has changed and post-transition validators run after the soak period. Intent changes, including clear, must not select an empty validator set or re-enable upgrades. There is no user cancellation after this state begins.
+5. **Failure handling**: On an admission failure, an intent change before the status commit, a status-update conflict, or a status-write failure, CCO re-reads current state and restarts the complete admission sequence. If no transition was committed, it restores the documented idle conditions. It must not restore upgradeability merely because no transition descriptor matches the current spec.
+
+The implementation and tests must cover an upgrade starting during admission, precondition loss after the first check, a condition update that succeeds before the status update fails, a conflict retry after intent changes, and clear/reset behavior before and after the topology status commit.
 
 ##### Supported Transitions
 
@@ -699,7 +720,8 @@ They must also cover omitted and empty lists for `SingleReplica` and a current t
 | Discovery consistency | Verify topology updates clear or replace old-source entries in the same status update; after SNO → HA the list is omitted or empty, while CCO conditions continue to report post-transition validation |
 | Upgrade safety | Verify `ClusterOperator/config-operator` reports the canonical `Upgradeable=False` condition while a transition is pending or in progress, CVO rejects upgrades, and the condition is correctly restored after rejection, cancellation, and completion |
 | Race and conflict handling | Verify correct behavior for an upgrade starting during transition admission, precondition loss after preflight, Infrastructure status-update conflicts, and a condition update that succeeds before a status update fails |
-| Cancellation | Verify the selected cancellation contract cannot complete a transition without running its post-transition validators |
+| Cancellation | Verify Pending cancellation restores idle state, and admitted or progressing intent changes cannot complete a transition or re-enable upgrades without required validators |
+| CCO fail-closed behavior | Verify an absent feature gate disables the controller without panic, and an operator-state read failure blocks rendered-MachineConfig validation |
 
 ### QE Testing
 
@@ -726,6 +748,8 @@ Standard QE testing scenarios will include:
 - Per-operator topology dependency matrix completed: for each in-payload operator that reads `controlPlaneTopology` or `infrastructureTopology`, document what the operator uses the value for (replica count, scheduling, feature enablement) and whether it watches the infrastructure CR for changes or reads the value only at startup
 - Operators that read topology only at startup are identified and a restart strategy is documented for post-transition reconciliation
 - CCO sets the canonical `Upgradeable=False` condition on `ClusterOperator/config-operator` while a topology transition is pending or in progress; CVO upgrade blocking, cancellation, conflict retry, and upgrade-vs-transition races are covered by tests
+- CCO implements the required idle, pending, admitted, and progressing state contract; no intent change can bypass post-transition validation or re-enable upgrades early
+- CCO treats an absent feature gate as disabled and fails closed on operator-state read errors during post-transition validation
 - The selected discovery API is merged and used consistently by API, CCO, and oc; CCO publishes applicable transitions with `Available`, `Unavailable`, or `Unknown` availability and required diagnostics before a request, and API integration tests validate its contract
 - CCO tests cover idle publication, refresh without spec changes, stale-request rejection, conflict retry, and atomic topology/discovery replacement
 - CLI discovery defines and tests stable output and exit behavior for omitted, empty, `Unknown`, `Unavailable`, stale, and `Available` data
