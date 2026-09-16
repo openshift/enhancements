@@ -58,7 +58,8 @@ This enhancement initially targets `controlPlaneTopology` transitions only (Sing
 This enhancement introduces "mutable topology" which is defined as "the ability for OpenShift clusters to transition between topology modes as a Day 2 operation". This changes the existing OpenShift assumption that topologies are immutable after installation.
 
 A new `controlPlaneTopology` field in the infrastructure spec expresses the administrator's intent to transition. A topology transition controller in cluster-config-operator watches for changes to this field, validates preconditions, coordinates the transition, and updates the existing topology status fields when the cluster is ready.
-A new `oc adm transition topology` CLI command provides an interface for cluster administrators to initiate transitions.
+The proposed `status.controlPlaneTopologyTransitions` API lets administrators and automation discover applicable transitions and current blockers before requesting a change. CCO does not publish this field today.
+A new `oc adm transition topology` CLI command provides an interface for cluster administrators to discover and initiate transitions.
 The initial implementation supports transitioning Single Node OpenShift (SNO) clusters to HA compact (3-node) on `platform: none`.
 
 This enhancement supersedes the [Adaptable Topology proposal](https://github.com/openshift/enhancements/pull/1905), which proposed a new `Adaptable` topology mode requiring changes across all core operators. That proposal is withdrawn in favor of this controller-based approach.
@@ -83,10 +84,13 @@ Operators continue to react to the same fixed topology values they already under
 
 * As a cluster administrator, I want topology transitions managed through a well-defined API so that I have a clear interface for monitoring transition state and integrating with my operational tooling.
 
+* As a cluster administrator or fleet orchestrator, I want to discover which transitions apply to a cluster and why they are currently blocked so that I can prepare the cluster before requesting a topology change.
+
 ### Goals
 
 * Officially support topology transitions in OpenShift
 * Provide a supported interface for administrators to initiate topology transitions
+* Expose applicable transitions and their current availability and diagnostic information to administrators and automation
 * Support transitioning SNO clusters to HA compact (3-node) on `platform: none` as the initial transition path
 * Maintain backward compatibility — existing clusters with fixed topology modes are unaffected
 * Establish the architectural foundation for additional transition paths in the future
@@ -103,15 +107,17 @@ Operators continue to react to the same fixed topology values they already under
 
 ## Proposal
 
-This enhancement introduces a new infrastructure API field and a topology transition controller in cluster-config-operator (CCO; not to be confused with cloud-credential-operator) to enable topology transitions as Day 2 operations.
+This enhancement introduces infrastructure API fields for transition intent and discovery, and a topology transition controller in cluster-config-operator (CCO; not to be confused with cloud-credential-operator) to enable topology transitions as Day 2 operations.
 
 The approach follows the standard OpenShift spec/status contract and mirrors the pattern used by `oc adm upgrade`:
 
 1. **`controlPlaneTopology` field in InfrastructureSpec** — Expresses the administrator's intent to transition. The CLI patches this field to initiate a transition. The existing `controlPlaneTopology` and `infrastructureTopology` fields in status continue to represent the cluster's observed topology.
 
-2. **Topology transition controller in cluster-config-operator** — A new controller in CCO that watches the infrastructure CR for `controlPlaneTopology` spec changes, validates preconditions, coordinates the transition, and updates the status topology fields when the cluster is ready for the new mode.
+2. **`controlPlaneTopologyTransitions` field in InfrastructureStatus** — The proposed API reports controller-computed transitions from the current control-plane topology, whether their preconditions currently pass, and diagnostic information when they do not. It is advisory discovery information; it does not request or admit a transition.
 
-3. **`oc adm transition topology` CLI command** — A command that validates preconditions, patches `spec.controlPlaneTopology` on the infrastructure CR, and returns immediately.
+3. **Topology transition controller in cluster-config-operator** — The controller must evaluate transition availability before intent is set, publish it through the same API contract, watch the infrastructure CR for `controlPlaneTopology` spec changes, revalidate requested transitions, coordinate the transition, and update status topology fields when the cluster is ready for the new mode.
+
+4. **`oc adm transition topology` CLI command** — A command that exposes controller-published transition availability, validates client-side preconditions, patches `spec.controlPlaneTopology` on the infrastructure CR to request a transition, and returns immediately after the patch.
 
 The transition controller is proposed to live in cluster-config-operator because CCO is the canonical owner of the `config.openshift.io` API group and the Infrastructure CR.
 The controller is feature-gated using the standard library-go FeatureGateAccess pattern: when the gate is disabled the controller is not registered with the manager and incurs negligible runtime overhead; a gate change triggers an operator restart via ForceExit so the new state is picked up cleanly.
@@ -164,6 +170,10 @@ Administrators should reduce non-critical workload risk accordingly. Administrat
 
 ##### Pre-Transition
 
+Once the discovery producer is implemented, administrators can inspect `status.controlPlaneTopologyTransitions` on `infrastructure/cluster`, directly or through the CLI's discovery interface, to identify applicable transitions and current blockers.
+A defined transition with unmet preconditions is reported as `Unavailable` with a reason, while `Unknown` indicates evaluation has not completed. An omitted or empty list does not distinguish evaluation pending from no applicable transitions.
+Discovery does not modify cluster intent. Seeing `Available` does not guarantee admission: the cluster may change before a request is processed, and external networking prerequisites remain the administrator's responsibility.
+
 1. The cluster administrator prepares exactly 2 additional control-plane nodes and joins them to the cluster — the kubelet is running on each node and Node objects exist in the Kubernetes API. On `platform: none`, the administrator manages their own load balancing configuration (VIPs, DNS).
 2. **Node-driven operator reactions (prerequisite)** — independent of any topology intent, as soon as the new Node objects appear: cluster-etcd-operator (CEO) scales etcd members sequentially (1→2→3) via its existing unsafe/day-2 scaling path, reusing the learner-to-voter promotion mechanism from bootstrapping;
    the kube-apiserver, kube-controller-manager, and kube-scheduler operators render static pod manifests for the new nodes.
@@ -186,6 +196,7 @@ Administrators should reduce non-critical workload risk accordingly. Administrat
 9. The controller updates the infrastructure status fields:
    - `controlPlaneTopology` transitions from `SingleReplica` to `HighlyAvailable`
    - `infrastructureTopology` transitions from `SingleReplica` to `HighlyAvailable` (no dedicated workers, so it matches control plane topology)
+   - When discovery is implemented, `controlPlaneTopologyTransitions` is cleared or replaced in the same status update so all remaining entries originate from the new `controlPlaneTopology`; initially there are no defined outgoing transitions from `HighlyAvailable`
 10. **Topology-driven operator reactions** — operators that watch the infrastructure status topology fields reconcile against the new values and adjust their deployment strategies, replica counts, and placement policies.
     This is a distinct phase from step 2: step 2 covers operators reacting to node presence before the transition is even admitted, step 10 covers operators reacting to the topology status change after admission.
     The set of operators with topology-dependent behavior has not been fully enumerated — building the per-operator topology dependency matrix is a prerequisite for entering dev preview (see [Graduation Criteria](#entering-dev-preview) and [Open Questions](#open-questions)).
@@ -200,6 +211,9 @@ Administrators should reduce non-critical workload risk accordingly. Administrat
 The CLI returns immediately after patching `spec.controlPlaneTopology` (step 5). Today, administrators inspect controller-specific transition conditions in `operator.openshift.io/v1 Config/cluster` and the aggregate `ClusterOperator/config-operator` status separately. The target monitoring UX will be defined during dev preview.
 
 ##### Failure Handling
+
+The proposed discovery field provides availability diagnostics without starting a transition or setting transition-progress conditions merely because a candidate is blocked.
+The controller must revalidate a request regardless of previously advertised availability. CCO conditions report request handling and transition progress; discovery is neither progress tracking nor transition history.
 
 The controller recognizes two distinct failure windows, and makes no guarantees about the node-driven etcd scaling itself:
 
@@ -266,6 +280,74 @@ InfrastructureTopology TopologyMode `json:"infrastructureTopology,omitempty"`
 
 No new enum values are added to `TopologyMode`. The existing values (`SingleReplica`, `HighlyAvailable`, `DualReplica`, `HighlyAvailableArbiter`) are sufficient.
 
+**Transition discovery (proposed observed availability):**
+
+[openshift/api#3029](https://github.com/openshift/api/pull/3029) proposes an optional, `MutableTopology`-gated `InfrastructureStatus.ControlPlaneTopologyTransitions` field, serialized as `status.controlPlaneTopologyTransitions`.
+The field is not yet merged or consumed by CCO. The current CCO follow-up instead references a different draft API field, `status.topologyTransitionStatus`, in [cluster-config-operator#499](https://github.com/openshift/cluster-config-operator/pull/499).
+Before dev preview, CCO and oc must target the same merged API contract; this enhancement uses `controlPlaneTopologyTransitions` as the proposed contract below.
+
+Each entry has the following API shape:
+
+| Field | Type | Meaning and validation |
+| ----- | ---- | ---------------------- |
+| `source` | `TopologyMode` | Required. `SingleReplica` or `HighlyAvailable`; must equal the current `status.controlPlaneTopology`. |
+| `target` | `TopologyMode` | Required. `SingleReplica` or `HighlyAvailable`. The schema's accepted values do not define the controller's supported transition paths. |
+| `availability` | `TransitionAvailability` | Required. `Available` means evaluation completed and preconditions pass; `Unavailable` means a defined transition cannot currently be initiated; `Unknown` means evaluation has not completed. |
+| `reason` | `string` | Required when availability is `Unavailable` or `Unknown`; optional and normally omitted when `Available`. A diagnostic, non-exhaustive machine-readable value matching `^[A-Z][A-Za-z0-9]*$`, between 1 and 128 characters. |
+| `message` | `string` | Optional human-readable detail, primarily for `Unavailable` entries. When present, between 1 and 2048 characters; the controller may truncate it. Consumers must not parse it. |
+
+The list has map semantics keyed by `(source, target)`, with no significant ordering and no duplicate pairs. It permits zero to two entries, matching the target enum's cardinality for one current source.
+The intended producer behavior is to publish defined transitions from the current topology and retain a defined transition with failing preconditions as `Unavailable` rather than omitting it.
+The initial transition graph contains only `SingleReplica` → `HighlyAvailable` on `platform: none`.
+
+The draft schema does not currently require `source` and `target` to differ, so it permits schema-valid no-op pairs. Before dev preview, it must reject those pairs with CEL validation and API integration coverage; neither the CLI nor automation should treat a same-source/target pair as a transition.
+
+An omitted field and an explicitly empty list intentionally carry the same meaning. Consumers cannot distinguish "not yet evaluated" from "evaluated with no applicable transitions" using this field alone.
+When the current topology is outside the source/target enum, the list is omitted or empty. Future support for `DualReplica` or `HighlyAvailableArbiter` requires widening the field enums and increasing the list bound to match the target cardinality, up to four for the non-`External` topology values.
+`External` is not expected to participate in transitions.
+
+The following Infrastructure status excerpts illustrate the intended independent evaluations of the initial transition. Reason values are illustrative diagnostics, not an exhaustive reason enum.
+
+Preconditions pass:
+
+```yaml
+status:
+  controlPlaneTopology: SingleReplica
+  controlPlaneTopologyTransitions:
+  - source: SingleReplica
+    target: HighlyAvailable
+    availability: Available
+```
+
+A precondition blocks initiation:
+
+```yaml
+status:
+  controlPlaneTopology: SingleReplica
+  controlPlaneTopologyTransitions:
+  - source: SingleReplica
+    target: HighlyAvailable
+    availability: Unavailable
+    reason: PreflightCheckFailed
+    message: "etcd requires 3 voting members for this transition; currently 1"
+```
+
+Evaluation has not completed:
+
+```yaml
+status:
+  controlPlaneTopology: SingleReplica
+  controlPlaneTopologyTransitions:
+  - source: SingleReplica
+    target: HighlyAvailable
+    availability: Unknown
+    reason: EvaluationPending
+```
+
+This flat shape represents a recomputed availability snapshot, rather than per-entry `metav1.Condition` objects. It has no evaluation timestamp or transition history.
+`Available` is advisory: the controller must revalidate any request against current cluster state, and consumers must not treat a status read as an admission or completion guarantee.
+Transitions continue to be requested exclusively through `spec.controlPlaneTopology`.
+
 **Current transition progress implementation:**
 
 The merged CCO controller writes the following custom conditions to the status of `operator.openshift.io/v1 Config/cluster`:
@@ -292,6 +374,7 @@ No additional RBAC restrictions are proposed for the initial implementation; a d
 #### Feature Gate
 
 The existing `MutableTopology` feature gate gates the spec field and controller registration. It is currently registered for self-managed clusters in `DevPreviewNoUpgrade`.
+API PR #3029 also gates discovery fields and their cross-field validation with `MutableTopology`.
 The feature gate will progress through the following stages:
 
 - **Dev Preview**: Part of the `DevPreviewNoUpgrade` feature set
@@ -310,6 +393,17 @@ The merged topology transition controller in cluster-config-operator has the fol
 - Validates preconditions before starting a transition
 - Updates `controlPlaneTopology` and `infrastructureTopology` in status once preconditions pass
 - Reports transition progress through custom conditions in `operator.openshift.io/v1 Config/cluster`
+
+##### Proposed Availability Evaluation
+
+The discovery producer is not implemented in the merged CCO controller. The future controller must evaluate defined transitions originating at the current observed control-plane topology and publish availability and diagnostics through the merged API contract, including periodic refresh without a spec change.
+It must share transition definitions and precondition checks with request handling so discovery and execution have the same source of truth.
+Publishing a blocked candidate must not initiate a transition or block upgrades.
+
+Discovery is observed state, not a reservation or admission approval. Once intent is set, the controller revalidates the requested transition even if it was previously advertised as `Available`.
+When updating observed topology, the controller must clear or replace discovery entries in the same status update to satisfy source/status validation. After the status becomes `HighlyAvailable`, the list is omitted or empty until a defined outgoing transition exists.
+
+Because the API does not distinguish omitted from empty and has no observation time, the producer and CLI contract must define a maximum acceptable age and use controller health to identify stale or unavailable discovery. The CLI must define output and exit behavior for omitted, empty, `Unknown`, `Unavailable`, stale, and `Available` data.
 
 ##### Upgrade Safety Status
 
@@ -369,11 +463,14 @@ Once all criteria pass, the controller clears its custom progressing condition a
 
 The CLI command provides an interface for topology transitions:
 
+- Once implemented, reads `status.controlPlaneTopologyTransitions` to expose applicable transitions, their current availability, and diagnostic reasons/messages
 - Validates preconditions client-side (feature gate enabled, no transition in progress)
 - Patches `spec.controlPlaneTopology` on the infrastructure CR
 - Returns immediately after a successful patch
 
 The CLI does not contain transition logic — it delegates entirely to the CCO controller. This follows the same pattern as `oc adm upgrade`, which patches `spec.desiredUpdate` and lets the CVO do the work.
+Discovery must not patch the Infrastructure CR. The CLI must report `Unknown` as incomplete evaluation and handle absent or empty discovery data without claiming that transitions are definitively unsupported.
+An `Available` entry does not bypass request-time validation. Exact discovery command syntax, stable output, and exit behavior must be defined before dev preview.
 Administrators monitor current controller-specific progress in `operator.openshift.io/v1 Config/cluster`; the aggregate operator status is `oc get clusteroperator config-operator -o yaml`. A dedicated `oc adm transition topology status` subcommand remains to be defined during dev preview.
 
 #### etcd Scaling: SNO to HA Compact
@@ -402,9 +499,9 @@ The blast radius of a failure during the 2-member window is higher than during i
 
 | Component | Changes Required |
 | --------- | ---------------- |
-| cluster-config-operator | Topology transition controller; watches `spec.controlPlaneTopology`, coordinates the initial transition, updates status topology fields, and currently reports custom controller conditions |
-| Infrastructure API (`openshift/api`) | `spec.controlPlaneTopology` uses `TopologyMode` with field-level enum and permitted-direction validation |
-| `oc` CLI | New `oc adm transition topology` command |
+| cluster-config-operator | Topology transition controller; current code watches `spec.controlPlaneTopology`, coordinates the initial transition, updates status topology fields, and reports custom controller conditions; it must add discovery publication against the selected API contract |
+| Infrastructure API (`openshift/api`) | `spec.controlPlaneTopology` uses `TopologyMode` with field-level enum and permitted-direction validation; API PR #3029 proposes gated `status.controlPlaneTopologyTransitions` |
+| `oc` CLI | New `oc adm transition topology` command; it must consume the selected discovery API contract |
 | cluster-etcd-operator | No code changes — its existing node-driven (unsafe) etcd scaling behavior is depended on as a precondition the transition controller checks for, rather than something it triggers or orchestrates |
 | ingress, networking, monitoring operators | Reconcile on infrastructure status topology field changes |
 
@@ -565,6 +662,11 @@ The transition controller is also feature-gated with near-zero overhead when ina
 
 ## Test Plan
 
+### Proposed API Validation Tests
+
+Before dev preview, API integration tests for the selected discovery field must cover all availability states; required `source`, `target`, and `availability`; enums; source/target inequality; source/status consistency; conditional reason requirements; reason/message bounds; duplicate `(source, target)` rejection; and rejection above the two-entry list limit.
+They must also cover omitted and empty lists for `SingleReplica` and a current topology outside the discovery enum, plus feature-gated schema presence and absence in Infrastructure and the Infrastructure schema embedded in machineconfiguration's ControllerConfig.
+
 ### CI Lanes
 
 | Lane | Frequency | Description |
@@ -581,7 +683,10 @@ The transition controller is also feature-gated with near-zero overhead when ina
 | Test | Description |
 | ---- | ----------- |
 | Precondition validation | Verify the controller withholds admission when nodes are missing/not-ready, dedicated workers are present, cluster operators are unstable, or etcd has not yet reached quorum with 3 voting members |
-| CLI interaction | Verify `oc adm transition topology` correctly patches `spec.controlPlaneTopology` and monitors progress |
+| Availability publication | Verify applicable transitions are published before intent is set, blocked transitions retain diagnostics, and availability changes as prerequisites change without initiating a transition or blocking upgrades |
+| Incomplete discovery | Verify controller and client handling of `Unknown`, omitted and empty lists, and no applicable transitions |
+| CLI interaction | Verify discovery displays controller-published availability and diagnostics without changing spec, and transition requests correctly patch `spec.controlPlaneTopology` |
+| Stale availability | Change preconditions after an `Available` status read and verify the controller withholds admission after revalidating the request |
 
 #### Transition Tests
 
@@ -591,6 +696,7 @@ The transition controller is also feature-gated with near-zero overhead when ina
 | etcd quorum as precondition | Verify CEO's existing 1→2→3 member addition completes independently of the CLI command, and that the controller does not admit the transition until it has |
 | Failure and recovery | Verify the controller withholds admission indefinitely when a precondition never becomes true (e.g., node unreachable, etcd never finishes promotion), and that CEO's own etcd disaster recovery procedures are unaffected by and independent of the transition controller |
 | Post-transition operator health | Verify all operators reconcile successfully after infrastructure topology status fields are updated |
+| Discovery consistency | Verify topology updates clear or replace old-source entries in the same status update; after SNO → HA the list is omitted or empty, while CCO conditions continue to report post-transition validation |
 | Upgrade safety | Verify `ClusterOperator/config-operator` reports the canonical `Upgradeable=False` condition while a transition is pending or in progress, CVO rejects upgrades, and the condition is correctly restored after rejection, cancellation, and completion |
 | Race and conflict handling | Verify correct behavior for an upgrade starting during transition admission, precondition loss after preflight, Infrastructure status-update conflicts, and a condition update that succeeds before a status update fails |
 | Cancellation | Verify the selected cancellation contract cannot complete a transition without running its post-transition validators |
@@ -620,7 +726,9 @@ Standard QE testing scenarios will include:
 - Per-operator topology dependency matrix completed: for each in-payload operator that reads `controlPlaneTopology` or `infrastructureTopology`, document what the operator uses the value for (replica count, scheduling, feature enablement) and whether it watches the infrastructure CR for changes or reads the value only at startup
 - Operators that read topology only at startup are identified and a restart strategy is documented for post-transition reconciliation
 - CCO sets the canonical `Upgradeable=False` condition on `ClusterOperator/config-operator` while a topology transition is pending or in progress; CVO upgrade blocking, cancellation, conflict retry, and upgrade-vs-transition races are covered by tests
-- Valid and invalid cluster transitions are identified in the the infrastructure status
+- The selected discovery API is merged and used consistently by API, CCO, and oc; CCO publishes applicable transitions with `Available`, `Unavailable`, or `Unknown` availability and required diagnostics before a request, and API integration tests validate its contract
+- CCO tests cover idle publication, refresh without spec changes, stale-request rejection, conflict retry, and atomic topology/discovery replacement
+- CLI discovery defines and tests stable output and exit behavior for omitted, empty, `Unknown`, `Unavailable`, stale, and `Available` data
 - CI lanes operational for transition testing
 - Developer documentation available
 
@@ -673,14 +781,20 @@ The required canonical `ClusterOperator/config-operator` `Upgradeable=False` int
 
 Post-transition clusters use standard topology values that all operator versions understand. There is no version skew risk for completed transitions.
 
+Discovery clients must tolerate a cluster API or controller version that does not expose or populate the selected discovery field. Omitted and empty lists cannot establish whether evaluation has occurred or a transition is unsupported.
+The discovery contract's maximum age and required controller-health signal must be defined before dev preview. Clients display discovery as advisory information; request-time revalidation remains authoritative regardless of client version or last advertised availability.
+
 ## Operational Aspects of API Extensions
 
-This enhancement adds `spec.controlPlaneTopology` to `InfrastructureSpec`. This field:
+This enhancement adds `spec.controlPlaneTopology` to `InfrastructureSpec` and proposes `status.controlPlaneTopologyTransitions` for discovery. The spec field:
 
 - Has no impact when it matches the current `status.controlPlaneTopology` or is empty
 - During transitions, the CCO topology transition controller makes API calls to coordinate operator transition. These calls are low-frequency and bounded by the transition sequence.
 
 Field-level enum and CEL validation provide API-server-level checks with no additional services required. Topology status fields are not protected by new admission policies — this is consistent with other infrastructure status fields.
+
+The proposed discovery field is bounded to the singleton Infrastructure resource and a maximum of two entries. It will run on controller syncs even when spec is empty or matches status; unchanged evaluations should not cause status writes.
+If the controller is unavailable, discovery can be absent or stale. This does not itself change topology or prevent ordinary workload operation. The producer and CLI must define freshness and health semantics before dev preview.
 
 ## Support Procedures
 
@@ -691,6 +805,7 @@ Field-level enum and CEL validation provide API-server-level checks with no addi
 - CLI (`oc adm transition topology` command)
 - Supported transition definitions and validation logic
 - Infrastructure CR API changes (`TopologyMode` validation and `spec.controlPlaneTopology` field)
+- Proposed Infrastructure discovery API (`status.controlPlaneTopologyTransitions`) and its controller/CLI integration
 
 **Control Plane Team:**
 - cluster-etcd-operator (CEO) node-driven etcd scaling — existing, unmodified behavior that the transition controller relies on as a precondition
@@ -702,6 +817,12 @@ Field-level enum and CEL validation provide API-server-level checks with no addi
 - Validate operator behavior during and after transitions
 
 ### Detecting Issues
+
+**Transition Discovery Unavailable or Stale (after implementation):**
+- Check: `oc get infrastructure cluster -o yaml` for `status.controlPlaneTopologyTransitions`
+- For `Unavailable`, inspect `reason` and `message`, address the reported prerequisites, and allow the controller to re-evaluate
+- For `Unknown`, evaluation has not completed; check CCO health and controller logs if it persists
+- An omitted or empty list can mean evaluation has not occurred or there are no applicable transitions; follow the finalized CLI freshness and health contract before drawing a conclusion
 
 **Transition Stuck or Failed:**
 - Symptom: Custom conditions on `operator.openshift.io/v1 Config/cluster` show transition in progress or failed for an extended period
