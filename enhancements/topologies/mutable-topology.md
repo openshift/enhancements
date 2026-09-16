@@ -300,7 +300,7 @@ The list has map semantics keyed by `(source, target)`, with no significant orde
 The intended producer behavior is to publish defined transitions from the current topology and retain a defined transition with failing preconditions as `Unavailable` rather than omitting it.
 The initial transition graph contains only `SingleReplica` → `HighlyAvailable` on `platform: none`.
 
-The draft schema does not currently require `source` and `target` to differ, so it permits schema-valid no-op pairs. Before dev preview, it must reject those pairs with CEL validation and API integration coverage; neither the CLI nor automation should treat a same-source/target pair as a transition.
+API PR #3029 requires `source` and `target` to differ with CEL validation and integration coverage, so same-source/target pairs are rejected.
 
 An omitted field and an explicitly empty list intentionally carry the same meaning. Consumers cannot distinguish "not yet evaluated" from "evaluated with no applicable transitions" using this field alone.
 When the current topology is outside the source/target enum, the list is omitted or empty. Future support for `DualReplica` or `HighlyAvailableArbiter` requires widening the field enums and increasing the list bound to match the target cardinality, up to four for the non-`External` topology values.
@@ -368,6 +368,10 @@ Other new transition directions are rejected by the API server. Dynamic precondi
 
 The current API allows clearing intent at any state. Before dev preview, the API and controller must implement the state-dependent cancellation contract in [Required State and Upgrade Protocol](#required-state-and-upgrade-protocol). In particular, clearing intent after admission must not be accepted as successful transition completion.
 
+**Intent wire operations:** An omitted YAML field and a JSON Patch `remove` operation on `/spec/controlPlaneTopology` both clear the field. An explicit empty string (`controlPlaneTopology: ""`) is invalid and must not be used.
+For a Pending request, the supported cancellation operation is a JSON Patch `replace` that sets `/spec/controlPlaneTopology` to the current `status.controlPlaneTopology`; the CLI must first read the Infrastructure resource and use a JSON Patch `test` for the request's current target to detect conflicts.
+The API and CLI must reject clear, remove, or target changes after admission or while Progressing. The CLI must expose this as a distinct cancellation operation rather than treating an empty target as a cancellation request.
+
 Access to `spec.controlPlaneTopology` is governed by the existing RBAC for the infrastructure CR (`infrastructures.config.openshift.io`). By default, only users with `cluster-admin` or equivalent roles can modify infrastructure spec fields.
 No additional RBAC restrictions are proposed for the initial implementation; a dedicated role for topology transitions may be considered in future iterations if finer-grained access control is needed.
 
@@ -405,7 +409,12 @@ Publishing a blocked candidate must not initiate a transition or block upgrades.
 Discovery is observed state, not a reservation or admission approval. Once intent is set, the controller revalidates the requested transition even if it was previously advertised as `Available`.
 When updating observed topology, the controller must clear or replace discovery entries in the same status update to satisfy source/status validation. After the status becomes `HighlyAvailable`, the list is omitted or empty until a defined outgoing transition exists.
 
-Because the API does not distinguish omitted from empty and has no observation time, the producer and CLI contract must define a maximum acceptable age and use controller health to identify stale or unavailable discovery. The CLI must define output and exit behavior for omitted, empty, `Unknown`, `Unavailable`, stale, and `Available` data.
+While a request is Pending, Admitted, or Progressing, the entry for its source and target remains present with `availability: Unavailable`, `reason: TransitionInProgress`, and a message that names the active request state. This replaces any previous `Available` snapshot until observed topology changes or the request is withdrawn.
+The CLI must reject a duplicate request whenever spec differs from observed topology or the controller reports Progressing, regardless of the discovery entry. It must not treat `TransitionInProgress` as a new available transition.
+
+Because the API does not distinguish omitted from empty and has no observation time, automation cannot determine data freshness. Before dev preview, the selected discovery API must add an evaluation timestamp and an observed Infrastructure resource version for the list.
+CCO refreshes this marker on its one-minute resync. The CLI accepts discovery for automation only when it is no more than two minutes old and `ClusterOperator/config-operator` is Available and not Degraded; otherwise it reports stale or unavailable discovery and exits nonzero.
+The CLI must define stable output and exit behavior for omitted, empty, `Unknown`, `Unavailable`, stale, `TransitionInProgress`, and `Available` data.
 
 ##### Current CCO Follow-Up Blockers
 
@@ -421,6 +430,8 @@ It does not currently write `Upgradeable=False` to `ClusterOperator/config-opera
 Therefore, it does not establish mutual exclusion between upgrades and topology transitions today.
 
 Before dev preview, the controller must write the canonical `Upgradeable=False` condition while a request is pending or a transition is in progress, and restore it to the appropriate idle state after cancellation, rejection, or completion.
+There is no current CVO acknowledgement API for a persisted `ClusterOperator` condition. A persisted `Upgradeable=False` alone does not prove CVO has observed it, and an unrelated `ClusterVersion` `Upgradeable=False` is not an acknowledgement.
+Before dev preview, this enhancement requires a CVO-supported acknowledgement containing the Infrastructure resource version and requested target. CCO waits up to five minutes for the matching acknowledgement before changing Infrastructure status. On timeout, it leaves status unchanged, restores the idle condition, records a retryable diagnostic, and retries from Pending with backoff.
 The implementation must protect the sequence against an upgrade or precondition change between preflight and the Infrastructure status update, and must retry status conflicts by re-reading and revalidating the complete sequence.
 
 ##### Required State and Upgrade Protocol
@@ -429,11 +440,12 @@ The current controller does not implement this protocol. It is required before d
 
 1. **Idle**: No transition is requested. `spec.controlPlaneTopology` is omitted or matches observed topology. The canonical `ClusterOperator/config-operator` `Upgradeable` condition is not blocked by mutable topology.
 2. **Pending**: A permitted spec value differs from observed topology, but CCO has not admitted it. CCO evaluates preconditions. A user can withdraw this request by resetting spec to observed topology; CCO clears pending diagnostics without updating topology status.
-3. **Admitted**: CCO writes canonical `Upgradeable=False` with a topology-transition reason and verifies the block is persisted and observable to CVO before committing topology status. CCO then re-reads Infrastructure and ClusterVersion, confirms intent is unchanged, reruns all dynamic preconditions, and performs a resource-version-guarded Infrastructure status update.
+3. **Admitted**: CCO writes canonical `Upgradeable=False` with a topology-transition reason and waits up to five minutes for the CVO acknowledgement that contains the Infrastructure resource version and requested target.
+   On acknowledgement timeout, it restores idle conditions and retries from Pending with backoff. CCO then re-reads Infrastructure and ClusterVersion, confirms intent is unchanged, reruns all dynamic preconditions, and performs a resource-version-guarded Infrastructure status update.
 4. **Progressing**: The observed topology has changed and post-transition validators run after the soak period. Intent changes, including clear, must not select an empty validator set or re-enable upgrades. There is no user cancellation after this state begins.
 5. **Failure handling**: On an admission failure, an intent change before the status commit, a status-update conflict, or a status-write failure, CCO re-reads current state and restarts the complete admission sequence. If no transition was committed, it restores the documented idle conditions. It must not restore upgradeability merely because no transition descriptor matches the current spec.
 
-The implementation and tests must cover an upgrade starting during admission, precondition loss after the first check, a condition update that succeeds before the status update fails, a conflict retry after intent changes, and clear/reset behavior before and after the topology status commit.
+The implementation and tests must cover an upgrade starting during admission, condition-write failure, acknowledgement timeout, precondition loss after the first check, a condition update that succeeds before the status update fails, a conflict retry after intent changes, and clear/reset behavior before and after the topology status commit.
 
 ##### Supported Transitions
 
@@ -685,8 +697,9 @@ The transition controller is also feature-gated with near-zero overhead when ina
 
 ### Proposed API Validation Tests
 
-Before dev preview, API integration tests for the selected discovery field must cover all availability states; required `source`, `target`, and `availability`; enums; source/target inequality; source/status consistency; conditional reason requirements; reason/message bounds; duplicate `(source, target)` rejection; and rejection above the two-entry list limit.
-They must also cover omitted and empty lists for `SingleReplica` and a current topology outside the discovery enum, plus feature-gated schema presence and absence in Infrastructure and the Infrastructure schema embedded in machineconfiguration's ControllerConfig.
+API PR #3029 covers all availability states; required `source`, `target`, and `availability`; enums; source/target inequality; source/status consistency; conditional reason requirements; reason/message bounds; duplicate `(source, target)` rejection; and rejection above the two-entry list limit.
+Before dev preview, selected-API tests must also cover omitted and empty lists for `SingleReplica` and a current topology outside the discovery enum, plus feature-gated schema presence and absence in Infrastructure and the Infrastructure schema embedded in machineconfiguration's ControllerConfig.
+Before dev preview, the selected API must also validate the discovery evaluation timestamp and observed resource version.
 
 ### CI Lanes
 
@@ -708,6 +721,7 @@ They must also cover omitted and empty lists for `SingleReplica` and a current t
 | Incomplete discovery | Verify controller and client handling of `Unknown`, omitted and empty lists, and no applicable transitions |
 | CLI interaction | Verify discovery displays controller-published availability and diagnostics without changing spec, and transition requests correctly patch `spec.controlPlaneTopology` |
 | Stale availability | Change preconditions after an `Available` status read and verify the controller withholds admission after revalidating the request |
+| Active request discovery | Verify Pending, Admitted, and Progressing reads publish `Unavailable` with `TransitionInProgress`, and the CLI rejects duplicate requests regardless of a prior `Available` snapshot |
 
 #### Transition Tests
 
@@ -720,7 +734,7 @@ They must also cover omitted and empty lists for `SingleReplica` and a current t
 | Discovery consistency | Verify topology updates clear or replace old-source entries in the same status update; after SNO → HA the list is omitted or empty, while CCO conditions continue to report post-transition validation |
 | Upgrade safety | Verify `ClusterOperator/config-operator` reports the canonical `Upgradeable=False` condition while a transition is pending or in progress, CVO rejects upgrades, and the condition is correctly restored after rejection, cancellation, and completion |
 | Race and conflict handling | Verify correct behavior for an upgrade starting during transition admission, precondition loss after preflight, Infrastructure status-update conflicts, and a condition update that succeeds before a status update fails |
-| Cancellation | Verify Pending cancellation restores idle state, and admitted or progressing intent changes cannot complete a transition or re-enable upgrades without required validators |
+| Cancellation | Verify the CLI uses JSON Patch `test` and `replace` to reset Pending intent to observed topology, rejects explicit empty strings and post-admission intent changes, and returns a conflict when the request has changed |
 | CCO fail-closed behavior | Verify an absent feature gate disables the controller without panic, and an operator-state read failure blocks rendered-MachineConfig validation |
 
 ### QE Testing
@@ -751,8 +765,9 @@ Standard QE testing scenarios will include:
 - CCO implements the required idle, pending, admitted, and progressing state contract; no intent change can bypass post-transition validation or re-enable upgrades early
 - CCO treats an absent feature gate as disabled and fails closed on operator-state read errors during post-transition validation
 - The selected discovery API is merged and used consistently by API, CCO, and oc; CCO publishes applicable transitions with `Available`, `Unavailable`, or `Unknown` availability and required diagnostics before a request, and API integration tests validate its contract
-- CCO tests cover idle publication, refresh without spec changes, stale-request rejection, conflict retry, and atomic topology/discovery replacement
-- CLI discovery defines and tests stable output and exit behavior for omitted, empty, `Unknown`, `Unavailable`, stale, and `Available` data
+- CCO tests cover idle publication, refresh without spec changes, stale-request rejection, `TransitionInProgress` publication, conflict retry, and atomic topology/discovery replacement
+- The discovery API exposes evaluation time and observed Infrastructure resource version. CLI discovery defines and tests stable output and exit behavior for omitted, empty, `Unknown`, `Unavailable`, stale, `TransitionInProgress`, and `Available` data
+- CVO acknowledgement, acknowledgement timeout, and rollback to idle conditions are implemented and covered by upgrade-vs-transition tests
 - CI lanes operational for transition testing
 - Developer documentation available
 
@@ -806,7 +821,7 @@ The required canonical `ClusterOperator/config-operator` `Upgradeable=False` int
 Post-transition clusters use standard topology values that all operator versions understand. There is no version skew risk for completed transitions.
 
 Discovery clients must tolerate a cluster API or controller version that does not expose or populate the selected discovery field. Omitted and empty lists cannot establish whether evaluation has occurred or a transition is unsupported.
-The discovery contract's maximum age and required controller-health signal must be defined before dev preview. Clients display discovery as advisory information; request-time revalidation remains authoritative regardless of client version or last advertised availability.
+The selected discovery API exposes evaluation time and observed Infrastructure resource version. For automation, clients accept data only when it is no more than two minutes old and `ClusterOperator/config-operator` is Available and not Degraded; otherwise they report stale or unavailable discovery. Request-time revalidation remains authoritative regardless of client version or last advertised availability.
 
 ## Operational Aspects of API Extensions
 
@@ -817,8 +832,8 @@ This enhancement adds `spec.controlPlaneTopology` to `InfrastructureSpec` and pr
 
 Field-level enum and CEL validation provide API-server-level checks with no additional services required. Topology status fields are not protected by new admission policies — this is consistent with other infrastructure status fields.
 
-The proposed discovery field is bounded to the singleton Infrastructure resource and a maximum of two entries. It will run on controller syncs even when spec is empty or matches status; unchanged evaluations should not cause status writes.
-If the controller is unavailable, discovery can be absent or stale. This does not itself change topology or prevent ordinary workload operation. The producer and CLI must define freshness and health semantics before dev preview.
+The proposed discovery field is bounded to the singleton Infrastructure resource and a maximum of two entries. It runs on controller syncs even when spec is empty or matches status; evaluation time and observed resource version update on the one-minute resync.
+If the controller is unavailable, discovery can be absent or stale. This does not itself change topology or prevent ordinary workload operation. Automation treats data older than two minutes, or data from an unavailable or degraded config-operator, as unavailable.
 
 ## Support Procedures
 
@@ -846,7 +861,9 @@ If the controller is unavailable, discovery can be absent or stale. This does no
 - Check: `oc get infrastructure cluster -o yaml` for `status.controlPlaneTopologyTransitions`
 - For `Unavailable`, inspect `reason` and `message`, address the reported prerequisites, and allow the controller to re-evaluate
 - For `Unknown`, evaluation has not completed; check CCO health and controller logs if it persists
-- An omitted or empty list can mean evaluation has not occurred or there are no applicable transitions; follow the finalized CLI freshness and health contract before drawing a conclusion
+- An omitted or empty list can mean evaluation has not occurred or there are no applicable transitions; do not use it for automation
+- Treat discovery older than two minutes, or discovery while `config-operator` is unavailable or degraded, as unavailable
+- `TransitionInProgress` means a request already exists; inspect the request and controller conditions instead of submitting another request
 
 **Transition Stuck or Failed:**
 - Symptom: Custom conditions on `operator.openshift.io/v1 Config/cluster` show transition in progress or failed for an extended period
