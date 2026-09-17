@@ -12,7 +12,7 @@ approvers:
 api-approvers:
   - None
 creation-date: 2026-09-08
-last-updated: 2026-09-15
+last-updated: 2026-09-16
 tracking-link:
   - https://redhat.atlassian.net/browse/OCPSTRAT-2899
 see-also:
@@ -185,13 +185,58 @@ JSON error object to standard error when JSON output was requested. In that
 case, no additional human-readable diagnostics are written beside the error
 document.
 
-JSON errors use `apiVersion`, `kind: Error`, a stable machine-readable `code`, a
-human-readable `message`, and optional structured `details`.
-
 The JSON contract is versioned independently from the human-readable table.
 Fields may be added compatibly, but existing fields and enum values are not
-removed or redefined within a version. Timestamps use RFC 3339 and durations use
-integer seconds.
+removed or redefined within a version. Timestamps use RFC 3339. Configured
+validity durations use Go duration strings, while calculated remaining durations
+use integer seconds. Unless a field is explicitly marked nullable below, it is
+required and must not be `null`.
+
+##### Error Document
+
+JSON-mode failures return the following `Error` document on standard error:
+
+| Field         | Type            | Nullable | Required value or meaning                         |
+| ------------- | --------------- | -------- | ------------------------------------------------- |
+| `apiVersion`  | string          | No       | `microshift.openshift.io/v1alpha1`                |
+| `kind`        | string          | No       | `Error`                                           |
+| `generatedAt` | RFC 3339 string | No       | Time at which the error document was generated    |
+| `code`        | string          | No       | One of the stable codes defined below             |
+| `message`     | string          | No       | Non-empty human-readable description              |
+| `details`     | object          | Yes      | Structured context; `null` when none is available |
+
+Allowed `Error.code` values are:
+
+| Code                         | Meaning                                                             |
+| ---------------------------- | ------------------------------------------------------------------- |
+| `InvalidArguments`           | Command arguments or output options are invalid                     |
+| `InvalidConfiguration`       | Effective MicroShift certificate configuration is invalid           |
+| `InsufficientPrivileges`     | The command is not running with the required root privileges        |
+| `MicroShiftRunning`          | Renewal was refused because the MicroShift service is active        |
+| `CertificateInventoryFailed` | Managed certificate inventory or certificate data could not be read |
+| `RenewalFailed`              | Renewal planning, validation, staging, or commit failed             |
+| `RecoveryFailed`             | An interrupted renewal transaction could not be recovered           |
+| `InternalError`              | An unexpected error not represented by another stable code          |
+
+The error code identifies the failure class for automation; callers must not
+parse `message`. Additional properties in `details` are code-specific and are
+not part of the stable vocabulary unless separately documented.
+
+```json
+{
+  "apiVersion": "microshift.openshift.io/v1alpha1",
+  "kind": "Error",
+  "generatedAt": "2026-09-08T10:30:00Z",
+  "code": "MicroShiftRunning",
+  "message": "MicroShift must be stopped before certificates can be renewed.",
+  "details": {
+    "service": "microshift.service",
+    "state": "active"
+  }
+}
+```
+
+##### Status Document
 
 `microshift certs status -o json` returns a `CertificateStatusList` document:
 
@@ -214,17 +259,60 @@ integer seconds.
       "zone": "yellow",
       "notBefore": "2016-11-03T08:00:00Z",
       "notAfter": "2026-11-01T08:00:00Z",
-      "remainingSeconds": 4665600
+      "remainingSeconds": 4656600
     }
   ],
   "warnings": []
 }
 ```
 
+##### Renewal Result Document
+
 `microshift certs renew --serving|--ca [--dry-run] -o json` returns a
-`CertificateRenewalResult` document. Dry-run and completed renewal use the same
-schema; `status`, `dryRun`, and `changed` distinguish planned changes from
-applied changes:
+`CertificateRenewalResult` document with these top-level fields:
+
+| Field         | Type             | Nullable | Required value or meaning                                           |
+| ------------- | ---------------- | -------- | ------------------------------------------------------------------- |
+| `apiVersion`  | string           | No       | `microshift.openshift.io/v1alpha1`                                  |
+| `kind`        | string           | No       | `CertificateRenewalResult`                                          |
+| `generatedAt` | RFC 3339 string  | No       | Time at which the result was generated                              |
+| `mode`        | string           | No       | `serving` or `ca`                                                   |
+| `status`      | string           | No       | `planned` or `completed`                                            |
+| `dryRun`      | boolean          | No       | Whether the operation made no persistent changes                    |
+| `items`       | non-empty array  | No       | All certificates selected by the operation                          |
+| `impact`      | object           | No       | Operational actions required after the planned or completed renewal |
+| `warnings`    | array of strings | No       | Human-readable warnings; an empty array when none apply             |
+
+Every member of `items` contains:
+
+| Field             | Type            | Nullable | Required value or meaning                                     |
+| ----------------- | --------------- | -------- | ------------------------------------------------------------- |
+| `service`         | string          | No       | Owning service or function                                    |
+| `name`            | string          | No       | Stable inventory name                                         |
+| `role`            | string          | No       | `ca`, `serving`, `client`, or `peer`                          |
+| `parentCA`        | string          | Yes      | Parent CA inventory name; `null` when there is no parent      |
+| `currentNotAfter` | RFC 3339 string | No       | Expiry before the planned or completed operation              |
+| `newNotAfter`     | RFC 3339 string | No       | Proposed expiry for `planned`; applied expiry for `completed` |
+| `changed`         | boolean         | No       | Whether this invocation persistently replaced the item        |
+
+The required `impact` object contains the boolean fields
+`serviceRestartRequired`, `kubeconfigRedistributionRequired`, and
+`applicationReloadMayBeRequired`.
+
+Only these result-state combinations are valid:
+
+| `status`    | `dryRun` | `changed` | Meaning                                     |
+| ----------- | -------- | --------- | ------------------------------------------- |
+| `planned`   | `true`   | `false`   | Validation succeeded; no files were changed |
+| `completed` | `false`  | `true`    | The transaction committed and was validated |
+
+`planned` with `dryRun: false`, `completed` with `dryRun: true`, or mixed
+`changed` values are schema-invalid. Failed or partially committed operations do
+not return `CertificateRenewalResult`; they return an `Error` document with a
+non-zero exit code. Transaction recovery completes or rolls back before a later
+result is emitted.
+
+Example planned renewal:
 
 ```json
 {
@@ -252,6 +340,38 @@ applied changes:
   },
   "warnings": [
     "Kubeconfigs stored outside the MicroShift data directory must be copied again after renewal."
+  ]
+}
+```
+
+Example completed renewal:
+
+```json
+{
+  "apiVersion": "microshift.openshift.io/v1alpha1",
+  "kind": "CertificateRenewalResult",
+  "generatedAt": "2026-09-08T10:31:00Z",
+  "mode": "ca",
+  "status": "completed",
+  "dryRun": false,
+  "items": [
+    {
+      "service": "service-ca",
+      "name": "service-ca",
+      "role": "ca",
+      "parentCA": null,
+      "currentNotAfter": "2035-09-08T10:30:00Z",
+      "newNotAfter": "2036-09-05T10:30:00Z",
+      "changed": true
+    }
+  ],
+  "impact": {
+    "serviceRestartRequired": true,
+    "kubeconfigRedistributionRequired": true,
+    "applicationReloadMayBeRequired": true
+  },
+  "warnings": [
+    "Kubeconfigs stored outside the MicroShift data directory must be copied again."
   ]
 }
 ```
@@ -787,6 +907,10 @@ retained as defaults instead.
 - JSON serialization for status, planned renewal, completed renewal, and error
   documents, including schema version, enum values, deterministic ordering, and
   warning representation.
+- Exhaustive validation of allowed `Error.code` values and required versus
+  nullable fields.
+- Validation of the two permitted renewal result combinations and rejection of
+  inconsistent `status`, `dryRun`, or item `changed` values.
 - Service-running detection guard.
 
 ### Integration Tests
