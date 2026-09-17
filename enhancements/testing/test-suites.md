@@ -312,12 +312,18 @@ is therefore a pure function of `Lifecycle` (plus the `Shard` and
 **Execution mode (parallel vs serial) is not a metadata tag.** It is
 derived from the existing `[Serial]` marker in the test name, consistent
 with how `openshift-tests` already separates serial from parallel work.
-Every parallel, serial, and minimal suite qualifier therefore combines
-its `Lifecycle`/`Criticality`/`Shard` predicate with a `[Serial]`
-predicate — serial suites require `test.name.contains("[Serial]")` and
-parallel suites require `!test.name.contains("[Serial]")` — so a single
-`(Lifecycle, Shard)` pair cannot match both a parallel and a serial
-suite. No separate `Mode` tag is introduced.
+Every suite qualifier combines a `[Serial]` predicate with its
+member-selection predicate — serial suites require
+`test.name.contains("[Serial]")` and parallel suites require
+`!test.name.contains("[Serial]")`. What that member-selection predicate
+is differs by suite: **lifecycle shard suites** (`active`/`stable`) select
+on the `Lifecycle` value *and* the `Shard` tag, whereas the **minimal
+suites** select on `Criticality: Core` and a non-`Draft` guard only —
+they deliberately do *not* filter on a specific `Lifecycle` value or
+`Shard`, so a `Core` test stays in minimal across every non-`Draft`
+stage and every shard. Either way the mode predicate means a single test
+cannot match both a parallel and a serial suite. No separate `Mode` tag
+is introduced.
 
 Rules governing the metadata:
 
@@ -365,7 +371,9 @@ Rules governing the metadata:
 The `Lifecycle` tag and the OTE `Informing()` annotation express the
 same fact for the non-blocking case and are kept in sync: `Informing()`
 present ⇔ `Lifecycle: Informing`; `Informing()` absent ⇔
-`Lifecycle: Blocking` or `Stable`.
+`Lifecycle: Draft`, `Blocking`, or `Stable`. (A `Draft` test does not
+run and must not carry `Informing()`; it simply has no annotation, like a
+`Blocking` or `Stable` test.)
 
 #### Suite Hierarchy
 
@@ -385,18 +393,30 @@ selecting its members by metadata tag:
 | `openshift/conformance/serial/stable-01` | `Lifecycle: Stable` | Stable tests, serial, shard 1 |
 | `openshift/spot-check/<feature>` | (own qualifier) | Uncommon cluster configs |
 
-Every suite name keeps the `conformance` prefix so the naming is
-consistent with the existing `openshift/conformance/parallel/minimal`
-and `openshift/conformance/serial/minimal` suites. Each shard suite's
+Every suite name keeps the `conformance` prefix so the naming stays
+consistent with the existing conformance suites. Each shard suite's
 qualifier combines the `Lifecycle` selection with the shard tag (see
 [Shard Membership Qualifiers](#shard-membership-qualifiers)).
 
-During bring-up, the new suites (`minimal`, `active-NN`, `stable-NN`)
-reuse the `openshift/conformance/...` prefix but are defined as new,
-standalone suites; **the existing `openshift/conformance/parallel` and
-`openshift/conformance/serial` definitions are left exactly as they are**
-and run in parallel with the new ones without interfering. The
-`.../minimal` suites are strict subsets used for the fast smoke signal.
+During bring-up, **the new suites must not reuse a suite name that
+already exists**, because OTE combines all registrations of the same
+suite name additively — it unions their qualifiers rather than replacing
+them (see [openshift-tests-extension](openshift-tests-extension.md)).
+Redefining an existing name (for example the current
+`openshift/conformance/parallel/minimal`) would therefore *add to* the
+legacy qualifier instead of producing a clean metadata-driven subset. So
+the new suites are registered under **new, non-colliding names** (the
+`active-NN`/`stable-NN` shard names are already new; the new minimal
+suites likewise take distinct names during bring-up rather than
+overwriting the existing `.../minimal`). **The existing
+`openshift/conformance/parallel`, `openshift/conformance/serial`, and
+`.../minimal` definitions are left exactly as they are** and run in
+parallel with the new ones without interfering. Each new minimal suite is
+then a strict, purely metadata-driven subset used for the fast smoke
+signal. (Whether the matured new suites eventually adopt the canonical
+`.../minimal` names — after the legacy registrations are retired — or are
+grafted in via `Parents` is the same cutover question tracked in
+[Open Questions](#open-questions-optional).)
 
 `Parents` **is** the right tool for one specific, later step: once the new
 suites and their jobs have matured, each shard suite can declare
@@ -686,7 +706,9 @@ To enforce this, a validation check runs in CI (in the extension binary
 self-check and/or as a required presubmit) that **fails** if any
 discovered test lacks the required metadata tags, or carries a value
 outside the defined vocabulary (e.g. a `Lifecycle` other than `Draft`
-/`Informing`/`Blocking`/`Stable`). Tests cannot merge without valid
+/`Informing`/`Blocking`/`Stable`, or a `Shard` that is not in the
+registered shard set for the test's `(Lifecycle, mode)` — see
+[Shard Registry](#shard-registry)). Tests cannot merge without valid
 metadata. This guarantees suite membership stays consistent across the
 lifecycle.
 
@@ -740,12 +762,39 @@ of a bulk-imported set is repeatable rather than ad hoc:
 - **`shardFor`**: assigns a starting `Shard` deterministically (e.g. a
   stable hash of the test name into the current shard count, or simply
   `01`), after which the balancing workflow redistributes shards to meet
-  the runtime target. The only invariant that matters here is that every
-  imported test receives exactly one valid `Shard`.
+  the runtime target. The invariant is not merely that every imported
+  test receives *a* `Shard`, but that it receives one drawn from the
+  **registered shard set** for its `(Lifecycle, mode)` — see
+  [Shard Registry](#shard-registry). Assigning a shard with no matching
+  suite would drop the test from every running suite, so `shardFor` never
+  invents a shard number.
 
 These are migration defaults, not a permanent classification: once a
 test is imported it follows the same lifecycle transitions and shard
 rebalancing as any other test.
+
+###### Shard Registry
+
+`Shard`'s vocabulary (`01`–`NN`) is not open-ended: the set of shards
+that actually exist for each `(Lifecycle, mode)` is defined by an
+**authoritative registry** — the set of `active`/`stable` shard suites
+that are registered via `AddSuite` and that have a corresponding CI job.
+`NN` is not a free-floating maximum; it is exactly the number of
+registered shard suites for that `(Lifecycle, mode)`, and it is bounded
+by the configurable per-suite maximum in [Shard Balancing](#shard-balancing).
+
+The registry is what makes shard assignment safe:
+
+- `shardFor` and the balancing workflow may only assign a `Shard` value
+  that is present in the registry for the test's `(Lifecycle, mode)`. An
+  assignment to an unregistered shard would match no suite, so the
+  metadata-enforcement check treats an out-of-registry `Shard` as invalid
+  (the same way it treats an out-of-vocabulary `Lifecycle`).
+- A new shard becomes assignable **only after** its suite (`AddSuite`)
+  and its CI job are registered. The balancing workflow therefore
+  registers the suite/job first and assigns tests into the shard second,
+  never the reverse. This keeps "a `Shard` value exists" and "a suite +
+  job exist to run it" in lockstep.
 
 ##### OTE API Extension: Inline Tags
 
@@ -781,23 +830,42 @@ ginkgo build path only populates `Labels`.
 2. A build-time promotion step in
    `BuildExtensionTestSpecsFromOpenShiftGinkgoSuite` that copies every
    `key:value` label into the spec's `Tags` map (generalizing the
-   special-cased `GetLifecycle` parsing that already runs there):
+   special-cased `GetLifecycle` parsing that already runs there). Because
+   each metadata key must carry exactly one value, the step **rejects a
+   conflicting duplicate** rather than silently keeping the last write:
 
    ```go
    // During the per-spec walk, promote key:value labels into Tags so
-   // suite qualifiers can select on test.tags.<key>.
+   // suite qualifiers can select on test.tags.<key>. A key may be
+   // repeated only if every occurrence carries the same value; a
+   // conflicting duplicate (e.g. two different Lifecycle values) is a
+   // build-time error, not a last-writer-wins overwrite.
    for _, l := range spec.Labels() {
        if k, v, ok := strings.Cut(l, ":"); ok {
+           if prev, seen := ets.Tags[k]; seen && prev != v {
+               return fmt.Errorf("conflicting %q tag on %q: %q vs %q",
+                   k, spec.Name, prev, v)
+           }
            ets.Tags[k] = v
        }
    }
    ```
 
+   `GetLifecycle()` today returns the *first* matching `Lifecycle:` label,
+   which — if two conflicting labels were allowed — could leave the
+   dedicated `Lifecycle` field and `Tags["Lifecycle"]` disagreeing. The
+   same single-value check should therefore also guard `GetLifecycle()` so
+   the dedicated field and the promoted tag can never diverge. The check is
+   kept fully generic: it validates *every* key's single-valued-ness, not
+   just the keys this enhancement happens to define.
+
 With these, `ote.Informing()` continues to work unchanged (it becomes
 `Tags["Lifecycle"] = "Informing"` in addition to setting the dedicated
-`Lifecycle` field), and `ote.Tag("Criticality", "Core")` /
-`ote.Tag("Shard", "01")` populate `Tags["Criticality"]` and
-`Tags["Shard"]`. All suite qualifiers in this enhancement then select on
+`Lifecycle` field), and `ote.Tag("Criticality", "Core")` populates
+`Tags["Criticality"]`. (`Shard` is not declared inline — it is assigned
+by automation — so it enters `Tags` through the centralized tagging path,
+not this decorator; see [Mandatory Metadata](#mandatory-metadata).) All
+suite qualifiers in this enhancement then select on
 the real key/value namespace (`test.tags.<key>=="<value>"`) while
 authors declare everything inline on the test. This work is tracked as a
 required dependency in
@@ -842,15 +910,22 @@ required dependency in
 - **Workflow**:
   1. Query Sippy for per-test and per-job runtimes.
   2. Move tests between shards by changing each test's single `Shard`
-     tag value (one change to preserve exclusive shard membership).
+     tag value (one change to preserve exclusive shard membership). A
+     test is only ever moved to a shard that is already in the registry
+     (see [Shard Registry](#shard-registry)); the agent never assigns a
+     `Shard` value that has no registered suite and job.
   3. Create new shards when existing ones cannot be rebalanced below
      runtime thresholds, up to a configurable per-suite maximum shard
-     count. This ceiling bounds the number of shards (and therefore the
-     number of prow jobs) a suite can spawn so that an unexpected influx
-     of tests, or a bug in the balancing logic, cannot trigger unbounded
-     shard creation. When the maximum is reached and shards still exceed
-     the runtime threshold, the agent stops creating shards and instead
-     flags the suite for human attention rather than silently degrading.
+     count. Creating a shard means **first** registering its suite
+     (`AddSuite`) and its CI job — adding the shard to the registry — and
+     **only then** assigning tests into it, so a `Shard` value never
+     exists without a suite and job to run it. This ceiling bounds the
+     number of shards (and therefore the number of prow jobs) a suite can
+     spawn so that an unexpected influx of tests, or a bug in the
+     balancing logic, cannot trigger unbounded shard creation. When the
+     maximum is reached and shards still exceed the runtime threshold, the
+     agent stops creating shards and instead flags the suite for human
+     attention rather than silently degrading.
 
 #### The Lifecycle Agent
 
