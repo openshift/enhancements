@@ -71,6 +71,8 @@ spec:
   forceDetachOnTimeout: Disabled
 ```
 
+Feature gates: the top-level ControllerManager type is gated by `ControllerManagerConfig`, and the forceDetachOnTimeout field is gated by `DisableForceDetachOnTimeout`. These gates should be promoted together as this enhancement progresses.
+
 API PR: <https://github.com/openshift/api/pull/2668>
 
 ### Topology Considerations
@@ -111,7 +113,8 @@ Disabling force detach leaves the related `VolumeAttachment` undeleted after an 
 
 ## Alternatives (Not Implemented)
 
-Add a new field to the Storage CR to control force detach behavior. This was ruled out because the Storage CR does not typically control KCM behavior. Storage is also an optional component that customers can disable but they may still want to disable force detach behavior in KCM.
+* Add a new field to the Storage CR to control force detach behavior. This was ruled out because the Storage CR does not typically control KCM behavior. Storage is also an optional component that customers can disable but they may still want to disable force detach behavior in KCM.
+* Disable force detach in OCP 5.y without any user configuration. This would be a sweeping change to make without any sort of configuration option. The force detach behavior has helped in the past with attach/detach controller (ADC) bugs, so volumes don't stay attached forever when a node disappears. Changing the default behavior would mean admins have to follow non-graceful node shutdown procedure and clean up VolumeAttachments manually. Even if we change the default in the future, it would be helpful to have a config option for cases where the default is the wrong behavior.
 
 ## Open Questions [optional]
 
