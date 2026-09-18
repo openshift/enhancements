@@ -13,12 +13,12 @@ approvers:
 api-approvers:
   - "@JoelSpeed"
 creation-date: 2026-08-19
-last-updated: 2026-09-10
+last-updated: 2026-09-18
 tracking-link:
-  - "https://issues.redhat.com/browse/CNTRLPLANE-3527"
+  - "https://redhat.atlassian.net/browse/OCPSTRAT-3780"
 status: provisional
 see-also:
-  - "/enhancements/hypershift/self-managed-azure.md"
+  - "https://issues.redhat.com/browse/CNTRLPLANE-3527"
 replaces:
   - "https://github.com/openshift/enhancements/pull/2024"
 superseded-by: []
