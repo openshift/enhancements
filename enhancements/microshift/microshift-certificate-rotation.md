@@ -12,7 +12,7 @@ approvers:
 api-approvers:
   - None
 creation-date: 2026-09-08
-last-updated: 2026-09-16
+last-updated: 2026-09-22
 tracking-link:
   - https://redhat.atlassian.net/browse/OCPSTRAT-2899
 see-also:
@@ -175,15 +175,18 @@ directory.
 
 #### Output Formats
 
+> Note: Since YAML is a superset of JSON, we are adding it as an output format
+> but all examples and descriptions will call out JSON only for simplicity.
+
 The `status` command and every `renew` operation, including `--dry-run`, accept
-`-o json` or `--output=json`. Human-readable tables remain the default when the
-flag is omitted. Successful JSON output writes exactly one JSON document to
-standard output; progress and diagnostics go to standard error. Warnings are
-included in the JSON document rather than mixed with standard output. On
-failure, the command exits non-zero, leaves standard output empty, and writes a
-JSON error object to standard error when JSON output was requested. In that
-case, no additional human-readable diagnostics are written beside the error
-document.
+`-o json|yaml` or `--output=json|yaml`. Human-readable tables remain the default
+when the flag is omitted. Successful JSON output writes exactly one JSON
+document to standard output; progress and diagnostics go to standard error.
+Warnings are included in the JSON document rather than mixed with standard
+output. On failure, the command exits non-zero, leaves standard output empty,
+and writes a JSON error object to standard error when JSON output was requested.
+In that case, no additional human-readable diagnostics are written beside the
+error document.
 
 The JSON contract is versioned independently from the human-readable table.
 Fields may be added compatibly, but existing fields and enum values are not
@@ -268,7 +271,7 @@ not part of the stable vocabulary unless separately documented.
 
 ##### Renewal Result Document
 
-`microshift certs renew --serving|--ca [--dry-run] -o json` returns a
+`microshift certs renew --serving|--ca [--dry-run] -o [json|yaml]` returns a
 `CertificateRenewalResult` document with these top-level fields:
 
 | Field         | Type             | Nullable | Required value or meaning                                           |
@@ -277,7 +280,7 @@ not part of the stable vocabulary unless separately documented.
 | `kind`        | string           | No       | `CertificateRenewalResult`                                          |
 | `generatedAt` | RFC 3339 string  | No       | Time at which the result was generated                              |
 | `mode`        | string           | No       | `serving` or `ca`                                                   |
-| `status`      | string           | No       | `planned` or `completed`                                            |
+| `status`      | string           | No       | `validated` or `completed`                                          |
 | `dryRun`      | boolean          | No       | Whether the operation made no persistent changes                    |
 | `items`       | non-empty array  | No       | All certificates selected by the operation                          |
 | `impact`      | object           | No       | Operational actions required after the planned or completed renewal |
@@ -285,15 +288,15 @@ not part of the stable vocabulary unless separately documented.
 
 Every member of `items` contains:
 
-| Field             | Type            | Nullable | Required value or meaning                                     |
-| ----------------- | --------------- | -------- | ------------------------------------------------------------- |
-| `service`         | string          | No       | Owning service or function                                    |
-| `name`            | string          | No       | Stable inventory name                                         |
-| `role`            | string          | No       | `ca`, `serving`, `client`, or `peer`                          |
-| `parentCA`        | string          | Yes      | Parent CA inventory name; `null` when there is no parent      |
-| `currentNotAfter` | RFC 3339 string | No       | Expiry before the planned or completed operation              |
-| `newNotAfter`     | RFC 3339 string | No       | Proposed expiry for `planned`; applied expiry for `completed` |
-| `changed`         | boolean         | No       | Whether this invocation persistently replaced the item        |
+| Field             | Type            | Nullable | Required value or meaning                                       |
+| ----------------- | --------------- | -------- | --------------------------------------------------------------- |
+| `service`         | string          | No       | Owning service or function                                      |
+| `name`            | string          | No       | Stable inventory name                                           |
+| `role`            | string          | No       | `ca`, `serving`, `client`, or `peer`                            |
+| `parentCA`        | string          | Yes      | Parent CA inventory name; `null` when there is no parent        |
+| `currentNotAfter` | RFC 3339 string | No       | Expiry before the planned or completed operation                |
+| `newNotAfter`     | RFC 3339 string | No       | Proposed expiry for `validated`; applied expiry for `completed` |
+| `changed`         | boolean         | No       | Whether this invocation persistently replaced the item          |
 
 The required `impact` object contains the boolean fields
 `serviceRestartRequired`, `kubeconfigRedistributionRequired`, and
@@ -303,10 +306,10 @@ Only these result-state combinations are valid:
 
 | `status`    | `dryRun` | `changed` | Meaning                                     |
 | ----------- | -------- | --------- | ------------------------------------------- |
-| `planned`   | `true`   | `false`   | Validation succeeded; no files were changed |
+| `validated` | `true`   | `false`   | Validation succeeded; no files were changed |
 | `completed` | `false`  | `true`    | The transaction committed and was validated |
 
-`planned` with `dryRun: false`, `completed` with `dryRun: true`, or mixed
+`validated` with `dryRun: false`, `completed` with `dryRun: true`, or mixed
 `changed` values are schema-invalid. Failed or partially committed operations do
 not return `CertificateRenewalResult`; they return an `Error` document with a
 non-zero exit code. Transaction recovery completes or rolls back before a later
@@ -320,7 +323,7 @@ Example planned renewal:
   "kind": "CertificateRenewalResult",
   "generatedAt": "2026-09-08T10:30:00Z",
   "mode": "ca",
-  "status": "planned",
+  "status": "validated",
   "dryRun": true,
   "items": [
     {
@@ -597,7 +600,8 @@ the number of CAs without modifying the CLI commands.
 
 #### Fleet Status Collection
 
-1. Fleet automation runs `sudo microshift certs status -o json` on each device.
+1. Fleet automation runs `sudo microshift certs status -o [json|yaml]` on each
+   device.
 2. It checks the process exit code and the output `apiVersion` before consuming
    the document.
 3. It records `generatedAt`, certificate identity, role, zone, and `notAfter`
@@ -694,10 +698,10 @@ microshift backup
 microshift restore
 microshift healthcheck
 microshift certs
-microshift certs status [-o json]
+microshift certs status [-o json|yaml]
 microshift certs renew
-microshift certs renew --serving [--dry-run] [-o json]
-microshift certs renew --ca [--dry-run] [-o json]
+microshift certs renew --serving [--dry-run] [-o json|yaml]
+microshift certs renew --ca [--dry-run] [-o json|yaml]
 ```
 
 #### JSON Rendering
@@ -917,7 +921,7 @@ retained as defaults instead.
 
 - End-to-end `certs status` output validation against a running MicroShift
   instance.
-- Validate `-o json` for `status`, serving and CA dry-runs, and completed
+- Validate `-o json|yaml` for `status`, serving and CA dry-runs, and completed
   serving and CA renewals. Each successful invocation produces one schema-valid
   JSON document on standard output with no human-readable text mixed into it.
 - Verify table and JSON renderings contain the same certificates, calculated
@@ -951,8 +955,8 @@ retained as defaults instead.
   authenticate with new kubeconfig.
 - Verify an application that caches an old certificate or CA bundle is called
   out by renewal impact messaging and can recover by reloading or restarting.
-- Collect `certs status -o json` from multiple devices and verify the documents
-  can be aggregated by an external fleet-management system.
+- Collect `certs status -o json|yaml` from multiple devices and verify the
+  documents can be aggregated by an external fleet-management system.
 
 ## Graduation Criteria
 
@@ -963,7 +967,7 @@ N/A This feature is targeted for GA directly.
 ### Tech Preview -> GA
 
 - All CLI commands implemented and tested (`certs status`, `certs renew
-  --serving`, `certs renew --ca`, `--dry-run`, and `-o json`).
+--serving`, `certs renew --ca`, `--dry-run`, and `-o json|yaml`).
 - Versioned JSON status, renewal, dry-run, and error contracts are documented
   and validated in CI.
 - `forceRestartOnRedZone` implemented with a compatibility-preserving `true`
@@ -1025,8 +1029,8 @@ N/A No API extensions are introduced.
 1. Run `sudo microshift show-config` to verify the effective configured validity
    durations.
 2. Run `sudo microshift certs status` to view the actual validity and state of
-   each existing certificate, or use `-o json` when collecting status through
-   fleet automation.
+   each existing certificate, or use `-o json|yaml` when collecting status
+   through fleet automation.
 3. Check MicroShift logs for certificate-related warnings: `journalctl -u
 microshift -g "certificate"`.
 4. If certificates are in red zone, plan a maintenance window and use the
