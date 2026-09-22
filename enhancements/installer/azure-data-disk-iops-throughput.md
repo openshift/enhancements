@@ -5,12 +5,13 @@ authors:
 reviewers:
 - "@jcpowermac"
 - "@vr4manta"
+- "@mfbonfigli"
 approvers:
 - "@patrickdillon"
 api-approvers:
 - TBD
 creation-date: 2026-05-16
-last-updated: 2026-05-20
+last-updated: 2026-09-22
 tracking-link:
 - https://issues.redhat.com/browse/RFE-7972
 status: implementable
@@ -226,12 +227,25 @@ In the Azure compute SDK, `DiskIOPSReadWrite` and `DiskMBpsReadWrite` are proper
 
 **Mitigation**: Clear error messages from Azure ARM API will surface during cluster installation. Documentation will include guidance on Azure limits. The kubebuilder `Minimum=1` validation prevents zero/negative values.
 
+### Feature Gate
+
+This enhancement extends [SPLAT-2133 (azure-data-disk)](https://github.com/openshift/enhancements/blob/master/enhancements/installer/azure-data-disk.md), which gates Azure multi-disk support behind `FeatureGateAzureMultiDisk`. IOPS/throughput configuration is an additive extension to the existing `dataDisks` schema — users cannot configure `diskIOPSReadWrite` or `diskMBpsReadWrite` without first configuring `dataDisks` on a machine pool.
+
+**Install-time (day 0):** Reuse `FeatureGateAzureMultiDisk`. No separate feature gate is proposed. The installer already requires `FeatureGateAzureMultiDisk` when any `dataDisks` are present (`pkg/types/azure/validation/featuregates.go`). IOPS/MBps fields and `PremiumV2_LRS` are additional properties on the same `dataDisks` entries and inherit that gate. This keeps graduation aligned with the parent enhancement, which targets GA in OCP 5.1.
+
+**Day-2:** No installer feature gate applies. Day-2 Machine/MachineSet configuration uses Machine API types validated by the MAO admission webhook and provisioned by MAPO. This matches the parent multi-disk enhancement: `FeatureGateAzureMultiDisk` is an installer install-config gate only; the Machine API path is governed by API schema validation and the MAO webhook. A prototype validated both paths on OpenShift 4.22-rc.3 — install-time via installer/CAPZ and day-2 via MachineSet scale-up with custom MAPO.
+
+**Why not a separate gate:** A separate gate would require enabling two flags for one logical feature, create ambiguous behavior when only one is enabled (e.g., data disks allowed but IOPS/MBps silently ignored by older components), and force independent graduation tracking for fields that cannot be used without multi-disk support. The new fields are optional on `DataDiskManagedDiskParameters`; clusters not setting them are unaffected.
+
+**Graduation interaction with AzureMultiDisk:** When `FeatureGateAzureMultiDisk` graduates to GA in 5.1, install-time IOPS/throughput configuration graduates with it. Day-2 criteria are satisfied by the same test matrix in this enhancement (MachineSet scale-up with IOPS/MBps, webhook rejection of invalid combinations). No separate gate lifecycle is required.
+
+
 ## Design Details
 
 ### Open Questions
 
-1. Should this feature be gated behind `TechPreviewNoUpgrade` for initial release, or ship as GA-ready?
-2. Should the installer perform any semantic validation of IOPS/throughput values, or defer entirely to Azure?
+1. ~~Should this feature be gated behind `TechPreviewNoUpgrade` for initial release, or ship as GA-ready?~~ **Resolved:** Reuse `FeatureGateAzureMultiDisk` (see Feature Gate section above). Graduates to GA alongside multi-disk in OCP 5.1.
+2. Should the installer perform any semantic validation of IOPS/throughput values (e.g., PremiumV2_LRS minimum IOPS 3000 / MBps 125), or defer entirely to Azure ARM API rejection at provisioning time?
 
 ### Test Plan
 
@@ -280,20 +294,23 @@ A full-stack prototype has been implemented and validated on a live Azure enviro
 
 ## Graduation Criteria
 
+This enhancement does not introduce a separate feature gate. Graduation is coupled to `FeatureGateAzureMultiDisk` (parent enhancement [SPLAT-2133 / PR #1779](https://github.com/openshift/enhancements/pull/1779)).
+
 ### Dev Preview -> Tech Preview
 
-- Installer allows configuration of IOPS/throughput on PremiumV2_LRS data disks
-- CI jobs for testing installation with custom IOPS/throughput
+- `FeatureGateAzureMultiDisk` enabled; installer accepts IOPS/throughput on `PremiumV2_LRS` / `UltraSSD_LRS` data disks
+- CI jobs for installation with custom IOPS/throughput
+- MAO webhook and MAPO day-2 path validated (see Prototype Validation)
 - End user documentation, relative API stability
 - Sufficient test coverage
 
-### Tech Preview -> GA
+### Tech Preview -> GA (target: OCP 5.1, with AzureMultiDisk)
 
-- More testing (upgrade, downgrade, scale)
+- `FeatureGateAzureMultiDisk` graduates to GA (enabled by default)
+- E2E tests verify IOPS/throughput values on provisioned Azure disks (install + day-2 MachineSet scale-up)
+- Upgrade/downgrade and scale testing on clusters with PremiumV2_LRS data disks
 - Sufficient time for feedback
-- Available by default
-- User facing documentation created in OCP documentation
-- E2E tests verify IOPS/throughput values on provisioned Azure disks
+- User-facing documentation in OCP docs
 
 ### Removing a deprecated feature
 
