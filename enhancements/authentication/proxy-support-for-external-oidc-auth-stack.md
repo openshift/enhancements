@@ -32,8 +32,7 @@ to External OIDC authentication. It enables the Cluster Authentication Operator
 (CAO) and the OAuth API server's External OIDC webhook authenticator to reach
 external identity providers and configured external claim sources through a proxy,
 without requiring a cluster-wide egress proxy. The feature targets standalone
-OpenShift and HyperShift; this initial draft describes the standalone design,
-with the hosted control plane design and remaining sections to be completed.
+OpenShift and HyperShift.
 
 ## Motivation
 
@@ -45,11 +44,9 @@ configuration beyond the authentication components that need it. The
 describes this problem and the operational cost of workarounds such as an internal
 identity broker or manually patching operator-managed Deployments.
 
-That enhancement introduces `Authentication.spec.proxy` on
-`operator.openshift.io/v1` and applies it to the integrated OAuth server and CAO.
-It explicitly leaves External OIDC and HyperShift support for later work.
-[OCPSTRAT-3721](https://redhat.atlassian.net/browse/OCPSTRAT-3721)
-continues that work for External OIDC on both standalone and hosted control planes.
+That enhancement adds `Authentication.spec.proxy` (operator.openshift.io/v1) for the integrated OAuth server and CAO,
+deferring External OIDC and HyperShift support. This enhancement extends that work to External
+OIDC on standalone and hosted control planes.
 
 ### Background
 
@@ -89,9 +86,6 @@ other OIDC clients is outside this component's configuration.
 - As a cluster administrator, I want configured external claim sources to use
   that proxy so that group and other identity information remains available in a
   restricted network.
-- As a cluster administrator, I want changes to the proxy and its trusted CA
-  bundle to be reconciled automatically so that I can maintain authentication
-  connectivity without manually editing managed Deployments.
 
 ### Goals
 
@@ -101,8 +95,7 @@ other OIDC clients is outside this component's configuration.
   precedence over the cluster-wide proxy.
 - Support proxy CA rotation without restarting the webhook solely for CA content
   changes.
-- Support standalone OpenShift and HyperShift, with the hosted design to be
-  completed in this proposal.
+- Support standalone OpenShift and HyperShift.
 
 ### Non-Goals
 
@@ -233,8 +226,34 @@ Reuse the resolution rules from
 The shared resolver adds cluster-internal bypass entries to the component
 `noProxy` list, including `.cluster.local`, `.svc`, `localhost`,
 `127.0.0.1`, and the Kubernetes service IP when available through
-`KUBERNETES_SERVICE_HOST`. Administrators can add other destinations that must
-be reached directly, including an internal discovery endpoint.
+`KUBERNETES_SERVICE_HOST`. The cluster-wide fallback preserves the `NO_PROXY`
+value supplied through CAO's environment.
+
+#### `NO_PROXY` and Internal Endpoint URLs
+
+Go matches `NO_PROXY` against the host in each request URL before DNS resolution;
+it does not expand DNS search suffixes or match a hostname against its resolved
+IP address. The default entries therefore cover common Service DNS names, but
+administrators must add other forms used by endpoints that require direct access:
+
+| Host in the request URL | Additional `spec.proxy.noProxy` entry |
+| --- | --- |
+| `oidc.oidc-namespace.svc` or `oidc.oidc-namespace.svc.cluster.local` | None; covered by the default suffixes. |
+| `oidc` or `oidc.oidc-namespace` | The short hostname used in the URL. |
+| A Route hostname or custom DNS alias | That hostname, or an appropriate domain suffix. |
+| A Service or Pod IP other than the automatically included Kubernetes service IP | That IP, or a CIDR containing it. |
+
+For example, `discoveryURL: https://oidc.oidc-namespace/.well-known/openid-configuration`
+requires `oidc.oidc-namespace` in `spec.proxy.noProxy` to bypass the proxy.
+Entries contain hosts or IPs, optionally with ports, or CIDRs, not complete URLs.
+The hostname must still resolve from the caller's namespace and match the
+endpoint's TLS certificate.
+
+Apply this rule to discovery, the `jwks_uri` returned by discovery, external claim
+source URLs, and client-credentials token endpoints independently. Bypassing an
+internal discovery endpoint does not automatically bypass a different JWKS host.
+The incoming TokenReview connection from kube-apiserver requires no additional
+bypass entry in the webhook's environment; these settings affect outbound requests.
 
 #### Operator Reconciliation and Issuer Validation
 
@@ -299,7 +318,18 @@ TODO.
 
 ## Alternatives (Not Implemented)
 
-TODO.
+### Proxy Settings in the OAuth API Server Configuration File
+
+CAO could pass proxy URLs and bypass settings through the OAuth API server's
+generated configuration file, with the server applying them to each outbound HTTP
+transport. Environment variables are the simplest solution that meets the
+requirements: the existing transports already honor `HTTP_PROXY`, `HTTPS_PROXY`,
+and `NO_PROXY` through Go's
+[`http.ProxyFromEnvironment`](https://pkg.go.dev/net/http#ProxyFromEnvironment).
+This covers discovery, JWKS retrieval, external claim sourcing, and
+client-credentials token requests without additional configuration fields or
+proxy wiring in the server. Proxy CA trust remains separately configured through
+`proxyTrustedCA`.
 
 ## Open Questions [optional]
 
