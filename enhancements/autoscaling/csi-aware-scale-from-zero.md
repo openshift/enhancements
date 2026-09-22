@@ -78,7 +78,7 @@ set to `true`.
 
 The Cluster Autoscaler(CA) version shipped in OpenShift
 5.1 likewise enables CSI node-aware scheduling by default. For scaling nodes
-in nodes with existing nodegroups, the new scheduler behaviour requires no further
+in nodegroups with existing nodes, the new scheduler behaviour requires no further
 changes from underlying Kubernetes distribution(Openshift). 
 
 For scaling from zero, CA requires some sort of help from underlying cloudprovider/platform
