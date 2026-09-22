@@ -387,7 +387,7 @@ same `NewCertificateSigner`, `WithClientCertificates`,
 
 None.
 
-### Test Plan
+## Test Plan
 
 **Unit tests:**
 * Verify the new chain builder produces the correct 5-CA hierarchy.
@@ -414,21 +414,21 @@ None.
 * Workloads (pods, routes) functional after upgrade.
 * Service account tokens valid (API calls from pods succeed).
 
-### Graduation Criteria
+## Graduation Criteria
 
-#### Dev Preview -> Tech Preview
+### Dev Preview -> Tech Preview
 
 N/A — this is an internal infrastructure change, not a user-facing feature.
 It ships as GA in 5.1.
 
-#### Tech Preview -> GA
+### Tech Preview -> GA
 
 * All unit and integration tests passing.
 * Upgrade testing from 5.0 to 5.1 validated.
 * Rollback testing validated with greenboot.
 * ProdSec sign-off on the new layout.
 
-#### Removing a deprecated feature
+### Removing a deprecated feature
 
 The old CA layout is removed in the same release. No deprecation period is
 needed because:
@@ -436,7 +436,7 @@ needed because:
 2. The backup-and-regenerate migration handles the transition automatically.
 3. Kubernetes Secret names and namespaces are preserved.
 
-### Upgrade / Downgrade Strategy
+## Upgrade / Downgrade Strategy
 
 **Upgrade (5.0 → 5.1):**
 1. New binary detects old cert layout on first startup.
@@ -451,12 +451,12 @@ needed because:
 
 No manual intervention is required in either direction.
 
-### Version Skew Strategy
+## Version Skew Strategy
 
 N/A — MicroShift runs all components at the same version on a single node.
 There is no version skew between control plane and kubelet.
 
-### Operational Aspects of API Extensions
+## Operational Aspects of API Extensions
 
 N/A — no API extensions are introduced.
 
@@ -470,7 +470,7 @@ N/A — no API extensions are introduced.
   not exist (was renamed), `certSetup()` fails. Greenboot detects unhealthy
   state and triggers rollback. Old binary regenerates certs from scratch.
 
-#### Support Procedures
+## Support Procedures
 
 * **Detecting migration occurred:** Check for `certs.backup.*` directory
   under the data directory.
