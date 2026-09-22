@@ -34,6 +34,8 @@ external identity providers and configured external claim sources through a prox
 without requiring a cluster-wide egress proxy. The feature targets standalone
 OpenShift and HyperShift.
 
+**Note: HyperShift part is largely missing for now.**
+
 ## Motivation
 
 Clusters in restricted networks may need to authenticate users against an external
@@ -48,7 +50,7 @@ That enhancement adds `Authentication.spec.proxy` (operator.openshift.io/v1) for
 deferring External OIDC and HyperShift support. This enhancement extends that work to External
 OIDC on standalone and hosted control planes.
 
-### Background
+### Authentication Architecture
 
 [Direct External OIDC Provider](direct-external-oidc-provider.md) allows OpenShift
 to accept tokens issued by an external OIDC provider. In its original architecture,
@@ -125,8 +127,10 @@ The standalone implementation requires `ExternalOIDC`,
 `ExternalOIDCExternalClaimsSourcing`, `AuthenticationComponentProxy`, and
 `AuthenticationComponentProxyExternalOIDC`. The External Claims Sourcing gate
 selects the webhook architecture even when no provider has external claim sources.
-The new `AuthenticationComponentProxyExternalOIDC` gate controls extending the
+The new `AuthenticationComponentProxyExternalOIDC` gate to be added controls extending the
 component proxy to this path.
+
+TODO: Update relevant gate names once `ExternalOIDCExternalClaimsSourcing` is split.
 
 ### Workflow Description
 
@@ -204,11 +208,13 @@ The standalone reconciliation and runtime behavior are described below.
 
 #### Single-node Deployments or MicroShift
 
-TODO.
+This proposal does not add any additional CPU/memory overhead to SNO deployments.
+
+The auth stack is not present on MicroShift.
 
 #### OpenShift Kubernetes Engine
 
-TODO.
+Not affected.
 
 ### Implementation Details/Notes/Constraints
 
