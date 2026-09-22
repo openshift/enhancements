@@ -25,24 +25,25 @@ superseded-by:
 
 ## Summary
 
-MicroShift currently operates 12 Certificate Authorities (CAs) and 18 leaf
-certificates inherited from OpenShift's multi-node architecture. On a
-single-node edge device this complexity provides no additional security
-benefit while increasing operational overhead and complicating future work
-such as controlled certificate renewal. This enhancement consolidates the
-PKI to 5 CAs (3 new, 2 unchanged) and reduces the KAS serving certificates
-from 3 to 1 using Subject Alternative Names (SANs), aligning with upstream
-Kubernetes best practices and ProdSec recommendations for the single-node
-edge deployment model.
+This enhancement consolidates MicroShift's CA hierarchy from 12 CAs to 5
+(3 new, 2 unchanged) to conform to ProdSec guidance for single-node
+deployments. The change is scoped exclusively to CAs — it only affects which
+CA signs each internally-generated certificate, not the certificates
+themselves or their content.
 
 ## Motivation
 
-A ProdSec review conducted in March 2026 identified that MicroShift's 12 CAs
-serve no security purpose on a single-node device. In OpenShift, separate CAs
-enable independent trust domains across nodes — for example, one node's kubelet
-does not need to trust another node's API server client certificate. On a
-single-node device all certificates are consumed by processes on the same host,
-making trust domain separation meaningless.
+MicroShift's current PKI inherits 12 CAs from OpenShift's multi-node
+architecture, where separate CAs enable independent trust domains across nodes —
+for example, one node's kubelet does not need to trust another node's API server
+client certificate. On a single-node device, however, all certificates are
+consumed by processes on the same host, making trust domain separation
+meaningless. ProdSec guidance for single-node deployments formalizes this:
+reduce the CA count to the minimum needed.
+
+Importantly, consolidating CAs only changes **which CA signs** each
+internally-generated certificate — the leaf certificates, their SANs, and
+their usage remain unchanged.
 
 The current structure also creates maintenance burden: each CA has its own
 validity lifecycle, its own trust bundle membership, and its own renewal
