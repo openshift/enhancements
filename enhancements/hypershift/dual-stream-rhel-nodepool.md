@@ -379,10 +379,13 @@ Implementation steps:
    - **Explicit value set** → return it as-is
    - **Unset + release >= 5.0 + runc** → return `"rhel-9"` (fallback)
    - **Unset + release >= 5.0** → return `"rhel-10"` (default)
-   - **Unset + release < 5.0** → return `""` (no stream, legacy behavior)
+   - **Unset + release < 5.0** → return `"rhel-9"`
 
-   When the function returns `""`, the system uses the existing single-stream code path — no OSImageStream CR is generated,
-   no stream is included in the hash, and the MCC uses `BaseOSContainerImage` from ControllerConfig as-is.
+   Returning an explicit `"rhel-9"` for pre-5.0 releases (rather than an empty string) ensures that
+   downstream consumers such as `StreamForName()` always receive a concrete stream name. This avoids
+   errors when the legacy `StreamMetadata` field is eventually removed (> 5.3). The hash normalization
+   in `NewConfigGenerator` keeps `rolloutConfig.rhelStream` empty when the resolved stream matches the
+   version-derived default, so returning `"rhel-9"` here does not cause spurious rollouts.
 
 3. **Call `getRHELStream()` from `NewToken()`** — `NewToken()` (`token.go`) already receives the `ConfigGenerator`
    (which has `usesRunc` and `releaseImage.Version()`), and has access to the NodePool spec.
