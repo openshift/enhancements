@@ -9,9 +9,9 @@ reviewers:
 approvers:
   - zaneb
 api-approvers:
-  - JoelSpeed
+  - everettraven
 creation-date: 2026-03-09
-last-updated: 2026-03-26
+last-updated: 2026-09-22
 status: implementable
 tracking-link:
   - https://issues.redhat.com/browse/OPNET-763
@@ -80,14 +80,32 @@ Kubernetes-NMState.
 
 ### API Extensions
 
-NA
+This enhancement adds two new fields. It does not add any CRDs, webhooks,
+aggregated API servers, or finalizers.
+
+* `bridgeTopology`, a new field under the existing `networking` stanza of
+  the installer's install-config API. Initially accepts `Standard` or
+  unset.
+* `BridgeTopology`, a new field on the `status` stanza of the cluster-scoped
+  `Infrastructure` resource (`config.openshift.io/v1`), alongside the other
+  high-level networking topology fields already present there. Initially
+  accepts `Disabled` (default) and `Standard`. This signals MCO which
+  configuration, if any, it should generate for setting up br-ex on nodes.
+  Placing it in the Infrastructure Status object is consistent with where
+  other high-level networking topology fields already live.
+
+  One noteworthy difference from existing on-prem fields is that this one is
+  cross-platform rather than platform-specific. We do not intend for this to
+  be a platform-specific feature, so we don't want to tie it to one, or even
+  several, platforms.
 
 ### Topology Considerations
 
 #### Hypershift / Hosted Control Planes
 
-Because this feature is delivered using the same mechanism (MCO) as the
-existing configure-ovs script, it should work the same way.
+This feature will be delivered as one of the built-in MCO templates that are
+delivered via Ignition, even on Hypershift nodes. The configure-ovs script is
+deployed the same way, so this should work the same way.
 
 #### Standalone Clusters
 
@@ -117,11 +135,34 @@ networking:
 # ...
 ```
 
-We also anticipate having a bridgeTopology for balance-slb bonds, which is
-structurally different from a standard br-ex configuration and can't easily
-be handled in the same policy. There is an existing feature in configure-ovs
-that creates a br-ex1 too, so at some point we will need to support that as
-well.
+#### Standard Topology Support
+
+The `Standard` topology will support most common network architectures
+currently in use. This includes single interfaces, bonds, and VLANs. Other
+interface types should work too, as long as they behave in the same way as
+the other supported ones.
+
+All types of addressing (DHCP, DHCPv6, SLAAC, static) will be supported.
+
+We expect that this will cover the vast majority of deployments.
+
+#### Additional Topologies
+
+We anticipate needing to support additional topologies beyond `Standard`.
+These topologies will include architectures that cannot be reasonably
+represented in a single common configuration, even with templating capability
+from NMPolicy.
+
+One example is the balance-slb bond mode. This requires two OVS bridges and
+some additional configurations to connect them. There is currently no path to
+deploying this architecture using a single configuration.
+
+Another possible example is br-ex1. Currently, configure-ovs supports deploying
+an additional OVS bridge named br-ex1. This is a somewhat obscure architecture
+that is not widely used and could be replicated by deploying br-ex1 using
+a different mechanism (possibly also NMState) and letting this feature handle
+br-ex. However, if we look at this as a preliminary step to replacing
+configure-ovs, we will need to replicate that functionality anyway.
 
 #### NMState Details
 
@@ -132,30 +173,24 @@ part of the nodeip-configuration service. The YAML looks something like this:
 ```yaml
 capture:
   # FIXME: This requires primary to be the first altname. Need NMState support to fix.
+  # This is not a blocker problem, but it does introduce an unnecessary requirement.
   base-iface: interfaces.alt-names.0.name == "primary"
 desiredState:
   interfaces:
   - name: {{`"{{ capture.base-iface.interfaces.0.name }}"`}}
-    type: ethernet
+    type: {{`"{{ capture.base-iface.interfaces.0.type }}"`}}
     state: up
 # ...
+  - name: br-ex
+    type: ovs-interface
+    state: up
+    copy-mac-from: {{`"{{ capture.base-iface.interfaces.0.name }}"`}}
+    mtu: {{`"{{ capture.base-iface.interfaces.0.mtu }}"`}}
+    wait-ip: {{`"{{ capture.base-iface.interfaces.0.wait-ip }}"`}}
+    ipv4: {{`"{{ capture.base-iface.interfaces.0.ipv4 }}"`}}
+    ipv6: {{`"{{ capture.base-iface.interfaces.0.ipv6 }}"`}}
+# ...
 ```
-
-#### New API Field
-
-We will add a new field to signal MCO which configuration it should generate
-for setting up br-ex on nodes. This will be named `BridgeTopology` in
-the Infrastructure Status object, which is where other such networking
-configuration fields have existed in the past. This also fits with a number
-of other such high level topology fields in that same structure.
-
-One noteworthy difference is that this will be a cross-platform field rather
-than a platform-specific one, like the several on-prem platform fields.
-We do not intend for this to be a platform-specific feature so we don't want
-to tie it to one or several platforms.
-
-Initially the field will only take two values, `Disabled` and `Standard`, with
-`Disabled` the default. Eventually we anticipate adding more options.
 
 ### Risks and Mitigations
 
@@ -163,16 +198,12 @@ Initially the field will only take two values, `Disabled` and `Standard`, with
   work for every use case. The feature is designed to be extensible in the
   future, so we can add automatic configuration for more architectures if
   needed, however.
-* It is unclear how adopting this default configuration into Kubernetes-NMState
-  will work. The use of nmpolicy configurations means the configuration is less
-  straightforward, and if the process to migrate the day 1 config into the
-  operator is too complex it will undo a lot of the benefit of the feature.
 
 ### Drawbacks
 
 Some users may already have existing full NMState br-ex configs that they would
 like to keep using. This is still possible because we are not removing the old
-feature, but it also doesn't improve the old, bad, interface.
+feature, but it also doesn't improve the old, bad interface.
 
 ## Alternatives (Not Implemented)
 
@@ -184,7 +215,6 @@ this more templated feature, we may still revisit this.
 
 ## Open Questions [optional]
 
-* Is there a realistic adoption path for these configs in Kubernetes-NMState?
 * Is selecting the primary interface based on the "primary" altname acceptable,
   or should we pick something less likely to conflict with existing configs?
   Currently we only support one altname because of a limitation in the NMState
