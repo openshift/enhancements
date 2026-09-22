@@ -1,17 +1,17 @@
 ---
-title: neat-enhancement-idea
+title: proxy-support-for-external-oidc-auth-stack
 authors:
   - "@tchap"
   - "@wouldgo"
 reviewers:
   - "@liouk" # The author of the original External OIDC EP, to review the whole EP.
-approvers: 
+approvers:
   - "@benluddy"
 api-approvers:
   - "None"
 creation-date: 2026-09-10
-last-updated: yyyy-mm-dd
-status: provisional|implementable|implemented|deferred|rejected|withdrawn|replaced|informational
+last-updated: 2026-09-22
+status: provisional
 tracking-link:
   - "https://redhat.atlassian.net/browse/OCPSTRAT-3721"
 see-also:
@@ -22,508 +22,330 @@ replaces:
 superseded-by:
 ---
 
-About the enhancement process:
-1. **Iterate.** Some sections of the enhancement do not make sense to fill out in the first pass.
-   We expect enhancements to be merged with enough detail to implement tech preview, and be updated later
-   ahead of promoting to GA.
-1. **Build consensus.** The enhancement process is a way to build consensus between multiple stakeholders
-   and align on the design before implementation begins. It is the responsibility of the author to drive
-   the process. This means that you must find stakeholders, request their review, and work with them to
-   address their concerns and get their approval. If you need help finding stakeholders, try asking in
-   #forum-ocp-arch or taking your proposal to the OCP arch call or a staff engineer.
-1. **Document decisions.** The enhancements act as our record of previous conversations and the decisions
-   that were made. It is important that these EPs are merged so that we can build a library of references
-   for future engineers/technical writers/support engineers to be able to understand the history of our
-   designs and the rationale behind them.
-   **Please find the time to make sure that these PRs are merged.** If you are struggling to reach consensus,
-   or you are not getting the reviews you need, please reach out to a staff engineer or your team lead to help you.
-
-To get started with this template:
-1. **Pick a domain.** Find the appropriate domain to discuss your enhancement.
-1. **Make a copy of this template.** Copy this template into the directory for
-   the domain.
-1. **Fill out the metadata at the top.** The embedded YAML document is
-   checked by the linter.
-1. **Fill out the "overview" sections.** This includes the Summary and
-   Motivation sections. These should be easy and explain why the community
-   should desire this enhancement.
-1. **Create a PR.** Assign it to folks with expertise in that domain to help
-   sponsor the process.
-1. **Merge after reaching consensus.** Merge when there is consensus
-   that the design is complete enough for implementation to begin.
-   It is ok to have some details missing, these should be captured in the open questions.
-   Come back and update the document if important details (API field names, workflow, etc.)
-   change during implementation.
-1. **Keep all required headers.** If a section does not apply to an
-   enhancement, explain why but do not remove the section. This part
-   of the process is enforced by the linter CI job.
-
-See ../README.md for background behind these instructions.
-
-Start by filling out the header with the metadata for this enhancement.
-
-# Neat Enhancement Idea
-
-This is the title of the enhancement. Keep it simple and descriptive. A good
-title can help communicate what the enhancement is and should be considered as
-part of any review.
-
-The YAML `title` should be lowercased and spaces/punctuation should be
-replaced with `-`.
-
-The `Metadata` section above is intended to support the creation of tooling
-around the enhancement process.
+# Proxy Support for External OIDC Auth Stack
 
 ## Summary
 
-The `Summary` section is important for producing high quality
-user-focused documentation such as release notes or a development roadmap. It
-should be possible to collect this information before implementation begins in
-order to avoid requiring implementors to split their attention between writing
-release notes and implementing the feature itself.
-
-Your summary should be one paragraph long. More detail
-should go into the following sections.
+This enhancement extends the component-scoped proxy support introduced by
+[Proxy Support for Integrated Auth Stack](proxy-support-for-integrated-auth-stack.md)
+to External OIDC authentication. It enables the Cluster Authentication Operator
+(CAO) and the OAuth API server's External OIDC webhook authenticator to reach
+external identity providers and configured external claim sources through a proxy,
+without requiring a cluster-wide egress proxy. The feature targets standalone
+OpenShift and HyperShift; this initial draft describes the standalone design,
+with the hosted control plane design and remaining sections to be completed.
 
 ## Motivation
 
-This section is for explicitly listing the motivation, goals and non-goals of
-this proposal. Describe why the change is important and the benefits to users.
+Clusters in restricted networks may need to authenticate users against an external
+identity provider while keeping other cluster components disconnected from external
+services. Configuring the cluster-wide proxy for this purpose distributes proxy
+configuration beyond the authentication components that need it. The
+[integrated authentication proxy enhancement](proxy-support-for-integrated-auth-stack.md#motivation)
+describes this problem and the operational cost of workarounds such as an internal
+identity broker or manually patching operator-managed Deployments.
+
+That enhancement introduces `Authentication.spec.proxy` on
+`operator.openshift.io/v1` and applies it to the integrated OAuth server and CAO.
+It explicitly leaves External OIDC and HyperShift support for later work.
+[OCPSTRAT-3721](https://redhat.atlassian.net/browse/OCPSTRAT-3721)
+continues that work for External OIDC on both standalone and hosted control planes.
+
+### Background
+
+[Direct External OIDC Provider](direct-external-oidc-provider.md) allows OpenShift
+to accept tokens issued by an external OIDC provider. In its original architecture,
+kube-apiserver validates those tokens directly using its structured authentication
+configuration.
+
+[External OIDC Additional Identity Information Sources](external-oidc-additional-identity-information-sources.md)
+introduces a different authentication path: the OAuth API server runs its
+`external-oidc` subcommand as a TokenReview webhook authenticator. Kube-apiserver
+delegates token validation to this webhook, which validates JWTs and can retrieve
+additional identity information from configured external claim sources. The
+integrated OAuth server is not used in this mode.
+
+This webhook architecture provides the component boundary for the proposed proxy
+support. Its outbound dependencies are:
+
+| Component | Outbound communication |
+| --- | --- |
+| CAO | Fetches the issuer's discovery document while validating External OIDC configuration. |
+| OAuth API server | Fetches OIDC discovery metadata and retrieves or refreshes the issuer's JWKS signing keys for JWT verification. |
+| OAuth API server, when external claim sources are configured | Fetches additional identity information from the configured source URLs. |
+| OAuth API server, when a claim source uses client credentials | Obtains access tokens from the configured token endpoint to authenticate requests to that source. |
+
+The webhook validates a token that the caller already obtained. It does not host
+the interactive browser login flow or exchange the user's authorization code for
+tokens. Client-credentials requests for external claim sourcing are a separate
+outbound dependency. Proxy configuration for browsers, CLI login helpers, or
+other OIDC clients is outside this component's configuration.
 
 ### User Stories
 
-Detail the things that people will be able to do if this is implemented and
-what goal that allows them to achieve. In each story, explain who the actor
-is based on their role, explain what they want to do with the system,
-and explain the underlying goal they have, what it is they are going to
-achieve with this new feature.
-
-Use the standard three part formula:
-
-> "As a _role_, I want to _take some action_ so that I can _accomplish a goal_."
-
-Make the change feel real for users, without getting bogged down in
-implementation details.
-
-Here are some example user stories to show what they might look like:
-
-* As an OpenShift engineer, I want to write an enhancement, so that I
-  can get feedback on my design and build consensus about the approach
-  to take before starting the implementation.
-* As an OpenShift engineer, I want to understand the rationale behind
-  a particular feature's design and alternatives considered, so I can
-  work on a new enhancement in that problem space knowing the history
-  of the current design better.
-* As a product manager, I want to review this enhancement proposal, so
-  that I can make sure the customer requirements are met by the
-  design.
-* As an administrator, I want a one-click OpenShift installer, so that
-  I can easily set up a new cluster without having to follow a long
-  set of operations.
-
-In each example, the persona's goal is clear, and the goal is clearly provided
-by the capability being described.
-The engineer wants feedback on their enhancement from their peers, and writing
-an enhancement allows for that feedback.
-The product manager wants to make sure that their customer requirements are fulfilled,
-reviewing the enhancement allows them to check that.
-The administrator wants to set up his OpenShift cluster as easily as possible, and
-reducing the install to a single click simplifies that process.
-
-Here are some real examples from previous enhancements:
-* [As a member of OpenShift concerned with the release process (TRT, dev, staff engineer, maybe even PM),
-I want to opt in to pre-release features so that I can run periodic testing in CI and obtain a signal of
-feature quality.](https://github.com/openshift/enhancements/blob/master/enhancements/installer/feature-sets.md#user-stories)
-* [As a cloud-provider affiliated engineer / platform integrator / RH partner
-I want to have a mechanism to signal OpenShift's built-in operators about additional
-cloud-provider specific components so that I can inject my own platform-specific controllers into OpenShift
-to improve the integration between OpenShift and my cloud provider.](https://github.com/openshift/enhancements/blob/master/enhancements/cloud-integration/infrastructure-external-platform-type.md#user-stories)
-* [As an OpenShift cluster administrator, I want to add worker nodes to my
-existing single control-plane node cluster, so that it'll be able to meet
-growing computation demands.](https://github.com/openshift/enhancements/blob/master/enhancements/single-node/single-node-openshift-with-workers.md#user-stories)
-
-Include a story on how this proposal will be operationalized:
-life-cycled, monitored and remediated at scale.
+- As a cluster administrator, I want External OIDC authentication to reach my
+  identity provider through an authentication-specific proxy so that I can use
+  external identities without configuring a cluster-wide proxy.
+- As a cluster administrator, I want configured external claim sources to use
+  that proxy so that group and other identity information remains available in a
+  restricted network.
+- As a cluster administrator, I want changes to the proxy and its trusted CA
+  bundle to be reconciled automatically so that I can maintain authentication
+  connectivity without manually editing managed Deployments.
 
 ### Goals
 
-Summarize the specific goals of the proposal. How will we know that
-this has succeeded?  A good goal describes something a user wants from
-their perspective, and does not include the implementation details
-from the proposal.
+- Extend component-scoped proxy support to External OIDC issuer validation,
+  discovery, JWKS retrieval, and external claim sourcing.
+- Reuse the existing standalone authentication proxy configuration and its
+  precedence over the cluster-wide proxy.
+- Support proxy CA rotation without restarting the webhook solely for CA content
+  changes.
+- Support standalone OpenShift and HyperShift, with the hosted design to be
+  completed in this proposal.
 
 ### Non-Goals
 
-What is out of scope for this proposal? Listing non-goals helps to
-focus discussion and make progress. Highlight anything that is being
-deferred to a later phase of implementation that may call for its own
-enhancement.
+- Component-scoped proxy support for the original External OIDC path in which
+  kube-apiserver performs OIDC authentication directly.
+- Changes to the integrated OAuth authentication flow covered by the preceding
+  proxy enhancement.
+- Per-provider or per-claim-source proxy settings, changes to the cluster-wide
+  proxy API, or a generalized per-component proxy framework.
+- Proxy configuration for end-user OIDC clients or unrelated cluster components.
 
 ## Proposal
 
-This section should explain what the proposal actually is. Enumerate
-*all* of the proposed changes at a *high level*, including all of the
-components that need to be modified and how they will be
-different. Include the reason for each choice in the design and
-implementation that is proposed here.
+Extend the existing authentication proxy resolution and CA distribution mechanisms
+to the External OIDC webhook architecture. On standalone clusters, the
+administrator continues to configure providers on
+`authentication.config.openshift.io/cluster` and configures the component proxy
+on the distinct `authentication.operator.openshift.io/cluster` resource.
 
-To keep this section succinct, document the details like API field
-changes, new images, and other implementation details in the
-**Implementation Details** section and record the reasons for not
-choosing alternatives in the **Alternatives** section at the end of
-the document.
+CAO uses the effective proxy when validating issuer discovery, renders proxy
+environment variables into the External OIDC OAuth API server Deployment, and
+synchronizes and mounts the optional proxy CA bundle. The webhook uses this
+configuration for its outbound requests. The TokenReview connection from
+kube-apiserver to the webhook remains within the cluster.
+
+The standalone implementation requires `ExternalOIDC`,
+`ExternalOIDCExternalClaimsSourcing`, `AuthenticationComponentProxy`, and
+`AuthenticationComponentProxyExternalOIDC`. The External Claims Sourcing gate
+selects the webhook architecture even when no provider has external claim sources.
+The new `AuthenticationComponentProxyExternalOIDC` gate controls extending the
+component proxy to this path.
 
 ### Workflow Description
 
-Explain how the user will use the feature. Be detailed and explicit.
-Describe all of the actors, their roles, and the APIs or interfaces
-involved. Define a starting state and then list the steps that the
-user would need to go through to trigger the feature described in the
-enhancement. Optionally add a
-[mermaid](https://github.com/mermaid-js/mermaid#readme) sequence
-diagram.
+The starting point is a standalone cluster using the External OIDC webhook
+architecture, with the required feature gates enabled and an administrator-provided
+proxy that can reach the required external endpoints.
 
-Use sub-sections to explain variations, such as for error handling,
-failure recovery, or alternative outcomes.
+1. The administrator configures OIDC providers on
+   `authentication.config.openshift.io/cluster`, including issuer trust and
+   external claim sources as needed.
+2. If the proxy requires a custom CA, the administrator creates a ConfigMap in
+   `openshift-config` containing the PEM bundle under `ca-bundle.crt`.
+3. The administrator sets `spec.proxy` on the authentication operator resource:
 
-For example:
+   ```yaml
+   apiVersion: operator.openshift.io/v1
+   kind: Authentication
+   metadata:
+     name: cluster
+   spec:
+     managementState: Managed
+     proxy:
+       httpProxy: http://proxy.example.com:3128
+       httpsProxy: http://proxy.example.com:3128
+       noProxy:
+         - idp.internal.example.com
+       trustedCA:
+         name: auth-proxy-ca
+   ```
 
-**cluster creator** is a human user responsible for deploying a
-cluster.
+   The `trustedCA` reference is optional and is omitted when no additional proxy
+   trust is needed. At least one of `httpProxy` or `httpsProxy` must be set.
+4. CAO revalidates issuer discovery using the effective proxy and applicable CA
+   certificates, and reconciles the webhook Deployment with the proxy environment
+   variables and optional CA mount.
+5. When a user presents an external OIDC token to kube-apiserver, kube-apiserver
+   calls the TokenReview webhook. The webhook uses issuer discovery and JWKS data
+   to validate the token and, if configured, retrieves external claims through the
+   effective proxy before returning the authentication result.
 
-**application administrator** is a human user responsible for
-deploying an application in a cluster.
-
-1. The cluster creator sits down at their keyboard...
-2. ...
-3. The cluster creator sees that their cluster is ready to receive
-   applications, and gives the application administrator their
-   credentials.
-
-See
-https://github.com/openshift/enhancements/blob/master/enhancements/workload-partitioning/management-workload-partitioning.md#high-level-end-to-end-workflow
-and https://github.com/openshift/enhancements/blob/master/enhancements/agent-installer/automated-workflow-for-agent-based-installer.md for more detailed examples.
+Changing proxy environment variables rolls out the Deployment. Updating only the
+contents of the referenced proxy CA bundle is picked up through the mounted file
+without a Deployment rollout. Removing `spec.proxy` restores the cluster-wide
+proxy configuration, if configured, or direct connectivity otherwise.
 
 ### API Extensions
 
-API Extensions are CRDs, admission and conversion webhooks, aggregated API servers,
-and finalizers, i.e. those mechanisms that change the OCP API surface and behaviour.
+The standalone design reuses the `spec.proxy` API defined in
+[the integrated authentication proxy enhancement](proxy-support-for-integrated-auth-stack.md#api-extensions):
+`httpProxy`, `httpsProxy`, `noProxy`, and `trustedCA`.
+It extends consumption of that API to the External OIDC path without introducing
+another user-facing proxy field.
 
-- Name the API extensions this enhancement adds or modifies.
-- Does this enhancement modify the behaviour of existing resources, especially those owned
-  by other parties than the authoring team (including upstream resources), and, if yes, how?
-  Please add those other parties as reviewers to the enhancement.
+The generated OAuth API server authentication configuration gains a
+`proxyTrustedCA` file path for the mounted proxy bundle. This is operand
+configuration managed by CAO, not a field that administrators set on
+`authentication.config.openshift.io/cluster`.
 
-  Examples:
-  - Adds a finalizer to namespaces. Namespace cannot be deleted without our controller running.
-  - Restricts the label format for objects to X.
-  - Defaults field Y on object kind Z.
-
-For small API changes, you may want to model the API here as a Go type.
-For large API changes, give an idea of what the API will look like in serialized form as YAML,
-and open a PR for the actual API changes to the relevant repository. Your API approver
-should review the API both at the high level in this document, and lower level in the PR for
-the actual API changes.
-Including larger API changes in this document often creates duplication of effort where feedback
-is given twice, once here and once in the PR for the actual API changes.
-
-Fill in the operational impact of these API Extensions in the "Operational Aspects
-of API Extensions" section.
+TODO: Describe the HyperShift API and determine its API review requirements.
 
 ### Topology Considerations
 
 #### Hypershift / Hosted Control Planes
 
-Are there any unique considerations for making this change work with
-Hypershift?
-
-See https://github.com/openshift/enhancements/blob/e044f84e9b2bafa600e6c24e35d226463c2308a5/enhancements/multi-arch/heterogeneous-architecture-clusters.md?plain=1#L282
-
-How does it affect any of the components running in the
-management cluster? How does it affect any components running split
-between the management cluster and guest cluster?
+TODO: Describe the hosted control plane configuration, reconciliation, and CA
+distribution. HyperShift is in scope for the feature; the standalone CAO design
+below does not by itself implement hosted support.
 
 #### Standalone Clusters
 
-Is the change relevant for standalone clusters?
+CAO runs in `openshift-authentication-operator` and manages the External OIDC
+webhook Deployment in `openshift-oauth-apiserver`. It reads the operator
+`Authentication` resource and user-provided ConfigMaps from the same cluster.
+The standalone reconciliation and runtime behavior are described below.
 
 #### Single-node Deployments or MicroShift
 
-How does this proposal affect the resource consumption of a
-single-node OpenShift deployment (SNO), CPU and memory?
-
-How does this proposal affect MicroShift? For example, if the proposal
-adds configuration options through API resources, should any of those
-behaviors also be exposed to MicroShift admins through the
-configuration file for MicroShift?
+TODO.
 
 #### OpenShift Kubernetes Engine
 
-How does this proposal affect OpenShift Kubernetes Engine (OKE)?  Does it depend
-on features that are excluded from the OKE product offering?  See [the
-comparison of OKE and OCP in the product documentation](https://docs.redhat.com/en/documentation/openshift_container_platform/latest/html/overview/oke-about#about_oke_similarities_and_differences).
+TODO.
 
 ### Implementation Details/Notes/Constraints
 
-What are some important details that didn't come across above in the
-**Proposal**? Go in to as much detail as necessary here. This might be
-a good place to talk about core concepts and how they relate. While it is useful
-to go into the details of the code changes required, it is not necessary to show
-how the code will be rewritten in the enhancement.
+#### Proxy Resolution
+
+Reuse the resolution rules from
+[the integrated authentication proxy enhancement](proxy-support-for-integrated-auth-stack.md#proxy-resolution):
+
+- When the component proxy gates are enabled and `spec.proxy` is configured,
+  use that configuration in full. Do not inherit individual fields from the
+  cluster-wide proxy.
+- Otherwise, use the cluster-wide proxy configuration provided through CAO's
+  process environment. If no proxy is configured there, use direct connectivity.
+
+The shared resolver adds cluster-internal bypass entries to the component
+`noProxy` list, including `.cluster.local`, `.svc`, `localhost`,
+`127.0.0.1`, and the Kubernetes service IP when available through
+`KUBERNETES_SERVICE_HOST`. Administrators can add other destinations that must
+be reached directly, including an internal discovery endpoint.
+
+#### Operator Reconciliation and Issuer Validation
+
+The External OIDC controller watches the configuration `Authentication` resource,
+the operator `Authentication` resource containing `spec.proxy`, and relevant
+ConfigMaps. Proxy and CA changes therefore trigger configuration reconciliation
+and issuer validation.
+
+For the webhook path, the OAuth API server authentication-config generator uses
+the shared proxy resolver when fetching
+`<issuer URL>/.well-known/openid-configuration`, or the configured
+`discoveryURL`. Its HTTP transport combines the applicable issuer trust with the
+component proxy CA. CAO reads the proxy configuration for these requests rather
+than changing its own process environment.
+
+The kube-apiserver authentication-config generator does not receive the component
+proxy resolver. Applying a proxy only to CAO's validation would not configure
+kube-apiserver's runtime discovery and JWKS requests, so this proposal does not
+claim support for that direct authentication path.
+
+#### OAuth API Server Deployment and Trust
+
+The workload controller watches the component proxy input and renders
+`HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` from the effective configuration
+onto the External OIDC container. This must also work when `trustedCA` is
+omitted, including when using the cluster-wide fallback.
+
+When `trustedCA` is set, CAO synchronizes the referenced ConfigMap from
+`openshift-config` into `openshift-oauth-apiserver` as
+`v4-0-config-system-auth-proxy-ca` and mounts it read-only. The generated
+`auth-config.json` includes the mounted `ca-bundle.crt` path in
+`proxyTrustedCA`.
+
+Issuer and external-source CA configuration continue to describe trust for those
+endpoints. The component proxy CA supplies additional trust for an HTTPS proxy or
+a TLS-intercepting proxy; it does not replace endpoint configuration.
+
+#### Webhook Runtime and CA Rotation
+
+The webhook's discovery and JWKS HTTP client uses the proxy environment and
+combines issuer trust with the mounted proxy CA. The operand watches that CA
+file and rebuilds the affected HTTP transports when its contents change.
+CAO propagates source ConfigMap updates to the mounted copy without including
+those contents in a Deployment rollout trigger.
+
+External claim source requests, including client-credentials token acquisition
+when configured, also need the effective proxy and applicable source and proxy
+trust. These use separate HTTP clients from discovery and JWKS retrieval;
+consistent proxy CA handling across those clients is an implementation follow-up
+noted below.
+
+Changes to proxy environment variables or adding or removing the CA mount change
+the PodSpec and trigger a rollout. CA bundle content rotation alone does not.
 
 ### Risks and Mitigations
 
-What are the risks of this proposal and how do we mitigate. Think broadly. For
-example, consider both security and how this will impact the larger OKD
-ecosystem.
-
-How will security be reviewed and by whom?
-
-How will UX be reviewed and by whom?
-
-Consider including folks that also work outside your immediate sub-project.
+TODO.
 
 ### Drawbacks
 
-The idea is to find the best form of an argument why this enhancement should
-_not_ be implemented.
-
-What trade-offs (technical/efficiency cost, user experience, flexibility,
-supportability, etc) must be made in order to implement this? What are the reasons
-we might not want to undertake this proposal, and how do we overcome them?
-
-Does this proposal implement a behavior that's new/unique/novel? Is it poorly
-aligned with existing user expectations?  Will it be a significant maintenance
-burden?  Is it likely to be superceded by something else in the near future?
+TODO.
 
 ## Alternatives (Not Implemented)
 
-Similar to the `Drawbacks` section the `Alternatives` section is used
-to highlight and record other possible approaches to delivering the
-value proposed by an enhancement, including especially information
-about why the alternative was not selected.
+TODO.
 
 ## Open Questions [optional]
 
-This is where to call out areas of the design that require closure before deciding
-to implement the design.  For instance,
- > 1. This requires exposing previously private resources which contain sensitive
-  information.  Can we do this?
+- Complete the HyperShift design, including the configuration API, ownership of
+  issuer validation, and synchronization of proxy trust.
+- Close two gaps in the current standalone implementation: render proxy
+  environment variables even when `trustedCA` is absent, and propagate the
+  component proxy CA and its updates to external claim source and
+  client-credentials HTTP clients.
 
 ## Test Plan
 
-**Note:** *Section not required until targeted at a release.*
-
-Consider the following in developing a test plan for this enhancement:
-- Will there be e2e and integration tests, in addition to unit tests?
-- How will it be tested in isolation vs with other components?
-- What additional testing is necessary to support managed OpenShift service-based offerings?
-
-No need to outline all of the test cases, just the general strategy. Anything
-that would count as tricky in the implementation and anything particularly
-challenging to test should be called out.
-
-All code is expected to have adequate tests (eventually with coverage
-expectations).
+TODO.
 
 ## Graduation Criteria
 
-**Note:** *Section not required until targeted at a release.*
-
-Define graduation milestones.
-
-These may be defined in terms of API maturity, or as something else. Initial proposal
-should keep this high-level with a focus on what signals will be looked at to
-determine graduation.
-
-Consider the following in developing the graduation criteria for this
-enhancement:
-
-- Maturity levels
-  - [`alpha`, `beta`, `stable` in upstream Kubernetes][maturity-levels]
-  - `Dev Preview`, `Tech Preview`, `GA` in OpenShift
-- [Deprecation policy][deprecation-policy]
-
-Clearly define what graduation means by either linking to the [API doc definition](https://kubernetes.io/docs/concepts/overview/kubernetes-api/#api-versioning),
-or by redefining what graduation means.
-
-In general, we try to use the same stages (alpha, beta, GA), regardless how the functionality is accessed.
-
-[maturity-levels]: https://git.k8s.io/community/contributors/devel/sig-architecture/api_changes.md#alpha-beta-and-stable-versions
-[deprecation-policy]: https://kubernetes.io/docs/reference/using-api/deprecation-policy/
-
-**If this is a user facing change requiring new or updated documentation in [openshift-docs](https://github.com/openshift/openshift-docs/),
-please be sure to include in the graduation criteria.**
-
-**Examples**: These are generalized examples to consider, in addition
-to the aforementioned [maturity levels][maturity-levels].
+TODO.
 
 ### Dev Preview -> Tech Preview
 
-- Ability to utilize the enhancement end to end
-- End user documentation, relative API stability
-- Sufficient test coverage
-- Gather feedback from users rather than just developers
-- Enumerate service level indicators (SLIs), expose SLIs as metrics
-- Write symptoms-based alerts for the component(s)
+TODO.
 
 ### Tech Preview -> GA
 
-- More testing (upgrade, downgrade, scale)
-- Sufficient time for feedback
-- Available by default
-- Backhaul SLI telemetry
-- Document SLOs for the component
-- Conduct load testing
-- User facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/)
-
-**For non-optional features moving to GA, the graduation criteria must include
-end to end tests.**
+TODO.
 
 ### Removing a deprecated feature
 
-- Announce deprecation and support policy of the existing feature
-- Deprecate the feature
+TODO.
 
 ## Upgrade / Downgrade Strategy
 
-If applicable, how will the component be upgraded and downgraded? Make sure this
-is in the test plan.
-
-Consider the following in developing an upgrade/downgrade strategy for this
-enhancement:
-- What changes (in invocations, configurations, API use, etc.) is an existing
-  cluster required to make on upgrade in order to keep previous behavior?
-- What changes (in invocations, configurations, API use, etc.) is an existing
-  cluster required to make on upgrade in order to make use of the enhancement?
-
-Upgrade expectations:
-- Each component should remain available for user requests and
-  workloads during upgrades. Ensure the components leverage best practices in handling [voluntary
-  disruption](https://kubernetes.io/docs/concepts/workloads/pods/disruptions/). Any exception to
-  this should be identified and discussed here.
-- Micro version upgrades - users should be able to skip forward versions within a
-  minor release stream without being required to pass through intermediate
-  versions - i.e. `x.y.N->x.y.N+2` should work without requiring `x.y.N->x.y.N+1`
-  as an intermediate step.
-- Minor version upgrades - you only need to support `x.N->x.N+1` upgrade
-  steps. So, for example, it is acceptable to require a user running 4.3 to
-  upgrade to 4.5 with a `4.3->4.4` step followed by a `4.4->4.5` step.
-- While an upgrade is in progress, new component versions should
-  continue to operate correctly in concert with older component
-  versions (aka "version skew"). For example, if a node is down, and
-  an operator is rolling out a daemonset, the old and new daemonset
-  pods must continue to work correctly even while the cluster remains
-  in this partially upgraded state for some time.
-
-Downgrade expectations:
-- If an `N->N+1` upgrade fails mid-way through, or if the `N+1` cluster is
-  misbehaving, it should be possible for the user to rollback to `N`. It is
-  acceptable to require some documented manual steps in order to fully restore
-  the downgraded cluster to its previous state. Examples of acceptable steps
-  include:
-  - Deleting any CVO-managed resources added by the new version. The
-    CVO does not currently delete resources that no longer exist in
-    the target version.
+TODO.
 
 ## Version Skew Strategy
 
-How will the component handle version skew with other components?
-What are the guarantees? Make sure this is in the test plan.
-
-Consider the following in developing a version skew strategy for this
-enhancement:
-- During an upgrade, we will always have skew among components, how will this impact your work?
-- Does this enhancement involve coordinating behavior in the control plane and
-  in the kubelet? How does an n-2 kubelet without this feature available behave
-  when this feature is used?
-- Will any other components on the node change? For example, changes to CSI, CRI
-  or CNI may require updating that component before the kubelet.
+TODO.
 
 ## Operational Aspects of API Extensions
 
-Describe the impact of API extensions (mentioned in the proposal section, i.e. CRDs,
-admission and conversion webhooks, aggregated API servers, finalizers) here in detail,
-especially how they impact the OCP system architecture and operational aspects.
-
-- For conversion/admission webhooks and aggregated apiservers: what are the SLIs (Service Level
-  Indicators) an administrator or support can use to determine the health of the API extensions
-
-  Examples (metrics, alerts, operator conditions)
-  - authentication-operator condition `APIServerDegraded=False`
-  - authentication-operator condition `APIServerAvailable=True`
-  - openshift-authentication/oauth-apiserver deployment and pods health
-
-- What impact do these API extensions have on existing SLIs (e.g. scalability, API throughput,
-  API availability)
-
-  Examples:
-  - Adds 1s to every pod update in the system, slowing down pod scheduling by 5s on average.
-  - Fails creation of ConfigMap in the system when the webhook is not available.
-  - Adds a dependency on the SDN service network for all resources, risking API availability in case
-    of SDN issues.
-  - Expected use-cases require less than 1000 instances of the CRD, not impacting
-    general API throughput.
-
-- How is the impact on existing SLIs to be measured and when (e.g. every release by QE, or
-  automatically in CI) and by whom (e.g. perf team; name the responsible person and let them review
-  this enhancement)
-
-- Describe the possible failure modes of the API extensions.
-- Describe how a failure or behaviour of the extension will impact the overall cluster health
-  (e.g. which kube-controller-manager functionality will stop working), especially regarding
-  stability, availability, performance and security.
-- Describe which OCP teams are likely to be called upon in case of escalation with one of the failure modes
-  and add them as reviewers to this enhancement.
+TODO.
 
 ## Support Procedures
 
-Describe how to
-- detect the failure modes in a support situation, describe possible symptoms (events, metrics,
-  alerts, which log output in which component)
-
-  Examples:
-  - If the webhook is not running, kube-apiserver logs will show errors like "failed to call admission webhook xyz".
-  - Operator X will degrade with message "Failed to launch webhook server" and reason "WehhookServerFailed".
-  - The metric `webhook_admission_duration_seconds("openpolicyagent-admission", "mutating", "put", "false")`
-    will show >1s latency and alert `WebhookAdmissionLatencyHigh` will fire.
-
-- disable the API extension (e.g. remove MutatingWebhookConfiguration `xyz`, remove APIService `foo`)
-
-  - What consequences does it have on the cluster health?
-
-    Examples:
-    - Garbage collection in kube-controller-manager will stop working.
-    - Quota will be wrongly computed.
-    - Disabling/removing the CRD is not possible without removing the CR instances. Customer will lose data.
-      Disabling the conversion webhook will break garbage collection.
-
-  - What consequences does it have on existing, running workloads?
-
-    Examples:
-    - New namespaces won't get the finalizer "xyz" and hence might leak resource X
-      when deleted.
-    - SDN pod-to-pod routing will stop updating, potentially breaking pod-to-pod
-      communication after some minutes.
-
-  - What consequences does it have for newly created workloads?
-
-    Examples:
-    - New pods in namespace with Istio support will not get sidecars injected, breaking
-      their networking.
-
-- Does functionality fail gracefully and will work resume when re-enabled without risking
-  consistency?
-
-  Examples:
-  - The mutating admission webhook "xyz" has FailPolicy=Ignore and hence
-    will not block the creation or updates on objects when it fails. When the
-    webhook comes back online, there is a controller reconciling all objects, applying
-    labels that were not applied during admission webhook downtime.
-  - Namespaces deletion will not delete all objects in etcd, leading to zombie
-    objects when another namespace with the same name is created.
+TODO.
 
 ## Infrastructure Needed [optional]
 
-Use this section if you need things from the project. Examples include a new
-subproject, repos requested, github details, and/or testing infrastructure.
+TODO.
