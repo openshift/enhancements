@@ -29,10 +29,10 @@ superseded-by:
 This enhancement extends the component-scoped proxy support introduced by
 [Proxy Support for Integrated Auth Stack](proxy-support-for-integrated-auth-stack.md)
 to External OIDC authentication. It enables the Cluster Authentication Operator
-(CAO) and the OAuth API server's External OIDC webhook authenticator to reach
-external identity providers, OIDC distributed claim endpoints, and configured
-external claim sources through a proxy, without requiring a cluster-wide egress
-proxy. The feature targets standalone OpenShift and HyperShift.
+(CAO), the OAuth API server's External OIDC webhook authenticator, and OpenShift
+Console to reach external identity providers, OIDC distributed claim endpoints,
+and configured external claim sources through a proxy, without requiring a
+cluster-wide egress proxy. The feature targets standalone OpenShift and HyperShift.
 
 **Note: HyperShift part is largely missing for now.**
 
@@ -64,22 +64,24 @@ delegates token validation to this webhook, which validates JWTs and can retriev
 additional identity information from configured external claim sources. The
 integrated OAuth server is not used in this mode.
 
-This webhook architecture provides the component boundary for the proposed proxy
-support. Its outbound dependencies are:
+The proposed proxy support covers both Console login and webhook token
+validation. Their outbound dependencies are:
 
 | Component | Outbound communication |
 | --- | --- |
 | CAO | Fetches the issuer's discovery document while validating External OIDC configuration. |
+| Console | Fetches OIDC discovery metadata and JWKS, exchanges authorization codes for tokens, and refreshes tokens to maintain login sessions. |
 | OAuth API server | Fetches OIDC discovery metadata and retrieves or refreshes the issuer's JWKS signing keys for JWT verification. |
 | OAuth API server, when a token references supported [OIDC distributed claims](https://openid.net/specs/openid-connect-core-1_0.html#AggregatedDistributedClaims) | Fetches claims from endpoints referenced in the token and discovers the returned JWT's issuer and signing keys for verification. |
 | OAuth API server, when external claim sources are configured | Fetches additional identity information from the configured source URLs. |
 | OAuth API server, when a claim source uses client credentials | Obtains access tokens from the configured token endpoint to authenticate requests to that source. |
 
-The webhook validates a token that the caller already obtained. It does not host
-the interactive browser login flow or exchange the user's authorization code for
-tokens. Client-credentials requests for external claim sourcing are a separate
-outbound dependency. Proxy configuration for browsers, CLI login helpers, or
-other OIDC clients is outside this component's configuration.
+The webhook validates a token that the caller already obtained. Console performs
+the server-side OAuth2/OIDC login flow and needs proxy access independently of the
+webhook; otherwise, API token validation can succeed while Console login fails.
+The user's browser must still reach the provider's authorization endpoint and the
+Console callback URL. Configuring the browser's network access, CLI login helpers,
+or user-managed OIDC clients is outside this enhancement's scope.
 
 ### User Stories
 
@@ -89,12 +91,17 @@ other OIDC clients is outside this component's configuration.
 - As a cluster administrator, I want configured external claim sources to use
   that proxy so that group and other identity information remains available in a
   restricted network.
+- As a cluster administrator, I want Console login and token refresh to use the
+  authentication proxy so that users can access Console without a cluster-wide
+  proxy.
 
 ### Goals
 
 - Extend component-scoped proxy support to External OIDC issuer validation,
   discovery, JWKS retrieval, distributed claim resolution, and external claim
   sourcing.
+- Support Console's server-side External OIDC login and token refresh using the
+  same authentication proxy configuration.
 - Reuse the existing standalone authentication proxy configuration and its
   precedence over the cluster-wide proxy.
 - Support proxy CA rotation without restarting the webhook solely for CA content
@@ -109,7 +116,9 @@ other OIDC clients is outside this component's configuration.
   proxy enhancement.
 - Per-provider or per-claim-source proxy settings, changes to the cluster-wide
   proxy API, or a generalized per-component proxy framework.
-- Proxy configuration for end-user OIDC clients or unrelated cluster components.
+- Proxy configuration for end-user browsers, CLI login helpers, user-managed OIDC
+  clients, or unrelated cluster components. Console's server-side OIDC client is
+  in scope.
 
 ## Proposal
 
@@ -125,7 +134,12 @@ synchronizes and mounts the optional proxy CA bundle. The webhook uses this
 configuration for its outbound requests. The TokenReview connection from
 kube-apiserver to the webhook remains within the cluster.
 
-The standalone implementation requires `ExternalOIDC`,
+Console Operator also consumes the authentication proxy configuration and supplies
+the effective proxy settings and trust to Console's External OIDC login clients.
+It owns reconciliation of the Console Deployment and its configuration; CAO
+continues to own the webhook Deployment.
+
+The standalone webhook implementation requires `ExternalOIDC`,
 `ExternalOIDCExternalClaimsSourcing`, `AuthenticationComponentProxy`, and
 `AuthenticationComponentProxyExternalOIDC`. The External Claims Sourcing gate
 selects the webhook architecture even when no provider has external claim sources.
@@ -142,7 +156,7 @@ proxy that can reach the required external endpoints.
 
 1. The administrator configures OIDC providers on
    `authentication.config.openshift.io/cluster`, including issuer trust and
-   external claim sources as needed.
+   external claim sources as needed, and the Console OIDC client for Console login.
 2. If the proxy requires a custom CA, the administrator creates a ConfigMap in
    `openshift-config` containing the PEM bundle under `ca-bundle.crt`.
 3. The administrator sets `spec.proxy` on the authentication operator resource:
@@ -167,17 +181,23 @@ proxy that can reach the required external endpoints.
    trust is needed. At least one of `httpProxy` or `httpsProxy` must be set.
 4. CAO revalidates issuer discovery using the effective proxy and applicable CA
    certificates, and reconciles the webhook Deployment with the proxy environment
-   variables and optional CA mount.
-5. When a user presents an external OIDC token to kube-apiserver, kube-apiserver
+   variables and optional CA mount. Console Operator reconciles the corresponding
+   proxy settings and trust for Console's OIDC clients.
+5. For Console login, the browser follows the authorization redirect to the
+   provider and returns to Console's callback. Console uses the effective proxy
+   for discovery, authorization-code exchange, JWKS retrieval, and subsequent
+   token refresh. The browser's requests use its own network configuration.
+6. When a user presents an external OIDC token to kube-apiserver, kube-apiserver
    calls the TokenReview webhook. The webhook uses issuer discovery and JWKS data
    to validate the token, resolves supported distributed claims referenced by the
    token, and retrieves configured external claims. These outbound requests use
    the effective proxy before the webhook returns the authentication result.
 
-Changing proxy environment variables rolls out the Deployment. Updating only the
-contents of the referenced proxy CA bundle is picked up through the mounted file
-without a Deployment rollout. Removing `spec.proxy` restores the cluster-wide
-proxy configuration, if configured, or direct connectivity otherwise.
+Changing the webhook's proxy environment variables rolls out its Deployment.
+Updating only the contents of its referenced proxy CA bundle is picked up through
+the mounted file without a webhook Deployment rollout. Console's update behavior
+is discussed below. Removing `spec.proxy` restores the cluster-wide proxy
+configuration, if configured, or direct connectivity for both components.
 
 ### API Extensions
 
@@ -199,8 +219,9 @@ TODO: Describe the HyperShift API and determine its API review requirements.
 #### Hypershift / Hosted Control Planes
 
 TODO: Describe the hosted control plane configuration, reconciliation, and CA
-distribution. HyperShift is in scope for the feature; the standalone CAO design
-below does not by itself implement hosted support.
+distribution, including how Console receives the authentication proxy settings and
+trust. HyperShift is in scope for the feature; the standalone design below does
+not by itself implement hosted support.
 
 #### Standalone Clusters
 
@@ -208,6 +229,9 @@ CAO runs in `openshift-authentication-operator` and manages the External OIDC
 webhook Deployment in `openshift-oauth-apiserver`. It reads the operator
 `Authentication` resource and user-provided ConfigMaps from the same cluster.
 The standalone reconciliation and runtime behavior are described below.
+
+Console Operator manages the Console Deployment and its configuration in
+`openshift-console`, including the External OIDC client configuration and trust.
 
 #### Single-node Deployments or MicroShift
 
@@ -229,8 +253,10 @@ Reuse the resolution rules from
 - When the component proxy gates are enabled and `spec.proxy` is configured,
   use that configuration in full. Do not inherit individual fields from the
   cluster-wide proxy.
-- Otherwise, use the cluster-wide proxy configuration provided through CAO's
-  process environment. If no proxy is configured there, use direct connectivity.
+- Otherwise, use the cluster-wide proxy configuration. CAO obtains this from its
+  process environment; Console Operator reads the status of
+  `proxy.config.openshift.io/cluster`. If no proxy is configured, use direct
+  connectivity.
 
 The shared resolver adds cluster-internal bypass entries to the component
 `noProxy` list, including `.cluster.local`, `.svc`, `localhost`,
@@ -260,8 +286,9 @@ endpoint's TLS certificate.
 
 Apply this rule to discovery, the `jwks_uri` returned by discovery, distributed
 claim endpoints and their JWT issuers' discovery and JWKS URLs, configured external
-claim source URLs, and client-credentials token endpoints independently. Bypassing
-an internal discovery endpoint does not automatically bypass a different JWKS host.
+claim source URLs, client-credentials token endpoints, and Console's discovery,
+JWKS, and token endpoints independently. Bypassing an internal discovery endpoint
+does not automatically bypass a different JWKS or token endpoint host.
 The incoming TokenReview connection from kube-apiserver requires no additional
 bypass entry in the webhook's environment; these settings affect outbound requests.
 
@@ -333,9 +360,100 @@ noted below.
 Changes to proxy environment variables or adding or removing the CA mount change
 the PodSpec and trigger a rollout. CA bundle content rotation alone does not.
 
+#### Console Login and Token Refresh
+
+Console is an External OIDC client. Its authentication HTTP clients perform
+discovery, authorization-code exchange, ID token verification using JWKS, and
+refresh-token requests. These requests must use the same effective authentication
+proxy and bypass rules as the webhook. The browser's authorization and logout
+redirects remain browser-side requests.
+
+Console already honors `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` in its
+authentication transports. Console Operator currently populates these variables
+from the cluster-wide Proxy status and separately synchronizes the issuer CA.
+It does not consume the authentication operator's `spec.proxy`, so configuring
+only CAO and the webhook is insufficient for Console login.
+
+Console Operator must watch `authentication.operator.openshift.io/cluster` and
+the referenced proxy CA ConfigMap, apply the component proxy feature gates and
+resolution rules, and reconcile the resulting settings and trust into Console.
+This requires adding the operator Authentication informer and read permissions.
+When `trustedCA` is specified, the operator must synchronize the bundle into
+`openshift-console` and make it available to Console's authentication clients
+alongside issuer trust. Changes and removal of the component configuration must
+be reconciled, including fallback to the cluster-wide proxy.
+
+TODO: Finalize the Console configuration mechanism and CA update behavior with
+Console reviewers. Process-wide proxy variables also affect Console's other HTTP
+clients; decide whether to use them or pass settings specifically to its OIDC
+transports. Define whether proxy CA changes reload those transports or roll out
+Console. The webhook's guarantee of CA rotation without restart does not by itself
+provide that behavior for Console.
+
 ### Risks and Mitigations
 
-TODO.
+The following risks extend those described in the
+[integrated authentication proxy enhancement](proxy-support-for-integrated-auth-stack.md#risks-and-mitigations)
+to External OIDC token validation and Console login.
+
+**Cluster lockout from invalid proxy configuration.**
+A wrong proxy URL, missing or invalid CA bundle, or incorrect `noProxy` entries
+can prevent the webhook and Console from reaching required endpoints. This can
+break token validation, Console login, or token refresh and lock out users who
+rely on External OIDC. CAO's issuer discovery validation provides early feedback,
+but successful discovery does not prove that JWKS, claim, and token endpoints are
+reachable from the operands. Validation and diagnostic conditions are not a
+guarantee against lockout.
+
+Administrators must retain and test an independent administrative access path
+using a kubeconfig with a valid client certificate and appropriate RBAC, as
+described in the
+[External OIDC authentication disruption guidance](direct-external-oidc-provider.md#authentication-disruptions).
+This bypasses the External OIDC webhook and does not depend on Console login.
+Recovery consists of correcting the proxy configuration or CA bundle, or removing
+`spec.proxy` to restore the cluster-wide proxy or direct connectivity. Removal
+only restores authentication if that fallback can reach the required endpoints;
+it is not an automatic recovery guarantee.
+
+**Proxy as a trusted intermediary.**
+A TLS-intercepting proxy trusted by the authentication clients can observe
+authorization codes, tokens, client credentials, and identity information.
+Administrators must trust the proxy and any CA added through `trustedCA`, retain
+HTTPS and certificate verification for external endpoints, and understand the
+implications of allowing TLS interception. An ordinary HTTPS CONNECT tunnel does
+not itself expose the encrypted request contents to the proxy.
+
+**Network dependency in the authentication path.**
+The proxy adds latency and an availability dependency to discovery, signing-key
+refresh, claim retrieval, and Console token requests. An outage can prevent
+authentication even when the identity provider is healthy. Existing caches may
+delay some failures but are not a recovery mechanism. Proxy availability and
+capacity are the administrator's responsibility. Connectivity failures must be
+visible through operator diagnostics and operand logs; requests must not silently
+bypass a configured proxy on failure.
+
+**Proxy credential leakage.**
+Credentials embedded in proxy URLs are stored in the operator resource and
+propagated into the webhook's Pod environment, not protected by a Secret
+reference. Access to these resources must be restricted, and diagnostics must
+avoid logging credentials. This limitation is inherited from the existing proxy
+API; adding a separate credential Secret reference is outside this proposal.
+
+**Debugging complexity from dual proxy sources.**
+When both component-scoped and cluster-wide proxies exist, diagnosing failures
+requires checking the effective settings in CAO, the webhook, and Console.
+Document the precedence rules: the component configuration replaces the
+cluster-wide configuration in full; absence of both means direct connectivity.
+Troubleshooting must also account for each endpoint's `NO_PROXY` match and for
+the separate endpoint and proxy CA bundles.
+
+**Authentication disruption during rollout.**
+Proxy environment changes roll out the webhook Deployment and can briefly disrupt
+authentication on single-replica deployments, including SNO. Administrators should
+plan these changes with recovery access available. Proxy CA content updates are
+hot-reloaded by the webhook without a rollout, reducing disruption during CA
+rotation. Console's CA update behavior remains subject to the Console integration
+design and must not be assumed to have the same no-restart guarantee.
 
 ### Drawbacks
 
@@ -359,7 +477,11 @@ separately configured through `proxyTrustedCA`.
 ## Open Questions [optional]
 
 - Complete the HyperShift design, including the configuration API, ownership of
-  issuer validation, and synchronization of proxy trust.
+  issuer validation, and synchronization of proxy settings and trust for the
+  webhook and Console.
+- Complete the Console integration design with Console reviewers, including
+  configuration delivery, the scope of proxy settings within the Console process,
+  and proxy CA update behavior.
 - Close two gaps in the current standalone implementation: render proxy
   environment variables even when `trustedCA` is absent, and propagate the
   component proxy CA and its updates to external claim source and
@@ -367,12 +489,27 @@ separately configured through `proxyTrustedCA`.
 
 ## Test Plan
 
+Verify a complete Console login when the provider is reachable from Console only
+through the authentication proxy, with no cluster-wide proxy configured. Cover
+discovery, authorization-code exchange, JWKS retrieval, token refresh, and the
+resulting API requests authenticated by the webhook. Also cover `NO_PROXY`,
+system-trusted and custom proxy CAs, proxy and CA updates, and removal of the
+component proxy with cluster-wide fallback or direct connectivity. Ensure the
+browser can independently reach the authorization endpoint and Console callback.
+
 Include a token whose configured groups claim is supplied through OIDC distributed
 claims, with no external claim sources configured. Verify proxy routing and
 `NO_PROXY` bypass for the claim endpoint and for discovery and JWKS retrieval of
 the returned JWT's issuer, including when these use hosts different from the
 original issuer. Cover custom proxy CA trust and CA rotation without a webhook
 restart for these requests.
+
+Exercise unreachable proxy URLs, invalid or missing proxy CA bundles, and
+incorrect `NO_PROXY` entries. Verify that failures are diagnosable, requests do
+not bypass the configured proxy on failure, and administrative client-certificate
+access remains available. Using that access, correct or remove `spec.proxy` and
+verify recovery of webhook authentication and Console login with a reachable
+cluster-wide fallback or direct path.
 
 TODO: Complete the remaining test plan.
 
