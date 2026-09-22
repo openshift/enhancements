@@ -30,9 +30,9 @@ This enhancement extends the component-scoped proxy support introduced by
 [Proxy Support for Integrated Auth Stack](proxy-support-for-integrated-auth-stack.md)
 to External OIDC authentication. It enables the Cluster Authentication Operator
 (CAO) and the OAuth API server's External OIDC webhook authenticator to reach
-external identity providers and configured external claim sources through a proxy,
-without requiring a cluster-wide egress proxy. The feature targets standalone
-OpenShift and HyperShift.
+external identity providers, OIDC distributed claim endpoints, and configured
+external claim sources through a proxy, without requiring a cluster-wide egress
+proxy. The feature targets standalone OpenShift and HyperShift.
 
 **Note: HyperShift part is largely missing for now.**
 
@@ -71,6 +71,7 @@ support. Its outbound dependencies are:
 | --- | --- |
 | CAO | Fetches the issuer's discovery document while validating External OIDC configuration. |
 | OAuth API server | Fetches OIDC discovery metadata and retrieves or refreshes the issuer's JWKS signing keys for JWT verification. |
+| OAuth API server, when a token references supported [OIDC distributed claims](https://openid.net/specs/openid-connect-core-1_0.html#AggregatedDistributedClaims) | Fetches claims from endpoints referenced in the token and discovers the returned JWT's issuer and signing keys for verification. |
 | OAuth API server, when external claim sources are configured | Fetches additional identity information from the configured source URLs. |
 | OAuth API server, when a claim source uses client credentials | Obtains access tokens from the configured token endpoint to authenticate requests to that source. |
 
@@ -92,7 +93,8 @@ other OIDC clients is outside this component's configuration.
 ### Goals
 
 - Extend component-scoped proxy support to External OIDC issuer validation,
-  discovery, JWKS retrieval, and external claim sourcing.
+  discovery, JWKS retrieval, distributed claim resolution, and external claim
+  sourcing.
 - Reuse the existing standalone authentication proxy configuration and its
   precedence over the cluster-wide proxy.
 - Support proxy CA rotation without restarting the webhook solely for CA content
@@ -168,8 +170,9 @@ proxy that can reach the required external endpoints.
    variables and optional CA mount.
 5. When a user presents an external OIDC token to kube-apiserver, kube-apiserver
    calls the TokenReview webhook. The webhook uses issuer discovery and JWKS data
-   to validate the token and, if configured, retrieves external claims through the
-   effective proxy before returning the authentication result.
+   to validate the token, resolves supported distributed claims referenced by the
+   token, and retrieves configured external claims. These outbound requests use
+   the effective proxy before the webhook returns the authentication result.
 
 Changing proxy environment variables rolls out the Deployment. Updating only the
 contents of the referenced proxy CA bundle is picked up through the mounted file
@@ -255,9 +258,10 @@ Entries contain hosts or IPs, optionally with ports, or CIDRs, not complete URLs
 The hostname must still resolve from the caller's namespace and match the
 endpoint's TLS certificate.
 
-Apply this rule to discovery, the `jwks_uri` returned by discovery, external claim
-source URLs, and client-credentials token endpoints independently. Bypassing an
-internal discovery endpoint does not automatically bypass a different JWKS host.
+Apply this rule to discovery, the `jwks_uri` returned by discovery, distributed
+claim endpoints and their JWT issuers' discovery and JWKS URLs, configured external
+claim source URLs, and client-credentials token endpoints independently. Bypassing
+an internal discovery endpoint does not automatically bypass a different JWKS host.
 The incoming TokenReview connection from kube-apiserver requires no additional
 bypass entry in the webhook's environment; these settings affect outbound requests.
 
@@ -305,6 +309,21 @@ file and rebuilds the affected HTTP transports when its contents change.
 CAO propagates source ConfigMap updates to the mounted copy without including
 those contents in a Deployment rollout trigger.
 
+The upstream OIDC authenticator also resolves distributed claims referenced by
+`_claim_names` and `_claim_sources` in the token. In the current implementation,
+this applies to the configured groups claim when it is not already present as a
+normal claim. The resolver fetches the referenced endpoint, using the supplied
+`access_token` when present, and verifies the returned JWT, which can require
+discovery and JWKS requests to that JWT's issuer. This path operates independently
+of configured external claim sources.
+
+Distributed claim retrieval and verification reuse the issuer HTTP client, so
+they inherit its proxy environment, `NO_PROXY` behavior, and issuer and proxy CA
+trust, including proxy CA reloads. No separate proxy integration is needed for
+this path. The claim endpoint and its JWT issuer can use hosts different from the
+original issuer; all must be reachable through the proxy or directly when matched
+by `NO_PROXY`.
+
 External claim source requests, including client-credentials token acquisition
 when configured, also need the effective proxy and applicable source and proxy
 trust. These use separate HTTP clients from discovery and JWKS retrieval;
@@ -332,10 +351,10 @@ transport. Environment variables are the simplest solution that meets the
 requirements: the existing transports already honor `HTTP_PROXY`, `HTTPS_PROXY`,
 and `NO_PROXY` through Go's
 [`http.ProxyFromEnvironment`](https://pkg.go.dev/net/http#ProxyFromEnvironment).
-This covers discovery, JWKS retrieval, external claim sourcing, and
-client-credentials token requests without additional configuration fields or
-proxy wiring in the server. Proxy CA trust remains separately configured through
-`proxyTrustedCA`.
+This covers discovery, JWKS retrieval, distributed claim resolution, external
+claim sourcing, and client-credentials token requests without additional
+configuration fields or proxy wiring in the server. Proxy CA trust remains
+separately configured through `proxyTrustedCA`.
 
 ## Open Questions [optional]
 
@@ -348,7 +367,14 @@ proxy wiring in the server. Proxy CA trust remains separately configured through
 
 ## Test Plan
 
-TODO.
+Include a token whose configured groups claim is supplied through OIDC distributed
+claims, with no external claim sources configured. Verify proxy routing and
+`NO_PROXY` bypass for the claim endpoint and for discovery and JWKS retrieval of
+the returned JWT's issuer, including when these use hosts different from the
+original issuer. Cover custom proxy CA trust and CA rotation without a webhook
+restart for these requests.
+
+TODO: Complete the remaining test plan.
 
 ## Graduation Criteria
 
