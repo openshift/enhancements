@@ -203,8 +203,11 @@ Starting state: a NodePool exists and references user/core/NTO configs.
    mark the new one reached.
 7. When a rollout drains (old MachineDeployment scaled to 0), the NodePool
    controller deletes the retired userdata Secret and advances
-   `spec.retiredGeneration`. The PayloadController frees the old token from the
-   store and clears `status.previous`.
+   `spec.retiredGeneration`. The PayloadController frees non-current store
+   entries at or below that generation and clears `status.previous` only when
+   `status.previous.generation <= spec.retiredGeneration`. Thus, if A->B->C
+   overtakes a rollout and A reports drained late, B remains available in
+   `status.previous` until B itself drains.
 8. On teardown, the creating consumer removes its consumer finalizer and deletes
    the CR; the PayloadController then frees all remaining store tokens and removes
    its store-cleanup finalizer, after which only the CR-owned projections (the
@@ -237,7 +240,8 @@ sequenceDiagram
     SRV-->>Node: serve payload
     SRV->>CR: set IgnitionReached=True (one-shot)
     NP->>CR: advance spec.retiredGeneration after drain
-    PC->>PS: Delete(previous token); clear status.previous
+    PC->>PS: Delete non-current tokens <= retiredGeneration
+    PC->>CR: Clear previous only if previous.gen <= retiredGeneration
 ```
 
 ### API Extensions
@@ -266,75 +270,75 @@ This enhancement adds a new CRD and a finalizer:
    // +kubebuilder:printcolumn:name="Generated",type=string,JSONPath=`.status.conditions[?(@.type=="PayloadGenerated")].status`
    // +kubebuilder:printcolumn:name="Reached",type=string,JSONPath=`.status.conditions[?(@.type=="IgnitionReached")].status`
    type IgnitionPayload struct {
-   	metav1.TypeMeta   `json:",inline"`
-   	metav1.ObjectMeta `json:"metadata,omitempty"`
+    metav1.TypeMeta   `json:",inline"`
+    metav1.ObjectMeta `json:"metadata,omitempty"`
 
-   	// spec is written by the consumer and describes the desired payload inputs.
-   	// +required
-   	Spec IgnitionPayloadSpec `json:"spec"`
+    // spec is written by the consumer and describes the desired payload inputs.
+    // +required
+    Spec IgnitionPayloadSpec `json:"spec"`
 
-   	// status is written by the PayloadController and reports generation and
-   	// rollout progress.
-   	// +optional
-   	Status IgnitionPayloadStatus `json:"status,omitempty"`
+    // status is written by the PayloadController and reports generation and
+    // rollout progress.
+    // +optional
+    Status IgnitionPayloadStatus `json:"status,omitempty"`
    }
 
    // IgnitionPayloadSpec is written entirely by the consumer; the PayloadController
    // treats it as read-only input. The consumer declares inputs and classifies
    // config sources — it never opens a ConfigMap's contents and computes no hash.
    type IgnitionPayloadSpec struct {
-   	// releaseImage is the pullspec of the OCP release whose
-   	// machine-config-server binaries render the payload. The PayloadController
-   	// resolves it to an immutable digest before pulling it.
-   	// +required
-   	// +kubebuilder:validation:MinLength=1
-   	ReleaseImage string `json:"releaseImage"`
+    // releaseImage is the pullspec of the OCP release whose
+    // machine-config-server binaries render the payload. The PayloadController
+    // resolves it to an immutable digest before pulling it.
+    // +required
+    // +kubebuilder:validation:MinLength=1
+    ReleaseImage string `json:"releaseImage"`
 
-   	// pullSecretName is the name of a Secret in the CR's namespace holding the
-   	// registry pull secret used to fetch the release image and embedded in the
-   	// payload.
-   	// +required
-   	// +kubebuilder:validation:MinLength=1
-   	PullSecretName string `json:"pullSecretName"`
+    // pullSecretName is the name of a Secret in the CR's namespace holding the
+    // registry pull secret used to fetch the release image and embedded in the
+    // payload.
+    // +required
+    // +kubebuilder:validation:MinLength=1
+    PullSecretName string `json:"pullSecretName"`
 
-   	// additionalTrustBundle optionally references a ConfigMap in the CR's
-   	// namespace holding a PEM CA bundle for booting nodes to trust.
-   	// +optional
-   	AdditionalTrustBundle *corev1.LocalObjectReference `json:"additionalTrustBundle,omitempty"`
+    // additionalTrustBundle optionally references a ConfigMap in the CR's
+    // namespace holding a PEM CA bundle for booting nodes to trust.
+    // +optional
+    AdditionalTrustBundle *corev1.LocalObjectReference `json:"additionalTrustBundle,omitempty"`
 
-   	// osStream selects the RHEL OS stream (e.g. "rhel-9") the payload targets.
-   	// +optional
-   	OSStream string `json:"osStream,omitempty"`
+    // osStream selects the RHEL OS stream (e.g. "rhel-9") the payload targets.
+    // +optional
+    OSStream string `json:"osStream,omitempty"`
 
-   	// rolloutGlobalConfig carries the rollout-relevant subset of the hosted
-   	// cluster's global configuration, canonicalized by the consumer. It is a
-   	// rollout-hash input; see predictable-nodepool-rollout-control (#8698).
-   	// +optional
-   	RolloutGlobalConfig string `json:"rolloutGlobalConfig,omitempty"`
+    // rolloutGlobalConfig carries the rollout-relevant subset of the hosted
+    // cluster's global configuration, canonicalized by the consumer. It is a
+    // rollout-hash input; see predictable-nodepool-rollout-control (#8698).
+    // +optional
+    RolloutGlobalConfig string `json:"rolloutGlobalConfig,omitempty"`
 
-   	// rolloutConfigRefs lists ConfigMaps in the CR's namespace whose contents
-   	// are rollout-relevant (user, core, and NTO machine configs). A change to
-   	// any of them can advance the rollout hash and trigger a node rollout.
-   	// +optional
-   	// +listType=map
-   	// +listMapKey=name
-   	RolloutConfigRefs []corev1.LocalObjectReference `json:"rolloutConfigRefs,omitempty"`
+    // rolloutConfigRefs lists ConfigMaps in the CR's namespace whose contents
+    // are rollout-relevant (user, core, and NTO machine configs). A change to
+    // any of them can advance the rollout hash and trigger a node rollout.
+    // +optional
+    // +listType=map
+    // +listMapKey=name
+    RolloutConfigRefs []corev1.LocalObjectReference `json:"rolloutConfigRefs,omitempty"`
 
-   	// mgmtConfigRefs lists ConfigMaps in the CR's namespace whose contents are
-   	// management-side only (the apiserver-HAProxy config). A change to them
-   	// refreshes the payload behind the current token without a rollout.
-   	// +optional
-   	// +listType=map
-   	// +listMapKey=name
-   	MgmtConfigRefs []corev1.LocalObjectReference `json:"mgmtConfigRefs,omitempty"`
+    // mgmtConfigRefs lists ConfigMaps in the CR's namespace whose contents are
+    // management-side only (the apiserver-HAProxy config). A change to them
+    // refreshes the payload behind the current token without a rollout.
+    // +optional
+    // +listType=map
+    // +listMapKey=name
+    MgmtConfigRefs []corev1.LocalObjectReference `json:"mgmtConfigRefs,omitempty"`
 
-   	// retiredGeneration is a level-triggered signal that the payload of the
-   	// given generation has drained (its nodes are gone) and its store token may
-   	// be freed. The PayloadController deletes store entries at or below this
-   	// generation except the one backing status.current.
-   	// +optional
-   	// +kubebuilder:validation:Minimum=0
-   	RetiredGeneration int64 `json:"retiredGeneration,omitempty"`
+    // retiredGeneration is a level-triggered signal that the payload of the
+    // given generation has drained (its nodes are gone) and its store token may
+    // be freed. The PayloadController deletes store entries at or below this
+    // generation except the one backing status.current.
+    // +optional
+    // +kubebuilder:validation:Minimum=0
+    RetiredGeneration int64 `json:"retiredGeneration,omitempty"`
    }
 
    // IgnitionPayloadStatus has two writers with disjoint field ownership. The
@@ -344,55 +348,55 @@ This enhancement adds a new CRD and a finalizer:
    // ownership contract in Implementation Details). No writer replaces the whole
    // status.
    type IgnitionPayloadStatus struct {
-   	// current describes the payload for the latest validated, generated config.
-   	// +optional
-   	Current *PayloadReference `json:"current,omitempty"`
+    // current describes the payload for the latest validated, generated config.
+    // +optional
+    Current *PayloadReference `json:"current,omitempty"`
 
-   	// previous describes the immediately prior payload, retained during a
-   	// rollout so in-flight boots on the old token are served until they drain.
-   	// It is serving/observability state, not the cleanup mechanism: tokens are
-   	// reclaimed by delete-on-evict and the store-cleanup finalizer, not by
-   	// tracking every generation here.
-   	// +optional
-   	Previous *PayloadReference `json:"previous,omitempty"`
+    // previous describes the immediately prior payload, retained during a
+    // rollout so in-flight boots on the old token are served until they drain.
+    // It is serving/observability state, not the cleanup mechanism: tokens are
+    // reclaimed by delete-on-evict and the store-cleanup finalizer, not by
+    // tracking every generation here.
+    // +optional
+    Previous *PayloadReference `json:"previous,omitempty"`
 
-   	// conditions reports generation and rollout progress. Known types:
-   	// "PayloadGenerated" (the latest config produced a payload) and
-   	// "IgnitionReached" (a node has fetched status.current's token; written by the
-   	// serving tier under the Status ownership contract).
-   	// +optional
-   	// +listType=map
-   	// +listMapKey=type
-   	Conditions []metav1.Condition `json:"conditions,omitempty"`
+    // conditions reports generation and rollout progress. Known types:
+    // "PayloadGenerated" (the latest config produced a payload) and
+    // "IgnitionReached" (a node has fetched status.current's token; written by the
+    // serving tier under the Status ownership contract).
+    // +optional
+    // +listType=map
+    // +listMapKey=type
+    Conditions []metav1.Condition `json:"conditions,omitempty"`
    }
 
    // PayloadReference identifies one generated payload version and its store key.
    type PayloadReference struct {
-   	// configHash is the payload-identity hash over the whole validated config.
-   	// It also labels the payload's store entry, making generation idempotent
-   	// across leader failover.
-   	// +required
-   	ConfigHash string `json:"configHash"`
+    // configHash is the payload-identity hash over the whole validated config.
+    // It also labels the payload's store entry, making generation idempotent
+    // across leader failover.
+    // +required
+    ConfigHash string `json:"configHash"`
 
-   	// rolloutHash is the hash over the rollout-relevant inputs. A change here
-   	// advances generation and triggers a node rollout.
-   	// +required
-   	RolloutHash string `json:"rolloutHash"`
+    // rolloutHash is the hash over the rollout-relevant inputs. A change here
+    // advances generation and triggers a node rollout.
+    // +required
+    RolloutHash string `json:"rolloutHash"`
 
-   	// token is an opaque, non-derivable UUID: the key into the PayloadStore for
-   	// this version. It is a capability to fetch the payload, not the payload
-   	// itself (bytes never live in status), and it becomes unusable the instant
-   	// its store entry is deleted (after which GET /ignition returns HTTP 511).
-   	// Its authorization model for GET /ignition is unchanged from today's
-   	// ignition server.
-   	// +required
-   	Token string `json:"token"`
+    // token is an opaque, non-derivable UUID: the key into the PayloadStore for
+    // this version. It is a capability to fetch the payload, not the payload
+    // itself (bytes never live in status), and it becomes unusable the instant
+    // its store entry is deleted (after which GET /ignition returns HTTP 511).
+    // Its authorization model for GET /ignition is unchanged from today's
+    // ignition server.
+    // +required
+    Token string `json:"token"`
 
-   	// generation is a monotonically increasing counter the consumer watches to
-   	// execute a rollout. It advances only when rolloutHash changes.
-   	// +required
-   	// +kubebuilder:validation:Minimum=0
-   	Generation int64 `json:"generation"`
+    // generation is a monotonically increasing counter the consumer watches to
+    // execute a rollout. It advances only when rolloutHash changes.
+    // +required
+    // +kubebuilder:validation:Minimum=0
+    Generation int64 `json:"generation"`
    }
    ```
 
@@ -679,8 +683,9 @@ The general strategy:
 
 - **Unit tests** for the PayloadController: config split + validation +
   deterministic gather order, both hashes, rollout detection (rollout-relevant
-  vs management-side change), and the delete-on-evict path for rollouts that
-  overtake each other (A->B->C within one rollout window).
+  vs management-side change), the delete-on-evict path for rollouts that
+  overtake each other (A->B->C within one rollout window), and a late A-drain
+  signal that proves `status.previous` retains B until B's generation is retired.
 - **Unit/integration tests** for the NodePool controller's reduced role: config
   projection, ref-list classification, `retiredGeneration` advancement,
   finalizer-driven CR delete and cascade of owned ConfigMaps.
