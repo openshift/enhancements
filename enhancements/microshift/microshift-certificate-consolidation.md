@@ -3,9 +3,13 @@ title: microshift-certificate-consolidation
 authors:
   - "@eslutsky"
 reviewers:
-  - TBD
+  - "@fzdarsky, MicroShift architect"
+  - "@ggiguash, MicroShift contributor"
+  - "@stlaz, Security specialist"
+  - "@pmtk, MicroShift contributor"
+  - "@copejon, MicroShift contributor"
 approvers:
-  - TBD
+  - "@dhellmann"
 api-approvers:
   - "None"
 creation-date: 2026-07-29
