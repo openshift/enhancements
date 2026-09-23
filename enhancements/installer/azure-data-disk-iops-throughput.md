@@ -11,7 +11,7 @@ approvers:
 api-approvers:
 - TBD
 creation-date: 2026-05-16
-last-updated: 2026-09-22
+last-updated: 2026-09-23
 tracking-link:
 - https://issues.redhat.com/browse/RFE-7972
 status: implementable
@@ -93,6 +93,7 @@ controlPlane:
         nameSuffix: etcd
         diskSizeGB: 64
         cachingType: None
+        deletionPolicy: Delete
         managedDisk:
           storageAccountType: PremiumV2_LRS
           diskIOPSReadWrite: 3000
@@ -108,6 +109,7 @@ compute:
         nameSuffix: data
         diskSizeGB: 256
         cachingType: None
+        deletionPolicy: Delete
         managedDisk:
           storageAccountType: PremiumV2_LRS
           diskIOPSReadWrite: 5000
@@ -166,8 +168,9 @@ The installer's `provider()` function in `pkg/asset/machines/azure/machines.go` 
 
 | Rule | Where enforced |
 |------|---------------|
-| `diskIOPSReadWrite`/`diskMBpsReadWrite` only with `UltraSSD_LRS` or `PremiumV2_LRS` | MAO webhook (`validateAzureDataDisks`) |
-| Caching must be `None` or empty for `PremiumV2_LRS` data disks | MAO webhook + MAPO (`generateDataDisks`) |
+| `PremiumV2_LRS` accepted for data disk `storageAccountType` | Installer install-config validation + CAPZ `generateStorageProfile` |
+| `diskIOPSReadWrite`/`diskMBpsReadWrite` only with `UltraSSD_LRS` or `PremiumV2_LRS` | Installer install-config validation + MAO webhook (`validateAzureDataDisks`) |
+| Caching must be `None` or empty for `PremiumV2_LRS` data disks | Installer install-config validation + CAPZ wiring; day-2: MAO webhook + MAPO (`generateDataDisks`) |
 | IOPS/MBps values must be >= 1 | openshift/api kubebuilder validation tags |
 | Azure-level constraints (IOPS ratio, region support) | Azure ARM API (runtime rejection) |
 
@@ -189,7 +192,7 @@ This feature applies to single-node OpenShift deployments. Data disks can be con
 
 **Data Flow:**
 
-```
+```text
 install-config.yaml
     -> Installer parses MachinePool.DataDisks[].ManagedDisk.DiskIOPSReadWrite/DiskMBpsReadWrite
     -> CAPZ AzureMachine CR (install time provisioning via CAPZ controller)
@@ -229,23 +232,24 @@ In the Azure compute SDK, `DiskIOPSReadWrite` and `DiskMBpsReadWrite` are proper
 
 ### Feature Gate
 
-This enhancement extends [SPLAT-2133 (azure-data-disk)](https://github.com/openshift/enhancements/blob/master/enhancements/installer/azure-data-disk.md), which gates Azure multi-disk support behind `FeatureGateAzureMultiDisk`. IOPS/throughput configuration is an additive extension to the existing `dataDisks` schema — users cannot configure `diskIOPSReadWrite` or `diskMBpsReadWrite` without first configuring `dataDisks` on a machine pool.
+This enhancement extends [SPLAT-2133 (azure-data-disk)](https://github.com/openshift/enhancements/blob/master/enhancements/installer/azure-data-disk.md), which gates Azure multi-disk install-time configuration behind `FeatureGateAzureMultiDisk`. IOPS/throughput configuration is an additive extension to the existing `dataDisks` schema: users cannot configure `diskIOPSReadWrite` or `diskMBpsReadWrite` without first configuring `dataDisks` on a machine pool.
 
-**Install-time (day 0):** Reuse `FeatureGateAzureMultiDisk`. No separate feature gate is proposed. The installer already requires `FeatureGateAzureMultiDisk` when any `dataDisks` are present (`pkg/types/azure/validation/featuregates.go`). IOPS/MBps fields and `PremiumV2_LRS` are additional properties on the same `dataDisks` entries and inherit that gate. This keeps graduation aligned with the parent enhancement, which targets GA in OCP 5.1.
+**Open for engineering decision:** Reviewers have raised whether to reuse `FeatureGateAzureMultiDisk`, introduce a separate gate, or phase implementation relative to [SPLAT-2352](https://redhat.atlassian.net/browse/SPLAT-2352) / Azure multi-disk GA promotion ([OCPSTRAT-2440](https://redhat.atlassian.net/browse/OCPSTRAT-2440)). This EP documents the capability and validation rules; the final feature-gate model and graduation timeline are deferred to the Azure platform engineering team.
 
-**Day-2:** No installer feature gate applies. Day-2 Machine/MachineSet configuration uses Machine API types validated by the MAO admission webhook and provisioned by MAPO. This matches the parent multi-disk enhancement: `FeatureGateAzureMultiDisk` is an installer install-config gate only; the Machine API path is governed by API schema validation and the MAO webhook. A prototype validated both paths on OpenShift 4.22-rc.3 — install-time via installer/CAPZ and day-2 via MachineSet scale-up with custom MAPO.
+**Context for the decision:**
 
-**Why not a separate gate:** A separate gate would require enabling two flags for one logical feature, create ambiguous behavior when only one is enabled (e.g., data disks allowed but IOPS/MBps silently ignored by older components), and force independent graduation tracking for fields that cannot be used without multi-disk support. The new fields are optional on `DataDiskManagedDiskParameters`; clusters not setting them are unaffected.
-
-**Graduation interaction with AzureMultiDisk:** When `FeatureGateAzureMultiDisk` graduates to GA in 5.1, install-time IOPS/throughput configuration graduates with it. Day-2 criteria are satisfied by the same test matrix in this enhancement (MachineSet scale-up with IOPS/MBps, webhook rejection of invalid combinations). No separate gate lifecycle is required.
+- `FeatureGateAzureMultiDisk` today is an installer install-config gate (`pkg/types/azure/validation/featuregates.go`).
+- This work also touches openshift/api types, MAO webhook validation, and MAPO provisioning.
+- A prototype validated both install-time (installer/CAPZ) and day-2 (MachineSet scale-up with custom MAPO) paths on OpenShift 4.22-rc.3.
+- Implementation PR sequencing can follow engineering guidance (e.g., after SPLAT-2352) regardless of when this EP merges.
 
 
 ## Design Details
 
 ### Open Questions
 
-1. ~~Should this feature be gated behind `TechPreviewNoUpgrade` for initial release, or ship as GA-ready?~~ **Resolved:** Reuse `FeatureGateAzureMultiDisk` (see Feature Gate section above). Graduates to GA alongside multi-disk in OCP 5.1.
-2. Should the installer perform any semantic validation of IOPS/throughput values (e.g., PremiumV2_LRS minimum IOPS 3000 / MBps 125), or defer entirely to Azure ARM API rejection at provisioning time?
+1. Feature gate and graduation model: reuse `FeatureGateAzureMultiDisk`, separate gate, or phased rollout relative to SPLAT-2352 / Azure multi-disk GA? **Deferred to engineering** (see Feature Gate section).
+2. ~~Should the installer perform any semantic validation of IOPS/throughput values (e.g., PremiumV2_LRS minimum IOPS 3000 / MBps 125), or defer entirely to Azure ARM API rejection at provisioning time?~~ **Resolved:** Defer to Azure ARM API rejection at provisioning time (see Non-Goals and Alternatives).
 
 ### Test Plan
 
@@ -269,6 +273,8 @@ This enhancement extends [SPLAT-2133 (azure-data-disk)](https://github.com/opens
   - PremiumV2_LRS + cachingType ReadOnly rejected
   - Standard_LRS + IOPS/MBps rejected
   - UltraSSD_LRS + IOPS/MBps accepted
+  - UltraSSD_LRS + cachingType ReadOnly rejected
+  - UltraSSD_LRS + cachingType ReadWrite rejected
 
 **End-to-End Tests:**
 
@@ -294,27 +300,28 @@ A full-stack prototype has been implemented and validated on a live Azure enviro
 
 ## Graduation Criteria
 
-This enhancement does not introduce a separate feature gate. Graduation is coupled to `FeatureGateAzureMultiDisk` (parent enhancement [SPLAT-2133 / PR #1779](https://github.com/openshift/enhancements/pull/1779)).
+Graduation criteria depend on the feature-gate model chosen by engineering (see Feature Gate section). The following criteria apply regardless of gate choice:
 
 ### Dev Preview -> Tech Preview
 
-- `FeatureGateAzureMultiDisk` enabled; installer accepts IOPS/throughput on `PremiumV2_LRS` / `UltraSSD_LRS` data disks
+- Installer accepts IOPS/throughput on `PremiumV2_LRS` / `UltraSSD_LRS` data disks (behind agreed feature gate)
 - CI jobs for installation with custom IOPS/throughput
 - MAO webhook and MAPO day-2 path validated (see Prototype Validation)
 - End user documentation, relative API stability
 - Sufficient test coverage
 
-### Tech Preview -> GA (target: OCP 5.1, with AzureMultiDisk)
+### Tech Preview -> GA
 
-- `FeatureGateAzureMultiDisk` graduates to GA (enabled by default)
 - E2E tests verify IOPS/throughput values on provisioned Azure disks (install + day-2 MachineSet scale-up)
 - Upgrade/downgrade and scale testing on clusters with PremiumV2_LRS data disks
 - Sufficient time for feedback
 - User-facing documentation in OCP docs
+- Feature gate graduates per engineering decision (may be coupled to or decoupled from Azure multi-disk GA)
 
 ### Removing a deprecated feature
 
 N/A
+
 
 ## Upgrade / Downgrade Strategy
 
@@ -332,7 +339,7 @@ The `diskIOPSReadWrite` and `diskMBpsReadWrite` fields are optional (`+optional`
 - Older MAO versions will issue a warning but still accept the Machine object (the fields are in `providerSpec`, which is a `RawExtension`)
 - Older installer versions will not include the fields in generated manifests
 
-No version skew coordination is required.
+When IOPS/MBps fields are configured, clusters require MAO and MAPO versions that understand these fields for correct provisioning. A MachineSet scale-up during component downgrade can create nodes with Azure default disk performance while the requested values remain in the Machine object. Test plans should cover this downgrade behavior.
 
 ## Operational Aspects of API Extensions
 
@@ -349,14 +356,18 @@ The MAO webhook (which already exists) is extended with additional validation lo
 
 **Verifying IOPS/Throughput on Running Disks:**
 
-```bash
-# Via Azure CLI
-az disk show --resource-group <rg> --name <disk-name> \
-  --query '{iops: diskIOPSReadWrite, mbps: diskMBpsReadWrite, sku: sku.name}'
+Desired state (Machine API, shows requested provider specification):
 
-# Via Machine API
+```bash
 oc get machine <name> -n openshift-machine-api \
   -o jsonpath='{.spec.providerSpec.value.dataDisks[0].managedDisk}'
+```
+
+Runtime verification (Azure, confirms provisioned disk performance):
+
+```bash
+az disk show --resource-group <rg> --name <disk-name> \
+  --query '{iops: diskIOPSReadWrite, mbps: diskMBpsReadWrite, sku: sku.name}'
 ```
 
 **Common Issues:**
