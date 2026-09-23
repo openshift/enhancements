@@ -146,8 +146,8 @@ own the webhook Deployment.
 
 ### Feature Gates
 
-The feature applies in External OIDC mode
-(`authentication.config.openshift.io/cluster.spec.type: OIDC`):
+The feature applies when `authentication.config.openshift.io/cluster` has
+`spec.type: OIDC`:
 
 | Consumer | Required gates |
 | --- | --- |
@@ -256,14 +256,14 @@ on the management cluster.
 4. The HyperShift operator copies the component configuration into the
    HostedControlPlane and, when configured, synchronizes the referenced CA into
    the HCP namespace.
-5. The Control Plane Operator (CPO) validates issuer discovery using the effective proxy and applicable trust,
-   and configures the HCP-side OAuth API server Deployment with the proxy
-   environment and optional proxy CA mount.
-6. The Hosted Cluster Config Operator (HCCO) publishes the component proxy into the guest
-   `authentication.operator.openshift.io/cluster` and, when configured, copies the
-   proxy CA into guest `openshift-config`, adjusting the `trustedCA` reference to
-   the managed copy. Console Operator consumes these inputs as on standalone
-   clusters.
+5. The Control Plane Operator (CPO) validates issuer discovery using the effective
+   proxy and applicable trust, and configures the HCP-side OAuth API server
+   Deployment with the proxy environment and optional proxy CA mount.
+6. The Hosted Cluster Config Operator (HCCO) publishes the component proxy into
+   the guest `authentication.operator.openshift.io/cluster` and, when configured,
+   copies the proxy CA into guest `openshift-config`, adjusting the `trustedCA`
+   reference to the managed copy. Console Operator consumes these inputs as on
+   standalone clusters.
 
 For updates, the administrator edits the HostedCluster proxy configuration or its
 source CA ConfigMap, not the HostedControlPlane or generated guest copies. The
@@ -377,7 +377,7 @@ guest synchronization.
 
 Each synchronizing controller must watch CA content and reference changes so
 rotation propagates through the entire chain, including both guest-side copies.
-CPO refreshes issuer-validation trust. Operand updates follow
+Validation and operand updates follow
 [Configuration Updates and CA Reload](#configuration-updates-and-ca-reload).
 The component settings must not alter the guest cluster-wide Proxy, ignition,
 or NodePool configuration or trigger a NodePool rollout.
@@ -535,8 +535,7 @@ resolution rules, and reconcile the resulting settings and trust into Console.
 This requires adding the operator Authentication informer and read permissions.
 When `trustedCA` is specified, the operator must synchronize the bundle into
 `openshift-console` and make it available to Console's authentication clients
-alongside issuer trust. Changes and removal of the component configuration must
-be reconciled.
+alongside issuer trust.
 
 Console already reads `/var/console-config/console-config.yaml`, mounted from the
 `console-config` ConfigMap in `openshift-console`, through its `--config` argument.
@@ -588,7 +587,7 @@ configured. The generated representation preserves the resolution semantics:
 The proxy CA is mounted separately and supplied through `auth.proxy.trustedCAFile`.
 Console's authentication client construction must append it to the applicable
 issuer trust, preserving the existing system-root behavior when no issuer CA is
-specified, with or without a custom issuer CA.
+specified.
 The component proxy CA is not added to non-OIDC clients' trust stores.
 
 #### Configuration Updates and CA Reload
