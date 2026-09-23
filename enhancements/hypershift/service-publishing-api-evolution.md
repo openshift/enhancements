@@ -29,11 +29,11 @@ superseded-by: []
 ## Summary
 
 HostedClusters cannot expose the hosted control plane router as anything other
-than a cloud LoadBalancer: the router Service is created unconditionally as type
-`LoadBalancer`, so on management clusters without a cloud load-balancer provider
-(Agent, KubeVirt) it stays `Pending` indefinitely (OCPBUGS-77856). Fixing this
-requires letting users choose how the router is exposed — and two attempts to
-add that capability to the existing `spec.services[]` API
+than a cloud LoadBalancer: when the router is deployed its Service is hardcoded
+to type `LoadBalancer`, so on management clusters without a cloud load-balancer
+provider (Agent, KubeVirt) it stays `Pending` indefinitely (OCPBUGS-77856).
+Fixing this requires letting users choose how the router is exposed — and two
+attempts to add that capability to the existing `spec.services[]` API
 ([openshift/hypershift#8439](https://github.com/openshift/hypershift/pull/8439)
 and
 [openshift/enhancements#2024](https://github.com/openshift/enhancements/pull/2024))
@@ -77,13 +77,17 @@ exists.
 
 ### The trigger: the router exposure bug (OCPBUGS-77856)
 
-The hosted control plane router Service is created unconditionally as type
-`LoadBalancer` (`hypershift-operator/controllers/sharedingress/router.go`). On
-management clusters that have no cloud load-balancer provider — Agent and
-KubeVirt in particular — that Service never receives an address and stays
-`Pending`, which blocks route status propagation and KAS resolution. The fix is
-conceptually simple: let the user expose the router as a NodePort instead.
-Delivering it through the current API was not:
+The hosted control plane router Service is hardcoded to type `LoadBalancer` in
+`ReconcileRouterService`
+(`control-plane-operator/controllers/hostedcontrolplane/ingress/router.go`);
+caller-side gating decides whether it is created at all
+(`control-plane-operator/controllers/hostedcontrolplane/infra/infra.go`), but
+there is no user-facing way to change how it is exposed. On management clusters
+that have no cloud load-balancer provider — Agent and KubeVirt in particular —
+that Service never receives an address and stays `Pending`, which blocks route
+status propagation and KAS resolution. The fix is conceptually simple: let the
+user expose the router as a NodePort instead. Delivering it through the current
+API was not:
 
 - PR
   [openshift/hypershift#8439](https://github.com/openshift/hypershift/pull/8439)
