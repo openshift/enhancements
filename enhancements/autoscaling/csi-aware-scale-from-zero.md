@@ -102,7 +102,7 @@ The value is illustrative. Providers derive conservative limits from the
 MachineSet template and supported CSI driver configuration, including for
 MachineSets created at zero replicas.
 
-This feature should have no negative interaction and will be introduced as a
+Adding this annotation should have no negative interaction and will be introduced as a
 techPreview feature(which we aim to remove before 5.1 release) called - `AutoscalerCSILimits`.
 
 ### Scheduler changes
