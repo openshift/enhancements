@@ -4,13 +4,13 @@ authors:
   - "@muraee"
 reviewers:
   - "@csrwng, HyperShift expertise, for the CPO->HO ownership move and NodePool controller changes"
-  - "TBD, managed services (ROSA/ARO) expertise, for the scaling and migration model"
+  - "@joshbranham, managed-services and ROSA integration expertise, for the scaling and migration model"
 approvers:
   - "@csrwng"
 api-approvers:
   - "@JoelSpeed"
 creation-date: 2026-09-15
-last-updated: 2026-09-15
+last-updated: 2026-09-23
 status: provisional
 tracking-link:
   - https://issues.redhat.com/browse/OCPSTRAT-3052
@@ -153,8 +153,16 @@ remove, and the migration rides a mandatory N->N+1 upgrade window either way.
 **NodePool controller** (the primary *consumer*) runs in the management
 cluster as part of the HyperShift Operator. **PayloadController** (the
 *generator*) and **ignition-server** (the *server*) run in the HCP namespace.
-**Karpenter** is a second consumer. A **worker node** fetches its ignition
-config at boot.
+**Karpenter** is a second consumer. In v1, Karpenter requests are deliberately
+one-shot: Karpenter creates an `IgnitionPayload` from an immutable config
+snapshot, never updates its rollout-bearing inputs after the first
+`status.current` is published, and creates a replacement CR for a replacement
+node. Consequently a Karpenter CR never has a retained `status.previous` and
+Karpenter never advances `spec.retiredGeneration`; only the NodePool controller
+owns normal rollout retirement. Karpenter retains its one-shot CR until the
+associated node has either completed bootstrap or the request is terminal, then
+deletes it through the consumer-finalizer path. A **worker node** fetches its
+ignition config at boot.
 
 Starting state: a NodePool exists and references user/core/NTO configs.
 
@@ -201,13 +209,16 @@ Starting state: a NodePool exists and references user/core/NTO configs.
    idempotent status update; serving a `status.previous` token during drain does
    not flip the condition, so a node still booting on the old generation cannot
    mark the new one reached.
-7. When a rollout drains (old MachineDeployment scaled to 0), the NodePool
-   controller deletes the retired userdata Secret and advances
-   `spec.retiredGeneration`. The PayloadController frees non-current store
-   entries at or below that generation and clears `status.previous` only when
+7. When a NodePool rollout drains (the old MachineDeployment has scaled to 0),
+   the NodePool controller deletes the retired userdata Secret and advances
+   `spec.retiredGeneration`. It is the only v1 consumer permitted to advance
+   that field. The PayloadController frees non-current store entries at or below
+   that generation and clears `status.previous` only when
    `status.previous.generation <= spec.retiredGeneration`. Thus, if A->B->C
    overtakes a rollout and A reports drained late, B remains available in
-   `status.previous` until B itself drains.
+   `status.previous` until B itself drains. Karpenter has no equivalent normal
+   drain signal in v1 because its immutable, one-shot CR never retains a
+   previous generation.
 8. On teardown, the creating consumer removes its consumer finalizer and deletes
    the CR; the PayloadController then frees all remaining store tokens and removes
    its store-cleanup finalizer, after which only the CR-owned projections (the
@@ -218,13 +229,18 @@ Starting state: a NodePool exists and references user/core/NTO configs.
 ```mermaid
 sequenceDiagram
     participant NP as NodePool controller (consumer)
+    participant KP as Karpenter (one-shot consumer)
     participant CR as IgnitionPayload CR
     participant PC as PayloadController (leader)
     participant PS as PayloadStore
     participant SRV as ignition-server (xN)
     participant Node as Worker node (ignition)
 
-    NP->>CR: Create/update spec + project config ConfigMaps
+    alt NodePool lifecycle
+        NP->>CR: Create/update spec + project config ConfigMaps
+    else Karpenter v1 lifecycle
+        KP->>CR: Create immutable, one-shot spec
+    end
     PC->>CR: Watch CR + referenced ConfigMaps
     PC->>PC: Split + validate configs, compute both hashes
     alt rollout hash changed
@@ -239,9 +255,13 @@ sequenceDiagram
     SRV->>PS: hydrate local cache
     SRV-->>Node: serve payload
     SRV->>CR: set IgnitionReached=True (one-shot)
-    NP->>CR: advance spec.retiredGeneration after drain
-    PC->>PS: Delete non-current tokens <= retiredGeneration
-    PC->>CR: Clear previous only if previous.gen <= retiredGeneration
+    alt NodePool rollout drain
+        NP->>CR: advance spec.retiredGeneration after drain
+        PC->>PS: Delete non-current tokens <= retiredGeneration
+        PC->>CR: Clear previous only if previous.gen <= retiredGeneration
+    else Karpenter v1 request ends
+        KP->>CR: Delete one-shot CR after bootstrap or terminal request
+    end
 ```
 
 ### API Extensions
@@ -332,10 +352,12 @@ This enhancement adds a new CRD and a finalizer:
     // +listMapKey=name
     MgmtConfigRefs []corev1.LocalObjectReference `json:"mgmtConfigRefs,omitempty"`
 
-    // retiredGeneration is a level-triggered signal that the payload of the
-    // given generation has drained (its nodes are gone) and its store token may
-    // be freed. The PayloadController deletes store entries at or below this
-    // generation except the one backing status.current.
+   // retiredGeneration is a level-triggered signal that the payload of the
+   // given generation has drained (its nodes are gone) and its store token may
+   // be freed. In v1 the NodePool controller is the only writer: Karpenter
+   // requests are immutable and one-shot, so they never retain a previous
+   // generation or advance this field. The PayloadController deletes store
+   // entries at or below this generation except the one backing status.current.
     // +optional
     // +kubebuilder:validation:Minimum=0
     RetiredGeneration int64 `json:"retiredGeneration,omitempty"`
@@ -353,7 +375,8 @@ This enhancement adds a new CRD and a finalizer:
     Current *PayloadReference `json:"current,omitempty"`
 
     // previous describes the immediately prior payload, retained during a
-    // rollout so in-flight boots on the old token are served until they drain.
+    // NodePool rollout so in-flight boots on the old token are served until they
+    // drain. Karpenter's v1 one-shot requests never populate this field.
     // It is serving/observability state, not the cleanup mechanism: tokens are
     // reclaimed by delete-on-evict and the store-cleanup finalizer, not by
     // tracking every generation here.
@@ -385,10 +408,11 @@ This enhancement adds a new CRD and a finalizer:
 
     // token is an opaque, non-derivable UUID: the key into the PayloadStore for
     // this version. It is a capability to fetch the payload, not the payload
-    // itself (bytes never live in status), and it becomes unusable the instant
-    // its store entry is deleted (after which GET /ignition returns HTTP 511).
-    // Its authorization model for GET /ignition is unchanged from today's
-    // ignition server.
+    // itself (bytes never live in status). It becomes unusable when its
+    // retirement delete completes: that operation removes the store entry and
+    // confirms eviction from every ready server cache, after which GET /ignition
+    // returns HTTP 511. Its API-read and endpoint authorization boundaries are
+    // defined below.
     // +required
     Token string `json:"token"`
 
@@ -412,6 +436,35 @@ This enhancement adds a new CRD and a finalizer:
    Karpenter-created CR's tokens are freed even though Karpenter, not the NodePool
    controller, drives its deletion. Once both finalizers clear, the CR's owned
    ConfigMaps cascade-delete via their owner references.
+
+3. **Token confidentiality and access boundary.** `status.current.token` and
+   `status.previous.token` are bearer capabilities: a Kubernetes API read of an
+   `IgnitionPayload` exposes them, and the `/status` subresource does not provide
+   a separate read boundary. RBAC is therefore namespace-scoped and
+   least-privilege. No human, tenant, default service account, aggregated role,
+   or unrelated controller receives `get`, `list`, or `watch` on
+   `ignitionpayloads`; diagnostic access must use a token-redacting support view
+   rather than the CR. The PayloadController alone receives the namespace-wide
+   `get/list/watch` and `update/patch` plus `status` write permissions it needs.
+   Each consumer receives only the named-resource `get/create/update/delete`
+   permissions required for CRs it creates (and no namespace-wide
+   `list/watch`); the ignition-server needs no `IgnitionPayload` read to serve
+   and has only narrowly scoped `get/patch` access to set `IgnitionReached`.
+   PayloadStore Secret reads/writes are likewise restricted to these component
+   service accounts in the HCP namespace; tokens are never logged, emitted in
+   events or metrics, or placed in URLs.
+
+   The only externally reachable path is the HCP Route through HAProxy. TLS is
+   required on the Route and HAProxy validates its authenticated TLS connection
+   to the ignition-server Service; NetworkPolicy permits ingress to server pods
+   only from HAProxy and denies direct external access. The handler accepts only
+   `GET /ignition` with an exact `Authorization: Bearer <token>` capability and
+   returns no token material. A cache may retain payload bytes, but it may not
+   serve a retired token: `PayloadStore.Delete` is complete only after the store
+   entry is deleted and every ready server replica has evicted the token (with a
+   liveness check as a backstop). Every request after that completion returns
+   HTTP 511. This retirement acknowledgement is the post-retirement invalidation
+   contract, including for a token that was already in a local cache.
 
 This enhancement also changes the behaviour of the HyperShift NodePool
 controller and the ignition server, but it does not modify any CRDs owned by
@@ -527,6 +580,11 @@ placed downstream of validation, in the PayloadController. It emits a new token
 and advances `status.current.generation` only when the rollout hash changes; the
 NodePool controller reacts to that generation bump to execute the rollout
 (userdata Secret, MachineDeployment re-point, drain watch, `retiredGeneration`).
+This ownership is intentionally asymmetric in v1: a Karpenter request is an
+immutable, one-shot snapshot and Karpenter creates a new CR rather than updating
+one through a second generation. It therefore has no `previous` payload and no
+normal `retiredGeneration` write; its sole lifecycle action is finalizer-backed
+deletion after bootstrap completes or the request becomes terminal.
 Payload refresh follows **Policy A**: the token is a rollout identity, and
 management-side/cloud-config changes refresh the bytes behind the current token
 so scale-up/replacement nodes always boot with current content while existing
@@ -689,12 +747,34 @@ The general strategy:
 - **Unit/integration tests** for the NodePool controller's reduced role: config
   projection, ref-list classification, `retiredGeneration` advancement,
   finalizer-driven CR delete and cascade of owned ConfigMaps.
+- **Karpenter consumer tests**: a Karpenter-created request is immutable after
+  its first `status.current`; replacement creates a distinct CR, never produces
+  `status.previous`, and never writes `retiredGeneration`. Its terminal or
+  successfully bootstrapped request deletes through the consumer and
+  store-cleanup finalizers.
 - **Integration tests** for the `PayloadStore` (SecretBackedStore + informer
   hydration; cold rehydrate on restart) and the two-Deployment leader-election
-  split (exactly one release-image pull per config version at any replica count).
+  split. The steady-state case asserts exactly one release-image pull per config
+  version across replica counts. A separate fault-injection case kills the
+  leader before `PayloadStore.Put` and asserts at most one additional pull for
+  that config version; a failure after `Put` reuses the stored identity and does
+  not add a pull.
+- **Authorization and retirement tests**: assert that default/tenant and
+  unrelated service accounts cannot get, list, or watch token-bearing
+  `IgnitionPayload` resources, while each component service account has only its
+  declared verbs; reject direct non-HAProxy network access, plaintext/invalid
+  TLS, missing or invalid bearer credentials, and token logging. Exercise a
+  cached previous token through retirement and assert every ready server returns
+  HTTP 511 after the delete-and-cache-eviction acknowledgement.
 - **e2e tests**: node provisioning through `GET /ignition`, a rollout-triggering
   config change, a management-side change that must *not* roll the fleet, and
-  the N->N+1 migration cutover (see Upgrade/Downgrade).
+  the N->N+1 migration cutover (see Upgrade/Downgrade). The migration test keeps
+  the old CPO server serving while it deploys and hydrates the HO server, proves
+  a legacy token is served through the production Route, verifies HO readiness,
+  then sets the disable annotation and proves both an in-flight legacy request
+  and a new `IgnitionPayload` request continue to be served. It verifies that
+  legacy lookup remains until the documented per-HCP drain condition and returns
+  HTTP 511 only after post-drain retirement.
 - **Managed-service coverage**: exercise scale-out of the serving tier under
   concurrent node provisioning to confirm no registry/KAS amplification.
 
@@ -738,28 +818,65 @@ a release. -->
 ## Upgrade / Downgrade Strategy
 
 Migration piggybacks on the mandatory N->N+1 OCP upgrade, which already rolls
-every worker node, so there is no extra rollout and no adoption shim:
+every worker node, so there is no extra rollout and no adoption shim. It is a
+readiness-first cutover; the old CPO server remains live until the new serving
+path has demonstrated that it can serve both old and new credentials:
 
-1. **HostedCluster on old CPO (OCP <= N):** the HO sets
-   `DisableIgnitionServerAnnotation` on the HostedControlPlane; the old CPO stops
-   managing its ignition server component; the HO deploys the ignition server
-   with the HO image and uses the `IgnitionPayload` path.
-2. **HostedCluster upgraded to new CPO (OCP N+1):** the new CPO has no ignition
+1. **HostedCluster on old CPO (OCP <= N):** without setting
+   `DisableIgnitionServerAnnotation`, the HO deploys the HO-owned
+   ignition-server with the same Route/Service contract as the CPO server. It
+   hydrates the new server from the PayloadStore *and* enables read-only legacy
+   token-Secret lookup for existing userdata. The server is not Ready until its
+   caches are hydrated, its Route/TLS checks pass, and an authenticated request
+   with a sampled legacy token is successfully served through the production
+   Route. The CPO server continues serving throughout these checks.
+2. **Cut over only after readiness:** the HO verifies the configured number of
+   HO server replicas are Ready and the legacy-token probe has passed, then sets
+   `DisableIgnitionServerAnnotation`. The old CPO then stops managing its server;
+   the already-ready HO replicas serve both legacy and `IgnitionPayload` tokens,
+   so requests in flight while endpoints transition are not dropped. A rollout
+   to new userdata begins only after this handoff succeeds.
+3. **Drain legacy lookup per HostedCluster:** a HostedCluster is drained only
+   when every legacy userdata Secret/MachineSet has been removed or scaled to
+   zero, no non-terminal Machine still references a legacy token, and the maximum
+   ignition bootstrap interval has elapsed after the final reference disappears.
+   Until all three are true, the HO server retains the legacy lookup and serves
+   old tokens. Once they are true, it deletes the corresponding legacy store
+   entries and waits for the same all-ready-replica cache-eviction acknowledgement
+   used for `IgnitionPayload` retirement; only then may it disable legacy lookup
+   for that HostedCluster. The shared compatibility implementation remains until
+   fleet EOL so old-CPO HostedClusters can still perform this sequence.
+4. **HostedCluster upgraded to new CPO (OCP N+1):** the new CPO has no ignition
    server code — nothing to disable. The HO is already deploying the server on
    the same CRD path. The worker roll performed by the OCP upgrade carries nodes
    onto the new path.
-3. **Fleet EOL:** once the oldest supported OCP has reached the cutover release
-   (~2-3 releases), the HO removes the frozen old token-Secret module and the
+5. **Fleet EOL:** once the oldest supported OCP has reached the cutover release
+   (~2-3 releases) and all HostedClusters have met the legacy drain condition,
+   the HO removes the frozen old token-Secret module and the
    `DisableIgnitionServerAnnotation` handling.
 
-Because the cutover rides this worker roll — during which every node is replaced
-and comes up on the new system from new userdata — the old token Secrets are
-never read after a cluster flips and need no compatibility serving path.
+```mermaid
+sequenceDiagram
+    participant HO as HyperShift Operator
+    participant CPO as old CPO server
+    participant NEW as HO ignition-server
+    participant Node as Existing or booting node
+
+    HO->>NEW: Deploy, hydrate PayloadStore + legacy lookup
+    NEW-->>HO: Ready only after TLS/Route + legacy-token probe
+    Node->>CPO: Existing legacy-token request remains served
+    HO->>HO: Verify ready replicas and probe success
+    HO->>CPO: Set DisableIgnitionServerAnnotation
+    CPO-->>HO: Stop serving
+    Node->>NEW: Legacy or new-token request, including in-flight handoff
+    NEW-->>Node: Serve payload
+    HO->>NEW: Remove legacy lookup only after per-HCP drain
+```
 
 No backports are required: old CPOs already recognize
 `DisableIgnitionServerAnnotation`, new CPOs simply lack the component, and the HO
-handles both. The old module is retained only to drain in-flight rollouts within
-the upgrade window and shares no code with the new path.
+handles both. The old module and legacy lookup are retained only to drain
+in-flight requests within the upgrade window and share no code with the new path.
 
 **Downgrade.** HyperShift does not support downgrading a HostedCluster's control
 plane to an earlier OCP version, so there is no supported N+1 -> N rollback of the
