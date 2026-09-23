@@ -99,6 +99,10 @@ The change is relevant for standalone clusters. The NetworkPolicy manifests are 
 
 No additional resource consumption. NetworkPolicy resources are lightweight metadata objects. The actual enforcement is handled by the CNI plugin, which is already running.
 
+#### OpenShift Kubernetes Engine
+
+No special considerations. NetworkPolicy is a standard Kubernetes API and does not depend on features excluded from the OKE product offering.
+
 ### Implementation Details/Notes/Constraints
 
 #### Layer 1: Operator Pod NetworkPolicy (Static Manifest)
@@ -362,20 +366,32 @@ E2E tests will verify:
 
 ## Graduation Criteria
 
-This enhancement is a post-GA hardening improvement shipped as a standard operator update.
+The operator is already GA. This enhancement is a post-GA hardening improvement shipped as a standard operator update.
 
-### Phase 1 (Current)
+### Dev Preview -> Tech Preview
+
+Not applicable. The operator is already GA. NetworkPolicy support is delivered in phases as part of regular operator updates.
+
+### Tech Preview -> GA
+
+Not applicable. See phased delivery below.
+
+#### Phase 1 (Current)
 
 - Operator pod static NetworkPolicy deployed
 - Tier 1 namespace-level default policy for job pods implemented and tested
 - Tier 2 SFTP/proxy per-CR policies implemented and tested
 - E2E test coverage for default image and SFTP upload scenarios
 
-### Phase 2 (With Admin Config Resource)
+#### Phase 2 (With Admin Config Resource)
 
 - Admin config resource (`MustGatherConfig`) available with `imageNetworkPolicies` support
 - Tier 2 per-image policies for custom images implemented and tested
 - E2E test coverage for custom image NetworkPolicy scenarios
+
+### Removing a deprecated feature
+
+Not applicable. This enhancement adds new functionality and does not deprecate any existing features.
 
 ## Upgrade / Downgrade Strategy
 
