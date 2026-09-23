@@ -36,15 +36,19 @@ load-balancer provider (Agent, KubeVirt) it stays `Pending`
 indefinitely (OCPBUGS-77856). Fixing this requires letting
 users choose how the router is exposed — and two attempts to
 add that capability to the existing `spec.services[]` API
+([openshift/hypershift#8439](https://github.com/openshift/hypershift/pull/8439)
+and [openshift/enhancements#2024](https://github.com/openshift/enhancements/pull/2024))
 failed review, because the field cannot be extended cleanly.
 
 The underlying problem is that `spec.services[]` advertises
 arbitrary per-service publishing combinations while the
 controllers implement only a small, fixed set of platform
 topologies. That mismatch is papered over with a growing tax
-of CEL rules (several disabled because they exceed the cost
-budget), controller-time validation, recurring bug fixes,
-and a ~1,200-line reference document that tells users which
+of CEL rules (several disabled for exceeding the cost budget
+on pre-4.17 API servers — a real pain point to date, though
+worth re-evaluating now on the current supported version
+matrix), controller-time validation, recurring bug fixes, and
+a ~1,200-line reference document that tells users which
 combinations are actually allowed.
 
 This enhancement replaces `spec.services[]` with a new
@@ -140,13 +144,22 @@ everywhere else:
 - **Validation admission can't run.** The rules that would
   enforce required service types and unique Route/NodePort
   endpoints are written but commented out on the `services`
-  field in `hostedcluster_types.go` because they exceed the
-  CEL cost budget. Uniqueness is instead checked at
-  controller time (`validatePublishingStrategyMapping`), and
-  Route capability likewise
-  (`validateConfigAndClusterCapabilities`). Both run after
-  the write is admitted, so the user learns of the problem
-  from a condition, not a rejection.
+  field in `hostedcluster_types.go` because they exceeded the
+  CEL cost budget. This has been a real pain point to date;
+  the in-code `TODO` scopes it to pre-4.17 API servers
+  ("this breaks the cost budget for < 4.17") and explicitly
+  leaves re-enabling them open, so on the current supported
+  management-cluster version matrix these specific rules may
+  now fit the budget and should be re-evaluated. Re-enabling
+  them is worth doing regardless, but it only patches
+  constraints onto an open-ended list — the preset model
+  encodes the same constraints structurally (see below), so
+  they hold for free rather than costing budget at all.
+  Today, uniqueness is instead checked at controller time
+  (`validatePublishingStrategyMapping`), and Route capability
+  likewise (`validateConfigAndClusterCapabilities`). Both run
+  after the write is admitted, so the user learns of the
+  problem from a condition, not a rejection.
 - **Recurring bug fixes.** OCPBUGS-77856 is one instance;
   each new platform or exposure requirement tends to surface
   another combination the controllers must be taught to
@@ -198,8 +211,10 @@ CRD ratcheting — but they recur because the shape is wrong:
 3. **Count without content.** A minimum count is enforced
    (`size(self.services) >= 4`, or `>= 3` for IBMCloud), but
    *which* services are present, and whether their endpoints
-   are unique, is not — those are exactly the checks that
-   exceed the CEL budget and were disabled.
+   are unique, is not — those are exactly the checks that were
+   disabled for exceeding the CEL budget on pre-4.17 API
+   servers (worth re-evaluating on the current version
+   matrix, per the note above).
 4. **Dead values kept for compatibility.** The `S3` and
    `None` strategies and the `OIDC` and `OVNSbDb` service
    types remain in the enums with CEL rules but no controller
@@ -1158,16 +1173,18 @@ false), so no private-only row is needed.
 #### CEL validation rules
 
 These constraints are enforced by CEL rules on
-`HostedClusterSpec`. Unlike the commented-out
-`spec.services[]` rules which exceeded the CEL cost budget,
-the `spec.publishing` rules stay well within budget: preset
-and endpoint-access checks are O(1) scalar/`has()` tests, and
-the per-service list rules are O(n) `exists`/`all` over lists
-capped at `MaxItems ≤ 4`. Crucially, per-service name
-uniqueness is enforced for free by `+listType=map`
-(`+listMapKey=name`) at the schema level — with no CEL — which
-is exactly the O(n²) uniqueness check that blew the budget on
-`spec.services[]`.
+`HostedClusterSpec`. The commented-out `spec.services[]` rules
+exceeded the CEL cost budget on pre-4.17 API servers (per the
+in-code `TODO`) and may fit the budget on the current
+supported version matrix; regardless, the `spec.publishing`
+rules are deliberately cheap and do not rely on that being
+re-evaluated: preset and endpoint-access checks are O(1)
+scalar/`has()` tests, and the per-service list rules are O(n)
+`exists`/`all` over lists capped at `MaxItems ≤ 4`. Crucially,
+per-service name uniqueness is enforced for free by
+`+listType=map` (`+listMapKey=name`) at the schema level —
+with no CEL — which is exactly the O(n²) uniqueness check that
+was most expensive on `spec.services[]`.
 
 **Mutual exclusivity and immutability:**
 
@@ -1519,7 +1536,10 @@ See "Why private connectivity is not a publishing preset".
    (CEL enforced) except on IBMCloud. Should any
    `spec.publishing` fields be mutable? Candidates:
    ingress `exposure` (switching NodePort <-> LoadBalancer),
-   per-service hostnames, NodePort ports.
+   per-service hostnames, NodePort ports. There are existing
+   RFEs asking for day-2 changes to service publishing, so
+   this should be synced with PM rather than defaulted to
+   immutable for parity with the field being replaced.
 
    Current decision: `spec.publishing` is immutable after
    creation, matching existing `spec.services[]` behavior.
