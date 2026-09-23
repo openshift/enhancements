@@ -170,19 +170,31 @@ Starting state: a NodePool exists and references user/core/NTO configs.
    rollout-relevant global-config subset (`rolloutGlobalConfig`). It never
    opens a ConfigMap's contents and computes no hash.
 2. The PayloadController (leader) reacts to the CR or to a change in any
-   referenced ConfigMap. It reads each referenced ConfigMap, splits it into
+   referenced ConfigMap, the pull-secret Secret named by `spec.pullSecretName`,
+   or the trust-bundle ConfigMap named by `spec.additionalTrustBundle` — all of
+   which it watches. It reads each referenced ConfigMap, splits it into
    individual manifests, and defaults + validates each. If validation fails it
    sets `PayloadGenerated: False` and stops — no hash, no token, no rollout.
-3. Over the validated config it computes the payload-identity hash (whole
-   config) and the rollout hash (`rolloutConfigRefs` config + version +
-   pullSecret + trustBundle + `rolloutGlobalConfig` + osStream). Before pulling
-   the release image it calls `PayloadStore.FindByIdentity` for this CR and the
-   payload-identity hash; on a hit it reuses that entry and skips the pull,
-   otherwise it runs the MCO pipeline (which pulls the release image).
+3. Over the validated config it computes the payload-identity hash and the
+   rollout hash. The payload-identity hash covers everything embedded in the
+   rendered payload — including the pull-secret and trust-bundle *contents* — so
+   an in-place rotation of either produces a new payload-identity and
+   `FindByIdentity` never reuses stale bytes. The rollout hash instead uses the
+   *references* (`rolloutConfigRefs` config + version + `pullSecretName` +
+   `additionalTrustBundle` name + `rolloutGlobalConfig` + osStream), preserving
+   parity with today's NodePool `ConfigGenerator.Hash()` (which hashes
+   `pullSecretName`/`additionalTrustBundleName`, not their contents) so an
+   in-place credential/CA rotation does not roll the fleet; instead it refreshes
+   the current token's bytes under Policy A (step 4), so scale-up/replacement
+   nodes boot with current credentials while existing nodes are untouched.
+   Before pulling the release image it calls `PayloadStore.FindByIdentity` for
+   this CR and the payload-identity hash; on a hit it reuses that entry and skips
+   the pull, otherwise it runs the MCO pipeline (which pulls the release image).
 4. If the rollout hash changed, it moves `status.current` to `status.previous` —
    deleting from the store any token already occupying `status.previous`
-   (delete-on-evict), so at most two tokens (current + previous) are ever live
-   per CR even when rollouts overtake each other (A->B->C) — mints a new UUID
+   (delete-on-evict), so at most two *status-referenced* tokens (current +
+   previous) are ever live per CR even when rollouts overtake each other
+   (A->B->C) — mints a new UUID
    token, calls `PayloadStore.Put(newToken, payload)`, and sets `status.current`
    with the new hashes, token, and `generation + 1`. Otherwise
    (management-side/cloud-config change only) it refreshes the bytes behind the
@@ -204,7 +216,11 @@ Starting state: a NodePool exists and references user/core/NTO configs.
 7. When a rollout drains (old MachineDeployment scaled to 0), the NodePool
    controller deletes the retired userdata Secret and advances
    `spec.retiredGeneration`. The PayloadController frees the old token from the
-   store and clears `status.previous`.
+   store and clears `status.previous` only when
+   `status.previous.generation <= spec.retiredGeneration` — so if rollouts
+   overtake each other (A->B->C), an earlier generation's (A) drain signal does
+   not clear a still-draining `status.previous` (B), keeping this step consistent
+   with the `retiredGeneration` contract in the CRD spec.
 8. On teardown, the creating consumer removes its consumer finalizer and deletes
    the CR; the PayloadController then frees all remaining store tokens and removes
    its store-cleanup finalizer, after which only the CR-owned projections (the
@@ -239,6 +255,24 @@ sequenceDiagram
     NP->>CR: advance spec.retiredGeneration after drain
     PC->>PS: Delete(previous token); clear status.previous
 ```
+
+**Consumers other than the NodePool controller.** The workflow above is written
+for the NodePool controller, but the CRD contract is consumer-agnostic and every
+consumer follows the same shape: create the `IgnitionPayload` (adding its own
+consumer finalizer), watch `status.current.generation`, and read
+`status.current.token` to stamp the userdata of the machines it provisions. The
+difference is rollout execution. The NodePool controller runs a *coordinated*
+rollout (userdata Secret, MachineDeployment re-point, drain watch,
+`retiredGeneration`). Karpenter — and external-provider integrations that want a
+payload without a NodePool — provision nodes just-in-time and do **not** run a
+coordinated rollout: they always stamp the *current* token onto new nodes, let
+their own node lifecycle replace older nodes, and advance `spec.retiredGeneration`
+as they observe a generation's nodes disappear (or leave it at zero and rely on
+delete-on-evict plus the store-cleanup finalizer for reclamation). On teardown
+each consumer removes its own consumer finalizer and deletes its CR; the
+PayloadController's store-cleanup finalizer then frees the tokens regardless of
+which consumer drove the delete. The concrete Karpenter integration is elaborated
+in the Karpenter-decoupling effort and is out of scope here beyond this contract.
 
 ### API Extensions
 
@@ -381,10 +415,12 @@ This enhancement adds a new CRD and a finalizer:
 
    	// token is an opaque, non-derivable UUID: the key into the PayloadStore for
    	// this version. It is a capability to fetch the payload, not the payload
-   	// itself (bytes never live in status), and it becomes unusable the instant
-   	// its store entry is deleted (after which GET /ignition returns HTTP 511).
-   	// Its authorization model for GET /ignition is unchanged from today's
-   	// ignition server.
+   	// itself (bytes never live in status), and it becomes unusable once its
+   	// store entry is deleted and that deletion has propagated to the serving
+   	// tier (bounded by informer lag), after which GET /ignition returns HTTP
+   	// 511; deletion happens only after the token's generation has drained or at
+   	// CR teardown. Its authorization model for GET /ignition is unchanged from
+   	// today's ignition server.
    	// +required
    	Token string `json:"token"`
 
@@ -485,7 +521,10 @@ and the store-cleanup finalizer has to reach every entry for a CR (including one
 an interrupted generation left unreferenced by status). The interface therefore
 adds two lookups — `FindByIdentity(owner, identityHash)` and `ListByOwner(owner)`
 — resolved against labels the entries already carry, so they are
-backend-independent rather than assuming a Secret query. v1 swaps
+backend-independent rather than assuming a Secret query. `Get(token)` returns the
+payload together with its owning-CR reference (every entry is owner-labeled), so
+the `/ignition` handler resolves the CR to patch `IgnitionReached` from the served
+token alone, with no separate token-to-owner lookup. v1 swaps
 the implementation for a `SecretBackedStore`: the generator writes each payload
 to a Secret in the HCP namespace labeled with its owning CR and payload-identity
 hash, and server replicas hydrate a per-pod
@@ -497,7 +536,11 @@ returns, before the informer propagates it. On a management-side refresh (Policy
 A) the generator overwrites the store entry for the *current* token in place;
 the informer delivers an update event and each replica replaces its cached bytes
 for that token (last-write-wins), so a replacement node served by any replica
-gets the current content. v2 swaps in a
+gets the current content. Deletions propagate the same way: the informer delivers
+a delete event and each replica evicts the token from its local cache, so a freed
+token converges to HTTP 511 on every replica within informer lag. Because a token
+is deleted only after its generation has drained (its nodes are gone) or at CR
+teardown, no live consumer depends on it during that bounded window. v2 swaps in a
 `DatabaseBackedStore` keyed by token, removing the etcd object-size cap on
 payloads without changing the CRD contract or the serving hot path; there the
 same two lookups are indexed queries on `(owner, identityHash)` and `owner`.
@@ -512,10 +555,20 @@ costs at most one repeated pull for that config version (the new leader may
 re-pull only if the crash preceded `PayloadStore.Put`), and the steady-state
 guarantee is exactly one pull per config version at any replica count. If such a
 crash lands after `Put` but before the `status` write and the config then
-advances, the entry it wrote is left unreferenced by `status`; it is not swept
-mid-life — it is reused if that identity recurs, and otherwise reclaimed at CR
-teardown when the store-cleanup finalizer deletes everything `ListByOwner`
-returns.
+advances to a different identity, the entry it wrote is left unreferenced by
+`status`. Such an orphan is reused if that identity recurs (`FindByIdentity`
+adopts it) and is otherwise reclaimed at CR teardown, when the store-cleanup
+finalizer deletes everything `ListByOwner` returns. This case is extremely rare —
+it needs a crash in the microsecond-scale `Put`-to-`status` window followed by a
+config change before adoption — but as defense-in-depth each generation reconcile
+also runs an inline, per-CR sweep: after resolving
+`status.current`/`status.previous` it calls `ListByOwner` and deletes any
+owner-labeled entry whose payload-identity hash matches neither those nor the
+identity being generated this pass. This is not the old background
+`secretsJanitor`: it is level-triggered, single-active (leader election), and
+scoped to the one CR already being reconciled, so it cannot race a concurrent
+generator. With it, the live per-CR entry count stays bounded to the two
+status-referenced tokens plus at most the one in flight.
 
 **Rollout detection lives with generation.** Because a rollout must not be
 triggered for a config that cannot produce a payload, rollout detection is
@@ -550,6 +603,18 @@ has advanced. Field-scoping plus the token precondition together mean concurrent
 writes can neither lose the PayloadController's rollout reset nor overwrite
 unrelated status fields, so no separate reporting resource or single-owner funnel
 is needed.
+
+**Token access (least privilege).** The tokens in `status.current` and
+`status.previous` are capabilities, so read access to `IgnitionPayload` status —
+and to the backing store Secrets in v1 — is confined to the management-side
+service accounts that need it: the PayloadController (writes status, reads its own
+tokens), the NodePool controller and other consumers (read `status.current.token`
+to stamp userdata), and the ignition-server (resolves a Bearer token to a
+payload). RBAC grants those Roles only in the HCP namespace; guest-cluster and
+tenant identities have no access to the CR or its backing store. Authorization for
+`GET /ignition` itself is unchanged from today's ignition server — the opaque
+Bearer token is the capability, and the standalone HAProxy Deployment remains the
+only externally reachable hop (see Risks).
 
 **Legacy in-place-upgrade compatibility.** The HCCO `InPlaceUpgrader` reads a
 Secret named `token-{machineSetName}-{targetConfigVersion}`, where
@@ -685,8 +750,11 @@ The general strategy:
   projection, ref-list classification, `retiredGeneration` advancement,
   finalizer-driven CR delete and cascade of owned ConfigMaps.
 - **Integration tests** for the `PayloadStore` (SecretBackedStore + informer
-  hydration; cold rehydrate on restart) and the two-Deployment leader-election
-  split (exactly one release-image pull per config version at any replica count).
+  hydration; cold rehydrate on restart; a management-side same-token refresh is
+  observed through *every* ignition-server replica — last-write-wins cache
+  replacement plus read-through on miss, so no replica serves stale bytes) and
+  the two-Deployment leader-election split (exactly one release-image pull per
+  config version at any replica count).
 - **e2e tests**: node provisioning through `GET /ignition`, a rollout-triggering
   config change, a management-side change that must *not* roll the fleet, and
   the N->N+1 migration cutover (see Upgrade/Downgrade).
