@@ -162,15 +162,15 @@ and handles the exceptions the agent escalates.
    helper — see [OTE API Extension: Inline Tags](#ote-api-extension-inline-tags)
    for why the helper set is left as-is). A `Draft` test therefore carries
    that one tag and no native lifecycle decorator. If a test carries no
-   `Lifecycle` tag at all, the normalization step writes
-   `Lifecycle: Informing` (this is a normalization-time default that the
-   self-check materializes, **not** a CEL fallback — the suite qualifiers
+   `Lifecycle` tag at all, the centralized normalization step writes
+   `Lifecycle: Informing` (a normalization-time default written into source,
+   **not** a CEL fallback — the suite qualifiers
    guard every `Lifecycle` read with `has(...)`, so an un-normalized test
    with no `Lifecycle` tag matches no suite rather than silently entering
    `active`; see [Test Metadata](#test-metadata)). This stage default also
-   keeps such a test *non-fatal*: once normalization has stamped the
-   `Informing` stage, the build step's one-way projection writes the native
-   `Lifecycle` field to `informing`, overriding OTE's own native default of
+   keeps such a test *non-fatal*: when normalization stamps the `Informing`
+   stage, the same centralized path materializes `ote.Informing()` in the
+   test source, overriding OTE's own native default of
    `blocking` (which would otherwise make an untagged test gate). Because
    omission normalizes to `Informing`, an author who wants `Draft` must
    say so explicitly with `ote.Tag("Lifecycle", "Draft")`. An
@@ -189,12 +189,14 @@ and handles the exceptions the agent escalates.
    one only as it leaves `Draft`. A `Shard` value written by hand is
    treated as a normalization/balancing concern, not an authoring
    decision.
-4. Because the default and the paired `Informing()` annotation must stay
-   consistent, a single normalization step (run in the same self-check
-   that enforces mandatory metadata) writes both together: when a test
-   resolves to `Lifecycle: Informing` (explicitly or by default) it must
-   carry the `Informing()` annotation, and vice versa. The check fails
-   any test where the tag and annotation disagree.
+4. Because the stage tag and the paired `Informing()` annotation must stay
+   consistent, the centralized tagging path (the lifecycle agent) writes
+   both into the test source together: when a test resolves to
+   `Lifecycle: Informing` (explicitly or by default) the agent materializes
+   the `Informing()` annotation alongside the tag, and removes it again on
+   promotion to `Blocking`/`Stable`. The CI self-check that enforces
+   mandatory metadata does not write; it *validates* agreement and fails any
+   test where the tag and annotation disagree.
 5. `Lifecycle: Informing` makes failures non-blocking during
    stabilization; this is expressed via the OTE `Informing()` annotation
    as well as the tag, which stay in sync.
@@ -839,17 +841,24 @@ uses, seeded from history (see [`lifecycleFor`](#mandatory-metadata)).
 Every suite qualifier reads `test.tags.<key>` and selects on the
 four-stage `Tags["Lifecycle"]`; nothing selects on OTE's native two-value
 `Lifecycle` field. That native field is not discarded — the executor still
-uses it to decide whether a failure is fatal — so the build step performs
-a one-way, informing-only projection: `Draft`/`Informing → informing`,
-while `Blocking`/`Stable` and any untagged test are left to the native
-default of `blocking` (see
-[OTE API Extension: Inline Tags](#ote-api-extension-inline-tags)). This
-`AddTag` bulk path only needs to set `Tags["Lifecycle"]`: an imported
-`Informing` test is projected to `informing`, while an imported
-`Blocking`/`Stable` test carries no native label and therefore stays
-`blocking` by default — exactly the intended gating in both cases. Because
-the build step only ever writes `informing` and never `blocking`, a test
-that gates today can never be silently de-gated by this projection.
+uses it to decide whether a failure is fatal — so it is kept consistent
+with the stage by a one-way, informing-only rule: a *running* `Informing`
+test is relaxed to native `informing`, while `Blocking`/`Stable` and any
+untagged test are left to the native default of `blocking` (a `Draft` test
+never runs, so its gating value is moot and it carries no native
+annotation). Crucially, this native annotation is
+**materialized in the test source by the lifecycle agent**, not projected
+at build time: the same centralized path that stamps a test's stage tag
+also writes (or removes) `ote.Informing()` in the test's source in the
+same change, so the gating decision is visible in the diff and greppable in
+source rather than an invisible runtime transform (see
+[OTE API Extension: Inline Tags](#ote-api-extension-inline-tags) and
+[Mandatory Metadata](#mandatory-metadata)). An `Informing` test therefore
+carries `ote.Informing()` and runs non-fatal, while a `Blocking`/`Stable`
+test carries no native annotation and therefore stays `blocking` by
+default — exactly the intended gating in both cases. Because the agent only
+ever writes `informing` and never `blocking`, a test that gates today can
+never be silently de-gated.
 
 The dedicated `Criticality: Core` step above is the function referenced
 in [Upstream and Externally-Sourced Tests](#upstream-and-externally-sourced-tests):
@@ -980,11 +989,12 @@ OTE), this enhancement keeps them distinct:
   qualifier selects on; it is authoritative for **membership**.
 - **The native `Lifecycle` field** stays the two-value `informing` /
   `blocking` fatal-switch, unchanged. It is authoritative for **whether a
-  failure fails the job**, and the build step keeps it consistent with the
-  stage in one direction only — it writes `informing` for
-  `Draft`/`Informing` and leaves `Blocking`/`Stable` (and untagged tests)
-  to the native `blocking` default, so a test that gates today is never
-  silently de-gated. Tests that only use the pre-existing `Informing()`/
+  failure fails the job**, and the **lifecycle agent keeps it consistent
+  with the stage in one direction only**, materializing the annotation in
+  the test source: it writes `ote.Informing()` for a running `Informing`
+  test and leaves `Blocking`/`Stable` (and untagged tests) to the native
+  `blocking` default, so a test that gates today is never silently
+  de-gated. Tests that only use the pre-existing `Informing()`/
   `Blocking()` helpers keep gating exactly as before; to be *selected by
   the new suites* they must additionally carry a stage tag, which the
   centralized tagging path stamps during migration.
@@ -1022,18 +1032,14 @@ than the two OTE already has are expressed with the generic `Tag()`.
    change; see [Mandatory Metadata](#mandatory-metadata)).
 
 2. A build-time step in `BuildExtensionTestSpecsFromOpenShiftGinkgoSuite`
-   that does two things: it promotes reserved-prefix labels into `Tags`
-   (rejecting conflicting duplicates), and it **projects the stage onto the
-   native `Lifecycle` field in one direction only — it only ever writes
-   `informing`, never `blocking`**. This is what keeps the two systems'
-   opposite defaults from colliding: the new stage's default is `Informing`
-   (non-gating) while OTE's native default is `blocking` (gating), and by
-   only ever writing `informing` we can never accidentally flip a test that
-   is `blocking` today. A `Blocking`/`Stable` test, and any untagged legacy
-   test, is left alone and stays `blocking` by the native default:
+   that promotes reserved-prefix labels into `Tags` (rejecting conflicting
+   duplicates). The build step does **not** touch the native `Lifecycle`
+   field — that field is written in the test source by the lifecycle agent
+   (see below), so the build step only needs to surface the stage tag for
+   suite selection:
 
    ```go
-   // (a) Promote ONLY reserved-prefix metadata labels into Tags so suite
+   // Promote ONLY reserved-prefix metadata labels into Tags so suite
    // qualifiers can select on test.tags.<key>. Ordinary labels (no "tag:"
    // prefix) are left untouched. A metadata key may repeat only if every
    // occurrence carries the same value; a conflicting duplicate (e.g. two
@@ -1053,36 +1059,41 @@ than the two OTE already has are expressed with the generic `Tag()`.
        }
        ets.Tags[k] = v
    }
-
-   // (b) One-way, informing-only projection. When the stage is Draft or
-   // Informing, force the native field to informing so the executor treats
-   // a failure as non-fatal. For Blocking/Stable — and for any test with
-   // no stage tag at all — do NOTHING: the native field keeps whatever it
-   // already had (a Blocking()/Informing() label, or GetLifecycle's
-   // blocking default for a label-less test). Because we never write
-   // blocking, a test that gates today can never be silently de-gated.
-   switch ets.Tags["Lifecycle"] {
-   case "Draft", "Informing":
-       ets.Lifecycle = ext.LifecycleInforming
-   }
    ```
 
-   The one case this does not fix by itself is a *promotion past a stale
-   label*: a test that still carries `ote.Informing()` but whose new stage
-   is `Blocking`/`Stable`. Step (b) leaves the native field untouched, so
-   the stale `Informing()` label would keep the test non-gating. That is
-   resolved at the source, not in the build step: the centralized tagging
-   path that stamps the higher stage also removes the now-wrong
-   `ote.Informing()` in the same change (see
-   [Mandatory Metadata](#mandatory-metadata)). A forgotten label therefore
-   under-gates rather than over-gates — the safe direction — and the
-   metadata-validation check flags stage/label disagreement.
+   The native `Lifecycle` field is kept consistent with the stage by the
+   **lifecycle agent, which is the sole writer of that field**, and it
+   writes it *into the test source* rather than as a runtime projection.
+   The rule is one-way and informing-only: when the agent sets or updates a
+   test's stage tag, it materializes the paired native annotation in the
+   same change — for a running `Informing` test it ensures `ote.Informing()`
+   is present; for `Blocking`/`Stable` it ensures `ote.Informing()` is
+   *absent* so the test stays `blocking` by the native default. (A `Draft`
+   test never runs, so it needs no native annotation.) Because the
+   agent only ever writes `informing` (never `blocking`), the two systems'
+   opposite defaults never collide: the new stage's default is `Informing`
+   (non-gating) while OTE's native default is `blocking` (gating), and a
+   test that is `blocking` today is never accidentally flipped. Materializing
+   the annotation in source also handles a *promotion past a stale label* —
+   a test that still carries `ote.Informing()` but whose new stage is
+   `Blocking`/`Stable` — directly at the source: the same change that stamps
+   the higher stage removes the now-wrong `ote.Informing()` (see
+   [Mandatory Metadata](#mandatory-metadata)). A forgotten annotation
+   therefore under-gates rather than over-gates — the safe direction — and
+   the metadata-validation check flags any stage/annotation disagreement.
+   An untagged legacy test the agent has not yet processed keeps whatever
+   native annotation it has today, so nothing it does silently changes
+   existing gating.
 
 With these, `ote.Informing()`/`ote.Blocking()` are unchanged and keep
 driving native gating; a legacy test joins the new suites only once the
 centralized path stamps its stage tag. `Draft` and `Stable` are expressed
-with `ote.Tag("Lifecycle", …)` and let step (b) set the native field
-(`Draft` → non-gating; `Stable` → left blocking by default). `ote.Tag("Criticality",
+with `ote.Tag("Lifecycle", …)` and carry no native annotation: a `Draft`
+test never runs, so its gating value is moot, and a `Stable` test is left
+`blocking` by the native default. The lifecycle agent materializes
+`ote.Informing()` in source only when a test enters a running suite as
+`Informing` (and removes it again on promotion to `Blocking`/`Stable`).
+`ote.Tag("Criticality",
 "Core")` populates `Tags["Criticality"]`. (`Shard` is not declared inline — it is assigned
 by automation — so it enters `Tags` through the centralized tagging path,
 not this decorator; see [Mandatory Metadata](#mandatory-metadata).) All
@@ -1098,19 +1109,18 @@ To summarize, the concrete OTE changes are just two:
    stages are written as `Tag("Lifecycle", …)`, and the existing
    `Informing()`/`Blocking()` are untouched.)
 2. In `BuildExtensionTestSpecsFromOpenShiftGinkgoSuite`, add a build-time
-   step that (a) promotes reserved-prefix labels into `Tags` with a
-   single-value conflict check, and (b) projects the stage onto the native
-   `Lifecycle` field in one direction only — writing `informing` for
-   `Draft`/`Informing` and leaving everything else untouched, so a test
-   that gates today is never silently de-gated.
+   step that promotes reserved-prefix labels into `Tags` with a
+   single-value conflict check. The build step does not write the native
+   `Lifecycle` field at all.
 
 No existing OTE type, helper, or serialized field is removed or changed
 in meaning; the native `Lifecycle` field keeps its two values and its
 executor semantics. The stage tag governs suite selection; the native
-field governs gating, and the two stay consistent because the build step
-only ever relaxes the native field (to `informing`) and stage promotions
-are applied at the source together with removal of any stale native
-label.
+field governs gating, and the two stay consistent because the **lifecycle
+agent is the sole writer of the native field** — it only ever relaxes that
+field (to `informing`) and applies stage promotions at the source together
+with removal of any stale native annotation, all materialized in the test
+source rather than at build time.
 
 #### Spot-Check Suite Details
 
@@ -1600,7 +1610,7 @@ owner and an availability gate.
 
 | Dependency | Purpose | Owner | Availability gate |
 |------------|---------|-------|-------------------|
-| OTE inline-tag API extension (`ote.Tag` decorator + build step: `tag:key=value`→`Tags` promotion, and one-way informing-only stage→native-`Lifecycle` projection) | Declare metadata inline on the `g.It` so qualifiers select on `test.tags.<key>` (see [OTE API Extension: Inline Tags](#ote-api-extension-inline-tags)) | TBD (QSE + Test Platform) | Before Dev Preview → Tech Preview |
+| OTE inline-tag API extension (`ote.Tag` decorator + build step promoting `tag:key=value`→`Tags`; native `Lifecycle` written in source by the lifecycle agent, not the build step) | Declare metadata inline on the `g.It` so qualifiers select on `test.tags.<key>` (see [OTE API Extension: Inline Tags](#ote-api-extension-inline-tags)) | TBD (QSE + Test Platform) | Before Dev Preview → Tech Preview |
 | Parallel validation jobs in `openshift/release` | Run the new hierarchy alongside existing suites (non-gating) to compare coverage and runtime | TBD (QSE + Test Platform) | Must exist and be green before Dev Preview → Tech Preview |
 | CI metadata-enforcement check | Fail any test that lacks its required metadata tags (`Shard`; `Lifecycle` defaults to `Informing`) or carries an out-of-vocabulary value, keeping suite membership consistent | TBD (QSE + Test Platform) | Required before Tech Preview → GA |
 | Sippy queries for pass-rate and shard-runtime analysis | Feed the lifecycle agent's promotion and rebalancing decisions | TBD (TRT) | Required before the agent leaves dry-run |
