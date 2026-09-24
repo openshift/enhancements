@@ -435,15 +435,24 @@ granularity.
 
 ## Graduation Criteria
 
-### Dev Preview → Tech Preview
+### Dev Preview -> Tech Preview
 
-Not applicable — this feature does not require a feature gate. The status field is
-additive and informational; consumers that do not read it are unaffected.
+Not applicable. This feature ships as GA from the first release. It is a purely additive,
+optional status field with no behavioral impact on existing clusters and requires no feature
+gate. It will be available by default once the CPO version containing this change is deployed.
 
-### Tech Preview → GA
+### Tech Preview -> GA
 
-The feature ships as GA from the first release. It is a purely additive, optional status
-field with no behavioral impact on existing clusters.
+Not applicable — see above. The field ships as GA directly.
+
+E2e test coverage (CNTRLPLANE-4496) is required before the feature is considered complete,
+but is not a blocking graduation criterion since the status field itself is functional and
+safe to ship without it.
+
+### Removing a deprecated feature
+
+Not applicable. This enhancement adds a new status field; it does not deprecate or remove
+any existing functionality.
 
 ## Upgrade / Downgrade Strategy
 
