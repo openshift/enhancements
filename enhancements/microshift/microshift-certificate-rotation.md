@@ -12,7 +12,7 @@ approvers:
 api-approvers:
   - None
 creation-date: 2026-09-08
-last-updated: 2026-09-22
+last-updated: 2026-09-24
 tracking-link:
   - https://redhat.atlassian.net/browse/OCPSTRAT-2899
 see-also:
@@ -188,12 +188,21 @@ and writes a JSON error object to standard error when JSON output was requested.
 In that case, no additional human-readable diagnostics are written beside the
 error document.
 
-The JSON contract is versioned independently from the human-readable table.
+The machine-readable object contract is versioned independently from the
+human-readable table.
 Fields may be added compatibly, but existing fields and enum values are not
 removed or redefined within a version. Timestamps use RFC 3339. Configured
 validity durations use Go duration strings, while calculated remaining durations
 use integer seconds. Unless a field is explicitly marked nullable below, it is
 required and must not be `null`.
+
+Machine-readable status, renewal result, and error documents are Kubernetes API
+objects registered under `microshift.openshift.io/v1alpha1`. Their `apiVersion`
+and `kind` fields are Kubernetes `TypeMeta`, allowing generic Kubernetes tooling
+to identify and decode each object. `CertificateStatusList` is the typed list
+object, while `CertificateRenewalResult` and `Error` are single result objects.
+These objects are emitted only by the CLI; they are not resources persisted by
+or served through the Kubernetes API server.
 
 ##### Error Document
 
@@ -241,7 +250,41 @@ not part of the stable vocabulary unless separately documented.
 
 ##### Status Document
 
-`microshift certs status -o json` returns a `CertificateStatusList` document:
+`microshift certs status -o json` returns a `CertificateStatusList` Kubernetes
+API object with these top-level fields:
+
+| Field         | Type             | Nullable | Required value or meaning                                      |
+| ------------- | ---------------- | -------- | -------------------------------------------------------------- |
+| `apiVersion`  | string           | No       | `microshift.openshift.io/v1alpha1`                             |
+| `kind`        | string           | No       | `CertificateStatusList`                                        |
+| `generatedAt` | RFC 3339 string  | No       | Time at which certificate state and remaining time were read   |
+| `config`      | object           | No       | Effective certificate configuration used for status evaluation |
+| `items`       | array            | No       | Managed certificate status entries                             |
+| `warnings`    | array of strings | No       | Human-readable warnings; an empty array when none apply        |
+
+The required `config` object contains:
+
+| Field                   | Type    | Nullable | Required value or meaning                        |
+| ----------------------- | ------- | -------- | ------------------------------------------------ |
+| `forceRestartOnRedZone` | boolean | No       | Effective red-zone forced-restart setting        |
+| `servingValidity`       | string  | No       | Effective serving validity as a Go duration      |
+| `caValidity`            | string  | No       | Effective CA validity as a Go duration           |
+
+Every member of `items` contains:
+
+| Field              | Type            | Nullable | Required value or meaning                                  |
+| ------------------ | --------------- | -------- | ---------------------------------------------------------- |
+| `service`          | string          | No       | Owning service or function                                 |
+| `name`             | string          | No       | Stable inventory name                                      |
+| `role`             | string          | No       | `ca`, `serving`, `client`, or `peer`                       |
+| `rotationPolicy`   | string          | No       | `standard` or `extended`                                   |
+| `zone`             | string          | No       | `green`, `yellow`, or `red`                                |
+| `notBefore`        | RFC 3339 string | No       | Beginning of the certificate validity interval             |
+| `notAfter`         | RFC 3339 string | No       | End of the certificate validity interval                   |
+| `remainingSeconds` | integer         | No       | Signed `notAfter - generatedAt` duration in whole seconds  |
+
+Items are ordered by `service` and then `name`. An expired certificate has a
+zero or negative `remainingSeconds` value and a `red` zone.
 
 ```json
 {
@@ -653,11 +696,14 @@ the number of CAs without modifying the CLI commands.
 
 ### API Extensions
 
-This enhancement does not introduce or modify Kubernetes API resources. It adds
-the `certificates.forceRestartOnRedZone`, `certificates.servingValidity`, and
-`certificates.caValidity` fields to the host-local MicroShift configuration
-file. The versioned JSON documents are a CLI output contract, not Kubernetes API
-resources.
+This enhancement does not introduce or modify resources served by the
+Kubernetes API server. It adds the `certificates.forceRestartOnRedZone`,
+`certificates.servingValidity`, and `certificates.caValidity` fields to the
+host-local MicroShift configuration file. The versioned CLI documents are
+Kubernetes API objects so that clients can use standard object identification
+and serialization conventions, but the objects have no API endpoints and
+cannot be created, retrieved, listed, watched, updated, or deleted through the
+API server.
 
 ### Topology Considerations
 
@@ -704,13 +750,16 @@ microshift certs renew --serving [--dry-run] [-o json|yaml]
 microshift certs renew --ca [--dry-run] [-o json|yaml]
 ```
 
-#### JSON Rendering
+#### Kubernetes Object Rendering
 
-Human-readable tables and JSON documents are rendered from the same typed status
-or renewal result so their certificate sets and calculated dates cannot diverge.
-JSON output uses deterministic item ordering by service/function and certificate
-name. Human-readable messages are not used as machine-readable state; callers
-use the versioned fields and enum values instead.
+The `CertificateStatusList`, `CertificateRenewalResult`, and `Error` types are
+registered Kubernetes API objects in the `microshift.openshift.io/v1alpha1`
+scheme. JSON and YAML use Kubernetes serializers, while human-readable tables
+are rendered from the same typed status or renewal result so their certificate
+sets and calculated dates cannot diverge. Machine-readable output uses
+deterministic item ordering by service/function and certificate name.
+Human-readable messages are not used as machine-readable state; callers use the
+object group, version, kind, and documented enum values instead.
 
 #### Service Stop Requirement
 
@@ -908,9 +957,12 @@ retained as defaults instead.
 - Renewal transaction fault injection before and during commit, including
   rollback and recovery of an interrupted transaction.
 - Dry-run output generation.
-- JSON serialization for status, planned renewal, completed renewal, and error
-  documents, including schema version, enum values, deterministic ordering, and
-  warning representation.
+- Kubernetes API object registration and JSON/YAML round-trip serialization for
+  status, validated renewal, completed renewal, and error documents, including
+  group, version, kind, enum values, deterministic ordering, and warning
+  representation.
+- Validation of all required `CertificateStatusList`, configuration, and item
+  fields and enum values.
 - Exhaustive validation of allowed `Error.code` values and required versus
   nullable fields.
 - Validation of the two permitted renewal result combinations and rejection of
@@ -968,8 +1020,8 @@ N/A This feature is targeted for GA directly.
 
 - All CLI commands implemented and tested (`certs status`, `certs renew
 --serving`, `certs renew --ca`, `--dry-run`, and `-o json|yaml`).
-- Versioned JSON status, renewal, dry-run, and error contracts are documented
-  and validated in CI.
+- Versioned Kubernetes API object contracts for JSON/YAML status, renewal,
+  dry-run, and error output are documented and validated in CI.
 - `forceRestartOnRedZone` implemented with a compatibility-preserving `true`
   default and a warn-only `false` mode.
 - PKI inventory abstraction implemented and validated.
@@ -1020,7 +1072,8 @@ skew considerations.
 
 ## Operational Aspects of API Extensions
 
-N/A No API extensions are introduced.
+N/A No server-side API extensions are introduced. The Kubernetes API objects
+defined by this enhancement are emitted only by the `microshift certs` CLI.
 
 ## Support Procedures
 
