@@ -160,15 +160,16 @@ Starting state: a NodePool exists and references user/core/NTO configs.
 
 1. The NodePool controller creates or updates an `IgnitionPayload` CR (with a
    finalizer) in the HCP namespace and enumerates the config sources in
-   `spec.rolloutConfigRefs` (user/core/NTO) or `spec.mgmtConfigRefs` (the
+   `spec.rolloutConfigMaps` (user/core/NTO) or `spec.mgmtConfigMaps` (the
    apiserver-HAProxy config). Sources that do not already live in the HCP
    namespace it projects there as CR-owned ConfigMaps — the user configs (copied
-   from the clusters namespace) and the HAProxy config it authors — while the
-   core and NTO ConfigMaps already reside in the HCP namespace and are referenced
-   in place with no CR owner reference. It sets scalar inputs (`releaseImage`,
-   `pullSecretName`, `additionalTrustBundle`, `osStream`) and the
-   rollout-relevant global-config subset (`rolloutGlobalConfig`). It never
-   opens a ConfigMap's contents and computes no hash.
+   from the clusters namespace), the HAProxy config, and the canonicalized
+   rollout-relevant global-config subset it authors and references via
+   `spec.rolloutGlobalConfig` — while the core and NTO ConfigMaps already reside
+   in the HCP namespace and are referenced in place with no CR owner reference. It
+   sets the direct inputs (`releaseImage`, `pullSecretName`,
+   `additionalTrustBundle`, `osStream`). It never opens a ConfigMap's contents and
+   computes no hash.
 2. The PayloadController (leader) reacts to the CR or to a change in any
    referenced ConfigMap, the pull-secret Secret named by `spec.pullSecretName`,
    or the trust-bundle ConfigMap named by `spec.additionalTrustBundle` — all of
@@ -180,8 +181,8 @@ Starting state: a NodePool exists and references user/core/NTO configs.
    rendered payload — including the pull-secret and trust-bundle *contents* — so
    an in-place rotation of either produces a new payload-identity and
    `FindByIdentity` never reuses stale bytes. The rollout hash instead uses the
-   *references* (`rolloutConfigRefs` config + version + `pullSecretName` +
-   `additionalTrustBundle` name + `rolloutGlobalConfig` + osStream), preserving
+   *references* (`rolloutConfigMaps` config + version + `pullSecretName` +
+   `additionalTrustBundle` name + `rolloutGlobalConfig` config + osStream), preserving
    parity with today's NodePool `ConfigGenerator.Hash()` (which hashes
    `pullSecretName`/`additionalTrustBundleName`, not their contents) so an
    in-place credential/CA rotation does not roll the fleet; instead it refreshes
@@ -300,17 +301,21 @@ This enhancement adds a new CRD and a finalizer:
    // +kubebuilder:printcolumn:name="Generated",type=string,JSONPath=`.status.conditions[?(@.type=="PayloadGenerated")].status`
    // +kubebuilder:printcolumn:name="Reached",type=string,JSONPath=`.status.conditions[?(@.type=="IgnitionReached")].status`
    type IgnitionPayload struct {
-   	metav1.TypeMeta   `json:",inline"`
+   	metav1.TypeMeta `json:",inline"`
+
+   	// metadata is the standard object metadata.
+   	// +optional
    	metav1.ObjectMeta `json:"metadata,omitempty"`
 
    	// spec is written by the consumer and describes the desired payload inputs.
    	// +required
-   	Spec IgnitionPayloadSpec `json:"spec"`
+   	Spec IgnitionPayloadSpec `json:"spec,omitzero"`
 
    	// status is written by the PayloadController and reports generation and
    	// rollout progress.
    	// +optional
-   	Status IgnitionPayloadStatus `json:"status,omitempty"`
+   	// +kubebuilder:validation:MinProperties=1
+   	Status IgnitionPayloadStatus `json:"status,omitzero"`
    }
 
    // IgnitionPayloadSpec is written entirely by the consumer; the PayloadController
@@ -322,53 +327,72 @@ This enhancement adds a new CRD and a finalizer:
    	// resolves it to an immutable digest before pulling it.
    	// +required
    	// +kubebuilder:validation:MinLength=1
-   	ReleaseImage string `json:"releaseImage"`
+   	// +kubebuilder:validation:MaxLength=447
+   	ReleaseImage string `json:"releaseImage,omitempty"`
 
    	// pullSecretName is the name of a Secret in the CR's namespace holding the
    	// registry pull secret used to fetch the release image and embedded in the
    	// payload.
    	// +required
    	// +kubebuilder:validation:MinLength=1
-   	PullSecretName string `json:"pullSecretName"`
+   	// +kubebuilder:validation:MaxLength=253
+   	PullSecretName string `json:"pullSecretName,omitempty"`
 
    	// additionalTrustBundle optionally references a ConfigMap in the CR's
    	// namespace holding a PEM CA bundle for booting nodes to trust.
    	// +optional
-   	AdditionalTrustBundle *corev1.LocalObjectReference `json:"additionalTrustBundle,omitempty"`
+   	AdditionalTrustBundle ConfigMapReference `json:"additionalTrustBundle,omitzero"`
 
-   	// osStream selects the RHEL OS stream (e.g. "rhel-9") the payload targets.
+   	// osStream selects the RHEL OS stream the payload targets.
    	// +optional
+   	// +kubebuilder:validation:Enum=rhel-9;rhel-10
    	OSStream string `json:"osStream,omitempty"`
 
-   	// rolloutGlobalConfig carries the rollout-relevant subset of the hosted
-   	// cluster's global configuration, canonicalized by the consumer. It is a
-   	// rollout-hash input; see predictable-nodepool-rollout-control (#8698).
+   	// rolloutGlobalConfig references a CR-owned ConfigMap in the CR's namespace
+   	// holding the rollout-relevant subset of the hosted cluster's global
+   	// configuration, canonicalized and authored by the consumer. Its contents are
+   	// a rollout-hash input; see predictable-nodepool-rollout-control (#8698).
    	// +optional
-   	RolloutGlobalConfig string `json:"rolloutGlobalConfig,omitempty"`
+   	RolloutGlobalConfig ConfigMapReference `json:"rolloutGlobalConfig,omitzero"`
 
-   	// rolloutConfigRefs lists ConfigMaps in the CR's namespace whose contents
+   	// rolloutConfigMaps lists ConfigMaps in the CR's namespace whose contents
    	// are rollout-relevant (user, core, and NTO machine configs). A change to
    	// any of them can advance the rollout hash and trigger a node rollout.
    	// +optional
    	// +listType=map
    	// +listMapKey=name
-   	RolloutConfigRefs []corev1.LocalObjectReference `json:"rolloutConfigRefs,omitempty"`
+   	// +kubebuilder:validation:MinItems=1
+   	// +kubebuilder:validation:MaxItems=100
+   	RolloutConfigMaps []ConfigMapReference `json:"rolloutConfigMaps,omitempty"`
 
-   	// mgmtConfigRefs lists ConfigMaps in the CR's namespace whose contents are
+   	// mgmtConfigMaps lists ConfigMaps in the CR's namespace whose contents are
    	// management-side only (the apiserver-HAProxy config). A change to them
    	// refreshes the payload behind the current token without a rollout.
    	// +optional
    	// +listType=map
    	// +listMapKey=name
-   	MgmtConfigRefs []corev1.LocalObjectReference `json:"mgmtConfigRefs,omitempty"`
+   	// +kubebuilder:validation:MinItems=1
+   	// +kubebuilder:validation:MaxItems=100
+   	MgmtConfigMaps []ConfigMapReference `json:"mgmtConfigMaps,omitempty"`
 
    	// retiredGeneration is a level-triggered signal that the payload of the
    	// given generation has drained (its nodes are gone) and its store token may
    	// be freed. The PayloadController deletes store entries at or below this
    	// generation except the one backing status.current.
    	// +optional
-   	// +kubebuilder:validation:Minimum=0
+   	// +kubebuilder:validation:Minimum=1
    	RetiredGeneration int64 `json:"retiredGeneration,omitempty"`
+   }
+
+   // ConfigMapReference references a ConfigMap by name in the CR's namespace. A
+   // required, length-bounded name keeps it usable as a list map key, unlike
+   // corev1.LocalObjectReference whose name is optional and defaults to "".
+   type ConfigMapReference struct {
+   	// name is the name of a ConfigMap in the same namespace as this resource.
+   	// +required
+   	// +kubebuilder:validation:MinLength=1
+   	// +kubebuilder:validation:MaxLength=253
+   	Name string `json:"name,omitempty"`
    }
 
    // IgnitionPayloadStatus has two writers with disjoint field ownership. The
@@ -378,18 +402,6 @@ This enhancement adds a new CRD and a finalizer:
    // ownership contract in Implementation Details). No writer replaces the whole
    // status.
    type IgnitionPayloadStatus struct {
-   	// current describes the payload for the latest validated, generated config.
-   	// +optional
-   	Current *PayloadReference `json:"current,omitempty"`
-
-   	// previous describes the immediately prior payload, retained during a
-   	// rollout so in-flight boots on the old token are served until they drain.
-   	// It is serving/observability state, not the cleanup mechanism: tokens are
-   	// reclaimed by delete-on-evict and the store-cleanup finalizer, not by
-   	// tracking every generation here.
-   	// +optional
-   	Previous *PayloadReference `json:"previous,omitempty"`
-
    	// conditions reports generation and rollout progress. Known types:
    	// "PayloadGenerated" (the latest config produced a payload) and
    	// "IgnitionReached" (a node has fetched status.current's token; written by the
@@ -397,7 +409,21 @@ This enhancement adds a new CRD and a finalizer:
    	// +optional
    	// +listType=map
    	// +listMapKey=type
+   	// +kubebuilder:validation:MinItems=1
+   	// +kubebuilder:validation:MaxItems=100
    	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+   	// current describes the payload for the latest validated, generated config.
+   	// +optional
+   	Current PayloadReference `json:"current,omitzero"`
+
+   	// previous describes the immediately prior payload, retained during a
+   	// rollout so in-flight boots on the old token are served until they drain.
+   	// It is serving/observability state, not the cleanup mechanism: tokens are
+   	// reclaimed by delete-on-evict and the store-cleanup finalizer, not by
+   	// tracking every generation here.
+   	// +optional
+   	Previous PayloadReference `json:"previous,omitzero"`
    }
 
    // PayloadReference identifies one generated payload version and its store key.
@@ -406,12 +432,16 @@ This enhancement adds a new CRD and a finalizer:
    	// It also labels the payload's store entry, making generation idempotent
    	// across leader failover.
    	// +required
-   	ConfigHash string `json:"configHash"`
+   	// +kubebuilder:validation:MinLength=1
+   	// +kubebuilder:validation:MaxLength=64
+   	ConfigHash string `json:"configHash,omitempty"`
 
    	// rolloutHash is the hash over the rollout-relevant inputs. A change here
    	// advances generation and triggers a node rollout.
    	// +required
-   	RolloutHash string `json:"rolloutHash"`
+   	// +kubebuilder:validation:MinLength=1
+   	// +kubebuilder:validation:MaxLength=64
+   	RolloutHash string `json:"rolloutHash,omitempty"`
 
    	// token is an opaque, non-derivable UUID: the key into the PayloadStore for
    	// this version. It is a capability to fetch the payload, not the payload
@@ -422,13 +452,15 @@ This enhancement adds a new CRD and a finalizer:
    	// CR teardown. Its authorization model for GET /ignition is unchanged from
    	// today's ignition server.
    	// +required
-   	Token string `json:"token"`
+   	// +kubebuilder:validation:MinLength=1
+   	// +kubebuilder:validation:MaxLength=253
+   	Token string `json:"token,omitempty"`
 
    	// generation is a monotonically increasing counter the consumer watches to
    	// execute a rollout. It advances only when rolloutHash changes.
    	// +required
-   	// +kubebuilder:validation:Minimum=0
-   	Generation int64 `json:"generation"`
+   	// +kubebuilder:validation:Minimum=1
+   	Generation int64 `json:"generation,omitempty"`
    }
    ```
 
@@ -502,7 +534,7 @@ code produces correct payloads for every OCP version in the fleet.
 
 **Config resolution: one owner.** The NodePool controller copies each config
 source into the HCP namespace as its own ConfigMap (owned by the CR) and
-classifies it into `rolloutConfigRefs` vs `mgmtConfigRefs`. The PayloadController
+classifies it into `rolloutConfigMaps` vs `mgmtConfigMaps`. The PayloadController
 reads exactly the ConfigMaps named in those lists — a self-describing input set
 with no label query — gathers them in a deterministic (sorted) order, splits
 multi-document YAML, validates each manifest, and computes both hashes over the
