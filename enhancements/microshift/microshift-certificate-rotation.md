@@ -12,7 +12,7 @@ approvers:
 api-approvers:
   - None
 creation-date: 2026-09-08
-last-updated: 2026-09-14
+last-updated: 2026-09-24
 tracking-link:
   - https://redhat.atlassian.net/browse/OCPSTRAT-2899
 see-also:
@@ -40,6 +40,8 @@ to `false` to use a warn-only policy that surfaces certificate zone status via
 `certs status` and healthcheck without forcing an unplanned restart.
 Administrators can also configure the validity of internally generated serving
 and CA certificates; the defaults remain one year and ten years, respectively.
+All certificate status, dry-run, and renewal operations provide JSON output for
+fleet automation.
 
 ## Motivation
 
@@ -85,6 +87,13 @@ generated serving certificates and CAs so that the cluster's certificate policy,
 including short-lived serving certificates, meets my organization's security
 requirements.
 
+#### Story 7: Fleet Status Automation
+
+As an administrator responsible for a fleet of MicroShift devices, I want
+machine-readable certificate status and renewal results so that I can aggregate
+expiry and impact data in external automation without parsing human-readable
+tables.
+
 ### Goals
 
 1. Provide a CLI-based mechanism to inspect the status of all MicroShift-managed
@@ -116,6 +125,9 @@ requirements.
    serving certificates and CAs. Preserve the current one-year serving
    certificate and ten-year CA defaults when the settings are omitted.
 
+9. Provide stable JSON output for certificate status, renewal dry-runs, and
+   completed renewals so fleet-management systems can consume the results.
+
 ### Non-Goals
 
 1. Hot-reload of certificates without a service restart. Due to vendor code
@@ -145,6 +157,11 @@ requirements.
    certificates, and `--ca` renews all managed CAs and their descendants. For
    example, this enhancement does not provide an etcd-only renewal operation.
 
+7. Providing a fleet-management service, transport, or central data store.
+   MicroShift provides machine-readable local command output; external systems
+   are responsible for command execution, device identity, aggregation,
+   retention, and alerting across the fleet.
+
 ## Proposal
 
 ### CLI Design
@@ -155,6 +172,255 @@ healthcheck`.
 
 All commands require root privileges and operate on the MicroShift data
 directory.
+
+#### Output Formats
+
+> Note: Since YAML is a superset of JSON, we are adding it as an output format
+> but all examples and descriptions will call out JSON only for simplicity.
+
+The `status` command and every `renew` operation, including `--dry-run`, accept
+`-o json|yaml` or `--output=json|yaml`. Human-readable tables remain the default
+when the flag is omitted. Successful JSON output writes exactly one JSON
+document to standard output; progress and diagnostics go to standard error.
+Warnings are included in the JSON document rather than mixed with standard
+output. On failure, the command exits non-zero, leaves standard output empty,
+and writes a JSON error object to standard error when JSON output was requested.
+In that case, no additional human-readable diagnostics are written beside the
+error document.
+
+The machine-readable object contract is versioned independently from the
+human-readable table.
+Fields may be added compatibly, but existing fields and enum values are not
+removed or redefined within a version. Timestamps use RFC 3339. Configured
+validity durations use Go duration strings, while calculated remaining durations
+use integer seconds. Unless a field is explicitly marked nullable below, it is
+required and must not be `null`.
+
+Machine-readable status, renewal result, and error documents are Kubernetes API
+objects registered under `microshift.openshift.io/v1alpha1`. Their `apiVersion`
+and `kind` fields are Kubernetes `TypeMeta`, allowing generic Kubernetes tooling
+to identify and decode each object. `CertificateStatusList` is the typed list
+object, while `CertificateRenewalResult` and `Error` are single result objects.
+These objects are emitted only by the CLI; they are not resources persisted by
+or served through the Kubernetes API server.
+
+##### Error Document
+
+JSON-mode failures return the following `Error` document on standard error:
+
+| Field         | Type            | Nullable | Required value or meaning                         |
+| ------------- | --------------- | -------- | ------------------------------------------------- |
+| `apiVersion`  | string          | No       | `microshift.openshift.io/v1alpha1`                |
+| `kind`        | string          | No       | `Error`                                           |
+| `generatedAt` | RFC 3339 string | No       | Time at which the error document was generated    |
+| `code`        | string          | No       | One of the stable codes defined below             |
+| `message`     | string          | No       | Non-empty human-readable description              |
+| `details`     | object          | Yes      | Structured context; `null` when none is available |
+
+Allowed `Error.code` values are:
+
+| Code                         | Meaning                                                             |
+| ---------------------------- | ------------------------------------------------------------------- |
+| `InvalidArguments`           | Command arguments or output options are invalid                     |
+| `InvalidConfiguration`       | Effective MicroShift certificate configuration is invalid           |
+| `InsufficientPrivileges`     | The command is not running with the required root privileges        |
+| `MicroShiftRunning`          | Renewal was refused because the MicroShift service is active        |
+| `CertificateInventoryFailed` | Managed certificate inventory or certificate data could not be read |
+| `RenewalFailed`              | Renewal planning, validation, staging, or commit failed             |
+| `RecoveryFailed`             | An interrupted renewal transaction could not be recovered           |
+| `InternalError`              | An unexpected error not represented by another stable code          |
+
+The error code identifies the failure class for automation; callers must not
+parse `message`. Additional properties in `details` are code-specific and are
+not part of the stable vocabulary unless separately documented.
+
+```json
+{
+  "apiVersion": "microshift.openshift.io/v1alpha1",
+  "kind": "Error",
+  "generatedAt": "2026-09-08T10:30:00Z",
+  "code": "MicroShiftRunning",
+  "message": "MicroShift must be stopped before certificates can be renewed.",
+  "details": {
+    "service": "microshift.service",
+    "state": "active"
+  }
+}
+```
+
+##### Status Document
+
+`microshift certs status -o json` returns a `CertificateStatusList` Kubernetes
+API object with these top-level fields:
+
+| Field         | Type             | Nullable | Required value or meaning                                      |
+| ------------- | ---------------- | -------- | -------------------------------------------------------------- |
+| `apiVersion`  | string           | No       | `microshift.openshift.io/v1alpha1`                             |
+| `kind`        | string           | No       | `CertificateStatusList`                                        |
+| `generatedAt` | RFC 3339 string  | No       | Time at which certificate state and remaining time were read   |
+| `config`      | object           | No       | Effective certificate configuration used for status evaluation |
+| `items`       | array            | No       | Managed certificate status entries                             |
+| `warnings`    | array of strings | No       | Human-readable warnings; an empty array when none apply        |
+
+The required `config` object contains:
+
+| Field                   | Type    | Nullable | Required value or meaning                        |
+| ----------------------- | ------- | -------- | ------------------------------------------------ |
+| `forceRestartOnRedZone` | boolean | No       | Effective red-zone forced-restart setting        |
+| `servingValidity`       | string  | No       | Effective serving validity as a Go duration      |
+| `caValidity`            | string  | No       | Effective CA validity as a Go duration           |
+
+Every member of `items` contains:
+
+| Field              | Type            | Nullable | Required value or meaning                                  |
+| ------------------ | --------------- | -------- | ---------------------------------------------------------- |
+| `service`          | string          | No       | Owning service or function                                 |
+| `name`             | string          | No       | Stable inventory name                                      |
+| `role`             | string          | No       | `ca`, `serving`, `client`, or `peer`                       |
+| `rotationPolicy`   | string          | No       | `standard` or `extended`                                   |
+| `zone`             | string          | No       | `green`, `yellow`, or `red`                                |
+| `notBefore`        | RFC 3339 string | No       | Beginning of the certificate validity interval             |
+| `notAfter`         | RFC 3339 string | No       | End of the certificate validity interval                   |
+| `remainingSeconds` | integer         | No       | Signed `notAfter - generatedAt` duration in whole seconds  |
+
+Items are ordered by `service` and then `name`. An expired certificate has a
+zero or negative `remainingSeconds` value and a `red` zone.
+
+```json
+{
+  "apiVersion": "microshift.openshift.io/v1alpha1",
+  "kind": "CertificateStatusList",
+  "generatedAt": "2026-09-08T10:30:00Z",
+  "config": {
+    "forceRestartOnRedZone": true,
+    "servingValidity": "8760h",
+    "caValidity": "87600h"
+  },
+  "items": [
+    {
+      "service": "etcd",
+      "name": "etcd-serving",
+      "role": "peer",
+      "rotationPolicy": "extended",
+      "zone": "yellow",
+      "notBefore": "2016-11-03T08:00:00Z",
+      "notAfter": "2026-11-01T08:00:00Z",
+      "remainingSeconds": 4656600
+    }
+  ],
+  "warnings": []
+}
+```
+
+##### Renewal Result Document
+
+`microshift certs renew --serving|--ca [--dry-run] -o [json|yaml]` returns a
+`CertificateRenewalResult` document with these top-level fields:
+
+| Field         | Type             | Nullable | Required value or meaning                                           |
+| ------------- | ---------------- | -------- | ------------------------------------------------------------------- |
+| `apiVersion`  | string           | No       | `microshift.openshift.io/v1alpha1`                                  |
+| `kind`        | string           | No       | `CertificateRenewalResult`                                          |
+| `generatedAt` | RFC 3339 string  | No       | Time at which the result was generated                              |
+| `mode`        | string           | No       | `serving` or `ca`                                                   |
+| `status`      | string           | No       | `validated` or `completed`                                          |
+| `dryRun`      | boolean          | No       | Whether the operation made no persistent changes                    |
+| `items`       | non-empty array  | No       | All certificates selected by the operation                          |
+| `impact`      | object           | No       | Operational actions required after the planned or completed renewal |
+| `warnings`    | array of strings | No       | Human-readable warnings; an empty array when none apply             |
+
+Every member of `items` contains:
+
+| Field             | Type            | Nullable | Required value or meaning                                       |
+| ----------------- | --------------- | -------- | --------------------------------------------------------------- |
+| `service`         | string          | No       | Owning service or function                                      |
+| `name`            | string          | No       | Stable inventory name                                           |
+| `role`            | string          | No       | `ca`, `serving`, `client`, or `peer`                            |
+| `parentCA`        | string          | Yes      | Parent CA inventory name; `null` when there is no parent        |
+| `currentNotAfter` | RFC 3339 string | No       | Expiry before the planned or completed operation                |
+| `newNotAfter`     | RFC 3339 string | No       | Proposed expiry for `validated`; applied expiry for `completed` |
+| `changed`         | boolean         | No       | Whether this invocation persistently replaced the item          |
+
+The required `impact` object contains the boolean fields
+`serviceRestartRequired`, `kubeconfigRedistributionRequired`, and
+`applicationReloadMayBeRequired`.
+
+Only these result-state combinations are valid:
+
+| `status`    | `dryRun` | `changed` | Meaning                                     |
+| ----------- | -------- | --------- | ------------------------------------------- |
+| `validated` | `true`   | `false`   | Validation succeeded; no files were changed |
+| `completed` | `false`  | `true`    | The transaction committed and was validated |
+
+`validated` with `dryRun: false`, `completed` with `dryRun: true`, or mixed
+`changed` values are schema-invalid. Failed or partially committed operations do
+not return `CertificateRenewalResult`; they return an `Error` document with a
+non-zero exit code. Transaction recovery completes or rolls back before a later
+result is emitted.
+
+Example planned renewal:
+
+```json
+{
+  "apiVersion": "microshift.openshift.io/v1alpha1",
+  "kind": "CertificateRenewalResult",
+  "generatedAt": "2026-09-08T10:30:00Z",
+  "mode": "ca",
+  "status": "validated",
+  "dryRun": true,
+  "items": [
+    {
+      "service": "service-ca",
+      "name": "service-ca",
+      "role": "ca",
+      "parentCA": null,
+      "currentNotAfter": "2035-09-08T10:30:00Z",
+      "newNotAfter": "2036-09-05T10:30:00Z",
+      "changed": false
+    }
+  ],
+  "impact": {
+    "serviceRestartRequired": true,
+    "kubeconfigRedistributionRequired": true,
+    "applicationReloadMayBeRequired": true
+  },
+  "warnings": [
+    "Kubeconfigs stored outside the MicroShift data directory must be copied again after renewal."
+  ]
+}
+```
+
+Example completed renewal:
+
+```json
+{
+  "apiVersion": "microshift.openshift.io/v1alpha1",
+  "kind": "CertificateRenewalResult",
+  "generatedAt": "2026-09-08T10:31:00Z",
+  "mode": "ca",
+  "status": "completed",
+  "dryRun": false,
+  "items": [
+    {
+      "service": "service-ca",
+      "name": "service-ca",
+      "role": "ca",
+      "parentCA": null,
+      "currentNotAfter": "2035-09-08T10:30:00Z",
+      "newNotAfter": "2036-09-05T10:30:00Z",
+      "changed": true
+    }
+  ],
+  "impact": {
+    "serviceRestartRequired": true,
+    "kubeconfigRedistributionRequired": true,
+    "applicationReloadMayBeRequired": true
+  },
+  "warnings": [
+    "Kubeconfigs stored outside the MicroShift data directory must be copied again."
+  ]
+}
+```
 
 #### `microshift certs status`
 
@@ -375,6 +641,17 @@ the number of CAs without modifying the CLI commands.
 
 ### Workflow Description
 
+#### Fleet Status Collection
+
+1. Fleet automation runs `sudo microshift certs status -o [json|yaml]` on each
+   device.
+2. It checks the process exit code and the output `apiVersion` before consuming
+   the document.
+3. It records `generatedAt`, certificate identity, role, zone, and `notAfter`
+   values together with the device identity supplied by the fleet system.
+4. It alerts or schedules maintenance according to the aggregated certificate
+   state. MicroShift does not contact or depend on a central fleet service.
+
 #### Serving/Client Certificate Renewal
 
 1. Administrator runs `microshift certs status` to assess certificate state.
@@ -419,10 +696,14 @@ the number of CAs without modifying the CLI commands.
 
 ### API Extensions
 
-This enhancement does not introduce or modify Kubernetes API resources. It adds
-the `certificates.forceRestartOnRedZone`, `certificates.servingValidity`, and
-`certificates.caValidity` fields to the host-local MicroShift configuration
-file.
+This enhancement does not introduce or modify resources served by the
+Kubernetes API server. It adds the `certificates.forceRestartOnRedZone`,
+`certificates.servingValidity`, and `certificates.caValidity` fields to the
+host-local MicroShift configuration file. The versioned CLI documents are
+Kubernetes API objects so that clients can use standard object identification
+and serialization conventions, but the objects have no API endpoints and
+cannot be created, retrieved, listed, watched, updated, or deleted through the
+API server.
 
 ### Topology Considerations
 
@@ -463,13 +744,22 @@ microshift backup
 microshift restore
 microshift healthcheck
 microshift certs
-microshift certs status
+microshift certs status [-o json|yaml]
 microshift certs renew
-microshift certs renew --serving
-microshift certs renew --serving --dry-run
-microshift certs renew --ca
-microshift certs renew --ca --dry-run
+microshift certs renew --serving [--dry-run] [-o json|yaml]
+microshift certs renew --ca [--dry-run] [-o json|yaml]
 ```
+
+#### Kubernetes Object Rendering
+
+The `CertificateStatusList`, `CertificateRenewalResult`, and `Error` types are
+registered Kubernetes API objects in the `microshift.openshift.io/v1alpha1`
+scheme. JSON and YAML use Kubernetes serializers, while human-readable tables
+are rendered from the same typed status or renewal result so their certificate
+sets and calculated dates cannot diverge. Machine-readable output uses
+deterministic item ordering by service/function and certificate name.
+Human-readable messages are not used as machine-readable state; callers use the
+object group, version, kind, and documented enum values instead.
 
 #### Service Stop Requirement
 
@@ -667,12 +957,29 @@ retained as defaults instead.
 - Renewal transaction fault injection before and during commit, including
   rollback and recovery of an interrupted transaction.
 - Dry-run output generation.
+- Kubernetes API object registration and JSON/YAML round-trip serialization for
+  status, validated renewal, completed renewal, and error documents, including
+  group, version, kind, enum values, deterministic ordering, and warning
+  representation.
+- Validation of all required `CertificateStatusList`, configuration, and item
+  fields and enum values.
+- Exhaustive validation of allowed `Error.code` values and required versus
+  nullable fields.
+- Validation of the two permitted renewal result combinations and rejection of
+  inconsistent `status`, `dryRun`, or item `changed` values.
 - Service-running detection guard.
 
 ### Integration Tests
 
 - End-to-end `certs status` output validation against a running MicroShift
   instance.
+- Validate `-o json|yaml` for `status`, serving and CA dry-runs, and completed
+  serving and CA renewals. Each successful invocation produces one schema-valid
+  JSON document on standard output with no human-readable text mixed into it.
+- Verify table and JSON renderings contain the same certificates, calculated
+  zones, impact, and expiry dates.
+- Verify JSON-mode failures return non-zero, leave standard output empty, and
+  produce a schema-valid error document on standard error.
 - End-to-end `certs renew --serving` followed by service restart, verifying all
   renewed certificates are valid and workloads resume.
 - End-to-end `certs renew --ca` followed by service restart, verifying CA chain
@@ -700,6 +1007,8 @@ retained as defaults instead.
   authenticate with new kubeconfig.
 - Verify an application that caches an old certificate or CA bundle is called
   out by renewal impact messaging and can recover by reloading or restarting.
+- Collect `certs status -o json|yaml` from multiple devices and verify the
+  documents can be aggregated by an external fleet-management system.
 
 ## Graduation Criteria
 
@@ -710,7 +1019,9 @@ N/A This feature is targeted for GA directly.
 ### Tech Preview -> GA
 
 - All CLI commands implemented and tested (`certs status`, `certs renew
---serving`, `certs renew --ca`, `--dry-run`).
+--serving`, `certs renew --ca`, `--dry-run`, and `-o json|yaml`).
+- Versioned Kubernetes API object contracts for JSON/YAML status, renewal,
+  dry-run, and error output are documented and validated in CI.
 - `forceRestartOnRedZone` implemented with a compatibility-preserving `true`
   default and a warn-only `false` mode.
 - PKI inventory abstraction implemented and validated.
@@ -761,7 +1072,8 @@ skew considerations.
 
 ## Operational Aspects of API Extensions
 
-N/A No API extensions are introduced.
+N/A No server-side API extensions are introduced. The Kubernetes API objects
+defined by this enhancement are emitted only by the `microshift certs` CLI.
 
 ## Support Procedures
 
@@ -770,7 +1082,8 @@ N/A No API extensions are introduced.
 1. Run `sudo microshift show-config` to verify the effective configured validity
    durations.
 2. Run `sudo microshift certs status` to view the actual validity and state of
-   each existing certificate.
+   each existing certificate, or use `-o json|yaml` when collecting status
+   through fleet automation.
 3. Check MicroShift logs for certificate-related warnings: `journalctl -u
 microshift -g "certificate"`.
 4. If certificates are in red zone, plan a maintenance window and use the
