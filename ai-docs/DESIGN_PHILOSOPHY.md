@@ -2,7 +2,7 @@
 
 **Purpose**: Core principles guiding OpenShift architecture and development
 
-**Last Updated**: YYYY-MM-DD
+**Last Updated**: 2026-06-24
 
 ---
 
@@ -93,7 +93,7 @@ Controller:     "I'll create 2 more" (Reconciliation)
 **Mechanisms**:
 - CVO orchestrates operator upgrades
 - Rolling updates for nodes
-- Upgrade ordering (etcd → kube → operators)
+- Upgrade ordering by runlevel (core platform → Kubernetes operators → higher-level operators)
 
 ---
 
