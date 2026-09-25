@@ -346,9 +346,10 @@ sequenceDiagram
     Mon->>SPIRE: Scrape metrics (via allowed ingress)
 ```
 
-### Capability-Driven Conditional Policies (No CRD Extension)
+### API Extensions
 
-This enhancement does **not** add `networkPolicyRefs` or other new fields
+This enhancement does **not** add new CRDs, webhooks, or finalizers, and does
+**not** add `networkPolicyRefs` or other new fields
 to operand CRs. Operand reconcilers deploy baseline `ztwim-sys-*` policies
 from embedded templates and **generate or update** conditional policies
 from configuration that already exists on the CR or operator Deployment.
