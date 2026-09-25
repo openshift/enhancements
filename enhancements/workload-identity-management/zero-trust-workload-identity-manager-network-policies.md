@@ -10,7 +10,7 @@ approvers:
 api-approvers:
   - None
 creation-date: 2026-04-08
-last-updated: 2026-09-22
+last-updated: 2026-09-25
 status: provisional
 tracking-link:
   - https://redhat.atlassian.net/browse/SPIRE-212
@@ -28,8 +28,10 @@ ZeroTrustWorkloadIdentityManager operator and its operands (SPIRE Server,
 SPIRE Agent, SPIFFE CSI Driver, and OIDC Discovery Provider). The network
 policies implement a zero-trust security model by deploying default-deny
 baseline policies and explicit allow rules for required communication
-patterns, ensuring that all components follow the principle of least
-privilege for network access.
+patterns. Conditional egress and federation ingress are derived from
+existing operand spec and operator proxy configuration (port-only rules,
+fixed `ztwim-sys-*` policy names) without `networkPolicyRefs` or other new
+CR fields.
 
 ### Supported Platforms
 
@@ -68,11 +70,21 @@ destinations.
   deployed with the ZeroTrustWorkloadIdentityManager operator, so that
   SPIRE components are allowed only required communication.
 
-* As a cluster administrator, I want to attach or update custom
-  NetworkPolicy resources on the SpireServer CR when enabling capabilities
-  (Vault upstream authority, external database, cluster proxy, or remote
-  federation endpoints), so that environment-specific egress is validated
-  and reported without the operator hardcoding endpoint ports.
+* As a cluster administrator, I want the operator to create and update
+  capability-specific NetworkPolicies from existing SpireServer, SpireAgent,
+  and operator configuration (federation URLs, Vault address, database type,
+  cluster proxy env), so that egress ports stay correct when I change the CR
+  without maintaining separate NetworkPolicy manifests or references.
+
+* As a cluster administrator upgrading the operator, I want conditional
+  policies applied from the current operand spec on the first reconcile after
+  upgrade, so that enabling deny-all does not break Vault, federation, or
+  external database connectivity that already worked before the upgrade.
+
+* As a site reliability engineer, I want operand status to show which
+  operator-managed NetworkPolicies were applied and whether reconciliation
+  failed, so that I can debug connectivity without guessing which capability
+  rule is missing.
 
 * As a security engineer, I want default-deny network policies enforced
   for all workload identity components, so that only explicitly permitted
@@ -108,15 +120,16 @@ destinations.
   * Webhook ingress for SPIRE controller manager (port 9443/TCP)
   * SPIRE Server federation via OpenShift Router (if enabled)
   * DNS resolution for service discovery (port 5353/TCP+UDP)
-  * User-referenced egress for Vault, external databases, proxy, and
-    remote federation endpoints via `networkPolicyRefs` on the SpireServer
-    CR
+  * Capability-derived egress for SPIRE Server (and proxy egress for server,
+    agent, and OIDC) by parsing operand spec and operator proxy environment
 
 * Ensure network policies do not interfere with normal operation of the
   workload identity management system.
 
-* Support user-configurable network policies to handle environment-specific
-  egress requirements (Vault, external database, proxy, remote federation).
+* Derive conditional egress TCP ports from existing configuration (no new
+  SpireServer fields for endpoint lists). Use port-only egress rules (no
+  `ipBlock`) unless the cluster administrator adds separate policies for
+  least-privilege CIDR restrictions.
 
 ### Non-Goals
 
@@ -146,7 +159,7 @@ baselines and minimal explicit allow rules.
 |-------------|--------|------------|---------------|
 | Operator policies | `ztwim-op-*` | OLM bundle at install | Not continuously (OLM) |
 | Operand baseline policies | `ztwim-sys-*` | Operand reconciler | Operand reconciler |
-| User-referenced policies | User-defined | User | User (validated by reconciler) |
+| Administrator supplemental policies | User-defined (not `ztwim-sys-*`) | Administrator | Administrator (optional; additive) |
 
 The operator's network policies are embedded in the **OLM bundle** and
 applied by OLM during operator installation. The operand's network
@@ -157,8 +170,9 @@ resources as it communicates exclusively via Unix domain sockets.
 
 The operator controller does **not** reconcile or overwrite its own
 NetworkPolicies. Operand reconcilers reconcile **operator-defined**
-`ztwim-sys-*` template names from embedded bindata (via ensureExists) and
-revert external modifications to those names.
+`ztwim-sys-*` template names from embedded bindata (create, update, or
+delete by fixed name per capability gate) and revert external modifications
+to those names.
 
 All policies use pod selectors to target specific components and enforce
 ingress/egress rules based on the minimum required communication patterns
@@ -224,14 +238,15 @@ managing the ZeroTrustWorkloadIdentityManager operator.
 2. The corresponding operand reconciler deploys the operand components and
    creates `ztwim-sys-*` NetworkPolicy resources.
 
-3. During operand CR reconciliation, each reconciler runs the reconcile loop
-   (see Operand Network Policies): ensureExists for operator-managed
-   policies whose condition is true, deleteIfExists when false, and
-   existence-only validation for `networkPolicyRefs` on SpireServer.
-   SpireAgent and SpireOIDCDiscoveryProvider have no `networkPolicyRefs`;
-   baseline `ztwim-sys-*` policies cover their traffic. The
-   `managedRoute` field on SpireOIDCDiscoveryProvider controls Route
-   lifecycle only; it does not affect NetworkPolicy reconciliation.
+3. During operand CR reconciliation, each reconciler runs the network
+   policy loop (see Operand Network Policies): for each operator-managed
+   template, create or update the policy when its capability gate is true,
+   and delete the policy by fixed name when the gate is false. The
+   SpireServer reconciler also builds or updates conditional egress
+   policies whose TCP ports are derived from the current spec and operator
+   proxy environment. The `managedRoute` field on SpireOIDCDiscoveryProvider
+   and SpireServer federation controls Route lifecycle only; it does not
+   change baseline ingress from `openshift-ingress` on port 8443/TCP.
 
 4. Policy rollout follows a safe ordering: allow rules are applied before
    or overlapping with default-deny replacements. The reconciler retries
@@ -259,8 +274,9 @@ sidecar containers; `app.kubernetes.io/name: spire-server`):
 * Allow egress to Kubernetes API server on port 6443/TCP (port-only rule,
   no `ipBlock`)
 * Allow egress to DNS on port 5353/TCP+UDP to openshift-dns namespace
-* Allow egress to remote federation endpoints on port 443/TCP (conditional,
-  port-only rule, when federation is enabled)
+* Allow conditional feature egress (port-only): union of TCP ports from
+  `federatesWith` URLs, federation ACME `directoryUrl`, Vault `vaultAddr`,
+  external database, and operator proxy env when those capabilities are enabled
 
 **SPIRE Agent** (DaemonSet, `app.kubernetes.io/name: spire-agent`):
 * Allow egress to SPIRE Server on port 8081/TCP (pod/namespace selectors)
@@ -282,11 +298,12 @@ sidecar containers; `app.kubernetes.io/name: spire-server`):
   `policy-group.network.openshift.io/ingress` namespace label). No egress
   rules required; data source is SPIRE Agent via Unix domain socket.
 
-**Note on health probes**: On OVN-Kubernetes and OpenShift SDN, kubelet
-httpGet health probes bypass NetworkPolicy because kubelet runs on the
-host network. No ingress rules are needed for probe ports (8080, 8083,
-9982, 8008, 9809). Other CNIs may require explicit probe ingress rules;
-such CNIs are out of scope unless probe-success tests are added.
+**Note on health probes**: On supported platforms (see Supported
+Platforms), kubelet httpGet health probes bypass NetworkPolicy because
+kubelet runs on the host network. No ingress rules are needed for probe
+ports (8080, 8083, 9982, 8008, 9809). Other CNIs may require explicit
+probe ingress rules; such CNIs are out of scope unless probe-success
+tests are added.
 
 **Baseline policy rule patterns**:
 
@@ -297,8 +314,10 @@ such CNIs are out of scope unless probe-success tests are added.
 | DNS (5353) | `namespaceSelector` + `podSelector` to openshift-dns |
 | Metrics | `namespaceSelector` to openshift-monitoring |
 | Standard federation / OIDC Route ingress | `ztwim-sys-*` baseline (`namespaceSelector` to openshift-ingress) |
-| Remote federation egress (restrictive) | **User-created** NetworkPolicy via `networkPolicyRefs` on SpireServer; user may use `ipBlock`, ports, and `to:` as needed |
-| Vault, DB, proxy | **User-created** NetworkPolicy via `networkPolicyRefs` on SpireServer |
+| Federation remote egress | Operator: port-only egress; TCP ports = union from `federatesWith[].bundleEndpointUrl` |
+| Federation ACME egress | Operator: port-only egress; TCP ports from `bundleEndpoint.httpsWeb.acme.directoryUrl` when set |
+| Federation ingress (local bundle) | Operator: fixed **8443/TCP** ingress when `spec.federation` set (pod listener; not configurable in CR today) |
+| Vault, external DB, proxy | Operator: port-only egress; ports parsed from `vaultAddr`, `connectionString` / `databaseType`, and operator `HTTP_PROXY`/`HTTPS_PROXY` |
 
 ```mermaid
 sequenceDiagram
@@ -320,163 +339,81 @@ sequenceDiagram
     Admin->>K8s: Create SpireServer / SpireAgent CR
     K8s->>Recon: Notify operand reconciler
     Recon->>K8s: Deploy operand + ztwim-sys-* NetworkPolicies
-    Recon->>K8s: SpireServer reconciler validates networkPolicyRefs
+    Recon->>K8s: SpireServer reconciler applies capability-derived egress ports
     Note over K8s: Operand default-deny + Allow rules applied
     K8s->>SPIRE: Start components
     SPIRE->>K8s: Register (via allowed egress)
     Mon->>SPIRE: Scrape metrics (via allowed ingress)
 ```
 
-### API Extensions
+### Capability-Driven Conditional Policies (No CRD Extension)
 
-This enhancement adds a `networkPolicyRefs` field (`[]string`) to the
-**SpireServer** CR. Operand reconcilers deploy all baseline `ztwim-sys-*`
-NetworkPolicies automatically. Users create standard Kubernetes
-NetworkPolicy resources for environment-specific egress and reference them
-on the SpireServer CR. The SpireServer reconciler validates that
-referenced policies **exist** in the operand namespace and reports status.
-It does not inspect NP rule content.
+This enhancement does **not** add `networkPolicyRefs` or other new fields
+to operand CRs. Operand reconcilers deploy baseline `ztwim-sys-*` policies
+from embedded templates and **generate or update** conditional policies
+from configuration that already exists on the CR or operator Deployment.
 
-**Placement by operand:**
+**Why:** Fixed operator policy names per capability avoid namespace scans
+and mis-typed references. Parsing URLs and connection strings for **TCP
+ports only** keeps policies simple (no `ipBlock`) while matching upgrade
+and spec changes automatically.
 
-| Capability | CR | Example |
-|------------|-----|---------|
-| Vault, external database, cluster proxy | SpireServer | Egress to `ipBlock` CIDRs |
-| Remote federation endpoints (restrictive egress) | SpireServer | Egress to `bundleEndpointUrl` hosts |
-| SpireAgent / OIDC traffic | — (no `networkPolicyRefs`) | Baseline `ztwim-sys-*` only |
+**SpireServer reconciler — capability gates and port sources:**
 
-```go
-type SpireServerSpec struct {
-    // existing fields...
+| Capability | Gate (spec / env) | Operator-managed policy (examples) | Egress or ingress ports |
+|------------|-------------------|------------------------------------|-------------------------|
+| Federation ingress | `spec.federation != nil` | `ztwim-sys-federation-ingress` | Ingress **8443/TCP** from `openshift-ingress` (fixed pod port in operator today) |
+| Federation remote egress | `len(federation.federatesWith) > 0` | `ztwim-sys-federation-egress` or merged into `ztwim-sys-server-egress-feature-ports` | Union of TCP ports from each `bundleEndpointUrl` (default **443** for `https://`) |
+| Federation ACME | `federation.bundleEndpoint.httpsWeb.acme != nil` | Same feature-egress policy | TCP ports from `acme.directoryUrl` |
+| Vault upstream | `upstreamAuthority.vault != nil` | Feature-egress policy | TCP ports from `vault.vaultAddr` (`http`→80, `https`→443, or explicit port) |
+| cert-manager upstream | `upstreamAuthority.certManager != nil` | *(none beyond baseline)* | API **6443** only |
+| Self-signed CA | `upstreamAuthority == nil` | *(none beyond baseline)* | — |
+| External database | `databaseType` not `sqlite3` (and not file-only `sql`) | Feature-egress policy | Parse `connectionString` or default **5432** / **3306** by type |
+| Cluster proxy | Operator `HTTP_PROXY` or `HTTPS_PROXY` set | `ztwim-sys-allow-proxy-egress` (server, agent, OIDC) | Union of proxy URL ports |
 
-    // NetworkPolicyRefs references user-created NetworkPolicy resources
-    // in the operand namespace for capability-specific egress (Vault, DB,
-    // proxy, remote federation). The SpireServer reconciler validates
-    // existence and reports status. It does not create, modify, or delete
-    // referenced policies.
-    // +kubebuilder:validation:Optional
-    // +kubebuilder:validation:MaxItems=10
-    // +listType=set
-    NetworkPolicyRefs []string `json:"networkPolicyRefs,omitempty"`
-}
-```
+**SpireAgent reconciler:** baseline + **10250/TCP** egress when Kubernetes
+workload attestor enabled (default) + proxy policy when proxy env set.
 
-**How it works:**
+**SpireOIDCDiscoveryProvider reconciler:** baseline ingress **8443/TCP** +
+proxy egress when proxy env set.
 
-1. The SpireServer reconciler deploys all baseline `ztwim-sys-*`
-   NetworkPolicies during operand CR reconciliation. No user input
-   required.
+**Port union:** The SpireServer reconciler may implement one
+`ztwim-sys-server-egress-feature-ports` NetworkPolicy whose egress allows
+the **deduplicated union** of all conditional TCP ports above. When the
+union is empty, delete that policy by name.
 
-2. If the user needs additional egress (e.g., to Vault or an external
-   database), they create a standard Kubernetes NetworkPolicy in the
-   operand namespace:
+**Parsing limits (documented, not blocking):**
 
-```yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: allow-vault-egress
-  namespace: zero-trust-workload-identity-manager
-spec:
-  podSelector:
-    matchLabels:
-      app.kubernetes.io/name: spire-server
-  policyTypes:
-  - Egress
-  egress:
-  - to:
-    - ipBlock:
-        cidr: 10.0.0.0/24
-    ports:
-    - port: 8200
-      protocol: TCP
-```
-
-3. The user references the policy on the SpireServer CR:
-
-```yaml
-apiVersion: operator.openshift.io/v1alpha1
-kind: SpireServer
-metadata:
-  name: cluster
-spec:
-  # existing fields...
-  networkPolicyRefs:
-  - allow-vault-egress
-  - allow-db-egress
-```
-
-4. During SpireServer CR reconciliation, the reconciler checks that each
-   referenced NetworkPolicy **object exists** in the operand namespace. It
-   does **not** validate ports, CIDRs, or whether the policy matches an
-   enabled capability — the cluster administrator is responsible for
-   correct NP content. If a referenced policy is missing, the reconciler
-   sets `NetworkPolicyAvailable=False` on the SpireServer CR and the ZTWIM
-   operator reports **Degraded**. If a capability is enabled (e.g., Vault)
-   but no reference is listed, the reconciler sets a **warning** condition
-   recommending the user create and reference a policy.
-
-**Design rationale:**
-
-* **Operand-level delegation.** The ZTWIM controller is not aware of
-  operand-specific configuration (Vault, federation, database type). The
-  SpireServer reconciler validates **existence** of `networkPolicyRefs`
-  and warns when a capability is enabled without a reference.
-
-* **No embedded Kubernetes structs in the CRD.** The API is a simple
-  `[]string` of names, avoiding coupling to upstream
-  `NetworkPolicyEgressRule` struct changes.
-
-* **Users already know NetworkPolicy syntax.** Creating a standard
-  Kubernetes NetworkPolicy is well-documented and familiar to cluster
-  administrators.
-
-* **Clear ownership.** Operand reconcilers own operator-defined `ztwim-sys-*`
-  template names in bindata. Users own referenced policies. OLM owns
-  `ztwim-op-*` policies.
-
-* **Flexible ports for non-operator endpoints.** The operator does not
-  hardcode Vault, database, or proxy ports. Users specify ports and CIDRs
-  in their NetworkPolicy. DNS port 5353 is an install-time constant for
-  `dns-default` and is safe to include in baseline policies.
-
-* **NetworkPolicies are additive.** User-created policies add egress rules
-  on top of the operator's baseline deny-all, without conflicting.
-
-* **Existence-only validation.** The reconciler does not parse or validate NP
-  rule semantics. Users supply correct `ipBlock`, ports, and selectors in
-  their NetworkPolicy; the operator only confirms the referenced object
-  exists.
+* Port-only egress does not restrict destination IP or hostname.
+* Database connection strings may be ambiguous; use type defaults when
+  parse fails and surface a **warning** on `NetworkPoliciesReconciled`.
+* Outbound traffic via corporate proxy uses **proxy** ports, not remote
+  URL ports, unless `NO_PROXY` bypasses the proxy for those hosts.
 
 **Naming conventions:**
 
-* `ztwim-op-*` -- operator policies in the OLM bundle. Applied by OLM at
-  install. Not reconciled by the operator controller.
-* `ztwim-sys-*` -- operator-managed operand policies from embedded templates.
-  Created and reconciled by operand controllers (ensureExists). Reverted if
-  modified externally. Avoid using these exact names for user-created
-  policies.
-* User-created policies -- any name outside operator template names.
-  Referenced via `networkPolicyRefs` on the SpireServer CR. Validated for
-  existence only; never created, updated, or deleted by the operator.
-
-**Removing a reference:** When a user removes an entry from
-`networkPolicyRefs`, the reconciler stops validating that policy. The
-NetworkPolicy resource itself is not deleted -- the user owns its lifecycle.
+* `ztwim-op-*` — operator policies in the OLM bundle (OLM install only).
+* `ztwim-sys-*` — operator-managed operand policies; fixed names in
+  bindata; recreated or updated on reconcile if modified externally.
+* Other names — administrator-owned; never created or deleted by the
+  operator.
 
 ### Status and Conditions
 
 | Resource | Condition | True | False |
 |----------|-----------|------|-------|
 | ZTWIM CR | `NetworkPoliciesApplied` | All operand baseline policies reconciled | Operand policy apply failed |
-| SpireServer CR | `NetworkPolicyAvailable` | All `networkPolicyRefs` exist | Missing referenced policy |
 | SpireServer CR | `NetworkPoliciesReconciled` | Operator-managed policies applied successfully | Create/update failed |
 | SpireAgent CR | `NetworkPoliciesReconciled` | Operator-managed policies applied successfully | Create/update failed |
 | SpireOIDCDiscoveryProvider CR | `NetworkPoliciesReconciled` | Operator-managed policies applied successfully | Create/update failed |
 
-When `NetworkPolicyAvailable=False`, `NetworkPoliciesReconciled=False`, or
-baseline policy creation fails, the ZTWIM operator reports **Degraded**.
-Operand CR conditions provide the detailed failure message.
+When `NetworkPoliciesReconciled=False` or baseline policy creation fails,
+the ZTWIM operator reports **Degraded**. Operand CR condition **messages**
+should list failed policy names and, for debugging, which capabilities
+were evaluated (for example federation, vault, external-db, proxy) and
+the TCP port set applied. A structured `status` field mapping capability
+to policy name may be added in a follow-up API change if reviewers require
+machine-readable status beyond condition messages.
 
 ### Topology Considerations
 
@@ -495,7 +432,8 @@ policies function identically to standalone clusters.
 
 This enhancement is fully applicable to standalone OpenShift clusters.
 Network policies are deployed in the operator namespace and operand
-namespace. OVN-Kubernetes or OpenShift SDN enforces the policies.
+namespace and are enforced by the cluster CNI when it supports
+NetworkPolicy (see Supported Platforms).
 
 #### Single-node Deployments or MicroShift
 
@@ -537,36 +475,29 @@ manage operator-defined NetworkPolicy resources from embedded bindata.
 
 #### Reconcile loop (operand reconcilers)
 
-For each operator-managed NetworkPolicy in embedded templates (fixed name
-and condition):
+For each operator-managed NetworkPolicy template (fixed Kubernetes object
+name and capability gate):
 
-* If the policy's condition is true for the current operand CR spec →
-  **ensureExists** (create or update; reverts external modifications to
-  operator-owned names)
-* If the condition is false → **deleteIfExists** (delete only that named
-  policy if present; no-op otherwise)
+* When the gate is true for the current CR spec (and operator env, for
+  proxy) → create the policy if missing, or update it if the desired
+  ports or selectors changed.
+* When the gate is false → delete that policy by name if it exists.
 
 **Baseline policies (always enabled):** Templates with no capability gate
 (default-deny, API/DNS/metrics/agent-server/kubelet, OIDC ingress from
-openshift-ingress, etc.) have a condition that is always true while the
-operand reconciler runs → ensureExists on every reconcile.
+openshift-ingress, etc.) are always applied while the operand reconciler
+runs.
 
-**Conditional policies:** Templates gated by operand spec (e.g.,
-`ztwim-sys-federation-*` when `spireServer.spec.federation` is set) →
-ensureExists when the gate is true, deleteIfExists when false.
+**Conditional policies:** Templates gated by operand spec (for example
+`ztwim-sys-federation-ingress` when `spireServer.spec.federation` is set)
+and dynamically generated feature-egress ports are applied when the gate
+is true and removed when false.
 
-The reconcile loop does not list or scan the namespace by name prefix.
+The reconciler does not list or scan the namespace by name prefix; it only
+touches embedded template names and generated policy names it owns.
 
-For each entry in `networkPolicyRefs` on SpireServer:
-
-* Verify the referenced NetworkPolicy object exists in the operand namespace
-* Set `NetworkPolicyAvailable` accordingly
-* Do not create, update, or delete the referenced object
-
-SpireAgent and SpireOIDCDiscoveryProvider have no `networkPolicyRefs`.
-
-On operand CR deletion, the reconciler calls deleteIfExists on all
-operator-managed policy names it owned for that operand.
+On operand CR deletion, the reconciler deletes each operator-managed
+NetworkPolicy by fixed name if it still exists.
 
 ### RBAC Requirements
 
@@ -578,9 +509,9 @@ Operand reconcilers require namespace-scoped RBAC:
   verbs: ["create", "update", "patch", "delete", "get", "list", "watch"]
 ```
 
-The ZTWIM controller requires `get`, `list`, `watch` on NetworkPolicies
-in the operand namespace for reference validation. No new cluster-scoped
-RBAC is required.
+The ZTWIM controller does not require NetworkPolicy write RBAC; operand
+reconcilers hold namespace-scoped NetworkPolicy permissions. No new
+cluster-scoped RBAC is required.
 
 ### Baseline Network Policy Generation
 
@@ -592,9 +523,9 @@ runtime.
 * **API server and kubelet egress**: port-only rules (egress on 6443/TCP
   or 10250/TCP with no `to:` clause).
 * **DNS, metrics, federation**: namespace and pod selectors.
-* **Conditional policies** (e.g., federation): ensureExists when enabled in
-  SpireServer CR fields, deleteIfExists when disabled; still use selectors
-  or port-only rules, not runtime CIDR discovery.
+* **Conditional policies** (federation, vault, DB, proxy): created when
+  enabled in SpireServer spec or operator env; deleted when disabled; use
+  selectors or port-only egress, not runtime CIDR discovery.
 
 ### DNS Resolution
 
@@ -608,45 +539,38 @@ evaluates real pod ports, so the egress rule uses port 5353.
 #### Operator-managed (standard)
 
 When `spireServer.spec.federation` is configured, the SpireServer
-reconciler calls ensureExists on conditional `ztwim-sys-federation-*`
-policies:
+reconciler applies conditional federation policies:
 
-* **Federation ingress**: port 8443/TCP from OpenShift Router (ingress
-  namespace selector)
-* **Federation egress**: port 443/TCP (port-only rule, no `ipBlock`)
+* **Federation ingress**: port **8443/TCP** from OpenShift Router (ingress
+  namespace selector). This matches the fixed federation listener port in
+  the operator (not configurable in the CR today).
+* **Federation remote egress**: when `federatesWith` is non-empty, egress
+  allows the union of TCP ports parsed from each `bundleEndpointUrl`
+  (default **443** for `https://` without an explicit port).
+* **Federation ACME egress**: when `bundleEndpoint.httpsWeb.acme` is set,
+  add TCP ports from `directoryUrl` to the same union.
 
-When federation is disabled, the reconciler calls deleteIfExists on each
-`ztwim-sys-federation-*` name.
+When federation is removed from spec (where API immutability rules allow)
+or gates become false, the reconciler deletes the corresponding
+operator-managed policy names.
 
-The baseline port-only egress on 443/TCP is intentionally broad for
-standard Route-based federation. Users who need least-privilege egress to
-specific remote hosts must add a user NetworkPolicy.
-
-#### User-supplemented (remote endpoints)
-
-For restrictive egress to remote federation endpoints (`bundleEndpointUrl`
-hosts outside the cluster):
-
-1. User creates a NetworkPolicy with `ipBlock` CIDRs and port 443 (or
-   custom port) targeting `spire-server` pods.
-2. User references the policy in `networkPolicyRefs` on the SpireServer CR.
-3. Reconciler confirms the referenced object exists and sets
-   `NetworkPolicyAvailable`.
-
-If federation is enabled but `networkPolicyRefs` is empty, the reconciler
-sets a **warning** recommending a reference when restrictive egress is
-needed. The operator does not verify the policy matches federation hosts.
+Port-only egress is intentionally broad (any destination on those ports).
+Administrators who need destination CIDR restrictions may add separate
+NetworkPolicies; the operator does not manage those.
 
 ### OIDC Routes and Ingress
 
 Route creation is defined in
 [oidc-routes-integration.md](oidc-routes-integration.md). The
-`managedRoute` field controls whether the operator creates and manages the
-Route object; it does not affect NetworkPolicy reconciliation.
+`managedRoute` field on SpireOIDCDiscoveryProvider and
+`spec.federation.managedRoute` on SpireServer control whether the operator
+creates and manages Route objects; they do not affect NetworkPolicy
+reconciliation.
 
 Baseline `ztwim-sys-*` ingress from the `openshift-ingress` namespace on
 port 8443/TCP covers standard OpenShift Router exposure for the OIDC
-Discovery Provider whether `managedRoute` is true or false.
+Discovery Provider and SPIRE federation listener whether `managedRoute` is
+true or false.
 
 Non-standard ingress (custom Ingress Controller namespace, `hostNetwork`
 Ingress Controller, or external load balancer not via `openshift-ingress`) is
@@ -654,59 +578,64 @@ the cluster administrator's responsibility and is out of operator scope.
 The operator does not create, validate, or delete Route objects or
 user-managed ingress NetworkPolicies for custom routes.
 
-### User-Configured Egress and Ingress (Vault, Database, Proxy)
+### Capability-Derived Egress (Vault, Database, Proxy)
 
-The operator does **not** auto-generate egress rules for Vault, external
-databases, or cluster proxy endpoints. Instead:
+When Vault, external database, or cluster proxy is enabled, the SpireServer
+(and SpireAgent / OIDC for proxy) reconciler **creates or updates**
+operator-managed egress policies with TCP ports derived as follows:
 
-1. User enables the capability in the SpireServer CR (e.g.,
-   `upstreamAuthority.vault`, non-sqlite3 `databaseType`).
-2. User creates a NetworkPolicy with the correct `ipBlock` CIDRs and ports.
-3. User references the policy in `networkPolicyRefs` on the SpireServer CR.
-4. Reconciler confirms the referenced NetworkPolicy object exists and sets
-   `NetworkPolicyAvailable`. Rule correctness (ports, `ipBlock`, CIDRs) is
-   the user's responsibility.
+| Source | Port derivation |
+|--------|-----------------|
+| `upstreamAuthority.vault.vaultAddr` | Parse URL; `http`→80, `https`→443, or explicit `:port` |
+| `datastore.databaseType` + `connectionString` | Not `sqlite3`: parse `port=` or URL, else **5432** / **3306** by type |
+| Operator `HTTP_PROXY` / `HTTPS_PROXY` | Same as operand proxy wiring in `pkg/controller/utils/proxy.go` |
 
-If a capability is enabled but no reference exists, the reconciler sets a
-warning condition recommending the user create and reference a policy.
-AdminNetworkPolicy at cluster scope may satisfy egress independently; the
-operator does not inspect ANP rules.
+cert-manager upstream adds no extra ports beyond baseline API **6443**.
+
+If parsing fails, apply the default port for the database type and set a
+warning on `NetworkPoliciesReconciled`. AdminNetworkPolicy at cluster
+scope may allow egress independently; the operator does not inspect ANP
+rules.
 
 ### Constraints
 
 * Network policy enforcement requires a CNI that supports NetworkPolicy
-  (OVN-Kubernetes or OpenShift SDN on OpenShift 4.16+).
+  (see Supported Platforms; OpenShift 4.16+).
 * Operator NetworkPolicies (`ztwim-op-*`) are deployed once by OLM and are
   not continuously reconciled. Manual deletion is not auto-healed.
 * Operand NetworkPolicies (operator-defined `ztwim-sys-*` template names)
-  are continuously reconciled by operand controllers; ensureExists recreates
-  them if manually deleted.
-* Baseline policies do not use `ipBlock` or runtime CIDR discovery. Port-only
-  egress and namespace/pod selectors are used instead.
-* User-created NetworkPolicies referenced via `networkPolicyRefs` may use
-  `ipBlock`, ports, and `to:` clauses as needed for external endpoints.
-  The operator validates existence only, not rule content. The cluster
-  administrator is responsible for correct NP rules (ports, CIDRs,
-  selectors).
+  are continuously reconciled by operand controllers and recreated if
+  manually deleted.
+* Operator-generated conditional egress uses port-only rules (no `ipBlock`).
+  Least-privilege destination restrictions require administrator-created
+  NetworkPolicies or AdminNetworkPolicy.
 * NetworkPolicies are additive. The operator cannot restrict traffic
-  allowed by user-created NetworkPolicies.
+  allowed by administrator-created NetworkPolicies.
 * Non-standard ingress paths and custom Route ingress beyond the baseline
-  openshift-ingress selector are administrator responsibility; out of
-  operator scope.
-* Clusters with non-standard networking may require user `networkPolicyRefs`
-  or AdminNetworkPolicy adjustments.
+  `openshift-ingress` selector are administrator responsibility; out of
+  operator scope. `managedRoute: "false"` means the operator does not own
+  the Route object; baseline ingress NP for the default router namespace
+  still applies when that path is used.
+* Clusters with non-standard networking may require administrator
+  NetworkPolicies or AdminNetworkPolicy adjustments in addition to
+  operator-managed `ztwim-sys-*` policies.
 
 ### Risks and Mitigations
 
-**Risk**: Misconfigured user-referenced NetworkPolicy resources could
-block legitimate traffic for Vault, database, or proxy connectivity.
+**Risk**: Misconfigured **administrator-created** NetworkPolicy resources
+could block legitimate traffic or allow unintended egress (policies are
+additive).
 
 **Mitigation**:
-* Operator-generated baseline `ztwim-sys-*` policies work out-of-the-box on
-  OVN-Kubernetes and OpenShift SDN
-* `NetworkPolicyAvailable` condition surfaces missing references before
-  silent failure
+* Operator-generated `ztwim-sys-*` policies are derived from operand spec
+  and are intended to work out-of-the-box for the required ports on
+  supported OpenShift versions (see Supported Platforms)
+* `NetworkPoliciesReconciled` surfaces operator apply failures
 * Comprehensive E2E tests for all required communication patterns
+
+**Constraint (not operator mitigation):** The cluster administrator is
+responsible for supplemental policies and for not using `ztwim-sys-*`
+names for custom objects.
 
 **Risk**: AdminNetworkPolicy at cluster scope may block traffic even when
 namespace NetworkPolicies allow it.
@@ -719,14 +648,16 @@ namespace NetworkPolicies allow it.
 differently.
 
 **Mitigation**:
-* Test on OVN-Kubernetes and OpenShift SDN (supported matrix)
+* Test on platforms listed in Supported Platforms
 * Use standard NetworkPolicy features only
 
-**Risk**: Overly permissive user NetworkPolicy combined with baseline
-deny-all may still allow unintended egress (NetworkPolicies are additive).
+**Risk**: Port-only capability egress allows those TCP ports to any
+destination, which is broader than host-specific allow lists.
 
 **Mitigation**:
-* Warn when a capability is enabled but no `networkPolicyRefs` entry exists
+* Document limitation in Constraints; administrators may add `ipBlock`
+  policies for tightening
+* Union only includes ports required by enabled capabilities
 
 **Risk**: Upgrading existing deployments to default-deny may break
 production connectivity.
@@ -755,43 +686,37 @@ structs. Requires users to learn a new CR format.
 **Cons**: API coupling and version drift; harder to reuse existing
 NetworkPolicy tooling and GitOps workflows.
 
-### Alternative 2: Operator Parses Ports from Existing Fields
+### Alternative 2: networkPolicyRefs on SpireServer (Existence-Only)
 
-Auto-detect egress ports from `vaultAddr`, `connectionString`, proxy env.
+Users create NetworkPolicies and list names in `networkPolicyRefs` on
+SpireServer; the reconciler validates existence only.
 
-**Reason not selected**: Connection string formats are varied and fragile.
-Ports may be omitted, relying on protocol defaults. The operator does not
-auto-generate or parse operand configuration for Vault/DB/proxy ports;
-existence-only validation via `networkPolicyRefs` applies instead. Port
-parsing would only be relevant if auto-generation (this alternative) were
-adopted.
+**Reason not selected**: Easy to misconfigure (wrong ports or missing refs),
+upgrade friction, and no automatic update when `vaultAddr` or
+`federatesWith` changes. Operand spec already contains endpoints.
 
-**Cons**: Unreliable parsing; operator must handle every DSN format;
-users cannot override CIDRs or ports.
+**Cons**: Silent egress gaps when refs omitted; operator cannot verify
+rule content.
 
-### Alternative 3: No User-Configurable Egress
+### Alternative 3: No Capability-Derived Egress
 
-Only deploy static baseline policies. Users create NPs without operator
-involvement.
+Only deploy static baseline policies. Administrators create all Vault/DB/
+federation/proxy egress without operator help.
 
-**Reason not selected**: No visibility into whether required egress
-policies exist. No status reporting.
+**Reason not selected**: No automatic alignment with CR; high operational
+burden; poor upgrade story.
 
-**Cons**: Silent failures when Vault/DB/proxy egress is missing; no
-Degraded signal.
+**Cons**: Silent failures when capabilities enabled; no Degraded signal
+from missing egress.
 
 ### Alternative 4: networkPolicyRefs on ZTWIM CR
 
-Place `networkPolicyRefs` on the cluster-wide ZeroTrustWorkloadIdentityManager
-CR instead of operand CRs.
+Place references on the cluster-wide ZeroTrustWorkloadIdentityManager CR.
 
-**Reason not selected**: ZTWIM controller lacks awareness of operand-specific
-capabilities (Vault, federation, database type). Operand reconcilers are
-the correct place for reference validation; semantic NP validation is
-out of scope (user responsibility).
+**Reason not selected**: ZTWIM controller lacks operand-specific awareness;
+SpireServer reconciler is the correct owner for server egress derivation.
 
-**Cons**: ZTWIM controller would need to watch and interpret all operand
-CRs; validation logic scattered across controllers.
+**Cons**: Scattered validation; same misconfiguration risks as Alternative 2.
 
 ## Test Plan
 
@@ -800,9 +725,9 @@ CRs; validation logic scattered across controllers.
 * Validate NetworkPolicy manifest generation for each component type
 * Verify pod label selectors match pod templates
 * Verify `policyTypes` (Ingress, Egress, or both) per policy template
-* Verify user-referenced policy examples use `policyTypes: [Egress]` only
-* Test `networkPolicyRefs` validation logic (exists, missing, namespace)
-* Test condition transitions (`NetworkPolicyAvailable`, `NetworkPoliciesReconciled`)
+* Test capability port parsing (federation URLs, ACME directoryUrl,
+  vaultAddr, connectionString, proxy env) and port union deduplication
+* Test condition transitions (`NetworkPoliciesReconciled`, Degraded)
 
 ### Integration Tests
 
@@ -810,16 +735,16 @@ CRs; validation logic scattered across controllers.
 * SpireServer reconcile creates `ztwim-sys-*` operand NetworkPolicies
 * Policies updated when operand configuration changes (e.g., federation
   enabled/disabled)
-* Policies deleted when operands are removed (deleteIfExists on all
-  operator-managed names)
-* `networkPolicyRefs` validation during SpireServer CR reconciliation
-* Degraded state when referenced policy is missing
-* Supported downgrade runs deleteIfExists on operator-managed names no
-  longer enabled (spec change)
+* Policies deleted when operands are removed (delete by fixed name for each
+  operator-managed policy)
+* Capability-derived egress policy updated when SpireServer spec changes
+* Degraded state when operator-managed policy create/update fails
+* Supported downgrade deletes operator-managed policies whose capability
+  gate is false after spec change
 * Supported downgrade leaves orphan policies when downgraded version
   predates a policy name (documented limitation)
-* Operand operator-managed policies recreated after manual deletion
-  (ensureExists)
+* Operand operator-managed policies recreated or updated after manual
+  deletion on the next reconcile
 * Operator `ztwim-op-*` policies **not** recreated after manual deletion
 
 ### E2E Tests
@@ -831,13 +756,15 @@ CRs; validation logic scattered across controllers.
 * Federation communication between SPIRE Servers (when enabled)
 * DNS resolution for all components
 * Kubelet attestation egress on port 10250
-* User-referenced Vault/DB egress via `networkPolicyRefs` on SpireServer
-* Remote federation egress via `networkPolicyRefs` on SpireServer
+* Vault upstream egress with parsed `vaultAddr` port
+* External database egress with parsed/default SQL port
+* Federation remote egress with union of `bundleEndpointUrl` ports
+* Cluster proxy egress on server, agent, and OIDC when proxy env set
 
 ### Compatibility Tests
 
-* OVN-Kubernetes on standalone, SNO, Hosted Control Planes
-* OpenShift SDN on standalone
+* Platforms and topologies in Supported Platforms (standalone, SNO, HCP
+  where applicable)
 * MicroShift with NetworkPolicy-capable CNI
 * Cluster with AdminNetworkPolicy that allows required operand traffic;
   operands remain healthy
@@ -847,7 +774,6 @@ CRs; validation logic scattered across controllers.
 ### Negative Tests
 
 * Traffic not explicitly allowed is blocked
-* Missing `networkPolicyRefs` when capability enabled surfaces warning
 * AdminNetworkPolicy blocking operand traffic (documented behavior)
 * Webhook unreachable from unrelated pods on Hosted Control Planes
 * Connectivity failure error messages in operand CR conditions
@@ -873,14 +799,13 @@ Not applicable. Network policies are delivered with the operator at GA.
 Network policies are enabled by default with the operator and use stable
 `networking.k8s.io/v1` APIs. GA criteria:
 
-* E2E tests pass on OVN-Kubernetes and OpenShift SDN (standalone, SNO, HCP
-  where applicable)
+* E2E tests pass on supported platforms per Supported Platforms
 * Upgrade and supported downgrade scenarios validated per Upgrade/Downgrade
   Strategy
-* Operand CR status conditions (`NetworkPolicyAvailable`,
-  `NetworkPoliciesReconciled`) exposed and documented
+* Operand CR status conditions (`NetworkPoliciesReconciled`) exposed and
+  documented with debug-oriented condition messages
 * [openshift-docs](https://github.com/openshift/openshift-docs/) covers
-  baseline policies, `networkPolicyRefs` workflow, and AdminNetworkPolicy
+  baseline policies, capability-derived egress, and AdminNetworkPolicy
   interaction
 
 ### Removing a deprecated feature
@@ -901,20 +826,19 @@ When upgrading the ZeroTrustWorkloadIdentityManager operator:
 3. **Upgrade safety for existing deployments:**
    * Allow rules are applied before or overlapping with default-deny
      replacements to avoid connectivity gaps
-   * Conditional baseline policies (e.g., federation) are only created when
-     the corresponding SpireServer spec field is set; Vault/DB/proxy use
-     user `networkPolicyRefs`
-   * Clusters with custom networking should configure `networkPolicyRefs`
-     before upgrade if baseline policies are insufficient
+   * Conditional policies (federation, vault, external DB, proxy) are
+     created only when the corresponding SpireServer spec field or operator
+     proxy env is set; ports are derived on first reconcile after upgrade
+   * Clusters with non-standard ingress or AdminNetworkPolicy may need
+     administrator adjustments in addition to operator policies
 
 4. **Capability-based operand policies on upgrade:** After the operator
-   upgrade, operand reconcilers re-run the reconcile loop with updated
-   embedded templates. The SpireServer reconciler reads `spireServer.spec`:
-   federation configured → ensureExists on `ztwim-sys-federation-*` names;
-   federation removed → deleteIfExists on those names; Vault/DB/proxy
-   enabled → operator does not generate egress NetworkPolicies; warns via
-   `NetworkPolicyAvailable` if `networkPolicyRefs` is empty. User-created
-   NetworkPolicies are never created, updated, or deleted by the operator.
+   upgrade, operand reconcilers re-run the network policy loop with updated
+   embedded templates. The SpireServer reconciler reads `spireServer.spec`
+   and operator proxy env, then creates or updates feature-egress ports
+   (federation remotes, ACME, Vault, DB) and deletes operator-managed
+   policies when gates become false. Administrator-created NetworkPolicies
+   are never created, updated, or deleted by the operator.
 
 5. Upgrade is non-disruptive: policies update without breaking existing
    connections.
@@ -928,7 +852,7 @@ names** from embedded bindata, not namespace prefix scanning:
 | Prefix | Owner | On supported downgrade | On unsupported downgrade |
 |--------|-------|------------------------|--------------------------|
 | `ztwim-op-*` | OLM bundle | OLM applies older bundle manifests to same object names | Left in place; not in older bundle |
-| `ztwim-sys-*` | Operand reconciler | ensureExists / deleteIfExists per embedded template names | Left in place; older reconciler has no NP logic |
+| `ztwim-sys-*` | Operand reconciler | Create, update, or delete by fixed name per embedded template | Left in place; older reconciler has no NP logic |
 | Other names | User | Never deleted by operator | Never deleted by operator |
 
 Two downgrade classes apply:
@@ -943,24 +867,25 @@ reconcile logic. Version numbers below are **illustrative examples only**.
    the older spec.
 
 2. **Operand policies (`ztwim-sys-*`)**: On the next operand reconcile,
-   the downgraded reconciler applies the ensureExists / deleteIfExists
-   loop using **that release's embedded template names only**:
+   the downgraded reconciler runs the same network policy loop using
+   **that release's embedded template names only**:
    * For each operator-managed policy name in the downgraded release's
-     bindata: if the policy's condition is true for the current operand CR
-     spec → ensureExists (create or update); if false → deleteIfExists
+     bindata: if the capability gate is true for the current operand CR
+     spec, create or update that policy; if false, delete it by name when
+     present
    * No namespace listing or prefix-based garbage collection
 
    **Example (spec change — automatic cleanup):** Suppose illustrative
    releases 1.2.0 and 1.3.0 both embed `ztwim-sys-federation-ingress` and
    `ztwim-sys-federation-egress`. When the cluster administrator disables
-   `spireServer.spec.federation`, the reconciler calls deleteIfExists on
-   those names. Downgrading from illustrative release 1.3.0 to 1.2.0
-   afterward does not leave federation policies behind because they were
-   already removed when the spec changed (or 1.2.0 repeats deleteIfExists
-   as a no-op).
+   `spireServer.spec.federation`, the reconciler deletes those policies by
+   name. Downgrading from illustrative release 1.3.0 to 1.2.0 afterward
+   does not leave federation policies behind because they were already
+   removed when the spec changed (or 1.2.0 attempts the same delete as a
+   no-op).
 
-3. **User-referenced policies**: Unaffected. The operator never deletes
-   user-created NetworkPolicies.
+3. **Administrator supplemental policies**: Unaffected. The operator never
+   deletes NetworkPolicies it did not create.
 
 **Limitation — policy names introduced only in a newer release:**
 
@@ -968,8 +893,8 @@ If a newer operator release introduces an operator-managed policy name that
 an older release never embedded (for example, a new `ztwim-sys-*` template
 added in illustrative release 1.3.0 but absent from illustrative release
 1.2.0 bindata), downgrading to the older release does **not** automatically
-remove that object. The downgraded reconciler cannot call deleteIfExists
-for a name it was never compiled with.
+remove that object. The downgraded reconciler does not know that policy
+name and therefore cannot delete it automatically.
 
 Such policies may remain as orphans in the operand namespace until:
 
@@ -982,7 +907,7 @@ Manual cleanup for orphan operator-managed policies:
 oc delete networkpolicy <orphan-policy-name> -n <operand-ns>
 ```
 
-User-created NetworkPolicies (referenced via `networkPolicyRefs`) are never
+Administrator-created NetworkPolicies (non-`ztwim-sys-*` names) are never
 deleted by the operator on any downgrade path.
 
 #### Unsupported downgrade (to a version without NetworkPolicy support)
@@ -993,9 +918,9 @@ supported.** No automatic cleanup occurs.
 
 * `ztwim-op-*` and `ztwim-sys-*` policies **remain** in the cluster and
   continue to be enforced by the CNI
-* The downgraded operator does not run ensureExists or deleteIfExists —
-  NetworkPolicy reconcile logic does not exist in that release
-* User-created NetworkPolicies are unaffected
+* The downgraded operator does not create, update, or delete operand
+  NetworkPolicies — reconcile logic does not exist in that release
+* Administrator-created NetworkPolicies are unaffected
 
 If an administrator accepts the risk and wants to remove stale policies
 after an unsupported downgrade, manual cleanup is required:
@@ -1008,15 +933,15 @@ oc delete networkpolicy -n <operator-ns> -l <ztwim-operator-label>
 oc get networkpolicy -n <operand-ns> -o name | grep ztwim-sys | xargs oc delete -n <operand-ns>
 ```
 
-User-created NetworkPolicies (referenced via `networkPolicyRefs`) must be
-deleted separately by the administrator if no longer needed.
+Administrator-created NetworkPolicies must be deleted separately if no
+longer needed.
 
 ### Testing
 
 * NetworkPolicy resources updated correctly during upgrade
 * Operand connectivity maintained during upgrade
-* Supported downgrade runs deleteIfExists on operator-managed names no
-  longer enabled (spec change); does not rely on prefix-based garbage
+* Supported downgrade deletes operator-managed policies whose capability
+  gate is false after spec change; does not rely on prefix-based garbage
   collection
 * Supported downgrade leaves orphan policies when downgraded release
   predates a policy name (documented limitation)
@@ -1040,20 +965,17 @@ NetworkPolicy resources take effect immediately on running pods.
 
 ## Operational Aspects of API Extensions
 
-This enhancement adds `networkPolicyRefs` (`[]string`) to the SpireServer
-CR. No new CRDs, webhooks, or finalizers.
+This enhancement does **not** add new SpireServer or ZTWIM spec fields.
+No new CRDs, webhooks, or finalizers.
 
-* **Failure modes**: Missing referenced policy sets
-  `NetworkPolicyAvailable=False` on the operand CR and Degraded on ZTWIM.
-  Baseline `ztwim-sys-*` policy creation failure sets
-  `NetworkPoliciesReconciled=False`.
+* **Failure modes**: Operator-managed policy create/update failure sets
+  `NetworkPoliciesReconciled=False` on the operand CR and Degraded on ZTWIM.
 
-* **Existing workloads**: Adding or removing references does not restart
-  pods. User-created policies take effect immediately at the CNI level.
+* **Existing workloads**: Policy updates do not restart pods. Changes take
+  effect at the CNI level on the next enforcement cycle.
 
-* **Resource footprint**: ~2 `ztwim-op-*` operator policies plus ~12
-  `ztwim-sys-*` operand policies. Maximum 10 `networkPolicyRefs` on the
-  SpireServer CR.
+* **Resource footprint**: ~2 `ztwim-op-*` operator policies plus ~12–15
+  `ztwim-sys-*` operand policies (including conditional feature-egress).
 
 ## Support Procedures
 
@@ -1064,12 +986,12 @@ CrashLoopBackOff with connection errors.
 
 **Diagnosis**:
 1. Check operand CR conditions (`NetworkPoliciesReconciled` on all
-   operands; `NetworkPolicyAvailable` on SpireServer) and ZTWIM Degraded
-   status
+   operands) and ZTWIM Degraded status; read condition message for applied
+   capabilities and ports
 2. Check pod logs for connection timeout or refused errors
 3. Verify NetworkPolicy resources: `oc get networkpolicies -n <namespace>`
-4. Distinguish operator-generated (`ztwim-sys-*`) vs user-referenced vs
-   AdminNetworkPolicy conflicts
+4. Distinguish operator-generated (`ztwim-sys-*`) vs administrator
+   supplemental vs AdminNetworkPolicy conflicts
 5. Verify CNI supports NetworkPolicy:
    `oc get network.config.openshift.io cluster -o yaml`
 
@@ -1087,12 +1009,15 @@ CrashLoopBackOff with connection errors.
 2. Verify server ingress and agent egress policies on port 8081
 3. Use `oc debug` to test connectivity
 
-**Symptom**: Vault/DB/proxy connectivity fails despite capability enabled.
+**Symptom**: Vault/DB/proxy/federation connectivity fails despite capability enabled.
 
 **Diagnosis**:
-1. Check `networkPolicyRefs` on SpireServer CR
-2. Verify referenced NetworkPolicy exists with correct `ipBlock` and port
+1. Check SpireServer spec (vault, databaseType, federation URLs) matches
+   expected egress ports on `ztwim-sys-server-egress-feature-ports` (or
+   federation/proxy policies)
+2. Verify operator proxy env if cluster uses HTTP(S) proxy
 3. Check for AdminNetworkPolicy blocking egress at cluster scope
+4. Verify parse warnings on `NetworkPoliciesReconciled` (DB connection string)
 
 **Symptom**: OIDC discovery endpoint unreachable.
 
@@ -1118,9 +1043,9 @@ CrashLoopBackOff with connection errors.
 
 * **Operator policies (`ztwim-op-*`)**: Not recreated automatically if
   deleted. Reinstall operator or reapply OLM bundle to restore.
-* **Operand policies (operator-managed names)**: Recreated by operand
-  reconciler on next reconcile (ensureExists).
-* **User-referenced policies**: User-owned; not recreated by operator.
+* **Operand policies (operator-managed names)**: Recreated or updated by
+  the operand reconciler on the next reconcile.
+* **Administrator supplemental policies**: Not recreated by operator.
 
 **Note**: Disabling network policies should only be done temporarily.
 Removing them violates the zero-trust security model.
