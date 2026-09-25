@@ -199,7 +199,11 @@ Starting state: a NodePool exists and references user/core/NTO configs.
    token, calls `PayloadStore.Put(newToken, payload)`, and sets `status.current`
    with the new hashes, token, and `generation + 1`. Otherwise
    (management-side/cloud-config change only) it refreshes the bytes behind the
-   *current* token and updates only `status.current.configHash`.
+   *current* token and updates only `status.current.configHash`. On the first
+   reconcile after the hash *formula* itself changes (`status.rolloutHashVersion`
+   older than the binary's constant) it rebaselines instead of rolling: it rewrites
+   `status.current.rolloutHash` to the new-formula value and updates the version
+   without advancing `generation` (see Version Skew Strategy).
 5. When `status.current.generation` advances, the NodePool controller creates a
    userdata Secret embedding `status.current.token` and re-points the
    MachineDeployment; CAPI provisions new machines with the new payload.
@@ -424,6 +428,16 @@ This enhancement adds a new CRD and a finalizer:
    	// tracking every generation here.
    	// +optional
    	Previous PayloadReference `json:"previous,omitzero"`
+
+   	// rolloutHashVersion identifies the formula version used to compute
+   	// current.rolloutHash. The PayloadController bumps it when it changes which
+   	// inputs feed the rollout hash; on that reconcile it rewrites
+   	// current.rolloutHash to the new-formula baseline without advancing
+   	// current.generation, migrating the fleet in place instead of rolling every
+   	// node (see Version Skew Strategy).
+   	// +optional
+   	// +kubebuilder:validation:Minimum=1
+   	RolloutHashVersion int64 `json:"rolloutHashVersion,omitempty"`
    }
 
    // PayloadReference identifies one generated payload version and its store key.
@@ -876,6 +890,37 @@ rollback) before it is deleted at fleet EOL.
 - **No kubelet/node coordination.** The payload is version-matched via the
   release image; an n-2 kubelet is unaffected because ignition is delivered at
   boot and the node consumes a fully rendered payload.
+- **Rollout-hash formula changes migrate in place, without rolling nodes.** The
+  inputs feeding the rollout hash may need to evolve over time (for example,
+  moving the pull secret from name-based to content-based hashing). Because the HO
+  spans OCP versions, a naive formula change would make every existing CR's
+  recomputed `rolloutHash` differ from its stored value on the first reconcile
+  after the HO upgrade — advancing `generation` and rolling the entire fleet. To
+  prevent this, the PayloadController carries the current formula as a hardcoded
+  constant, bumped by hand in the same change that alters the rollout-hash inputs,
+  and records it in `status.rolloutHashVersion` alongside the hash it produced.
+  When the stored version is older than the binary's constant, the controller
+  *unconditionally rebaselines*: it rewrites `status.current.rolloutHash` to the
+  new-formula value over the current inputs, sets `rolloutHashVersion` to the
+  constant, and does **not** advance `generation` — so the version bump itself
+  never rolls. This mirrors the versioned NodePool config hash
+  (`nodePoolConfigHashVersion`) introduced in openshift/hypershift#9007, and is
+  simpler here because the PayloadController is the single owner of both the hash
+  and the generation counter — the migration is one controller's decision rather
+  than a per-NodePool reconciliation.
+  - **Accepted limitation of unconditional rebaseline.** A config change that is
+    visible to *both* the old and new formula, and that lands in the narrow window
+    between the outgoing leader's last status write and the new leader's first
+    reconcile, is absorbed into the rebaselined value without rolling; it rolls on
+    the next change instead. Outside a formula bump this race is self-correcting —
+    the stored hash is still pre-change, so the restarted controller detects the
+    delta and rolls — but the rebaseline overwrites that pre-change baseline, which
+    defeats the catch-up. Distinguishing this case from a pre-existing drift that
+    must *not* retroactively roll (the name→content scenario above) would require
+    the controller to recompute the stored hash under its old formula, and thus to
+    retain every historical formula implementation indefinitely. Given the window
+    is a single controller failover (seconds) and the change still rolls on the
+    next edit, this is accepted rather than paying that cost.
 
 ## Operational Aspects of API Extensions
 
