@@ -363,7 +363,7 @@ The three possible approaches:
 
 | Approach                                           | Layout                                                          | How the server reaches the socket                                                                                                                                                                                                                             | Why not chosen                                                                                                                                                                                                                                         |
 | -------------------------------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Sidecar**                                        | Upstream agent as a second container in the `spire-server` pod  | Shared `emptyDir` volume in the same pod; socket never leaves the pod                                                                                                                                                                                         | The agent needs `hostPID` (and related settings) for `k8s_psat` workload attestation, which applies to the whole pod and moves `spire-server` off the `restricted` SCC. Agent and server lifecycles are also coupled: any agent change restarts SPIRE. |
+| **Sidecar**                                        | Upstream agent as a second container in the `spire-server` pod  | Shared `emptyDir` volume in the same pod; socket never leaves the pod                                                                                                                                                                                         | Feasible on `restricted-v2` without `hostPID`, but the upstream agent is not independently deployable and both attestation stages share one ServiceAccount. See [alternative 1](#1-sidecar-container-not-chosen). |
 | **Shared `hostPath`**                              | Upstream agent in a separate pod                                | Agent writes the socket to a host directory; `spire-server` mounts the same `hostPath`                                                                                                                                                                        | A `hostPath` mount on `spire-server` also moves it off `restricted`. On OpenShift, the server and agent pods have different SELinux MCS labels, so the server often cannot open the socket without broader SCC grants.                                 |
 | **Separate agent + CSI ephemeral volume** (chosen) | Upstream agent in a one-replica Deployment on the server's node | Agent writes the socket to a host directory (same pattern as the workload `spire-agent`). A node-local SPIFFE CSI DaemonSet reads that directory and bind-mounts the socket into `spire-server` through a CSI ephemeral volume at `/run/spire/upstream-agent` | Agent pod uses a dedicated `spire-agent-upstream` SCC; CSI DaemonSet uses `privileged`; `spire-server` stays `restricted`. Requires `podAffinity` so agent and server share a node.                                                                    |
 
@@ -462,7 +462,7 @@ Upstream:
 From the feature requirements:
 
 1. **Shared trust domain.** Every cluster in a hierarchy must use the same `ZeroTrustWorkloadIdentityManager.spec.trustDomain`.
-2. `**k8s_psat` only in this iteration.** The upstream agent attests with projected service account tokens; upstream clusters validate tokens against each downstream cluster's API server.
+2. **`k8s_psat` only in this iteration.** The upstream agent attests with projected service account tokens; upstream clusters validate tokens against each downstream cluster's API server.
 3. **Administrator-provided cross-cluster Secrets.** Kubeconfigs (upstream → downstream API server) and trust bundles (downstream → upstream root) are referenced in the CR, not generated or distributed by the operator.
 4. **Root CA path length (external PKI only).** Default SPIRE self-signed roots do not set a `pathLen` constraint and can support multi-tier nesting. This constraint applies when the root or upstream signing CA comes from external PKI (cert-manager, Vault, AWS PCA, etc.): that CA must allow at least one subordinate CA per nesting level.
 
@@ -488,10 +488,13 @@ Additional constraints:
 - Each change to `spec.nestedSpire.downstreamClusters` rolls the upstream `spire-server` pod (ConfigMap hash change)
   - Impact: Low: upstream server briefly unavailable; downstream workload issuance continues from cached intermediate CAs; upstream-agent attestation and CA preparation on downstream clusters retry once the pod is back
   - Mitigation: Batch onboarding or removal during a maintenance window to avoid repeated restarts. No manual recovery after the roll completes. SPIRE retries any CA rotation that overlapped the restart.
+- A principal with `pods/create` in the operator namespace could impersonate the downstream SPIRE server and obtain the `downstream: true` SVID
+  - Impact: High: intermediate CA minting and fraudulent workload SVID issuance
+  - Mitigation: Defense in depth only. SPIRE matches `ns`, `sa`, `pod-name`, and `container-name` from what the kubelet reports is running, but anyone with `pods/create` can create a pod with those values set to match the entry. The `pod-name` selector blocks a duplicate name only while the real `spire-server-0` is running; during startup or replacement, another pod can take that name first. Any pod on the agent's node that mounts `upstream.csi.spiffe.io` can reach the socket. Do not grant untrusted principals `pods/create` or `serviceAccountName: spire-server` in the operator namespace.
 
 ### Drawbacks
 
-This is operationally complex feature. Each upstream-downstream link needs configuration on both clusters. Each downstream cluster adds privileged components and a cross-cluster dependency in the issuance path.
+This is an operationally complex feature. Each upstream-downstream link needs configuration on both clusters. Each downstream cluster adds privileged components and a cross-cluster dependency in the issuance path.
 
 An upstream cluster signing for N downstream clusters holds N kubeconfig credentials and restarts its SPIRE server when the downstream list changes. A mistake on the upstream cluster affects every downstream cluster that chains to it.
 
@@ -499,22 +502,65 @@ With `k8s_psat`, the upstream cluster holds standing credentials on every downst
 
 ## Alternatives (Not Implemented)
 
-- **Sidecar container in the SPIRE server pod.** The upstream agent runs as a second container in the `spire-server` pod, sharing the socket through an `emptyDir`. Attractive because it adds no CSI driver, no `hostPath`, and no pod affinity.
-  - Not chosen because the agent needs `hostPID` for pod-based workload attestation, which would move the SPIRE server pod off the `restricted` SCC. It also couples the agent's lifecycle to the server's.
-- **Raw `hostPath` shared between the agent and the server.** Simplest option, no CSI driver.
-  - Rejected because a `hostPath` mount moves the SPIRE server pod off `restricted`. On OpenShift the two pods' SELinux MCS labels differ, so the server cannot open the socket without an SCC granting `spc_t`.
-- **Reuse the existing `spire-agent` DaemonSet.**
-  - Not possible. It is attested to the local server.
-- **Add the upstream agent ServiceAccount to the existing `spire-agent` SCC.** Avoids a second SCC object with identical settings.
-  - Rejected because the `spire-agent` SCC is owned and reconciled by the `SpireAgent` controller, which today sets `Users` to the workload facing spire agent only. Sharing the SCC would require the `SpireAgent` reconciler to read `SpireServer.spec.upstreamAuthority.spire`, watch `SpireServer`, and merge `Users` on every loop so it does not drop `spire-agent-upstream` when `SpireAgent` reconciles. A dedicated `spire-agent-upstream` SCC keeps all nested-SPIRE resources under the `SpireServer` controller.
-- `**x509pop` node attestation.** The agent presents a pre-provisioned X.509 certificate with a proof-of-possession challenge.
-  - Deferred rather than rejected: it needs certificate provisioning, distribution, and rotation on both clusters.
-- `**join_token` node attestation.** A one-time token minted on the upstream server. Simplest bootstrap, needs no cross-cluster access.
-  - Rejected because join tokens are consumed on first use and produce a non-re-attestable agent.
-- **Upstream agent as a DaemonSet.** Would remove the pod affinity requirement.
-  - Rejected: one agent per node would multiply upstream-server attestation and sync load with no benefit, since only the agent on the SPIRE server's node provides the Workload API socket the plugin uses.
-- **SPIRE federation instead of nesting.** Already shipped, and it solves cross-cluster authentication.
-  - It is a different capability rather than an alternative: federation joins *distinct* trust domains, each with its own root, whereas nesting produces one trust domain with one root.
+### 1. Sidecar container (not chosen)
+
+The upstream agent can run as a second container in the `spire-server` pod. Both containers share an `emptyDir` volume at `/run/spire/upstream-agent` for the Workload API socket. This removes the separate upstream agent Deployment, the second CSI driver, and `podAffinity`.
+
+Nested SPIRE still uses two attestation stages on the upstream cluster. They must not be conflated:
+
+| Stage | Plugin | Purpose |
+| ----- | ------ | ------- |
+| Agent → upstream server | `k8s_psat` (node attestor) | Prove the upstream agent pod belongs to the downstream cluster |
+| `spire-server` → agent Workload API | `k8s` or `unix` (workload attestor) | Prove the process calling the socket is the real `spire-server` container |
+
+`k8s_psat` only needs a projected ServiceAccount token with audience `spire-server`. It does **not** require `hostPID`.
+
+A sidecar pod has one ServiceAccount. Both containers use `spire-server`, so the upstream cluster must allow that SA for node attestation (`service_account_allow_list` and node-alias `k8s_psat:agent_sa:spire-server`) instead of `spire-agent-upstream`.
+
+The workload attestor choice determines what else the sidecar needs:
+
+| | **Sidecar + `k8s` workload attestor** | **Sidecar + `unix` workload attestor** |
+| -- | ------------------------------------- | -------------------------------------- |
+| **Pod setting** | `shareProcessNamespace: true` | `shareProcessNamespace: true` |
+| **SCC** | `restricted-v2` (no elevation) | `restricted-v2` (no elevation) |
+| **RBAC on `spire-server` SA** | `get` on `pods`, `nodes`, `nodes/proxy` | None |
+| **Agent config** | `k8s` workload attestor with `node_name_env` | `unix` workload attestor with `discover_workload_path: true` |
+| **Downstream `ClusterStaticEntry`** | `k8s:ns`, `k8s:sa`, `k8s:pod-name`, `k8s:container-name` (same as the chosen design) | `unix:path` and `unix:sha256` (must track server image digest) |
+| **Without `shareProcessNamespace`** | Workload attestation fails (`could not resolve caller information`) even with kubelet RBAC | Workload attestation cannot read sibling `/proc` for path discovery |
+
+**Sidecar + `k8s`.** The `k8s` workload attestor maps the socket caller's PID to pod metadata through the kubelet API (`nodes/proxy`). `shareProcessNamespace` is required so the peer PID from the Unix socket matches what kubelet reports. Without `nodes/proxy` RBAC on `spire-server`, the attestor returns `403 Forbidden` and the downstream server cannot obtain an upstream-signed CA.
+
+**Sidecar + `unix`.** The `unix` workload attestor inspects `/proc/<pid>/exe` instead of calling the kubelet. It requires `discover_workload_path: true` in agent config to emit `unix:path` and `unix:sha256` selectors. The downstream entry must use those selectors instead of `k8s:*`. Image upgrades change `unix:sha256`, so entries must be re-rendered on every server image bump.
+
+**Why the sidecar is not chosen.** The separate Deployment + CSI design keeps two ServiceAccounts (`spire-agent-upstream` for `k8s_psat`, `spire-server` for workload attestation), keeps kubelet RBAC off `spire-server`, uses stable `k8s:*` downstream selectors, and deploys the upstream agent as its own workload. The sidecar trades those properties for fewer moving parts (one pod, no CSI driver, no `hostPID`/`hostPath` on the agent) at the cost of either kubelet access on the server SA (`k8s` path) or brittle binary-hash selectors (`unix` path). It also couples lifecycles at the StatefulSet template: an agent image or config-hash change recreates `spire-server-0` and restarts the server process, and a failing sidecar readiness probe makes the pod not Ready, which drops it from the `spire-server` Service. Sidecar container crash does not kill the server process.
+
+### 2. Raw `hostPath` shared between the agent and the server
+
+Simplest socket-delivery option; no CSI driver. Rejected because a `hostPath` mount moves the SPIRE server pod off `restricted`. On OpenShift the two pods' SELinux MCS labels differ, so the server cannot open the socket without an SCC granting `spc_t`.
+
+### 3. Reuse the existing `spire-agent` DaemonSet
+
+Not possible. It is attested to the local server.
+
+### 4. Add the upstream agent ServiceAccount to the existing `spire-agent` SCC
+
+Avoids a second SCC object with identical settings. Rejected because the `spire-agent` SCC is owned and reconciled by the `SpireAgent` controller, which today sets `Users` to the workload facing spire agent only. Sharing the SCC would require the `SpireAgent` reconciler to read `SpireServer.spec.upstreamAuthority.spire`, watch `SpireServer`, and merge `Users` on every loop so it does not drop `spire-agent-upstream` when `SpireAgent` reconciles. A dedicated `spire-agent-upstream` SCC keeps all nested-SPIRE resources under the `SpireServer` controller.
+
+### 5. `x509pop` node attestation
+
+The agent presents a pre-provisioned X.509 certificate with a proof-of-possession challenge. Deferred rather than rejected: it needs certificate provisioning, distribution, and rotation on both clusters.
+
+### 6. `join_token` node attestation
+
+A one-time token minted on the upstream server. Simplest bootstrap, needs no cross-cluster access. Rejected because join tokens are consumed on first use and produce a non-re-attestable agent.
+
+### 7. Upstream agent as a DaemonSet
+
+Would remove the pod affinity requirement. Rejected: one agent per node would multiply upstream-server attestation and sync load with no benefit, since only the agent on the SPIRE server's node provides the Workload API socket the plugin uses.
+
+### 8. SPIRE federation instead of nesting
+
+Already shipped, and it solves cross-cluster authentication. It is a different capability rather than an alternative: federation joins *distinct* trust domains, each with its own root, whereas nesting produces one trust domain with one root.
 
 ## Open Questions
 
@@ -582,6 +628,8 @@ Maps to the feature acceptance criteria:
 - User-facing documentation covering single-upstream-cluster and multi-tier procedures
 
 ### Removing a deprecated feature
+
+Not applicable. This enhancement only adds optional fields and operator-managed resources. It does not deprecate or remove an existing API or behavior.
 
 ## Upgrade / Downgrade Strategy
 
