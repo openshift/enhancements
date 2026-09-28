@@ -12,6 +12,7 @@ api-approvers:
   - "@tgeer"
 creation-date: 2026-09-18
 last-updated: 2026-09-23
+status: provisional
 tracking-link:
   - https://redhat.atlassian.net/browse/SPIRE-625
 ---
@@ -340,13 +341,21 @@ Together, the alias absorbs node-level identity churn from `k8s_psat` attestatio
 
 #### Hypershift / Hosted Control Planes
 
+Not evaluated in this iteration. ZTWIM does not yet support Hosted Control Planes. If Hypershift support is added, the nested SPIRE design will need to account for the split between management and guest clusters (for example, whether the SPIRE server runs in the management cluster and how the upstream agent and CSI driver are placed relative to the guest cluster's workloads).
+
 #### Standalone Clusters
 
 The primary target. Both upstream and downstream cluster configurations are supported.
 
 #### Single-node Deployments or MicroShift
 
+Single-node OpenShift (SNO) can participate in a nested topology as either upstream or downstream. Resource consumption increases by one upstream agent pod and one CSI DaemonSet pod on a downstream SNO cluster, and by one Route and additional kubeconfig Secret mounts on an upstream SNO cluster. No SNO-specific changes are required. Not tested in this iteration.
+
+MicroShift does not run ZTWIM and is not affected by this enhancement.
+
 #### OpenShift Kubernetes Engine
+
+ZTWIM is not available on OKE. The operator's CSV limits valid subscriptions to OpenShift Container Platform and OpenShift Platform Plus. This enhancement does not change that scope.
 
 ### Implementation Details/Notes/Constraints
 
@@ -650,6 +659,20 @@ The consequential skew is between clusters. SPIRE's policy is that [agents must 
 Therefore **a cluster's direct upstream should be upgraded before that cluster**, and **downstream clusters must not fall more than one SPIRE minor version behind their upstream cluster**. In multi-tier topologies, upgrade **from the root outward**: each tier before the one below it.
 
 ## Operational Aspects of API Extensions
+
+This enhancement modifies the existing `SpireServer` CRD (adding optional fields) and creates `ClusterStaticEntry` CR instances on the upstream cluster. It does not add admission webhooks, conversion webhooks, aggregated API servers, or finalizers.
+
+- **CRD changes to `SpireServer`**: three new optional fields (`spec.grpcEndpoint`, `spec.nestedSpire`, `spec.upstreamAuthority.spire`). Expected instance count remains one per cluster (cluster-scoped singleton).
+- **`ClusterStaticEntry` instances**: the operator creates two per downstream cluster (node alias and downstream entry). These are processed by the existing `spire-controller-manager` and do not add API server load beyond the initial create and periodic status updates.
+- **Route (`spire-server-grpc`)**: one passthrough Route per upstream cluster. Standard OpenShift Route; no impact on the ingress controller beyond one additional backend.
+
+Failure modes:
+
+- If operator-created `ClusterStaticEntry` objects are deleted externally, the operator recreates them on the next reconciliation. Downstream clusters cannot obtain new intermediate CAs until the entries are restored, but continue issuing from cached CAs.
+- If the `spire-server-grpc` Route is deleted while `managedRoute` is `"true"`, the operator recreates it. Downstream clusters cannot reach the upstream server until the Route is restored.
+- If the `spire-agent-upstream` SCC is deleted, the upstream agent pod cannot start until the operator recreates it on the next reconciliation.
+
+The ZTWIM team owns all components involved and would be the escalation point for nested SPIRE failures.
 
 ## Support Procedures
 
