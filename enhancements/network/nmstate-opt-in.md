@@ -172,8 +172,8 @@ part of the nodeip-configuration service. The YAML looks something like this:
 
 ```yaml
 capture:
-  # FIXME: This requires primary to be the first altname. Need NMState support to fix.
-  # This is not a blocker problem, but it does introduce an unnecessary requirement.
+  # NOTE: This selector requires "primary" to be alt-names[0]. NMState's capture
+  # syntax does not currently support matching by value regardless of position.
   base-iface: interfaces.alt-names.0.name == "primary"
 desiredState:
   interfaces:
@@ -198,6 +198,12 @@ desiredState:
   work for every use case. The feature is designed to be extensible in the
   future, so we can add automatic configuration for more architectures if
   needed, however.
+* We are selecting the primary interface based on the "primary" altname.
+  Currently we only support matching a single altname because of a limitation
+  in the NMState capture syntax, so this is the only option available to us
+  without pursuing changes upstream. If that limitation gets fixed, we may
+  want to support matching on additional altnames to further reduce the
+  chance of conflicting with existing configs.
 
 ### Drawbacks
 
@@ -212,13 +218,6 @@ However, this does not address the duplication issues, and if we are able to
 completely replace configure-ovs it may leave us with a useless field in the
 install-config API. If we are unable to replace the free-form configuration with
 this more templated feature, we may still revisit this.
-
-## Open Questions [optional]
-
-* Is selecting the primary interface based on the "primary" altname acceptable,
-  or should we pick something less likely to conflict with existing configs?
-  Currently we only support one altname because of a limitation in the NMState
-  capture syntax, but if that gets fixed we may want/need to support more.
 
 ## Test Plan
 
