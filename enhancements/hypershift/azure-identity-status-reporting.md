@@ -12,7 +12,7 @@ approvers:
 api-approvers:
   - "@JoelSpeed"
 creation-date: 2026-09-24
-last-updated: 2026-09-24
+last-updated: 2026-09-28
 status: provisional
 tracking-link:
   - https://issues.redhat.com/browse/CNTRLPLANE-4491
@@ -27,496 +27,455 @@ superseded-by: []
 
 ## Summary
 
-This enhancement adds `status.platform.azure` to the `HostedCluster` and
-`HostedControlPlane` resources in HyperShift. The new status field reflects the Azure
-identity configuration that the control plane operator (CPO) is actively applying to
-control plane components. The primary consumer is ARO HCP, which needs this signal to
-determine when identity replacements have taken effect so that it can safely clean up
-credentials associated with old managed identities.
+Report Azure identities per role after the controller responsible for each role
+has applied its identity-bearing Kubernetes resources. Each controller records
+its observation on the corresponding `ControlPlaneComponent` (CPC); the
+HyperShift Operator (HO) rolls these records up to
+`HostedControlPlane.status.platform.azure.identities`, which is then copied to
+`HostedCluster.status.platform.azure.identities`. The rollup gives ARO HCP one
+cluster-level read while retaining the component and role that produced each
+observation. Status describes an applied reference, not successful credential
+use. Mount confirmation is a separate, later observation.
+
+This is a provisional design for [CNTRLPLANE-4491](https://redhat.atlassian.net/browse/CNTRLPLANE-4491).
+The current spec-mirroring implementation in
+[CNTRLPLANE-4493](https://redhat.atlassian.net/browse/CNTRLPLANE-4493)
+does not provide the applied-state guarantee proposed here and must be revised
+before its status can be used as a rotation signal.
 
 ## Motivation
 
-ARO HCP supports day-2 managed identity replacement: when a control plane identity is
-rotated, Clusters Service updates the `credentialsSecretName` fields in the
-`HostedCluster` spec. The CPO reconciles those changes into `SecretProviderClass`
-objects; the Secrets Store CSI driver then mounts the new certificates. Without a
-status signal from HyperShift, ARO HCP cannot observe when the CPO has applied the
-new configuration and must instead rely on conservative time-based delays (currently
-24 hours) before cleaning up old identity credentials — even though the CPO typically
-applies changes within one reconcile loop.
+ARO HCP replaces managed identities by changing the requested credential
+reference. Today it cannot see which control-plane and data-plane consumers
+have applied the change, so it retains old credentials for a conservative
+period. Components reconcile independently; a whole-spec mirror can show the
+new value before a component's resource write succeeds.
 
-This enhancement is tracked in [OCPSTRAT-2151](https://issues.redhat.com/browse/OCPSTRAT-2151)
-and unblocks [ARO-29197](https://issues.redhat.com/browse/ARO-29197).
+The desired update path at implementation time is Clusters Service (CS) to the
+ARO resource provider (RP) backend, then kube-applier to
+`HostedCluster.spec`. HO propagates that desired state to
+`HostedControlPlane.spec`. CS does not directly update HostedCluster in this
+design. The RP backend reads HostedCluster status through its ReadDesire and
+compares each reported role with the latest desired state and its own
+identity-replacement plan.
+
+This enhancement supports [OCPSTRAT-2151](https://issues.redhat.com/browse/OCPSTRAT-2151)
+and [ARO-29197](https://issues.redhat.com/browse/ARO-29197).
 
 ### User Stories
 
-#### Story 1: ARO HCP identity rotation clean-up
-
-As an ARO HCP platform operator, I want to observe when the HyperShift control plane
-operator has applied a new identity configuration to `SecretProviderClass` resources so
-that I can safely clean up Key Vault credentials associated with the old managed identity
-without relying on a conservative, time-based delay.
-
-#### Story 2: Detecting stale identity configuration
-
-As an ARO HCP operator or SRE, I want to compare `status.platform.azure` against
-`spec.platform.azure.azureAuthenticationConfig` to detect clusters where identity
-configuration changes have not yet been applied by the CPO, so that I can investigate
-or alert on stuck reconciliation.
-
-#### Story 3: Self-managed Azure workload identity visibility
-
-As a self-managed Azure cluster operator, I want to observe which workload identity
-client IDs the CPO has applied to `ServiceAccount` annotations for each control plane
-component, so that I can verify that OIDC federation is configured correctly after
-a cluster update.
+1. As an ARO HCP operator, I can see the applied identity reference for each
+   control-plane, data-plane, and service identity role, so I can detect partial
+   or stalled replacement.
+2. As an ARO HCP operator, I can distinguish resource application from CSI
+   mounting and credential use, so I do not delete an old identity based on a
+   premature signal.
+3. As a self-managed Azure operator, I can see the client ID applied for each
+   applicable workload identity role.
 
 ### Goals
 
-1. Report the active Azure identity configuration being applied by the CPO in
-   `HostedCluster.Status.Platform.Azure` and `HostedControlPlane.Status.Platform.Azure`.
-2. Cover both authentication modes: `ManagedIdentities` (ARO HCP) and `WorkloadIdentities`
-   (self-managed Azure).
-3. For `ManagedIdentities` mode: report the `credentialsSecretName` per control plane
-   component (the operative rotation signal) and the MSI client IDs for data plane
-   components.
-4. For `WorkloadIdentities` mode: report the workload identity `clientID` per component.
-5. Populate the status on every CPO reconcile using `statuspatching.PatchStatus` with
-   optimistic locking, consistent with existing HCP status patching patterns.
+1. Cover managed and workload identity modes, including control-plane roles,
+   guest-cluster data-plane credential Secrets, and the Azure KMS identity.
+2. Report each role only after its owner has successfully applied the resources
+   that carry that role's identity reference. Preserve the last applied value
+   when a later apply fails.
+3. Expose the same per-role observations on HCP and HC, with source component,
+   applied reference, and observed HCP generation. An absent or stale record is
+   unknown, never successful.
+4. Define the separate pod-mount observation needed by
+   [CNTRLPLANE-4495](https://redhat.atlassian.net/browse/CNTRLPLANE-4495),
+   including a version signal for same-name Key Vault updates where available.
 
 ### Non-Goals
 
-1. **Pod-level confirmation.** The CPO can confirm it has updated `SecretProviderClass`
-   objects but cannot confirm that pods are running with the new credentials. Pod-level
-   confirmation (via `SecretProviderClassPodStatus`) is deferred to a follow-on
-   enhancement (CNTRLPLANE-4495).
-2. **Same-name Key Vault rotation detection.** If a Key Vault secret is replaced in-place
-   (same `credentialsSecretName`, new certificate content), HyperShift cannot detect this
-   without per-reconcile Key Vault API calls. This is not a valid scenario in the ARO HCP
-   identity replacement protocol, which always uses a distinct `credentialsSecretName` per
-   new identity.
-3. **KMS managed identity.** The KMS identity is configured under
-   `spec.secretEncryption.kms.azure.kms`, not under `spec.platform.azure.azureAuthenticationConfig`.
-   Its status reporting is deferred (CNTRLPLANE-4494).
-4. **Verifying that identities work against Azure APIs.** Out of scope.
+1. Proving a workload loaded a mounted certificate, acquired a token, or
+   successfully called Azure. Neither a Kubernetes resource write nor CSI
+   `SecretProviderClassPodStatus` proves those events.
+2. Authorizing old credential deletion from applied-resource status alone.
+   RP cleanup requires a separate, documented safety policy and evidence for
+   every affected consumer.
+3. Reporting a worker-node rollout. The data-plane identities in this proposal
+   are the IDs placed in guest-cluster operand credential Secrets by the hosted
+   cluster config operator (HCCO), rather than a NodePool ignition change.
 
 ## Proposal
 
 ### Workflow Description
 
-**Actors:**
-- **Clusters Service (CS):** Updates `HostedCluster.Spec.Platform.Azure.AzureAuthenticationConfig`
-  to rotate managed identities.
-- **HyperShift Operator (HO):** Creates/updates the `HostedControlPlane` from the
-  `HostedCluster` spec.
-- **Control Plane Operator (CPO):** Reconciles the `HostedControlPlane` and applies the
-  identity configuration to `SecretProviderClass` (ManagedIdentities) or `ServiceAccount`
-  (WorkloadIdentities) resources.
-- **ARO HCP backend:** Reads `HostedCluster.Status.Platform.Azure` to determine when an
-  identity rotation has been applied by the CPO.
+1. CS supplies the new desired identity to the RP backend. The backend writes
+   its HostedCluster ApplyDesire; kube-applier updates HostedCluster spec.
+2. HO updates HCP spec. Each owner applies the identity-bearing resources
+   using the captured desired reference and HCP generation. A successful
+   per-role apply updates that owner's CPC status. A failed or skipped role
+   retains its previous applied observation.
+3. HO validates each CPC's identity record against the current CPC object and
+   copies the per-role records into HCP platform status. The existing
+   HCP-to-HC status propagation publishes the rollup to HostedCluster.
+4. RP compares every expected role's reported reference and
+   `observedHCPGeneration` with the latest desired state. A match confirms
+   resource application only. RP waits for separately defined mount and
+   workload-use evidence, or a justified grace period, before old-identity
+   cleanup.
 
-**Rotation workflow:**
+The rollup is keyed by `component`, `scope`, and `role`; it is not a
+single cluster-wide success boolean. An identity used by more than one
+component has a record for each consuming component. RP requires all
+affected consumers to converge. API review must fix the complete role
+inventory and ownership before implementation.
 
-1. CS updates the `HostedCluster` spec with new `credentialsSecretName` values for the
-   rotated components.
-2. The HO propagates the updated spec to `HostedControlPlane`.
-3. On the next reconcile, the CPO reads the new `credentialsSecretName` values, updates
-   the corresponding `SecretProviderClass` objects, and then calls
-   `reconcileAzurePlatformStatus` to mirror the active configuration into
-   `HostedControlPlane.Status.Platform.Azure` via `statuspatching.PatchStatus`.
-4. The HO copies `hcp.Status.Platform` to `hcluster.Status.Platform` — this already
-   happens generically and requires no additional code.
-5. ARO HCP reads `HostedCluster.Status.Platform.Azure.ManagedIdentities.ControlPlane`
-   and compares each component's `credentialsSecretName` against what it wrote in step 1.
-   When they match, the CPO has applied the rotation and ARO HCP can initiate clean-up
-   of the old identity's credentials.
+### Reporting ownership
 
-**Rotation contract:** The operative rotation signal is a `credentialsSecretName` change
-in the spec. ARO HCP must use a new Key Vault secret name when rotating to a new identity;
-the status will reflect it once the CPO has reconciled. Same-name Key Vault rotation (new
-certificate uploaded to the same secret name) is handled transparently by the CSI driver
-and is out of scope for this status signal.
+| Scope and role | Resource applied by | Source status |
+| --- | --- | --- |
+| Control plane: cloud provider, image registry, ingress, network, disk, file | CPO component reconciler | Respective CPC; storage has separate disk and file records |
+| Control plane: control plane operator | HO | HO-reconciled control-plane-operator CPC |
+| Control plane: node pool management | HO | HO-reconciled CAPZ CPC |
+| Service: Azure KMS credentials for CPO in managed mode | HO | HO-reconciled control-plane-operator CPC |
+| Service: Azure KMS credentials for kube-apiserver, including workload identity mode | CPO kube-apiserver/KMS component | Kube-apiserver CPC |
+| Data plane: image registry, disk, file | HCCO guest-cluster credential reconciler | HCCO CPC, one record per guest Secret |
+| Data plane: ingress in workload identity mode | HCCO guest-cluster credential reconciler | HCCO CPC |
+
+The managed-Azure guest ingress Secret currently contains a placeholder client
+ID and is not a real identity consumer, so it is omitted in that mode. The
+data-plane client IDs are written to guest-cluster credential Secrets by HCCO;
+they are not reported as applied merely because HO copied them to HCP spec.
+HCCO already has a management-cluster client for HCP status; its CPC reporting
+path requires implementation and RBAC review.
+
+In managed mode the KMS identity is consumed by two
+`SecretProviderClass` resources: HO applies the one for CPO, and the CPO
+kube-apiserver component applies the other. Both records must converge
+before RP considers the KMS reference applied. In workload identity mode,
+the kube-apiserver component applies its token-minter configuration. The
+identity comes from
+`spec.secretEncryption.kms.azure.kms` in managed mode, or
+`spec.secretEncryption.kms.azure.workloadIdentity` in workload identity mode.
+[CNTRLPLANE-4494](https://redhat.atlassian.net/browse/CNTRLPLANE-4494)
+implements its source record within the common status shape.
 
 ### API Extensions
 
-This enhancement adds five new types to the HyperShift API and one new field on
-`PlatformStatus`.
+Add a bounded `azureIdentities` status list to CPC and an `identities` list
+under the existing `status.platform.azure` on HCP and HC. The latter two
+use the same wire type. This supersedes the unmerged
+`managedIdentities`/`workloadIdentities` spec-mirror status shape in
+CNTRLPLANE-4493; it must not leave two conflicting "active" status fields.
+The proposed shape is:
 
-#### New field on PlatformStatus
-
-```go
-type PlatformStatus struct {
-    // aws contains platform-specific status for AWS
-    // +optional
-    AWS *AWSPlatformStatus `json:"aws,omitempty"`
-
-    // azure contains platform-specific status for Azure, reflecting the identity
-    // configuration currently applied by the control plane operator.
-    // +optional
-    Azure AzurePlatformStatus `json:"azure,omitzero,omitempty"`
-}
+```yaml
+kind: ControlPlaneComponent
+metadata:
+  name: cluster-storage-operator
+status:
+  azureIdentities:
+  - scope: controlPlane
+    role: disk
+    authenticationMode: ManagedIdentities
+    appliedReference:
+      type: CredentialsSecretName
+      value: disk-identity-v2
+    observedHCPGeneration: 42
+  - scope: controlPlane
+    role: file
+    authenticationMode: ManagedIdentities
+    appliedReference:
+      type: CredentialsSecretName
+      value: file-identity-v2
+    observedHCPGeneration: 42
 ```
 
-#### New types
-
-```go
-// AzurePlatformStatus contains status specific to the Azure platform. It reflects
-// the identity configuration that the control plane operator has applied to
-// SecretProviderClass and ServiceAccount resources.
-//
-// Note: this reflects CPO-applied configuration, not pod-runtime state. Pods may
-// continue to use old credentials for minutes after the CPO applies a new
-// SecretProviderClass (CSI driver poll interval). Pod-level confirmation is a
-// separate follow-on effort (CNTRLPLANE-4495).
-//
-// +kubebuilder:validation:MinProperties=1
-type AzurePlatformStatus struct {
-    // managedIdentities reflects the credential references currently applied
-    // to control plane and data plane components. Populated when the Azure
-    // authentication mode is ManagedIdentities.
-    // +optional
-    ManagedIdentities AzureManagedIdentitiesStatus `json:"managedIdentities,omitzero,omitempty"`
-
-    // workloadIdentities reflects the client IDs of the federated workload identities
-    // currently applied by the control plane operator. Populated when the Azure
-    // authentication mode is WorkloadIdentities.
-    // +optional
-    WorkloadIdentities AzureWorkloadIdentitiesStatus `json:"workloadIdentities,omitzero,omitempty"`
-}
-
-// AzureManagedIdentitiesStatus reflects the active managed identity credential
-// references for control plane and data plane components.
-//
-// +kubebuilder:validation:MinProperties=1
-type AzureManagedIdentitiesStatus struct {
-    // controlPlane contains the Key Vault credential secret names currently applied
-    // to control plane components by the control plane operator.
-    // +optional
-    ControlPlane AzureControlPlaneManagedIdentitiesStatus `json:"controlPlane,omitzero,omitempty"`
-
-    // dataPlane contains the MSI client IDs currently applied to data plane components
-    // via the ignition configuration.
-    // +optional
-    DataPlane AzureDataPlaneManagedIdentitiesStatus `json:"dataPlane,omitzero,omitempty"`
-}
-
-// AzureControlPlaneManagedIdentitiesStatus reflects the active Key Vault credential
-// secret name for each control plane component. Each field holds the
-// credentialsSecretName that the CPO is currently using; it changes when an
-// identity rotation is applied.
-//
-// +kubebuilder:validation:MinProperties=1
-type AzureControlPlaneManagedIdentitiesStatus struct {
-    // +optional
-    // +kubebuilder:validation:MaxLength=127
-    // +kubebuilder:validation:MinLength=1
-    CloudProvider string `json:"cloudProvider,omitempty"`
-    // +optional
-    // +kubebuilder:validation:MaxLength=127
-    // +kubebuilder:validation:MinLength=1
-    NodePoolManagement string `json:"nodePoolManagement,omitempty"`
-    // +optional
-    // +kubebuilder:validation:MaxLength=127
-    // +kubebuilder:validation:MinLength=1
-    ControlPlaneOperator string `json:"controlPlaneOperator,omitempty"`
-    // +optional
-    // +kubebuilder:validation:MaxLength=127
-    // +kubebuilder:validation:MinLength=1
-    ImageRegistry string `json:"imageRegistry,omitempty"`
-    // +optional
-    // +kubebuilder:validation:MaxLength=127
-    // +kubebuilder:validation:MinLength=1
-    Ingress string `json:"ingress,omitempty"`
-    // +optional
-    // +kubebuilder:validation:MaxLength=127
-    // +kubebuilder:validation:MinLength=1
-    Network string `json:"network,omitempty"`
-    // +optional
-    // +kubebuilder:validation:MaxLength=127
-    // +kubebuilder:validation:MinLength=1
-    Disk string `json:"disk,omitempty"`
-    // +optional
-    // +kubebuilder:validation:MaxLength=127
-    // +kubebuilder:validation:MinLength=1
-    File string `json:"file,omitempty"`
-}
-
-// AzureDataPlaneManagedIdentitiesStatus reflects the active MSI client IDs for
-// data plane managed identities. These values are passed into the ignition
-// configuration applied to worker nodes.
-//
-// +kubebuilder:validation:MinProperties=1
-type AzureDataPlaneManagedIdentitiesStatus struct {
-    // +optional
-    // +kubebuilder:validation:MaxLength=255
-    // +kubebuilder:validation:MinLength=1
-    ImageRegistryClientID string `json:"imageRegistryClientID,omitempty"`
-    // +optional
-    // +kubebuilder:validation:MaxLength=255
-    // +kubebuilder:validation:MinLength=1
-    DiskClientID string `json:"diskClientID,omitempty"`
-    // +optional
-    // +kubebuilder:validation:MaxLength=255
-    // +kubebuilder:validation:MinLength=1
-    FileClientID string `json:"fileClientID,omitempty"`
-}
-
-// AzureWorkloadIdentitiesStatus reflects the active client IDs for federated
-// workload identities currently applied by the control plane operator.
-//
-// +kubebuilder:validation:MinProperties=1
-type AzureWorkloadIdentitiesStatus struct {
-    // +optional
-    // +kubebuilder:validation:MaxLength=255
-    // +kubebuilder:validation:MinLength=1
-    CloudProvider string `json:"cloudProvider,omitempty"`
-    // +optional
-    // +kubebuilder:validation:MaxLength=255
-    // +kubebuilder:validation:MinLength=1
-    NodePoolManagement string `json:"nodePoolManagement,omitempty"`
-    // +optional
-    // +kubebuilder:validation:MaxLength=255
-    // +kubebuilder:validation:MinLength=1
-    ControlPlaneOperator string `json:"controlPlaneOperator,omitempty"`
-    // +optional
-    // +kubebuilder:validation:MaxLength=255
-    // +kubebuilder:validation:MinLength=1
-    ImageRegistry string `json:"imageRegistry,omitempty"`
-    // +optional
-    // +kubebuilder:validation:MaxLength=255
-    // +kubebuilder:validation:MinLength=1
-    Ingress string `json:"ingress,omitempty"`
-    // +optional
-    // +kubebuilder:validation:MaxLength=255
-    // +kubebuilder:validation:MinLength=1
-    Network string `json:"network,omitempty"`
-    // +optional
-    // +kubebuilder:validation:MaxLength=255
-    // +kubebuilder:validation:MinLength=1
-    Disk string `json:"disk,omitempty"`
-    // +optional
-    // +kubebuilder:validation:MaxLength=255
-    // +kubebuilder:validation:MinLength=1
-    File string `json:"file,omitempty"`
-}
+```yaml
+kind: HostedCluster
+status:
+  platform:
+    azure:
+      observedHCGeneration: 28
+      currentHCPGeneration: 42
+      identities:
+      - scope: controlPlane
+        role: disk
+        component: cluster-storage-operator
+        authenticationMode: ManagedIdentities
+        appliedReference:
+          type: CredentialsSecretName
+          value: disk-identity-v2
+        observedHCPGeneration: 42
+      - scope: dataPlane
+        role: disk
+        component: hosted-cluster-config-operator
+        authenticationMode: ManagedIdentities
+        appliedReference:
+          type: ClientID
+          value: 00000000-0000-0000-0000-000000000000
+        observedHCPGeneration: 42
 ```
+
+`component`, `scope`, and `role` form the list key in the rollup; a CPC
+owns only its declared roles. `component` identifies the source CPC.
+A record has exactly
+one nonempty applied reference. Control-plane managed identities and managed
+KMS use `CredentialsSecretName`; data-plane managed identities and workload
+identities use `ClientID`. The schema must validate supported combinations,
+list uniqueness, and bounded size. Status contains no certificate or token.
+
+A record is absent until the first successful apply. When a component is
+disabled or a role removed, the source removes its record after the related
+resources are removed; HO then removes it from the rollup. HO must discard
+records from a deleted or recreated CPC, using the CPC UID it observed while
+aggregating. It must not retain a rollup entry when its source disappears.
+
+`observedHCPGeneration` identifies the HCP spec used for that particular
+apply, and advances only after a successful resource write. HO publishes the
+HCP's current generation in `currentHCPGeneration` and the HC generation
+whose desired spec it has propagated in `observedHCGeneration`. RP compares
+the latter with `HostedCluster.metadata.generation` and each role's
+`observedHCPGeneration` with `currentHCPGeneration`. HO sets
+`observedHCGeneration` only after it has confirmed that HCP spec contains
+that HC generation's desired values. The CPC's general
+`status.observedGeneration` can advance after a failed reconcile and must
+not be used as a substitute. A generation mismatch is conservative even
+when an unrelated HCP spec change leaves identity references unchanged.
+
+### Pod mount and same-name rotation
+
+[CNTRLPLANE-4495](https://redhat.atlassian.net/browse/CNTRLPLANE-4495)
+adds an optional per-role mount observation, copied through the same rollup.
+For managed control-plane roles, it may contain
+`mountedReference`, `objectVersion`, `observedHCPGeneration`, and
+`allCurrentPodsMountedAt`. The field is present only when at least one
+expected live pod exists and every current consumer pod has a matching CSI
+`SecretProviderClassPodStatus` with `mounted=true` and the expected object
+ID and version. A changed pod set, a missing/stale pod status, or mixed
+versions clears the completion observation. The implementation must map
+roles to actual pod consumers and handle rolling updates and terminating pods.
+
+The CSI API exposes object ID and version. This can reveal a same-name Key
+Vault content update without querying Key Vault on every reconcile, but the
+RP must know the expected new object version to distinguish it from the old
+one. If it does not, same-name rotation remains `Unknown` for cleanup.
+An unchanged `credentialsSecretName` is never evidence that new content
+was mounted. Similarly, re-creating a managed identity under the same Azure
+resource ID requires a changed client ID, credential reference, or version
+known to RP; the resource ID alone is insufficient.
+
+`allCurrentPodsMountedAt` is deliberately a mount-completion timestamp.
+It must not be named `confirmedActiveAt` or described as proof of
+application use. CNTRLPLANE-4495's proposed automatic removal of the
+24-hour delay needs workload-use evidence or a separately reviewed cleanup
+policy. Workload identity mode needs a distinct rollout and token-use design;
+CSI pod status does not cover it. Data-plane guest Secrets likewise require
+operand rollout/consumption evidence beyond their successful write.
 
 ### Topology Considerations
 
 #### Hypershift / Hosted Control Planes
 
-This enhancement is specific to HyperShift. The new status field is populated by the
-CPO — which runs in the management cluster — based on what it has applied to
-`SecretProviderClass` and `ServiceAccount` resources in the control plane namespace.
-The field is propagated from `HostedControlPlane.Status.Platform` to
-`HostedCluster.Status.Platform` by the HyperShift Operator's existing generic status
-copy (`hcluster.Status.Platform = hcp.Status.Platform`); no additional HO code is
-required.
-
-The CPO uses `statuspatching.PatchStatus` with optimistic locking so that concurrent
-status writers (CPO, HCCO, karpenter) do not silently overwrite each other's changes.
+CPC, HCP, and HC status live in the management cluster. HCCO must reach
+guest-cluster Secrets to apply data-plane credentials and then report its
+result through the management-cluster CPC. HO performs the bounded rollup
+and already copies HCP platform status to HC. RP already mirrors HC; a
+complete HC rollup avoids per-cluster ReadDesires for every CPC. Status writes
+occur only when a record, generation, or mount state changes, not on every
+reconcile or CSI poll.
 
 #### Standalone Clusters
 
-Not applicable. This enhancement is exclusively for Azure-backed hosted control planes.
+Not applicable: this API is specific to HyperShift.
 
 #### Single-node Deployments or MicroShift
 
-Not applicable.
+No new node-level workload or MachineConfig change.
 
 #### OpenShift Kubernetes Engine
 
-Not applicable.
+The reporting path is independent of the guest cluster's operator set;
+disabled components have no identity record.
 
 ### Implementation Details/Notes/Constraints
 
-**Reconciliation function:** A new `reconcileAzurePlatformStatus` method is added to
-`HostedControlPlaneReconciler` in
-`control-plane-operator/controllers/hostedcontrolplane/hostedcontrolplane_controller.go`.
-It is called after `reconcileDefaultSecurityGroup` in the `update()` function, once per
-reconcile loop. It performs a pure spec-mirror operation — no Azure API calls — and is
-therefore safe to run on every reconcile and correct on conflict-retry.
+The component framework already passes HCP through its workload context.
+Its apply result needs per-role success information, including for storage's
+two identities. A component must capture the reference and HCP generation
+used for its resource write, verify that generation before publishing, and
+retry on change. A conflict retry must not substitute a newer, unapplied
+spec value. Publish via the CPC status subresource while preserving existing
+conditions and resource lists.
 
-**Idempotency:** Because the status mirrors spec directly, calling the function repeatedly
-with the same spec produces the same status. `statuspatching.PatchStatus` skips the patch
-if no change is detected.
+HO uses the same after-apply rule for the CPO and CAPZ CPCs. For HO-owned
+roles, HO must first persist the updated HCP spec and read its generation
+before applying resources and recording `observedHCPGeneration`. HCCO currently
+returns a combined list of guest Secret reconciliation errors; it must return
+or retain per-role outcomes so one failed Secret does not advance that role.
+The HCCO status path must be wired to the appropriate CPC and must not infer
+success from a general resources-controller condition.
 
-**Auth mode switching:** The `AzureAuthenticationType` field is immutable once set, so
-a cluster will always be either `ManagedIdentities` or `WorkloadIdentities`. Only one of
-the two sub-fields will be populated; the other will be at its zero value and omitted from
-serialization via `omitzero`.
-
-**Generated artifacts:** Adding new API types requires regenerating:
-- `api/hypershift/v1beta1/zz_generated.deepcopy.go`
-- `client/applyconfiguration/hypershift/v1beta1/` (new apply-configuration builders)
-- `docs/content/reference/api.md` and `docs/content/reference/aggregated-docs.md`
-- CRD YAML manifests under `cmd/install/assets/crds/`
-
-**No vendor drift:** The HyperShift main module vendors its own API module
-(`replace github.com/openshift/hypershift/api => ./api`). The vendored copies of changed
-files must be kept in sync with their sources.
+HO is the single writer of the HCP Azure identity rollup. It watches relevant
+CPC status changes, validates source ownership and generation, patches only
+the Azure identity field with optimistic locking, and avoids no-op writes.
+The existing CPO `reconcileAzurePlatformStatus` spec mirror must stop
+writing the authoritative Azure identity field; concurrent writers or a
+whole-spec mirror would violate the guarantee. HO must re-read HCP after its
+status patch before propagating to HC, or allow the next reconcile to do so.
+Update generated CRDs, clients, deepcopy code, API documentation, and
+vendored API copies together.
 
 ### Risks and Mitigations
 
-**Risk: Consumers treat status as pod-runtime confirmation.**
-The status reflects CPO-applied `SecretProviderClass` configuration, not that pods are
-running with the new certificate. Consumers must account for the CSI driver poll interval
-(default: 2 minutes) and any pod restart lag.
-*Mitigation:* The API comment and this enhancement document the semantic explicitly.
-Pod-level confirmation (CNTRLPLANE-4495) provides the stronger guarantee.
-
-**Risk: Status written before component reconciliation succeeds.**
-The current call site places `reconcileAzurePlatformStatus` after `reconcileDefaultSecurityGroup`
-but before the v2 component reconciliation loop. If a later component reconcile fails, the
-status already reflects the new identity — a consumer may act on stale information.
-*Mitigation:* The window is small (one reconcile loop) and the CPO will retry on the next
-reconcile. For the initial release this is acceptable; a follow-on can gate the status
-write on successful component reconciliation.
-
-**Risk: Stale status during downgrade.**
-If the operator is downgraded to a version that does not populate `status.platform.azure`,
-the field will stop updating but retain its last value.
-*Mitigation:* The field is purely informational and optional. Consumers must tolerate
-stale status by cross-checking against spec or using a separate freshness signal.
+- **Applied resources are not running credentials.** RP treats applied status
+  as one stage and keeps its existing cleanup protection until later evidence
+  and policy are delivered.
+- **Partial failure and stale rollup.** Each source record advances
+  independently; source deletion invalidates its rollup entry. RP checks the
+  full expected consumer set, reference, source, HC generation, and HCP
+  generation.
+- **Same-name updates lack a spec delta.** CSI object version may provide a
+  later observation; without a known target version, cleanup remains blocked.
+- **Guest-cluster data-plane writes can fail independently.** HCCO reports
+  each Secret only after its own successful write.
+- **Fleet-scale watches and writes.** HO watches bounded CPCs and performs
+  change-only rollup writes; measure status and watch load before GA.
 
 ### Drawbacks
 
-- Adds new generated files and CRD schema complexity for a status-only feature.
-- The "CPO-applied SPC" semantic is one level weaker than the "pods confirmed using new
-  credential" semantic that consumers ultimately want. The stronger guarantee requires
-  watching `SecretProviderClassPodStatus` objects (CNTRLPLANE-4495), which is more complex.
+The design adds a CPC status extension, an HO aggregator, and an HCCO
+management-cluster publication path. It also requires changing the current
+spec-mirror implementation in CNTRLPLANE-4493. This cost buys one HC status
+surface for RP while retaining per-component application evidence.
 
 ## Alternatives (Not Implemented)
 
-### Report clientID instead of credentialsSecretName
+### Copy the desired Azure spec into HCP and HC status
 
-`ManagedIdentity.clientID` exists in the spec but is optional and documented as
-"mainly used for CI purposes." ARO HCP production clusters do not set this field today
-(confirmed by the ARO team). Reporting it would result in empty status for all production
-clusters. `credentialsSecretName` is always required and is the operative rotation signal
-in the ARO HCP identity replacement protocol.
+The current CNTRLPLANE-4493 implementation writes a spec mirror before the
+component apply loop. It can advertise a new identity even if application
+fails. Renaming that field to `desired` would make it useful for diagnostics,
+but it cannot satisfy this enhancement's applied-state contract.
 
-### ControlPlaneComponent CRD
+### Require RP to mirror every CPC
 
-Suggested in an [OCPSTRAT-2151 comment](https://issues.redhat.com/browse/OCPSTRAT-2151?focusedCommentId=18079965):
-extend `ControlPlaneComponent.Status` with per-component identity information.
-Rejected because `ControlPlaneComponent` is reconciled generically without per-component
-identity knowledge. The CPO's component reconciliation framework has no access to which
-`credentialsSecretName` was applied to a given component's `SecretProviderClass`.
+Direct CPC reads retain source details, but RP currently mirrors HC and only
+one CPC for another purpose. Mirroring every identity-bearing CPC adds
+per-cluster ReadDesires and makes the backend maintain the role inventory.
+An HO rollup lets RP consume one HC status object.
 
-### Single rollup status field
+### Use a single completion boolean or timestamp
 
-Instead of per-component granularity, expose a single boolean or timestamp indicating
-"all identities applied." Rejected based on [OCPSTRAT-2151 feedback](https://issues.redhat.com/browse/OCPSTRAT-2151?focusedCommentId=18143688):
-ARO HCP tracks individual managed identities by component and requires per-identity-role
-granularity.
+A cluster can have only some identities updated. A single flag hides which
+consumer is blocking replacement.
+
+### Query Key Vault on every reconcile
+
+Per-reconcile external calls would add latency and load and still would not
+prove that a pod mounted or used the returned credential version. CSI mount
+status is the appropriate source for mount observations.
+
+## Jira Delivery Alignment
+
+| Task | Required outcome under this enhancement |
+| --- | --- |
+| [CNTRLPLANE-4493](https://redhat.atlassian.net/browse/CNTRLPLANE-4493) | Replace the early CPO spec mirror with after-apply CPC records and HO HCP/HC rollup. Do not release the mirror as an applied or active signal. |
+| [CNTRLPLANE-4494](https://redhat.atlassian.net/browse/CNTRLPLANE-4494) | Add the KMS role from `spec.secretEncryption.kms.azure` after its own resource apply, for both supported auth modes. |
+| [CNTRLPLANE-4495](https://redhat.atlassian.net/browse/CNTRLPLANE-4495) | Report all-current-pods mount completion and CSI object version where verifiable; define a separate cleanup gate. |
+| [CNTRLPLANE-4496](https://redhat.atlassian.net/browse/CNTRLPLANE-4496) | Test both auth modes, CP and DP, KMS, partial failure, HC propagation, rotation, and no-rollout regressions. |
+| [CNTRLPLANE-4509](https://redhat.atlassian.net/browse/CNTRLPLANE-4509) | Resolve API location, ownership, status semantics, propagation, and same-name rotation limitations in this proposal. |
+
+The task descriptions for 4493 and 4495 currently promise more than their
+proposed mechanisms can prove. Their acceptance criteria should be updated
+before the epic is considered complete.
 
 ## Open Questions
 
-1. **msi-dataplane auto-refresh:** The msi-dataplane library supports auto-refresh of
-   credentials without pod restarts. This needs to be verified for each control plane
-   component to confirm that identity rotation does not require a rolling restart of
-   control plane pods after the CSI driver updates the mounted certificate.
-
-2. **Call site placement:** Should `reconcileAzurePlatformStatus` be called after the
-   v2 component reconciliation loop (so it only writes status when components have
-   been successfully reconciled) rather than before it? This would tighten the semantic
-   guarantee at the cost of slightly delayed status updates.
+1. Confirm the exhaustive role-to-CPC mapping, including components that share
+   an identity and the exact HCCO CPC name, against the implementation.
+2. Decide the supported workload-use or grace-period evidence that lets RP
+   delete an old identity after all affected pods have mounted a new one.
+3. Establish whether RP can supply an expected CSI object version for
+   same-name Key Vault rotations and same-resource-ID identity recreation.
+4. Verify the HCCO management-cluster CPC status permissions and the HO CPC
+   watch/aggregation path in the supported topology.
 
 ## Test Plan
 
-- **Unit tests:** Table-driven tests for `reconcileAzurePlatformStatus` covering
-  `ManagedIdentities` mode, `WorkloadIdentities` mode, non-Azure platform (no-op), and
-  nil identity config (no panic).
-- **E2e tests:** Verify that `status.platform.azure` is populated with the correct
-  values after cluster creation on an Azure cluster. Must cover both `ManagedIdentities`
-  (ARO HCP CI environment) and `WorkloadIdentities` (self-managed Azure CI environment).
-  Tracked in CNTRLPLANE-4496.
+- Unit tests for owner/role mapping, per-role success and failure, skipped or
+  disabled roles, generation changes during apply, conflict retry, no-op
+  status patches, and deleted/recreated CPCs.
+- API serialization and validation tests for bounded unique consumer/role keys,
+  reference types, authentication modes, absent fields, and older clients.
+- Integration tests proving no status before resource apply; previous values
+  remain on failure; HO aggregates only current CPC observations; HC receives
+  the HCP rollup. Include HO-owned resources and HCCO guest Secrets.
+- Azure end-to-end tests for managed and workload identity creation and
+  replacement, at least one control-plane and one data-plane role, KMS where
+  enabled, and status visible through RP's HC ReadDesire. Assert status does
+  not advance on injected apply failure.
+- For CNTRLPLANE-4495, test missing/stale CSI pod status, mixed object
+  versions, new/terminating pods, same-name content changes, and removal of
+  completion when the expected pod set changes.
 
 ## Graduation Criteria
 
 ### Dev Preview -> Tech Preview
 
-Not applicable. This feature ships as GA from the first release. It is a purely additive,
-optional status field with no behavioral impact on existing clusters and requires no feature
-gate. It will be available by default once the CPO version containing this change is deployed.
+API approval, reviewed role inventory, corrected CNTRLPLANE-4493 semantics,
+and tests proving after-apply status for CP and DP.
 
 ### Tech Preview -> GA
 
-Not applicable — see above. The field ships as GA directly.
-
-E2e test coverage (CNTRLPLANE-4496) is required before the feature is considered complete,
-but is not a blocking graduation criterion since the status field itself is functional and
-safe to ship without it.
+End-to-end rotation and propagation coverage for both auth modes, KMS
+coverage, version-skew and downgrade tests, measured rollup cost, and a
+documented RP cleanup policy that does not equate application or mounting
+with successful credential use.
 
 ### Removing a deprecated feature
 
-Not applicable. This enhancement adds a new status field; it does not deprecate or remove
-any existing functionality.
+Not applicable.
 
 ## Upgrade / Downgrade Strategy
 
-**Upgrade:** The new `status.platform.azure` field is populated by the first CPO version
-that includes this enhancement. Prior to upgrade, the field is absent (zero value);
-consumers that check it before upgrade will see an empty status, which they should treat
-as "not yet available." No spec changes are required.
+On upgrade, new fields remain absent until each owning controller applies
+its identity resources. An old HCCO or CPO may leave some roles absent; RP
+treats the set as incomplete. An old HO may not aggregate CPC status or copy
+it to HC, so RP keeps its existing cleanup protection.
 
-**Downgrade:** If the operator is downgraded, `status.platform.azure` stops being updated
-but retains its last value (Kubernetes does not clear unknown status fields on downgrade).
-Consumers should treat a stale status as equivalent to "not yet available" until the field
-is refreshed.
-
-No rollout or configuration changes are required on existing clusters for either direction.
+On downgrade, older controllers may stop updating these status fields, and
+an older CRD schema may prune them. Consumers treat absent, old-generation,
+or unsupported records as unknown. Compatibility tests must verify behavior
+for supported version pairs. No ignition, MachineConfig, or NodePool
+config-hash input changes are proposed.
 
 ## Version Skew Strategy
 
-The CPO version is tied to the hosted cluster's OCP release image. The HyperShift Operator
-and CPO may temporarily run different versions during an operator upgrade.
-
-- **HO upgraded, CPO not yet upgraded:** The new `status.platform.azure` field exists in
-  the CRD schema (deployed by HO) but the old CPO does not write it. Status is absent.
-- **CPO upgraded, HO not yet upgraded:** The new CPO writes `status.platform.azure`; the
-  old HO ignores unknown status fields and copies `hcp.Status.Platform` generically.
-
-Both directions are safe. No action required during the skew window.
+HO and CPO can run different versions because CPO comes from the hosted
+release payload. The rollup must never infer that a missing producer
+completed a role. RP requires the expected role set for the cluster's
+authentication mode and capabilities, not merely all records that happen
+to be present. The producer should expose a schema/capability version or
+equivalent feature gate so RP can distinguish unsupported status from a
+temporarily missing observation.
 
 ## Operational Aspects of API Extensions
 
-The new types are purely status fields — they are only written by the CPO and read by
-consumers. They add no admission webhooks, conversion webhooks, finalizers, or other
-mechanisms that could affect API availability or cluster stability.
-
-**Impact on SLIs:**
-- No impact on API server throughput or latency.
-- The CPO writes to `status.platform.azure` on every reconcile of the
-  `HostedControlPlane`. Each write is a small JSON patch on an existing object with
-  optimistic locking. Expected frequency: once per reconcile loop (typically every
-  few minutes for a stable cluster).
-
-**Failure modes:**
-- If `statuspatching.PatchStatus` fails (e.g., conflict retry limit exceeded), the
-  status update is skipped for that reconcile loop and retried on the next. The CPO
-  continues reconciling other components normally.
-- No cluster functionality depends on this status field. Failure to update it is
-  operationally equivalent to the pre-enhancement state.
+These are status-only additions. CPC records are written only when a role's
+applied reference or observed HCP generation changes. HO writes the HCP
+rollup only when its content changes; normal HCP-to-HC propagation follows.
+Status publication errors surface as reconciliation errors and leave the old
+observation intact. Watches, write rates, and HC status size should be
+measured at fleet scale before GA.
 
 ## Support Procedures
 
-**Detecting a stale or missing status:**
-- Check `kubectl get hcp <name> -n <ns> -o jsonpath='{.status.platform.azure}'`.
-- If empty, the CPO has not applied the identity configuration yet, or the cluster
-  is running an older CPO version.
-- Compare `status.platform.azure.managedIdentities.controlPlane` against
-  `spec.platform.azure.azureAuthenticationConfig.managedIdentities.controlPlane` to
-  identify which components have not been updated.
-
-**Disabling:**
-- The feature cannot be disabled independently. Because it is a status-only field with
-  no behavioral impact, disabling is not necessary.
-- Removing the `Azure` field from `PlatformStatus` would be a breaking API change and
-  is not supported.
+Read `HostedCluster.status.platform.azure.identities`, identify the role
+and source component, and compare its reference and HCP generation with
+the current desired state. If absent or stale, inspect the CPC's
+`status.azureIdentities`, the owner controller's reconcile errors, and the
+actual SecretProviderClass, ServiceAccount, Deployment, or guest credential
+Secret. Inspect CSI pod status separately for mount completion and workload
+telemetry separately for credential use.
 
 ## Infrastructure Needed
 
-No new infrastructure is required. All changes are within the existing HyperShift
-repository and the openshift/enhancements repository.
+HO needs CPC watches and an HCP Azure status aggregator. HCCO needs a
+management-cluster CPC status publication path. RP can use its existing HC
+ReadDesire once the rollup is propagated; it does not need a ReadDesire for
+each CPC. No new external service is required.
