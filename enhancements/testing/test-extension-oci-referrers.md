@@ -177,6 +177,17 @@ and avoids following registry-supplied pagination URLs to unrelated hosts.
 The test extension filename comes from the existing payload or ImageStream
 registration; it is not used as an arbitrary download path.
 
+**CI registry compatibility.** On 2026-09-29, a read-only probe of
+`registry.ci.openshift.org/ocp/builder` with an existing image digest returned
+404 from `/v2/ocp/builder/referrers/<digest>`. ORAS reported the API as
+unsupported. A referrers-tag lookup returned an empty list, which confirms
+that a client can query the fallback path but does not establish that
+publishing, retaining, or promoting artifacts through it works. Before any
+runtime image drops its gzip, CI must either enable the OCI 1.1 referrers API
+or demonstrate an end-to-end tag-schema workflow on a disposable repository.
+Tag-schema writers must be serialized or use conditional updates to avoid
+losing another artifact's index entry during concurrent pushes.
+
 **Promotion and mirrors.** The release workflow must preserve the destination
 image manifest digest where possible. When it cannot, it must reattach the
 artifact to the new destination digest and record both digests. Image and
@@ -230,6 +241,8 @@ not implement this stronger release binding.
   measure artifact bytes and deletion backlog per repository.
 - **Mirror gaps:** gate release and disconnected testing on destination
   discovery and download, including registries with tag-schema fallback.
+- **CI registry gap:** keep in-image binaries until a write, copy, fetch, and
+  cleanup test passes on `registry.ci.openshift.org` or the API is enabled.
 - **Malicious or ambiguous artifact:** restrict publishing, pin expected
   digests in trusted release metadata, and reject duplicate matches.
 - **Platform mismatch:** test each architecture against its exact platform
@@ -266,6 +279,8 @@ smaller.
   period? The answer must precede any automated deletion.
 - Which registries and mirror workflows can preserve the required manifest
   media type and retention tag without rewriting the gzip blob?
+- Will the CI registry gain the OCI 1.1 API, or will promotion use the
+  tag-schema fallback with serialized writers?
 
 ## Test Plan
 
