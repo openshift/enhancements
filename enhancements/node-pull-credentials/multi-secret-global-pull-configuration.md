@@ -1,7 +1,7 @@
 ---
 title: multi-secret-global-pull-configuration
 authors:
-  - "@cmaurya"
+  - "@Chandan9112"
 reviewers:
   - "@QiWang19" # aggregator design, output contract, risk mitigations — verify handle
   - "@haircommander"
@@ -67,8 +67,8 @@ Enterprise and GitOps-managed clusters need to add or revoke registry credential
 
 1. An administrator creates a Secret in `openshift-config`, type `kubernetes.io/dockerconfigjson`, labeled `config.openshift.io/global-pull-secret=true`.
 2. The aggregator controller discovers it, validates type, key, and JSON parseability.
-3. Valid sources are merged with the current `pull-secret` content using deterministic conflict rules: baseline wins on conflict; among modular secrets, priority annotation then name.
-4. The merged result is written back into `openshift-config/pull-secret` in place, only if all sources validated. On any invalid source, the last successfully published content is retained and the controller reports degraded, redacted status.
+3. Valid sources are merged with the preserved baseline (the installer/Red Hat-provided content captured before the controller's first write — not the current, already-merged `pull-secret`) using deterministic conflict rules: baseline wins on conflict; among modular secrets, priority annotation then name.
+4. The merged result — recomputed in full from the baseline plus all currently valid modular Secrets on every reconcile — is written back into `openshift-config/pull-secret` in place, only if all sources validated. Deleting or fixing a modular Secret therefore removes or corrects its entries on the next reconcile instead of leaving stale credentials behind. On any invalid source, the last successfully published content is retained and the controller reports degraded, redacted status.
 5. Existing consumers pick up the change through their existing, unmodified read paths.
 
 ```mermaid
@@ -119,7 +119,7 @@ Proposed: a small, dedicated controller rather than MCO. MCO is scoped to node l
 
 ### Implementation Details/Notes/Constraints
 
-The controller watches Secrets in `openshift-config` for the `config.openshift.io/global-pull-secret=true` label and the `openshift-config/pull-secret` Secret itself. On any relevant change, it lists all labeled sources, validates each (`kubernetes.io/dockerconfigjson` type, expected key present, value is parseable JSON), and deterministically merges valid sources on top of the baseline content: baseline entries win on conflict; among modular secrets, an optional priority annotation breaks ties, falling back to Secret name. The merged result is written back to `pull-secret` only when every source that contributed to the write validated successfully; if any source is invalid, the controller retains the last successfully published content and reports degraded, redacted status instead of writing. No new object, CRD, or webhook is introduced; all state needed to reconstruct the merge is derivable from the labeled Secrets already in `openshift-config`.
+The controller watches Secrets in `openshift-config` for the `config.openshift.io/global-pull-secret=true` label. On first activation, it captures the pre-controller content of `openshift-config/pull-secret` as a preserved baseline (stored internally by the controller; exact storage mechanism is an open question) so that installer/Red Hat-provided credentials stay distinguishable from modular contributions across repeated merges. On any relevant change — a labeled Secret created, updated, or deleted — the controller re-lists all currently labeled sources, validates each (`kubernetes.io/dockerconfigjson` type, expected key present, value is parseable JSON), and recomputes the merge from scratch: the preserved baseline plus the current set of valid modular sources, with baseline entries winning on conflict and an optional priority annotation (falling back to Secret name) breaking ties among modular secrets. Recomputing from the preserved baseline on every reconcile — rather than treating the already-merged `pull-secret` as the new baseline — ensures deleting or correcting a modular Secret removes or fixes its entries instead of leaving stale credentials behind. The merged result is written back to `pull-secret` only when every source that contributed to the write validated successfully; if any source is invalid, the controller retains the last successfully published content and reports degraded, redacted status instead of writing. No new CRD or webhook is introduced.
 
 ### Risks and Mitigations
 
@@ -139,6 +139,7 @@ The controller watches Secrets in `openshift-config` for the `config.openshift.i
 2. **HyperShift control-plane execution model** — unresolved; no HyperShift-side component identified yet.
 3. **Manual-edit-vs-controller write-conflict policy** — options include treating untracked edits as a preserved source, or documenting that they may be superseded on next reconcile. Not decided.
 4. **Node-propagation-complete signal for e2e** — not yet defined.
+5. **Baseline storage mechanism** — where/how the preserved pre-controller `pull-secret` content is stored (e.g. status field, annotation, internal object) is not yet decided.
 
 ## Test Plan
 
