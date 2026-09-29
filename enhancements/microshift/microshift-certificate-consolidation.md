@@ -220,7 +220,12 @@ matches the same certificate.
 2. Migration logic detects the old CA directory layout by checking for the
    existence of `<datadir>/certs/kube-control-plane-signer/`.
 3. The entire `certs/` directory is renamed to
-   `certs.backup.<version>.<timestamp>/`.
+   `certs.backup.<version>.<timestamp>/`. This `os.Rename` is atomic on the
+   same filesystem — no partial rename state is observable. No dedicated
+   migration marker file is needed: the absence of `certs/` combined with
+   the presence of `certs.backup.*/` is itself the migration record, and
+   `certSetup()` failure after the rename is handled by the fresh-start
+   fallback (see Failure Modes).
 4. `certSetup()` finds no certs directory, generates everything fresh with
    the new hierarchy.
 5. Kubeconfigs are regenerated with the new serving-ca as the trust anchor.
