@@ -73,12 +73,12 @@ Enterprise and GitOps-managed clusters need to add or revoke registry credential
 
 ```mermaid
 flowchart TD
-    A[Admin creates labeled Secret] --> C[Aggregator Controller]
-    B[openshift-config/pull-secret] --> C
-    C -->|valid merge| B
-    C -->|invalid input| D[Retain last-known-good, no write]
-    B --> M[MCO - existing render, unchanged]
-    B --> R[image-registry-operator - existing copy, unchanged]
+    A[Admin: labeled Secret] --> C[Aggregator]
+    P[pull-secret<br/>openshift-config] --> C
+    C -->|valid| P
+    C -->|invalid| D[Last-known-good<br/>no write]
+    P --> M[MCO]
+    P --> R[Image registry<br/>operator]
 ```
 
 ### API Extensions
