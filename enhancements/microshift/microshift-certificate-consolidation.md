@@ -3,13 +3,12 @@ title: microshift-certificate-consolidation
 authors:
   - "@eslutsky"
 reviewers:
-  - "@fzdarsky, MicroShift architect"
-  - "@ggiguash, MicroShift contributor"
-  - "@stlaz, Security specialist"
-  - "@pmtk, MicroShift contributor"
-  - "@copejon, MicroShift contributor"
+  - "@pacevedom"
+  - "@copejon"
+  - "@pmtk"
 approvers:
-  - "@dhellmann"
+  - "@pacevedom"
+  - "@pmtk"
 api-approvers:
   - "None"
 creation-date: 2026-07-29
@@ -29,11 +28,13 @@ superseded-by:
 
 ## Summary
 
-This enhancement consolidates MicroShift's CA hierarchy from 12 CAs to 5
-(3 new, 2 unchanged) to conform to ProdSec guidance for single-node
-deployments. The change is scoped exclusively to CAs — it only affects which
-CA signs each internally-generated certificate, not the certificates
-themselves or their content.
+This enhancement consolidates MicroShift's CA hierarchy from 12 CAs to 6
+to conform to ProdSec guidance for single-node deployments: two new
+consolidated CAs (client-ca, serving-ca), one renamed CA (peer-ca, formerly
+etcd-signer), one retained standalone CA (aggregator-signer), and two
+unchanged CAs (service-ca, ingress-ca). The change is scoped exclusively to
+CAs — it only affects which CA signs each internally-generated certificate,
+not the certificates themselves or their content.
 
 ## Motivation
 
@@ -59,7 +60,7 @@ This enhancement co-ships with OCPSTRAT-2899 (Controlled Certificate and CA Rene
 OCPSTRAT-2899 introduces a PKI inventory abstraction that catalogs all managed
 certificates by role and tracks parent-child relationships between CAs and their
 issued certificates, decoupling the `microshift certs` CLI from the specific
-on-disk layout. This enhancement updates that inventory to reflect the new 5-CA
+on-disk layout. This enhancement updates that inventory to reflect the new 6-CA
 hierarchy, so that `microshift certs status`, `microshift certs renew --serving`,
 and `microshift certs renew --ca` operate correctly without any layout-specific
 changes to the CLI code.
@@ -79,7 +80,7 @@ changes to the CLI code.
 
 ### Goals
 
-* Reduce the number of managed CAs from 12 to 5.
+* Reduce the number of managed CAs from 12 to 6.
 * Consolidate the 3 KAS serving certificates into 1 SAN-based certificate.
 * Preserve all leaf certificate identities (CN/O fields) so that Kubernetes
   RBAC authorization is unaffected.
@@ -136,10 +137,9 @@ effectively 2 CAs, for a total of 12 (11 root + 1 sub-CA).
 
 **New CAs:**
 
-`client-ca` replaces 5 CAs (kube-control-plane-signer,
+`client-ca` replaces 4 CAs (kube-control-plane-signer,
 kube-apiserver-to-kubelet-signer, admin-kubeconfig-signer,
-kubelet-csr-signer-signer/kube-csr-signer, aggregator-signer) and signs all
-client certificates:
+kubelet-csr-signer-signer/kube-csr-signer) and signs client certificates:
 
 | Leaf certificate | CN | O (groups) |
 |------------------|----|------------|
@@ -152,6 +152,16 @@ client certificates:
 | admin-kubeconfig-client | system:admin | system:masters |
 | openshift-observability-client | openshift-observability-client | — |
 | kubelet-client | system:node:\<nodename\> | system:nodes |
+
+`aggregator-signer` is retained as a standalone CA. The kube-apiserver uses
+its signed certificate when proxying requests to aggregated APIs; Kubernetes
+validates these via the `requestheader-client-ca-file` configuration, which
+is separate from the general `client-ca-file`. Merging aggregator-signer into
+client-ca would allow any client certificate to satisfy requestheader
+validation, enabling impersonation of the apiserver in aggregated API calls:
+
+| Leaf certificate | CN | O (groups) |
+|------------------|----|------------|
 | aggregator-client | system:openshift-aggregator | — |
 
 `serving-ca` replaces 3 CAs (kube-apiserver-external-signer,
@@ -175,7 +185,7 @@ conflating Kubernetes RBAC trust with etcd's internal trust domain:
 | etcd-peer | etcd peer-to-peer TLS |
 | etcd-serving | etcd server TLS |
 
-**Unchanged CAs:** service-ca and ingress-ca remain identical.
+**Unchanged CAs:** service-ca, ingress-ca, and aggregator-signer remain identical to the current layout.
 
 ### Certificate Identity Preservation
 
@@ -201,7 +211,7 @@ matches the same certificate.
 
 **Fresh install:**
 1. MicroShift starts and calls `initCerts()`.
-2. `certSetup()` builds the new 5-CA hierarchy.
+2. `certSetup()` builds the new 6-CA hierarchy.
 3. All leaf certs, kubeconfigs, and trust bundles are generated.
 4. MicroShift starts normally.
 
@@ -210,26 +220,32 @@ matches the same certificate.
 2. Migration logic detects the old CA directory layout by checking for the
    existence of `<datadir>/certs/kube-control-plane-signer/`.
 3. The entire `certs/` directory is renamed to
-   `certs.backup.<version>/`.
+   `certs.backup.<version>.<timestamp>/`.
 4. `certSetup()` finds no certs directory, generates everything fresh with
    the new hierarchy.
 5. Kubeconfigs are regenerated with the new serving-ca as the trust anchor.
-6. All pods restart and receive new service account tokens.
+6. On ostree/bootc deployments, all pods restart as part of the upgrade
+   and pick up the updated CA bundle via their projected volumes. This is
+   existing MicroShift upgrade behavior, not new to this enhancement.
 
 **Rollback (greenboot/ostree):**
 1. If greenboot detects an unhealthy system after upgrade, it triggers an
    atomic rollback to the previous OS commit.
 2. The old MicroShift binary starts, finds no `certs/` directory (the backup
    has a different name).
-3. Existing behavior: MicroShift regenerates all certs from scratch with the
-   old hierarchy.
-4. Clean rollback with no manual intervention required.
+3. Existing behavior: whenever MicroShift finds no `certs/` directory on
+   startup, it regenerates all certs and kubeconfigs from scratch. This path
+   applies equally to rollback.
+4. Services start normally with the regenerated old-layout PKI.
+5. No manual intervention required.
 
 **Backup cleanup:**
-The `certs.backup.<version>/` directory is left on disk and not
-automatically deleted. Documentation will advise operators to remove it after
-confirming the upgrade is stable. Edge devices have sufficient disk capacity
-for one backup.
+The `certs.backup.<version>.<timestamp>/` directory is left on disk and not
+automatically deleted. The timestamp suffix (Unix seconds at migration time)
+avoids name collisions on an upgrade → rollback → re-upgrade cycle, where
+the same version number would otherwise overwrite a prior backup. Documentation
+will advise operators to remove old backups after confirming an upgrade is
+stable. Edge devices have sufficient disk capacity for one backup.
 
 ### CA Bundle Changes
 
@@ -238,7 +254,7 @@ for one backup.
 | `ca-bundle/client-ca.crt` | 5 CA certs concatenated | single client-ca cert |
 | `ca-bundle/kubelet-ca.crt` | kubelet-csr-signer CA | client-ca cert |
 | `ca-bundle/kubelet-serving-ca.crt` | kubelet-csr-signer CA | serving-ca cert |
-| `ca-bundle/service-account-token-ca.crt` | 3 KAS serving CAs | client-ca cert |
+| `ca-bundle/service-account-token-ca.crt` | 3 KAS serving CAs | serving-ca cert |
 | `ca-bundle/ca-bundle.crt` | all serving CAs | serving-ca + peer-ca certs |
 
 ConfigMaps and Secrets exposed to Kubernetes maintain the same names and
@@ -279,12 +295,13 @@ N/A
 OCPSTRAT-2899 introduces a PKI inventory that catalogs all managed certificates
 by role (CA, serving, client, peer) and tracks parent-child signing relationships.
 This enhancement updates that inventory from the current 12-CA layout to the new
-5-CA layout:
+6-CA layout:
 
 | Role | Old entries | New entries |
 |------|-------------|-------------|
-| Rotatable CAs | kube-control-plane-signer, kube-apiserver-to-kubelet-signer, admin-kubeconfig-signer, kubelet-csr-signer-signer, kube-csr-signer (sub-CA), kube-apiserver-external-signer, kube-apiserver-localhost-signer, kube-apiserver-service-network-signer | client-ca, serving-ca |
+| Rotatable CAs (consolidated) | kube-control-plane-signer, kube-apiserver-to-kubelet-signer, admin-kubeconfig-signer, kubelet-csr-signer-signer, kube-csr-signer (sub-CA), kube-apiserver-external-signer, kube-apiserver-localhost-signer, kube-apiserver-service-network-signer | client-ca, serving-ca |
 | Rotatable CAs (renamed) | etcd-signer | peer-ca |
+| Rotatable CAs (retained) | aggregator-signer | aggregator-signer (unchanged) |
 | Fixed CAs | service-ca, ingress-ca | service-ca, ingress-ca (unchanged) |
 | Serving certs | kube-external-serving, kube-apiserver-localhost-serving, kube-apiserver-service-network-serving | kube-apiserver-serving (single SAN-based cert) |
 
@@ -292,9 +309,14 @@ The inventory abstraction ensures that `microshift certs renew --ca` cascades
 renewal to all descendant certificates correctly under the new hierarchy without
 requiring changes to the CLI code.
 
-**Service account tokens:** Tokens signed by the old service-account-token
-CA become invalid after migration. MicroShift restarts all pods on upgrade,
-so they receive new tokens immediately. No user action required.
+**Service account CA bundle:** The `service-account-token-ca.crt` bundle
+contains the KAS serving CAs and is injected into pods as a projected volume
+so they can verify the KAS TLS identity. After migration this bundle is
+updated to contain `serving-ca`. On ostree/bootc deployments MicroShift
+restarts all pods on upgrade, so pods receive the updated bundle
+automatically. Note: service account tokens themselves are JWTs signed by an
+asymmetric key pair (`service-account.key`), not by an X.509 CA; the signing
+key is preserved across certificate migration so tokens remain valid.
 
 **Certificate validity:** Two validity constants are used throughout
 (`pkg/util/cryptomaterial/certinfo.go`):
@@ -349,6 +371,12 @@ Rotation thresholds (from `certsToRegenerate`, `pkg/cmd/init.go`):
 | Short-lived (< 5 yr total) | < 7 months remaining |
 | Long-lived (≥ 5 yr total) | < 18 months remaining |
 
+The validity assignments above reflect the current implementation and are
+not changed by this enhancement. Configurable certificate validity periods
+are tracked separately in OCPSTRAT-2899; see
+[microshift-certificate-rotation.md](/enhancements/microshift/microshift-certificate-rotation.md#certificate-lifetime-configuration)
+for details.
+
 **certchains framework:** No changes to the builder framework itself. The
 same `NewCertificateSigner`, `WithClientCertificates`,
 `WithServingCertificates`, `WithCABundle`, and `Complete` APIs are used.
@@ -361,16 +389,32 @@ same `NewCertificateSigner`, `WithClientCertificates`,
   If operators have distributed the old CA cert to external systems, they
   must update those systems after upgrade.
 
-* **Risk: Service account token invalidation during upgrade.**
-  Mitigation: MicroShift restarts all workloads on upgrade. Pods receive
-  new tokens automatically. Operators using long-lived extracted tokens
-  (anti-pattern) must re-extract after upgrade.
+* **Risk: Service account CA bundle update during upgrade.**
+  Mitigation: The `service-account-token-ca.crt` bundle changes from three
+  KAS serving CAs to a single `serving-ca`. On ostree/bootc deployments,
+  MicroShift restarts all workloads automatically so pods get the updated
+  bundle from the projected volume. Service account tokens themselves are
+  JWTs signed by a key pair and are unaffected by CA consolidation.
+
+* **Risk: Loss of per-endpoint CA discrimination in KAS serving certificate selection.**
+  The current design uses three separate serving CAs, one per endpoint
+  (external, localhost, service-network). Consolidating to a single `serving-ca`
+  means the KAS no longer validates incoming connections against an
+  endpoint-specific CA. On a single-node device this is not a meaningful
+  security boundary — all consumers run on the same host — but it is a
+  departure from the multi-node model. ProdSec confirmed that per-endpoint
+  CA isolation provides no meaningful security benefit in a single-node
+  deployment. The `dynamiccertificates` SNI selection logic continues to
+  function unchanged; it simply always matches the same SAN-based certificate.
 
 * **Risk: Migration failure leaves no certs directory.**
   Mitigation: The `os.Rename` operation is atomic on the same filesystem.
   If it fails, the old `certs/` directory remains intact and MicroShift
   continues with the old layout. If it succeeds but `certSetup()` fails,
-  greenboot triggers a rollback.
+  MicroShift falls back to fresh-start behavior: it removes any partially-
+  written `certs/` directory and retries cert generation with the new
+  hierarchy. If the retry also fails, MicroShift does not start; on
+  ostree/bootc deployments greenboot triggers a rollback.
 
 ### Drawbacks
 
@@ -394,7 +438,7 @@ None.
 ## Test Plan
 
 **Unit tests:**
-* Verify the new chain builder produces the correct 5-CA hierarchy.
+* Verify the new chain builder produces the correct 6-CA hierarchy.
 * Verify the consolidated KAS serving cert contains all expected SANs.
 * Verify leaf cert CN/O fields match their original values.
 * Verify migration detection correctly identifies old vs. new layouts.
@@ -444,7 +488,7 @@ needed because:
 
 **Upgrade (5.0 → 5.1):**
 1. New binary detects old cert layout on first startup.
-2. Old `certs/` directory is atomically renamed to `certs.backup.<version>/`.
+2. Old `certs/` directory is atomically renamed to `certs.backup.<version>.<timestamp>/`.
 3. Fresh cert generation creates the new layout.
 4. All services restart with new certificates.
 
@@ -471,18 +515,22 @@ N/A — no API extensions are introduced.
   unchanged. Operator fixes the disk issue and restarts.
 
 * **Fresh cert generation fails after migration:** `certs/` directory does
-  not exist (was renamed), `certSetup()` fails. Greenboot detects unhealthy
-  state and triggers rollback. Old binary regenerates certs from scratch.
+  not exist (was renamed), `certSetup()` fails. MicroShift falls back to
+  fresh-start behavior: it removes any partially-written `certs/` directory
+  and retries cert generation. If the retry succeeds, MicroShift starts
+  normally. If the retry also fails, MicroShift does not start; on
+  ostree/bootc deployments greenboot triggers a rollback and the old binary
+  regenerates the old-layout certs from scratch.
 
 ## Support Procedures
 
 * **Detecting migration occurred:** Check for `certs.backup.*` directory
   under the data directory.
 * **Verifying new layout:** `ls /var/lib/microshift/certs/` should show
-  `client-ca/`, `serving-ca/`, `peer-ca/`, `service-ca/`, `ingress-ca/`,
-  and `ca-bundle/`.
+  `client-ca/`, `aggregator-signer/`, `serving-ca/`, `peer-ca/`,
+  `service-ca/`, `ingress-ca/`, and `ca-bundle/`.
 * **Reverting manually:** Stop MicroShift, remove `certs/`, rename
-  `certs.backup.<version>/` back to `certs/`, restart. Old certs will be
+  `certs.backup.<version>.<timestamp>/` back to `certs/`, restart. Old certs will be
   used until the next upgrade triggers migration again.
 
 ## Implementation History
@@ -516,6 +564,17 @@ N/A — no API extensions are introduced.
   ingress routes, so it must remain independently configurable with its own
   lifecycle. Folding it into serving-ca would prevent customers from managing
   their own ingress TLS independently.
+
+* **Merge aggregator-signer into client-ca.**
+  Rejected for security reasons. The kube-apiserver uses the aggregator-client
+  certificate when proxying requests to aggregated APIs. Kubernetes validates
+  these via `requestheader-client-ca-file`, which is configured separately
+  from `client-ca-file`. Merging aggregator-signer into client-ca would
+  cause any client certificate signed by client-ca to satisfy requestheader
+  validation, enabling impersonation of the apiserver in aggregated API calls.
+  aggregator-signer is also used by metrics packages today. The risk is
+  non-zero even on a single node because the trust boundary is enforced by
+  Kubernetes API machinery, not by network topology.
 
 * **Keep etcd-signer name unchanged.**
   etcd-signer is structurally identical to the ProdSec-recommended peer-ca.
