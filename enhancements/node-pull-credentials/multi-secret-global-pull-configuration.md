@@ -6,7 +6,7 @@ reviewers:
   - "@QiWang19" # aggregator design, output contract, risk mitigations — verify handle
   - "@haircommander"
 approvers:
-  - TBD
+  - "@haircommander"
 api-approvers:
   - None
 creation-date: 2026-09-29
@@ -85,6 +85,24 @@ flowchart TD
 
 None. No new CRDs, webhooks, or aggregated API servers. This proposal only changes reconciliation behavior around the existing `openshift-config/pull-secret` Secret.
 
+### Topology Considerations
+
+#### Hypershift / Hosted Control Planes
+
+Control-plane execution model for the aggregator in Hosted Control Planes is unresolved (see Open Questions). This enhancement must not assume MCO is available on the guest cluster side; alignment with HyperShift's existing `kube-system/additional-pull-secret` sync model is TBD and tracked as an open question, not solved here.
+
+#### Standalone Clusters
+
+Primary topology for this proposal. Administrators create labeled Secrets in `openshift-config`; the aggregator merges them into `openshift-config/pull-secret`; existing MCO and consumer read paths are unchanged.
+
+#### Single-node Deployments or MicroShift
+
+SNO: uses the same control-plane reconcile path as multi-node; no additional node-side resource consumption since no new node binary or daemon is introduced. MicroShift: out of scope for MVP — MicroShift does not use the full OCP MCO/global-pull-secret model, so this proposal does not extend to it.
+
+#### OpenShift Kubernetes Engine
+
+OKE clusters use the same global pull-secret model as OCP standalone clusters for cluster-wide registry credentials. No dependency on a capability excluded from the OKE product offering has been identified for MVP.
+
 ### Consumer Integration
 
 | Consumer | Current dependency | Impact of this proposal |
@@ -99,11 +117,21 @@ None. No new CRDs, webhooks, or aggregated API servers. This proposal only chang
 
 Proposed: a small, dedicated controller rather than MCO. MCO is scoped to node lifecycle and has no clean equivalent in Hosted Control Planes. OpenShift precedent for "derive a canonical secret from admin input in `openshift-config`" is `library-go`'s `ResourceSyncController` pattern (used by `cluster-kube-controller-manager-operator`, `cluster-kube-apiserver-operator`, `cluster-etcd-operator`, `cluster-authentication-operator`), and Insights Operator's independent ownership of the SCA `etc-pki-entitlement` secret. `cluster-config-operator` was considered and ruled out — its own documentation states it is not accepting new control-loop contributions. This is not yet finalized; see Open Questions.
 
+### Implementation Details/Notes/Constraints
+
+The controller watches Secrets in `openshift-config` for the `config.openshift.io/global-pull-secret=true` label and the `openshift-config/pull-secret` Secret itself. On any relevant change, it lists all labeled sources, validates each (`kubernetes.io/dockerconfigjson` type, expected key present, value is parseable JSON), and deterministically merges valid sources on top of the baseline content: baseline entries win on conflict; among modular secrets, an optional priority annotation breaks ties, falling back to Secret name. The merged result is written back to `pull-secret` only when every source that contributed to the write validated successfully; if any source is invalid, the controller retains the last successfully published content and reports degraded, redacted status instead of writing. No new object, CRD, or webhook is introduced; all state needed to reconstruct the merge is derivable from the labeled Secrets already in `openshift-config`.
+
 ### Risks and Mitigations
 
 - **Controller-vs-manual-edit write conflict:** an administrator's direct `oc set data secret/pull-secret ...` edit can race with the controller's reconcile loop. Policy not yet decided — see Open Questions.
 - **Responsibility/blast-radius shift:** today a broken `pull-secret` is self-inflicted by the administrator; with this design, a controller defect can break it without administrator action. Proposed mitigations, not yet finalized: strict validation before any write, automatic last-known-good rollback, redacted status/events naming the offending source, and an option to disable the controller and fall back to pure manual control.
 - **Internal Registry propagation gap:** see Consumer Integration above.
+
+### Drawbacks
+
+- Adds a new always-on control loop with write access to a Secret that every node and several control-plane components depend on for image pulls, increasing the blast radius of a controller defect relative to today's purely manual workflow.
+- Administrators lose the ability to see, in `pull-secret` alone, which registry credentials came from which source without also inspecting status/events or the labeled Secrets themselves.
+- Until the Internal Registry propagation gap (see Consumer Integration) is separately fixed, updates may not reach `openshift-image-registry/installation-pull-secrets` promptly after a merge.
 
 ## Open Questions
 
@@ -131,6 +159,10 @@ See the companion test plan document (Multi-Secret Global Pull Configuration TP 
 - HyperShift alignment (Open Question 2) resolved
 - User-facing documentation in openshift-docs
 
+### Removing a deprecated feature
+
+Not applicable. This proposal does not deprecate or remove any existing API, field, or behavior; disabling the feature gate simply stops the merge controller and leaves `pull-secret` under manual administrator control, as it is today.
+
 ## Upgrade / Downgrade Strategy
 
 No API version changes. On upgrade, clusters without labeled secrets behave identically to today (baseline-only). On downgrade, any content the controller merged into `pull-secret` remains present as plain secret data; no automatic reversal is proposed for MVP.
@@ -149,7 +181,7 @@ No new CRDs or webhooks introduced for MVP. The main operational risk is the wri
 - Recover: fixing or deleting the invalid modular secret triggers automatic re-reconciliation and recovery; no manual `pull-secret` repair should be necessary.
 - Disable: turning off the feature gate stops the merge; `pull-secret` retains its last-written content, and administrators can resume manual management if needed.
 
-## Alternatives
+## Alternatives (Not Implemented)
 
 Write the merge result to a new object (e.g., `openshift-config/global-pull-secret-aggregated`) instead of the existing `pull-secret`. Rejected: every consumer that hardcodes the literal name `pull-secret` — confirmed for MCO (`pkg/operator/sync.go`) and `image-registry-operator`'s copy logic — would require a code change to adopt a new object name, while the merge-in-place approach requires none.
 
