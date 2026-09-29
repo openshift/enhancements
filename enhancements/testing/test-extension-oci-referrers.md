@@ -188,6 +188,21 @@ or demonstrate an end-to-end tag-schema workflow on a disposable repository.
 Tag-schema writers must be serialized or use conditional updates to avoid
 losing another artifact's index entry during concurrent pushes.
 
+[OCPSTRAT-3649](https://redhat.atlassian.net/browse/OCPSTRAT-3649) and its
+linked [PROJQUAY-12709](https://redhat.atlassian.net/browse/PROJQUAY-12709)
+propose OCI 1.1 referrers support in a next-generation Quay-powered
+integrated registry; OCPSTRAT-3649 identifies the legacy integrated registry
+as lacking it. This work does not establish support in
+`registry.ci.openshift.org`, and the OCPSTRAT/RFE search found no issue that
+specifically tracks that CI registry. Related
+[OCPSTRAT-3748](https://redhat.atlassian.net/browse/OCPSTRAT-3748) covers
+client-side signature discovery, while
+[OCPSTRAT-1417](https://redhat.atlassian.net/browse/OCPSTRAT-1417) covers
+mirroring OCI attachments, and
+[RFE-8487](https://redhat.atlassian.net/browse/RFE-8487) concerns referrers
+through `registry.redhat.io` and `registry.access.redhat.com` proxies. None
+resolves the CI registry prerequisite.
+
 **Promotion and mirrors.** The release workflow must preserve the destination
 image manifest digest where possible. When it cannot, it must reattach the
 artifact to the new destination digest and record both digests. Image and
@@ -359,3 +374,5 @@ verification support. Release metadata and retention inventory storage need
 owners. Registries used for release testing need OCI 1.1 referrer support or
 the tag-schema fallback specified by the
 [OCI Distribution specification](https://github.com/opencontainers/distribution-spec/blob/main/spec.md#listing-referrers).
+The CI registry compatibility gate needs an owner and a tracking issue; the
+integrated-registry work in OCPSTRAT-3649 does not cover it.
