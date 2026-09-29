@@ -31,6 +31,19 @@ superseded-by: []
 This enhancement introduces a new API and changes to the relevant controllers to allow users to electively rollout [Pod Security Admission (PSA)](https://kubernetes.io/docs/concepts/security/pod-security-admission/) enforcement [in OpenShift](https://www.redhat.com/en/blog/pod-security-admission-in-openshift-4.11).
 Enforcement means that the PodSecurityAdmission plugin enforces the `Restricted` or `Baseline` [Pod Security Standard (PSS)](https://kubernetes.io/docs/concepts/security/pod-security-standards/) globally on Namespaces without any `pod-security.kubernetes.io/enforce` label.
 
+### What "enabling" and "disabling" PSA mean here
+
+The words are used precisely throughout this document and are easy to over-read, so they are defined once, up front:
+
+- **Opting in** means setting `spec.enforcementMode` to `Baseline` or `Restricted`. The kube-apiserver's global `enforce` level becomes that standard, and it applies to every Namespace that carries no `pod-security.kubernetes.io/enforce` label of its own.
+- **Opting out** means `spec.enforcementMode: Privileged`, or leaving the field unset. The two are the same state, and it is the shipped default — see [Unset means `Privileged`](#unset-means-privileged).
+
+`spec.enforcementMode` selects exactly one thing: the global `enforce` level. It does not turn any component on or off.
+
+**The PSA label syncer is retired, in every mode.** It does not run at `Privileged`, and it does *not* come back when an administrator opts in to `Baseline` or `Restricted` — it is not a consumer of this API and does not read `status.enforcementMode`. The reasoning is in [Why the syncer is retired outright](#why-the-syncer-is-retired-outright), and the consequence is direct: on a cluster that opts in, a Namespace with no `enforce` label of its own is held to the global standard with nothing computing a gentler one on its behalf. That is what makes the [violation evaluation](#podsecurityreadinesscontroller) the load-bearing safety mechanism of this enhancement rather than a convenience.
+
+"Disabling PSA" means **exactly `enforce: privileged`**. It does not mean switching PSA off. The `PodSecurity` admission plugin stays loaded, `warn` and `audit` stay pinned to `restricted` so violations remain observable, the `PodSecurityReadinessController` keeps evaluating the cluster, and per-Namespace `pod-security.kubernetes.io/*` labels keep taking precedence over the global default.
+
 ### This Changes the Default Security Posture
 
 **PSA enforcement is enabled by default on OpenShift today, and this enhancement turns it off by default and makes it opt-in.**
@@ -39,6 +52,8 @@ Concretely, the `OpenShiftPodSecurityAdmission` feature gate is currently enable
 
 - the kube-apiserver's global PodSecurity configuration to be set to `enforce: restricted` ([`podsecurityadmission.go#L99-L111`](https://github.com/openshift/cluster-kube-apiserver-operator/blob/c128b63ac1e9c45aa67032987b96370af783843e/pkg/operator/configobservation/auth/podsecurityadmission.go#L99-L111)), and
 - the PSA label syncer to run in **enforcing** mode, writing `pod-security.kubernetes.io/enforce` on the Namespaces it manages ([`psalabelsyncer.go#L17-L50`](https://github.com/openshift/cluster-policy-controller/blob/c9e9a348260921c9e788e33a51e904502cbe2d13/pkg/cmd/controller/psalabelsyncer.go#L17-L50)).
+
+Those two go together. The syncer exists *because* the global default is `restricted`: it is what keeps a Namespace whose ServiceAccounts cannot meet that standard from having its workloads rejected. This enhancement removes the mandatory `restricted` default and retires the syncer along with it — including for clusters that opt back in. See [Why the syncer is retired outright](#why-the-syncer-is-retired-outright).
 
 After this enhancement, the shipped default for customer workloads becomes `Privileged` and enforcement must be explicitly requested by the cluster administrator.
 This is a deliberate reduction in the out-of-the-box security posture, traded for the guarantee that no cluster acquires failing workloads without its administrator opting in.
@@ -61,7 +76,7 @@ Although these numbers are now quite low, it is essential to avoid any scenario 
 
 This is primarily the motivation behind allowing newly created clusters to enable PSA Enforcement either at install time or via kube-apiserver CRD. This puts the onus on the user to create PSA compliant workloads from the get-go and avoid potential catastrophic failures such as already existing workloads not being admitted at run-time once the feature is enabled. 
 
-When the feature is enabled, `Privileged` PSS will be the default for managed namespaces. The `PodSecurityReadinessController` will then evaluate managed namespaces. When the namespaces and their inherent workloads are deemed compliant, the `PodSecurityReadinessController` will move the compliant namespaces to PSS set by the user (Privileged|Baseline|Restricted).
+Out of the box, `Privileged` is the global default and the PSA label syncer does not run. The `PodSecurityReadinessController` keeps evaluating the cluster regardless — that is the part that must not be switched off, because with the syncer retired it is the *only* thing that tells the administrator whether opting in is safe. When the administrator requests `Baseline` or `Restricted` and the evaluation finds no violating Namespaces, the requested level is applied to the kube-apiserver's global configuration. Namespaces that cannot meet it are surfaced as violations for the administrator to fix or label by hand, rather than being quietly granted a lower standard.
 
 Any namespaces that were not compliant will be listed in the kube-apiserver API status along with the explicit reason(s) for not workloads being admitted, which should help the user to resolve this.
 
@@ -106,7 +121,7 @@ As a System Administrator:
 
 **Config Observer** runs in the `cluster-kube-apiserver-operator` and renders the kube-apiserver's global `PodSecurity` admission configuration.
 
-**PSA label syncer** runs in the `cluster-policy-controller` and maintains Namespace-level PSA labels and annotations.
+**PSA label syncer** ran in the `cluster-policy-controller` and maintained Namespace-level PSA labels and annotations. It is **not an actor in this workflow**: it does not run in any enforcement mode and does not read this API. It appears in this document only as the source of the labels already present on upgraded clusters.
 
 The starting state is a cluster on release `n+1` or later with `spec.enforcementMode` unset, which resolves to `Privileged`: the kube-apiserver applies `enforce: privileged` to Namespaces that carry no `pod-security.kubernetes.io/enforce` label, while `warn` and `audit` remain pinned to `restricted`.
 
@@ -129,12 +144,12 @@ Enabling enforcement:
 
    If violations are currently recorded, the apiserver returns an advisory `Warning` header on this update naming the count and the acknowledgement required; the update is not rejected.
 4. On its next sweep the `PodSecurityReadinessController` resolves `spec` into `status`. With no violations outstanding it sets `status.enforcementMode: Restricted` and `EnforcementBlocked=False`.
-5. The Config Observer observes that change and re-renders the kube-apiserver configuration with `enforce: restricted`, which cuts a new static pod revision and rolls the control plane one node at a time. The PSA label syncer moves to enforcing mode.
+5. The Config Observer observes that change and re-renders the kube-apiserver configuration with `enforce: restricted`, which cuts a new static pod revision and rolls the control plane one node at a time. Nothing else starts: no controller begins writing Namespace labels, and every Namespace without an `enforce` label of its own is now held to `restricted`.
 6. The administrator confirms with `oc get psaenforcementconfig cluster -o jsonpath='{.status.enforcementMode}'`.
 
 Variation — violations outstanding: at step 4 the controller leaves `status.enforcementMode` at `Privileged` and sets `EnforcementBlocked=True` with reason `ViolatingNamespaces`. The administrator's request stays on record. Resolving the violations causes the requested mode to take effect on the next evaluation with no further action; alternatively the administrator sets `spec.acknowledgeKnownViolations` to the `resourceVersion` the violations were reported against, which unblocks that specific set of findings and no later ones.
 
-Variation — disabling: the administrator sets `spec.enforcementMode` to `Privileged`, or removes the field. This is applied unconditionally and is never gated on an evaluation, because the escape hatch has to work when the evaluation machinery is exactly what has failed. See [Support Procedures](#support-procedures) for the break-glass procedure and its cost.
+Variation — disabling: the administrator sets `spec.enforcementMode` to `Privileged`, or removes the field. The global `enforce` level returns to `privileged`; nothing else about PSA changes, and Namespaces that already carry an `enforce` label keep enforcing at that label's level. This is applied unconditionally and is never gated on an evaluation, because the escape hatch has to work when the evaluation machinery is exactly what has failed. See [Support Procedures](#support-procedures) for the break-glass procedure and its cost, and [Existing labels are retained, and the opt-out does not remove them](#existing-labels-are-retained-and-the-opt-out-does-not-remove-them) for why this may not be enough on an upgraded cluster.
 
 Variation — Day 0: the Summary and [New Installation](#new-installation) both assert that enforcement can be requested at install time. The install-time surface is not yet specified; see [Open Questions](#day-0-configuration).
 
@@ -144,7 +159,7 @@ This enhancement adds one API extension and changes the behaviour of three exist
 
 - **New CRD `PSAEnforcementConfig`** — a cluster-scoped singleton carrying the administrator's requested enforcement level in `spec` and the resolved, actually-in-force level in `status`. Group, version, markers and validation are still being settled with the API approvers; the Go sketch below is indicative, not final.
 - **The kube-apiserver's `PodSecurity` admission plugin configuration** changes meaning. The `enforce` key becomes derived from `PSAEnforcementConfig.status.enforcementMode` rather than from the `OpenShiftPodSecurityAdmission` feature gate alone. The `audit` and `warn` keys stay pinned to `restricted` and are unchanged.
-- **Namespace metadata written by another component.** The PSA label syncer, owned by the cluster-policy-controller, changes which keys it writes: `pod-security.kubernetes.io/enforce` is no longer written by default, and `security.openshift.io/MinimallySufficientPodSecurityStandard` starts being written for Namespaces the syncer does not otherwise control. Namespaces are a core upstream resource; the change is additive for the annotation and subtractive for the label, and existing labels are retained.
+- **Namespace metadata written by another component.** The PSA label syncer, owned by the cluster-policy-controller, no longer runs at all, in any enforcement mode, so no `pod-security.kubernetes.io/*` label and no `security.openshift.io/MinimallySufficientPodSecurityStandard` annotation is written by it on any cluster. Namespaces are a core upstream resource; the change is purely subtractive, and metadata already present is retained untouched. Opting in does not bring it back.
 - **An advisory `Warning` header** returned on updates to `PSAEnforcementConfig` that raise enforcement while violations are recorded. It is advisory only and never rejects a request.
 
 No admission webhooks, conversion webhooks, aggregated API servers or finalizers are introduced. The operational impact of these extensions is described in [Operational Aspects of API Extensions](#operational-aspects-of-api-extensions).
@@ -217,9 +232,16 @@ type PSAEnforcementConfigSpec struct {
 	// enforcementMode is the Pod Security Standard the user requests be enforced
 	// on Namespaces that carry no pod-security.kubernetes.io/enforce label.
 	// This field records user intent only and is never written by a controller.
-	// - Privileged opts out of PSA enforcement.
+	// - Privileged opts out of PSA enforcement. The PodSecurity admission plugin
+	//   remains configured, with warn and audit pinned to restricted.
 	// - Baseline enables the cluster to partially enforce PSA.
 	// - Restricted enables the cluster to completely enforce PSA.
+	//
+	// This field selects the global enforce level and nothing else. In
+	// particular, no mode starts the PSA label syncer: it is retired and nothing
+	// computes a per-Namespace enforce label. A Namespace that cannot meet the
+	// requested standard must carry its own pod-security.kubernetes.io/enforce
+	// label, and is otherwise reported in status.violatingNamespaces.
 	//
 	// The requested mode is only applied once the PodSecurityReadinessController
 	// has confirmed the cluster has no violating Namespaces. Until then,
@@ -227,9 +249,11 @@ type PSAEnforcementConfigSpec struct {
 	// EnforcementBlocked condition explains why, and status.violatingNamespaces
 	// lists what must be resolved.
 	//
-	// When omitted, this means the user has no opinion and the platform chooses
-	// a default, which is subject to change over time. The current default is
-	// Privileged.
+	// The default is Privileged. Omitting this field and setting it to
+	// Privileged are equivalent and both mean the cluster has opted out of PSA
+	// enforcement. Unlike most optional enums in this group, the default is a
+	// fixed commitment rather than a platform choice that may change: a cluster
+	// that takes no action must never acquire enforcement it did not request.
 	//
 	// +kubebuilder:validation:Enum:=Privileged;Baseline;Restricted
 	// +optional
@@ -308,13 +332,17 @@ type ViolatingNamespace struct {
 
 	// reason is a textual description explaining why the Namespace is incompatible
 	// with the expected Pod Security mode.
-	// It contains a prefix, indicating, which part of PSA validation is conflicting:
-	// - the global configuration, which will be set to `Restricted` or
-	// - the PSA label syncer, which tries to infer the PSS from the SCCs available to ServiceAccounts in the Namespace.
+	// It contains a prefix, indicating which part of the evaluation found the
+	// conflict:
+	// - PSAConfig: the Namespace conflicts with the global enforce level that
+	//   spec.enforcementMode requests, which may be Baseline or Restricted.
+	// - PSALabel: the standard inferred from the SCCs available to the
+	//   ServiceAccounts in the Namespace is lower than that level. This inference
+	//   was performed by the PSA label syncer historically and is performed by the
+	//   PodSecurityReadinessController now that the syncer is retired.
 	//
 	// Possible values are:
 	// - PSAConfig: Misconfigured OpenShift Namespace
-	// - PSAConfig: PSA label syncer disabled
 	// - PSALabel: ServiceAccount with insufficient SCCs
 	//
 	// +optional
@@ -333,6 +361,35 @@ type ViolatingNamespace struct {
 }
 ```
 
+#### Unset means `Privileged`
+
+There are two outcomes, and omitting the field selects one of them:
+
+| `spec.enforcementMode` | Meaning |
+|---|---|
+| `Baseline` or `Restricted` | **opt in** |
+| `Privileged`, or the field omitted entirely | **opt out** |
+
+`Privileged` *is* the default. A cluster that never mentions the field and a cluster that explicitly sets `Privileged` are in the same state and are treated identically by every consumer. There is no "no opinion" tier that behaves differently from an explicit opt-out, and no consumer may branch on which of the two it sees.
+
+Two API notes:
+
+- **The enum does not include `""`.** Including the empty string is an established pattern — `config.openshift.io/v1 FeatureSet` does exactly that, and there `""` *is* the `Default` feature set. But it is there because `FeatureSet` has no named value for its default; `""` is the only way to spell it. This enum does have one. Adding `""` would give two spellings of a single state with no capability gained, forcing every consumer to normalise and making `oc get -o jsonpath='{.spec.enforcementMode}'` return different strings for identical clusters. The enum is therefore `Privileged;Baseline;Restricted`, and omitting the field — which `+optional` and `omitempty` already allow — is how the default is expressed. A client that wants to clear the field sets `Privileged` or removes the key.
+- **The field documents a fixed default, not a platform-chosen one.** The usual OpenShift wording for an optional enum is "the platform chooses a default, which is subject to change over time"; that is deliberately not used here, because pinning the default to `Privileged` is the point of the enhancement. API reviewers will ask about this, and the answer is that a cluster which takes no action must never acquire enforcement it did not request — which is only true if the default is a commitment rather than a placeholder.
+
+Everything absent resolves the same way, which matters because "absent" arises in four different shapes during the rollout:
+
+| State | How it arises | Resolves to |
+|---|---|---|
+| CRD absent | release `n` on a non-TechPreview cluster; MicroShift | `Privileged` |
+| CRD present, singleton absent | nothing creates the object automatically | `Privileged` |
+| `spec.enforcementMode` unset | the object exists, the field is not set | `Privileged` |
+| `status.enforcementMode` unset | the readiness controller has not resolved `spec` yet | `Privileged` |
+
+A consumer that treats a missing CRD differently from an unset field has a bug. The last row is the one exception worth care: it resolves to `Privileged` like the rest, but it is an *unresolved* state rather than a settled one, which is why the Config Observer gates raising enforcement on the `Evaluated` condition rather than on `status.enforcementMode` being non-empty — see [Freshness is an interlock, not a hint](#freshness-is-an-interlock-not-a-hint). Lowering is never gated on it.
+
+#### Resolving violations
+
 If a user encounters `status.violatingNamespaces` when PSA is enabled and configured, they are expected to:
 
 - resolve the violations in the Namespaces, after which the requested mode takes effect on the next evaluation with no further user action, or
@@ -340,7 +397,7 @@ If a user encounters `status.violatingNamespaces` when PSA is enabled and config
 
 Because the controller never writes `spec`, a user who requested `Restricted` and hit violations keeps that request on record. The cluster reports `status.enforcementMode: Privileged` with `EnforcementBlocked=True` until the violations are resolved, and then transitions to `Restricted` on its own.
 
-As this is an optional feature, the feature can be disabled if needed e.g. if the user manages several clusters and there are well known violating Namespaces. This can be done by setting `.spec.enforcementMode` to `Privileged`, or by omitting the field.
+As this is an optional feature, enforcement can be turned off if needed — for example if the user manages several clusters and there are well known violating Namespaces. This is done by setting `.spec.enforcementMode` to `Privileged`, or by removing the field; the two are equivalent.
 
 ### Topology Considerations
 
@@ -349,9 +406,9 @@ As this is an optional feature, the feature can be disabled if needed e.g. if th
 HyperShift is affected, and not in the way an earlier draft of this enhancement assumed. The differences are structural rather than cosmetic, and the following are verified against the `openshift/hypershift` source:
 
 - **There is no `cluster-kube-apiserver-operator` in a hosted control plane.** The control-plane-operator renders the kube-apiserver's PodSecurity configuration directly (`control-plane-operator/controllers/hostedcontrolplane/v2/kas/config.go`), keyed off whether `OpenShiftPodSecurityAdmission=true` appears in the rendered feature gate list. The Config Observer mechanism this enhancement builds on therefore has a second, independent implementation in HyperShift that has to change in step with it.
-- **The PSA label syncer runs as a management-cluster Deployment**, reconciled as a control-plane component (`control-plane-operator/controllers/hostedcontrolplane/v2/clusterpolicy/component.go`). The hosted-cluster-config-operator (HCCO) runs no syncer logic of its own; what it reconciles is the *guest-cluster* RBAC that the management-side syncer needs in order to write Namespace labels (`control-plane-operator/hostedclusterconfigoperator/controllers/resources/resources.go` and `.../rbac/reconcile.go`). Removing that RBAC, as an earlier draft proposed, would strip permissions from a controller running in a different cluster. Consequently, "watch the new API continuously" means a management-cluster Deployment watching a guest-cluster resource.
+- **The PSA label syncer runs as a management-cluster Deployment**, reconciled as a control-plane component (`control-plane-operator/controllers/hostedcontrolplane/v2/clusterpolicy/component.go`). The hosted-cluster-config-operator (HCCO) runs no syncer logic of its own; what it reconciles is the *guest-cluster* RBAC that the management-side syncer needs in order to write Namespace labels (`control-plane-operator/hostedclusterconfigoperator/controllers/resources/resources.go` and `.../rbac/reconcile.go`). Because the syncer is retired unconditionally rather than switched by enforcement mode, HCP's change is a straight removal: the control-plane component stops starting the syncer, and it never has to be started again. Whether the guest-cluster RBAC is also removed is a separate decision — it grants a management-cluster controller write access to guest Namespaces, so leaving it in place is a standing privilege with no consumer, and removing it is the kind of change that is awkward to reverse if MicroShift's or anyone else's outcome differs. It needs a HyperShift owner's call.
 - **The `PodSecurityViolation` alert already ships in HCP**, embedded in the HCCO resources and reconciled unconditionally — a copy of the standalone `cluster-kube-apiserver-operator` asset that has already drifted from its source. Any change to that alert has to be made in two places, and this enhancement retains it unchanged in both.
-- HCCO opts `kube-system` out of label syncing in the guest cluster, and the management side additionally carries a `PodSecurityAdmissionLabelOverrideAnnotation` and a `restricted-psa` image label handled in `hypershift-operator/controllers/hostedcluster/hostedcluster_controller.go`. Both interact with the enforcement level and need to be reconciled with the new API.
+- HCCO opts `kube-system` out of label syncing in the guest cluster, and the management side additionally carries a `PodSecurityAdmissionLabelOverrideAnnotation` and a `restricted-psa` image label handled in `hypershift-operator/controllers/hostedcluster/hostedcluster_controller.go`. The `kube-system` opt-out becomes inert with the syncer retired. The other two interact with the enforcement level and need to be reconciled with the new API.
 
 Two decisions remain open and are tracked in [Open Questions](#hypershift-configuration-surface):
 
@@ -375,7 +432,7 @@ Bare metal is likewise unaffected. PSA is platform-agnostic; the mechanism is en
 - the rollout cost has to be stated in the break-glass procedure, so that nobody is surprised by an API outage while recovering from an outage;
 - the Config Observer's inputs must be debounced or rate-limited, so that a status field flapping — for example a readiness controller alternating between fresh and stale — cannot cut kube-apiserver revisions in a loop.
 
-This is also the reason the `AllManagedNamespacesLabeled` check is computed by the readiness controller and published as a condition rather than being computed in the observer; see [Namespace labelling coverage](#namespace-labelling-coverage).
+The observer's input set is small for exactly this reason: it reads `status.enforcementMode` and two conditions on one singleton, and nothing that varies with ordinary cluster activity such as Namespace creation. Retiring the syncer helps here — with no second controller stamping labels, there is no labelling-progress signal for the observer to track and therefore no input that changes as the cluster churns.
 
 On resource consumption, the new recurring cost on SNO is the readiness controller's sweep: one Namespace LIST plus a per-Namespace Pod LIST and the workload-template LISTs added by [Scope of the evaluation](#scope-of-the-evaluation), every four hours, through a client throttled to QPS=2 / Burst=2. Peak memory and CPU for that sweep still need to be quantified for SNO specifically, and the lists need pagination; see [Open Questions](#evaluation-cost-and-pagination).
 
@@ -384,9 +441,17 @@ On resource consumption, the new recurring cost on SNO is the readiness controll
 - it hardcodes `enforce: restricted` in `assets/controllers/kube-apiserver/defaultconfig.yaml`;
 - it vendors and runs the cluster-policy-controller with `"*"` controllers and no feature gates, so it falls through to `NewEnforcingPodSecurityAdmissionLabelSynchronizationController` (`pkg/controllers/cluster-policy-controller.go`) — the label syncer runs in enforcing mode there today;
 - it ships the syncer's RBAC and documents the resulting behaviour to users in `docs/user/howto_pod_security.md`;
-- it has no CVO, no `FeatureGate` CR and no `PSAEnforcementConfig` CRD. The change that makes the syncer select its mode from the new API's `status` therefore hits a path where the CRD simply does not exist. That path must be a no-op that preserves today's behaviour, not an error or a degraded condition.
+- it has no CVO, no `FeatureGate` CR and no `PSAEnforcementConfig` CRD, so none of the configuration surface this enhancement adds reaches it. MicroShift's behaviour is whatever its vendored code does.
 
-The open decision is whether MicroShift keeps `restricted` or follows OpenShift to `privileged`, and, if it is to be configurable, whether the setting surfaces in `/etc/microshift/config.yaml`. A MicroShift reviewer is required.
+Retiring the syncer unconditionally makes MicroShift the sharpest case in this enhancement, because MicroShift is the one topology where the syncer is unambiguously doing load-bearing work: it hardcodes `enforce: restricted`, so the computed per-Namespace labels are the only thing keeping non-compliant Namespaces admitting workloads. Remove the syncer there without also moving the global default to `privileged` and workloads break on the next MicroShift release.
+
+Three outcomes are possible and the choice is MicroShift's to make, not this enhancement's:
+
+- **MicroShift follows OpenShift**: global default moves to `privileged` and the syncer goes. Consistent, but it is a posture change for an edge product whose users did not ask for one, delivered without the `PSAEnforcementConfig` opt-back-in that standalone gets.
+- **MicroShift keeps `restricted` and keeps the syncer.** Then the syncer is not retired product-wide, only in OpenShift and HCP, and `cluster-policy-controller` has to keep the code alive and tested for a single consumer — which is the deciding input for [Is the syncer deleted or merely never started](#is-the-syncer-deleted-or-merely-never-started).
+- **MicroShift keeps `restricted` and drops the syncer**, requiring every MicroShift user to label their own Namespaces. This is a breaking change and would need its own deprecation.
+
+Whether the setting becomes configurable in `/etc/microshift/config.yaml` follows from that choice. A MicroShift reviewer is required, and this enhancement should not merge as `implementable` with the question open, because the second outcome changes what "retired" means everywhere else in this document.
 
 #### OpenShift Kubernetes Engine
 
@@ -400,8 +465,10 @@ The open decision is whether enabling `Baseline` or `Restricted` on OKE is suppo
 
 - The `PodSecurityReadinessController` in the `cluster-kube-apiserver-operator` will manage the new API.
 - The [`Config Observer Controller`](https://github.com/openshift/cluster-kube-apiserver-operator/blob/218530fdea4e89b93bc6e136d8b5d8c3beacdd51/pkg/operator/configobservation/configobservercontroller/observe_config_controller.go#L135) must be updated to derive the kube-apiserver's `PodSecurity` configuration from the new API's `status`.
-- The [`PodSecurityAdmissionLabelSynchronizationController`](https://github.com/openshift/cluster-policy-controller/blob/master/pkg/cmd/controller/psalabelsyncer.go#L17-L50) must be updated to select its enforcing or advising mode from the new API's `status`.
-- Disabling PSA enforcement on a running cluster is done by setting `spec.enforcementMode` to `Privileged` (or omitting the field). It is not done by changing the cluster's `FeatureSet`.
+- The [`PodSecurityAdmissionLabelSynchronizationController`](https://github.com/openshift/cluster-policy-controller/blob/master/pkg/cmd/controller/psalabelsyncer.go#L17-L50) is **not started, in any enforcement mode**. It is not wired to the new API at all: `cluster-policy-controller` gains no watch, no client and no dependency on `PSAEnforcementConfig`. This is a removal from the startup path, not a new conditional.
+- The SCC-to-PSS computation the syncer performed moves to the `PodSecurityReadinessController`, where it becomes a diagnostic input rather than a source of Namespace labels. See [The minimally sufficient standard must still be computed](#the-minimally-sufficient-standard-must-still-be-computed).
+- **"Disabling PSA" means `spec.enforcementMode: Privileged`, not switching PSA off.** The `PodSecurity` admission plugin stays loaded and configured; `warn` and `audit` stay pinned to `restricted`; the `PodSecurityReadinessController` keeps evaluating; per-Namespace labels keep taking precedence. Opting in means `Baseline` or `Restricted`; opting out means `Privileged`. Neither starts or stops any controller.
+- Disabling PSA enforcement on a running cluster is done by setting `spec.enforcementMode` to `Privileged`, or by removing the field — the two are equivalent. It is not done by changing the cluster's `FeatureSet`.
 
 #### Existing Building Blocks (Already Shipped)
 
@@ -480,12 +547,12 @@ Building on the above, this enhancement proposes:
 `OpenShiftPodSecurityAdmission` already exists and today means exactly one thing: *PSA enforcement is on by default*.
 It is in the `Default` feature set, which is why the config observer emits `enforce: restricted` and the label syncer runs in enforcing mode on every cluster.
 
-This enhancement keeps that meaning and removes the gate from the `Default` feature set. That removal *is* the mechanism by which PSA enforcement becomes optional — it flips the fleet's default to `Privileged` and the label syncer to advising mode.
+This enhancement keeps that meaning and removes the gate from the `Default` feature set. That removal *is* the mechanism by which PSA enforcement becomes optional — it flips the fleet's default to `Privileged` and stops the label syncer from running.
 
 Two consequences follow, and both are load-bearing:
 
 - **Feature gate membership is a property of the payload, not a cluster setting.** Which gates are on in a feature set is compiled in at build time ([`payload-manifests/featuregates/`](https://github.com/openshift/api/tree/de86ee3bf48122ecb00fde7287aa633642ddc215/payload-manifests/featuregates)); an administrator selects a `FeatureSet`, not individual gates. The only feature set permitting per-gate control is `CustomNoUpgrade`, which is documented as unsupported, irreversible, and upgrade-blocking ([`types_feature.go#L51-L54`](https://github.com/openshift/api/blob/de86ee3bf48122ecb00fde7287aa633642ddc215/config/v1/types_feature.go#L51-L54)). No supported administrator workflow enables or disables this gate, so no part of this design may depend on one.
-- **The opt-in machinery must not sit behind this gate.** The `PSAEnforcementConfig` API and the observer and syncer wiring that reads its `status` are guarded by their own gate, `PodSecurityAdmissionConfiguration` (name provisional), on their own graduation schedule. If they were guarded by `OpenShiftPodSecurityAdmission`, removing that gate from `Default` would remove the only means of turning enforcement back on along with the enforcement itself.
+- **The opt-in machinery must not sit behind this gate.** The `PSAEnforcementConfig` API and the observer wiring that reads its `status` are guarded by their own gate, `PodSecurityAdmissionConfiguration` (name provisional), on their own graduation schedule. If they were guarded by `OpenShiftPodSecurityAdmission`, removing that gate from `Default` would remove the only means of turning enforcement back on along with the enforcement itself.
 
 The three levers are therefore distinct and should not be conflated:
 
@@ -571,13 +638,17 @@ The long `for` durations are deliberate: none of these represent an outage in pr
 
 The existing [`PodSecurityViolation`](https://github.com/openshift/cluster-kube-apiserver-operator/blob/c128b63ac1e9c45aa67032987b96370af783843e/bindata/assets/alerts/podsecurity-violations.yaml) alert is **retained unchanged**. It fires on `pod_security_evaluations_total{decision="deny",mode="audit"}`, and because `audit` stays pinned to `restricted` regardless of the enforcement level (see [PodSecurity Configuration](#podsecurity-configuration)), its signal is unaffected by this enhancement. It continues to report workloads that would be denied under `restricted`, which is exactly the pre-flight evidence an administrator needs before opting in. Retaining it also means no behavior change for clusters that never adopt the new API.
 
-##### Namespace labelling coverage
+##### There is no labelling handshake
 
-The controller also answers, during the same sweep, whether every Namespace managed by the `PodSecurityAdmissionLabelSynchronizationController` currently carries a `pod-security.kubernetes.io/enforce` label, and publishes the answer as the `AllManagedNamespacesLabeled` condition.
+An earlier draft had the controller publish an `AllManagedNamespacesLabeled` condition, reporting whether every Namespace the syncer manages carried a `pod-security.kubernetes.io/enforce` label, and had the Config Observer refuse to raise the global level until it was `True`. That condition existed to sequence two operators: the syncer had to finish stamping labels before the observer raised the global default, or workloads in not-yet-labelled Namespaces would be rejected.
 
-This check deliberately lives here rather than in the Config Observer. The controller already lists every Namespace on its normal sweep and holds a throttled client sized for that work, whereas an observer has no Namespace informer and would have to acquire one. More importantly, an observer re-renders the kube-apiserver config whenever any of its inputs change, and every change to that config cuts a new static pod revision that rolls the control plane one node at a time. Newly created Namespaces are unlabelled for the short window before the syncer reaches them, so computing the check in the observer would flip its output on ordinary Namespace creation and roll the control plane each time — continuously, on a cluster whose workloads create Namespaces in a loop, and as an API outage on Single Node OpenShift.
+Retiring the syncer removes both halves. No controller stamps labels, so there is no labelling progress to wait for, and `cluster-policy-controller` is no longer a participant, so there is no second operator to sequence against. The condition is **not part of this design**, and the cross-operator ordering problem it was introduced to solve — two operators reconciling the same inputs on independent timing, where raising the level before the labels land rejects workloads — does not arise.
 
-Publishing it as a condition means the observer reads one field on one object and re-renders only when the answer genuinely changes.
+The word "managed" is doing two jobs here and the distinction is what decides whether anything is actually lost. In the syncer's code, "managed" means the set `isNSControlled` returns true for, which **excludes** every `openshift-`-prefixed Namespace. In ordinary OpenShift usage, "managed Namespaces" means precisely those payload Namespaces. The handshake was about the first set; the assurance that matters for the platform is about the second.
+
+**Platform Namespaces do not rely on this design at all.** They carry PSA labels from their own CVO manifests, which the syncer never owned (see [Why the syncer is retired outright](#why-the-syncer-is-retired-outright)), and correct labelling is verified in CI: a monitor test already checks that workloads run under the SCC their Namespace's labels imply, and a second monitor test asserting that every managed Namespace carries an `enforce` label is a deliverable of this enhancement, listed in [Test Plan](#test-plan). OLM is the known exception — it declares its requirement through SCC configuration rather than Namespace labels, so the labelling test cannot cover it and it is handled separately under [`openshift-operators` has no label to freeze](#openshift-operators-has-no-label-to-freeze).
+
+Those tests are pre-merge verification of the payload, not a runtime guardrail on a customer cluster, and they say nothing about Namespaces the customer creates. That is where the handshake's loss is real: for user Namespaces the guarantee falls from "every one carries a label sized to what it can actually run" to "no violation was found at the moment of the last sweep". A user Namespace created after that sweep, or one whose workloads change after it, has no computed label and nothing standing behind it — it is held to the global standard directly. See [Scope of the evaluation](#scope-of-the-evaluation).
 
 ##### Scope of the evaluation
 
@@ -587,12 +658,14 @@ A sweep that inspects only the Pods that exist at that moment therefore produces
 
 - a Deployment scaled to zero, a CronJob that has not yet fired, or a DaemonSet whose nodes are cordoned — no Pods exist to inspect;
 - **an already-running violating Pod that is recreated** by a node drain, reboot, upgrade, eviction or crash-loop restart. Recreation is a new Pod creation, so it is admitted against the current enforcement level for the first time. A routine MachineConfig rollout weeks after enforcement was enabled can take down a workload that the evaluation reported as clean;
-- any new workload in an unlabelled Namespace once enforcement is on — the gap this enhancement opens by moving the label syncer to advising mode, since those Namespaces no longer receive a computed enforce label.
+- **any user Namespace created after the sweep**, on a cluster that has opted in. With the syncer retired nothing computes an `enforce` label for it, so it is held to the global standard from the moment it exists. Under `Restricted` that means a new Namespace is `restricted` by default and stays that way until somebody labels it — which is upstream Kubernetes' behaviour, but is not what OpenShift administrators have experienced to date and is the single largest behavioural change for a cluster that opts in. Payload Namespaces are not in this bullet: they ship with their labels and are covered by the monitor tests described in [There is no labelling handshake](#there-is-no-labelling-handshake).
 
-Two mechanisms close this gap and are both in scope:
+Two mechanisms close part of this gap and are both in scope:
 
 - **Evaluate workload templates, not only live Pods.** `Deployment`, `StatefulSet`, `DaemonSet`, `Job`, `CronJob`, `ReplicationController` and `DeploymentConfig` each describe the Pod that will be created, so the same check can run against `spec.template` whether or not a Pod exists today. This is what covers the scaled-to-zero, not-yet-fired and drain-and-reschedule cases, because the template is what gets recreated.
 - **Keep `warn` and `audit` at the target standard while `enforce` remains `privileged`.** Every creation that *would* be rejected is then surfaced continuously and nothing is blocked, turning a single snapshot into a running record. This is the mechanism the [original Pod Security Admission enhancement](https://github.com/openshift/enhancements/blob/master/enhancements/authentication/pod-security-admission.md) used for the same purpose, and the machinery already exists.
+
+Neither mechanism covers the last bullet. Both operate before enforcement is raised; once a cluster is at `Restricted`, a Namespace created afterwards is enforced immediately and the evaluation's next sweep reports it only after the fact. The syncer used to cover this case by labelling new Namespaces as they appeared, and for user Namespaces nothing does now. This is the residual risk an administrator accepts by opting in, and it is recorded in [Risks and Mitigations](#risks-and-mitigations).
 
 #### PodSecurity Configuration
 
@@ -602,90 +675,107 @@ There is no "unset" option for this configuration. [`defaultconfig.yaml#L12-L22`
 
 The Config Observer's inputs are:
 - `status.enforcementMode` — the administrator's request, after the readiness controller has resolved it;
-- the `FeatureGate` `OpenShiftPodSecurityAdmission` — used only to pick the level substituted when the administrator has expressed no opinion. While the gate is in `Default` that fallback is `privileged` once the gate leaves `Default`, and `restricted` until then, preserving today's behavior across the transition;
-- the `AllManagedNamespacesLabeled` condition on the `PSAEnforcementConfig` `status`, computed by the `PodSecurityReadinessController` as described above. The observer does not list Namespaces itself.
+- the `FeatureGate` `OpenShiftPodSecurityAdmission` — used only to pick the level substituted when `status.enforcementMode` is `Privileged`, empty, or unavailable. The fallback is `restricted` while the gate is still in the `Default` feature set, and `privileged` once it leaves in release `n`. This exists only to preserve today's behaviour across the transition; from release `n` onward the fallback is `privileged` and stays there, which is what makes unset and `Privileged` equivalent;
+- the `Evaluated` and `StatusStale` conditions on the `PSAEnforcementConfig` `status`.
 
-The observer substitutes a level above the fallback only when all of the following hold:
+That is the whole input set. The observer does not list Namespaces, and it has no input that varies with ordinary cluster activity — see [There is no labelling handshake](#there-is-no-labelling-handshake).
+
+The observer substitutes a level above the fallback only when both of the following hold:
 
 - `status.enforcementMode` is `Baseline` or `Restricted`;
-- `Evaluated` is `True` and `StatusStale` is `False`, so the result rests on a real and recent sweep rather than on a controller that has never run — see [Freshness is an interlock, not a hint](#freshness-is-an-interlock-not-a-hint);
-- `AllManagedNamespacesLabeled` is `True`.
+- `Evaluated` is `True` and `StatusStale` is `False`, so the result rests on a real and recent sweep rather than on a controller that has never run — see [Freshness is an interlock, not a hint](#freshness-is-an-interlock-not-a-hint).
 
-Substituting `privileged` is subject to none of these conditions. Lowering enforcement must work when the readiness controller is broken, because that is precisely when an administrator is most likely to need it.
+Substituting `privileged` is subject to neither condition. Lowering enforcement must work when the readiness controller is broken, because that is precisely when an administrator is most likely to need it.
 
 This enhancement changes only the `enforce` key. Both existing branches pin `audit` and `warn` to `restricted` regardless of the enforcement level ([`podsecurityadmission.go#L32-L39`](https://github.com/openshift/cluster-kube-apiserver-operator/blob/c128b63ac1e9c45aa67032987b96370af783843e/pkg/operator/configobservation/auth/podsecurityadmission.go#L32-L39), [`#L50-L57`](https://github.com/openshift/cluster-kube-apiserver-operator/blob/c128b63ac1e9c45aa67032987b96370af783843e/pkg/operator/configobservation/auth/podsecurityadmission.go#L50-L57)) and that is retained deliberately: it is what keeps violations observable while `enforce` is `privileged`, per [Scope of the evaluation](#scope-of-the-evaluation). The corresponding `*-version` keys are unchanged.
 
 `Baseline` has no implementation today — only the privileged and restricted helpers exist — so a third branch must be added.
 
 This state must be watched continuously.
-If `status.enforcementMode` returns to `Privileged`, the observer applies that immediately and unconditionally — the escape hatch is never gated on the labelling precondition.
+If `status.enforcementMode` returns to `Privileged`, the observer applies that immediately and unconditionally — the escape hatch is never gated on the evaluation.
 
 #### PodSecurityAdmissionLabelSynchronizationController
 
-The [PodSecurityAdmissionLabelSynchronizationController (PSA label syncer)](https://github.com/openshift/cluster-policy-controller/blob/master/pkg/psalabelsyncer/podsecurity_label_sync_controller.go) will be retired as its primary use was with this feature being non-optional in mind. As it is now going to be optional, the PSA Label Syncer's future purpose will be assisting with monitoring and testing of openshift managed workloads and namespaces instead. The below is kept for context on this. Please read with this in mind.
+The [PodSecurityAdmissionLabelSynchronizationController (PSA label syncer)](https://github.com/openshift/cluster-policy-controller/blob/master/pkg/psalabelsyncer/podsecurity_label_sync_controller.go) is **retired**. It does not run in any enforcement mode, it is not kept running in a reduced advising or annotation-only mode, and it is not restarted when an administrator opts in.
 
-The PSA label syncer labels all the Namespaces it manages.
-Without PSA enforcement it sets the `pod-security.kubernetes.io/warn` and `pod-security.kubernetes.io/audit` labels on managed Namespaces.
+This is the single largest behavioural change in this enhancement, larger than the change of default, and it is stated as a flat rule because every conditional version of it that was considered turned out worse. There is no `status.enforcementMode` value that starts the controller and no cluster configuration that brings it back.
 
-Namespaces that are **managed** by the `PodSecurityAdmissionLabelSynchronizationController` are Namespaces that:
+Namespaces that were **managed** by the syncer — the set it acted on, and therefore the set that carries its labels on any cluster upgrading into release `n` — are Namespaces that:
 
 - are not named `kube-node-lease`, `kube-system`, `kube-public`, `default` or `openshift` and
-- are not  prefixed with `openshift-` and
+- are not prefixed with `openshift-` and
 - have no `security.openshift.io/scc.podSecurityLabelSync=false` label set and
 - at least one PSA label (including `pod-security.kubernetes.io/enforce`) isn't set by the user or
 - if the user sets all PSA labels, it also has set the `security.openshift.io/scc.podSecurityLabelSync=true` label.
 
-The PSA label syncer's choice between enforcing and advising mode must be driven by `status.enforcementMode`.
-Today that choice is made once at construction from the `OpenShiftPodSecurityAdmission` gate ([`psalabelsyncer.go#L17-L50`](https://github.com/openshift/cluster-policy-controller/blob/master/pkg/cmd/controller/psalabelsyncer.go#L17-L50)), with enforcing as the default branch.
-The gate continues to supply that default for clusters where the administrator has expressed no opinion; `status.enforcementMode`, when set, takes precedence over it.
+That definition is now historical. It describes where the retained labels came from, not a set of Namespaces any running controller acts on.
 
-##### Three modes, not two
+##### Why the syncer is retired outright
 
-The syncer today has two modes, and they are not sufficient. "Stop maintaining the `enforce` label" and "remove the `enforce` label" are different operations with different authority behind them, and the existing advising mode conflates them — see [Freezing is not the same as removing](#freezing-is-not-the-same-as-removing) for why the current code does neither deterministically. This enhancement therefore defines three modes, selected by `status.enforcementMode` with the `OpenShiftPodSecurityAdmission` gate supplying the default when no opinion has been expressed:
+The obvious design is to tie the syncer to the enforcement mode: off at `Privileged`, on at `Baseline` or `Restricted`. That is rejected, and the reasons divide into one that applies to the opt-out and three that apply to the opt-in.
 
-| Mode | Trigger | `enforce` label | `warn` / `audit` |
-|---|---|---|---|
-| **Enforcing** | `Baseline` or `Restricted` | written and maintained at the level in `security.openshift.io/MinimallySufficientPodSecurityStandard` | written and maintained |
-| **Frozen** | gate out of `Default` in `n` and no `enforcementMode` expressed — the state every upgraded cluster lands in | **retained exactly as-is, never updated, never deleted** | written and maintained |
-| **Opt-out** | administrator explicitly sets `enforcementMode: Privileged` | **actively removed** wherever the syncer owns it | written and maintained |
+**At `Privileged` the syncer has nothing to do.** Its premise is a cluster whose global default is `restricted`: in that world every Namespace whose ServiceAccounts cannot meet `restricted` needs a computed, *less* restrictive `enforce` label or its workloads stop being admitted, and the syncer is the machinery that derives that label from the SCCs available in the Namespace. It exists to make a `restricted` default survivable. Once the default is `privileged` — already the most permissive standard PSA offers — a Namespace carrying no label is admitted regardless of what its ServiceAccounts can do, and a computed label protects against nothing. Running it anyway would write per-Namespace PSA metadata that no admission decision consumes, on every managed Namespace, indefinitely, including on Namespaces whose administrator explicitly opted out.
 
-The distinction between the middle row and the last is consent, and it is worth being precise about why, because "the upgrade must not relax anything" would contradict this enhancement's own purpose. Release `n` does relax the cluster: it moves the global default from `restricted` to `privileged`. What it does not do is rewrite per-Namespace state that is currently load-bearing. Three reasons:
+**At `Baseline` or `Restricted` the syncer contradicts the request.** This is the part that is easy to miss. An administrator who sets `Restricted` is asking for a cluster where unlabelled Namespaces are held to `restricted`. The syncer would immediately grant many of those Namespaces a *lower* standard, computed from their SCCs, without telling anyone. The cluster would report `status.enforcementMode: Restricted` while running a per-Namespace patchwork that neither the administrator chose nor the API describes. Under the old mandatory-enforcement model that was the point — it was damage control for a default nobody opted into. Under an opt-in model it silently weakens the thing that was opted into, and the API becomes a claim the cluster does not honour.
 
-- **Optional is not the same as off.** Stripping every syncer-written `enforce` label on upgrade would not make enforcement optional; it would replace "every cluster must enforce" with "every cluster must stop enforcing". Optionality means the cluster's existing state persists until an administrator chooses otherwise, and `PSAEnforcementConfig` is how they choose.
-- **One direction is reversible and the other is not.** Freezing can be undone by setting `Privileged`, which removes the labels. Stripping cannot be undone: server-side apply deletes the value, and returning to `Restricted` recomputes labels from current SCC and RBAC state rather than restoring what was there. Where only one direction is recoverable, the upgrade should take it.
-- **The exposure is compliance, not availability.** Relaxing enforcement can only admit more workloads; it breaks nothing and causes no outage. The risk is a security control disappearing without announcement from clusters that may be attesting to it, and being discovered long afterwards. Weighed against that, requiring one documented administrator action from the clusters that want relief is the cheaper error.
+**The inference it relies on is the known-unreliable part of the system.** The syncer derives the standard from SCCs available to the Namespace's ServiceAccounts. The [Motivation](#motivation) section of this enhancement exists because that inference is wrong often enough to matter: it does not account for user-based SCCs, and it is defeated by user-overridden labels. Those are the two root causes behind most violating Namespaces found by the fleet evaluation. Keeping the syncer would keep an unreliable inference in the *enforcement* path, where being wrong means either a workload rejected or a Namespace quietly running below the requested standard. Moving the same computation into the readiness controller keeps it where being wrong produces a misleading diagnostic that an administrator can inspect and override — see [The minimally sufficient standard must still be computed](#the-minimally-sufficient-standard-must-still-be-computed).
 
-Explicitly setting `Privileged` is that action, and is the only thing that removes labels.
+**A controller that starts and stops is harder to reason about than one that does not exist.** A mode-switched syncer has to handle being started on a cluster it has never seen, catching up across every Namespace before enforcement is safe to raise, and being stopped mid-apply — which is the cross-operator sequencing problem an earlier draft tried to solve with an `AllManagedNamespacesLabeled` handshake. Retiring it deletes that problem rather than specifying it. See [There is no labelling handshake](#there-is-no-labelling-handshake).
 
-None of the three modes affects OpenShift's own Namespaces. `isNSControlled` ([`podsecurity_label_sync_controller.go#L475-L522`](https://github.com/openshift/cluster-policy-controller/blob/master/pkg/psalabelsyncer/podsecurity_label_sync_controller.go#L475-L522)) excludes them twice: first against the hardcoded payload list in `nsexemptions`, then by skipping any Namespace prefixed `openshift-` outright. Payload Namespaces carry PSA labels from their own manifests, which the syncer never owns and therefore can neither freeze nor remove.
+The resulting rule is one row, not a table:
 
-##### The gap the frozen mode cannot close
+| `status.enforcementMode` | Syncer | Namespace labels |
+|---|---|---|
+| any value, including unset | **not running** | nothing is written, ever. Labels already present are left exactly as they are, because a controller that never applies never prunes |
 
-Freezing labels protects only Namespaces that *have* a label. The kube-apiserver's PodSecurity configuration carries no Namespace exemptions at all — [`defaultconfig.yaml`](https://github.com/openshift/cluster-kube-apiserver-operator/blob/master/bindata/assets/config/defaultconfig.yaml) exempts exactly one username, `system:serviceaccount:openshift-infra:build-controller` — so any Namespace without its own `enforce` label falls through to the global default and is relaxed when that default moves to `privileged` in release `n`.
+Today the choice is made once at construction from the `OpenShiftPodSecurityAdmission` gate ([`psalabelsyncer.go#L17-L50`](https://github.com/openshift/cluster-policy-controller/blob/master/pkg/cmd/controller/psalabelsyncer.go#L17-L50)), with enforcing as the default branch and advising as the alternative. Both branches go. `cluster-policy-controller` gains no watch on `PSAEnforcementConfig` and no dependency on the `cluster-kube-apiserver-operator`; the change is a deletion from its startup path. Whether the controller's code is removed outright or left in place unreferenced is [an open question](#is-the-syncer-deleted-or-merely-never-started) whose answer depends on MicroShift.
 
-`openshift-operators` is exactly that Namespace, and it is the one OLM users install operator bundles into. It is deliberately kept out of the `nsexemptions` list — the list carries an `IMPORTANT:` comment explaining that it must not be exempted — but it is then caught by the `openshift-` prefix skip, so the syncer never labels it. It has neither a syncer-written label nor a manifest-written one, and is enforced at `restricted` today purely by the global default. On upgrade to release `n` its effective level silently becomes `privileged`, and no mode above prevents that.
+The advising path is the one whose server-side-apply behaviour is [neither freezing nor removing](#freezing-is-not-the-same-as-removing); not running avoids that behaviour rather than having to rebuild it.
+
+None of this affects OpenShift's own Namespaces. `isNSControlled` ([`podsecurity_label_sync_controller.go#L475-L522`](https://github.com/openshift/cluster-policy-controller/blob/master/pkg/psalabelsyncer/podsecurity_label_sync_controller.go#L475-L522)) excluded them twice: first against the hardcoded payload list in `nsexemptions`, then by skipping any Namespace prefixed `openshift-` outright. Payload Namespaces carry PSA labels from their own manifests, which the syncer never owned and therefore could neither write nor remove.
+
+##### What retiring it costs
+
+Three things the syncer produced stop being produced. The first two are load-bearing elsewhere in this enhancement; the third is the one an administrator will actually notice.
+
+- **No Namespace gets a computed `enforce` label, on any cluster, ever again.** On a cluster that opts in to `Baseline` or `Restricted`, the global level applies directly to every Namespace without a label of its own — including Namespaces created after the opt-in, which nothing labels and which the last evaluation could not have seen. Under the previous design those Namespaces were caught by the syncer; now whoever owns the Namespace is responsible for labelling it if it cannot meet the cluster-wide standard. For payload Namespaces that owner is the component team, the label travels in the CVO manifest, and CI enforces it. For user Namespaces it is the administrator, with no equivalent check. This is upstream Kubernetes' behaviour and it is defensible, but it is not what OpenShift administrators have experienced, and it means opting in is a sharper action than it was. It is recorded as a risk in [Risks and Mitigations](#risks-and-mitigations) and as a drawback in [Drawbacks](#drawbacks).
+
+- **The `security.openshift.io/MinimallySufficientPodSecurityStandard` annotation stops being maintained.** It is written by the syncer ([`podsecurity_label_sync_controller.go#L375-L380`](https://github.com/openshift/cluster-policy-controller/blob/c9e9a348260921c9e788e33a51e904502cbe2d13/pkg/psalabelsyncer/podsecurity_label_sync_controller.go#L375-L380)) and consumed by the `PodSecurityReadinessController` ([`violation.go#L55`](https://github.com/openshift/cluster-kube-apiserver-operator/blob/c128b63ac1e9c45aa67032987b96370af783843e/pkg/operator/podsecurityreadinesscontroller/violation.go#L55)) to evaluate Namespaces whose `warn`/`audit` labels have been overridden. With the syncer retired, that input goes stale on existing Namespaces and is absent on new ones — on every cluster, not only the ones that have opted out. The SCC-to-PSS computation therefore has to move into the `PodSecurityReadinessController`, which already sweeps every Namespace. This is no longer optional or conditional work: it is the only remaining implementation of the mapping on an OpenShift cluster. See [The minimally sufficient standard must still be computed](#the-minimally-sufficient-standard-must-still-be-computed) and [Open Questions](#who-computes-the-minimally-sufficient-standard-now-the-syncer-is-retired).
+- **The fossilised-label detection in [Detecting fossilised labels](#detecting-fossilised-labels) depends on that same annotation** to know that a retained `enforce` label is now more restrictive than the Namespace needs. It works only if the computation is relocated as above.
+
+Per-Namespace `warn` and `audit` labels also stop being written, but nothing depends on them: the kube-apiserver's global configuration pins `warn` and `audit` to `restricted` regardless of the enforcement level (see [PodSecurity Configuration](#podsecurity-configuration)), so violations remain observable cluster-wide without any per-Namespace label.
+
+##### The gap retiring the syncer cannot close
+
+Retaining existing labels protects only Namespaces that *have* a label. The kube-apiserver's PodSecurity configuration carries no Namespace exemptions at all — [`defaultconfig.yaml`](https://github.com/openshift/cluster-kube-apiserver-operator/blob/master/bindata/assets/config/defaultconfig.yaml) exempts exactly one username, `system:serviceaccount:openshift-infra:build-controller` — so any Namespace without its own `enforce` label falls through to the global default and is relaxed when that default moves to `privileged` in release `n`.
+
+`openshift-operators` is exactly that Namespace, and it is the one OLM users install operator bundles into. It is deliberately kept out of the `nsexemptions` list — the list carries an `IMPORTANT:` comment explaining that it must not be exempted — but it is then caught by the `openshift-` prefix skip, so the syncer never labelled it even when it ran. It has neither a syncer-written label nor a manifest-written one, and is enforced at `restricted` today purely by the global default. On upgrade to release `n` its effective level silently becomes `privileged`, and nothing above prevents that.
 
 This is the same `openshift-operators` hole described in [Risks and Mitigations](#risks-and-mitigations), seen from the relaxation side rather than the breakage side. It is not resolved by this enhancement and is [an open question](#openshift-operators-has-no-label-to-freeze).
 
-##### Why the opt-out must remove labels
+##### Existing labels are retained, and the opt-out does not remove them
 
-Per-Namespace PSA labels take precedence over the global default in the kube-apiserver's admission configuration. The config observer only sets that global default from `status.enforcementMode`, so on an upgraded cluster — where essentially every managed Namespace carries a syncer-written `enforce` label — lowering the global default on its own changes nothing at all. Without the opt-out mode the API would be inert on precisely the clusters this enhancement exists to help: the ones already struggling under mandatory enforcement.
+Because a controller that does not run performs no server-side apply, the `pod-security.kubernetes.io/enforce` labels already on an upgraded cluster are retained by construction — and stay retained, since no enforcement mode brings the syncer back to reconcile them. That is the intended outcome, for three reasons:
 
-This places the opt-out in the label syncer rather than in the config observer, which has a consequence for sequencing. The observer lowering the global default is the cosmetic half of the change; the syncer removing labels is the half that takes effect. The handshake between the two is described in [Cross-operator ordering](#cross-operator-ordering), and the ordering requirement for lowering is the reverse of the one for raising.
+- **Optional is not the same as off.** Stripping every syncer-written `enforce` label on upgrade would not make enforcement optional; it would replace "every cluster must enforce" with "every cluster must stop enforcing". Optionality means the cluster's existing state persists until an administrator chooses otherwise, and `PSAEnforcementConfig` is how they choose.
+- **One direction is reversible and the other is not.** Retention can be undone by hand. Stripping cannot: server-side apply deletes the value, and returning to `Restricted` recomputes labels from current SCC and RBAC state rather than restoring what was there. Where only one direction is recoverable, the upgrade should take it.
+- **The exposure is compliance, not availability.** Relaxing enforcement can only admit more workloads; it breaks nothing and causes no outage. The risk is a security control disappearing without announcement from clusters that may be attesting to it, and being discovered long afterwards.
 
-Removing labels is also not free to undo. `Privileged` → `Restricted` → `Privileged` is not a round trip: the first transition deletes labels, the second recomputes and rewrites them from current SCC and RBAC state, which may differ from what was deleted. Administrators toggling the field should expect the second `Privileged` to act on a different set of Namespaces than the first.
+The consequence has to be stated plainly, because it cuts against the feature's purpose. Per-Namespace PSA labels take precedence over the global default in the kube-apiserver's admission configuration. The config observer only sets that global default. So on an upgraded cluster — where essentially every managed Namespace carries a syncer-written `enforce` label — setting `enforcementMode: Privileged` lowers the global default and changes the effective level of *nothing that already has a label*. The API is inert on precisely the clusters this enhancement exists to help, until somebody removes those labels.
+
+Removing them is a one-shot cleanup, not a syncer mode: the syncer is retired, so it cannot be the thing that does it in any configuration. Whether that cleanup ships, what performs it, and whether it is automatic on the transition to `Privileged` or a documented `oc` procedure, is [an open question](#removing-retained-enforce-labels-on-opt-out). Until it is answered, [Drawbacks](#drawbacks) records the inertness as real.
 
 ##### What release `n` inherits
 
-An earlier draft required release `n-1` to be able to remove the `pod-security.kubernetes.io/enforce` labels set in release `n`. That requirement has been dropped: the label is not introduced by release `n`. It is written today, by the syncer's enforcing default, on every cluster with `OpenShiftPodSecurityAdmission` in `Default`. Release `n` stops writing it on newly evaluated Namespaces rather than starting to.
+An earlier draft required release `n-1` to be able to remove the `pod-security.kubernetes.io/enforce` labels set in release `n`. That requirement has been dropped: the label is not introduced by release `n`. It is written today, by the syncer's enforcing default, on every cluster with `OpenShiftPodSecurityAdmission` in `Default`. Release `n` stops writing it rather than starting to.
 
-What release `n` does inherit is the labels already on upgraded clusters. Under the three modes above those labels are retained by design, and the frozen mode is what has to be built to guarantee it.
+What release `n` does inherit is the labels already on upgraded clusters, retained as described above.
 
 #### Existing Clusters
 
-Every cluster running today has `OpenShiftPodSecurityAdmission` in its `Default` feature set, and the label syncer's **enforcing** constructor is the default branch ([`psalabelsyncer.go#L17-L50`](https://github.com/openshift/cluster-policy-controller/blob/master/pkg/cmd/controller/psalabelsyncer.go#L17-L50)) — advising mode requires explicitly passing `OpenShiftPodSecurityAdmission=false`. So `pod-security.kubernetes.io/enforce` labels are already present across the fleet, applied via server-side apply under the field manager `pod-security-admission-label-synchronization-controller` ([`podsecurity_label_sync_controller.go#L386`](https://github.com/openshift/cluster-policy-controller/blob/master/pkg/psalabelsyncer/podsecurity_label_sync_controller.go#L386)).
+Every cluster running today has `OpenShiftPodSecurityAdmission` in its `Default` feature set, and the label syncer's **enforcing** constructor is the default branch ([`psalabelsyncer.go#L17-L50`](https://github.com/openshift/cluster-policy-controller/blob/master/pkg/cmd/controller/psalabelsyncer.go#L17-L50)) — the non-enforcing path requires explicitly passing `OpenShiftPodSecurityAdmission=false`. So `pod-security.kubernetes.io/enforce` labels are already present across the fleet, applied via server-side apply under the field manager `pod-security-admission-label-synchronization-controller` ([`podsecurity_label_sync_controller.go#L386`](https://github.com/openshift/cluster-policy-controller/blob/master/pkg/psalabelsyncer/podsecurity_label_sync_controller.go#L386)).
 
-Moving the syncer to advising mode stops it writing new labels. It does not remove the existing ones, and no code path in any component removes them.
+Retiring the syncer stops it writing new labels. It does not remove the existing ones, no code path in any component removes them, and — because no enforcement mode restarts the syncer — nothing ever reconciles them again either. They are frozen at whatever value the last pre-upgrade sync left.
 
 ##### The labels are retained
 
@@ -695,25 +785,30 @@ Retaining them unchanged, however, introduces a regression of its own. Consider 
 
 1. An administrator grants that Namespace's ServiceAccount the `anyuid` SCC, expecting to run a workload that needs a fixed UID.
 2. Before release `n`, the syncer would have recomputed the Namespace's minimally sufficient standard as `baseline` and relaxed the label accordingly.
-3. In release `n` the syncer no longer writes the enforce label, so it stays pinned at `restricted`.
+3. In release `n` the syncer is not running, so the label stays pinned at `restricted`.
 4. The workload is rejected at admission, on a cluster whose administrator never opted into this feature and has no reason to associate the failure with an upgrade.
 
-The label is now a fossil: it records a decision made by a controller that has stopped maintaining it.
+The label is now a fossil: it records a decision made by a controller that is no longer running.
 
-##### Annotation-only mode
+Because the syncer is retired unconditionally, there is no configuration that resolves this. Under the mode-switched design an administrator hitting this could opt in to `Restricted`, which would restart the syncer and cause it to recompute and relax the label on its next sync — an obscure remedy, but a remedy. That no longer exists. The only fixes are to edit the label by hand or to delete it and let the Namespace fall to the global default, and the [alert](#detecting-fossilised-labels) is what tells the administrator to do so.
 
-To prevent that, the syncer is not switched off. It continues to run in **annotation-only** mode: it keeps computing each Namespace's minimally sufficient standard and writing it to the `security.openshift.io/MinimallySufficientPodSecurityStandard` annotation, while no longer writing `pod-security.kubernetes.io/enforce`.
+##### The minimally sufficient standard must still be computed
 
-Two changes are required beyond the mode switch:
+Detecting that fossil requires knowing what the Namespace's minimally sufficient standard *would* be, which is the calculation the syncer used to perform and record in `security.openshift.io/MinimallySufficientPodSecurityStandard`. With the syncer retired, nothing performs it on any cluster in any mode, so relocating this computation is required work for this enhancement rather than a mitigation for one configuration of it.
 
-- **The annotation write is decoupled from the label write.** Today both happen in the same apply and `sync` returns early for Namespaces where `isNSControlled` is false ([`podsecurity_label_sync_controller.go#L204`](https://github.com/openshift/cluster-policy-controller/blob/master/pkg/psalabelsyncer/podsecurity_label_sync_controller.go#L204)), so uncontrolled Namespaces — including every `openshift-`-prefixed one — receive no annotation at all and have no computed baseline to compare against. The annotation must be written independently of whether the syncer owns the Namespace's labels.
-- **This does not alter enforcement anywhere.** The annotation is diagnostic and is not read by any admission path. In particular, payload Namespaces set their PSA labels explicitly in their own CVO manifests — `openshift-kube-apiserver-operator` is pinned `restricted` and `openshift-kube-apiserver` `privileged` — so the `Restricted`-by-default expectation that OpenShift components are developed against is held by those manifests, not by the syncer or the global default, and is unaffected. For such Namespaces the annotation may report a *lower* minimally sufficient standard than the label enforces. That is informational and must not be read as a recommendation to relax a deliberately pinned Namespace.
+An earlier draft solved this by keeping the syncer alive in an annotation-only mode. That is rejected for the reasons in [Why the syncer is retired outright](#why-the-syncer-is-retired-outright): a controller that still watches every Namespace, every ServiceAccount and every SCC, and still writes Namespace metadata, is not retired in any sense an administrator would recognise, and it is the mode whose server-side-apply semantics cause the non-deterministic label decay described below.
+
+The calculation moves instead to the `PodSecurityReadinessController`, which already sweeps every Namespace on a fixed interval and already consumes the annotation today. Relocating it has three consequences that the annotation-only design did not have:
+
+- **Coverage is no longer limited to syncer-controlled Namespaces.** The syncer's `sync` returns early where `isNSControlled` is false ([`podsecurity_label_sync_controller.go#L204`](https://github.com/openshift/cluster-policy-controller/blob/master/pkg/psalabelsyncer/podsecurity_label_sync_controller.go#L204)), so uncontrolled Namespaces — including every `openshift-`-prefixed one — never received an annotation and had no computed baseline to compare against. A readiness-controller-side computation has no such restriction.
+- **It is a read, not a write.** The readiness controller can hold the computed standard in `status` rather than stamping it onto Namespaces, which removes the last writer from Namespace PSA metadata on every cluster, in every mode. Whether it is still worth writing the annotation for support and must-gather is [an open question](#who-computes-the-minimally-sufficient-standard-now-the-syncer-is-retired).
+- **It changes nothing about enforcement.** The value is diagnostic and is not read by any admission path. Payload Namespaces set their PSA labels explicitly in their own CVO manifests — `openshift-kube-apiserver-operator` is pinned `restricted` and `openshift-kube-apiserver` `privileged` — so the `Restricted`-by-default expectation that OpenShift components are developed against is held by those manifests, not by the syncer or the global default, and is unaffected. For such Namespaces the computed standard may be *lower* than the label enforces; that is informational and must not be read as a recommendation to relax a deliberately pinned Namespace.
 
 ##### Detecting fossilised labels
 
-With the annotation maintained everywhere, a Namespace whose enforce label is more restrictive than its computed minimum is detectable. This drives a metric and an alert, so the `anyuid` case above surfaces to the administrator instead of being debugged cold.
+With the minimally sufficient standard computed for every Namespace, a Namespace whose enforce label is more restrictive than that minimum is detectable. This drives a metric and an alert, so the `anyuid` case above surfaces to the administrator instead of being debugged cold.
 
-The alert must not fire on labels an administrator set deliberately. Ownership is recorded in `metadata.managedFields` and is already parsed by the syncer for its own write decisions ([`extractNSFieldsPerManager`](https://github.com/openshift/cluster-policy-controller/blob/master/pkg/psalabelsyncer/podsecurity_label_sync_controller.go#L546), [`getManagerForLabel`](https://github.com/openshift/cluster-policy-controller/blob/master/pkg/psalabelsyncer/podsecurity_label_sync_controller.go#L562)), tracked per label key rather than per Namespace. A label written with `oc label`, `oc edit` or by a GitOps controller carries that manager's name and is plainly distinguishable from one the syncer wrote.
+The alert must not fire on labels an administrator set deliberately. Ownership is recorded in `metadata.managedFields`, tracked per label key rather than per Namespace, and there is existing precedent for parsing it in the syncer's own write decisions ([`extractNSFieldsPerManager`](https://github.com/openshift/cluster-policy-controller/blob/master/pkg/psalabelsyncer/podsecurity_label_sync_controller.go#L546), [`getManagerForLabel`](https://github.com/openshift/cluster-policy-controller/blob/master/pkg/psalabelsyncer/podsecurity_label_sync_controller.go#L562)) that the readiness controller can follow. A label written with `oc label`, `oc edit` or by a GitOps controller carries that manager's name and is plainly distinguishable from one the syncer wrote before it was retired.
 
 Ownership resolves to three cases:
 
@@ -733,19 +828,23 @@ The change in default posture, the retention of existing labels, and the new ale
 
 #### New Installation
 
-Fresh installs won't have PSA enabled by default and will be disabled.
-If the system administrator does not configure PSA at install time, `spec.enforcementMode` is unset, which resolves to `Privileged`.
-This means that the system administrator can electively increase the value of `spec.enforcementMode` to the level of enforcement they are comfortable with.
-The System Administrator needs to either disable PSA or configure the new API’s `spec.enforcementMode`, for `spec.enforcementMode = Privileged` to revert this.
-There is no need for `PodSecurityReadinessController` to run as OpenShift workloads and namespaces should have been labelled appropriately. <u>It would need to run if enabled in existing clusters or when workloads are added as there will be existing customer workloads and namespaces.</u>
+Fresh installs are not enforcing PSA by default. If the system administrator does not configure PSA at install time, `spec.enforcementMode` is unset, which resolves to `Privileged`: the kube-apiserver's global `enforce` level is `privileged`.
+
+Nothing else about PSA is switched off. The `PodSecurity` admission plugin is still loaded, `warn` and `audit` are still pinned to `restricted`, the `PodSecurityReadinessController` still evaluates the cluster, and per-Namespace `pod-security.kubernetes.io/*` labels are still honoured. "PSA is disabled" on a fresh install means exactly `enforce: privileged`, and nothing more.
+
+From there the administrator electively raises `spec.enforcementMode` to the level they are comfortable with, and returns it to `Privileged` — or unsets it — to go back.
+
+A fresh install is the cleanest case for this design, and the only one where retiring the syncer costs nothing. No Namespace carries a syncer-written label, so there are no fossils, the API is not inert, and `Privileged` really is the cluster's effective posture rather than only its default. The trade appears later: once the administrator opts in to `Restricted`, every Namespace their workloads create from then on is `restricted` unless they label it, and nothing is computing labels on their behalf. That is the behaviour to document, because it is what an administrator adopting this on a new cluster will meet first.
+
+There is no need for the `PodSecurityReadinessController` to gate anything on a fresh install, because OpenShift's own workloads and Namespaces are labelled appropriately by their own manifests. It becomes load-bearing once customer workloads and Namespaces exist, and on existing clusters where they already do.
 
 ### Risks and Mitigations
 
 - **The out-of-the-box security posture is reduced.** Clusters that take no action end up less restrictive than they are today. *Mitigation:* per-Namespace `pod-security.kubernetes.io/*` labels continue to take precedence and are unaffected; SCCs, OpenShift's primary workload admission control, are unchanged; existing enforce labels on upgraded clusters are retained rather than removed; and the change is called out in the release note for release `n`. This risk is not fully mitigated by design — it is the trade this enhancement makes — and it requires explicit security sign-off before the EP is marked implementable.
 - **A clean evaluation is not a guarantee.** PSA is validating-admission only, so a workload that is not running at evaluation time, or that is recreated later by a drain or upgrade, can fail long after an administrator was told the cluster was clean. *Mitigation:* workload templates are evaluated alongside live Pods, and `warn`/`audit` stay pinned to `restricted` so violations keep surfacing continuously. See [Scope of the evaluation](#scope-of-the-evaluation).
 - **An empty violation list can mean "no violations" or "never evaluated".** *Mitigation:* the `Evaluated` and `StatusStale` conditions gate any raise in enforcement, and repeated evaluation failure degrades the `kube-apiserver` ClusterOperator. See [Freshness is an interlock, not a hint](#freshness-is-an-interlock-not-a-hint).
-- **`openshift-operators` is deliberately non-exempt from the syncer but is skipped by the `openshift-` prefix rule**, so once the syncer stops writing enforce labels that Namespace has neither a computed label nor a manifest-pinned one, and falls to the global default. On a cluster that opts into `Restricted`, every operator bundle needing more than restricted then fails admission. **This is currently unmitigated**: the happy path of the feature is a mass-breakage path for OLM users. Decoupling the annotation write makes the situation diagnosable but does not fix it. OLM and layered-product reviewers are required, and the likely mitigation — keeping the syncer enforcing for `openshift-*` Namespaces while disabling it for user Namespaces — still has to be written down and agreed.
-- **Two operators reconcile against the same inputs on independent timing.** If the Config Observer raises the global level before the syncer has stamped labels, workloads in those Namespaces are rejected; the reverse ordering is required when lowering. *Mitigation:* the `AllManagedNamespacesLabeled` condition is intended as the handshake, but the full coordination protocol is not yet specified. See [Open Questions](#cross-operator-ordering).
+- **Opting in has no runtime safety net for unlabelled user Namespaces.** With the syncer retired, `Baseline` or `Restricted` applies directly to every Namespace that carries no `enforce` label of its own. Nothing computes a gentler per-Namespace standard, so a Namespace that cannot meet the requested level fails admission rather than being relaxed. *Mitigation:* for payload Namespaces, the CVO manifests supply the labels and the monitor tests in [Test Plan](#test-plan) verify they are correct and complete before the release ships — so the risk here is not a platform risk. For user Namespaces, the evaluation must report zero violating Namespaces before the observer raises the level, and the administrator can label any Namespace by hand. *Not mitigated:* user Namespaces created after the evaluation, whose workloads nothing has assessed; and OLM's Namespaces, which express their requirement through SCC configuration rather than labels and so are outside both the manifests and the labelling test — see [`openshift-operators` has no label to freeze](#openshift-operators-has-no-label-to-freeze). This is the direct consequence of [Why the syncer is retired outright](#why-the-syncer-is-retired-outright) and it makes opting in a materially sharper action for user workloads than it was under mandatory enforcement with a syncer.
+- **`openshift-operators` is deliberately non-exempt from the syncer but is skipped by the `openshift-` prefix rule**, so it has neither a computed label nor a manifest-pinned one and falls to the global default. On a cluster that opts into `Restricted`, every operator bundle needing more than restricted then fails admission. **This is currently unmitigated**: the happy path of the feature is a mass-breakage path for OLM users. Retiring the syncer neither causes nor worsens this — the prefix skip means the syncer never labelled `openshift-operators` in the first place — but it removes one candidate mitigation, since there is no longer a running syncer that could be taught to make it an exception. OLM and layered-product reviewers are required, and the mitigation still has to be chosen; the candidates are in [`openshift-operators` has no label to freeze](#openshift-operators-has-no-label-to-freeze).
 - **Every enforcement change rolls the kube-apiserver.** On SNO that is an API outage, including on the disable path. *Mitigation:* lowering is unconditional so it is never blocked, the cost is documented in the break-glass procedure, and the observer's inputs are debounced.
 - **The subject-type annotation is absent on pre-existing Pods**, which makes both possible readings wrong — see [Open Questions](#annotation-coverage-on-upgraded-clusters). Unmitigated pending that decision.
 
@@ -755,9 +854,11 @@ Security review is required from the OpenShift security architecture group, cove
 
 - It ships a less secure default than the product has today, and no mechanism preserves the current default for clusters that take no action. For a product whose positioning includes "secure by default", that is a real cost and not only a documentation problem.
 - It adds a second place to look for PSA state. The effective configuration already lives in the kube-apiserver's admission config, in Namespace labels and in the feature gate; a new CRD adds a fourth, with its own reconcile loop and its own staleness semantics. One optional field on an existing config resource would avoid that; see [Alternatives (Not Implemented)](#alternatives-not-implemented).
-- It bundles three separable changes — the already-shipped SCC annotation work, the retirement of the label syncer's enforcing mode, and the new configuration API. Approving the API implicitly approves the retirement, which has by far the largest blast radius of the three and is currently receiving the least review attention.
-- Retained enforce labels become unmaintained. The fossilised-label alert makes them visible, but the underlying situation — a label written by a controller that no longer updates it — is a new class of cluster state that support will have to reason about for as long as those clusters live.
-- **The feature does nothing on an upgraded cluster until the administrator acts.** Because existing `enforce` labels are frozen rather than removed, a cluster that upgrades into release `n` sees no change to any Namespace that already has an effective level. The clusters most in need of relief — those already struggling under mandatory enforcement — get it only after explicitly setting `enforcementMode: Privileged`. This is the deliberate trade argued in [Three modes, not two](#three-modes-not-two), but it means the headline claim "PSA enforcement is now optional" is true of the product and not yet true of any given upgraded cluster, and the release note has to carry that distinction.
+- It bundles three separable changes — the already-shipped SCC annotation work, retiring the PSA label syncer, and the new configuration API. Approving the API implicitly approves the syncer's removal, which has by far the largest blast radius of the three and is currently receiving the least review attention. Retiring the syncer is not even conditional on the API: it happens on every cluster whatever `spec.enforcementMode` says, so a reviewer who evaluates only the API has not evaluated the change.
+- **Opting in is a weaker guarantee than the enforcement it replaces.** Under today's mandatory `restricted`, the syncer ensures each Namespace ends up at the strictest standard it can actually meet. Under this design, `Restricted` means `restricted` everywhere unlabelled — stricter in principle, but only survivable if the cluster is already clean, and offering nothing to a cluster that is mostly clean. There is no longer a per-Namespace middle ground, so administrators with heterogeneous clusters must either label Namespaces themselves or stay at `Privileged`. Some clusters that today run a syncer-computed mix of `restricted` and `baseline` have no equivalent state available after this change.
+- Retiring the syncer removes the cluster's only maintained source of `security.openshift.io/MinimallySufficientPodSecurityStandard`, which the readiness evaluation and the fossilised-label alert both consume. The calculation has to be rebuilt in the `PodSecurityReadinessController` — net new work that the earlier annotation-only design avoided, and a second implementation of the SCC-to-PSS mapping unless it is factored into a shared library. Because the syncer never comes back, this relocation is a hard prerequisite rather than a mitigation. See [Who computes the minimally sufficient standard now the syncer is retired](#who-computes-the-minimally-sufficient-standard-now-the-syncer-is-retired).
+- Retained enforce labels become unmaintained, permanently. The fossilised-label alert makes them visible, but the underlying situation — a label written by a controller that no longer exists, which no supported action will ever refresh — is a new class of cluster state that support will have to reason about for as long as those clusters live.
+- **The feature does nothing on an upgraded cluster until the labels are dealt with.** Because existing `enforce` labels are retained rather than removed, and because retiring the syncer means no component removes them, a cluster that upgrades into release `n` sees no change to any Namespace that already has an effective level — and setting `enforcementMode: Privileged` does not change that either, since per-Namespace labels outrank the global default. The clusters most in need of relief — those already struggling under mandatory enforcement — get none from the API alone. This is the deliberate trade argued in [Existing labels are retained, and the opt-out does not remove them](#existing-labels-are-retained-and-the-opt-out-does-not-remove-them), but it means the headline claim "PSA enforcement is now optional" is true of the product and not yet true of any given upgraded cluster, and the release note has to carry that distinction.
 - It introduces a configuration change whose application costs a control-plane rollout, which on SNO is an outage, in both directions.
 
 ## Alternatives (Not Implemented)
@@ -795,27 +896,54 @@ This will give the user the ability to see how old the basis for the decision is
 
 The likely answer is an explicit third state surfaced in the per-Namespace `reason`, plus a coverage signal — the proportion of Pods carrying the annotation — that the Config Observer can gate on. Additionally, nothing currently states that the SCC admission plugin overwrites a user-supplied value for this annotation; if it did not, a user able to create Pods could hide a violation from the evaluation.
 
-### PSA label syncer turned off
+### PSA label syncer in OpenShift's own CI
 
-The PSA Label Syncer will now be turned off by default on all clusters. This is because its use case was to allow customers to automatically migrate customers to `Restricted` PSS. As the default will now be `Privileged` on customer workloads, it is no longer required.
+The syncer is gone in every mode, per [Why the syncer is retired outright](#why-the-syncer-is-retired-outright). An earlier draft added that OpenShift developers "will remain using the PSA label syncer to ensure OpenShift workloads still comply, such as in monitor and periodic tests", since the expected default PSS for OpenShift's own components stays `Restricted`.
 
-As the expected default PSS for OpenShift developers will remain `Restricted`, they will remain using the PSA label syncer to ensure OpenShift workloads still comply, such as in monitor and periodic tests.
+That claim does not survive contact with the code, and under this design it is not available even if it did. `isNSControlled` skips every Namespace prefixed `openshift-` outright, so the syncer never labelled OpenShift's own Namespaces in the first place; their PSA labels come from their own CVO manifests. Whatever the monitor and periodic tests are actually relying on, it is not the syncer labelling payload Namespaces.
 
-This is stated in several places in this document with different scope — "retired", "off by default on all clusters", "still used by OpenShift developers", "annotation-only mode" — and those statements are not yet reconciled. What is needed is a truth table over {unset or `Privileged`, `Baseline`, `Restricted`} × {payload Namespace, non-exempt `openshift-*` Namespace, user Namespace} saying, for each cell, whether the syncer is active and what it writes.
+What remains to be decided is how CI lanes get a `restricted` cluster at all. Opting in via `PSAEnforcementConfig` sets the global default, which is what payload Namespaces without their own labels would then be held to — but it no longer brings the syncer with it, so any test Namespace the lanes create themselves (`e2e-test-*` and similar, which are not `openshift-` prefixed and were syncer-managed) now inherits `restricted` with nothing computing a gentler label for it. Whether that breaks existing e2e suites, and whether the fix is per-test labelling or a broader exemption, is the input the [Test Plan](#test-plan) is missing.
+
+### Who computes the minimally sufficient standard now the syncer is retired
+
+Retiring the syncer stops `security.openshift.io/MinimallySufficientPodSecurityStandard` being maintained on every cluster, in every mode, and both the readiness evaluation ([`violation.go#L55`](https://github.com/openshift/cluster-kube-apiserver-operator/blob/c128b63ac1e9c45aa67032987b96370af783843e/pkg/operator/podsecurityreadinesscontroller/violation.go#L55)) and [Detecting fossilised labels](#detecting-fossilised-labels) consume it. [What retiring it costs](#what-retiring-it-costs) moves the SCC-to-PSS computation into the `PodSecurityReadinessController`; because there is no mode in which the syncer still supplies the value, that relocation is a prerequisite for this enhancement rather than a choice. What is not decided:
+
+- whether the relocated computation still writes the annotation onto Namespaces — useful for `oc get ns -o yaml`, support and must-gather, but it puts a writer back onto Namespace metadata on clusters that have opted out — or holds the value only in the controller's own `status` and metrics;
+- whether the mapping *moves* to `cluster-kube-apiserver-operator` or is *shared* with `cluster-policy-controller`. This follows from [Is the syncer deleted or merely never started](#is-the-syncer-deleted-or-merely-never-started): if the syncer's code goes, the mapping moves and there is one implementation; if it stays for MicroShift's benefit, the mapping has two callers in two repositories and must be a shared library rather than a copy, or it drifts from itself as well as from upstream. Either way the [hardcoded SCC to PSA mapping](#non-urgent-but-important-hardcoded-scc-to-psa-mapping) test has to cover whatever survives;
+- what the annotation's value means during the transition, when some Namespaces carry a value written by the old syncer and others carry one written by the readiness controller.
+
+### Removing retained `enforce` labels on opt-out
+
+Because the syncer is retired rather than left advising, nothing prunes the `pod-security.kubernetes.io/enforce` labels it wrote before the upgrade. Per-Namespace labels outrank the global default, so on an upgraded cluster `enforcementMode: Privileged` lowers the default and changes the effective level of nothing that already carries a label. See [Existing labels are retained, and the opt-out does not remove them](#existing-labels-are-retained-and-the-opt-out-does-not-remove-them).
+
+The labels outlive the opt-out question, too. Since no mode restarts the syncer, a cluster that later opts back in to `Restricted` still has those labels, still unmaintained, and still outranking the level it just asked for — so whatever is decided here is the *only* mechanism by which a pre-upgrade label is ever removed.
+
+The options are:
+
+- **Ship nothing.** The API is honest about only governing the global default, and administrators who want the labels gone remove them themselves. Cheapest, and consistent with this enhancement being aimed at newly created clusters — but it means the opt-out does not deliver relief to the clusters that most need it.
+- **A one-shot cleanup on transition to `Privileged`**, performed by the `cluster-kube-apiserver-operator` or a dedicated job rather than by the syncer, deleting only labels whose `managedFields` owner is the syncer. This is the behaviour the earlier three-mode draft attributed to the syncer's opt-out mode. The hazard is that ownership records are lost by backup/restore and etcd restore, so an ownership-based delete fails *unsafe* in a way an ownership-based write does not — the point made in [Detecting fossilised labels](#detecting-fossilised-labels).
+- **A documented `oc` procedure** in [Support Procedures](#support-procedures), so the deletion is a deliberate administrator act with a visible blast radius.
+
+Whichever is chosen, the observer lowering the global default and the labels being removed are two halves of the same change, and they are not ordered with respect to each other. Lowering first is harmless — a Namespace keeps its label and its current level until the label goes. Removing first is not: between the delete and the kube-apiserver rolling to a `privileged` revision, a Namespace that lost a `baseline` label is governed by a global default that is still `restricted`, which is *stricter* than what it had. Any cleanup mechanism therefore has to run after the observer has taken effect, not merely after the administrator has asked for it.
 
 ### `openshift-operators` has no label to freeze
 
-Described in [The gap the frozen mode cannot close](#the-gap-the-frozen-mode-cannot-close): `openshift-operators` is non-exempt but prefix-skipped, so it carries no `enforce` label from any source and is enforced at `restricted` today only by the global default. Release `n` relaxes it to `privileged` with no signal and no way to freeze it.
+Described in [The gap retiring the syncer cannot close](#the-gap-retiring-the-syncer-cannot-close): `openshift-operators` is non-exempt but prefix-skipped, so it carries no `enforce` label from any source and is enforced at `restricted` today only by the global default. Release `n` relaxes it to `privileged` with no signal, and there is no label to retain because there was never a label.
 
-Options are to add it to the PodSecurity configuration's Namespace exemptions, to make the syncer manage it as a named exception to the prefix skip, or to have OLM ship an explicit label on the Namespace it owns. The last is the most honest about who owns the decision but requires an OLM-side change and an OLM reviewer, neither of which is currently in this enhancement. Whichever is chosen, the release note for `n` must state the change in effective level for this Namespace explicitly.
+Retiring the syncer removes one of the candidate mitigations — an earlier draft suggested making the syncer manage this Namespace as a named exception to the prefix skip, and there is no longer a syncer to do it. What is left is to add it to the PodSecurity configuration's Namespace exemptions, or to have OLM ship an explicit label on the Namespace it owns. The latter is the most honest about who owns the decision but requires an OLM-side change and an OLM reviewer, neither of which is currently in this enhancement. Whichever is chosen, the release note for `n` must state the change in effective level for this Namespace explicitly.
 
 ### HyperShift configuration surface
 
 Is the administrator-facing surface for a hosted cluster a guest-cluster `PSAEnforcementConfig` CR, or a field under `HostedCluster.spec.configuration`? The recommendation is `spec.configuration`, matching existing `ClusterConfiguration` plumbing, but this determines RBAC, tenancy and whether a tenant may change their own enforcement level at all. See [Hypershift / Hosted Control Planes](#hypershift--hosted-control-planes).
 
-### Cross-operator ordering
+### Is the syncer deleted or merely never started
 
-The Config Observer (in `cluster-kube-apiserver-operator`) and the label syncer (in `cluster-policy-controller`) watch the same inputs on independent reconcile timing. Raising the global level before Namespaces are labelled rejects workloads; lowering requires the opposite order. The `AllManagedNamespacesLabeled` condition is intended as a one-way handshake — the syncer publishes "all managed Namespaces labelled as of generation G", the observer acts only on that — but the generation semantics, and the behaviour on restart, lost watch and leader-election change, are not yet specified.
+This enhancement says the `PodSecurityAdmissionLabelSynchronizationController` never runs on OpenShift, in any enforcement mode. It does not say whether the controller's code is removed from `cluster-policy-controller` or left in the tree with nothing constructing it. The two are very different commitments and the answer is not ours alone to give:
+
+- **Deleted.** The honest expression of the design: a controller nobody may enable cannot rot, cannot be re-enabled by a well-meaning patch, and cannot accumulate a second, divergent copy of the SCC-to-PSS mapping. It also forecloses the option — there is no supported path back short of reverting a deletion.
+- **Left in place, unstarted.** Keeps a revert cheap through the Tech Preview window, and keeps the code available to any consumer of the library that is not OpenShift. The cost is a large body of unreachable, untested code whose CI signal disappears the moment nothing starts it, which is how controllers quietly stop working.
+
+The deciding input is MicroShift, per [Single-node Deployments or MicroShift](#single-node-deployments-or-microshift). MicroShift hardcodes `enforce: restricted` and has no SCC-derived escape for a workload that cannot meet it, so it is the one topology with a live argument for keeping the syncer running. If MicroShift keeps it, the code stays and must stay tested and shared; if MicroShift follows OpenShift, deletion is available. **This enhancement should not merge as `implementable` with this question open**, because the answer changes which repositories the implementation touches and whether [Who computes the minimally sufficient standard now the syncer is retired](#who-computes-the-minimally-sufficient-standard-now-the-syncer-is-retired) is a move or a split.
 
 ### Evaluation cost and pagination
 
@@ -827,17 +955,37 @@ The Summary, Motivation and [New Installation](#new-installation) all state that
 
 ## Test Plan
 
-### Switching between PSA modes and enable/disable .
+### Switching between PSA modes and enable/disable
 
-We need to be able to switch between different PSA modes (`restricted`,`baseline`, `privleged`) when PSA is enabled. Additionally, we should be able to enable or disable the feature at will. Tests must be added to ensure this is possible.
+We need to be able to switch between the PSA modes (`Restricted`, `Baseline`, `Privileged`) and to opt in or out at will. Tests must cover, for each transition:
+
+- the kube-apiserver's effective `enforce` level, read from the revisioned `config-<revision>` ConfigMap rather than from `status`, per [Support Procedures](#psaenforcementconfig-appears-to-have-no-effect);
+- **that the PSA label syncer never runs**, in any mode including `Baseline` and `Restricted`. This is not a per-transition assertion so much as an invariant the transition tests must not be able to violate: the controller does not start, and switching modes does not start it. "Not running" is what distinguishes this design from advising mode, so it needs a direct test rather than being inferred from labels not changing;
+- that a Namespace's existing `pod-security.kubernetes.io/enforce` label is **byte-for-byte unchanged** across every transition, including after an unrelated SCC or RBAC change to that Namespace — the churn case that advising mode got wrong, per [Freezing is not the same as removing](#freezing-is-not-the-same-as-removing) — and including on the transition *back up* to `Restricted`, which under an earlier draft would have rewritten it;
+- that a Namespace with **no** `enforce` label, created while the cluster was at `Privileged`, is held to the global level as soon as the cluster opts in, with nothing computing a gentler label for it. This is the safety-net loss described in [What retiring it costs](#what-retiring-it-costs), and it should be asserted deliberately rather than discovered;
+- that `warn` and `audit` stay pinned to `restricted` in the global configuration in every mode;
+- that the `PodSecurityReadinessController` continues to evaluate while `Privileged` is in force, since "disabled" must not mean the diagnostics stop.
+
+### Monitor tests for managed Namespaces
+
+Retiring the syncer moves the assurance for OpenShift's own Namespaces from a runtime controller to CI. That assurance has to be explicit rather than assumed, because after release `n` there is nothing on a running cluster that would notice a payload Namespace shipping without a label.
+
+- **SCC labelling (exists).** A monitor test already checks that workloads run under the SCC their Namespace's configuration implies. It is unaffected by this enhancement and must not regress once the default posture is `privileged`.
+- **Managed Namespaces are labelled (new, required by this enhancement).** A monitor test asserting that every payload Namespace carries a `pod-security.kubernetes.io/enforce` label from its own manifest. This is what replaces the `AllManagedNamespacesLabeled` condition described in [There is no labelling handshake](#there-is-no-labelling-handshake) — a pre-merge check on the payload rather than a runtime handshake between two operators, which is the right place for it given that payload labels are static and ship in manifests. It must be in place before the default changes in release `n`, not at graduation.
+
+The test cannot cover OLM, which expresses its requirement through SCC configuration rather than Namespace labels. That exclusion has to be encoded in the test rather than left implicit, and it is the same gap tracked in [`openshift-operators` has no label to freeze](#openshift-operators-has-no-label-to-freeze).
+
+Neither test says anything about user-created Namespaces; nothing in CI can. See [Scope of the evaluation](#scope-of-the-evaluation).
 
 ### Non-urgent, but important: Hardcoded SCC to PSA mapping
 
-The PSA label syncer currently maps SCCs to PSS through a hard-coded rule set, and the PSA version is set to `latest`.
+The PSA label syncer maps SCCs to PSS through a hard-coded rule set, with the PSA version set to `latest`.
 This setup risks becoming outdated if the mapping logic changes upstream.
 To protect user workloads, an end-to-end test should fail if the mapping logic no longer behaves as expected.
-Ideally, the PSA label syncer would use the `podsecurityadmission` package directly.
+Ideally the mapping would use the `podsecurityadmission` package directly.
 Otherwise, it can't be guaranteed that all possible SCCs are mapped correctly.
+
+This enhancement inherits the problem rather than introducing it, but it does move where it lives: the mapping follows the `MinimallySufficientPodSecurityStandard` computation into the `PodSecurityReadinessController`, so the test has to target whichever copies survive [Is the syncer deleted or merely never started](#is-the-syncer-deleted-or-merely-never-started). The stakes also rise. Under the syncer the mapping produced a label that was, at worst, wrong for one Namespace; under this design it produces the `reason` text and the violation verdict that an administrator reads when deciding whether opting in is safe for the whole cluster.
 
 ## Graduation Criteria
 > **Draft.** The criteria below are being reworked against `dev-guide/feature-zero-to-hero.md` and currently understate the documented bar — the 14-runs-per-platform requirement is missing, the platform list is incomplete, and the "95% over 7 consecutive days" figure is not the documented window.
@@ -850,14 +998,14 @@ Graduation occurs in a tiered approach.
 
 Prerequisites for the removal:
 
-- all OpenShift workloads and namespaces are labelled appropriately and have the correct SCC pinning;
-- the existing monitor tests do not regress once the default posture is no longer enforcing.
+- all OpenShift workloads and namespaces are labelled appropriately and have the correct SCC pinning, demonstrated by the managed-Namespace labelling monitor test in [Monitor tests for managed Namespaces](#monitor-tests-for-managed-namespaces) rather than by inspection. This is a hard prerequisite: once the syncer is retired and the default is `privileged`, an unlabelled payload Namespace produces no signal on a running cluster, so CI is the only place it can be caught;
+- the existing SCC labelling monitor test does not regress once the default posture is no longer enforcing.
 
 This tier changes only the default. It does not remove the enforcement code paths, and it does not depend on the `PSAEnforcementConfig` API, which is still `TechPreviewNoUpgrade` at this point.
 
 ### Tier 2: graduating the opt-in configuration
 
-In release `n+1`, once the default has moved and clusters are running with enforcement off, we graduate the opt-in path — the `PSAEnforcementConfig` API and the observer and syncer wiring that consume it.
+In release `n+1`, once the default has moved and clusters are running with enforcement off, we graduate the opt-in path — the `PSAEnforcementConfig` API, the `PodSecurityReadinessController` status it depends on, and the Config Observer that consumes it. The label syncer is not part of this tier; it is not a consumer of the API and is already gone by tier 1.
 
 This is a combined API and feature-gate promotion:
 
@@ -872,8 +1020,8 @@ This feature does not pass through Dev Preview. The API is introduced directly a
 Entering Tech Preview requires:
 
 - the API type merged in `openshift/api` with its feature gate, and API validation integration tests alongside it;
-- the `PodSecurityReadinessController` populating `status` end to end, including the `Evaluated`, `StatusStale`, `EnforcementBlocked` and `AllManagedNamespacesLabeled` conditions;
-- the Config Observer and the label syncer both selecting behaviour from `status`, with the absent-CRD path exercised;
+- the `PodSecurityReadinessController` populating `status` end to end, including the `Evaluated`, `StatusStale` and `EnforcementBlocked` conditions, and computing the minimally sufficient standard itself now that the syncer no longer supplies it;
+- the Config Observer selecting the enforcement level from `status`, with the absent-CRD path exercised;
 - the four metrics in [Metrics](#metrics) exposed, and the three alerts in [Alerts](#alerts) written with runbooks;
 - tests labelled `[OCPFeatureGate:PodSecurityAdmissionConfiguration]` and `[Jira:"auth"]`, running in both the TechPreviewNoUpgrade and Default Prow variants.
 
@@ -896,9 +1044,11 @@ In addition, GA requires user-facing documentation in [openshift-docs](https://g
 
 ### Removing a deprecated feature
 
-This enhancement removes no deprecated API. It does deprecate a behaviour: the label syncer's enforcing mode stops being the default in release `n`, and `pod-security.kubernetes.io/enforce` labels the syncer previously wrote stop being maintained.
+This enhancement removes no deprecated API. It removes a behaviour outright: the label syncer stops running in release `n` and does not run again in any configuration, and the `pod-security.kubernetes.io/enforce` labels it previously wrote stop being maintained. This is a removal, not a deprecation with a migration window — there is no supported setting under which the old behaviour returns, which is unusual enough that the release note has to say it plainly rather than describing the feature only as "enforcement is now optional".
 
-Because the behaviour is removed from the default rather than from the code, the deprecation is announced through the release note for release `n` described in [Release note](#release-note), and the resulting unmaintained labels are made visible through the `PodSecurityNamespaceOverRestricted` alert rather than being deleted. Whether the enforcing mode is eventually removed from the code entirely — and whether that retirement is reversible — is not decided by this enhancement.
+Whether the *code* goes with the behaviour is [Is the syncer deleted or merely never started](#is-the-syncer-deleted-or-merely-never-started). Either way, the advising mode is deleted: it no longer has a caller, and removing it also removes the non-deterministic server-side-apply decay described in [Freezing is not the same as removing](#freezing-is-not-the-same-as-removing).
+
+The labels the syncer leaves behind are not deleted with it. They are made visible through the `PodSecurityNamespaceOverRestricted` alert and handled by whatever [Removing retained `enforce` labels on opt-out](#removing-retained-enforce-labels-on-opt-out) settles on.
 
 ## Upgrade / Downgrade Strategy
 
@@ -909,7 +1059,8 @@ Because the behaviour is removed from the default rather than from the code, the
 No change is backported to release `n-1`. An earlier draft proposed backporting the API there; that has been dropped, because release `n-1` contains no consumer of the API and because the CRD and any stored object survive a downgrade regardless of whether `n-1` shipped the type.
 
 - Release `n`:
-  - Remove `OpenShiftPodSecurityAdmission` from the `Default` feature set. This is the change that makes PSA enforcement optional: the config observer's fallback moves from `restricted` to `privileged`, and the label syncer's default moves from enforcing to advising.
+  - Remove `OpenShiftPodSecurityAdmission` from the `Default` feature set. This is the change that makes PSA enforcement optional: the config observer's fallback moves from `restricted` to `privileged`.
+  - Stop starting the label syncer. This is a separate change in `cluster-policy-controller`, and it is unconditional — it is not gated on the feature set, not gated on the API, and not reversed by opting in. See [Why the syncer is retired outright](#why-the-syncer-is-retired-outright).
   - Ship `PSAEnforcementConfig` `v1alpha1` behind `PodSecurityAdmissionConfiguration` in `TechPreviewNoUpgrade`.
   - Enable the `PodSecurityReadinessController` to set the API's `status` — `enforcementMode`, `conditions`, `observedGeneration`, `lastEvaluationTime` and `violatingNamespaces`. It does not write `spec`.
   - Enable the `Config Observer Controller` to set the kube-apiserver's global `PodSecurity` `enforce` level from `status.enforcementMode` when it is `Baseline` or `Restricted`. `Privileged` and unset fall back to the level implied by the `OpenShiftPodSecurityAdmission` gate.
@@ -930,23 +1081,27 @@ Nothing creates the singleton. `config.openshift.io` singletons are rendered by 
 
 That is deliberate, not incidental: `bindata/assets/config/defaultconfig.yaml` ships all six keys as the literal string `invalid-to-force-substitution`, so a kube-apiserver whose PodSecurity block was never substituted fails to start. The constraint this places on the enhancement is hard. The observer may change *which* level it writes based on `status.enforcementMode`, but it may never decline to write one. Both "CRD absent" and "evaluation not yet complete" must resolve to the gate-implied default, which in release `n` is `privileged`.
 
-The sequence on an upgraded cluster is therefore: the kube-apiserver rolls to a revision whose PodSecurity block says `privileged`, because `OpenShiftPodSecurityAdmission` is no longer in the `Default` feature set; the `cluster-policy-controller` restarts in advising mode for the same reason; and nothing further happens until an administrator creates a `PSAEnforcementConfig`. There is no window in which enforcement is *raised* as a side effect of the upgrade.
+The sequence on an upgraded cluster is therefore: the kube-apiserver rolls to a revision whose PodSecurity block says `privileged`, because `OpenShiftPodSecurityAdmission` is no longer in the `Default` feature set; the `cluster-policy-controller` restarts with the label syncer not running, for its own reason rather than because of the feature set; and nothing further happens until an administrator creates a `PSAEnforcementConfig`. There is no window in which enforcement is *raised* as a side effect of the upgrade.
 
 #### The relaxation is not retroactive
 
 The global default only applies to Namespaces that carry no `pod-security.kubernetes.io/enforce` label. On a cluster upgraded from `n-1` most Namespaces do carry one, written by the enforcing label syncer, so those Namespaces keep enforcing at their existing level even though the cluster-wide default has moved to `privileged`.
 
-That is intended. Release `n` changes the default; it does not retroactively rewrite Namespaces that already have an effective level, and the syncer's frozen mode exists to guarantee it. The reasoning, including why this is not a contradiction of the enhancement's purpose, is in [Three modes, not two](#three-modes-not-two). The practical consequence is that an upgraded cluster is opt-in for *new* Namespaces and unchanged for existing ones until the administrator acts.
+That is intended. Release `n` changes the default; it does not retroactively rewrite Namespaces that already have an effective level, and retiring the syncer rather than leaving it advising is what guarantees it. The reasoning, including why this is not a contradiction of the enhancement's purpose, is in [Existing labels are retained, and the opt-out does not remove them](#existing-labels-are-retained-and-the-opt-out-does-not-remove-them). The practical consequence is that an upgraded cluster is opt-in for *new* Namespaces and unchanged for existing ones until those labels are dealt with.
 
 ##### Freezing is not the same as removing
 
-The existing code does not guarantee it, and this is the main piece of implementation work the enhancement adds to the `cluster-policy-controller`. What becomes of the labels today is decided by server-side apply, not by any cleanup code. The syncer applies with field manager `pod-security-admission-label-synchronization-controller` and rebuilds its apply configuration from scratch on every sync from its `syncedLabels` map, which in advising mode contains `warn` and `audit` only. Server-side apply prunes fields a manager previously owned and no longer sends, so the `enforce` label *is* dropped — but only on the next apply, and `shouldUpdate` skips the apply entirely unless one of the values the syncer still tracks has drifted. A Namespace whose `warn`, `audit` and `MinimallySufficientPodSecurityStandard` values are all already correct keeps its `enforce` label indefinitely. A Namespace that happens to see an unrelated SCC or RBAC change six months later loses it at that moment.
+This is the concrete reason the syncer is retired rather than left running in advising mode, and it is worth spelling out because the advising path looks superficially safe.
 
-So the current advising mode delivers neither of the two behaviours the design calls for. It is not freezing, because the labels are eventually deleted; and it is not opting out, because the deletion happens at an arbitrary time per Namespace and never at all where the label is co-owned. The cluster's posture decays non-deterministically, and two identically configured clusters diverge based on unrelated churn.
+What becomes of the labels in advising mode is decided by server-side apply, not by any cleanup code. The syncer applies with field manager `pod-security-admission-label-synchronization-controller` and rebuilds its apply configuration from scratch on every sync from its `syncedLabels` map, which in advising mode contains `warn` and `audit` only. Server-side apply prunes fields a manager previously owned and no longer sends, so the `enforce` label *is* dropped — but only on the next apply, and `shouldUpdate` skips the apply entirely unless one of the values the syncer still tracks has drifted. A Namespace whose `warn`, `audit` and `MinimallySufficientPodSecurityStandard` values are all already correct keeps its `enforce` label indefinitely. A Namespace that happens to see an unrelated SCC or RBAC change six months later loses it at that moment.
 
-Frozen mode must therefore stop the pruning rather than merely stop the writing. Two mechanisms are available, and the choice is an implementation detail rather than a design one: apply under a field manager that never owned `enforce`, so there is no ownership to relinquish; or relinquish ownership without deleting the value, for which the syncer already has precedent in the ownership-transfer sequence at [`podsecurity_label_sync_controller.go#L260-L287`](https://github.com/openshift/cluster-policy-controller/blob/master/pkg/psalabelsyncer/podsecurity_label_sync_controller.go#L260-L287) that migrates fields between managers with a paired `Update` and `Apply`.
+So advising mode delivers neither of the two behaviours anyone would want from it. It is not freezing, because the labels are eventually deleted; and it is not opting out, because the deletion happens at an arbitrary time per Namespace and never at all where the label is co-owned. The cluster's posture decays non-deterministically, and two identically configured clusters diverge based on unrelated churn.
 
-Because the labels are retained, the release note for `n` cannot say "PSA enforcement is now opt-in" without qualification. On an upgraded cluster it is opt-in for *new* Namespaces; existing Namespaces keep their current level until the administrator sets `enforcementMode: Privileged`, which is what triggers removal. The `PodSecurityNamespaceOverRestricted` alert described in [Removing a deprecated feature](#removing-a-deprecated-feature) makes the retained labels visible in the meantime.
+Retiring the controller avoids this entirely rather than repairing it. A controller that never issues an apply never prunes, so retention is a property of not running rather than a behaviour that has to be implemented and tested against server-side apply's ownership semantics. The alternative — keeping the syncer alive and stopping it pruning, by applying under a field manager that never owned `enforce`, or by relinquishing ownership without deleting the value as the ownership-transfer sequence at [`podsecurity_label_sync_controller.go#L260-L287`](https://github.com/openshift/cluster-policy-controller/blob/master/pkg/psalabelsyncer/podsecurity_label_sync_controller.go#L260-L287) does — was the earlier design, and it is strictly more code for a controller that has no remaining job.
+
+Because the syncer is retired unconditionally, this reasoning covers the opt-in case as well, and there it is doing more work than it first appears. Under a design where opting in restarted the syncer, these same server-side-apply mechanics would run in reverse: a Namespace frozen at `restricted` since before the upgrade would be *relaxed* to whatever the syncer now computed, at the arbitrary moment its next apply happened to fire. Retention would then have been a property of the cluster's configuration rather than of the labels themselves, and an administrator raising the global level could have lowered several Namespaces' effective level in the same act. Nothing in this design does that.
+
+Because the labels are retained, the release note for `n` cannot say "PSA enforcement is now opt-in" without qualification. On an upgraded cluster it is opt-in for *new* Namespaces; existing Namespaces keep their current level until their labels are removed, and no component removes them — see [Existing labels are retained, and the opt-out does not remove them](#existing-labels-are-retained-and-the-opt-out-does-not-remove-them) and [the open question](#removing-retained-enforce-labels-on-opt-out) on whether a cleanup ships. The `PodSecurityNamespaceOverRestricted` alert described in [Removing a deprecated feature](#removing-a-deprecated-feature) makes the retained labels visible in the meantime.
 
 #### `unsupportedConfigOverrides` already blocks the upgrade
 
@@ -971,8 +1126,8 @@ The reverse case is benign: a cluster running `Restricted` on `n` downgrades int
 | Resource | State on `n` | What `n-1` does to it | Who cleans up | Administrator action |
 |---|---|---|---|---|
 | `observedConfig` → `admission.pluginConfig.PodSecurity.configuration.defaults` | `privileged`, or the level from `status.enforcementMode` | `n-1`'s observer unconditionally rewrites the whole six-key block to `restricted` and rolls a new kube-apiserver revision | self-healing, no cleanup needed | none, unless enforcement must stay off — then apply the override above |
-| Namespace `pod-security.kubernetes.io/{enforce,warn,audit}` and `-version` labels | `enforce` unmaintained and decaying; `warn`/`audit` maintained by the advising syncer | `n-1`'s syncer runs enforcing, so it re-adds and re-owns `enforce` at the minimally sufficient level on every Namespace it controls | the label syncer, via server-side apply | none for syncer-controlled Namespaces; Namespaces opted out with `security.openshift.io/scc.podSecurityLabelSync: false`, or whose labels are owned by another field manager, keep whatever `n` left and must be fixed by hand |
-| Namespace `security.openshift.io/MinimallySufficientPodSecurityStandard` | maintained — the syncer writes it in both enforcing and advising mode | continues to be maintained, unchanged | the label syncer | none |
+| Namespace `pod-security.kubernetes.io/{enforce,warn,audit}` and `-version` labels | all unmaintained but intact, whatever the enforcement mode — the syncer is not running, so it neither writes nor prunes | `n-1`'s syncer runs enforcing, so it re-adds and re-owns all three at the minimally sufficient level on every Namespace it controls | the label syncer, via server-side apply | none for syncer-controlled Namespaces; Namespaces opted out with `security.openshift.io/scc.podSecurityLabelSync: false`, or whose labels are owned by another field manager, keep whatever `n` left and must be fixed by hand |
+| Namespace `security.openshift.io/MinimallySufficientPodSecurityStandard` | stale, in every mode — the syncer that wrote it is not running on `n` at all, and the readiness controller's replacement computation may or may not write it back to the Namespace (see [the open question](#who-computes-the-minimally-sufficient-standard-now-the-syncer-is-retired)) | `n-1`'s syncer runs enforcing and rewrites it | the label syncer, on `n-1` | none |
 | Pod `openshift.io/scc`, `security.openshift.io/validated-scc-subject-type` | set by SCC admission at creation time | nothing; they are per-Pod and immutable after admission | recreated Pods only | none — these are inputs to the readiness evaluation, not to enforcement, so staleness is harmless on `n-1` |
 | `PSAEnforcementConfig` CRD and singleton | present, `status` current | CVO does not delete CRDs on downgrade, so both persist with no controller reading either | nobody | optionally delete the object; leaving it is inert but its `status` goes stale |
 | `kubeapiservers.operator.openshift.io` `status.conditions` added by this enhancement | `Evaluated`, `StatusStale` and the readiness conditions | `n-1` has no controller that writes the condition types introduced in `n`, and conditions are not garbage collected | nobody | see below |
@@ -1008,9 +1163,11 @@ On single-node deployments there is no mixed window, because there is only one k
 
 ### Operator skew
 
-The producer and the consumers of `status.enforcementMode` are in different operators that roll independently during an upgrade. `cluster-kube-apiserver-operator` runs the `PodSecurityReadinessController` and the config observer; the `cluster-policy-controller` runs the label syncer but is deployed as a container in the kube-controller-manager static pod, owned by `cluster-kube-controller-manager-operator`. There is no ordering guarantee between the two, so for part of every upgrade one of them is at `n` and the other at `n-1`.
+Retiring the syncer removes most of this problem. The producer of `status.enforcementMode` (the `PodSecurityReadinessController`) and its only consumer (the config observer) are both in `cluster-kube-apiserver-operator`, so they ship and roll together and cannot disagree about the API. `cluster-policy-controller` reads none of it.
 
-The consequence is bounded because neither side reads the other's output directly — both read the same declarative inputs — but the enum is the sharp edge. `Baseline` is a value this enhancement introduces. A consumer from an earlier release that encounters it must **preserve its existing behaviour**, not error and not treat the field as unset: treating an unknown value as unset would silently relax enforcement, and erroring would degrade a ClusterOperator over a value that is valid on the cluster's own API server. Concretely:
+What remains is a transient during the upgrade itself. `cluster-policy-controller` runs as a container in the kube-controller-manager static pod, owned by `cluster-kube-controller-manager-operator`, and there is no ordering guarantee against `cluster-kube-apiserver-operator`. So for part of every upgrade the kube-apiserver has already rolled to `privileged` while an `n-1` `cluster-policy-controller` is still running the syncer and still stamping `enforce` labels on Namespaces it manages — or, in the other order, the syncer has already stopped while the kube-apiserver is still enforcing `restricted`. Neither is harmful: the first writes labels that are merely redundant and that become the retained labels discussed in [The relaxation is not retroactive](#the-relaxation-is-not-retroactive); the second changes nothing, because Namespaces keep the labels the syncer last wrote. The window is bounded by the upgrade and closes on its own.
+
+The enum is the sharper edge, and it applies to any out-of-payload or hosted-control-plane consumer rather than to `cluster-policy-controller`. `Baseline` is a value this enhancement introduces. A consumer from an earlier release that encounters it must **preserve its existing behaviour**, not error and not treat the field as unset: treating an unknown value as unset would silently relax enforcement, and erroring would degrade a ClusterOperator over a value that is valid on the cluster's own API server. Concretely:
 
 - Consumers switch on the values they know and fall through to "make no change to the currently effective level" for anything else.
 - The `enforcementMode` enum is only ever extended, never has a value removed or repurposed, for the reasons in [API Extensions](#api-extensions).
@@ -1018,7 +1175,7 @@ The consequence is bounded because neither side reads the other's output directl
 
 ### HyperShift skew
 
-HyperShift has no `cluster-kube-apiserver-operator`; the management-cluster `control-plane-operator` renders the hosted kube-apiserver's configuration directly, and it carries its own copy of the privileged-versus-restricted decision. The management cluster is required to be at or ahead of the hosted cluster's release, so the skew is one-directional and can span several releases: a `control-plane-operator` at `n+2` may be rendering the kube-apiserver for a hosted cluster whose payload — and whose `cluster-policy-controller` and `PSAEnforcementConfig` consumers — is at `n`.
+HyperShift has no `cluster-kube-apiserver-operator`; the management-cluster `control-plane-operator` renders the hosted kube-apiserver's configuration directly, and it carries its own copy of the privileged-versus-restricted decision. The management cluster is required to be at or ahead of the hosted cluster's release, so the skew is one-directional and can span several releases: a `control-plane-operator` at `n+2` may be rendering the kube-apiserver for a hosted cluster whose payload — and whose `PSAEnforcementConfig` consumers — is at `n`.
 
 This means the hosted cluster's opt-in cannot be expressed purely in the guest without the management side honouring it, and the management side is the component that may be arbitrarily newer. Which side owns the configuration surface is [an open question](#hypershift-configuration-surface) and is the main unresolved dependency in this section; see [Hypershift / Hosted Control Planes](#hypershift--hosted-control-planes).
 
@@ -1190,8 +1347,8 @@ To solve the issue:
 
 - Update the ServiceAccount to be able to use the necessary SCCs.
 	The necessary SCC can be identified in the annotation `openshift.io/scc` of the existing workloads.
-	After that is done, the PSA label syncer will update the PSA labels.
-- Otherwise set the `pod-security.kubernetes.io/enforce` label manually.
+	This is enough for the next evaluation to stop reporting the Namespace as violating, in any enforcement mode. It does **not** cause a PSA label to be written: the syncer that used to do that no longer runs on any cluster, so granting the SCC changes what the Namespace is *allowed* to run without changing what PSA *enforces* on it.
+- Therefore, if the Namespace needs an effective level other than the cluster-wide one, set the `pod-security.kubernetes.io/enforce` label manually. On a cluster that has opted in to `Baseline` or `Restricted` this is the only mechanism — an unlabelled Namespace is held to the global level with nothing computing a gentler one for it.
 
 ## Infrastructure Needed
 
