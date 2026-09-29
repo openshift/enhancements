@@ -447,7 +447,6 @@ never reconciled.
 | Field | Type | Description |
 |-------|------|-------------|
 | `managementState` | string enum `Managed` \| `Unmanaged` | Mirrors effective `managedNetworkPolicy` |
-| `observedGeneration` | int64 | `metadata.generation` last reconciled for network policies |
 | `appliedPolicyNames` | `[]string` | Fixed `ztwim-sys-*` names successfully applied (not full NP spec) |
 | `capabilities` | `[]string` | Capability gates evaluated true (e.g. `federation`, `vault`, `external-db`, `proxy`) |
 | `egressPorts` | `[]NetworkPolicyPortStatus` | Deduplicated TCP ports in feature-egress union |
@@ -466,7 +465,6 @@ Example:
 status:
   networkPolicy:
     managementState: Managed
-    observedGeneration: 3
     appliedPolicyNames:
       - ztwim-sys-server-default-deny
       - ztwim-sys-server-egress-feature-ports
