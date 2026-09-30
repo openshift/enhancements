@@ -3,14 +3,15 @@ title: must-gather-operator-golang-upload
 authors:
   - "@neha037"
 reviewers:
-  - TBD
+  - "@shivprakashmuley"
+  - "@swghosh"
+  - "@Prashanth684"
 approvers:
-  - TBD
+  - "@Prashanth684"
 api-approvers:
-  - None
+  - "@Prashanth684"
 creation-date: 2026-09-30
 last-updated: 2026-09-30
-status: provisional
 tracking-link:
   - https://issues.redhat.com/browse/MG-386
 see-also:
