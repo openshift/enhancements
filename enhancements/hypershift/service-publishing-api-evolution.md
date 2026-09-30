@@ -49,8 +49,8 @@ bug fixes, and a ~1,200-line reference document that tells users which
 combinations are actually allowed.
 
 This enhancement replaces `spec.services[]` with a new `spec.publishing` field
-built from a small set of topology presets: `DedicatedIngress` (all services
-through a single ingress point), `DedicatedAPIEndpoint` (API server on a
+built from a small set of topology presets: `SingleIngressPoint` (all services
+through a single ingress point), `DedicatedAPIServerEndpoint` (API server on a
 dedicated LoadBalancer, the rest through management-cluster ingress), and
 `NodePort` (all services on node ports). Because the presets encode only the
 topologies the controllers support, the set of valid configurations is expressed
@@ -309,8 +309,8 @@ Operators (CPO) by writing both fields.
 
 #### New cluster creation
 
-1. Operator chooses a publishing topology: `DedicatedIngress`,
-   `DedicatedAPIEndpoint`, or `NodePort`.
+1. Operator chooses a publishing topology: `SingleIngressPoint`,
+   `DedicatedAPIServerEndpoint`, or `NodePort`.
 2. Operator sets `spec.publishing.type` to the chosen preset and fills in the
    preset-specific sub-struct (hostnames, ports, exposure type).
 3. API server CEL validation rejects invalid preset x platform x endpointAccess
@@ -368,17 +368,17 @@ sequenceDiagram
 #### CLI interaction
 
 ```bash
-# DedicatedIngress with LB exposure (e.g., AWS Private)
+# SingleIngressPoint with LB exposure (e.g., AWS Private)
 hcp create cluster aws \
   --endpoint-access=Private \
   --external-dns-domain=example.com \
-  --publishing-type=DedicatedIngress \
+  --publishing-type=SingleIngressPoint \
   --publishing-exposure=LoadBalancer
 
-# DedicatedAPIEndpoint (e.g., AWS Public, no ExternalDNS)
+# DedicatedAPIServerEndpoint (e.g., AWS Public, no ExternalDNS)
 hcp create cluster aws \
   --endpoint-access=Public \
-  --publishing-type=DedicatedAPIEndpoint
+  --publishing-type=DedicatedAPIServerEndpoint
 
 # NodePort (e.g., Agent default)
 hcp create cluster agent \
@@ -408,17 +408,17 @@ A new field `spec.publishing` on `HostedClusterSpec`, mutually exclusive with
 spec:
   publishing:
     # +unionDiscriminator
-    # +kubebuilder:validation:Enum=DedicatedIngress;
-    #   DedicatedAPIEndpoint;NodePort
-    type: DedicatedIngress | DedicatedAPIEndpoint | NodePort
+    # +kubebuilder:validation:Enum=SingleIngressPoint;
+    #   DedicatedAPIServerEndpoint;NodePort
+    type: SingleIngressPoint | DedicatedAPIServerEndpoint | NodePort
 
-    # type=DedicatedIngress: all services through a
+    # type=SingleIngressPoint: all services through a
     # single ingress point
-    dedicatedIngress:
+    singleIngressPoint:
       # +unionDiscriminator
       # +kubebuilder:validation:Enum=LoadBalancer;
-      #   NodePort;External
-      exposure: LoadBalancer | NodePort | External
+      #   NodePort;PlatformProvided
+      exposure: LoadBalancer | NodePort | PlatformProvided
 
       # exposure=LoadBalancer: HCP router deployed,
       # fronted by cloud LB
@@ -431,7 +431,7 @@ spec:
         address: 10.0.0.5
         port: 30080  # optional — auto-assigned if omitted
 
-      # exposure=External: platform handles routing
+      # exposure=PlatformProvided: platform handles routing
       # (IBMCloud)
 
       # services: list keyed by service name. An APIServer
@@ -450,9 +450,9 @@ spec:
       - name: Ignition       # optional — omit if no Ignition
         hostname: ignition.custom.com
 
-    # type=DedicatedAPIEndpoint: KAS on a dedicated LB;
+    # type=DedicatedAPIServerEndpoint: KAS on a dedicated LB;
     # OAuth via Route through the management ingress
-    dedicatedAPIEndpoint:
+    dedicatedAPIServerEndpoint:
       # services: only APIServer and OAuthServer are
       # configurable. Konnectivity/Ignition are served by the
       # management ingress with derived, non-overridable
@@ -484,28 +484,28 @@ spec:
 
 ```go
 // ServicePublishing configures how control plane services
-// are exposed. Exactly one of DedicatedIngress,
-// DedicatedAPIEndpoint, or NodePort must be set, matching
+// are exposed. Exactly one of SingleIngressPoint,
+// DedicatedAPIServerEndpoint, or NodePort must be set, matching
 // the Type discriminator.
 // +union
 type ServicePublishing struct {
     // +unionDiscriminator
-    // +kubebuilder:validation:Enum=DedicatedIngress;DedicatedAPIEndpoint;NodePort
+    // +kubebuilder:validation:Enum=SingleIngressPoint;DedicatedAPIServerEndpoint;NodePort
     // +required
     Type ServicePublishingType `json:"type,omitempty"`
 
     // +optional
-    DedicatedIngress DedicatedIngressPublishing `json:"dedicatedIngress,omitzero"`
+    SingleIngressPoint SingleIngressPointPublishing `json:"singleIngressPoint,omitzero"`
 
     // +optional
-    DedicatedAPIEndpoint DedicatedAPIEndpointPublishing `json:"dedicatedAPIEndpoint,omitzero"`
+    DedicatedAPIServerEndpoint DedicatedAPIServerEndpointPublishing `json:"dedicatedAPIServerEndpoint,omitzero"`
 
     // +optional
     NodePort NodePortPublishing `json:"nodePort,omitzero"`
 }
 
 // IngressServiceName is the closed set of services published
-// through the HCP ingress router in the DedicatedIngress
+// through the HCP ingress router in the SingleIngressPoint
 // preset. All four are served by the router, so each supports
 // a hostname in the cluster's external DNS domain. New
 // services are added by extending this enum.
@@ -513,15 +513,15 @@ type ServicePublishing struct {
 // +kubebuilder:validation:MaxLength=16
 type IngressServiceName string
 
-// APIEndpointServiceName is the closed set of services whose
-// endpoints are user-configurable in the DedicatedAPIEndpoint
+// APIServerEndpointServiceName is the closed set of services whose
+// endpoints are user-configurable in the DedicatedAPIServerEndpoint
 // preset. Konnectivity and Ignition are intentionally absent:
 // in this topology they are served by the management-cluster
 // ingress with the external-DNS annotation stripped, so a
 // custom hostname would be unreachable.
 // +kubebuilder:validation:Enum=APIServer;OAuthServer
 // +kubebuilder:validation:MaxLength=16
-type APIEndpointServiceName string
+type APIServerEndpointServiceName string
 
 // NodePortServiceName is the closed set of services published
 // on node ports in the NodePort preset.
@@ -537,15 +537,15 @@ type NodePortServiceName string
 // +kubebuilder:validation:MaxLength=24
 type ServiceExposureOverride string
 
-// DedicatedIngressPublishing configures all services through
+// SingleIngressPointPublishing configures all services through
 // a single ingress point. The exposure sub-union describes
 // how the HCP router itself is exposed.
 // +union
-// +kubebuilder:validation:XValidation:rule="self.services.exists(s, s.name == 'APIServer' && has(s.hostname))",message="DedicatedIngress requires an APIServer entry with a hostname"
+// +kubebuilder:validation:XValidation:rule="self.services.exists(s, s.name == 'APIServer' && has(s.hostname))",message="SingleIngressPoint requires an APIServer entry with a hostname"
 // +kubebuilder:validation:XValidation:rule="self.services.all(s, !has(s.exposure) || s.name == 'OAuthServer')",message="exposure override is only valid for the OAuthServer entry"
-type DedicatedIngressPublishing struct {
+type SingleIngressPointPublishing struct {
     // +unionDiscriminator
-    // +kubebuilder:validation:Enum=LoadBalancer;NodePort;External
+    // +kubebuilder:validation:Enum=LoadBalancer;NodePort;PlatformProvided
     // +required
     Exposure IngressExposureType `json:"exposure,omitempty"`
 
@@ -565,13 +565,13 @@ type DedicatedIngressPublishing struct {
     // +kubebuilder:validation:MinItems=1
     // +kubebuilder:validation:MaxItems=4
     // +required
-    Services []DedicatedIngressService `json:"services,omitempty"`
+    Services []SingleIngressPointService `json:"services,omitempty"`
 }
 
-// DedicatedIngressService configures one service published
+// SingleIngressPointService configures one service published
 // through the HCP ingress router. It carries only endpoint
 // metadata; the preset determines the exposure strategy.
-type DedicatedIngressService struct {
+type SingleIngressPointService struct {
     // name identifies the control-plane service this entry
     // configures.
     // +required
@@ -615,13 +615,13 @@ type IngressNodePortConfig struct {
     Port *int32 `json:"port,omitempty"`
 }
 
-// DedicatedAPIEndpointPublishing publishes KAS on a dedicated
+// DedicatedAPIServerEndpointPublishing publishes KAS on a dedicated
 // LoadBalancer and OAuth via Route through the management
 // ingress. Konnectivity and Ignition are served by the
 // management ingress with derived, non-overridable hostnames
 // and are therefore not configurable in this preset.
 // +kubebuilder:validation:XValidation:rule="self.services.all(s, !has(s.exposure) || s.name == 'OAuthServer')",message="exposure override is only valid for the OAuthServer entry"
-type DedicatedAPIEndpointPublishing struct {
+type DedicatedAPIServerEndpointPublishing struct {
     // services optionally overrides the APIServer and/or
     // OAuthServer endpoints. The preset is fully functional
     // with the list absent (all hostnames derived).
@@ -629,15 +629,15 @@ type DedicatedAPIEndpointPublishing struct {
     // +listMapKey=name
     // +kubebuilder:validation:MaxItems=2
     // +optional
-    Services []DedicatedAPIEndpointService `json:"services,omitempty"`
+    Services []DedicatedAPIServerEndpointService `json:"services,omitempty"`
 }
 
-// DedicatedAPIEndpointService configures one service in the
-// DedicatedAPIEndpoint preset. Only APIServer and OAuthServer
-// are representable (see APIEndpointServiceName).
-type DedicatedAPIEndpointService struct {
+// DedicatedAPIServerEndpointService configures one service in the
+// DedicatedAPIServerEndpoint preset. Only APIServer and OAuthServer
+// are representable (see APIServerEndpointServiceName).
+type DedicatedAPIServerEndpointService struct {
     // +required
-    Name APIEndpointServiceName `json:"name,omitempty"`
+    Name APIServerEndpointServiceName `json:"name,omitempty"`
 
     // hostname is the DNS name for this service. For APIServer
     // it is derived from the dedicated LoadBalancer status when
@@ -697,8 +697,8 @@ type NodePortPublishedService struct {
    think in topologies, not per-service configurations.
 3. **No contradictions by construction.** Each preset fully determines the
    publishing topology.
-4. **Ingress exposure is explicit.** The `DedicatedIngress` preset has a nested
-   `exposure` discriminator.
+4. **Ingress exposure is explicit.** The `SingleIngressPoint` preset has a
+   nested `exposure` discriminator.
 5. **No `Custom` / escape-hatch preset.** Three presets cover all documented
    topologies. Freeform per-service strategy would reproduce `spec.services[]`
    problems.
@@ -710,20 +710,20 @@ type NodePortPublishedService struct {
    (hostname/port/exposure), never a strategy — so the `spec.services[]`
    `{service × strategy}` explosion cannot recur. Because the reachable service
    set genuinely differs by preset, each preset has its own enum
-   (`IngressServiceName` = all four; `APIEndpointServiceName` =
+   (`IngressServiceName` = all four; `APIServerEndpointServiceName` =
    APIServer/OAuthServer only), so the schema never advertises a hostname the
    controllers cannot honor.
 7. **Consistent field naming.** LoadBalancer uses `hostname`; NodePort uses
    `address` and `port` — matching existing API types.
 8. **Router deployment is preset-determined:**
-   - `DedicatedIngress` (LoadBalancer) → HCP router deployed, fronted by cloud
+   - `SingleIngressPoint` (LoadBalancer) → HCP router deployed, fronted by cloud
      LB
-   - `DedicatedIngress` (NodePort) → HCP router deployed, exposed as NodePort
-   - `DedicatedIngress` (External) → no HCP router; platform handles routing
-     (currently IBMCloud)
-   - `DedicatedAPIEndpoint` → no user-facing HCP router; on private clusters, a
-     private HCP router is deployed for internal Route serving via the
-     platform's private connectivity (PrivateLink, PSC)
+   - `SingleIngressPoint` (NodePort) → HCP router deployed, exposed as NodePort
+   - `SingleIngressPoint` (PlatformProvided) → no HCP router; platform handles
+     routing (currently IBMCloud)
+   - `DedicatedAPIServerEndpoint` → no user-facing HCP router; on private
+     clusters, a private HCP router is deployed for internal Route serving via
+     the platform's private connectivity (PrivateLink, PSC)
    - `NodePort` → no HCP router
 
    The private connectivity mechanisms themselves (PrivateLink, Private Service
@@ -740,9 +740,9 @@ fully `Private` cluster is fronted by a single private endpoint to the HCP
 router — Private Service Connect (GCP), Private Link Service (Azure), and, on
 the standard ROSA path, a single `private-router` VPC Endpoint Service (AWS) —
 so KAS and OAuth must use Route (hostname required). This constraint is captured
-by the `AWS Private → DedicatedIngress only`,
-`GCP Private → DedicatedIngress only`, and
-`Azure Private → DedicatedIngress only` CEL rules below.
+by the `AWS Private → SingleIngressPoint only`,
+`GCP Private → SingleIngressPoint only`, and
+`Azure Private → SingleIngressPoint only` CEL rules below.
 
 Even though the premise now holds uniformly, private connectivity is kept
 orthogonal to the publishing preset (derived from
@@ -762,10 +762,10 @@ reasons:
 2. **The publishing intent is the same as the public case.** For
    `Public + ExternalDNS`, `PublicAndPrivate + ExternalDNS`, and
    `Private + ExternalDNS`, all services use Route through one router — the same
-   `DedicatedIngress` intent. The only difference under private endpoint access
-   is that just the APIServer and OAuthServer hostnames are user-facing
+   `SingleIngressPoint` intent. The only difference under private endpoint
+   access is that just the APIServer and OAuthServer hostnames are user-facing
    (Konnectivity and Ignition are internal) — but that is already how
-   `DedicatedIngress` behaves: non-APIServer hostnames are derived, and the
+   `SingleIngressPoint` behaves: non-APIServer hostnames are derived, and the
    preset carries no reachability information of its own.
 
 The HCP router is a single Deployment in every mode; what changes with
@@ -774,7 +774,7 @@ The HCP router is a single Deployment in every mode; what changes with
 is a reachability detail owned by `endpointAccess`, not a distinct publishing
 topology, which reinforces why it does not belong in the preset.
 
-Net: the "PrivateLink" topology is `DedicatedIngress` combined with
+Net: the "PrivateLink" topology is `SingleIngressPoint` combined with
 `endpointAccess` of `Private` or `PublicAndPrivate`. It has a clearly named home
 without a redundant API discriminator, and the per-cloud single-endpoint
 constraint (AWS, GCP, Azure) is enforced by cross-field CEL rather than as a
@@ -784,20 +784,20 @@ third enum value.
 
 | Preset | KAS | OAuth | Konnectivity | Ignition | Ingress infrastructure | Platforms |
 |--------|-----|-------|-------------|----------|----------------------|-----------|
-| `DedicatedIngress` (LB) | Route | Route | Route | Route | HCP Router + cloud LB | AWS+ExtDNS, AWS Private+ExtDNS, Azure (all), GCP+ExtDNS, KubeVirt+ExtDNS, PowerVS+ExtDNS |
-| `DedicatedIngress` (LB) + OAuth `exposure` | Route | **LB** | Route | Route | HCP Router + cloud LB; OAuth on dedicated LB | Azure self-managed + ExtDNS |
-| `DedicatedIngress` (NodePort) | Route | Route | Route | Route | HCP Router as NodePort | Bare metal use case |
-| `DedicatedIngress` (External) | Route | Route | Route | opt | Platform handles routing | IBMCloud (Route path) |
-| `DedicatedAPIEndpoint` | LB | Route | Route | Route | KAS on dedicated LB; rest through mgmt ingress; no HCP router | AWS (Public/PublicAndPrivate, no ExtDNS), GCP PublicAndPrivate (no ExtDNS), KubeVirt Ingress, Agent production, OpenStack, PowerVS, None (LB) |
-| `DedicatedAPIEndpoint` + OAuth `exposure` | LB | **LB** | Route | Route | KAS+OAuth on dedicated LBs | Azure self-managed (no ExtDNS) |
+| `SingleIngressPoint` (LB) | Route | Route | Route | Route | HCP Router + cloud LB | AWS+ExtDNS, AWS Private+ExtDNS, Azure (all), GCP+ExtDNS, KubeVirt+ExtDNS, PowerVS+ExtDNS |
+| `SingleIngressPoint` (LB) + OAuth `exposure` | Route | **LB** | Route | Route | HCP Router + cloud LB; OAuth on dedicated LB | Azure self-managed + ExtDNS |
+| `SingleIngressPoint` (NodePort) | Route | Route | Route | Route | HCP Router as NodePort | Bare metal use case |
+| `SingleIngressPoint` (PlatformProvided) | Route | Route | Route | opt | Platform handles routing | IBMCloud (Route path) |
+| `DedicatedAPIServerEndpoint` | LB | Route | Route | Route | KAS on dedicated LB; rest through mgmt ingress; no HCP router | AWS (Public/PublicAndPrivate, no ExtDNS), GCP PublicAndPrivate (no ExtDNS), KubeVirt Ingress, Agent production, OpenStack, PowerVS, None (LB) |
+| `DedicatedAPIServerEndpoint` + OAuth `exposure` | LB | **LB** | Route | Route | KAS+OAuth on dedicated LBs | Azure self-managed (no ExtDNS) |
 | `NodePort` | NP | NP | NP | NP | None | Agent default, KubeVirt NP, None, IBMCloud (legacy) |
 
 Endpoint access (`Public` / `PublicAndPrivate` / `Private`) is an orthogonal
 axis, not a preset — see "Why private connectivity is not a publishing preset".
-The "PrivateLink" topology is `DedicatedIngress` with `endpointAccess` of
+The "PrivateLink" topology is `SingleIngressPoint` with `endpointAccess` of
 `Private` or `PublicAndPrivate` on AWS, Azure, and GCP — a single VPC Endpoint
 Service fronts the private router on all three, so a fully `Private` cluster
-serves KAS via Route (`DedicatedIngress`), never a dedicated private KAS
+serves KAS via Route (`SingleIngressPoint`), never a dedicated private KAS
 LoadBalancer.
 
 ### Topology Considerations
@@ -852,11 +852,11 @@ Analysis of CLI defaults, CEL validation, controller code (`UseHCPRouter`,
 reveals three supported topologies:
 
 **Topology 1: Single Ingress (all services via Route)** — maps to
-`DedicatedIngress`
+`SingleIngressPoint`
 
 All services use Route strategy through a single ingress point. An HCP router is
 deployed in all configurations except IBMCloud (which uses
-`exposure: External`).
+`exposure: PlatformProvided`).
 
 | Platform | Variant | Ingress exposure |
 |----------|---------|-----------------|
@@ -871,10 +871,10 @@ deployed in all configurations except IBMCloud (which uses
 | GCP (Managed) | Private + ExternalDNS | HCP Router + Internal LB (PSC) |
 | KubeVirt | Ingress + ExternalDNS | HCP Router + External LB |
 | PowerVS | With ExternalDNS | HCP Router + External LB |
-| IBMCloud | Route (new) | External (no HCP router) |
+| IBMCloud | Route (new) | PlatformProvided (no HCP router) |
 
-**Topology 2: Dedicated API Endpoint (KAS=LoadBalancer, rest=Route)** — maps to
-`DedicatedAPIEndpoint`
+**Topology 2: Dedicated API Server Endpoint (KAS=LoadBalancer, rest=Route)** —
+maps to `DedicatedAPIServerEndpoint`
 
 | Platform | Variant |
 |----------|---------|
@@ -903,8 +903,8 @@ dedicated LoadBalancer:
 
 | ExternalDNS | KAS | OAuth | Preset |
 |-------------|-----|-------|--------|
-| No | LB | LB | `DedicatedAPIEndpoint`, OAuthServer entry `exposure: DedicatedLoadBalancer` |
-| Yes | Route | LB | `DedicatedIngress`, OAuthServer entry `exposure: DedicatedLoadBalancer` |
+| No | LB | LB | `DedicatedAPIServerEndpoint`, OAuthServer entry `exposure: DedicatedLoadBalancer` |
+| Yes | Route | LB | `SingleIngressPoint`, OAuthServer entry `exposure: DedicatedLoadBalancer` |
 
 #### Preset validation by platform and endpoint access
 
@@ -913,7 +913,7 @@ combinations. Invalid combinations must be rejected by CEL at admission time.
 
 **Key constraints:**
 
-- `DedicatedIngress` requires KAS to use Route, which requires a hostname. The
+- `SingleIngressPoint` requires KAS to use Route, which requires a hostname. The
   API enforces this structurally: the APIServer entry must be present with a
   hostname (CEL), because the KAS Route hostname is non-derivable — the
   controller errors on an empty value (verified: `kas/service.go`,
@@ -922,24 +922,25 @@ combinations. Invalid combinations must be rejected by CEL at admission time.
   `netutil.ReconcileExternalRoute`). The CLI may still materialize hostnames
   from the ExternalDNS domain, but the API only hard-requires the APIServer
   hostname.
-- `DedicatedAPIEndpoint` requires a KAS LoadBalancer. On fully `Private`
+- `DedicatedAPIServerEndpoint` requires a KAS LoadBalancer. On fully `Private`
   clusters the KAS LB would have to be reachable through the platform's private
   connectivity mechanism, but AWS, GCP, and Azure all expose only a single
   private endpoint fronting the HCP router (the AWS dedicated
   `kube-apiserver-private` endpoint service is a non-standard, discouraged path
   and is not offered as a preset). KAS must therefore use Route, so fully
-  `Private` clusters use `DedicatedIngress`, not `DedicatedAPIEndpoint`. On
-  `PublicAndPrivate` the KAS LB can still be public, so `DedicatedAPIEndpoint`
-  remains valid there.
-- `DedicatedIngress` (External) delegates routing to the platform. Currently
-  only IBMCloud uses this exposure, but it is not restricted by CEL to IBMCloud
-  — other platforms may adopt it in the future.
+  `Private` clusters use `SingleIngressPoint`, not `DedicatedAPIServerEndpoint`.
+  On `PublicAndPrivate` the KAS LB can still be public, so
+  `DedicatedAPIServerEndpoint` remains valid there.
+- `SingleIngressPoint` (PlatformProvided) delegates routing to the platform.
+  Currently only IBMCloud uses this exposure, but it is not restricted by CEL to
+  IBMCloud — other platforms may adopt it in the future.
 
-> **Open question:** Should `DedicatedIngress` (External) be restricted
-> bidirectionally? Two independent decisions: (1) force IBMCloud to use External
-> (currently enforced by the IBMCloud CEL rule), and (2) prevent non-IBMCloud
-> platforms from using External. Currently only (1) is enforced. Adding (2)
-> would require relaxation if another platform adopts External later.
+> **Open question:** Should `SingleIngressPoint` (PlatformProvided) be
+> restricted bidirectionally? Two independent decisions: (1) force IBMCloud to
+> use PlatformProvided (currently enforced by the IBMCloud CEL rule), and (2)
+> prevent non-IBMCloud platforms from using PlatformProvided. Currently only (1)
+> is enforced. Adding (2) would require relaxation if another platform adopts
+> PlatformProvided later.
 - `NodePort` requires directly reachable management cluster nodes. Supported on
   Agent, KubeVirt, and None. IBMCloud is a managed exception: legacy IBMCloud
   clusters expose services as NodePort but reach them through IBM's shared
@@ -954,57 +955,58 @@ combinations. Invalid combinations must be rejected by CEL at admission time.
 
 | EndpointAccess | ExternalDNS | Valid presets |
 |----------------|-------------|--------------|
-| Public | Yes | `DedicatedIngress` (LB) |
-| Public | No | `DedicatedAPIEndpoint` |
-| PublicAndPrivate | Yes | `DedicatedIngress` (LB) |
-| PublicAndPrivate | No | `DedicatedAPIEndpoint` |
-| Private | Yes | `DedicatedIngress` (LB) |
+| Public | Yes | `SingleIngressPoint` (LB) |
+| Public | No | `DedicatedAPIServerEndpoint` |
+| PublicAndPrivate | Yes | `SingleIngressPoint` (LB) |
+| PublicAndPrivate | No | `DedicatedAPIServerEndpoint` |
+| Private | Yes | `SingleIngressPoint` (LB) |
 
 AWS `Private` without ExternalDNS maps to no preset and is omitted deliberately:
-`DedicatedIngress` needs a Route hostname (supplied by ExternalDNS), and
-`DedicatedAPIEndpoint` would require the KAS LoadBalancer to be reachable
+`SingleIngressPoint` needs a Route hostname (supplied by ExternalDNS), and
+`DedicatedAPIServerEndpoint` would require the KAS LoadBalancer to be reachable
 through a dedicated `kube-apiserver-private` VPC Endpoint Service — a path that
 exists in code but is non-standard and discouraged (the standard ROSA flow uses
 only the `private-router` endpoint service; see
 `docs/content/reference/architecture/aws/privatelink.md`). AWS `Private`
-therefore mirrors GCP/Azure `Private` (`DedicatedIngress` only) and requires
+therefore mirrors GCP/Azure `Private` (`SingleIngressPoint` only) and requires
 ExternalDNS. `PublicAndPrivate` without ExternalDNS keeps
-`DedicatedAPIEndpoint`, since KAS stays reachable via the public LoadBalancer.
-Consequently, if any existing AWS fully-private cluster published KAS via
-LoadBalancer, it has no equivalent preset: the HO leaves it on `spec.services[]`
-and reports `ValidConfiguration=False` (the untranslatable-config path).
+`DedicatedAPIServerEndpoint`, since KAS stays reachable via the public
+LoadBalancer. Consequently, if any existing AWS fully-private cluster published
+KAS via LoadBalancer, it has no equivalent preset: the HO leaves it on
+`spec.services[]` and reports `ValidConfiguration=False` (the
+untranslatable-config path).
 
 **Azure (ARO HCP / Managed):**
 
 | EndpointAccess | Valid presets |
 |----------------|--------------|
-| PublicAndPrivate (always) | `DedicatedIngress` (LB) |
+| PublicAndPrivate (always) | `SingleIngressPoint` (LB) |
 
 **Azure (Self-Managed):**
 
 | EndpointAccess | ExternalDNS | Valid presets |
 |----------------|-------------|--------------|
-| Public | Yes | `DedicatedIngress` (LB), + OAuth `exposure` |
-| Public | No | `DedicatedAPIEndpoint`, + OAuth `exposure` |
-| PublicAndPrivate | Yes | `DedicatedIngress` (LB), + OAuth `exposure` |
-| PublicAndPrivate | No | `DedicatedAPIEndpoint`, + OAuth `exposure` |
-| Private | Yes | `DedicatedIngress` (LB) |
-| Private | No | `DedicatedIngress` (LB) |
+| Public | Yes | `SingleIngressPoint` (LB), + OAuth `exposure` |
+| Public | No | `DedicatedAPIServerEndpoint`, + OAuth `exposure` |
+| PublicAndPrivate | Yes | `SingleIngressPoint` (LB), + OAuth `exposure` |
+| PublicAndPrivate | No | `DedicatedAPIServerEndpoint`, + OAuth `exposure` |
+| Private | Yes | `SingleIngressPoint` (LB) |
+| Private | No | `SingleIngressPoint` (LB) |
 
 **GCP (Managed):**
 
 | EndpointAccess | ExternalDNS | Valid presets |
 |----------------|-------------|--------------|
-| PublicAndPrivate | Yes | `DedicatedIngress` (LB) |
-| PublicAndPrivate | No | `DedicatedAPIEndpoint` |
-| Private | Yes | `DedicatedIngress` (LB) |
+| PublicAndPrivate | Yes | `SingleIngressPoint` (LB) |
+| PublicAndPrivate | No | `DedicatedAPIServerEndpoint` |
+| Private | Yes | `SingleIngressPoint` (LB) |
 
 **KubeVirt:**
 
 | ExternalDNS | Valid presets |
 |-------------|--------------|
-| Yes | `DedicatedIngress` (LB) |
-| No | `DedicatedAPIEndpoint` |
+| Yes | `SingleIngressPoint` (LB) |
+| No | `DedicatedAPIServerEndpoint` |
 | N/A (NP mode) | `NodePort` |
 
 > **IBM Z (s390x):** "Z" is a worker-node architecture, not a platform. It is
@@ -1018,39 +1020,39 @@ and reports `ValidConfiguration=False` (the untranslatable-config path).
 | Configuration | Valid presets |
 |--------------|--------------|
 | Default | `NodePort` |
-| With MetalLB | `DedicatedAPIEndpoint` |
+| With MetalLB | `DedicatedAPIServerEndpoint` |
 
 **None:**
 
 | Configuration | Valid presets |
 |--------------|--------------|
 | `--api-server-address` | `NodePort` |
-| `--expose-through-load-balancer` | `DedicatedAPIEndpoint` |
+| `--expose-through-load-balancer` | `DedicatedAPIServerEndpoint` |
 
 **OpenStack:**
 
 | Configuration | Valid presets |
 |--------------|--------------|
-| Default | `DedicatedAPIEndpoint` |
+| Default | `DedicatedAPIServerEndpoint` |
 
 **PowerVS:**
 
 | ExternalDNS | Valid presets |
 |-------------|--------------|
-| Yes | `DedicatedIngress` (LB) |
-| No | `DedicatedAPIEndpoint` |
+| Yes | `SingleIngressPoint` (LB) |
+| No | `DedicatedAPIServerEndpoint` |
 
 Verified against `hcp create cluster powervs` defaults: without ExternalDNS,
-KAS=LoadBalancer with the rest on Route (`DedicatedAPIEndpoint`); with
-ExternalDNS, all services on Route (`DedicatedIngress` LB). The PowerVS CLI only
-supports `Public` (its `isPrivate` is hardcoded false), so no private-only row
-is needed.
+KAS=LoadBalancer with the rest on Route (`DedicatedAPIServerEndpoint`); with
+ExternalDNS, all services on Route (`SingleIngressPoint` LB). The PowerVS CLI
+only supports `Public` (its `isPrivate` is hardcoded false), so no private-only
+row is needed.
 
 **IBMCloud:** (managed only)
 
 | Configuration | Valid presets |
 |--------------|--------------|
-| Route strategy (new) | `DedicatedIngress` (External) |
+| Route strategy (new) | `SingleIngressPoint` (PlatformProvided) |
 | NodePort strategy (legacy, mid-migration) | `NodePort` |
 
 #### CEL validation rules
@@ -1097,40 +1099,40 @@ message: "spec.publishing cannot be removed once set"
 **Platform → valid presets** (each rule is `NOT platform || preset in allowed`):
 
 ```cel
-// AWS: DedicatedIngress or DedicatedAPIEndpoint
+// AWS: SingleIngressPoint or DedicatedAPIServerEndpoint
 rule: !has(self.publishing)
       || self.platform.type != "AWS"
       || self.publishing.type in
-         ["DedicatedIngress", "DedicatedAPIEndpoint"]
+         ["SingleIngressPoint", "DedicatedAPIServerEndpoint"]
 
-// Agent: NodePort or DedicatedAPIEndpoint
+// Agent: NodePort or DedicatedAPIServerEndpoint
 rule: !has(self.publishing)
       || self.platform.type != "Agent"
       || self.publishing.type in
-         ["NodePort", "DedicatedAPIEndpoint"]
+         ["NodePort", "DedicatedAPIServerEndpoint"]
 
-// OpenStack: DedicatedAPIEndpoint only
+// OpenStack: DedicatedAPIServerEndpoint only
 rule: !has(self.publishing)
       || self.platform.type != "OpenStack"
-      || self.publishing.type == "DedicatedAPIEndpoint"
+      || self.publishing.type == "DedicatedAPIServerEndpoint"
 
-// IBMCloud: DedicatedIngress (External) for new
+// IBMCloud: SingleIngressPoint (PlatformProvided) for new
 // Route-based clusters, or NodePort for legacy clusters
 // still mid-migration (OCPBUGS-57450). See "IBMCloud
 // special cases".
 rule: !has(self.publishing)
       || self.platform.type != "IBMCloud"
       || self.publishing.type == "NodePort"
-      || (self.publishing.type == "DedicatedIngress"
-          && has(self.publishing.dedicatedIngress)
-          && self.publishing.dedicatedIngress.exposure
-             == "External")
+      || (self.publishing.type == "SingleIngressPoint"
+          && has(self.publishing.singleIngressPoint)
+          && self.publishing.singleIngressPoint.exposure
+             == "PlatformProvided")
 ```
 
 **Endpoint access → preset restrictions:**
 
 ```cel
-// AWS Private: DedicatedIngress only. A fully-private AWS
+// AWS Private: SingleIngressPoint only. A fully-private AWS
 // cluster has a single VPC Endpoint Service fronting the
 // private router; the dedicated private KAS LoadBalancer
 // (a second, non-standard endpoint service) is not offered
@@ -1139,55 +1141,55 @@ rule: !has(self.publishing)
       || self.platform.type != "AWS"
       || !has(self.platform.aws)
       || self.platform.aws.endpointAccess != "Private"
-      || self.publishing.type == "DedicatedIngress"
+      || self.publishing.type == "SingleIngressPoint"
 
-// GCP Private: DedicatedIngress only
+// GCP Private: SingleIngressPoint only
 // (PSC has router endpoint only)
 rule: !has(self.publishing)
       || self.platform.type != "GCP"
       || !has(self.platform.gcp)
       || self.platform.gcp.endpointAccess != "Private"
-      || self.publishing.type == "DedicatedIngress"
+      || self.publishing.type == "SingleIngressPoint"
 
-// Azure Private: DedicatedIngress only
+// Azure Private: SingleIngressPoint only
 // (PLS has router endpoint only)
 rule: !has(self.publishing)
       || self.platform.type != "Azure"
       || self.platform.?azure.topology.orValue("")
          != "Private"
-      || self.publishing.type == "DedicatedIngress"
+      || self.publishing.type == "SingleIngressPoint"
 ```
 
 **Exposure type restrictions:**
 
 ```cel
-// DedicatedIngress NodePort: only platforms with
+// SingleIngressPoint NodePort: only platforms with
 // directly reachable nodes
 rule: !has(self.publishing)
-      || self.publishing.type != "DedicatedIngress"
-      || !has(self.publishing.dedicatedIngress)
-      || self.publishing.dedicatedIngress.exposure
+      || self.publishing.type != "SingleIngressPoint"
+      || !has(self.publishing.singleIngressPoint)
+      || self.publishing.singleIngressPoint.exposure
          != "NodePort"
       || self.platform.type in
          ["Agent", "KubeVirt", "None"]
-message: "DedicatedIngress with NodePort exposure is
+message: "SingleIngressPoint with NodePort exposure is
   only supported on Agent, KubeVirt, and None"
 ```
 
 **Per-service rules** (on the preset sub-structs; O(n) over `MaxItems ≤ 4`):
 
 ```cel
-// DedicatedIngress: an APIServer entry with a hostname is
+// SingleIngressPoint: an APIServer entry with a hostname is
 // required — the KAS Route hostname is non-derivable
 // (verified: kas/service.go, hostedcluster_controller.go).
 rule: self.services.exists(s, s.name == "APIServer"
       && has(s.hostname))
-message: "DedicatedIngress requires an APIServer entry with
+message: "SingleIngressPoint requires an APIServer entry with
   a hostname"
 
 // exposure override is valid only on the OAuthServer entry
-// (same rule on the DedicatedIngress and
-// DedicatedAPIEndpoint sub-structs).
+// (same rule on the SingleIngressPoint and
+// DedicatedAPIServerEndpoint sub-structs).
 rule: self.services.all(s, !has(s.exposure)
       || s.name == "OAuthServer")
 message: "exposure override is only valid for the OAuthServer
@@ -1196,20 +1198,20 @@ message: "exposure override is only valid for the OAuthServer
 
 Per-service name uniqueness needs no CEL: `+listType=map` with
 `+listMapKey=name` rejects duplicate service names at the schema level. The
-per-preset name enums (`IngressServiceName`, `APIEndpointServiceName`) forbid
-unreachable services (e.g. a Konnectivity hostname under `DedicatedAPIEndpoint`)
-at the schema level too — no CEL allowlist needed.
+per-preset name enums (`IngressServiceName`, `APIServerEndpointServiceName`)
+forbid unreachable services (e.g. a Konnectivity hostname under
+`DedicatedAPIServerEndpoint`) at the schema level too — no CEL allowlist needed.
 
 **OAuth exposure → Azure self-managed** (top-level `HostedClusterSpec`, because
 the sub-struct cannot see `spec.platform`; O(n) over `MaxItems ≤ 4`):
 
 ```cel
-// DedicatedIngress: OAuthServer exposure only on Azure
+// SingleIngressPoint: OAuthServer exposure only on Azure
 // self-managed.
 rule: !has(self.publishing)
-      || self.publishing.type != "DedicatedIngress"
-      || !has(self.publishing.dedicatedIngress)
-      || self.publishing.dedicatedIngress.services.all(s,
+      || self.publishing.type != "SingleIngressPoint"
+      || !has(self.publishing.singleIngressPoint)
+      || self.publishing.singleIngressPoint.services.all(s,
            !has(s.exposure))
       || (self.platform.type == "Azure"
           && self.platform.?azure.azureAuthenticationConfig
@@ -1218,8 +1220,8 @@ rule: !has(self.publishing)
 message: "OAuthServer dedicated LoadBalancer exposure is
   only supported on Azure self-managed"
 
-// DedicatedAPIEndpoint: analogous rule over
-// self.publishing.dedicatedAPIEndpoint.services.
+// DedicatedAPIServerEndpoint: analogous rule over
+// self.publishing.dedicatedAPIServerEndpoint.services.
 ```
 
 > **To confirm during implementation:** the exact self-managed predicate
@@ -1237,20 +1239,20 @@ implemented in the API PR.
 ```cel
 // Top-level: type must match sub-struct
 rule: !has(self.publishing)
-      || (self.publishing.type == "DedicatedIngress"
-          ? has(self.publishing.dedicatedIngress)
-          : !has(self.publishing.dedicatedIngress))
-message: "dedicatedIngress must be set when type is
-  DedicatedIngress, and forbidden otherwise"
+      || (self.publishing.type == "SingleIngressPoint"
+          ? has(self.publishing.singleIngressPoint)
+          : !has(self.publishing.singleIngressPoint))
+message: "singleIngressPoint must be set when type is
+  SingleIngressPoint, and forbidden otherwise"
 
-// DedicatedAPIEndpoint arm is NOT required when
+// DedicatedAPIServerEndpoint arm is NOT required when
 // selected — all fields are optional, defaults apply
 // when absent. Only reject if set on a non-matching type.
 rule: !has(self.publishing)
-      || self.publishing.type == "DedicatedAPIEndpoint"
-      || !has(self.publishing.dedicatedAPIEndpoint)
-message: "dedicatedAPIEndpoint must not be set when type
-  is not DedicatedAPIEndpoint"
+      || self.publishing.type == "DedicatedAPIServerEndpoint"
+      || !has(self.publishing.dedicatedAPIServerEndpoint)
+message: "dedicatedAPIServerEndpoint must not be set when type
+  is not DedicatedAPIServerEndpoint"
 
 rule: !has(self.publishing)
       || (self.publishing.type == "NodePort"
@@ -1259,22 +1261,22 @@ rule: !has(self.publishing)
 message: "nodePort must be set when type is NodePort,
   and forbidden otherwise"
 
-// Nested: DedicatedIngress exposure must match sub-struct
+// Nested: SingleIngressPoint exposure must match sub-struct
 rule: !has(self.publishing)
-      || !has(self.publishing.dedicatedIngress)
-      || (self.publishing.dedicatedIngress.exposure
+      || !has(self.publishing.singleIngressPoint)
+      || (self.publishing.singleIngressPoint.exposure
               == "LoadBalancer"
-          ? has(self.publishing.dedicatedIngress.loadBalancer)
-          : !has(self.publishing.dedicatedIngress.loadBalancer))
+          ? has(self.publishing.singleIngressPoint.loadBalancer)
+          : !has(self.publishing.singleIngressPoint.loadBalancer))
 message: "loadBalancer config must be set when exposure
   is LoadBalancer, and forbidden otherwise"
 
 rule: !has(self.publishing)
-      || !has(self.publishing.dedicatedIngress)
-      || (self.publishing.dedicatedIngress.exposure
+      || !has(self.publishing.singleIngressPoint)
+      || (self.publishing.singleIngressPoint.exposure
               == "NodePort"
-          ? has(self.publishing.dedicatedIngress.nodePort)
-          : !has(self.publishing.dedicatedIngress.nodePort))
+          ? has(self.publishing.singleIngressPoint.nodePort)
+          : !has(self.publishing.singleIngressPoint.nodePort))
 message: "nodePort config must be set when exposure is
   NodePort, and forbidden otherwise"
 ```
@@ -1304,13 +1306,13 @@ IBMCloud is migrating its service publishing from NodePort to Route
   manifests under `docs/content/reference/manifests/ibmcloud/`). These map to
   the `NodePort` preset.
 - **New / migrated clusters:** services use `Route`, with IBM's platform
-  handling exposure. These map to the `DedicatedIngress` preset with
-  `exposure: External`.
+  handling exposure. These map to the `SingleIngressPoint` preset with
+  `exposure: PlatformProvided`.
 
 Because IBMCloud services are mutable and clusters may sit on either side of
 this migration, the IBMCloud CEL rule must permit **both** the `NodePort` preset
-and `DedicatedIngress` (External) — reflected in the platform validation matrix
-and CEL rules above.
+and `SingleIngressPoint` (PlatformProvided) — reflected in the platform
+validation matrix and CEL rules above.
 
 ### Risks and Mitigations
 
@@ -1359,7 +1361,7 @@ Rejected because the Router is infrastructure, not a peer service. This approach
 would worsen the existing structural issues (MaxItems bump, validation gaps,
 ordering ambiguity) without addressing them.
 
-**Rename `DedicatedAPIEndpoint` to a general preset with configurable
+**Rename `DedicatedAPIServerEndpoint` to a general preset with configurable
 services**: Rejected because router deployment becomes dependent on which
 optional fields are set rather than being explicit.
 
@@ -1376,7 +1378,7 @@ private connectivity is a reachability concern already owned by
 would duplicate that state and permit contradictory specs (e.g. a `PrivateLink`
 preset with `endpointAccess: Public`). On all three clouds a fully `Private`
 cluster fronts a single VPC Endpoint Service to the private router and serves
-KAS via Route, so the topology is already captured by `DedicatedIngress` +
+KAS via Route, so the topology is already captured by `SingleIngressPoint` +
 `endpointAccess`. See "Why private connectivity is not a publishing preset".
 
 ## Open Questions
@@ -1392,17 +1394,17 @@ KAS via Route, so the topology is already captured by `DedicatedIngress` +
    existing `spec.services[]` behavior. This constraint can be loosened for
    specific fields in the future without breaking changes.
 
-2. **DedicatedIngress NodePort exposure platform restrictions.** The
-   `DedicatedIngress` preset with `exposure: NodePort` is listed for bare-metal
-   use cases. No CEL rule currently restricts which platforms can use this
-   exposure type. Is `exposure: NodePort` valid on all platforms that support
-   `DedicatedIngress`, or only a subset (e.g., Agent, KubeVirt, None)?
+2. **SingleIngressPoint NodePort exposure platform restrictions.** The
+   `SingleIngressPoint` preset with `exposure: NodePort` is listed for
+   bare-metal use cases. No CEL rule currently restricts which platforms can use
+   this exposure type. Is `exposure: NodePort` valid on all platforms that
+   support `SingleIngressPoint`, or only a subset (e.g., Agent, KubeVirt, None)?
 
 3. **GCP CLI vs. CEL for `Private` without ExternalDNS.** The proposed
-   `GCP Private → DedicatedIngress only` rule requires KAS to use Route. But the
-   GCP CLI hardcodes `isPrivate=false` (`cmd/cluster/gcp/create.go`), so
+   `GCP Private → SingleIngressPoint only` rule requires KAS to use Route. But
+   the GCP CLI hardcodes `isPrivate=false` (`cmd/cluster/gcp/create.go`), so
    `GCP Private` without ExternalDNS currently yields KAS=`LoadBalancer`
-   (`DedicatedAPIEndpoint`), which the rule would reject. Before shipping,
+   (`DedicatedAPIServerEndpoint`), which the rule would reject. Before shipping,
    reconcile the two: either the GCP CLI must set KAS=Route for `Private`
    (matching Azure, which wires `isPrivate` through), or the matrix/CEL must
    accept the current CLI output. The GCP validation matrix above omits
@@ -1442,18 +1444,18 @@ See dev-guide/test-conventions.md for details. -->
 
 - Mutual exclusivity: setting both `spec.publishing` and `spec.services[]` is
   rejected.
-- Union discriminator enforcement: `type=DedicatedIngress` with `nodePort`
+- Union discriminator enforcement: `type=SingleIngressPoint` with `nodePort`
   sub-struct (wrong arm) is rejected.
 - Exposure discriminator enforcement: `exposure=LoadBalancer` with `nodePort`
   sub-struct is rejected.
-- Required field validation: `DedicatedIngress` without an APIServer `services`
-  entry — or with one lacking a `hostname` — is rejected.
+- Required field validation: `SingleIngressPoint` without an APIServer
+  `services` entry — or with one lacking a `hostname` — is rejected.
 - Preset x platform x endpointAccess matrix: all invalid combinations are
   rejected per the validation matrix.
 - OAuth `exposure: DedicatedLoadBalancer` restricted to the OAuthServer entry
   and to Azure self-managed.
 - Per-preset service enum: a `Konnectivity` or `Ignition` entry under
-  `DedicatedAPIEndpoint` is rejected.
+  `DedicatedAPIServerEndpoint` is rejected.
 - Per-service name uniqueness: duplicate service names in a preset's `services`
   list are rejected (`+listType=map`).
 - NodePort range validation (30000-32767).
@@ -1471,11 +1473,11 @@ See dev-guide/test-conventions.md for details. -->
 
 **E2E tests:**
 
-- `DedicatedIngress` (LoadBalancer): AWS Private or AWS Public + ExternalDNS.
-- `DedicatedIngress` (NodePort): Agent or bare metal.
-- `DedicatedIngress` (External): IBMCloud (if CI available).
-- `DedicatedAPIEndpoint`: AWS Public (no ExternalDNS).
-- `DedicatedAPIEndpoint` + OAuth `exposure`: Azure self-managed (no
+- `SingleIngressPoint` (LoadBalancer): AWS Private or AWS Public + ExternalDNS.
+- `SingleIngressPoint` (NodePort): Agent or bare metal.
+- `SingleIngressPoint` (PlatformProvided): IBMCloud (if CI available).
+- `DedicatedAPIServerEndpoint`: AWS Public (no ExternalDNS).
+- `DedicatedAPIServerEndpoint` + OAuth `exposure`: Azure self-managed (no
   ExternalDNS).
 - `NodePort`: Agent default.
 - HO translation: create cluster with `spec.services[]`, upgrade HO, verify HCP
@@ -1503,21 +1505,21 @@ platform matrix applies. -->
 The immediate use case driving this enhancement is
 [CNTRLPLANE-3527](https://issues.redhat.com/browse/CNTRLPLANE-3527): enabling
 configurable HCP router exposure (particularly NodePort for bare-metal
-environments). `DedicatedIngress` is the preset that addresses this.
+environments). `SingleIngressPoint` is the preset that addresses this.
 
-- `DedicatedIngress` preset implemented with all three exposure modes
-  (LoadBalancer, NodePort, External) and controller support (CPO reads
+- `SingleIngressPoint` preset implemented with all three exposure modes
+  (LoadBalancer, NodePort, PlatformProvided) and controller support (CPO reads
   `spec.publishing`).
-- `DedicatedAPIEndpoint` and `NodePort` presets implemented with controller
-  support.
+- `DedicatedAPIServerEndpoint` and `NodePort` presets implemented with
+  controller support.
 - HO translation path functional (`spec.services[]` → `spec.publishing` on HCP).
 - CEL validation: mutual exclusivity, union discriminators, required fields,
-  platform restrictions for `DedicatedIngress`.
-- CLI produces `spec.publishing` with `DedicatedIngress` for new clusters on at
-  least AWS and Agent platforms.
+  platform restrictions for `SingleIngressPoint`.
+- CLI produces `spec.publishing` with `SingleIngressPoint` for new clusters on
+  at least AWS and Agent platforms.
 - Unit test coverage for translation logic and preset mapping.
 - Envtest coverage for CEL validation rules.
-- E2E passing for `DedicatedIngress` (LB) on AWS and `DedicatedIngress`
+- E2E passing for `SingleIngressPoint` (LB) on AWS and `SingleIngressPoint`
   (NodePort) on Agent.
 - Feature-gated behind `ServicePublishingAPI`.
 
@@ -1533,7 +1535,7 @@ environments). `DedicatedIngress` is the preset that addresses this.
 - Upgrade tested: new HO + old CPO version skew verified.
 - `e2e-aws-upgrade-hypershift-operator` passing with HO translation path.
 - Azure OAuth LB sub-cases covered (both ExternalDNS variants).
-- IBMCloud `DedicatedIngress` (External) validated.
+- IBMCloud `SingleIngressPoint` (PlatformProvided) validated.
 - Documentation updated: service-publishing-strategies.md rewritten for
   `spec.publishing`.
 - User facing documentation created in
