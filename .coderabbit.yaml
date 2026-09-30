@@ -1,0 +1,63 @@
+language: en-US
+reviews:
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: false
+  auto_review:
+    enabled: true
+    drafts: false
+  tools:
+    enabled: true
+    filePatterns:
+      - "REVIEW.md"
+      - "enhancements/**/*.md"
+      - "dev-guide/**/*.md"
+      - "guidelines/**/*.md"
+  path_filters:
+    - "!this-week/**"
+    - "!tools/**"
+    - "!hack/**"
+  path_instructions:
+    - path: "enhancements/**/*.md"
+      instructions: |
+        Verify template compliance: all required sections from guidelines/enhancement_template.md must be present.
+        Check Topology Considerations: Hypershift, Standalone, SNO, MicroShift, OKE must all be addressed.
+        Verify YAML frontmatter: title, authors, reviewers, approvers, status, tracking-link required.
+        API changes require api-approvers field.
+    - path: "dev-guide/**"
+      instructions: |
+        High scrutiny: these are authoritative development conventions for all OCP components.
+        Verify accuracy against current OCP practices.
+    - path: "guidelines/**"
+      instructions: |
+        Very high scrutiny: changes affect all future enhancement proposals.
+        Verify backward compatibility with existing EPs.
+chat:
+  auto_reply: true
+knowledge_base:
+  learnings:
+    scope: auto
+  issues:
+    scope: auto
+  jira:
+    project_keys: []
+  linear:
+    team_keys: []
+  pull_requests:
+    scope: auto
+early_access: true
+tools:
+  markdownlint:
+    enabled: true
+  languagetool:
+    enabled: true
+    enabled_rules: []
+    disabled_rules:
+      - EN_QUOTES
+    enabled_categories: []
+    disabled_categories:
+      - TYPOS
+    enabled_only: false
+    level: default
