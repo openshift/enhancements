@@ -202,7 +202,7 @@ Phase 1 is delivered as three incremental pull requests. Each PR can be reviewed
 |----|-------|----------|------|
 | **PR 1: Infrastructure** | Framework and orchestration | Add `status_reporting.sh` (`report_error`, `report_skip`, `status_init`, `status_finalize`, atomic merge). Refactor `gather` to per-PID wait loop (replace group `wait`). Generate `status.json` with `schemaVersion: 1`. Add BATS unit tests for helpers. Clean up dead code (`resources+=()` on `gather` line 50). | Low — additive, no collector behavior changes. |
 | **PR 2: Skip instrumentation** | Silent-skip visibility | Fix `get_operator_ns` to call `report_skip` (affects metallb, nmstate, nfd, sriov). Add `report_skip` to all silent-skip collectors (vsphere, aro, osus, windows, frrk8s, olm\_v1, priority\_and\_fairness, metallb CR-absent case as `report_error`). Add BATS tests for skip detection. | Low — one-line additions per collector, exit codes unchanged. |
-| **PR 3: Error instrumentation** | Error-swallowing and nested-wait fixes | Fix `gather_monitoring` (`|| true` removal + `report_error`). Fix `gather_etcd`, `gather_ppc`, `gather_network_logs_basics`, `gather_sriov`, `gather_olm_v1` error handling. Fix all nested-wait collectors (per-PID child wait). Add `gather_insights` basic error handling. Add BATS tests for error/degraded detection. | Medium — behavioral changes inside collectors, needs careful per-collector review. |
+| **PR 3: Error instrumentation** | Error-swallowing and nested-wait fixes | Fix `gather_monitoring` (remove unconditional-success suppression, add `report_error`). Fix `gather_etcd`, `gather_ppc`, `gather_network_logs_basics`, `gather_sriov`, `gather_olm_v1` error handling. Fix all nested-wait collectors (per-PID child wait). Add `gather_insights` basic error handling. Add BATS tests for error/degraded detection. | Medium — behavioral changes inside collectors, needs careful per-collector review. |
 
 A fourth parallel effort (support documentation, error code registry, archive inspection guide) can proceed alongside PRs 2 and 3.
 
@@ -219,7 +219,7 @@ A fourth parallel effort (support documentation, error code registry, archive in
 | Job lifecycle (Layer 1) | Standard K8s conditions: Pending, Running, Gathering, Uploading, Completed, Failed — synced from Job/Pod phase, exit codes, termination reasons |
 | Report consumption (Layer 2) | Read `/must-gather/status.json` from gather output volume before cleanup/upload; parse and map to CR status |
 | CR status extension | Bounded `status.collectionReport` with counts, `overallStatus`, affected collector names/reasons |
-| Mapping rules | Job Failed → Failed condition regardless of report; Job Succeeded + report `degraded` → Completed with `CollectionDegraded` reason; missing/invalid report → Job-only fallback |
+| Mapping rules | Job Failed → Failed condition regardless of report; Job Succeeded + report `degraded` → Completed with `CollectionDegraded` reason; Job Succeeded + report `error` → Completed with `CollectionFrameworkError` reason; missing/invalid report → Job-only fallback |
 | Version skew | New image + old operator; old image + new operator; unsupported `schemaVersion` → graceful fallback |
 | Tests | Controller unit tests; integration/e2e with operator-managed gather |
 | API review | Condition types, reason strings, status field size limits, message redaction |
@@ -279,8 +279,8 @@ The original process exit code is always retained in the report. Status normaliz
 Normalization rules:
 
 * `skipped`: explicit `report_skip`, or wrapper maps known skip patterns (for example `get_operator_ns` INFO message + exit `0`).
-* `degraded`: explicit `report_error` with non-fatal severity, or wrapper detects bounded signals (for example non-empty `monitoring/**/*.stderr` files).
-* `error`: non-zero exit without skip mapping, or explicit fatal `report_error`.
+* `degraded`: explicit `report_error` with severity `warning` (the default), or wrapper detects bounded signals (for example non-empty `monitoring/**/*.stderr` files), and exit code is `0`.
+* `error`: non-zero exit without skip mapping, or explicit `report_error` with severity `error` (fatal).
 * Every scheduled work unit gets a wrapper entry; there is no `unknown` state.
 
 #### Overall outcomes and exit semantics
@@ -299,33 +299,35 @@ The report has an overall status separate from individual collector outcomes:
 
 There is no v1 concept of "required collectors" that flip overall status to `error`. Collector failures on a finalized archive are always `degraded`. This preserves the upstream must-gather best-effort contract and the existing e2e expectation that gather exits successfully when the archive is produced.
 
-On timeout or cancellation, write a partial report when possible: populate finished work units, set `overallStatus: error`, set `completedAt`, and set `interrupted: true`.
+On timeout or cancellation, write a partial report when possible. The partial report must still include an entry for **every scheduled work unit** (the "no `unknown` state" rule applies even under timeout). Finished units keep their normal outcomes. Work units that were launched but not yet completed when the timeout fires receive `status: error`, `exitCode: null`, and a message with code `INTERRUPTED` (for example `"Collection interrupted before completion"`). Set the report-level fields `overallStatus: error`, `completedAt`, and `interrupted: true`.
 
 #### Status report format
 
-The initial report schema (`schemaVersion: 1`) is as follows. Field names are illustrative until reviewed by the owners of `must-gather` and `must-gather-operator`.
+The initial report schema (`schemaVersion: 1`) is as follows. Field names are illustrative until reviewed by the owners of `must-gather` and `must-gather-operator`. Allowed values: `overallStatus` is one of `success`, `degraded`, `error`; collector `status` is one of `success`, `skipped`, `degraded`, `error`; message `severity` is `warning` or `error`; framework step `status` is one of `success`, `skipped`, `error`.
+
+The following concrete example shows a **degraded** archive where `gather_etcd` failed while the remaining collectors succeeded and `compress_logs` was not enabled:
 
 ~~~json
 {
   "schemaVersion": 1,
-  "mustGatherVersion": "<from /must-gather/version line 2>",
-  "startedAt": "<RFC3339 timestamp>",
-  "completedAt": "<RFC3339 timestamp>",
+  "mustGatherVersion": "4.18.0-202609170001",
+  "startedAt": "2026-09-17T09:55:00Z",
+  "completedAt": "2026-09-17T09:58:42Z",
   "interrupted": false,
-  "overallStatus": "success|degraded|error",
+  "overallStatus": "degraded",
   "collectors": [
     {
       "name": "gather_etcd",
-      "status": "success|skipped|degraded|error",
+      "status": "error",
       "exitCode": 1,
-      "startedAt": "<RFC3339 timestamp>",
-      "completedAt": "<RFC3339 timestamp>",
-      "durationSeconds": 42,
+      "startedAt": "2026-09-17T09:55:01Z",
+      "completedAt": "2026-09-17T09:55:03Z",
+      "durationSeconds": 2,
       "messages": [
         {
-          "severity": "warning|error",
+          "severity": "error",
           "code": "ETCD_NO_RUNNING_POD",
-          "message": "No running etcd pods found"
+          "message": "No running etcd pods found in namespace openshift-etcd"
         }
       ],
       "artifacts": ["etcd_info"]
@@ -333,8 +335,8 @@ The initial report schema (`schemaVersion: 1`) is as follows. Field names are il
   ],
   "framework": {
     "compress_logs": {
-      "status": "success|skipped|error",
-      "exitCode": 0
+      "status": "skipped",
+      "exitCode": null
     }
   }
 }
@@ -385,7 +387,7 @@ status:
 | Job Succeeded, no report | — | `Completed` + `reportAvailable: false` |
 | Job Succeeded, report `success` | present | `Completed` |
 | Job Succeeded, report `degraded` | present | `Completed` + `CollectionDegraded` reason |
-| Job Succeeded, report `error` (framework) | present | `Failed` or `Completed` with framework error — archive may still exist |
+| Job Succeeded, report `error` (framework) | present | `Completed` + `CollectionFrameworkError` reason — archive may still exist but report completeness is untrustworthy |
 | Report parse fails | present but invalid | `Completed` + `reportAvailable: false` + parse error in condition message |
 
 The detailed per-collector messages remain in the archive. The CR status contains only bounded, non-sensitive summary data and the names/statuses of affected collectors. The operator reads `status.json` from the gather output volume after the Job container terminates and before cleanup or upload.
@@ -430,8 +432,8 @@ The archive-level report does not depend on features excluded from OKE. Any oper
 
 Add a shared shell helper module `status_reporting.sh` that provides:
 
-* `report_error` for bounded, human-readable error events.
-* `report_skip` for intentional non-applicability.
+* `report_error <code> <message> [severity]` for bounded, human-readable error events. The optional `severity` argument is `warning` (non-fatal, default when omitted) or `error` (fatal). A `warning` event marks the collector `degraded` when it exits `0`; an `error` event marks the collector `error` regardless of exit code.
+* `report_skip <code> <message>` for intentional non-applicability.
 * Initialization and finalization of per-collector result data.
 * Normalization of exit codes into the four collector outcomes in `status.json`.
 * Atomic report generation and validation.
@@ -832,10 +834,7 @@ The following questions were resolved during enhancement review:
 | 8 | `status.json` is recommended for custom images but not required. Custom images without a report use Job-only fallback. |
 | 9 | Message limits: max 10 messages per work unit, 500 characters each, stable `code` field, no secrets/tokens in CR status. |
 | 10 | Prior analysis spikes are closed. This enhancement is the authoritative design. |
-
-## Open Questions [optional]
-
-* What release first targets this behavior, and should it be treated as Dev Preview, Tech Preview, or GA? Recommend Tech Preview for the schema in the first release that ships Phase 1.
+| 11 | This feature ships as **GA**. There is no Dev Preview or Tech Preview maturity stage. Phase 1 and Phase 2 are implementation delivery phases within the same GA track. |
 
 ## Test Plan
 
@@ -874,7 +873,9 @@ The test plan should be expanded with managed-service testing requirements when 
 
 ## Graduation Criteria
 
-This proposal is initially `provisional`. The following criteria define a path to implementation and maturity:
+This feature ships as **GA**. There is no Dev Preview or Tech Preview maturity stage. Phase 1 (must-gather) and Phase 2 (must-gather-operator) are implementation delivery milestones on the same GA track.
+
+This proposal is initially `provisional`. The following criteria define the path to implementable and GA.
 
 ### Provisional -> Implementable
 
@@ -886,7 +887,13 @@ This proposal is initially `provisional`. The following criteria define a path t
 
 ### Dev Preview -> Tech Preview
 
-Phase 1 (must-gather repository) targets Dev Preview. The following criteria must be met before promoting to Tech Preview:
+N/A. This feature is not released as Dev Preview or Tech Preview.
+
+### Tech Preview -> GA
+
+N/A. This feature graduates directly to GA.
+
+**GA readiness — Phase 1 (must-gather):**
 
 * The default must-gather image emits a valid versioned report for all 28 top-level work units.
 * The report is preserved for success, degraded, and collector-error runs where archive finalization succeeds.
@@ -894,9 +901,7 @@ Phase 1 (must-gather repository) targets Dev Preview. The following criteria mus
 * Support-facing documentation explains how to interpret the report and decide whether to re-run collection.
 * Schema v1 is frozen.
 
-### Tech Preview -> GA
-
-Phase 2 (must-gather-operator repository) targets Tech Preview. The following criteria must be met before promoting to GA:
+**GA readiness — Phase 2 (must-gather-operator):**
 
 * Operator handles Job lifecycle conditions as defined in the operator status requirements section above.
 * Operator handles report-present, report-absent, and unsupported-schema cases without losing archives.
