@@ -11,7 +11,7 @@ Enhancement proposals (EPs) for OpenShift. Primarily markdown documents followin
 1. **Missing template sections** -- all sections from `enhancement_template.md` must be present. If not applicable, explain why
 2. **Topology Considerations gaps** -- every EP must address Hypershift, Standalone, SNO, MicroShift, OKE. "N/A" without explanation is insufficient
 3. **Missing YAML frontmatter** -- `title`, `authors`, `reviewers`, `approvers`, `status`, `tracking-link` required
-4. **API changes without api-approvers** -- EPs modifying APIs must have `api-approvers` field set
+4. **Missing `api-approvers`** -- required for ALL EPs. Set named approvers for API changes; set `None` when there is no API change
 
 ### Important (Request changes)
 

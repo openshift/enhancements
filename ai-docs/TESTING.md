@@ -21,12 +21,11 @@ make image
 
 ### What the Linter Checks
 
-| Check | Enforced By | What It Validates |
-|-------|-------------|-------------------|
-| Markdown formatting | `markdownlint` in container | Heading levels, list formatting, line length |
-| Required sections | Template section checker | All headers from `enhancement_template.md` present |
-| YAML frontmatter | Frontmatter validator | Required fields: title, authors, reviewers, approvers, status |
-| Link validity | Link checker | Internal cross-references resolve |
+| Check | Enforced By | Scope | What It Validates |
+|-------|-------------|-------|-------------------|
+| Markdown formatting | `markdownlint-cli2` in container | All `enhancements/**/*.md` files | Heading levels, list formatting, line length |
+| Required sections | `hack/template-lint.sh` | Newly added enhancement files only | All non-optional headers from `enhancement_template.md` present (sections marked `[optional]` are skipped) |
+| YAML frontmatter | `hack/metadata-lint.sh` via Go tool | Newly added enhancement files only | Required fields: title, authors, reviewers, approvers, api-approvers, status, tracking-link |
 
 ### Linter Container
 
@@ -34,7 +33,8 @@ The linter runs inside a container built from `hack/Dockerfile.markdownlint`:
 - Image name: `enhancements-markdownlint:latest`
 - Mounts the repo at `/workdir`
 - Environment: `RUN_LOCAL=true`, `VALIDATE_MARKDOWN=true`
-- Compares against `PULL_BASE_SHA` (default: `origin/master`) to lint only changed files
+- Markdown formatting checks scan all `enhancements/**/*.md` files
+- Template and metadata checks use `PULL_BASE_SHA` (default: `origin/master`) to select only newly added enhancement files
 
 ### Common Linter Failures
 

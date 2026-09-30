@@ -28,7 +28,7 @@ make show-stale  # dry-run
 
 | Command | What It Does |
 |---------|-------------|
-| `make lint` | Build linter image + run markdown validation on changed files |
+| `make lint` | Build linter image + run markdown lint on all enhancement files + template/metadata checks on new files |
 | `make image` | Build the `enhancements-markdownlint` container image |
 | `make image-clean` | Remove cached linter image |
 | `PULL_BASE_SHA=HEAD~3 make lint` | Lint against a specific base ref |
@@ -66,7 +66,7 @@ make report
 # Annual summary for previous year
 make annual-summary
 
-# Upload report to HackMD (requires hackmd-cli image)
+# Build the HackMD CLI container image (for manual report uploads)
 make report-image
 ```
 

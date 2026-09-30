@@ -178,21 +178,27 @@ oc get infrastructure cluster -o jsonpath='{.status.controlPlaneTopology}'
 
 ## OpenShift Kubernetes Engine (OKE)
 
-**Architecture**: Upstream Kubernetes with minimal OpenShift additions; no platform operators.
+**Architecture**: Same binary distribution as OCP but with a reduced entitlement. OKE includes the Administrator web console, cluster monitoring (Prometheus), OLM, and all platform operators. It excludes developer-focused features.
 
-### Key Differences from OCP
+### Features Excluded from OKE
 
-- No platform operators: monitoring, console, registry, etc.
-- Upstream Kubernetes components
-- Minimal `config.openshift.io` API surface
+- Developer console persona (Administrator console IS included)
+- CI/CD pipelines (Tekton, Jenkins)
+- Source-to-Image (S2I) and build strategies
+- OpenShift Serverless
+- OpenShift Service Mesh
+- Cluster-wide log aggregation
+- OpenShift sandboxed containers
+- Dev Spaces, `odo` CLI
+- Middleware entitlements (Keycloak, Quarkus)
 
 ### When to Consider
 
-- Features depending on OCP-specific operators (console, monitoring, etc.)
-- Features using `config.openshift.io` APIs not in OKE
-- Features requiring OpenShift-specific integrations
+- Features depending on developer console, builds, pipelines, or Serverless
+- Features requiring Service Mesh or cluster-wide logging
+- Features using Dev Spaces or `odo`
 
-**Good**: "OKE: This enhancement adds a console plugin, which depends on the OpenShift web console. OKE does not include the console, so this feature is not available in OKE."
+**Good**: "OKE: This enhancement adds a Tekton pipeline integration. OKE does not include CI/CD pipelines, so this feature is not available in OKE."
 
 ### Reference
 

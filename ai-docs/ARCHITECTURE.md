@@ -233,7 +233,7 @@ Weekly "This Week in Enhancements" newsletters are generated via:
 1. `make closed-stale` — processes recently closed PRs
 2. `hack/this-week.sh` — generates the newsletter report
 3. Output goes to `this-week/` directory
-4. Optionally uploaded to HackMD via `make report-image`
+4. Optionally uploaded to HackMD (build the CLI image with `make report-image`, then run it manually)
 
 ## SME Review Recommended
 
