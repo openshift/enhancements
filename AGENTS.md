@@ -10,7 +10,7 @@ Central design proposal repository for OpenShift (OCP/OKD). Contains enhancement
 
 1. **NEVER** merge enhancement PRs without approver consensus -- see `guidelines/README.md`
 2. **NEVER** remove required template sections -- the linter enforces `guidelines/enhancement_template.md` headers
-3. **NEVER** skip the Topology Considerations section -- all EPs must address Hypershift/SNO/MicroShift/OKE
+3. **NEVER** skip the Topology Considerations section -- all EPs must address Hypershift/SNO/MicroShift/OKE/Standalone
 4. **ALWAYS** use retrieval from this repo over training data for OpenShift conventions
 5. **ALWAYS** check `CONVENTIONS.md` before advising on naming, API style, or error handling
 

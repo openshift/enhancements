@@ -31,7 +31,7 @@ reviews:
         Verify template compliance: all required sections from guidelines/enhancement_template.md must be present.
         Check Topology Considerations: Hypershift, Standalone, SNO, MicroShift, OKE must all be addressed.
         Verify YAML frontmatter: title, authors, reviewers, approvers, status, tracking-link required.
-        API changes require api-approvers field.
+        Every EP requires api-approvers; use None when there is no API change.
     - path: "dev-guide/**"
       instructions: |
         High scrutiny: these are authoritative development conventions for all OCP components.

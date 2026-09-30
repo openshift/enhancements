@@ -178,7 +178,7 @@ oc get infrastructure cluster -o jsonpath='{.status.controlPlaneTopology}'
 
 ## OpenShift Kubernetes Engine (OKE)
 
-**Architecture**: Same binary distribution as OCP but with a reduced entitlement. OKE includes the Administrator web console, cluster monitoring (Prometheus), OLM, and all platform operators. It excludes developer-focused features.
+**Architecture**: Same binary distribution as OCP but with a reduced entitlement. OKE includes the Administrator web console, cluster monitoring (Prometheus), OLM, and the core operators required for OKE-supported features. It excludes developer-focused features.
 
 ### Features Excluded from OKE
 
