@@ -1667,6 +1667,7 @@ approver-policy will be available as Tech Preview starting from cert-manager-ope
 - Complete end-user documentation.
 - Complete UTs and e2e tests are present.
 - Investigate NetworkPolicy requirements for approver-policy.
+- Evaluate and integrate Cluster TLS Profile config for the approver-policy operand.
 
 ### Removing a deprecated feature
 
