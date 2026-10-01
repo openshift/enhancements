@@ -1,0 +1,53 @@
+language: en-US
+reviews:
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: false
+  path_filters:
+    - "!enhancements/**"
+    - "!this-week/**"
+    - "!tools/**"
+    - "!hack/**"
+    - "!vendor/**"
+    - "!go.sum"
+  path_instructions:
+    - path: "guidelines/enhancement_template.md"
+      instructions: |
+        This template is CI-enforced. Changes affect linter behavior on all open PRs.
+        Verify backward compatibility and that required sections are clearly marked.
+    - path: "dev-guide/api-conventions.md"
+      instructions: |
+        Changes define API design rules for all of OpenShift.
+        Verify consistency with upstream Kubernetes API conventions.
+    - path: "CONVENTIONS.md"
+      instructions: |
+        Project-wide conventions. Changes affect ALL component repos.
+        Verify no conflicts with existing implementations.
+    - path: "dev-guide/**"
+      instructions: |
+        Development guides define cross-repo standards.
+        Verify accuracy of cross-references and examples.
+  auto_review:
+    enabled: true
+    drafts: false
+chat:
+  auto_reply: true
+knowledge_base:
+  learnings:
+    scope: auto
+  issues:
+    scope: auto
+  jira:
+    usage: auto
+  linear:
+    usage: auto
+  pull_requests:
+    scope: auto
+  opt_out: false
+  web_search:
+    enabled: true
+  input:
+    filePatterns:
+      - "REVIEW.md"
+      - "AGENTS.md"
