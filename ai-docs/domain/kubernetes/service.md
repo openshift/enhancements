@@ -379,5 +379,5 @@ spec:
 
 - **API**: `oc explain service`
 - **Docs**: [Kubernetes Services](https://kubernetes.io/docs/concepts/services-networking/service/)
-- **OpenShift**: [Routes](https://docs.openshift.com/container-platform/latest/networking/routes/route-configuration.html)
+- **OpenShift**: [Routes](https://docs.redhat.com/en/documentation/openshift_container_platform/4.16/html/networking/configuring-routes)
 - **Related**: [pod.md](./pod.md)

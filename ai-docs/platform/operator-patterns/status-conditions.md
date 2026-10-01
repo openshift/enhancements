@@ -6,7 +6,7 @@
 
 ## Overview
 
-Status conditions provide standardized health reporting for OpenShift components. Every ClusterOperator must report Available, Progressing, and Degraded conditions.
+Status conditions provide standardized health reporting for OpenShift components. Core (platform) operators report via `configv1.ClusterOperatorStatusCondition` on a `ClusterOperator` resource; OLM-managed operators report via standard `metav1.Condition` on their own Custom Resources. The pattern is the same — the Go types and reporting targets differ.
 
 **Purpose**: Enable cluster-wide health monitoring and upgrade orchestration.
 
@@ -72,6 +72,37 @@ func setCondition(conditions *[]configv1.ClusterOperatorStatusCondition,
     })
 }
 ```
+
+## OLM-Managed Operators
+
+OLM-managed operators use `metav1.Condition` (from `k8s.io/apimachinery/pkg/apis/meta/v1`) instead of `configv1.ClusterOperatorStatusCondition`. Conditions are set on the operator's own Custom Resource, not on a `ClusterOperator`.
+
+```go
+import (
+    metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+    "k8s.io/apimachinery/pkg/api/meta"
+)
+
+func setStatusCondition(conditions *[]metav1.Condition,
+                        condType string,
+                        status metav1.ConditionStatus,
+                        reason, message string,
+                        generation int64) {
+    meta.SetStatusCondition(conditions, metav1.Condition{
+        Type:               condType,
+        Status:             status,
+        Reason:             reason,
+        Message:            message,
+        ObservedGeneration: generation,
+    })
+}
+```
+
+Key differences from core operators:
+- **Type field**: Open vocabulary string (e.g., `"Ready"`, `"Available"`, `"Degraded"`) rather than the fixed constants in `configv1.ClusterStatusConditionType`
+- **ObservedGeneration**: Supported in `metav1.Condition` (absent in `configv1.ClusterOperatorStatusCondition`)
+- **No CVO visibility**: Conditions on a CR do not propagate to the CVO and do not gate cluster upgrades
+- **OLM also creates an `OperatorCondition` CR** (OLMv0 only, deprecated in OLMv1) per managed operator, where the operator can set `Upgradeable=False` in `spec.conditions` to block its own CSV upgrade (not cluster upgrades)
 
 ## Best Practices
 

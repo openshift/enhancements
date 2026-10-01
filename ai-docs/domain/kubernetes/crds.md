@@ -105,7 +105,7 @@ versions:
 
 ### Conversion Webhook
 
-**⚠️ OpenShift Practice**: OpenShift operators typically **do not serve multiple API versions simultaneously**, so conversion webhooks are rarely needed. Version transitions happen during OpenShift upgrades (one version at a time), not via runtime conversion.
+**⚠️ OpenShift Practice**: Core platform operators (CVO-managed) typically **do not serve multiple API versions simultaneously**, so conversion webhooks are rarely needed for platform APIs. Version transitions happen during OpenShift upgrades (one version at a time), not via runtime conversion. Note: many OLM-managed/optional operators do use conversion webhooks in practice.
 
 **Contrast with upstream Kubernetes**: The [Kubernetes documentation](https://kubernetes.io/docs/tasks/extend-kubernetes/custom-resources/custom-resource-definition-versioning/) presents serving multiple versions simultaneously as the standard API evolution pattern, stating "it is perfectly safe for some clients to use the old version while others use the new version." Conversion webhooks enable this multi-version serving model.
 
@@ -218,7 +218,7 @@ foo     3          3           5m
    shortNames: [co]  # kubectl get co
    ```
    
-   **OpenShift API team practice**: Short names should only be used for APIs accessed frequently by the majority of cluster users (e.g., `co` for ClusterOperator, `mc` for MachineConfig). Most operator-specific APIs should **not** define short names to avoid namespace pollution.
+   **OpenShift best practice**: Short names should only be used for APIs accessed frequently by the majority of cluster users (e.g., `co` for ClusterOperator, `mc` for MachineConfig). Most operator-specific APIs should **not** define short names to avoid namespace pollution and potential collisions.
 
 ## Common Patterns
 
