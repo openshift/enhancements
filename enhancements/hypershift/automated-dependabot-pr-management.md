@@ -38,7 +38,7 @@ The proposal delegates review attestations only for eligible Go dependency updat
 
 - As a HyperShift maintainer, I want routine dependency updates to progress without repeated manual commands, so that I can focus on changes that require engineering judgment.
 - As a reviewer, I want Chai to notify me in Slack when an update needs human review, with an explanation, so that I can understand why automation stopped and what needs attention.
-- As a maintainer handling a failed update, I want a repaired PR to be tested and reviewed independently, so that generating a replacement does not bypass the original safeguards.
+- As a HyperShift maintainer, I want Chai to replace Dependabot PRs that fail `verify` with validated repair PRs and notify approvers, so that I can review the fix rather than manually reconstruct the update.
 
 ### Goals
 
@@ -91,7 +91,7 @@ The automated workflow is:
 
 1. Dependabot opens or updates a PR. Chai fetches its current commit ID, target branch, complete changed-file list, and full diff.
 2. Chai checks the author, branch, allowed paths, and exception policies. It records the decision and claims processing ownership to prevent duplicate work.
-3. Chai uses the supported test-trust path if needed and waits for the configured initial checks to pass on the evaluated commit.
+3. Chai uses the supported test-trust path if needed and waits for initial checks, including `verify`. A failed `verify` on the original PR enters the repair workflow; otherwise, all initial checks must pass before approval.
 4. Chai refetches the PR and requests `approved` and `lgtm` through the authorized repository-scoped mechanism. The configured workflow starts the required end-to-end suite after `lgtm`.
 5. Chai waits for every job in the required end-to-end suite to pass for the current commit. It records job names, run links, tested revisions, and the policy version.
 6. Chai confirms that the PR still has the tested revision and posts `/verified by e2e passing`.
@@ -102,10 +102,16 @@ The automated workflow is:
 flowchart TD
     PR[Dependabot Go dependency PR] --> C{Complete diff and policy checks}
     C -->|Excluded or uncertain| H[Slack ping to approvers; human review]
-    C -->|Eligible| I[Initial checks pass]
-    I --> A[Authorized approved and lgtm]
-    A --> E[Required end-to-end suite passes]
-    E --> V["Chai posts /verified by e2e passing"]
+    C -->|Eligible| I[Initial checks including verify]
+    I -->|All pass| A[Authorized approved and lgtm]
+    I -->|Original verify fails| R[Chai cherry-picks and repairs]
+    R -->|Local validation passes| P["Open Chai PR, link and close original"]
+    P --> H
+    R -->|Repair or publication fails| F["Keep original open and held; request human help"]
+    I -->|Other check fails| H
+    A --> E[Required end-to-end suite]
+    E -->|All pass| V["Chai posts /verified by e2e passing"]
+    E -->|Any fails| H
     V --> G[Current evidence and eligibility gate]
     G --> T[Tide evaluates requirements and merges]
 ```
@@ -124,21 +130,27 @@ Chai avoids duplicate pings for the same decision. If routing or delivery fails,
 
 API failures, incomplete diffs, unknown security results, and stale revisions block automated actions. Chai may retry data collection, but cannot infer eligibility from missing information.
 
-Failed tests do not become passing evidence through a label override. Failures outside the narrow repair path remain human-owned; any permitted retest must produce fresh successful results for the current candidate.
+Labels do not turn failed tests into passing evidence. Only a failed `verify` on the original Dependabot PR triggers replacement; other failures remain human-owned. Retests must produce fresh results for the current candidate.
 
 #### Repair and replacement PRs
 
-Chai may attempt repair only when evidence identifies stale vendored or generated output as the cause of a validation failure. Repair is not a general-purpose code-fixing path.
+A failed `verify` check on an in-scope original Dependabot PR's current revision triggers this replacement path. Passing `verify` keeps the normal workflow; failures in other checks do not trigger replacement.
 
-The repair worker starts from a pinned source revision in an isolated workspace. It runs `make verify`, uses `UPDATE=true make test` only when fixture regeneration is justified, then reruns strict `make verify` and plain `make test`.
+Chai keeps the original PR open and held while preparing the repair:
 
-The replacement PR is evaluated from its own complete diff. It never inherits the source PR's eligibility, review attestations, or test evidence. Generated CRDs, assets, or Go files outside the allowed paths require human review.
+1. Chai creates a fresh branch from `main` in an isolated workspace and cherry-picks the pinned Dependabot update commits.
+2. Chai fixes the `verify` failure and reruns `make verify` and plain `make test`. It uses `UPDATE=true make test` only when fixture regeneration is justified. Both validation commands must pass before publication.
+3. Chai opens its own replacement PR. Its description links to the Dependabot PR and records the original failing revision, verification failure, repair changes, and local validation results.
+4. Once the replacement PR is confirmed open, Chai links the two PRs and closes the original Dependabot PR as superseded. It does not wait for the replacement to merge before closing the original.
+5. Chai pings the designated approvers in Slack with the replacement PR link, the reason for the repair, and the changes requiring review.
 
-Before publishing a replacement, Chai holds the source PR and verifies that the hold is effective. It links the two PRs and leaves the source open while the replacement is tested and reviewed.
+Every replacement PR is handed to human approvers, even if its diff remains within the original allowlist. Chai does not auto-approve these repair PRs or carry over the original PR's review labels or test results.
 
-Chai closes the source only after the replacement's required remote checks pass on its final commit, any required human review is complete, and Tide has merged it. Local validation or CI success alone is insufficient.
+Reviewers assess the replacement's full diff, including generated assets and non-vendored Go changes. The replacement must pass its own required remote checks and normal human review before Tide merges it.
 
-If repair fails or the replacement is abandoned, the source remains open and held for human resolution. Maintainers decide whether to resume the source, revise the replacement, or close either PR.
+If repair, local validation, or publication fails, Chai leaves the original open and held and requests human help in Slack. It never closes the original without a confirmed replacement PR.
+
+After the original is closed, failed checks or abandonment of the replacement require maintainer resolution. Closing the original marks it as superseded, not successfully merged.
 
 ### API Extensions
 
@@ -170,7 +182,7 @@ The workflow operates outside customer clusters and has no dependency on OKE-spe
 
 The policy has two outcomes: **eligible (`NOMINAL`)** and **human review (`SPECIAL`)**. `SPECIAL` includes incomplete or uncertain evidence; it does not necessarily indicate a defect in the update.
 
-Intake requires a verified Dependabot identity and the `main` target branch. A repair PR also requires a recorded source relationship and an authorized repair identity; unrelated bot-authored PRs cannot enter through that exception.
+Automatic approval requires an open original Dependabot PR with a verified author identity targeting `main`. Chai-authored repair PRs always enter human review, regardless of their changed paths.
 
 The initial manifest allowlist covers the Go modules currently configured for Dependabot. Paths are repository-relative; vendored subtrees are allowed only under these module roots.
 
@@ -232,7 +244,7 @@ Validation environments use only the test credentials they require. Their isolat
 
 Chai owns individual eligible Dependabot PRs, not weekly consolidated updates. The weekly triage job must skip claimed candidates or be disabled for the overlapping scope before enabling the workflow.
 
-Ownership is recorded before work begins and is shared with the weekly job. The coordination mechanism must handle duplicate events, interrupted repairs, and abandoned claims without silently closing source PRs.
+Ownership is recorded before work begins and is shared with the weekly job. The coordination mechanism must handle duplicate events, interrupted repairs, and abandoned claims without closing an original PR before its replacement exists.
 
 Reusing the weekly job requires fail-closed file retrieval, coverage of all changed modules, and separation of validation from writer credentials. It does not receive Chai's attestation authority unchanged.
 
@@ -257,7 +269,7 @@ The concrete gate, shutdown response time, and any already-dispatched merge beha
 | Bot permissions exceed the delegated scope. | Enforce policy at the trusted writer, separate permissions, and avoid broad OWNERS membership. |
 | Tests or dependency code expose credentials. | Isolate validation from writer credentials and review the remaining CI secret boundary. |
 | Another Tide query bypasses eligibility or shutdown. | Review every matching query and test that held, stale, and disabled candidates cannot merge. |
-| Repair expands the diff or closes the source too early. | Reclassify the replacement and retain the held source until remote validation and Tide merge complete. |
+| Repair hides additional changes or loses the original update. | Require human review of the full replacement diff, and close the original only after a validated replacement PR is open and linked. |
 | Additional test runs increase CI cost or queue time. | Limit the pilot, measure test usage, and require maintainer approval before increasing throughput. |
 | A regression appears after merge. | Use the normal human-owned investigation and revert process; pre-merge checks cannot eliminate every regression. |
 
@@ -329,9 +341,12 @@ Reviewer identities, one coordinating approver, and the enhancement's tracking i
 
 ### Repair and execution isolation
 
-- Reproduce a repairable vendored-output failure and verify the strict local validation sequence before publication.
-- Produce an out-of-scope generated file and confirm the replacement receives no Chai attestations. The replacement must require its own remote tests and any necessary human review.
-- Verify the source stays open and held until the replacement merges. Repair failure, replacement closure, and interrupted processing must not close the source.
+- Verify replacement is triggered only by a failed `verify` on the current revision of the original Dependabot PR. Passing, pending, missing, or stale `verify` results and failures in other checks must not trigger it.
+- Reproduce a `verify` failure, cherry-pick the pinned update, fix the failure, and verify the strict local validation sequence before publication.
+- Verify Chai opens its own replacement PR, links and closes the original as superseded, and then pings the approvers in Slack. Closure must not depend on the replacement having already merged.
+- Verify repair, validation, or publication failure leaves the original open and held. Never close it before the replacement PR is confirmed open.
+- Verify all replacement PRs require human review, including replacements whose diffs remain within the allowlist. They must not inherit labels or test evidence and must pass their own remote checks.
+- Verify a failed `verify` on a Chai-authored replacement does not recursively create another replacement.
 - Verify workers cannot access writer tokens, private keys, or credential helpers, and that vendored instruction files cannot influence privileged decisions.
 - Verify the weekly job respects ownership claims and fails closed when file retrieval is unavailable.
 
@@ -402,7 +417,8 @@ Chai tracks blocked decisions, failed commands, processing age, reconciliation l
 | Initial or end-to-end tests do not start | Check the agreed job list, trigger configuration, actor authorization, and observed Prow response. Do not substitute labels for missing tests. |
 | Chai cannot post the verification command | Inspect Chai's command-posting failure, then retry only after confirming that the required e2e results still match the current revision. |
 | Evidence refers to an old revision | Keep the candidate blocked, invalidate stale actions, and rerun classification and the required tests. |
-| Repair or replacement is stalled | Keep the source open and held. Inspect replacement checks and ownership, then request a maintainer decision. |
+| Repair fails before a replacement opens | Keep the original open and held; inspect the failure and request human help. |
+| A published replacement is stalled or abandoned | Inspect its checks, full diff, and source link. Maintainers decide how to proceed or whether to reopen the superseded original. |
 | Chai and the weekly job both claim a PR | Hold the candidate and reconcile processing ownership before either workflow resumes. |
 | Automation needs to stop | Disable new actions, apply the agreed merge block to pending candidates, and confirm that every matching Tide query honors it. |
 
