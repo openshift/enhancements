@@ -6,32 +6,34 @@ at proposal length. **Nothing here belongs in the enhancements repo** — this
 directory is untracked and should be moved out or deleted before the EP merges.
 
 Each file is written against the enhancement as it currently stands
-(`podSecurityAdmission` on `config.openshift.io/v1 APIServer`, PSA label syncer
-retired, no cleanup and no
-fossil detection shipping). If any of those decisions change in review, these
-change with them.
+(`podSecurityAdmission` on `config.openshift.io/v1 APIServer`, the requested
+level applied unconditionally with no interlock and no acknowledgement step,
+**write-only** — no `status`, no conditions, no new metric and no new alert —
+PSA label syncer retired, `PodSecurityReadinessController` retired, no cleanup
+and no fossil detection shipping). If any of those decisions change in review,
+these change with them.
 
 ## Destinations
 
 | File | Goes to | Blocking on |
 |---|---|---|
-| `alerts/PodSecurityReadinessEvaluationStale.md` | `openshift/runbooks` → `alerts/cluster-kube-apiserver-operator/` | alert merging in `cluster-kube-apiserver-operator` |
-| `alerts/PodSecurityEnforcementBlocked.md` | `openshift/runbooks` → `alerts/cluster-kube-apiserver-operator/` | same |
 | `docs/troubleshooting-psa-configuration.md` | `openshift-docs` (admin) + support KCS | API merging |
 | `docs/removing-retained-enforce-labels.md` | `openshift-docs` (admin), **and the release note must link it** | release `n` release note |
 | `docs/disabling-psa-enforcement.md` | `openshift-docs` (admin) + support KCS | API merging |
 | `docs/resolving-violating-namespaces.md` | `openshift-docs` (admin) | API merging |
 
-Both alerts are `Warning` severity, so `openshift/runbooks` entries are
-**required before the alerts can merge**. The `runbook_url` annotation on each
-alert must be:
+**There is no longer an `alerts/` directory, and nothing here is blocked on
+`openshift/runbooks`.** Two alert runbooks were drafted and have both been
+deleted: `PodSecurityEnforcementBlocked.md` went with the interlock, since there
+is no longer a state in which enforcement is withheld, and
+`PodSecurityReadinessEvaluationStale.md` went with the
+`PodSecurityReadinessController`. The enhancement ships no new alert and no new
+metric, so no `runbook_url` annotation has to be satisfied.
 
-```
-https://github.com/openshift/runbooks/blob/master/alerts/cluster-kube-apiserver-operator/<AlertName>.md
-```
-
-which matches the convention already used by `kube-apiserver-down.yaml`,
-`cpu-utilization.yaml` and the SLO alerts in that repo.
+The one standing PSA alert is the pre-existing `PodSecurityViolation`, driven by
+`pod_security_evaluations_total{decision="deny",mode="audit"}`. It is not
+introduced here and already has whatever runbook it has; the docs below point at
+it rather than replacing it.
 
 ## Before filing
 
@@ -40,9 +42,9 @@ which matches the convention already used by `kube-apiserver-down.yaml`,
   `cluster-kube-apiserver-operator` runbooks follow, but I did not have a clone
   of `openshift/runbooks` to diff against. Reconcile with that repo's
   `TEMPLATE.md` before opening a PR.
-- **Metric and alert names are not yet implemented.** Everything referenced here
-  is proposed in the EP, not shipped. Confirm the final names against the
-  merged `PrometheusRule` before filing.
+- **API field names are not yet implemented.** Everything referenced here is
+  proposed in the EP, not shipped. Confirm the final spelling of
+  `spec.podSecurityAdmission` against merged `openshift/api` before filing.
 - `openshift-docs` uses AsciiDoc modules, not Markdown. These are drafted as
   Markdown for review; they need converting and splitting into
   concept/procedure/reference modules to match that repo's conventions.
@@ -52,10 +54,13 @@ which matches the convention already used by `kube-apiserver-down.yaml`,
 The EP's Support Procedures section lists these as outstanding and none of them
 is covered by the files here:
 
-- symptoms and log lines for the `PodSecurityReadinessController` not running,
-  crash-looping, or failing to evaluate;
 - the exact PSA denial message emitted at admission;
 - audit-log correlation via the `pod-security.kubernetes.io/enforce-policy`
   annotation;
-- must-gather coverage for `apiserver/cluster`'s `podSecurityAdmission`, the effective admission
-  configuration, and the violating-Namespace list.
+- must-gather coverage for `apiserver/cluster`'s `podSecurityAdmission`, the
+  effective admission configuration read from the revisioned `config-<revision>`
+  ConfigMap, and the dry-run sweep that identifies violating Namespaces. The
+  sweep is the pressing one: with no `status`, no conditions, no readiness
+  controller and no `MinimallySufficientPodSecurityStandard` annotation, a
+  support bundle from a release `n` cluster otherwise contains nothing at all
+  that locates a violation.

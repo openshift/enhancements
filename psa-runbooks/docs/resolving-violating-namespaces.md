@@ -1,26 +1,57 @@
-# Resolving violating Namespaces
+# Finding and resolving violating Namespaces
 
 **Audience:** cluster administrators. **Destination:** `openshift-docs` admin
 guide.
 
-A Namespace listed in `apiserver/cluster`'s `status.podSecurityAdmission.violatingNamespaces` contains
-workloads that would be rejected if the requested Pod Security Standard were
-enforced. Each entry carries a `reason` whose prefix identifies the class of
-problem.
+A violating Namespace is one containing workloads that would be rejected if the
+Pod Security Standard in question were enforced on it.
 
-```bash
-oc get apiserver cluster \
-    -o jsonpath='{range .status.podSecurityAdmission.violatingNamespaces[*]}{.name}{"\t"}{.reason}{"\n"}{end}'
+## Step 1: find them
+
+**Nothing on the cluster reports this.** From release `n` there is no
+`PodSecurityReadinessController` and no condition saying whether violations
+exist; the API is write-only. Two signals replace it, and they answer different
+questions.
+
+**Is anything violating, continuously?** `warn` and `audit` are pinned to
+`restricted` in every enforcement mode, including `Privileged`, so the
+kube-apiserver evaluates every Pod creation against `restricted` and counts the
+failures whether or not it enforces them:
+
+```
+sum(rate(pod_security_evaluations_total{decision="deny",mode="audit"}[1h]))
 ```
 
-| Prefix | Section below |
-|---|---|
-| `PSAConfig` | [Namespace name starts with `openshift`](#namespace-name-starts-with-openshift) |
-| `PSALabel` | [Workload uses user-based SCCs](#workload-uses-user-based-sccs) |
+This is a *continuous* signal over *every* Namespace, including ones carrying
+their own `enforce` label, which is a broader population than the retired sweep
+ever covered. It tells you something is violating; it does not reliably tell
+you where, and it only sees workloads that are actually being created.
 
-## Finding the specific violation
+**Which Namespaces?** Run the sweep by hand:
 
-Reproduce what the readiness controller saw:
+```bash
+for ns in $(oc get ns -l '!pod-security.kubernetes.io/enforce' -o name); do
+    oc label --dry-run=server --overwrite "$ns" \
+        pod-security.kubernetes.io/enforce=restricted 2>&1 \
+        | grep -q 'violate' && echo "$ns"
+done
+```
+
+Three things to know about it:
+
+- **Substitute the level you care about.** As written it asks about
+  `restricted`. On a cluster running or considering `Baseline`, use
+  `=baseline` here or you will get Namespaces that are perfectly fine.
+- **As written it only covers Namespaces with no `enforce` label of their own**,
+  because those are the only ones the cluster-wide default governs — a labelled
+  Namespace is governed by its label. On a cluster upgraded from a release that
+  ran the PSA label syncer, most Namespaces carry a retained label and are
+  skipped. Drop the `-l` selector to sweep everything.
+- **It is one API call per Namespace**, serial. On a large cluster this takes a
+  while and adds load; narrow it to the Namespaces you care about where you
+  can.
+
+## Step 2: find the specific violation
 
 ```bash
 oc label --dry-run=server --overwrite ns/$NAMESPACE \
@@ -29,12 +60,24 @@ oc label --dry-run=server --overwrite ns/$NAMESPACE \
 
 The warnings name the fields in the Pod spec that violate the standard. If
 `restricted` warns, try `baseline`; if both warn, the Namespace needs
-`privileged` in its current state.
+`privileged` in its current state. This is also the answer to "what standard
+does this Namespace need?", which the platform no longer maintains for you —
+the `MinimallySufficientPodSecurityStandard` annotation carried it until
+release `n`.
 
 Server-side dry run reports only on Pods that **exist right now**. It says
 nothing about a Deployment scaled to zero, a CronJob that has not fired, or a
 DaemonSet whose nodes are cordoned. Those will be caught at creation time
 instead.
+
+## Step 3: classify it
+
+The two classes of problem below cover most violations:
+
+- the Namespace name starts with `openshift` — see
+  [below](#namespace-name-starts-with-openshift);
+- a workload is running under its creator's SCCs rather than a
+  ServiceAccount's — see [below](#workload-uses-user-based-sccs).
 
 ## PSA denials are not visible in `oc get pods`
 
@@ -104,10 +147,12 @@ Then set it by dropping `--dry-run=server`:
 oc label --overwrite ns/$NAMESPACE pod-security.kubernetes.io/enforce=baseline
 ```
 
-A Namespace with its own `enforce` label is excluded from the readiness sweep
-entirely, so it will stop appearing in `status.podSecurityAdmission.violatingNamespaces`. Nothing
-maintains the label afterwards — it is yours now, including if the Namespace's
-SCCs change later.
+A Namespace with its own `enforce` label is outside the scope of the
+cluster-wide default and of the `-l`-filtered sweep above, whether you labelled
+it correctly or not — so labelling it makes it disappear from that sweep rather
+than proving anything. The `audit` metric still sees it, which is the reason to
+watch both. Nothing maintains the label afterwards; it is yours now, including
+if the Namespace's SCCs change later.
 
 ## Workload uses user-based SCCs
 
@@ -116,10 +161,10 @@ than those of a ServiceAccount. This usually happens when a Pod is created
 directly rather than through a Deployment with a properly configured
 ServiceAccount.
 
-This matters because the evaluation, and the retired syncer before it, only ever
-considered SCCs reachable by a Namespace's **ServiceAccounts**. A workload
-relying on its creator's SCCs looks compliant until that user is gone, or until
-the workload is recreated by a controller.
+This matters because the retired syncer only ever considered SCCs reachable by a
+Namespace's **ServiceAccounts**, and the dry-run above inherits the same blind
+spot. A workload relying on its creator's SCCs looks compliant until that user
+is gone, or until the workload is recreated by a controller.
 
 Check the provenance annotation on the Pod:
 
@@ -146,7 +191,7 @@ oc adm policy add-scc-to-user <scc> -z <serviceaccount> -n $NAMESPACE
 Then recreate the workload through a Deployment (or other controller) configured
 to use that ServiceAccount.
 
-This is enough for the next evaluation to stop reporting the Namespace as
+This is enough for the dry-run above to stop reporting the Namespace as
 violating, in any enforcement mode.
 
 **It does not cause a PSA label to be written.** The syncer no longer runs, so

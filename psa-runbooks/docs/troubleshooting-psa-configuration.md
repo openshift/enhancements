@@ -5,20 +5,21 @@
 
 ## Symptom
 
-`spec.podSecurityAdmission.enforcementMode` on `apiserver/cluster` is set to a
-level the cluster is plainly not applying, while `status` reports the change as
-successful — or a change to `spec` appears to do nothing at all.
+`spec.podSecurityAdmission.enforceLevel` on `apiserver/cluster` is set to a
+level the cluster is plainly not applying, or a change to `spec` appears to do
+nothing at all.
 
 The configuration lives on the cluster-wide API server config resource, not on a
-resource of its own:
+resource of its own, and it is **write-only** — there is no `status` reporting
+back what was applied:
 
 ```bash
 oc get apiserver cluster -o jsonpath='{.spec.podSecurityAdmission}' | jq
-oc get apiserver cluster -o jsonpath='{.status.podSecurityAdmission}' | jq
 ```
 
-The causes are distinguished by reading the **effective** admission
-configuration rather than any operator's `status`.
+So every cause below is distinguished by reading the **effective** admission
+configuration out of the kube-apiserver's own ConfigMap. There is no shortcut
+through a condition or a status field.
 
 ## Reading the effective configuration
 
@@ -49,7 +50,13 @@ oc get cm config-12 -n openshift-kube-apiserver -o jsonpath='{.data.config\.yaml
 
 Expect `warn` and `audit` to be `restricted` regardless of the enforcement level
 — that is intentional and keeps violations observable. Only `enforce` tracks
-`spec.podSecurityAdmission.enforcementMode`.
+`spec.podSecurityAdmission.enforceLevel`.
+
+The three `*-version` keys are a separate matter: `enforce-version`,
+`warn-version` and `audit-version` all track
+`spec.podSecurityAdmission.enforceVersion`, in every mode including
+`Privileged`. If `enforceVersion` is unset they are the cluster's own
+Kubernetes version, which means they **move on every upgrade**.
 
 ## Cause 1: the rollout has not finished
 
@@ -99,31 +106,48 @@ this procedure.
 **The only fix is to remove the override.** The cluster cannot upgrade until it
 is gone.
 
-## Cause 3: the request is blocked by violating Namespaces
+## Not a cause: violations
 
-`spec` records intent; `status` records what is in force. If the readiness
-controller found Namespaces that would violate the requested standard, the
-request is recorded but not applied.
+Worth stating because earlier previews of this feature behaved differently, and
+because it is the first thing people look for: **nothing evaluates the cluster
+and nothing withholds an enforcement change.** There is no blocked state, no
+acknowledgement step, and no condition to clear. The `PodSecurityReadinessController`
+and its `PodSecurity*EvaluationConditionsDetected` conditions were retired in
+release `n`; if you are looking for them on `oc get co/kube-apiserver`, their
+absence is expected and is not a fault. Violating workloads cannot be the reason
+a change to `spec` did not take effect.
+
+## Cause 3: `enforceVersion` was clamped
+
+A `spec.podSecurityAdmission.enforceVersion` newer than the cluster's own
+Kubernetes version is **clamped down to it** rather than rejected — a `v1.99`
+reaching the kube-apiserver's admission configuration would be fatal to the
+static pod, so validation accepts the value and the operator pins it to
+something the cluster can load.
+
+**The clamp is not reported anywhere.** There is no `status` field, no
+condition and no metric carrying the applied version, so it has to be inferred
+by comparing what was requested against what the kube-apiserver actually loaded:
 
 ```bash
 oc get apiserver cluster \
-    -o jsonpath='requested={.spec.podSecurityAdmission.enforcementMode} effective={.status.podSecurityAdmission.enforcementMode}{"\n"}'
-oc get apiserver cluster \
-    -o jsonpath='{range .status.podSecurityAdmission.conditions[*]}{.type}{"\t"}{.status}{"\t"}{.reason}{"\n"}{end}'
+    -o jsonpath='requested={.spec.podSecurityAdmission.enforceVersion}{"\n"}'
+
+oc version -o json | jq -r '.serverVersion.gitVersion'
+
+# applied — read the revision the node is actually on, per the section above
+oc get cm config -n openshift-kube-apiserver -o jsonpath='{.data.config\.yaml}' \
+    | jq '.admission.pluginConfig.PodSecurity.configuration.defaults
+          | {"enforce-version", "warn-version", "audit-version"}'
 ```
 
-`EnforcementBlocked=True` with reason `ViolatingNamespaces` is this case. See the
-`PodSecurityEnforcementBlocked` runbook.
+Requested newer than the applied value is this case, and it is expected after a
+downgrade: a cluster pinned to `v1.34` that moves to a payload shipping
+Kubernetes 1.33 enforces the 1.33 standards. The `spec` value is retained, so
+re-upgrading restores it. A standard that is *looser* than the one you pinned is
+the symptom to watch for here.
 
-## Cause 4: the evaluation is stale or has never run
-
-Raising enforcement is gated on a completed, recent evaluation. `Evaluated=False`
-(reason `NeverRan`) or `StatusStale=True` both prevent it. Lowering enforcement
-is never gated this way.
-
-See the `PodSecurityReadinessEvaluationStale` runbook.
-
-## Cause 5: the Namespace has its own label
+## Cause 4: the Namespace has its own label
 
 The cluster-wide setting only governs Namespaces with **no**
 `pod-security.kubernetes.io/enforce` label of their own. On a cluster upgraded
@@ -137,7 +161,7 @@ oc get ns $NAMESPACE -o jsonpath='{.metadata.labels}{"\n"}' | jq
 This is the single most common reason the API appears inert on an upgraded
 cluster. See `removing-retained-enforce-labels.md`.
 
-## Cause 6: the field is not in the API at all
+## Cause 5: the field is not in the API at all
 
 `apiserver/cluster` always exists on a standard cluster, but `podSecurityAdmission`
 is a feature-gated field and is only in the schema where the gate is on. Check
@@ -158,7 +182,7 @@ A field absent from the schema, a field present but unset, and a field set to
 `Privileged` are all the same state: the cluster has opted out and the effective
 level is `privileged`.
 
-## Cause 7: the configuration was erased by a downgrade
+## Cause 6: the configuration was erased by a downgrade
 
 If the cluster was downgraded to a release without the field and then returned,
 `spec.podSecurityAdmission` is gone — pruned by the older schema, at the latest
@@ -170,7 +194,7 @@ Nothing restores it. Re-apply the intended configuration:
 
 ```bash
 oc patch apiserver cluster --type=merge \
-    -p '{"spec":{"podSecurityAdmission":{"enforcementMode":"Restricted"}}}'
+    -p '{"spec":{"podSecurityAdmission":{"enforceLevel":"Restricted"}}}'
 ```
 
 Administrators performing a downgrade should record the value first:
@@ -178,31 +202,3 @@ Administrators performing a downgrade should record the value first:
 ```bash
 oc get apiserver cluster -o jsonpath='{.spec.podSecurityAdmission}' > psa-config.json
 ```
-
-## Clearing conditions left behind by a downgrade
-
-After a downgrade from release `n` to `n-1`, condition types introduced in `n`
-remain on `kubeapiservers.operator.openshift.io` with no controller writing them,
-and are not garbage collected. Because the status controller unions every
-`*Degraded` and `*Upgradeable` condition into the ClusterOperator, a condition
-captured in the seconds before a downgrade can leave `kube-apiserver`
-permanently `Degraded` or `Upgradeable=False` for a reason no running component
-can explain.
-
-The signature is a condition whose `lastTransitionTime` predates the downgrade
-and whose type is unknown to the running release. Find the index:
-
-```bash
-oc get kubeapiserver/cluster \
-    -o jsonpath='{range .status.podSecurityAdmission.conditions[*]}{.type}{"\t"}{.status}{"\t"}{.lastTransitionTime}{"\n"}{end}' \
-    | cat -n
-```
-
-Then remove it explicitly (indices are zero-based; `cat -n` above is one-based):
-
-```bash
-oc patch kubeapiserver/cluster --type=json --subresource=status \
-    -p '[{"op":"remove","path":"/status/conditions/<index>"}]'
-```
-
-Remove one at a time and re-read between patches — indices shift.

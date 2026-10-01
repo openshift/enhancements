@@ -26,7 +26,7 @@ Two situations lead here.
 **The cluster-wide setting appears to have no effect.** Per-Namespace labels take
 precedence over the cluster-wide default, so on an upgraded cluster where most
 Namespaces carry a retained label, setting
-`spec.podSecurityAdmission.enforcementMode: Privileged` changes the effective level of nothing that
+`spec.podSecurityAdmission.enforceLevel: Privileged` changes the effective level of nothing that
 already has a label. Those labels have to be removed individually.
 
 **A workload is rejected after an SCC change that should have permitted it.** For
