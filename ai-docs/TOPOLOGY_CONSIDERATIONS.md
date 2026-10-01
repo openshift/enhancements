@@ -48,7 +48,7 @@
 
 **Architecture**: Single node acts as both control plane and worker. No high availability.
 
-**Resource constraints**: ~8 vCPUs, 16-32 GB RAM, local disk only (vs 3x4 vCPUs, 3x16 GB in HA).
+**Resource constraints**: ~8 vCPUs, 16-32 GB RAM (vs 3x4 vCPUs, 3x16 GB in HA). Storage depends on the storage driver and deployment configuration — SNO supports CSI-backed remote storage in addition to local volumes.
 
 **When to consider**: New daemons/operators consuming resources, features requiring quorum or leader election, storage-intensive workloads, features assuming multiple nodes exist.
 
@@ -70,7 +70,7 @@
 | Replica requirements | Can't schedule 3 replicas | Allow replica=1 via SNO detection |
 | Distributed quorum | No quorum with 1 member | Use single-member mode or disable |
 
-**Topology detection**: `oc get node -l node.openshift.io/single-node-cluster`
+**Topology detection**: `oc get infrastructure cluster -o jsonpath='{.status.controlPlaneTopology}'` — a value of `SingleReplica` indicates SNO.
 
 **Good example**: "SNO impact: This adds a DaemonSet consuming 100MB RAM and 50m CPU per node. In SNO, this is 100MB total. The feature detects single-node topology and reduces replica count from 3 to 1."
 
@@ -93,11 +93,11 @@
 
 ## OpenShift Kubernetes Engine (OKE)
 
-**Architecture**: Upstream Kubernetes with minimal OpenShift additions; no platform operators (monitoring, console, registry, etc.).
+**Architecture**: OKE is the OpenShift Container Platform distribution with a subscription-limited feature set. It includes the administrator console and cluster monitoring, but excludes the developer console and user-workload monitoring.
 
-**When to consider**: Features depending on OCP-specific operators (console, monitoring), features using `config.openshift.io` APIs not in OKE, features requiring OpenShift-specific integrations.
+**When to consider**: Features depending on OCP-specific capabilities not included in OKE (developer console, user-workload monitoring), features using `config.openshift.io` APIs not in OKE, features requiring OpenShift-specific integrations beyond the OKE scope.
 
-**Good example**: "OKE: This enhancement adds a console plugin, which depends on the OpenShift web console. OKE does not include the console, so this feature is not available in OKE."
+**Good example**: "OKE: This enhancement adds a developer console plugin, which depends on the OpenShift developer console. OKE includes only the administrator console, so this feature is not available in OKE."
 
 **Reference**: [OKE comparison doc](https://docs.redhat.com/en/documentation/openshift_container_platform/latest/html/overview/oke-about)
 

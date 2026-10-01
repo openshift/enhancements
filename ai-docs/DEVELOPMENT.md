@@ -70,7 +70,7 @@ make image-clean
 cd tools
 go run ./main.go report        # Generate weekly report
 go run ./main.go closed-stale  # Process lifecycle-bot closures
-go run ./main.go stats         # Enhancement statistics
+go run ./main.go pull-requests # List pull requests
 ```
 
 The tools CLI requires GitHub tokens for API access. See `tools/README.md` for configuration.

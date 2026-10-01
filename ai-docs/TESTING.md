@@ -65,7 +65,7 @@ The primary "testing" mechanism for enhancement proposals is the review process:
 2. **Domain review**: SMEs from affected areas review technical accuracy
 3. **API review**: Dedicated API approvers review CRD/webhook changes
 4. **Approver signoff**: Final approval confirms consensus reached
-5. **Topology review**: Reviewers verify Hypershift/SNO/MicroShift/OKE considerations
+5. **Topology review**: Reviewers verify Hypershift/HCP, Standalone, SNO, MicroShift, and OKE considerations
 
 ### What Reviewers Check
 
