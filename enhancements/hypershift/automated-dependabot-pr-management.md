@@ -25,7 +25,7 @@ superseded-by: []
 
 ## Summary
 
-Chai auto-approves Dependabot Go PRs changing only `go.mod`, `go.sum`, or vendored files, with Kubernetes and security exceptions. Other paths, including non-vendored Go code, need human review. Tests and verification gate Tide merges.
+Chai auto-approves eligible Dependabot Go PRs limited to `go.mod`, `go.sum`, and vendored files. For other paths, including non-vendored Go code, Chai pings approvers in Slack for human review. Tests and verification gate Tide merges.
 
 ## Motivation
 
@@ -38,7 +38,7 @@ The proposal delegates review attestations only for eligible Go dependency updat
 ### User Stories
 
 - As a HyperShift maintainer, I want routine dependency updates to progress without repeated manual commands, so that I can focus on changes that require engineering judgment.
-- As a reviewer, I want excluded or uncertain updates to arrive with an explanation, so that I can understand why automation stopped and what needs attention.
+- As a reviewer, I want Chai to notify me in Slack when an update needs human review, with an explanation, so that I can understand why automation stopped and what needs attention.
 - As a maintainer handling a failed update, I want a repaired PR to be tested and reviewed independently, so that generating a replacement does not bypass the original safeguards.
 - As an automation operator, I want to audit decisions and stop pending automated merges, so that I can safely operate and recover the service.
 
@@ -80,7 +80,7 @@ The initial deployment is report-only. Live authority remains disabled until mai
 | Prow | Coordinates presubmit testing and processes supported review and test commands. |
 | Jira-lifecycle plugin | Processes the `/verified` command, authorizes its caller, and manages verification labels and records. |
 | Tide | Merges PRs that satisfy the applicable labels, checks, and merge gates. |
-| HyperShift maintainers | Own the policy, review exceptions, authorize rollout, and handle post-merge recovery. |
+| HyperShift maintainers and approvers | Own the policy and notification routing, respond to Slack review requests, authorize rollout, and handle post-merge recovery. |
 | Automation operator | Operates Chai, investigates failures, and invokes the shutdown procedure. |
 
 `approved` represents delegated approval. `lgtm` represents delegated review. `verified` records a pre-merge testing attestation. Permission to start tests is separate from all three.
@@ -101,7 +101,7 @@ The following sequence describes live mode. Report-only mode records proposed ac
 ```mermaid
 flowchart TD
     PR[Dependabot Go dependency PR] --> C{Complete diff and policy checks}
-    C -->|Excluded or uncertain| H[Human review; no Chai attestations]
+    C -->|Excluded or uncertain| H[Slack ping to approvers; human review]
     C -->|Eligible| I[Initial checks pass]
     I --> A[Authorized approved and lgtm]
     A --> E[Required end-to-end suite passes]
@@ -115,7 +115,13 @@ The configured test-trigger mechanism must be demonstrated before live rollout. 
 
 #### Excluded, uncertain, or failed update
 
-Chai provides no approval or verification for an excluded update. It explains the reason and hands the PR to maintainers. Any Go file outside an allowed vendored subtree requires human `lgtm`.
+Chai provides no approval or verification for an excluded update. It pings the designated approvers in Slack to request human review. Any Go file outside an allowed vendored subtree requires human `lgtm`.
+
+The notification targets approvers for the affected paths through maintainer-owned routing. It includes the PR link, evaluated commit ID, relevant changed paths, and the reasons the update needs human review.
+
+Approvers review the PR and provide the required attestations through the normal GitHub/Prow workflow. A Slack reply is not an approval and does not make the PR eligible to merge.
+
+Chai avoids duplicate pings for the same decision. If routing or delivery fails, it records the failure and retries the notification; the failure never causes automatic approval or verification.
 
 API failures, incomplete diffs, unknown security results, and stale revisions block automated actions. Chai may retry data collection, but cannot infer eligibility from missing information.
 
@@ -293,6 +299,7 @@ These questions block live activation, not creation of a report-only draft. Dire
 4. **Merge and shutdown gates:** How will eligibility be enforced across overlapping queries and stale commands, including an already-dispatched merge? What is the shutdown response target? Owners: Chai operations and Tide maintainers.
 5. **Pilot thresholds:** Are the proposed shadow sample, duration, and live limits below appropriate? What evidence permits expanding the pilot? Owners: HyperShift maintainers and the automation operator.
 6. **Processing ownership:** What claim mechanism will Chai and the weekly job share, and how will claims be recovered after interruption? Owners: Chai and weekly-job maintainers.
+7. **Approver notifications:** What Slack destination, path-to-approver routing, and notification retry policy should Chai use? Owners: HyperShift maintainers and Chai operations.
 
 Reviewer identities, one coordinating approver, and the enhancement's tracking issue must also be supplied before submission. No existing prerequisite issue is assumed to track the complete proposal.
 
@@ -312,6 +319,8 @@ Reviewer identities, one coordinating approver, and the enhancement's tracking i
 - Exercise `/verified by` for `NO-JIRA` and Jira-linked PRs. Unauthorized calls, command failures, and invalid evidence must leave the candidate blocked without a direct-API fallback.
 - Change a PR's head while verification is queued. Confirm stale evidence and late commands cannot restore merge eligibility. Repeat while the target branch advances.
 - Verify every applicable Tide query rejects a managed candidate with missing labels, stale evidence, a failed required check, a hold, or disabled automation.
+- Verify an out-of-scope or excluded update triggers a Slack ping to the designated approvers with its PR link, revision, changed paths, and reasons, while receiving no Chai attestations.
+- Verify duplicate events do not repeat the same ping, delivery failures remain visible and retryable, and Slack replies cannot supply approval or merge eligibility.
 
 ### Repair and execution isolation
 
@@ -388,6 +397,7 @@ The operator monitors pre-merge workflow health: blocked decisions, failed comma
 | Symptom | Diagnostic and recovery action |
 | --- | --- |
 | PR never becomes eligible | Read its reason codes; distinguish a policy exclusion from unavailable evidence. Retry data collection or hand the PR to maintainers. |
+| Approvers do not receive a Slack ping | Check notification status and approver routing, then retry delivery. Keep the PR in the human-review lane without Chai attestations. |
 | Initial or end-to-end tests do not start | Check the agreed job list, trigger configuration, actor authorization, and observed Prow response. Do not substitute labels for missing tests. |
 | `/verified` is rejected | Inspect the plugin response and deployed actor authorization. Check Jira-linked PR validation separately; do not apply `verified` directly. |
 | Evidence refers to an old revision | Keep the candidate blocked, invalidate stale actions, and rerun classification and the required tests. |
@@ -405,6 +415,7 @@ Disablement affects pending repository work, not running customer workloads. Rec
 - A separately authorized writer and isolated repair/validation workers, with access reviewed by Security and repository owners.
 - Prow and Tide configuration changes implementing the agreed test contract and merge gates, plus a proven Jira-lifecycle authorization path.
 - A shared processing-ownership mechanism or an explicit exclusion in the weekly job.
+- Slack notification access and maintainer-owned routing to the designated approvers, with delivery records and retry handling.
 - Controlled canary PRs, decision artifacts or digests, and an operator runbook. No new customer-cluster infrastructure is required.
 
 ### References
