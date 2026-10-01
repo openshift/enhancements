@@ -280,6 +280,12 @@ Manual review preserves the existing workflow without another service. It does n
 
 Consolidation can reduce test runs, but combines dependencies and complicates failure attribution, replacement review, and source-PR closure. The initial design instead operates on individual Dependabot PRs.
 
+### Use GitHub auto-merge for Dependabot PRs
+
+GitHub auto-merge can merge Dependabot PRs after required checks and reviews pass, without using GitHub's merge queue. It can wait for Prow checks, but only those required by GitHub—not every Prow job or Tide label.
+
+As of 2026-10-01, HyperShift's `main` required-check list omits `ci/prow/e2e-*` contexts. Auto-merge would need equivalent e2e, approval, and verification gates in GitHub. This proposal retains Tide as the sole merger.
+
 ### Give Dependabot or Chai unrestricted review trust
 
 Broad trust is simpler to configure but does not enforce the agreed file and exception boundaries. Test-trigger permission must not implicitly grant approval, verification, or merge authority.
@@ -419,4 +425,6 @@ Disablement affects pending repository work, not running customer workloads. Rec
 - [HyperShift Dependabot configuration](https://github.com/openshift/hypershift/blob/main/.github/dependabot.yml)
 - [HyperShift Prow plugin configuration](https://github.com/openshift/release/blob/main/core-services/prow/02_config/openshift/hypershift/_pluginconfig.yaml)
 - [HyperShift Tide queries](https://github.com/openshift/release/blob/main/core-services/prow/02_config/openshift/hypershift/_prowconfig.yaml)
+- [HyperShift main branch protection metadata](https://api.github.com/repos/openshift/hypershift/branches/main)
+- [GitHub Dependabot automation guide](https://docs.github.com/en/code-security/tutorials/secure-your-dependencies/automate-dependabot-with-actions)
 - [Existing dependency triage workflow](https://github.com/openshift/release/tree/main/ci-operator/step-registry/hypershift/dependabot-triage)
