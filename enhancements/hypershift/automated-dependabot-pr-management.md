@@ -25,7 +25,7 @@ superseded-by: []
 
 ## Summary
 
-This enhancement lets Chai advance routine Go dependency PRs in `openshift/hypershift` after required testing. Exceptions remain human-reviewed, and Tide remains the only merger.
+Chai auto-approves Dependabot Go PRs changing only `go.mod`, `go.sum`, or vendored files, with Kubernetes and security exceptions. Other paths, including non-vendored Go code, need human review. Tests and verification gate Tide merges.
 
 ## Motivation
 
