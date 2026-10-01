@@ -137,9 +137,11 @@ effectively 2 CAs, for a total of 12 (11 root + 1 sub-CA).
 
 **New CAs:**
 
-`client-ca` replaces 4 CAs (kube-control-plane-signer,
-kube-apiserver-to-kubelet-signer, admin-kubeconfig-signer,
-kubelet-csr-signer-signer/kube-csr-signer) and signs client certificates:
+`client-ca` replaces 4 signer entries — kube-control-plane-signer,
+kube-apiserver-to-kubelet-signer, admin-kubeconfig-signer, and the
+two-level kubelet-csr-signer-signer/kube-csr-signer pair (a root signer
+and its sub-CA, counting as 2 CA objects) — for a total of 5 CA objects
+eliminated — and signs client certificates:
 
 | Leaf certificate | CN | O (groups) |
 |------------------|----|------------|
