@@ -62,7 +62,12 @@ The proposal delegates review attestations only for eligible Go dependency updat
 
 Use Chai to manage individual Dependabot Go dependency PRs targeting `main` in `openshift/hypershift`. Chai is the automation service responsible for classification, test coordination, and narrowly delegated review attestations.
 
-An update is eligible only when its complete diff stays within the allowed paths and passes the Kubernetes compatibility and security exception policies. Matching paths alone does not establish that a change is safe.
+An update enters the automated approval path only when both checks succeed:
+
+- Its complete diff contains only allowed paths.
+- The exception checks confirm that no Kubernetes compatibility or security-sensitive exclusion applies.
+
+For example, a PR limited to vendored files still requires human review if it triggers a security-sensitive exclusion. Passing the path check does not bypass exclusions or required testing.
 
 For eligible updates, Chai provides `approved` and `lgtm` after initial checks. It issues `/verified by <evidence>` only after the required end-to-end suite and all merge-required checks succeed. Tide performs the merge.
 
