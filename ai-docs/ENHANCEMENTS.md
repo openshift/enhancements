@@ -2,7 +2,7 @@
 
 ## About This Repository
 
-This repository IS the enhancement proposal repository for OpenShift. It contains 600+ design proposals across 78 domain areas. This catalog highlights the major domain areas and provides navigation guidance.
+This repository IS the enhancement proposal repository for OpenShift. It contains 600+ design proposals across 65 domain directories. This catalog highlights the major domain areas and provides navigation guidance.
 
 ## Enhancement Domains
 

@@ -15,7 +15,7 @@ Enhancement tracking and design proposal repository for OpenShift (OCP & OKD). T
 ## Architecture at a Glance
 
 ```
-enhancements/          # 600+ design proposals organized by domain (78 areas)
+enhancements/          # 600+ design proposals in 65 domain directories
 guidelines/            # Enhancement process: template, commit guidelines, supportability
 dev-guide/             # Development conventions: APIs, testing, feature gates, rebasing
 CONVENTIONS.md         # Project-wide naming, API, and UX conventions

@@ -4,7 +4,7 @@
 
 ```
 openshift/enhancements/
-├── enhancements/              # 600+ enhancement proposals in 78 domain areas
+├── enhancements/              # 600+ enhancement proposals in 65 domain directories
 │   ├── authentication/        #   Auth: OAuth, OIDC, token, identity providers
 │   ├── hypershift/            #   Hosted Control Planes design proposals
 │   ├── installer/             #   IPI/UPI install, platform support
@@ -132,11 +132,17 @@ Platform components expose Prometheus metrics, report health via status conditio
 
 The `tools/` directory contains a Go CLI (`tools/main.go`) used for:
 
-| Command | Purpose |
-|---------|---------|
-| `report` | Generate "This Week in Enhancements" newsletter |
-| `closed-stale` | Comment on EPs closed by lifecycle bot |
-| `stats` | Generate enhancement statistics |
+| Command | Purpose | Source |
+|---------|---------|--------|
+| `report` | Generate "This Week in Enhancements" newsletter | `tools/cmd/report.go` |
+| `closed-stale` | Comment on EPs closed by lifecycle bot | `tools/cmd/closedStale.go` |
+| `show-pr` | Show PR details | `tools/cmd/show-pr.go` |
+| `pull-requests` | List/filter pull requests | `tools/cmd/pullRequests.go` |
+| `reviewers` | Analyze reviewer assignments | `tools/cmd/reviewers.go` |
+| `annual-summary` | Generate annual summary report | `tools/cmd/annualSummary.go` |
+| `metadata-lint` | Lint EP YAML metadata | `tools/cmd/metadataLint.go` |
+| `owner-names` | Extract owner names | `tools/cmd/ownerNames.go` |
+| `prune-owners` | Clean up OWNERS files | `tools/cmd/pruneOwners.go` |
 
 Build: `cd tools && go build ./...`
 
@@ -151,7 +157,7 @@ The repository uses a containerized markdown linter:
 
 ## Enhancement Domain Areas
 
-The 78 domain directories under `enhancements/` map to OpenShift architectural areas. Key areas by volume:
+The 65 domain directories under `enhancements/` (plus standalone proposals at the root) map to OpenShift architectural areas. Key areas by volume:
 
 | Area | Focus |
 |------|-------|
