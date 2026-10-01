@@ -5,7 +5,6 @@ authors:
 reviewers:
   - TBD # HyperShift: dependency scope, repair behavior, and maintainer workflow.
   - TBD # Test Platform: Prow authorization, test triggering, and Tide merge gates.
-  - TBD # Jira-lifecycle: verification authorization and label invalidation.
   - TBD # Security: dependency exclusions, untrusted content, and credential isolation.
 approvers:
   - TBD # Select one approver to coordinate review and establish consensus.
@@ -15,7 +14,7 @@ creation-date: 2026-10-01
 last-updated: 2026-10-01
 status: provisional
 tracking-link:
-  - TBD # Add the issue tracking this enhancement, not an authorization prerequisite.
+  - TBD # Add the issue tracking this enhancement.
 see-also: []
 replaces: []
 superseded-by: []
@@ -40,7 +39,6 @@ The proposal delegates review attestations only for eligible Go dependency updat
 - As a HyperShift maintainer, I want routine dependency updates to progress without repeated manual commands, so that I can focus on changes that require engineering judgment.
 - As a reviewer, I want Chai to notify me in Slack when an update needs human review, with an explanation, so that I can understand why automation stopped and what needs attention.
 - As a maintainer handling a failed update, I want a repaired PR to be tested and reviewed independently, so that generating a replacement does not bypass the original safeguards.
-- As an automation operator, I want to audit decisions and stop pending automated merges, so that I can safely operate and recover the service.
 
 ### Goals
 
@@ -69,9 +67,9 @@ An update enters the automated approval path only when both checks succeed:
 
 For example, a PR limited to vendored files still requires human review if it triggers a security-sensitive exclusion. Passing the path check does not bypass exclusions or required testing.
 
-For eligible updates, Chai provides `approved` and `lgtm` after initial checks. It issues `/verified by <evidence>` only after the required end-to-end suite and all merge-required checks succeed. Tide performs the merge.
+For eligible updates, Chai provides `approved` and `lgtm` after initial checks. Once the full required end-to-end suite passes on the current revision, it issues `/verified by e2e passing`. Tide alone merges once its requirements are met.
 
-The initial deployment is report-only. Live authority remains disabled until maintainers approve the evaluation results and the authorization, merge gates, and shutdown procedure have been tested.
+For eligible Go dependency bumps, passing the required end-to-end suite is sufficient pre-merge verification; no additional manual verification is required.
 
 ### Workflow Description
 
@@ -80,25 +78,23 @@ The initial deployment is report-only. Live authority remains disabled until mai
 | Actor | Responsibility |
 | --- | --- |
 | Dependabot | Opens Go dependency update PRs. |
-| Chai | Evaluates eligibility, coordinates testing, records evidence, and requests authorized review attestations. |
+| Chai | Runs the automated workflow: evaluates eligibility, coordinates tests, records evidence, applies delegated attestations, notifies approvers, and handles retries and reconciliation. |
 | Prow | Coordinates presubmit testing and processes supported review and test commands. |
-| Jira-lifecycle plugin | Processes the `/verified` command, authorizes its caller, and manages verification labels and records. |
 | Tide | Merges PRs that satisfy the applicable labels, checks, and merge gates. |
 | HyperShift maintainers and approvers | Own the policy and notification routing, respond to Slack review requests, authorize rollout, and handle post-merge recovery. |
-| Automation operator | Operates Chai, investigates failures, and invokes the shutdown procedure. |
 
 `approved` represents delegated approval. `lgtm` represents delegated review. `verified` records a pre-merge testing attestation. Permission to start tests is separate from all three.
 
 #### Eligible update
 
-The following sequence describes live mode. Report-only mode records proposed actions without executing them.
+The automated workflow is:
 
 1. Dependabot opens or updates a PR. Chai fetches its current commit ID, target branch, complete changed-file list, and full diff.
 2. Chai checks the author, branch, allowed paths, and exception policies. It records the decision and claims processing ownership to prevent duplicate work.
 3. Chai uses the supported test-trust path if needed and waits for the configured initial checks to pass on the evaluated commit.
 4. Chai refetches the PR and requests `approved` and `lgtm` through the authorized repository-scoped mechanism. The configured workflow starts the required end-to-end suite after `lgtm`.
-5. Chai waits for every job in that suite and every Tide-required check to succeed for the current commit. It records job names, run links, tested revisions, and the policy version.
-6. Chai refetches the PR again and posts `/verified by <job names, run links, and commit ID>`. It confirms that the Jira-lifecycle plugin accepted the command and applied `verified`.
+5. Chai waits for every job in the required end-to-end suite to pass for the current commit. It records job names, run links, tested revisions, and the policy version.
+6. Chai confirms that the PR still has the tested revision and posts `/verified by e2e passing`.
 7. Chai enables the final eligibility gate only while the evidence is current and automation remains enabled. Tide evaluates the applicable merge requirements and merges the PR.
 8. Chai records the merge result and releases processing ownership. Its responsibility for the update ends at merge.
 
@@ -109,13 +105,12 @@ flowchart TD
     C -->|Eligible| I[Initial checks pass]
     I --> A[Authorized approved and lgtm]
     A --> E[Required end-to-end suite passes]
-    E --> V[Chai posts verified-by evidence]
-    V --> J[Jira-lifecycle applies verified]
-    J --> G[Current evidence and eligibility gate]
+    E --> V["Chai posts /verified by e2e passing"]
+    V --> G[Current evidence and eligibility gate]
     G --> T[Tide evaluates requirements and merges]
 ```
 
-The configured test-trigger mechanism must be demonstrated before live rollout. This proposal does not assume that adding `lgtm` already starts every required end-to-end job in the existing configuration.
+The configured test-trigger mechanism must be demonstrated before enabling automation. This proposal does not assume that adding `lgtm` already starts every required end-to-end job in the existing configuration.
 
 #### Excluded, uncertain, or failed update
 
@@ -147,7 +142,7 @@ If repair fails or the replacement is abandoned, the source remains open and hel
 
 ### API Extensions
 
-This enhancement introduces no OpenShift API extensions. It does not add or modify CRDs, webhooks, aggregated API servers, or finalizers. It uses existing GitHub, Prow, and Jira-lifecycle interfaces.
+This enhancement introduces no OpenShift API extensions. It does not add or modify CRDs, webhooks, aggregated API servers, or finalizers. It uses existing repository and CI interfaces.
 
 ### Topology Considerations
 
@@ -189,7 +184,7 @@ Any other path requires human review, including `go.work`, another module's mani
 
 Classification must inspect both old and new paths for renames and all pages of the changed-file listing. It must detect truncation and missing diff content; an API limit or error cannot become an empty, eligible diff.
 
-Kubernetes compatibility and security exclusions override the path allowlist. Maintainers must approve the dependency rules and security-review inputs before live rollout. Unavailable or inconclusive checks require human review.
+Kubernetes compatibility and security exclusions override the path allowlist. Maintainers must approve the dependency rules and security-review inputs before enabling automation. Unavailable or inconclusive checks require human review.
 
 All changed module manifests must be examined for exclusions, including modules outside the allowlist. PR titles, Dependabot grouping, and a patch-version designation are not substitutes for examining the actual update.
 
@@ -201,9 +196,9 @@ The idempotency key is `repository#PR#head_sha#policy_version`. Chai also record
 
 Chai refetches current state after delayed or duplicate events and before every privileged action. A head change invalidates the classification, pending actions, Chai-owned attestations, verification evidence, and eligibility gate.
 
-Webhook delivery alone is insufficient. Reconciliation must recover missed events and reconcile commands processed after their evaluated revision became stale. An old `/verified` comment must not restore eligibility for a newer commit.
+Chai reconciles missed or delayed events and rechecks the current revision before issuing queued commands. Passing tests from an older revision cannot justify verification of a newer revision.
 
-Initial checks and merge checks are separate sets. Initial checks gate `approved` and `lgtm`; the complete required end-to-end suite and Tide-required checks gate `/verified` and final eligibility.
+Initial checks gate `approved` and `lgtm`. The full required end-to-end suite gates `/verified by e2e passing`. Tide separately enforces all merge-required checks.
 
 Missing, pending, failed, canceled, or skipped required jobs do not count as successful evidence. Chai must validate the expected job identities and revisions, not merely observe a green aggregate status.
 
@@ -211,19 +206,19 @@ Base-branch changes also affect the tested merge candidate. Prow and Tide owners
 
 #### Authorization boundaries
 
-Test-trigger authority, review authority, verification authority, and merge authority remain separate. Chai is not added to broad root OWNERS aliases, and it receives no direct merge capability.
+Test-trigger and review permissions are separate from merge authority. Chai is not added to broad root OWNERS aliases, and it receives no direct merge capability.
 
 The privileged attestation path must enforce the approved repository and eligibility policy. Repository-scoped credentials alone cannot restrict writes by changed-file path; that restriction must exist at the trusted action boundary.
 
-The supported path for `approved` and `lgtm` is a live-launch prerequisite. If existing Prow authorization cannot enforce the required boundary, the integration needs an explicitly reviewed policy-enforcing mechanism.
+The supported path for `approved` and `lgtm` must enforce the required boundary. If existing Prow authorization cannot do so, the integration needs an explicitly reviewed policy-enforcing mechanism.
 
-`verified` is applied only through `/verified by <evidence>`. There is no fallback to direct GitHub label writes, `/verified bypass`, or `/verified later` when the command is rejected.
+#### Verification
 
-The current upstream verification handler checks `IsCollaborator`. The exact Chai identity must pass the deployed authorization path in a controlled canary before live use. OWNERS membership alone is not proof of authorization.
+Chai is assumed to have permission to issue `/verified`. It posts `/verified by e2e passing` once all required e2e jobs pass on the current revision.
 
-The command records a testing assertion; it does not independently validate Chai's CI evidence or bind the label to a commit. Chai must enforce those conditions and test invalidation and delayed-command behavior.
+How that command is authorized or processed is outside this enhancement's scope.
 
-Canaries must cover both `NO-JIRA` dependency PRs and PRs with Jira references. Referenced-issue validation and Jira lifecycle effects must be checked separately from caller authorization and test evidence.
+The standardized reason is `e2e passing`; job names, run links, and tested revisions remain in the decision record.
 
 #### Execution and credential isolation
 
@@ -235,7 +230,7 @@ Validation environments use only the test credentials they require. Their isolat
 
 #### Coordination with existing automation
 
-Chai owns individual eligible Dependabot PRs, not weekly consolidated updates. The weekly triage job must skip claimed candidates or be disabled for the overlapping scope before the live pilot.
+Chai owns individual eligible Dependabot PRs, not weekly consolidated updates. The weekly triage job must skip claimed candidates or be disabled for the overlapping scope before enabling the workflow.
 
 Ownership is recorded before work begins and is shared with the weekly job. The coordination mechanism must handle duplicate events, interrupted repairs, and abandoned claims without silently closing source PRs.
 
@@ -243,15 +238,15 @@ Reusing the weekly job requires fail-closed file retrieval, coverage of all chan
 
 #### Merge gates and shutdown
 
-Automated merge eligibility requires current policy and test evidence, accepted verification, the required review labels, and an enabled automation gate. A static label alone cannot establish current-commit eligibility.
+Automated merge eligibility requires current policy and test evidence, the required labels and checks, and an enabled automation gate. A static label alone cannot establish current-commit eligibility.
 
 Every Tide query capable of selecting a managed PR must honor equivalent gates. The current bot-specific and general queries overlap; adding a condition only to the bot query does not establish isolation.
 
 A central enablement flag stops new test-trust grants, attestations, and eligibility decisions. Shutdown must also block already-attested open PRs, using an effective hold or the agreed merge-gate mechanism.
 
-The operator confirms that Tide can no longer select pending managed candidates and reconciles queued commands. Revoking credentials alone does not remove existing labels or cancel work already accepted by another service.
+When disabled, Chai blocks pending candidates and invalidates queued actions. Credential revocation alone does not remove existing labels or cancel actions already accepted by another service.
 
-The concrete gate, shutdown response time, and any already-dispatched merge behavior must be agreed and tested before live rollout. Chai does not monitor or undo changes that have already merged.
+The concrete gate, shutdown response time, and any already-dispatched merge behavior must be agreed and tested before enabling automation. Chai does not monitor or undo changes that have already merged.
 
 ### Risks and Mitigations
 
@@ -266,7 +261,7 @@ The concrete gate, shutdown response time, and any already-dispatched merge beha
 | Additional test runs increase CI cost or queue time. | Limit the pilot, measure test usage, and require maintainer approval before increasing throughput. |
 | A regression appears after merge. | Use the normal human-owned investigation and revert process; pre-merge checks cannot eliminate every regression. |
 
-HyperShift maintainers review the policy and maintainer experience. Test Platform and Jira-lifecycle owners review authorization and merge behavior. Security reviewers assess content handling, permissions, and execution isolation.
+HyperShift maintainers review the policy and maintainer experience. Test Platform owners review Prow permissions and merge behavior. Security reviewers assess content handling, permissions, and execution isolation.
 
 ### Drawbacks
 
@@ -291,19 +286,19 @@ Broad trust is simpler to configure but does not enforce the agreed file and exc
 
 ### Apply verification labels or merge directly through GitHub
 
-Direct writes bypass the agreed Jira-lifecycle verification path or introduce a second merger. The proposal preserves `/verified` as the verification interface and Tide as the sole merge authority.
+Chai issues the explicit `/verified by e2e passing` command rather than writing verification labels directly. Direct merging would introduce a second merger; Tide remains the sole merge authority.
 
 ## Open Questions
 
-These questions block live activation, not creation of a report-only draft. Direct individual PRs, human-handled reverts, deferred Renovate support, and no post-merge monitor are settled boundaries, not open alternatives.
+These implementation details remain to be resolved. Direct individual PRs, human-handled reverts, deferred Renovate support, and no post-merge monitor are settled boundaries, not open alternatives.
 
 1. **Eligibility exceptions:** Which exact dependency and version rules identify Kubernetes compatibility updates, and which security signals or review criteria must succeed? Owners: HyperShift maintainers and Security.
-2. **Authorized identity:** What is Chai's exact GitHub identity, and which deployed mechanisms authorize its test, approval, review, and verification actions? Owners: repository access, Test Platform, and Jira-lifecycle teams.
+2. **Prow permissions:** What is Chai's exact GitHub identity, and which mechanisms authorize its test-trigger, approval, and review actions within the agreed scope? Owners: repository access and Test Platform teams.
 3. **Test contract:** Which initial and end-to-end jobs are mandatory, how does `lgtm` start the latter, and how is current-base testing established? Owners: HyperShift and Test Platform maintainers.
-4. **Merge and shutdown gates:** How will eligibility be enforced across overlapping queries and stale commands, including an already-dispatched merge? What is the shutdown response target? Owners: Chai operations and Tide maintainers.
-5. **Pilot thresholds:** Are the proposed shadow sample, duration, and live limits below appropriate? What evidence permits expanding the pilot? Owners: HyperShift maintainers and the automation operator.
+4. **Merge and shutdown gates:** How will eligibility be enforced across overlapping queries and stale commands, including an already-dispatched merge? What is the shutdown response target? Owners: HyperShift and Tide maintainers.
+5. **Throughput limits:** Are the proposed initial limits below appropriate, and what evidence permits increasing them? Owners: HyperShift maintainers.
 6. **Processing ownership:** What claim mechanism will Chai and the weekly job share, and how will claims be recovered after interruption? Owners: Chai and weekly-job maintainers.
-7. **Approver notifications:** What Slack destination, path-to-approver routing, and notification retry policy should Chai use? Owners: HyperShift maintainers and Chai operations.
+7. **Approver notifications:** What Slack destination, path-to-approver routing, and notification retry policy should Chai use? Owners: HyperShift maintainers.
 
 Reviewer identities, one coordinating approver, and the enhancement's tracking issue must also be supplied before submission. No existing prerequisite issue is assumed to track the complete proposal.
 
@@ -319,9 +314,9 @@ Reviewer identities, one coordinating approver, and the enhancement's tracking i
 ### Authorization and workflow integration
 
 - Use controlled canaries to prove the exact actor can trigger only the intended tests and provide `approved` and `lgtm` through the supported path.
-- Demonstrate the two test stages. No approval precedes successful initial checks, and no verification precedes the complete required end-to-end suite and Tide-required checks.
-- Exercise `/verified by` for `NO-JIRA` and Jira-linked PRs. Unauthorized calls, command failures, and invalid evidence must leave the candidate blocked without a direct-API fallback.
-- Change a PR's head while verification is queued. Confirm stale evidence and late commands cannot restore merge eligibility. Repeat while the target branch advances.
+- Demonstrate the two test stages. No approval precedes successful initial checks, and Chai issues `/verified by e2e passing` only after the full required end-to-end suite passes on the current revision.
+- Verify that missing, pending, failed, canceled, skipped, or stale required e2e results prevent Chai from issuing the verification command.
+- Change a PR's head while verification is queued. Confirm Chai does not issue the command using old test results and requires fresh results for the new revision. Test merge-candidate freshness when the target branch advances.
 - Verify every applicable Tide query rejects a managed candidate with missing labels, stale evidence, a failed required check, a hold, or disabled automation.
 - Verify an out-of-scope or excluded update triggers a Slack ping to the designated approvers with its PR link, revision, changed paths, and reasons, while receiving no Chai attestations.
 - Verify duplicate events do not repeat the same ping, delivery failures remain visible and retryable, and Slack replies cannot supply approval or merge eligibility.
@@ -346,25 +341,21 @@ This is repository automation, not a customer-facing OpenShift feature. The requ
 
 ### Dev Preview -> Tech Preview
 
-Report-only mode records decisions and a maintainer digest, but grants no test trust and writes no approval, review, verification, or eligibility labels. Tests started by the existing workflow may be observed without being changed.
+Before enabling the automated workflow:
 
-Proposed shadow criteria are at least two weeks and 25 reviewed candidates, whichever takes longer. Cover each allowed module and representative excluded and incomplete-input cases; use controlled tests for cases not observed.
-
-Live activation additionally requires:
-
-- Zero false-eligible classifications in the reviewed sample and complete evidence for every evaluated candidate.
+- Policy tests and representative cases must cover each allowed module, excluded updates, and incomplete inputs, with no excluded case receiving Chai attestations.
 - Maintainer-approved exception rules, test-suite definitions, and a documented comparison with human decisions.
 - Passing authorization canaries, stale-event tests, repair tests, and merge-gate tests.
-- A tested shutdown and recovery runbook with named operational owners.
+- Tested Chai shutdown and recovery behavior, with documented maintainer controls.
 - Confirmed deconfliction with the weekly job and approved credential isolation.
 
-The proposed initial live limit is one in-flight PR and at most one automated merge per UTC day. Maintainers must approve these thresholds before evaluation begins; the sample is not proof against rare failures.
+The proposed initial limit is one in-flight PR and at most one automated merge per UTC day. Maintainers must approve or adjust these limits before enabling the workflow.
 
 ### Tech Preview -> GA
 
-Expand routine operation only after maintainers review the live pilot's classification accuracy, manual interventions, test cost, processing latency, and shutdown results. Any scope or throughput expansion requires explicit approval.
+Expand throughput only after maintainers review classification accuracy, manual interventions, test cost, processing latency, and shutdown behavior. Any scope or throughput expansion requires explicit approval.
 
-The operating team must own policy updates, integration maintenance, diagnostics, and recovery. The reviewer-facing decision record and operator runbook must be usable without knowledge of Chai's internal implementation.
+HyperShift maintainers own policy updates and integration configuration. Chai records decisions and handles workflow retries and reconciliation. Recovery instructions describe when human intervention is needed.
 
 This milestone does not expand the proposal to Renovate, other branches, reverts, or post-merge monitoring. Those changes require a separate scope decision and review.
 
@@ -374,7 +365,7 @@ No customer-facing feature is deprecated. If the weekly job is disabled for over
 
 ## Upgrade / Downgrade Strategy
 
-No cluster upgrade or downgrade behavior changes. Chai policy, test-contract, authorization, and merge-configuration changes are deployed with live eligibility disabled until their integration checks pass.
+No cluster upgrade or downgrade behavior changes. Chai policy, test-contract, authorization, and merge-configuration changes are deployed with automation disabled until their integration checks pass.
 
 Policy changes receive a new version and invalidate affected decisions. Do not carry old evidence into a policy or test contract that changes the candidate's requirements.
 
@@ -384,9 +375,9 @@ Do not remove unrelated human labels or resume the weekly job over claimed PRs w
 
 ## Version Skew Strategy
 
-Chai depends on the deployed GitHub, Prow, Tide, and Jira-lifecycle behaviors, not on control-plane and worker version skew. Authorization, command handling, and test-contract compatibility must be verified against those deployed services.
+Chai depends on the deployed GitHub, Prow, and Tide behaviors, not on control-plane and worker version skew. Prow permissions and test-contract compatibility must be verified against those deployed services.
 
-When an integration changes or its behavior is unknown, automated actions stop. Report-only collection may continue if it remains safe. Resume live actions only after canaries prove the required contract and stale-evidence handling.
+When an integration changes or its behavior is unknown, automated actions stop. Resume only after integration tests prove the required contract and stale-evidence handling.
 
 ## Operational Aspects of API Extensions
 
@@ -396,31 +387,31 @@ There are no OpenShift API extensions, so this proposal adds no API-server avail
 
 Each candidate's record must show its evaluated revision, policy decision, current stage, required jobs, evidence links, authorization results, ownership claim, and source/replacement relationship where applicable.
 
-The operator monitors pre-merge workflow health: blocked decisions, failed commands, processing age, reconciliation lag, CI usage, and shutdown completion. This is not monitoring for regressions after a dependency update merges.
+Chai tracks blocked decisions, failed commands, processing age, reconciliation lag, and CI usage. It reports problems requiring human intervention to maintainers. It does not monitor regressions after merge.
 
 | Symptom | Diagnostic and recovery action |
 | --- | --- |
 | PR never becomes eligible | Read its reason codes; distinguish a policy exclusion from unavailable evidence. Retry data collection or hand the PR to maintainers. |
 | Approvers do not receive a Slack ping | Check notification status and approver routing, then retry delivery. Keep the PR in the human-review lane without Chai attestations. |
 | Initial or end-to-end tests do not start | Check the agreed job list, trigger configuration, actor authorization, and observed Prow response. Do not substitute labels for missing tests. |
-| `/verified` is rejected | Inspect the plugin response and deployed actor authorization. Check Jira-linked PR validation separately; do not apply `verified` directly. |
+| Chai cannot post the verification command | Inspect Chai's command-posting failure, then retry only after confirming that the required e2e results still match the current revision. |
 | Evidence refers to an old revision | Keep the candidate blocked, invalidate stale actions, and rerun classification and the required tests. |
 | Repair or replacement is stalled | Keep the source open and held. Inspect replacement checks and ownership, then request a maintainer decision. |
 | Chai and the weekly job both claim a PR | Hold the candidate and reconcile processing ownership before either workflow resumes. |
 | Automation needs to stop | Disable new actions, apply the agreed merge block to pending candidates, and confirm that every matching Tide query honors it. |
 
-HyperShift maintainers own policy exceptions and post-merge regressions. The automation operator owns service recovery; Test Platform and Jira-lifecycle owners handle their respective integration failures.
+Chai handles workflow retries and reconciliation. HyperShift maintainers handle policy exceptions and post-merge regressions; Test Platform maintainers handle CI integration failures.
 
 Disablement affects pending repository work, not running customer workloads. Recovery preserves audit records and human review, and re-evaluates open candidates rather than replaying old attestations.
 
 ## Infrastructure Needed
 
-- A Chai execution service with durable decision records, event reconciliation, and a centrally controlled live-enable flag.
+- A Chai execution service with durable decision records, event reconciliation, and a centrally controlled automation-enable flag.
 - A separately authorized writer and isolated repair/validation workers, with access reviewed by Security and repository owners.
-- Prow and Tide configuration changes implementing the agreed test contract and merge gates, plus a proven Jira-lifecycle authorization path.
+- Prow and Tide configuration changes implementing the agreed test contract and merge gates.
 - A shared processing-ownership mechanism or an explicit exclusion in the weekly job.
 - Slack notification access and maintainer-owned routing to the designated approvers, with delivery records and retry handling.
-- Controlled canary PRs, decision artifacts or digests, and an operator runbook. No new customer-cluster infrastructure is required.
+- Controlled test PRs, decision records, and maintainer recovery instructions. No new customer-cluster infrastructure is required.
 
 ### References
 
@@ -429,5 +420,3 @@ Disablement affects pending repository work, not running customer workloads. Rec
 - [HyperShift Prow plugin configuration](https://github.com/openshift/release/blob/main/core-services/prow/02_config/openshift/hypershift/_pluginconfig.yaml)
 - [HyperShift Tide queries](https://github.com/openshift/release/blob/main/core-services/prow/02_config/openshift/hypershift/_prowconfig.yaml)
 - [Existing dependency triage workflow](https://github.com/openshift/release/tree/main/ci-operator/step-registry/hypershift/dependabot-triage)
-- [Jira pre-merge verification documentation](https://docs.ci.openshift.org/architecture/jira/#pre-merge-verification)
-- [Jira-lifecycle command implementation](https://github.com/openshift-eng/jira-lifecycle-plugin/blob/main/cmd/jira-lifecycle-plugin/server.go)
