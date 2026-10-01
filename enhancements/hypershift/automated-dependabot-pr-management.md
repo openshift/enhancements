@@ -49,7 +49,7 @@ The proposal delegates review attestations only for eligible Go dependency updat
 
 ### Non-Goals
 
-- Automating Kubernetes compatibility updates or security-sensitive exceptions to the agreed dependency policy.
+- Automatically approving or repairing Kubernetes dependency or Cluster API (CAPI) provider bumps. These always require human review; security-sensitive updates also remain human-owned.
 - Approving application code, generated Go outside vendored directories, CRDs, workflows, container images, or non-Go dependency updates.
 - Managing Renovate PRs, release-branch updates, or weekly consolidated dependency PRs in the initial pilot.
 - Calling GitHub's merge API from Chai or replacing Tide.
@@ -63,9 +63,9 @@ Use Chai to manage individual Dependabot Go dependency PRs targeting `main` in `
 An update enters the automated approval path only when both checks succeed:
 
 - Its complete diff contains only allowed paths.
-- The exception checks confirm that no Kubernetes compatibility or security-sensitive exclusion applies.
+- The update contains no Kubernetes or CAPI provider bump and matches no security-sensitive exclusion.
 
-For example, a PR limited to vendored files still requires human review if it triggers a security-sensitive exclusion. Passing the path check does not bypass exclusions or required testing.
+Any Kubernetes or CAPI provider bump goes to human review even if it changes only allowed files and all checks pass. Chai does not automatically approve, repair, or verify those updates.
 
 For eligible updates, Chai provides `approved` and `lgtm` after initial checks. Once the full required end-to-end suite passes on the current revision, it issues `/verified by e2e passing`. Tide alone merges once its requirements are met.
 
@@ -101,7 +101,7 @@ The automated workflow is:
 ```mermaid
 flowchart TD
     PR[Dependabot Go dependency PR] --> C{Complete diff and policy checks}
-    C -->|Excluded or uncertain| H[Slack ping to approvers; human review]
+    C -->|K8s/CAPI bump, other exclusion, or uncertainty| H[Slack ping to approvers; human review]
     C -->|Eligible| I[Initial checks including verify]
     I -->|All pass| A[Authorized approved and lgtm]
     I -->|Original verify fails| R[Chai cherry-picks and repairs]
@@ -116,7 +116,7 @@ flowchart TD
     G --> T[Tide evaluates requirements and merges]
 ```
 
-The configured test-trigger mechanism must be demonstrated before enabling automation. This proposal does not assume that adding `lgtm` already starts every required end-to-end job in the existing configuration.
+The one-PR trial must demonstrate the test-trigger mechanism before recurring execution is enabled. This proposal does not assume that adding `lgtm` already starts every required end-to-end job in the existing configuration.
 
 #### Excluded, uncertain, or failed update
 
@@ -196,7 +196,11 @@ Any other path requires human review, including `go.work`, another module's mani
 
 Classification must inspect both old and new paths for renames and all pages of the changed-file listing. It must detect truncation and missing diff content; an API limit or error cannot become an empty, eligible diff.
 
-Kubernetes compatibility and security exclusions override the path allowlist. Maintainers must approve the dependency rules and security-review inputs before enabling automation. Unavailable or inconclusive checks require human review.
+Every Kubernetes dependency or CAPI provider version bump is `SPECIAL`, including patch, minor, and major changes, direct and indirect dependencies, and updates in any Go module.
+
+This covers `k8s.io/*`, `sigs.k8s.io/*`, and CAPI provider modules outside those namespaces, including provider forks. These exclusions override both the path allowlist and passing tests.
+
+Chai routes these updates to human approvers in Slack and does not automatically approve, repair, or verify them. Existing security-sensitive exclusions remain human-owned; unavailable or inconclusive checks also require human review.
 
 All changed module manifests must be examined for exclusions, including modules outside the allowlist. PR titles, Dependabot grouping, and a patch-version designation are not substitutes for examining the actual update.
 
@@ -226,9 +230,9 @@ The supported path for `approved` and `lgtm` must enforce the required boundary.
 
 #### Verification
 
-Chai is assumed to have permission to issue `/verified`. It posts `/verified by e2e passing` once all required e2e jobs pass on the current revision.
+Chai posts `/verified by e2e passing` once all required e2e jobs pass on the current revision. The setup needed to enable its approval, review, and verification actions is an open question.
 
-How that command is authorized or processed is outside this enhancement's scope.
+This proposal uses the existing PR commands; it does not change their implementation.
 
 The standardized reason is `e2e passing`; job names, run links, and tested revisions remain in the decision record.
 
@@ -258,19 +262,19 @@ A central enablement flag stops new test-trust grants, attestations, and eligibi
 
 When disabled, Chai blocks pending candidates and invalidates queued actions. Credential revocation alone does not remove existing labels or cancel actions already accepted by another service.
 
-The concrete gate, shutdown response time, and any already-dispatched merge behavior must be agreed and tested before enabling automation. Chai does not monitor or undo changes that have already merged.
+The shutdown control covers new actions and already-attested open PRs. Chai does not monitor or undo changes that have already merged.
 
 ### Risks and Mitigations
 
 | Risk | Mitigation |
 | --- | --- |
-| Unsafe dependency content matches the path allowlist. | Keep explicit Kubernetes and security exclusions, review full diffs, and route inconclusive results to humans. |
+| Unsafe dependency content matches the path allowlist. | Keep explicit Kubernetes, CAPI provider, and security exclusions, review full diffs, and route inconclusive results to humans. |
 | Incomplete or stale input is treated as eligible. | Verify complete listings and revisions, fail closed, and reconcile delayed events and commands. |
 | Bot permissions exceed the delegated scope. | Enforce policy at the trusted writer, separate permissions, and avoid broad OWNERS membership. |
 | Tests or dependency code expose credentials. | Isolate validation from writer credentials and review the remaining CI secret boundary. |
 | Another Tide query bypasses eligibility or shutdown. | Review every matching query and test that held, stale, and disabled candidates cannot merge. |
 | Repair hides additional changes or loses the original update. | Require human review of the full replacement diff, and close the original only after a validated replacement PR is open and linked. |
-| Additional test runs increase CI cost or queue time. | Limit the pilot, measure test usage, and require maintainer approval before increasing throughput. |
+| Additional test runs increase CI cost or queue time. | Observe CI use during the one-PR trial and choose an appropriate schedule. |
 | A regression appears after merge. | Use the normal human-owned investigation and revert process; pre-merge checks cannot eliminate every regression. |
 
 HyperShift maintainers review the policy and maintainer experience. Test Platform owners review Prow permissions and merge behavior. Security reviewers assess content handling, permissions, and execution isolation.
@@ -310,51 +314,18 @@ Chai issues the explicit `/verified by e2e passing` command rather than writing 
 
 These implementation details remain to be resolved. Direct individual PRs, human-handled reverts, deferred Renovate support, and no post-merge monitor are settled boundaries, not open alternatives.
 
-1. **Eligibility exceptions:** Which exact dependency and version rules identify Kubernetes compatibility updates, and which security signals or review criteria must succeed? Owners: HyperShift maintainers and Security.
-2. **Prow permissions:** What is Chai's exact GitHub identity, and which mechanisms authorize its test-trigger, approval, and review actions within the agreed scope? Owners: repository access and Test Platform teams.
-3. **Test contract:** Which initial and end-to-end jobs are mandatory, how does `lgtm` start the latter, and how is current-base testing established? Owners: HyperShift and Test Platform maintainers.
-4. **Merge and shutdown gates:** How will eligibility be enforced across overlapping queries and stale commands, including an already-dispatched merge? What is the shutdown response target? Owners: HyperShift and Tide maintainers.
-5. **Throughput limits:** Are the proposed initial limits below appropriate, and what evidence permits increasing them? Owners: HyperShift maintainers.
-6. **Processing ownership:** What claim mechanism will Chai and the weekly job share, and how will claims be recovered after interruption? Owners: Chai and weekly-job maintainers.
-7. **Approver notifications:** What Slack destination, path-to-approver routing, and notification retry policy should Chai use? Owners: HyperShift maintainers.
+1. **Chai enablement:** What do we need to configure to enable Chai to apply `approved` and `lgtm` and issue `/verified by e2e passing`?
+2. **Processing ownership:** What claim mechanism will Chai and the weekly job share, and how will claims be recovered after interruption? Owners: Chai and weekly-job maintainers.
+3. **Approver notifications:** What Slack destination, path-to-approver routing, and notification retry policy should Chai use? Owners: HyperShift maintainers.
+4. **Routine scheduling:** Should this run as a routine configured in Chai bot, or should a periodic CI job invoke Chai? Chai remains the workflow owner either way. Owners: HyperShift maintainers and CI configuration owners.
 
 Reviewer identities, one coordinating approver, and the enhancement's tracking issue must also be supplied before submission. No existing prerequisite issue is assumed to track the complete proposal.
 
 ## Test Plan
 
-### Policy and evidence tests
-
-- Cover each allowed module, vendored Go files, disallowed module roots, `go.work`, non-Go lockfiles, generated assets, and Go files outside vendored subtrees.
-- Cover both sides of renames, deletions, pagination, API limits, missing diff content, and unavailable exception results. Each incomplete or excluded case must produce no Chai attestation.
-- Test Kubernetes and security overrides independently of path eligibility. Cover mixed dependency groups rather than relying on PR titles or update-type metadata.
-- Test duplicate and out-of-order events, policy changes, head changes, base changes, and incorrect job identities or tested revisions.
-
-### Authorization and workflow integration
-
-- Use controlled canaries to prove the exact actor can trigger only the intended tests and provide `approved` and `lgtm` through the supported path.
-- Demonstrate the two test stages. No approval precedes successful initial checks, and Chai issues `/verified by e2e passing` only after the full required end-to-end suite passes on the current revision.
-- Verify that missing, pending, failed, canceled, skipped, or stale required e2e results prevent Chai from issuing the verification command.
-- Change a PR's head while verification is queued. Confirm Chai does not issue the command using old test results and requires fresh results for the new revision. Test merge-candidate freshness when the target branch advances.
-- Verify every applicable Tide query rejects a managed candidate with missing labels, stale evidence, a failed required check, a hold, or disabled automation.
-- Verify an out-of-scope or excluded update triggers a Slack ping to the designated approvers with its PR link, revision, changed paths, and reasons, while receiving no Chai attestations.
-- Verify duplicate events do not repeat the same ping, delivery failures remain visible and retryable, and Slack replies cannot supply approval or merge eligibility.
-
-### Repair and execution isolation
-
-- Verify replacement is triggered only by a failed `verify` on the current revision of the original Dependabot PR. Passing, pending, missing, or stale `verify` results and failures in other checks must not trigger it.
-- Reproduce a `verify` failure, cherry-pick the pinned update, fix the failure, and verify the strict local validation sequence before publication.
-- Verify Chai opens its own replacement PR, links and closes the original as superseded, and then pings the approvers in Slack. Closure must not depend on the replacement having already merged.
-- Verify repair, validation, or publication failure leaves the original open and held. Never close it before the replacement PR is confirmed open.
-- Verify all replacement PRs require human review, including replacements whose diffs remain within the allowlist. They must not inherit labels or test evidence and must pass their own remote checks.
-- Verify a failed `verify` on a Chai-authored replacement does not recursively create another replacement.
-- Verify workers cannot access writer tokens, private keys, or credential helpers, and that vendored instruction files cannot influence privileged decisions.
-- Verify the weekly job respects ownership claims and fails closed when file retrieval is unavailable.
-
-### Shutdown and recovery
-
-- Disable automation before approval, during end-to-end testing, after verification, and while commands are queued. Confirm pending candidates are blocked across all applicable merge queries.
-- Exercise the agreed handling of an already-dispatched merge and measure shutdown latency. The runbook must describe any limit on stopping work already in progress.
-- Restart after missed events or worker interruption. Require current classification and evidence before restoring eligibility, without deleting human-owned review decisions.
+1. Ask Chai to process one eligible Dependabot PR without enabling the recurring schedule.
+2. Review the result with maintainers: classification, labels, test results, and any repair or human-review handoff must follow this proposal.
+3. If the run behaves as intended, configure the selected Chai routine or periodic CI job to process the remaining PRs. If it does not, fix the workflow and retry before scheduling it.
 
 ## Graduation Criteria
 
@@ -362,19 +333,11 @@ This is repository automation, not a customer-facing OpenShift feature. The requ
 
 ### Dev Preview -> Tech Preview
 
-Before enabling the automated workflow:
-
-- Policy tests and representative cases must cover each allowed module, excluded updates, and incomplete inputs, with no excluded case receiving Chai attestations.
-- Maintainer-approved exception rules, test-suite definitions, and a documented comparison with human decisions.
-- Passing authorization canaries, stale-event tests, repair tests, and merge-gate tests.
-- Tested Chai shutdown and recovery behavior, with documented maintainer controls.
-- Confirmed deconfliction with the weekly job and approved credential isolation.
-
-The proposed initial limit is one in-flight PR and at most one automated merge per UTC day. Maintainers must approve or adjust these limits before enabling the workflow.
+Complete the one-PR trial and review its result. Confirm that Chai can carry out the required actions before enabling the recurring schedule.
 
 ### Tech Preview -> GA
 
-Expand throughput only after maintainers review classification accuracy, manual interventions, test cost, processing latency, and shutdown behavior. Any scope or throughput expansion requires explicit approval.
+Configure the selected scheduling approach and use the same workflow for the remaining in-scope Dependabot PRs. Exclusions and repair PRs retain the human-review behavior described above.
 
 HyperShift maintainers own policy updates and integration configuration. Chai records decisions and handles workflow retries and reconciliation. Recovery instructions describe when human intervention is needed.
 
@@ -386,7 +349,7 @@ No customer-facing feature is deprecated. If the weekly job is disabled for over
 
 ## Upgrade / Downgrade Strategy
 
-No cluster upgrade or downgrade behavior changes. Chai policy, test-contract, authorization, and merge-configuration changes are deployed with automation disabled until their integration checks pass.
+No cluster upgrade or downgrade behavior changes. Validate changes to Chai's policy, permissions, or scheduling on one PR before restoring recurring execution.
 
 Policy changes receive a new version and invalidate affected decisions. Do not carry old evidence into a policy or test contract that changes the candidate's requirements.
 
@@ -398,7 +361,7 @@ Do not remove unrelated human labels or resume the weekly job over claimed PRs w
 
 Chai depends on the deployed GitHub, Prow, and Tide behaviors, not on control-plane and worker version skew. Prow permissions and test-contract compatibility must be verified against those deployed services.
 
-When an integration changes or its behavior is unknown, automated actions stop. Resume only after integration tests prove the required contract and stale-evidence handling.
+When an integration changes or its behavior is unknown, pause recurring execution. Confirm correct behavior on one PR before restoring the schedule.
 
 ## Operational Aspects of API Extensions
 
