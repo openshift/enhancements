@@ -628,8 +628,14 @@ flowchart TB
         S --> T[Set .status.autoApproverDisabled=true<br/>on CertManager CR]
     end
 
-    subgraph PolicyWorkflow["Step 2: Policy Enforcement"]
-        U[Admin creates<br/>CertificateRequestPolicy CRs] --> V[approver-policy evaluates<br/>incoming CertificateRequests]
+    subgraph TrustManagerIntegration["Automatic Trust-Manager Integration (managementState: Managed)"]
+        T --> TM1[trust-manager-controller observes<br/>autoApproverDisabled=true]
+        TM1 --> TM2[Create CertificateRequestPolicy<br/>ClusterRole + ClusterRoleBinding<br/>for trust-manager webhook cert]
+        TM2 --> TM3[trust-manager webhook cert<br/>approved by approver-policy]
+    end
+
+    subgraph PolicyWorkflow["Step 2: Workload Policy Enforcement"]
+        U[Admin creates<br/>CertificateRequestPolicy CRs<br/>for workloads] --> V[approver-policy evaluates<br/>incoming CertificateRequests]
         V --> W{Matching policy<br/>found?}
         W -->|No matching policy| W3[No action — CR stays pending]
         W -->|Policy matched,<br/>all evaluators deny| W2[Deny CertificateRequest]
@@ -1017,13 +1023,15 @@ feature gate configuration. This gate must be explicitly enabled.
 The cert-manager controller watches the `ApproverPolicyManager` CR. On each reconciliation:
 
 - **ApproverPolicyManager CR `Not Found`**: Re-enable — recreate ClusterRole/CRB, remove `--controllers` flag,
-  set `.status.autoApproverDisabled=false`.
+  set `.status.autoApproverDisabled=false`. Emits a `Normal` Event on the CertManager CR:
+  `AutoApproverEnabled: built-in CertificateRequest auto-approver has been re-enabled`.
 - **ApproverPolicyManager CR exists, auto-approver already disabled** (idempotent): Keep disabled — no-op,
-  ensure `.status.autoApproverDisabled=true`.
+  ensure `.status.autoApproverDisabled=true`. No Event is emitted (no state change).
 - **ApproverPolicyManager CR exists, auto-approver currently enabled, `Ready=True`**: Trigger disable —
   inject `--controllers` flag into Deployment and delete ClusterRole/CRB. Both operations must succeed
   before setting `.status.autoApproverDisabled=true`. If either fails, return an error to trigger an immediate
-  retry on the next loop.
+  retry on the next loop. On success, emits a `Normal` Event on the CertManager CR:
+  `AutoApproverDisabled: built-in CertificateRequest auto-approver has been disabled; approver-policy is now responsible for approvals`.
 - **ApproverPolicyManager CR exists, auto-approver currently enabled, `Ready != True`**: **Requeue**
   (`ctrl.Result{Requeue: true}`). The `Watches()` trigger fires again when the ApproverPolicyManager CR status
   is updated.
@@ -1394,9 +1402,13 @@ Below are example static manifests used for creating required resources for inst
 - **Accidental ApproverPolicyManager CR Deletion Restores Auto-Approval**: If the `ApproverPolicyManager` CR is accidentally
   deleted, the built-in auto-approver is re-enabled, and all CertificateRequests are auto-approved until
   the CR is recreated.
-  - Mitigation: The `AutoApproverDisabled` status field on the CertManager CR clearly shows the current state.
+  - Mitigation: The `autoApproverDisabled` field on the CertManager CR clearly shows the current state.
     RBAC restrictions on who can delete the `ApproverPolicyManager` CR should follow least-privilege principles.
-    The transition from policy-enforced to auto-approved is visible in CertManager CR status.
+    The transition from policy-enforced to auto-approved is visible in CertManager CR status. Additionally,
+    the cert-manager controller emits a Kubernetes Event on the CertManager CR whenever `autoApproverDisabled`
+    transitions — administrators can watch for these events (`oc get events --field-selector involvedObject.name=cluster,involvedObject.kind=CertManager`)
+    or configure a Prometheus alerting rule (see [Support Procedures](#support-procedures)) to be notified
+    immediately when the field changes.
 
 - **Trust-Manager Webhook Certificate Pending When Auto-Approval Is Disabled**: trust-manager uses a
   cert-manager `Certificate` resource to provision its webhook TLS. When the built-in approver is
@@ -1614,6 +1626,11 @@ None
     `--controllers=*,-certificaterequests-approver`, recreates approve ClusterRole/CRB) after `ApproverPolicyManager`
     CR deletion.
   - Verify that `autoApproverDisabled` is set to `false` after `ApproverPolicyManager` CR deletion.
+  - Verify that a `Normal` Event with reason `AutoApproverEnabled` is recorded on the CertManager CR after re-enable.
+- **Event emission tests:**
+  - Verify that a `Normal` Event with reason `AutoApproverDisabled` is recorded on the CertManager CR when
+    the built-in approver is disabled.
+  - Verify that no duplicate Event is emitted on subsequent idempotent reconciliations (latch already held).
 - **Atomicity tests (partial disable failure):**
   - Verify that if the Deployment update succeeds but the ClusterRole deletion fails (simulated transient
     error), the cert-manager controller retries on the next reconciliation and eventually completes both
@@ -1868,6 +1885,15 @@ approver-policy will be supported for:
   ```bash
   oc get certmanager cluster -o jsonpath='{.status.autoApproverDisabled}'
   ```
+
+- Watching for `autoApproverDisabled` transition Events on the CertManager CR
+  ```bash
+  oc get events --field-selector involvedObject.name=cluster,involvedObject.kind=CertManager -n cert-manager-operator
+  ```
+
+- **Prometheus alerting** — to be notified when `autoApproverDisabled` changes, create a
+  `PrometheusRule` in the `cert-manager-operator` namespace for the `certmanagers.operator.openshift.io` resource, `name=cluster`,
+  `field=autoApproverDisabled`.
 
 - Checking trust-manager's approver-policy integration state (should track the `autoApproverDisabled`
   field above when `managementState: Managed`, the default)
