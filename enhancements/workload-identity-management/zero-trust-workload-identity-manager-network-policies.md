@@ -133,8 +133,9 @@ destinations.
   * Webhook ingress for SPIRE controller manager (port 9443/TCP)
   * SPIRE Server federation via OpenShift Router (if enabled)
   * DNS resolution for service discovery (port 5353/TCP+UDP)
-  * Capability-derived egress for SPIRE Server (and proxy egress for server,
-    agent, and OIDC) by parsing operand spec and operator proxy environment
+  * Capability-derived egress for SPIRE Server (including proxy egress when
+    operator proxy env is set) by parsing operand spec and operator proxy
+    environment
 
 * Ensure network policies do not interfere with normal operation of the
   workload identity management system.
@@ -401,13 +402,16 @@ automatically.
 | cert-manager upstream | `upstreamAuthority.certManager != nil` | *(none beyond baseline)* | API **6443** only |
 | Self-signed CA | `upstreamAuthority == nil` | *(none beyond baseline)* | — |
 | External database | `databaseType` not `sqlite3` (and not file-only `sql`) | Feature-egress policy | Parse `connectionString` or default **5432** / **3306** by type |
-| Cluster proxy | Operator `HTTP_PROXY` or `HTTPS_PROXY` set | `ztwim-sys-allow-proxy-egress` (server, agent, OIDC) | Union of proxy URL ports |
+| Cluster proxy | Operator `HTTP_PROXY` or `HTTPS_PROXY` set | `ztwim-sys-allow-proxy-egress` (**SpireServer** only) | Union of proxy URL ports |
 
 **SpireAgent reconciler:** baseline + **10250/TCP** egress when Kubernetes
-workload attestor enabled (default) + proxy policy when proxy env set.
+workload attestor enabled (default). No proxy egress NetworkPolicy; agent
+traffic is in-cluster (server, API, kubelet, DNS) even when proxy env is
+injected on the pod.
 
-**SpireOIDCDiscoveryProvider reconciler:** baseline ingress **8443/TCP** +
-proxy egress when proxy env set.
+**SpireOIDCDiscoveryProvider reconciler:** baseline ingress **8443/TCP**
+only. No egress rules; workload API uses the SPIRE Agent Unix socket (no
+proxy egress NetworkPolicy).
 
 **Port union:** The SpireServer reconciler may implement one
 `ztwim-sys-server-egress-feature-ports` NetworkPolicy whose egress allows
@@ -664,9 +668,9 @@ user-managed ingress NetworkPolicies for custom routes.
 ### Capability-Derived Egress (Vault, Database, Proxy)
 
 When Vault, external database, or cluster proxy is enabled and
-`managedNetworkPolicy` is `"true"`, the SpireServer (and SpireAgent /
-OIDC for proxy) reconciler **creates or updates** operator-managed egress
-policies with TCP ports derived as follows:
+`managedNetworkPolicy` is `"true"`, the **SpireServer** reconciler
+**creates or updates** operator-managed egress policies with TCP ports
+derived as follows (proxy egress is server-only; see capability table):
 
 | Source | Port derivation |
 |--------|-----------------|
@@ -850,7 +854,7 @@ creation; per-operand `managedNetworkPolicy` matches `managedRoute`.
 * Vault upstream egress with parsed `vaultAddr` port
 * External database egress with parsed/default SQL port
 * Federation remote egress with union of `bundleEndpointUrl` ports
-* Cluster proxy egress on server, agent, and OIDC when proxy env set
+* Cluster proxy egress on SpireServer when operator proxy env is set
 * Operand health with `managedNetworkPolicy: "false"` when administrator
   supplies equivalent allow policies
 
@@ -1112,7 +1116,8 @@ CrashLoopBackOff with connection errors.
    federation/proxy policies)
 2. Verify operator proxy env if cluster uses HTTP(S) proxy
 3. Check for AdminNetworkPolicy blocking egress at cluster scope
-4. Verify parse warnings on `NetworkPoliciesAvailable` (DB connection string)
+4. Check `status.networkPolicy.warnings` on SpireServer (e.g. DB connection
+   string parse fallback)
 
 **Symptom**: OIDC discovery endpoint unreachable.
 
