@@ -48,7 +48,6 @@ The proposal delegates review attestations only for eligible Go dependency updat
 - Make eligibility decisions consistent, explainable, and auditable.
 - Require human review whenever changes exceed the delegated scope or available evidence is insufficient.
 - Preserve required testing, current-commit verification, and Tide's sole merge authority.
-- Introduce automation gradually, with a report-only evaluation and a tested shutdown procedure.
 
 ### Non-Goals
 
