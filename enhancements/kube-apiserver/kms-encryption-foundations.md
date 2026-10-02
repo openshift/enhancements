@@ -505,9 +505,11 @@ External remote-key rotation does **not** mint a new encryption key secret, chan
 
 Remote-key annotations live on the encryption key Secret for the KMS operand — the secret **keyController** is rolling out. On first enablement **keyController** creates that secret as a **backup** key; the existing state machine promotes it to **write** key in a later step. Annotations are written when the secret is created and remain on that secret after promotion. **keyController** reads aggregated health and runs the convergence clock only for the **current write key's** `keyID` (the socket id in `kms-{keyID}.sock`), not for read-only backup keys. During KMS-to-KMS provider migration, health reports multiple plugins per node; rotation logic uses only the entry matching the write key's `keyID`.
 
+Report-list hygiene (10-minute stale prune) and the admin-facing `KmsHealthReportsProgressing` / `KmsHealthReportsDegraded` rollups live in **KmsHealthController**, which assesses **all** KeyID groups. The [KEP-3299](https://github.com/kubernetes/enhancements/blob/master/keps/sig-auth/3299-kms-v2-improvements/README.md) 5-minute remote-key convergence clock remains on **keyController** annotations and continues to filter reports to the write key's `keyID` only. See [KMS Plugin Health](#kms-plugin-health).
+
 Two controllers cooperate on that encryption key secret:
 
-- **keyController** handles the target state: reads cluster-converged `RemoteKeyId` for the **current write key's** `keyID` from health aggregation, maintains the [KEP-3299](https://github.com/kubernetes/enhancements/blob/master/keps/sig-auth/3299-kms-v2-improvements/README.md) 5-minute convergence clock, and promotes `target-remote-key-id` when allowed. It is the only writer of `target-remote-key-id` and the `remote-key-converged-*` annotations.
+- **keyController** handles the target state: reads cluster-converged `RemoteKeyId` for the **current write key's** `keyID` from `status.kmsEncryption.healthReports`, maintains the [KEP-3299](https://github.com/kubernetes/enhancements/blob/master/keps/sig-auth/3299-kms-v2-improvements/README.md) 5-minute convergence clock, and promotes `target-remote-key-id` when allowed. It is the only writer of `target-remote-key-id` and the `remote-key-converged-*` annotations.
 - **migrationController** handles the migration: runs storage migration when `needsMigration` is true and sets `migrated-remote-key-id` from the `RemoteKeyId` encoded in the completed SVM’s `write-key` annotation, not from a fresh read of `target-remote-key-id` on the secret and not when `migrated-resources` alone is complete. At bootstrap only, **keyController** sets `migrated-remote-key-id = target-remote-key-id` in one update.
 
 Keeping target promotion in **keyController** — the same sync loop that already blocks new key minting while `NeedsRemoteKeyMigration()` — avoids two controllers racing to update the same secret. Rotation progress is recorded as annotations on the encryption key secret described above.
@@ -576,7 +578,7 @@ All `RemoteKeyId` annotations use the prefix **`encryption.apiserver.operator.op
 3. **keyController** creates a new encryption key secret as **backup** key and writes **`encryption.apiserver.operator.openshift.io/target-remote-key-id = {RemoteKeyId}`** on it (`{RemoteKeyId}` from pre-flight `Status`).
 4. The state machine promotes that secret to **write** key; **stateController** + deployer roll out the updated encryption config until revision is stable. (**stateController** involvement here is KMS enablement, not remote-key rotation.)
 5. **migrationController** migrates each GR via **migrator** → SVM with `encryption.apiserver.operator.openshift.io/write-key={keyName}-{RemoteKeyId}` (`target-remote-key-id` from pre-flight; `migrated-remote-key-id` unset).
-6. **Health aggregation** reports per-node `RemoteKeyId` for the **write** key's `keyID`.
+6. **`healthReports`** show per-node `RemoteKeyId` for the **write** key's `keyID`.
 7. When **initial migration is complete** and health shows a **converged** `RemoteKeyId` for that write `keyID`, **keyController** sets **`encryption.apiserver.operator.openshift.io/migrated-remote-key-id = target-remote-key-id`** on the write encryption key secret (bootstrap). The converged `RemoteKeyId` does not need to match `target-remote-key-id`; if it differs, rotation proceeds per [case 4](#4-remote-key-rotates-before-bootstrap) after bootstrap. Does **not** start the convergence clock.
 
 **End state (converged matches target):** initial migration complete; `target-remote-key-id = migrated-remote-key-id = remote-key-old`.
@@ -588,7 +590,7 @@ sequenceDiagram
     participant Preflight as KMSPreflightController
     participant MigCtrl as migrationController
     participant SVM as Migrator
-    participant Health as HealthAggregation
+    participant Health as HealthReports
     participant Secret as WriteKeySecret
 
     Admin->>KeyCtrl: enable KMS encryption
@@ -609,7 +611,7 @@ sequenceDiagram
 **What happens, and who drives it:**
 
 1. **cluster admin / KMS** rotates the remote key.
-2. **Health aggregation** converges on **`remote-key-new`** for the **current write key's** `keyID` → **keyController** reads it.
+2. **`healthReports`** converge on **`remote-key-new`** for the **current write key's** `keyID` → **keyController** reads it.
 3. **keyController** sees `remote-key-new ≠ target-remote-key-id`. Writes **`encryption.apiserver.operator.openshift.io/remote-key-converged-id = remote-key-new`** and **`encryption.apiserver.operator.openshift.io/remote-key-converged-at = now`**. Does not update `target-remote-key-id` yet.
 4. For **≥ 5m** converged on `remote-key-new`: if health diverges, clears `remote-key-converged-id` and `remote-key-converged-at`; if stable **and** `migrated-remote-key-id = target-remote-key-id` (migration gate), sets **`encryption.apiserver.operator.openshift.io/target-remote-key-id = remote-key-new`** and clears convergence pair.
 5. **migrationController** sees `needsMigration` (ignores `migrated-resources` if already complete). **Migrator** runs with `encryption.apiserver.operator.openshift.io/write-key = {keyName}-remote-key-new`.
@@ -621,7 +623,7 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant KMS as RemoteKMS
-    participant Health as HealthAggregation
+    participant Health as HealthReports
     participant KeyCtrl as keyController
     participant Secret as WriteKeySecret
     participant MigCtrl as migrationController
@@ -678,7 +680,7 @@ sequenceDiagram
 
 1. **cluster admin / KMS** rotates the remote key after pre-flight recorded `remote-key-old` but before bootstrap.
 2. **migrationController** completes the first-enablement migration (`write-key={keyName}-{RemoteKeyId}` with `{RemoteKeyId}` from pre-flight). **migrationController** does **not** set `migrated-remote-key-id`.
-3. **Health aggregation** converges on **`remote-key-new`** for the write key's `keyID` (≠ `target-remote-key-id`).
+3. **`healthReports`** converge on **`remote-key-new`** for the write key's `keyID` (≠ `target-remote-key-id`).
 4. **keyController** bootstraps anyway: **`encryption.apiserver.operator.openshift.io/migrated-remote-key-id = target-remote-key-id`** (`remote-key-old`). Does **not** update `target-remote-key-id` and does **not** start the convergence clock.
 5. With bootstrap complete, **`needsMigration` is false** (`migrated = target = remote-key-old`). **keyController** sees converged **`remote-key-new ≠ target-remote-key-id`** and enters the rotation path per [case 2](#2-rotation-when-remotekeyid-changes-happy-path): convergence clock → promote `target-remote-key-id` → **migrationController** runs suffixed SVMs → verifies succeeded SVMs for all GRs → sets **`migrated-remote-key-id = remote-key-new`**.
 
@@ -690,7 +692,7 @@ sequenceDiagram
 sequenceDiagram
     participant KMS as RemoteKMS
     participant MigCtrl as migrationController
-    participant Health as HealthAggregation
+    participant Health as HealthReports
     participant KeyCtrl as keyController
     participant Secret as WriteKeySecret
     participant SVM as Migrator
@@ -797,7 +799,7 @@ During KMS-to-KMS migration, the encryption-configuration secret contains provid
 
 #### Health Reporter Sidecar
 
-When KMS encryption is enabled, a health reporter sidecar runs alongside every API server pod replica. The sidecar probes the colocated KMS plugin(s) and publishes the outcome to the owning operator's CR as a per-node condition. A separate aggregator controller picks up these conditions and emits one or more `ClusterOperator`-bound rollups (starting with `KMSPluginsDegraded`, see [Aggregator behavior](#aggregator-behavior)).
+When KMS encryption is enabled, a health reporter sidecar runs alongside every API server pod replica. The sidecar probes the colocated KMS plugin(s) and publishes typed entries under `status.kmsEncryption.healthReports` on the owning operator CR. **KmsHealthController** prunes stale reports and emits `KmsHealthReportsProgressing` / `KmsHealthReportsDegraded` rollups (see [KMS Plugin Health](#kms-plugin-health)).
 
 The sidecar's lifecycle (injection into the pod spec, image, mounts, RBAC) is managed by the same mechanism that handles KMS plugin sidecars; see [KMS Plugin Lifecycle Management](#kms-plugin-lifecycle-management-tech-preview-v2).
 
@@ -811,21 +813,21 @@ One sidecar per API server pod replica, scaling with control-plane HA replica co
 - One per `openshift-oauth-apiserver` Deployment replica
 - One per `openshift-apiserver` Deployment replica
 
-During KMS-to-KMS migration, the same sidecar probes every active KMS plugin in its pod (see [Multiple Concurrent Sidecars](#multiple-concurrent-sidecars)) and reports their combined state in the Message field of its single per-node condition.
+During KMS-to-KMS migration, the same sidecar probes every active KMS plugin in its pod (see [Multiple Concurrent Sidecars](#multiple-concurrent-sidecars)) and writes one `healthReports` entry per `(nodeName, keyID)`.
 
 ##### Probe contract
 
 Each sidecar probes its colocated KMS plugin(s) over the local UDS at `unix:///var/run/kmsplugin/kms-{keyID}.sock` (the same socket path scheme described in [Sidecar Injection](#sidecar-injection)).
 
-**Naming caveat.** `{keyID}` in the socket path is **not** an id of a cryptographic key. It is the id of the encryption key secret managed by the encryption controllers, a monotonically incrementing sequence number (a new one per key rotation). The KMS v2 plugin separately reports the id of the remote KEK it currently uses in its `StatusResponse.key_id`. This document keeps `keyID` for the socket-path id and `kekID` for the plugin-reported KEK. Conflating them will misbehave in any consumer that assumes `keyID` names a key.
+**Naming caveat.** `{keyID}` in the socket path is **not** an id of a cryptographic key. It is the id of the encryption key secret managed by the encryption controllers, a monotonically incrementing sequence number (a new one per key rotation). The KMS v2 plugin separately reports the id of the remote KEK it currently uses in its `StatusResponse.key_id`. This document keeps `keyID` for the socket-path id and `remoteKeyID` for the plugin-reported KEK. Conflating them will misbehave in any consumer that assumes `keyID` names a key.
 
 ##### Per-tick emission
 
-Each probe produces one `PluginHealthCondition` (defined in [Message format](#message-format)) for the plugin it targeted. The sidecar collects one entry per colocated plugin into a `PluginHealthConditions` array and writes the minified JSON to the condition's `Message`. Each entry's `lastChecked` is the wall-clock time of that probe.
+Each probe produces one `KMSPluginHealthReport` (defined in [Report shape](#report-shape)) for the plugin it targeted. The sidecar collects one entry per colocated plugin and applies them under `status.kmsEncryption.healthReports`. Each entry's `lastCheckedTime` is the wall-clock time of that probe.
 
 ##### Destination
 
-The sidecar writes one condition per pod replica to the owning operator's `*.operator.openshift.io/cluster` CR via Server-Side Apply (per-entry ownership via `+listType=map` on `OperatorStatus.Conditions`). The aggregator controller reads these conditions and emits the `KMSPluginsDegraded` rollup. See [KMS Plugin Health Conditions](#kms-plugin-health-conditions) for the exact naming, status mapping, and rollup behavior, and [KMS Health Reporter Connectivity](#kms-health-reporter-connectivity) for how the reporter authenticates and connects to perform the write.
+The sidecar writes its node's reports to the owning operator's `*.operator.openshift.io/cluster` CR via Server-Side Apply, with per-node fieldManager ownership and `+listType=map` keys `nodeName`+`keyID` on `KMSEncryptionStatus.HealthReports`. **KmsHealthController** reads these reports, prunes stale entries, and emits Progressing/Degraded conditions. See [KMS Plugin Health](#kms-plugin-health) for the exact shape, prune, and rollup behavior, and [KMS Health Reporter Connectivity](#kms-health-reporter-connectivity) for how the reporter authenticates and connects to perform the write.
 
 ```
 within each apiserver pod (3 in HA):
@@ -839,14 +841,15 @@ within each apiserver pod (3 in HA):
                                     │  SSA (per-node fieldManager)
                                     ▼
 operator CR (kubeapiservers.operator.openshift.io/cluster):
-  ├─ KMSHealthReporter_<nodeName>    ◄─ written by each per-pod reporter
-  │      (one per node, multi-plugin state in Message)
+  ├─ status.kmsEncryption.healthReports[]   ◄─ written by each per-pod reporter
+  │      (map keys: nodeName + keyID)
   │
-  └─ KMSPluginsDegraded              ◄─ written by aggregator controller
-            │                            (reads the per-node entries above)
-            │  matches _Degraded suffix
+  ├─ KmsHealthReportsProgressing            ◄─ written by KmsHealthController
+  └─ KmsHealthReportsDegraded               ◄─ after Progressing True for 1h
+            │
+            │  StatusSyncer (_Progressing / _Degraded suffixes)
             ▼
-  ClusterOperator: Degraded
+  ClusterOperator: Progressing / Degraded
 ```
 
 ### User Stories
@@ -943,7 +946,7 @@ Reusing an admin-grade token is a deliberate short-term tradeoff. The trust boun
 
 ##### Aggregated API servers (`openshift-apiserver`, `openshift-oauth-apiserver`)
 
-The aggregated API servers run as Deployments in the pod network, each backed by a ServiceAccount (`openshift-apiserver-sa`, `oauth-apiserver-sa`). The reporter sidecar inherits that projected token with no extra wiring, exactly as the existing `openshift-apiserver-check-endpoints` sidecar does (it runs with no `--kubeconfig` and falls back to in-cluster config). Both SAs are bound to `cluster-admin`, so the token applies the per-node condition with no added RBAC.
+The aggregated API servers run as Deployments in the pod network, each backed by a ServiceAccount (`openshift-apiserver-sa`, `oauth-apiserver-sa`). The reporter sidecar inherits that projected token with no extra wiring, exactly as the existing `openshift-apiserver-check-endpoints` sidecar does (it runs with no `--kubeconfig` and falls back to in-cluster config). Both SAs are bound to `cluster-admin`, so the token applies the per-node `healthReports` SSA with no added RBAC.
 
 ##### kube-apiserver
 
@@ -951,7 +954,7 @@ The reporter reuses the kubeconfig `cert-syncer` already uses: it dials the loca
 
 Loopback is deliberate: not `kubernetes.default.svc` (does not resolve from a host-network static pod), and not the `KUBERNETES_SERVICE_HOST` ClusterIP. An unhealthy KMS plugin does not break this write, despite gating its own kube-apiserver's health: KMS gates `/readyz` and `/healthz` but not `/livez`, so the pod is dropped from the Service load balancer but never restarted and keeps serving on loopback. And the reporter writes an `operator.openshift.io` CR, which is not in the encrypted set (OpenShift encrypts only core `secrets` and `configmaps`), so the write uses the identity transformer and never calls KMS.
 
-We lose the cross-node failover the ClusterIP would have offered. This is acceptable, because if a node's local kube-apiserver is itself down, the node's condition stops advancing `lastChecked` and the aggregator flips it to `Unknown` (see [Probe interval](#probe-interval)). Loopback also keeps the cluster network out of the write path: one fewer component that can fail between the reporter and its kube-apiserver.
+We lose the cross-node failover the ClusterIP would have offered. This is acceptable, because if a node's local kube-apiserver is itself down, that node's `lastCheckedTime` stops advancing and **KmsHealthController** eventually prunes the stale report (see [KmsHealthController](#kmshealthcontroller)). Loopback also keeps the cluster network out of the write path: one fewer component that can fail between the reporter and its kube-apiserver.
 
 ##### Long term
 
@@ -960,42 +963,22 @@ The reporter moves to a dedicated, least-privilege identity, auto-rotated by the
 - On the static pod, a managed client certificate whose CN names a dedicated identity, issued and rotated by the operator's existing certrotation, the same mechanism that already mints the scoped `check-endpoints` client cert.
 - On the aggregated API servers, a dedicated ServiceAccount with a minimal Role, its bound token minted and rotated by the operator through the TokenRequest API (a plain projected volume cannot scope below the pod's own SA).
 
-#### KMS Plugin Health Conditions
+#### KMS Plugin Health
 
-##### Naming convention
+Health is published as typed `status.kmsEncryption.healthReports` on the owning operator CR (`kubeapiservers.operator.openshift.io/cluster`, etc.). Per-node reporters write entries via SSA; **KmsHealthController** in library-go prunes stale entries and emits `KmsHealthReportsProgressing` / `KmsHealthReportsDegraded`. An earlier design encoded the same signal as `KMSHealthReporter_<nodeName>` conditions with JSON in `Message` and a `KMSPluginsDegraded` aggregator; that path is obsolete.
 
-Each reporter sidecar writes one condition per pod replica to the owning operator's CR (`kubeapiservers.operator.openshift.io/cluster`, etc.), keyed by the node:
+##### Report shape
 
-```
-KMSHealthReporter_<nodeName>
-```
-
-The Type has no `_Available` or `_Degraded` suffix, so library-go's `StatusSyncer` ignores it and it does not propagate to the `ClusterOperator`. The aggregator controller consumes these conditions and emits the `KMSPluginsDegraded` rollup separately (see [Aggregator behavior](#aggregator-behavior)).
-
-This is a **temporary mechanism**. Long term, we plan to add first-class status fields for KMS plugin health to the operator CR API, so this signal lives in a typed shape rather than a string-encoded condition. Until then, encoding it in `KMSHealthReporter_<nodeName>` avoids an API change and keeps the design reversible.
-
-##### Status mapping
-
-While this condition is a temporary solution (see [Naming convention](#naming-convention)), the `Status` and `Reason` are hardcoded to avoid library-go's `StatusSyncer` or other consumers reacting to per-pod transitions:
-
-- `Status: True`
-- `Reason: AsExpected`
-
-All structured probe outcomes (per-plugin health, KEK ID, timestamps, error detail) live in the `Message` field and are parsed by the aggregator (see [Message format](#message-format) and [Aggregator behavior](#aggregator-behavior)).
-
-##### Message format
-
-The `Message` field carries the structured probe outcomes that the aggregator parses. It holds a single minified JSON array, one element per probed plugin:
+Each entry is a `KMSPluginHealthReport`. The list is `+listType=map` with map keys `nodeName` + `keyID` (unique combination per plugin instance on a node):
 
 ```go
-type PluginHealthConditions []PluginHealthCondition
-
-type PluginHealthCondition struct {
-    KeyID       string    `json:"keyID"`            // encryption-key-secret id from the socket path (kms-{keyID}.sock); not a cryptographic key
-    KEKID       string    `json:"kekID,omitempty"`  // remote KEK id from the plugin's KMS v2 StatusResponse.key_id; omitted when the probe errors (no StatusResponse)
-    Status      string    `json:"status"`           // healthy | unhealthy | error
-    LastChecked time.Time `json:"lastChecked"`      // RFC 3339 timestamp of this probe
-    Detail      string    `json:"detail,omitempty"` // error/health detail; omitted when healthy
+type KMSPluginHealthReport struct {
+    NodeName        string                // control-plane node running the reporter
+    KeyID           string                // encryption-key-secret id from kms-{keyID}.sock; not a cryptographic key
+    Status          KMSPluginHealthStatus // Healthy | Unhealthy | Error
+    LastCheckedTime metav1.Time           // wall-clock time of this probe
+    RemoteKeyID     string                // remote KEK id from StatusResponse.key_id; empty when the probe errors
+    Detail          string                // optional error/health detail
 }
 ```
 
@@ -1004,45 +987,63 @@ type PluginHealthCondition struct {
 A three-node control plane during KMS-to-KMS migration. Each pod carries two plugins (six total across the cluster): `keyID=2` is the new key handling writes and reads, `keyID=1` is the previous key kept read-only to decrypt in-flight data. In this snapshot:
 
 - `master-0`: both plugins healthy
-- `master-1`: the new plugin (`id=2`) has a misconfigured cloud credential
+- `master-1`: the new plugin (`keyID=2`) has a misconfigured cloud credential
 - `master-2`: cannot reach either plugin
-
-`Status` and `Reason` are uniform per the [Status mapping](#status-mapping); the actionable signal lives in `Message`:
 
 ```yaml
 status:
-  conditions:
-    - type: KMSHealthReporter_master-0
-      status: "True"
-      reason: AsExpected
-      message: '[{"kekID":"kek-9f2c","keyID":"2","status":"healthy","lastChecked":"2026-05-08T12:34:56Z"},{"kekID":"kek-4a17","keyID":"1","status":"healthy","lastChecked":"2026-05-08T12:34:56Z"}]'
-    - type: KMSHealthReporter_master-1
-      status: "True"
-      reason: AsExpected
-      message: '[{"kekID":"kek-9f2c","keyID":"2","status":"unhealthy","lastChecked":"2026-05-08T12:34:56Z","detail":"credential lacks decrypt permission"},{"kekID":"kek-4a17","keyID":"1","status":"healthy","lastChecked":"2026-05-08T12:34:56Z"}]'
-    - type: KMSHealthReporter_master-2
-      status: "True"
-      reason: AsExpected
-      message: '[{"keyID":"2","status":"error","lastChecked":"2026-05-08T12:34:56Z","detail":"connection refused"},{"keyID":"1","status":"error","lastChecked":"2026-05-08T12:34:56Z","detail":"connection refused"}]'
+  kmsEncryption:
+    healthReports:
+      - nodeName: master-0
+        keyID: "2"
+        status: Healthy
+        lastCheckedTime: "2026-05-08T12:34:56Z"
+        remoteKeyID: kek-9f2c
+      - nodeName: master-0
+        keyID: "1"
+        status: Healthy
+        lastCheckedTime: "2026-05-08T12:34:56Z"
+        remoteKeyID: kek-4a17
+      - nodeName: master-1
+        keyID: "2"
+        status: Unhealthy
+        lastCheckedTime: "2026-05-08T12:34:56Z"
+        remoteKeyID: kek-9f2c
+        detail: credential lacks decrypt permission
+      - nodeName: master-1
+        keyID: "1"
+        status: Healthy
+        lastCheckedTime: "2026-05-08T12:34:56Z"
+        remoteKeyID: kek-4a17
+      - nodeName: master-2
+        keyID: "2"
+        status: Error
+        lastCheckedTime: "2026-05-08T12:34:56Z"
+        detail: connection refused
+      - nodeName: master-2
+        keyID: "1"
+        status: Error
+        lastCheckedTime: "2026-05-08T12:34:56Z"
+        detail: connection refused
 ```
-
-See [Aggregator behavior](#aggregator-behavior) for how these conditions roll up to the `ClusterOperator`.
 
 ##### Probe interval
 
 Each reporter probes and emits on a fixed interval, **default 30 seconds**, passed as a sidecar flag at injection time (alongside the UDS socket paths). The exact value is not load-bearing: a probe cycle is `n` local UDS gRPC calls, one per `n` colocated plugins, followed by a single SSA write carrying all `n` results to the operator CR. Both are cheap, and tens-of-seconds detection latency is acceptable for KMS plugin health (key rotation and credential expiry are minutes-to-hours events).
 
-Emission is unconditional and best-effort. The reporter writes its condition every tick even when nothing changed: the stale-reporter mitigation (see [Risks and Mitigations](#risks-and-mitigations)) relies on `lastChecked` advancing, so a write-on-change-only reporter would leave a healthy steady-state condition indistinguishable from a hung one. The reporter attempts the write every interval no matter the cluster state. If it cannot reach the kube-apiserver within the interval, it discards that result rather than queuing it: the reporter only ever needs its freshest probe on the CR, so once the next interval produces a result with a newer `lastChecked`, the un-written previous one is outdated and pointless to retry. A reporter that keeps failing to write stops advancing `lastChecked` and is caught by the staleness threshold.
+Emission is unconditional and best-effort. The reporter writes its reports every tick even when nothing changed: the stale-report prune (see [Risks and Mitigations](#risks-and-mitigations)) relies on `lastCheckedTime` advancing, so a write-on-change-only reporter would leave a healthy steady-state entry indistinguishable from a hung one. The reporter attempts the write every interval no matter the cluster state. If it cannot reach the kube-apiserver within the interval, it discards that result rather than queuing it: the reporter only ever needs its freshest probe on the CR, so once the next interval produces a result with a newer `lastCheckedTime`, the un-written previous one is outdated and pointless to retry. A reporter that keeps failing to write stops advancing `lastCheckedTime` and is eventually pruned. Reporters apply small random jitter so replicas do not write the operator CR in lockstep.
 
-The aggregator's staleness threshold is derived from the interval rather than configured independently: a condition whose `lastChecked` is older than `4 × interval` (120 s at the default) is treated as `Unknown`. Four intervals give enough data points that one or two dropped probes do not flip the rollup. Reporters apply small random jitter so replicas do not write the operator CR in lockstep.
+##### KmsHealthController
 
-##### Aggregator behavior
+**KmsHealthController** owns report-list hygiene and the admin-facing rollup conditions. It does **not** require a MasterNodeProvider or node watch: freshness is intrinsic to each report's `lastCheckedTime`.
 
-An aggregator controller reads the per-node `KMSHealthReporter_<nodeName>` conditions on the operator's CR and emits rollup conditions on the same CR. The first rollup is `KMSPluginsDegraded`; its `_Degraded` suffix routes it into the `ClusterOperator`'s `Degraded` slot via library-go's `StatusSyncer`. Additional rollups (e.g. `KMSPluginsAvailable`, `KMSPluginsProgressing`) may be added so the `ClusterOperator`'s `Available` and `Progressing` slots also reflect KMS plugin health. Each suffix maps to its matching `ClusterOperator` field via the same `StatusSyncer` convention, so each new type slots in without additional plumbing.
+**Stale prune (10 minutes).** Entries whose `LastCheckedTime` is older than **10 minutes** are dropped. That TTL is long enough that slow SKUs and brief reporter outages do not churn the list, and short enough that SSA leftovers from a replaced or dead node stop affecting convergence. Prune runs inside the status update callback so conflict retries re-read status and do not overwrite concurrent reporter SSA writes.
 
-These rollup conditions (`KMSPluginsDegraded`, and any future `KMSPluginsAvailable` / `KMSPluginsProgressing`) are the admin-facing signal: they surface through `ClusterOperator` so that `oc get co kube-apiserver` is sufficient to learn KMS plugin health. The per-node `KMSHealthReporter_<nodeName>` conditions are plumbing for the aggregator and tooling, not intended for direct admin consumption.
+**Per-KeyID convergence.** Reports are grouped by `keyID`. A group is converged when every remaining entry in that group shares the same non-empty `remoteKeyID`. During KMS-to-KMS migration, different KeyID groups may legitimately report different remote KEKs; only a split **within** a KeyID group is non-converged. Empty report list is treated as converged (nothing to assess).
 
-The plan is to extend the existing [`conditionController`](https://github.com/openshift/library-go/blob/master/pkg/operator/encryption/controllers/condition_controller.go) in library-go's encryption controllers, which already emits the `Encrypted` condition on the same operator CR. It sits in the right call path (operator CR → ClusterOperator) and runs on the informer set the rollup needs. If extending it turns out to be a poor fit (conflicting sync triggers, unrelated dependencies that make the rollup hard to reason about), a dedicated controller will be introduced instead.
+**Progressing / Degraded (1-hour hysteresis).** While any KeyID group is non-converged, the controller sets `KmsHealthReportsProgressing=True` (`Reason: HealthReportsNotConverged`). After Progressing has stayed True for **1 hour** (clocked from Progressing `LastTransitionTime`), it also sets `KmsHealthReportsDegraded=True` with the same reason. The hour of hysteresis avoids false Degraded during rollouts and slow external KMS SKUs. On reconcile errors the controller does **not** clear or rewrite these conditions, so a transient status failure cannot reset the LTT clock.
+
+The `_Progressing` / `_Degraded` suffixes route into the `ClusterOperator` via library-go's `StatusSyncer`, so `oc get co kube-apiserver` surfaces prolonged non-convergence. Typed `healthReports` remain the detailed signal for tooling and for **keyController** remote-key rotation (write-key `keyID` filter only; see [KMS Key Rotation](#kms-key-rotation)).
 
 ### Risks and Mitigations
 
@@ -1062,17 +1063,21 @@ The plan is to extend the existing [`conditionController`](https://github.com/op
 - **Impact:** Conflict with in-progress state machine
 - **Mitigation:** keyController blocks new encryption key generation during promotion
 
-**Risk: Stale Reporter Conditions**
-- **Impact:** A reporter that hangs leaves its last `KMSHealthReporter_<nodeName>` condition in etcd unchanged.
-- **Mitigation:** Per-plugin `lastChecked` timestamps in Message expose staleness. The aggregator controller treats a condition whose `lastChecked` exceeds the freshness threshold (`4 × probe interval`; see [Probe interval](#probe-interval)) as effectively `Unknown`.
+**Risk: Stale Reporter Entries**
+- **Impact:** A reporter that hangs leaves its last `healthReports` entries in etcd unchanged, which can pin an obsolete `remoteKeyID` and block remote-key convergence.
+- **Mitigation:** **KmsHealthController** prunes entries whose `lastCheckedTime` is older than **10 minutes** (see [KmsHealthController](#kmshealthcontroller)). Hung or dead reporters stop affecting rollups once pruned.
 
-**Risk: Orphaned Conditions on encryption type change and node replacement**
-- **Impact:** When KMS is disabled (e.g., switching to `aescbc`), reporter sidecars are removed. Without explicit cleanup, `KMSHealthReporter_<nodeName>` and `KMSPluginsDegraded` entries remain stale on the operator CR.
-- **Mitigation:** The aggregator controller owns cleanup. It removes orphaned `KMSHealthReporter_<nodeName>` entries (when their owning sidecar is no longer present) and removes its own `KMSPluginsDegraded` entry on KMS disable.
+**Risk: Orphaned Entries on encryption type change and node replacement**
+- **Impact:** When a control-plane node is replaced, or KMS is disabled (e.g., switching to `aescbc`), SSA-owned `healthReports` entries can linger after their reporter is gone.
+- **Mitigation:** The same **10-minute** prune removes orphans without a MasterNodeProvider or node watch. When KMS encryption controllers stop running, Progressing/Degraded are no longer updated toward True; leftover report entries age out under prune once controllers resume or status is otherwise cleared by operator lifecycle.
+
+**Risk: Prolonged Non-Convergence**
+- **Impact:** Split `remoteKeyID` within a KeyID group (misconfig, partial rollout, external KMS lag) leaves the cluster unable to promote remote-key targets safely.
+- **Mitigation:** **KmsHealthController** sets `KmsHealthReportsProgressing` immediately while any KeyID group is non-unanimous, then `KmsHealthReportsDegraded` after Progressing has been True for **1 hour** (Progressing `LastTransitionTime`). Reconcile errors do not clear these conditions or reset the clock.
 
 **Risk: Cold-Start Window**
-- **Impact:** KMS plugin starts first (KAS depends on it), KAS starts second, reporter starts last. During the window between KAS readiness and reporter readiness, no `KMSHealthReporter_<nodeName>` condition exists even though KMS is functional.
-- **Mitigation:** Consumers must not infer "KMS broken" from condition absence; missing means "not yet observed". KMS plugin lifecycle and KAS startup do not depend on reporter conditions existing.
+- **Impact:** KMS plugin starts first (KAS depends on it), KAS starts second, reporter starts last. During the window between KAS readiness and reporter readiness, no `healthReports` entry exists for that node even though KMS is functional.
+- **Mitigation:** Consumers must not infer "KMS broken" from report absence; missing means "not yet observed". Empty report list is treated as converged for rollup purposes. KMS plugin lifecycle and KAS startup do not depend on health reports existing.
 
 #### KMS Key Loss Considerations
 
@@ -1136,7 +1141,7 @@ None
 
 - Report current KMS encryption status to platform users (e.g., active KMS plugins)
 - Automatic `key_id` rotation detection
-- KMS plugin health checks
+- Typed `status.kmsEncryption.healthReports` plus `KmsHealthReportsProgressing` / `KmsHealthReportsDegraded` (KmsHealthController prune and 1h hysteresis)
 - Feature parity with existing modes (monitoring, migration, key rotation)
 - Removal of unused KMS plugins from EncryptionConfiguration after migration completes
 - Support updating the KMS timeout field via `unsupportedConfigOverrides`
@@ -1178,7 +1183,7 @@ No special handling required.
 ## Operational Aspects of API Extensions
 
 **Monitoring:**
-- Operator conditions: `EncryptionControllerDegraded`, `EncryptionMigrationControllerProgressing`, plus per-node `KMSHealthReporter_<nodeName>` and the aggregated `KMSPluginsDegraded` (rolled into the `ClusterOperator`'s `Degraded` condition; see [Health Reporter Sidecar](#health-reporter-sidecar))
+- Operator conditions: `EncryptionControllerDegraded`, `EncryptionMigrationControllerProgressing`, plus typed `status.kmsEncryption.healthReports` and `KmsHealthReportsProgressing` / `KmsHealthReportsDegraded` (see [KMS Plugin Health](#kms-plugin-health))
 - Metrics: `apiserver_storage_transformation_operations_total`, `apiserver_storage_transformation_duration_seconds`
 
 **Impact:**
