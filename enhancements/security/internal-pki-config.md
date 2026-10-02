@@ -17,7 +17,8 @@ approvers:
 api-approvers:
   - "@everettraven" # new API in config.openshift.io/v1alpha1
 creation-date: 2025-10-20
-last-updated: 2026-08-03
+last-updated: 2026-10-02
+status: provisional
 tracking-link:
   - https://issues.redhat.com/browse/OCPSTRAT-2271
   - https://issues.redhat.com/browse/CNTRLPLANE-1735
@@ -46,41 +47,71 @@ Enterprise customers are increasingly required to meet stringent security compli
 - Use of elliptic curve cryptography (ECDSA) for better performance with equivalent security
 - Consistent cryptographic parameters across the entire certificate hierarchy
 - Ability to align with organizational PKI policies
+- Readiness for post-quantum cryptography, so the platform can adopt quantum-resistant algorithms through the same configuration surface as standards and runtime support mature. Federal guidance (the executive-order direction for government systems to adopt post-quantum cryptography by the end of 2027) makes a clear migration path to PQC a near-term requirement, not a hypothetical one.
 
 Currently, OpenShift provides no mechanism to configure these parameters for internally generated certificates, forcing customers to either accept the hardcoded defaults or seek exemptions from their security policies. This creates significant friction for adoption in regulated industries and government environments.
 
 ### User Stories
 
-* As a security administrator in a regulated industry, I want to configure OpenShift to use 4096-bit RSA keys for all signer certificates, so that I can comply with my organization's PKI policy and security standards.
+**Configuration**
 
-* As a platform engineer, I want to configure OpenShift to use ECDSA P-384 for serving certificates, so that I can improve cryptographic operations performance while meeting CNSA 2.0 requirements for top-secret workloads.
+* As a cluster administrator, I want to configure the key algorithm and parameters (RSA key size or ECDSA curve) used for internally generated certificates, so that my cluster's PKI meets my organization's compliance requirements.
 
-* As a cluster administrator, I want to configure different key sizes for different certificate types (larger keys for long-lived CAs, smaller keys for frequently rotated certificates), so that I can balance security requirements with performance considerations.
+* As a cluster administrator, I want to set cluster-wide defaults and override them per certificate category (signers, serving, clients) or for a specific named certificate, with the most-specific setting winning, so that I can apply stronger parameters to long-lived signers and accommodate a lagging component without weakening cluster-wide policy.
 
-* As a compliance officer, I want to verify that all internally generated certificates in my OpenShift cluster use cryptographic parameters that meet my organization's requirements, so that I can audit compliance with security policies.
+* As a component author, I want documented, stable override names for the certificates my operator manages, so that administrators can target them precisely.
+
+**Install and upgrade safety**
+
+* As a cluster administrator, I want to select a named PKI profile at install time that seeds my cluster's initial certificates, so that new clusters start out meeting my crypto policy without a post-install migration.
+
+* As a cluster administrator, I want upgrades to leave my existing PKI configuration and certificates unchanged, so that upgrading never alters my cluster's cryptography without my involvement.
+
+**Rotation and migration**
+
+* As a cluster administrator, I want to apply a configuration change immediately on demand instead of waiting for natural certificate expiry, so that I can reach a known, converged state on my own schedule.
+
+* As a cluster administrator, I want rotation to keep existing connections working while components adopt the new trust at their own pace (via cross-signing), so that a migration does not require every consumer to reload or restart within a deadline.
+
+* As a cluster administrator, I want to control when migrations happen and keep my break-glass credentials valid across them, so that I can transition smoothly without locking myself out.
+
+**Signer retirement**
+
+* As a cluster administrator, I want to retire superseded signer CAs on demand, so that old trust anchors are removed rather than lingering until their (up to 10-year) expiry.
+
+**Observability**
+
+* As a cluster administrator, I want PKI status to report configuration, migration, and retirement progress, so that I can tell whether a change is in progress, converged, failed, or unsafe.
+
+Post-quantum migration to ML-DSA builds on this baseline and is covered by the separate layered ML-DSA / PQC enhancement. That enhancement — not this one — owns the ML-DSA mechanics, including: algorithm selection and additive adoption followed by a gated removal of classical algorithms; the larger ML-DSA key/signature sizes; the TLS 1.3 requirement; enabling the corresponding upstream Kubernetes ML-DSA feature gates; admission validation that webhook integrations present PQC-compliant CA bundles; and upgrade gating.
 
 ### Goals
 
 - Provide a declarative API for configuring cryptographic parameters (algorithm, key size, curve) for OpenShift internal certificates
-- Support configuration at different levels of granularity: global defaults and certificate category overrides (signer, serving, client), with extensibility for future per-certificate override types
+- Support configuration at different levels of granularity: global defaults, certificate category overrides (signer, serving, client), and overrides for specific named certificates (most-specific wins)
 - Support RSA (with configurable key sizes: 2048-8192 in multiples of 1024) and ECDSA (with configurable curves: P-256, P-384, P-521) algorithms in the initial implementation
 - Apply configuration to both Day-1 certificates (generated by openshift-installer) and Day-2 certificates (rotated by cluster operators)
 - Maintain backward compatibility: clusters upgraded without PKI configuration continue using existing defaults
 - Ensure new certificates generated during rotation respect the PKI configuration
+- Reissue non-conforming certificates immediately when the configuration changes (reconciliation), rather than waiting for natural expiry; certificates that already conform are left untouched
 
 ### Non-Goals
 
 - Modifying certificate lifetimes or rotation schedules (this is handled by existing mechanisms)
 - Supporting external CA integration or certificate injection (this is covered by existing user-provided certificate features such as cert-manager and custom CA bundles)
-- Automatic rotation of existing certificates to new cryptographic parameters (rotation happens on natural certificate expiry or forced rotation events)
+- Re-keying certificates that already conform to the configuration (reconciliation reissues only non-conforming certificates, immediately, when the configuration changes)
 - Supporting algorithms beyond RSA and ECDSA in the initial implementation (e.g., Ed25519, RSA-PSS)
 - Configuring signature algorithms separately from key algorithms (signature algorithm is derived from key type)
-- Changing certificate subject names, SANs, or other X.509 extensions (only cryptographic parameters)
-- Retrospectively changing certificates that have already been generated (only applies to new generation/rotation)
+- Changing certificate subject names, SANs (Subject Alternative Names), or other X.509 extensions (only cryptographic parameters)
+- Configuring non-certificate signing keys — notably service-account token signing and any JWKS-published JWT issuance — which fall outside `certificateManagement`; these are a separate workstream and a candidate future `keyManagement` section (see [Open Questions](#open-questions))
 
 ### Relationship to Existing Certificate Configuration Features
 
 OpenShift provides several certificate-related configuration mechanisms. This enhancement affects OpenShift’s internal certificate generation, not user-provided certificates, trust anchors, TLS parameters, or external CA integration.
+
+In scope are the platform-**generated** artifacts: serving certificates, client certificates, and the platform-generated CA certificates that make up the cluster-wide trust stores. Any user-provided certificate or trust anchor always takes precedence and is out of scope (see below).
+
+**Service-account token signing (out of scope).** The API server signs bound service-account tokens with a bare signing key (managed by `BoundSATokenSignerController`, currently hardcoded RSA 2048) whose public half is published as raw JWKs at the OIDC JWKS endpoint — there is no X.509 certificate, so it falls outside `certificateManagement`, which governs certificates. Making the SA signing-key algorithm configurable (and with it the JWT signature algorithm, including an eventual move to ML-DSA) is a candidate future extension of the broader `PKI` resource via a separate `keyManagement` section (see [Open Questions](#open-questions)), not of `certificateManagement`.
 
 #### User-Provided Certificates (Out of Scope)
 
@@ -88,9 +119,10 @@ OpenShift provides several certificate-related configuration mechanisms. This en
 - Allows administrators to provide **custom serving certificates** for the API server
 - Certificates are **externally generated** and **injected** into OpenShift
 - This PKI enhancement does **not** affect user-provided certificates
-- Relationship: **Complementary** - administrators choose between:
+- Relationship: **Complementary, with user-provided taking precedence** - administrators choose between:
   - Using this PKI API to configure how OpenShift **generates** its internal certificates, OR
   - Using APIServer.servingCerts to **provide** externally-generated certificates
+- Precedence: a user-provided serving certificate is **always used when specified**; the PKI configuration governs only the endpoints where OpenShift still generates the certificate itself. The PKI API never overrides a user-supplied certificate.
 
 **Custom CA Bundles** (e.g., APIServer.spec.clientCA, Proxy.spec.trustedCA):
 - Allows injection of custom CA certificates for trust purposes
@@ -130,18 +162,18 @@ OpenShift provides several certificate-related configuration mechanisms. This en
 
 This proposal introduces a new resource in the `config.openshift.io/v1alpha1` API group, along with a `ConfigurablePKI` feature gate to control the rollout:
 
-- **PKI**: A cluster-scoped singleton configuration resource that allows administrators to specify cryptographic parameters for internal certificates organized by defaults and category overrides (explicit fields for signer, serving, and client certificates).
+- **PKI**: A cluster-scoped singleton configuration resource that allows administrators to specify cryptographic parameters for internal certificates organized by defaults, category overrides (explicit fields for signer, serving, and client certificates), and overrides for specific named certificates.
 
 **Note:** During development, the API will start as `v1alpha1` with TechPreviewNoUpgrade feature gate enablement. The API will be promoted to `v1` and the feature gate will be enabled by default before the target OpenShift release, shipping as GA.
 
-**Note:** Named certificate overrides (targeting individual certificates by name) are planned for a future release. The validation design for certificate names requires a cluster-wide resource for name registration, which needs further work.
+**Note:** Named certificate overrides (targeting individual certificates by name) are supported in the initial release. Because certificates can be installed dynamically (for example, by OLM operators), a static registry of valid names is not possible, so override names are validated for format only. Selector-based matching (label selectors or regular expressions) is deferred to a future release.
 
 At a high level, the changes include:
 
 1. **New API Resource**:
    - `PKI` configuration resource in `config.openshift.io/v1alpha1` (cluster-scoped singleton)
 2. **Feature Gate**: `ConfigurablePKI` to enable the functionality (TechPreviewNoUpgrade during development, enabled by default at GA)
-3. **Installer Integration**: Limited Day-1 configuration support for signer certificate cryptographic parameters
+3. **Installer Integration**: Day-1 configuration via a named `pki.profile` that seeds the initial PKI resource
 4. **Operator Updates**: Modifications to certificate-generating operators to:
    - Watch and consume the PKI configuration independently
 5. **Certificate Rotation**: Operators apply PKI configuration parameters during existing certificate rotation cycles (no changes to rotation mechanisms themselves)
@@ -154,7 +186,7 @@ Note: There is **no central PKI controller**. Each certificate-generating operat
 
 #### Initial Cluster Installation (Day-1)
 
-1. The cluster administrator prepares an install-config.yaml that includes PKI configuration for signer certificates:
+1. The cluster administrator prepares an install-config.yaml that selects a PKI profile:
 
 ```yaml
 apiVersion: v1
@@ -166,22 +198,18 @@ platform:
     region: us-east-1
 # New PKI configuration section
 pki:
-  signerCertificates:
-    key:
-      algorithm: RSA
-      rsa:
-        keySize: 4096
+  profile: default
 ```
 
-2. The openshift-installer generates the cluster, creating signer certificates using the specified cryptographic parameters (4096-bit RSA keys).
+2. The openshift-installer resolves the selected profile and generates the cluster, creating signer certificates using the profile's cryptographic parameters (the `default` profile uses ECDSA P-384 signer keys).
 
-3. All other certificates (serving certificates, client certificates) are generated using default parameters at installation time, as they will be rotated within 24 hours of cluster creation.
+3. All other certificates (serving certificates, client certificates) are generated at installation time and rotated within 24 hours of cluster creation, at which point they adopt the profile's parameters.
 
 4. The installer creates the initial `PKI` custom resource in the cluster reflecting the Day-1 configuration.
 
 #### Post-Installation Configuration (Day-2)
 
-1. The cluster administrator wants to configure ECDSA P-384 for all serving certificates to improve performance:
+1. The cluster administrator wants to configure ECDSA P-384 for all serving certificates to comply with their company policy:
 
 ```bash
 oc edit pki cluster
@@ -196,53 +224,51 @@ metadata:
   name: cluster
 spec:
   certificateManagement:
-    # Use Custom mode to explicitly configure cryptographic parameters
-    mode: Custom
+    # Global default for all certificates (key is required in defaults)
+    defaults:
+      key:
+        algorithm: ECDSA
+        ecdsa:
+          curve: P256
 
-    custom:
-      # Global default for all certificates (key is required in defaults)
-      defaults:
-        key:
-          algorithm: RSA
-          rsa:
-            keySize: 2048
+    # Category-level overrides (optional, explicit fields)
+    signerCertificates:
+      key:
+        algorithm: ECDSA
+        ecdsa:
+          curve: P384
 
-      # Category-level overrides (optional, explicit fields)
-      signerCertificates:
-        key:
-          algorithm: RSA
-          rsa:
-            keySize: 4096
+    servingCertificates:
+      key:
+        algorithm: ECDSA
+        ecdsa:
+          curve: P384
 
-      servingCertificates:
-        key:
-          algorithm: ECDSA
-          ecdsa:
-            curve: P384
-
-      clientCertificates:
-        key:
-          algorithm: ECDSA
-          ecdsa:
-            curve: P256
+    clientCertificates:
+      key:
+        algorithm: ECDSA
+        ecdsa:
+          curve: P256
 ```
 
-3. On the next rotation cycle (either natural expiry or forced rotation), operators generate new certificates using the configured parameters.
+3. Operators detect that existing certificates no longer match the configuration and reconcile **immediately**, generating new certificates using the configured parameters. Cross-signing (see [Cross-Signing to Ease Rotation](#cross-signing-to-ease-rotation)) keeps existing clients working during the change.
 
-#### Forced Certificate Rotation with New Parameters
+#### Applying Configuration and Retiring Old Signers
 
-Use pre-existing workflow to force certificate rotation using the current PKI configuration.
+When an administrator changes the `PKI` configuration, operators reconcile it **immediately**: certificates that no longer match the configuration are reissued, without waiting for natural expiry. Cross-signing (see [Cross-Signing to Ease Rotation](#cross-signing-to-ease-rotation)) keeps existing clients working during the change, so there is no need to confirm cluster-wide trust-bundle propagation before new serving or client certificates are issued.
+
+Retiring the superseded signer CAs is a separate, deliberate step, performed as the final part of migrating from one algorithm to another while disabling the old one. It is forward-only (there is no rollback once an old signing key is removed). The administrator prepares the cluster first (confirming rotation has converged and that off-cluster consumers and break-glass credentials are ready), then prunes. See [Rotation and Signer Retirement](#rotation-and-signer-retirement) for details.
 
 
 #### Upgrade Scenario
 
 1. A cluster running OpenShift M.N is upgraded to M.N+1 which includes this feature.
 
-2. The upgrade installs the PKI CRD (API definition) and creates a PKI resource with `spec.certificateManagement.mode: Unmanaged`.
+2. The upgrade installs the PKI CRD (API definition). **No PKI resource is created**: its absence means all operators continue using their existing hardcoded defaults, ensuring zero behavior change.
 
-3. With `spec.certificateManagement.mode: Unmanaged`, all operators continue using their existing hardcoded defaults, ensuring zero behavior change.
+3. To manage PKI, the cluster administrator creates the `cluster` PKI resource post-upgrade with `certificateManagement` configuration, which operators reconcile and apply immediately.
 
-4. The cluster administrator can update the PKI resource post-upgrade to `spec.certificateManagement.mode: Default` or `spec.certificateManagement.mode: Custom` with configuration, which will apply on the next certificate rotation cycle.
+4. Deleting the PKI resource reverts subsequently generated certificates to hardcoded defaults.
 
 5. Existing certificates continue to function until their natural rotation.
 
@@ -284,17 +310,15 @@ The full API type definitions are available in the API PR: [openshift/api#2645](
 
 Key aspects of the API:
 
-- **`PKISpec`** contains a `certificateManagement` discriminated union with modes: `Unmanaged`, `Default`, or `Custom`.
-- **`Custom` mode** maps to a `CustomPKIPolicy` type (the `custom` field), which embeds `PKIProfile` inline. `PKIProfile` contains a required `defaults` key configuration and optional category overrides for `signerCertificates`, `servingCertificates`, and `clientCertificates`. `CustomPKIPolicy` has `+kubebuilder:validation:MinProperties=1` to prevent an empty `custom: {}` block.
+- **`PKISpec`** contains a `certificateManagement` object holding the cryptographic configuration directly: a required `defaults`, optional category overrides (`signerCertificates`, `servingCertificates`, `clientCertificates`), and optional overrides for specific named certificates. The most-specific setting wins (named override, then category, then defaults). (Earlier drafts wrapped these in a management-`mode` discriminated union and a `custom` container; those are removed. The fields are flattened up one level, and the removed v1alpha1 fields are tombstoned in the API types.)
 - **`KeyConfig`** is a discriminated union on `algorithm` (`RSA` or `ECDSA`), with `RSAKeyConfig` (key sizes 2048-8192) and `ECDSAKeyConfig` (curves P256, P384, P521) as union member types.
+- **Rotation is immediate and signer retirement is a deliberate administrator action**, not fields on the `PKI` resource: operators reconcile configuration changes immediately, and superseded signer CAs are pruned as the final step of an algorithm migration. See [Rotation and Signer Retirement](#rotation-and-signer-retirement).
 
-#### Certificate Management Modes
+#### Platform Default Profile
 
-The `certificateManagement.mode` field controls how operators determine cryptographic parameters:
+When `certificateManagement` is not configured, operators use their existing hardcoded defaults (mostly RSA 2048, though a small number of leaf certificates already use ECDSA P-256 today: kubelet client/serving certs generated via the Kubernetes CSR mechanism, and OLM-managed certs), so existing clusters see zero behavior change.
 
-- **`Unmanaged`**: Operators use their existing hardcoded defaults. This is the initial mode set during upgrade to ensure zero behavior change. Most operators default to RSA 2048, though a small number of leaf certificates already use ECDSA P-256 today (kubelet client/serving certs generated via the Kubernetes CSR mechanism, and OLM-managed certs).
-
-- **`Default`**: Operators use the platform's default PKI profile, which specifies:
+The platform default profile, used by the installer `default` profile and recommended for new configurations, specifies:
 
   | Certificate Category | Algorithm | Params | Security Strength |
   |----------------------|-----------|--------|-------------------|
@@ -303,23 +327,73 @@ The `certificateManagement.mode` field controls how operators determine cryptogr
   | Client               | ECDSA     | P-256  | 128-bit           |
   | Peer                 | ECDSA     | P-256  | 128-bit           |
 
-  This profile provides stronger security than the legacy RSA 2048 defaults (112-bit security) while improving performance (see [Performance Considerations](#performance-considerations)). It is also consistent with the ECDSA P-256 keys that the kubelet already generates via the CSR mechanism today.
+**Peer is derived, not a settable category.** Peer certificates (dual client+server auth) have no category override field; their parameters are derived as the stronger of the resolved serving and client configurations (see [Peer Certificates](#peer-certificates-category-peer)). The Peer row above shows the value that derivation yields under this profile, where serving and client are both ECDSA P-256.
 
-- **`Custom`**: Administrators explicitly specify cryptographic parameters via the `custom` field, with a required `defaults` section and optional category overrides for `signerCertificates`, `servingCertificates`, and `clientCertificates`.
+This profile provides stronger security than the legacy RSA 2048 defaults (112-bit security) while improving performance (see [Performance Considerations](#performance-considerations)). It is also consistent with the ECDSA P-256 keys that the kubelet already generates via the CSR mechanism today.
+
+Administrators may override any of these by setting `defaults` and the category fields (`signerCertificates`, `servingCertificates`, `clientCertificates`) on the `PKI` resource.
+
+#### Rotation and Signer Retirement
+
+Moving a cluster from one PKI configuration to another involves two operations, both **cluster-wide** (never per-certificate or per-signer):
+
+- **Rotation** reissues certificates under the new configuration.
+- **Pruning** removes the now-superseded signer CAs from trust, as the final step of a migration that disables an old algorithm.
+
+##### Immediate reconciliation (rotation)
+
+When an administrator changes the `PKI` configuration, the certificate-generating operators reconcile **immediately** on detecting that existing certificates no longer match the configuration, rather than waiting for the next natural rotation cycle. This matches standard OpenShift config-API behavior. Cross-signing (see [Cross-Signing to Ease Rotation](#cross-signing-to-ease-rotation)) keeps existing clients working throughout, so applying a change immediately does not break in-flight connections. An unconfigured cluster keeps its hardcoded defaults until an administrator sets explicit configuration.
+
+There is no separate "apply now" trigger: applying is simply the effect of changing the configuration. This is consistent with the model in which each operator watches the `PKI` resource and reconciles its own certificates, with no central PKI controller.
+
+##### Pruning superseded signers
+
+Because OpenShift has no certificate-revocation primitive, a signer CA leaves a trust bundle only when it is pruned or expires; pruning is therefore **forward-only** (there is no rollback once an old signing key is removed). A library-go primitive to drop a specific CA from the managed trust bundles is a prerequisite.
+
+Pruning is a **deliberate, one-off administrator action**, performed as the last step of migrating from one algorithm to another while disabling the old one. It is **not** an automated controller behavior and is **not** arbitrated by a central PKI controller (there is none): the superseded CAs are dropped from trust bundles when the prune is requested, via a configuration signal (for example, a config-map or annotation) processed by the existing rotation controllers.
+
+Before pruning, the administrator prepares the cluster following documented guidance: confirm rotation has converged, confirm every operator has distributed the new signers into its trust stores, rotate break-glass credentials, and update off-cluster consumers (kubeconfigs, external mTLS clients, external trust stores) that the cluster cannot observe. The prune tooling may perform minimal sanity checks to reduce the chance of removing a still-needed CA, but the administrator remains responsible for the readiness of consumers outside the cluster's visibility.
+
+**Readiness conditions (phased).** Rather than an opaque attestation, each certificate-generating operator reports its prune-readiness through status conditions describing observable facts — for example, that its latest CA bundle has been distributed and loaded by its consumers, and that its latest leaf certificates have been distributed and loaded. These conditions let the administrator (and, over time, the tooling) tell when it is safe to drop a superseded signer. This starts deliberately minimal: the initial design may report few or no automatic conditions and lean on administrator preparation and judgment, and grow the set of automatically-reported conditions as the technical design matures and we learn which facts can be observed reliably in-cluster.
+
+**Serving vs. client signers.** The two directions differ in what "safe to prune" requires:
+
+- **Serving-CA signers**: once the superseded serving CA has left the trust bundles (all consumers trust the new CA and are served chains that validate), the platform's responsibility ends and the signer can be pruned. A subsequent client-side rotation, so clients no longer trust the old CA, is the administrator's follow-up.
+- **Client-CA (signer) signers**: dropping a superseded client signer additionally requires explicit administrator acknowledgement that **break-glass client certificates and critical-path clients have rotated** to the new signer. Because the cluster cannot observe every holder of a client certificate (notably off-cluster break-glass kubeconfigs), this ACK keeps a human in the loop before the old client trust anchor is removed.
+
+The exact prune interface is still being designed (it may be an `oc adm` subcommand — for example `oc adm pki prune-superseded-signers` — or a documented procedure). Whatever its form, it is cluster-wide and removes the signer generations that no longer match the resolved PKI configuration.
+
+##### Scope and continuity
+
+- **Cluster-wide only.** Rotation and pruning operate across the cluster, not on individual certificates or signer lineages.
+- **Cross-signing continuity.** Immediate rotation is safe because the new signer cross-signs the old signer's key, so both old and new trust validate during the transition (see [Cross-Signing to Ease Rotation](#cross-signing-to-ease-rotation)).
+- **Migration shape.** A configuration change (applied immediately) followed by a prune brackets a full algorithm migration: reissue under the new algorithm, then disable the old one by pruning its signers.
+
+##### Scenarios
+
+**Algorithm migration.** The administrator changes the `PKI` configuration (for example, RSA to ECDSA). Operators reconcile immediately, reissuing certificates under the new algorithm while cross-signing keeps existing clients working. Once the cluster has converged and the administrator has prepared it as described above, the administrator prunes the superseded signers to disable the old algorithm. This reissue-then-prune sequence is the full migration.
+
+**Post-quantum migration.** Disabling classical algorithms after a PQC migration is the same reissue-then-prune sequence, applied as the deliberate final step of that migration. The ML-DSA specifics are covered by the separate layered ML-DSA / PQC enhancement.
+
+##### Shelved
+
+**Forced rotation** (reissuing certificates without a configuration change, such as for key-compromise recovery or same-config re-issue) is out of scope for the initial migration-focused design. It may be added later as an additive feature; it would reintroduce signer-scoped targeting, which the current cluster-wide design deliberately omits.
+
 
 ### Topology Considerations
 
 #### Hypershift / Hosted Control Planes
 
-For Hypershift deployments, the PKI configuration applies to certificates generated in both the management cluster and guest clusters:
+For Hypershift deployments, a hosted cluster's control plane runs as pods on a management cluster. **Which PKI configuration governs the hosted control plane is unresolved** and pending Hypershift-team input. (Guest-cluster *data-plane* certificates — kubelet, in-cluster operators — are governed by the hosted cluster's own PKI configuration, as for any standalone cluster.)
 
-- **Management Cluster**: The PKI resource in the management cluster controls certificates for hosted control plane components (API server, controller manager, etcd running in the management cluster). The `control-plane-pki-operator`, which manages break-glass client certificates (customer admin and SRE admin) for each hosted cluster, also respects the management cluster's PKI profile.
+Two options are under consideration for the hosted **control-plane** PKI (see [Alternative 7](#alternative-7-hypershift-hosted-control-plane-pki-ownership)):
 
-- **Guest Cluster**: Each hosted cluster can have its own PKI configuration resource that controls certificates for guest cluster components (kubelet, in-cluster operators).
+- **Per-HostedCluster only**: the hosted control-plane PKI is configured at the HostedCluster level and is independent; the management cluster's PKI configuration has no bearing on hosted control planes. Cleanest multi-tenancy. The likely shape under this option is a new field on the `HostedCluster` and `HostedControlPlane` APIs that mirrors the standalone `PKI` resource's configuration, with the configured parameters applied to **both** the hosted control plane and the guest data plane.
+- **Management floor + HostedCluster override**: the management cluster sets a default/floor policy that applies to hosted control planes unless the HostedCluster overrides it. Enables fleet-wide compliance baselines, at the cost of coupling tenant PKI to the host.
 
-- **Separation**: Hypershift's architecture naturally separates control plane and data plane certificates, making it straightforward to apply different policies to each.
+An open sub-question under either option is whether the **break-glass customer/SRE admin certificates** generated for a hosted cluster follow the HostedCluster-defined PKI configuration or are configured independently. The precise component-by-component topology (which certificates are governed where) is to be worked out with HyperShift SMEs; this EP does not commit to a model.
 
-- **RBAC Considerations**: The `control-plane-pki-operator` runs per-hosted-cluster in the HCP namespace with namespace-scoped RBAC. To watch the cluster-scoped PKI CR on the management cluster, it requires a ClusterRole granting read access to `config.openshift.io/v1alpha1` PKI resources.
+- **RBAC Considerations**: If the management cluster's PKI configuration governs any hosted control-plane certificates, the `control-plane-pki-operator` (which runs per-hosted-cluster in the HCP namespace with namespace-scoped RBAC, and manages break-glass customer/SRE admin certificates) requires a ClusterRole granting read access to the cluster-scoped `config.openshift.io/v1alpha1` PKI resource on the management cluster.
 
 #### Standalone Clusters
 
@@ -333,30 +407,7 @@ This enhancement is fully applicable and relevant for standalone clusters. All i
 - Certificate generation is infrequent (only during rotation), so the choice of RSA vs ECDSA has minimal runtime impact
 
 **MicroShift:**
-- The PKI configuration should be exposed through MicroShift's YAML configuration file
-- Example MicroShift configuration:
-
-```yaml
-apiVersion: v1alpha1
-kind: MicroShiftConfig
-pki:
-  certificateManagement:
-    mode: Custom
-    custom:
-      defaults:
-        key:
-          algorithm: ECDSA
-          ecdsa:
-            curve: P256
-      signerCertificates:
-        key:
-          algorithm: RSA
-          rsa:
-            keySize: 4096
-```
-
-- MicroShift's lighter weight makes ECDSA particularly attractive for resource-constrained environments
-- The MicroShift team should map this configuration to the same internal PKI infrastructure
+- Out of scope. MicroShift does not use the OpenShift operators or the `config.openshift.io` PKI resource, so this enhancement does not apply to it.
 
 #### OpenShift Kubernetes Engine
 
@@ -366,7 +417,7 @@ This enhancement is fully compatible with OpenShift Kubernetes Engine (OKE). The
 
 #### Certificate Category Classification
 
-OpenShift's internal PKI uses a **flat topology** rather than a traditional hierarchical CA model. Certificates are classified into three categories based on their purpose and lifecycle:
+OpenShift's internal PKI uses a **flat topology** rather than a traditional hierarchical CA model. Certificates are classified into three configurable categories based on their purpose and lifecycle. (A fourth grouping, *peer* certificates, is not separately configurable: its parameters are derived — see [Peer Certificates](#peer-certificates-category-peer).)
 
 1. **Signer Certificates** (`Signer`): CA certificates that directly sign either serving or client certificates
    - Examples: `etcd-signer`, `kube-apiserver-to-kubelet-signer`, `service-ca`, `kubelet-bootstrap-kubeconfig-signer`, `admin-kubeconfig-signer`
@@ -403,17 +454,77 @@ OpenShift manages certificate rotation through a combination of operator-driven 
 
 - **Leaf certificate rotation**: Serving and client certificates are rotated according to their configured lifetimes. During rotation, new certificates are signed by the current signer, and the system coordinates updates to ensure zero downtime.
 
+#### Cross-Signing to Ease Rotation
+
+As part of this feature we adopt **cross-signed certificates** to make signer (CA) rotation safe, and to replace the fragile *time-based checkpoints* the platform relies on today. The `service-ca-operator` already uses this technique for its serving certificates; this feature extends the same idea to the rest of the internal PKI.
+
+##### The problem
+
+When we replace a signing CA, two things must happen across the cluster: every component must (1) start **trusting** certificates from the new CA, and (2) eventually **present** certificates issued by the new CA. Components do not all update at the same instant: some reload their trust store seconds after rotation, and some not until they restart hours later. During that gap, a client that only trusts the *old* CA can be handed a certificate signed by the *new* CA (or vice-versa) and reject the connection.
+
+##### How we solve it today: time-based checkpoints
+
+The current rotation machinery (library-go `certrotation`) manages that gap with **timing**:
+
+- Both the old and new CA are kept in a **union trust bundle**, and the bundle is distributed *before* any certificate from the new signer is issued (bundle-first ordering).
+- A new leaf certificate is not allowed to move to the new signer until the signer has **aged ~10%** of its lifetime, giving consumers time to pick up the new bundle.
+- The system leans on the certificate **validity overlap** and on components **restarting** (reloading the bundle) to close the window in time.
+
+This works, but it is a race against a clock: a component that is slow to reload, or cannot hot-reload at all, can miss the window and break. It also couples leaf rotation to an arbitrary delay.
+
+##### How cross-signing works: two small "bridge" certificates
+
+When a signer rotates, we mint a new CA that keeps the **same identity (subject)** as the old one, plus **two bridge certificates**:
+
+| Bridge certificate          | Plain meaning                          | Where it lives                                                                     |
+|-----------------------------|----------------------------------------|------------------------------------------------------------------------------------|
+| **old-CA-signed-by-new-CA** | "I, the new CA, vouch for the old CA." | Added to the **trust bundle**                                                      |
+| **new-CA-signed-by-old-CA** | "I, the old CA, vouch for the new CA." | **Shipped alongside** every leaf (serving/client) certificate issued by the new CA |
+
+Because each bridge lets trust flow from one CA to the other, **trust is continuous from the moment of rotation**, with no clock involved.
+
+##### Why it helps: walking through the scenarios
+
+The key move: a server (or client) always presents a chain that ends at a CA the other side *already* trusts.
+
+| Situation                                                                                                                          | What is presented                              | How it validates                                                                    |
+|------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------|-------------------------------------------------------------------------------------|
+| An **un-updated** consumer (still trusts only the old CA) is handed a **new-CA** certificate                                       | leaf + `new-CA-signed-by-old-CA` bridge        | chain ends at the **old** CA it still trusts → accepted immediately, no reload      |
+| An **updated** consumer (has the new bundle) is handed an **old-CA** certificate (e.g. a not-yet-rotated leaf)                     | leaf                                           | chain ends via `old-CA-signed-by-new-CA` in its bundle at the **new** CA → accepted |
+| **mTLS / client direction**: a client rotates to a new client-CA and connects to a server that still trusts only the old client-CA | client leaf + `new-CA-signed-by-old-CA` bridge | server validates the presented chain back to the **old** client-CA → accepted       |
+
+In every case the connection succeeds *without waiting* for the peer to reload anything.
+
+##### Improving the time-based checkpoints
+
+With bridges in place, the timing gates become unnecessary or soften into eventual consistency:
+
+- The **~10% signer-age delay** before leaves may use the new signer is **removed**. Leaves can re-issue immediately or lazily, in any order, because both old- and new-issued leaves are trusted throughout.
+- Bundle reload changes from a **deadline** into **eventual consistency**: an un-updated consumer still validates via the served bridge; it only needs to reload eventually, to drop the *expired* old root. No component has to be restarted to stay connected.
+- The **union bundle** idea is kept, now augmented with bridges.
+
+This is what makes immediate reconciliation safe: because trust is continuous from t=0, there is no need to first confirm that the new trust bundle has propagated everywhere before issuing new certificates.
+
+##### Costs and constraints (so readers know the trade-offs)
+
+- The **old signer's key is used once**, at rotation time, to sign the `new-CA-signed-by-old-CA` bridge. (The prior signer secret still exists, so the key is available.)
+- **Every endpoint must present its full chain** (leaf + bridge), not a bare leaf. This is transparent for standard Go TLS servers/clients (Go serves and builds chains automatically); the audit burden is non-Go proxies, CA-pinning consumers, or code that reads only the first certificate.
+- Each active CA generation adds **~2 small bridge certificates** to the bundle (pruned on expiry). This removes the *time pressure* to rotate/reload quickly, but by itself does **not** fix trust-bundle overflow from rapid regeneration; that root cause still needs its own guard.
+
 #### Configuration Resolution Order
 
 When generating a certificate, the cryptographic parameters are determined by the following precedence (highest to lowest):
 
-1. **Category Override**: If the corresponding category field (`signerCertificates`, `servingCertificates`, or `clientCertificates`) is set, use those parameters
-2. **Default Configuration**: Use the `defaults` configuration
-3. **Hardcoded Defaults**: Use hardcoded defaults (typically RSA 2048)
+1. **Named Override**: If an override targets the specific certificate by name, use those parameters
+2. **Category Override**: If the corresponding category field (`signerCertificates`, `servingCertificates`, or `clientCertificates`) is set, use those parameters
+3. **Default Configuration**: Use the `defaults` configuration
+4. **Hardcoded Defaults**: Use hardcoded defaults (typically RSA 2048) when no PKI resource exists
+
+Peer certificates (dual client/server authentication) have no category override field of their own. Absent a named override, their parameters are **derived** as the stronger (by NIST security strength) of the resolved serving and client configurations, with ECDSA preferred on ties; a named override that targets a peer certificate by name still takes precedence over the derived value (see [Peer Certificates](#peer-certificates-category-peer)).
 
 #### Day-1 (Installer) Integration
 
-The openshift-installer will support a limited subset of PKI configuration:
+The installer surface is intentionally minimal: `install-config.yaml` takes only a named `pki.profile`.
 
 ```yaml
 # install-config.yaml
@@ -422,24 +533,33 @@ metadata:
   name: my-cluster
 # ... other configuration ...
 pki:
-  signerCertificates:
-    key:
-      algorithm: RSA
-      rsa:
-        keySize: 4096
+  profile: default
 ```
 
-Rationale for limiting Day-1 configuration:
-- **10-year signer certificates**: The installer generates several long-lived (10-year) signer certificates specifically for **bootstrapping new nodes** (e.g., `kubelet-bootstrap-kubeconfig-signer`) and **disaster recovery** (e.g., `admin-kubeconfig-signer`). These certificates are never automatically rotated by cluster operators, making Day-1 configuration critical.
-- **Shorter-lived certificates**: The installer also generates 1-year and 1-day signers, as well as serving and client certificates. These are rotated by cluster operators (most within 24 hours of installation), so they can be configured via the PKI resource post-installation.
-- **Simplicity**: Keeping installer configuration simple reduces complexity and potential for misconfiguration during cluster bootstrap.
-- **Source of truth**: The installer-generated PKI resource serves as the source of truth for ongoing operations.
+A profile is an **installer-only, version-defined** bundle of cryptographic settings. At install time the installer resolves the named profile and writes the resolved values into the initial `PKI` resource; the profile name itself does not persist in the API.
+
+A profile is a bundle of **category defaults** (signers are configured stronger and longer-lived than leaves), not a single key size. Two kinds of named profiles are offered:
+
+- **Opinionated algorithm profiles** bake a sensible signer-stronger-than-leaf split for an algorithm family. Their resolved parameters may be refined across installer versions (new installs only; existing clusters are never changed on upgrade):
+  - `default` / `ECDSA` - ECDSA P-384 signers, P-256 serving/client (the platform default profile above)
+  - `RSA` - RSA 4096 signers, RSA 2048 serving/client
+  - `PostQuantum` / `MLDSA` - **name reserved here; parameters delivered by the layered ML-DSA / PQC enhancement** once ML-DSA algorithm support (and the required Go runtime support) lands. The name is reserved now so there is a stable, documented install-time intent for the post-quantum migration driven by the end-of-2027 federal guidance; selecting it before the layered enhancement ships is rejected by the installer.
+- **Explicit all-uniform pins** apply one concrete parameter set to every category and are **not** redefined across installer versions, for compliance regimes that must pin exact parameters:
+  - e.g. `RSA4096All`, `ECDSAP384All`
+  - `legacy` / `RSA2048All` - replicates exactly what the platform ships pre-PKI-config (RSA 2048 for every category), for administrators who must match today's behavior at install time rather than adopt the stronger `default`.
+
+Administrators who need arbitrary per-category day-0 values (rather than a named bundle) are covered by the open question on accepting a full PKI manifest at install time (see [Open Questions](#open-questions)); Day-2 the full `PKI` resource provides complete per-category control.
+
+Rationale:
+- **Simplicity**: administrators select a named intent at install rather than authoring full cryptographic configuration during bootstrap.
+- **10-year signer certificates**: the installer generates several long-lived (10-year) signers used for **bootstrapping new nodes** (e.g., `kubelet-bootstrap-kubeconfig-signer`) and **disaster recovery** (e.g., `admin-kubeconfig-signer`). These are never automatically rotated, so the profile-resolved parameters must be applied to them at install.
+- **No silent upgrade changes**: profile *definitions* may change across installer versions, but this only affects **new** installs. An existing cluster is never modified on upgrade: once the initial `PKI` resource is created it belongs to the administrator, and the platform never rewrites an administrator's configuration.
 
 The installer will:
-1. Generate all signer certificates (10-year, 1-year, and 1-day) using the specified parameters (or defaults if not configured)
-2. Generate serving and client certificates using hardcoded defaults
-3. Create the initial PKI resource with the `signerCertificates` field matching the install-config
-4. Document that administrators should configure `servingCertificates` and `clientCertificates` fields post-installation
+1. Resolve the named profile to concrete cryptographic parameters.
+2. Generate all signer certificates (10-year, 1-year, and 1-day) using the resolved parameters.
+3. Create the initial `PKI` resource populated from the resolved profile.
+4. Leave all subsequent changes to the administrator via the `PKI` resource (Day-2).
 
 #### Operator Integration
 
@@ -447,8 +567,9 @@ Each operator that generates certificates will:
 
 1. Watch the `PKI` cluster resource for changes
 2. Implement configuration resolution logic to determine parameters for each certificate
-3. Apply new parameters during the next certificate rotation (natural expiry or forced)
-4. Update operator status conditions if configuration is invalid or cannot be applied
+3. Reissue non-conforming certificates immediately on detecting a configuration change (reconciliation), rather than waiting for natural expiry; certificates that already conform are left untouched (see [Rotation and Signer Retirement](#rotation-and-signer-retirement)). Cross-signing keeps existing clients working during the change.
+4. Report prune-readiness status conditions for the signers it owns (phased; see [Pruning superseded signers](#pruning-superseded-signers))
+5. Update operator status conditions if configuration is invalid or cannot be applied
 
 Key operators to update:
 - `cluster-kube-apiserver-operator` - API server serving and client certificates
@@ -459,6 +580,8 @@ Key operators to update:
 - `cluster-authentication-operator` - OAuth server certificates
 - `cluster-monitoring-operator` - Thanos GRPC TLS certificates
 - `control-plane-pki-operator` (HyperShift) - Break-glass customer admin and SRE admin signer and client certificates
+- OLM (`operator-lifecycle-manager`) - the webhook and APIService self-signed certificates OLM generates itself (see special note below)
+- OLM-managed operators (layered products) - certificates created dynamically by OLM-installed operators (see special note below)
 
 **Special Case: service-ca-operator**
 
@@ -468,7 +591,7 @@ The [service-ca-operator](https://github.com/openshift/service-ca-operator) gene
 - **Service serving certificates**: Generated on-demand and will use:
   - **`servingCertificates`** field if specified in the PKI resource
   - **Defaults** configuration if specified in the PKI resource
-  - Hardcoded defaults (RSA 2048) when mode is `Unmanaged`
+  - Hardcoded defaults (RSA 2048) when no PKI resource exists
 
 **Important limitation**: Individual service serving certificates cannot be configured independently because:
 - They are generated dynamically in response to service annotations
@@ -477,18 +600,26 @@ The [service-ca-operator](https://github.com/openshift/service-ca-operator) gene
 
 This design is intentional and maintains consistency with the PKI API's philosophy: defaults apply broadly and category overrides target certificate categories.
 
+**Migration constraint**: Because the `service-ca` signer is configurable only cluster-wide (there is no per-service override), its algorithm is effectively shared by every consumer of service-CA-issued certificates — both OpenShift platform components and customer workloads that rely on service-CA serving certificates. As a consequence, an administrator cannot migrate the `service-ca` signer to a new algorithm until **all** consuming workloads support that algorithm; changing the signer affects all of them at once. A customer whose workloads cannot yet support a stronger algorithm must keep the `service-ca` signer on an algorithm those workloads accept, which also holds back any platform component issuing through service-CA.
+
+**Special Case: OLM / layered products**
+
+OLM participates in this feature at two levels. The deeper design is being worked out with the OLM team; the main points for this EP are:
+
+- **The OLM operator consumes the PKI configuration itself.** OLM generates its own webhook and APIService self-signed certificates. Like any other certificate-generating operator above, OLM watches the `PKI` resource and applies the resolved configuration to those certificates. When an OLM-managed operator cannot roll out because of a certificate issue (for example, it cannot read a generated self-signed certificate), this surfaces through OLM's existing "deployment failed" signalling rather than a new mechanism.
+- **OLM-managed operators may need named-override support.** An administrator may need to target the certificates OLM manages on behalf of a specific installed operator — for example, to hold one lagging operator on a compatible algorithm. These are expressed through the [named overrides](#configuration-resolution-order) API using a dedicated naming convention, for example `olm.openshift.io/<namespace>/<operator>`. This form does not follow the core `openshift.io/<category>/component.certname` scheme (see [Well-Known Certificate Names](#well-known-certificate-names)), and it embeds `openshift.io` as a subdomain rather than the leading `openshift.io/` label the [validation rule](#validation) reserves for core-platform names. Reconciling the exact override key form with the format-only validation rule is part of the OLM-team work below.
+
+Certificates created by layered products that do not consume the PKI configuration are not covered automatically; they are handled as part of the off-cluster/unmanaged set that the administrator is responsible for during migrations and pruning.
+
+The specifics of OLM integration — including how far named-override coverage extends and the exact naming convention — are deferred to engagement with the OLM team.
+
 #### Validation
 
 The PKI API uses **CRD-level CEL validation** for comprehensive validation.
 
 **CRD-Level CEL Validation (PKI resource):**
 
-1. **Union enforcement** (`PKICertificateManagement` type):
-   - When `mode == "Custom"`: `custom` field must be set
-   - When `mode != "Custom"`: `custom` field must not be set
-   - CEL rule: `self.mode == 'Custom' ? has(self.custom) : !has(self.custom)`
-
-2. **Union enforcement** (`KeyConfig` type):
+1. **Union enforcement** (`KeyConfig` type):
    - When `algorithm == "RSA"`: `rsa` field must be set, `ecdsa` field must not be set
    - When `algorithm == "ECDSA"`: `ecdsa` field must be set, `rsa` field must not be set
    - When `algorithm` is not set: neither `rsa` nor `ecdsa` may be set
@@ -496,20 +627,19 @@ The PKI API uses **CRD-level CEL validation** for comprehensive validation.
      - `has(self.algorithm) && self.algorithm == 'RSA' ? has(self.rsa) : !has(self.rsa)`
      - `has(self.algorithm) && self.algorithm == 'ECDSA' ? has(self.ecdsa) : !has(self.ecdsa)`
 
-3. **CustomPKIPolicy minimum properties:**
-   - `+kubebuilder:validation:MinProperties=1` ensures the `custom` block is not empty when `mode == "Custom"`
-
-4. **CertificateConfig minimum properties:**
+2. **CertificateConfig minimum properties:**
    - `+kubebuilder:validation:MinProperties=1` ensures at least one field is set in override certificate configs
 
-5. **DefaultCertificateConfig required fields:**
-   - `key` is required in defaults to ensure all certificates have a well-defined key configuration
+3. **DefaultCertificateConfig required fields:**
+   - `key` is required in `defaults` to ensure all certificates have a well-defined key configuration
 
-6. **Enum and range constraints:**
-   - `mode`: Unmanaged, Default, Custom
+4. **Enum and range constraints:**
    - `algorithm`: RSA, ECDSA
    - `keySize`: Multiples of 1024 from 2048 to 8192
    - `curve`: P256, P384, P521
+
+5. **Named override names:**
+   - Override names are validated for **format only** (a syntactically valid name). No static list of valid names is enforced, because certificates can be registered dynamically (for example, by OLM operators). Names outside the core platform must not use the `openshift.io` prefix; some names may map to multiple certificates (for example, etcd per-node serving certs) and are documented by the owning component.
 
 **Additional Runtime Validation:**
 - Operators validate that certificate lifetimes are compatible with key sizes (e.g., log warning if using RSA 2048 for a 10-year certificate)
@@ -625,9 +755,9 @@ Example: Signing a certificate with a stronger key than the CA itself
 **Risk: Upgrade disruption if PKI configuration is misconfigured**
 
 *Mitigation:*
-- PKI resource is created with `mode: Unmanaged` during upgrade, preserving existing behavior
-- Changes only apply at next rotation, not immediately
-- Forced rotation requires explicit annotation, not automatic
+- No PKI resource is created during upgrade; its absence preserves existing behavior
+- An administrator must explicitly create or change the PKI configuration before anything is reissued; the platform never changes cryptography on its own
+- Cross-signing keeps existing clients working while an applied change reconciles, so immediate reconciliation does not break in-flight connections
 
 **Risk: Security downgrade if configuration allows weak parameters**
 
@@ -635,15 +765,42 @@ Example: Signing a certificate with a stronger key than the CA itself
 - Minimum supported parameters (RSA 2048, ECDSA P-256) meet current best practices
 - Future versions can increase minimums without breaking compatibility
 
+**Risk: service-CA signer migration blocked by lagging consumer workloads**
+
+The `service-ca` signer is cluster-wide only (no per-service override), so migrating it to a new algorithm affects every platform component and customer workload consuming service-CA-issued certificates simultaneously. A single workload that cannot yet accept the new algorithm blocks the migration for all of them (see the service-ca-operator special case under [Operator Integration](#operator-integration)). Cross-signing does not help here: it preserves trust continuity across a signer rotation, but it cannot make a consumer that does not understand the new key algorithm negotiate it — so flipping the shared `service-ca` signer is immediate-and-breaking for any algorithm-incompatible consumer.
+
+*Mitigation:*
+- Documentation makes the shared-signer constraint explicit so administrators audit service-CA consumers before changing the signer algorithm.
+- The administrator can hold the `service-ca` signer on a compatible algorithm using a **named override** that targets the service-CA signer specifically (for example `openshift.io/signers/service-ca.service-serving-signer`), leaving the rest of the cluster's PKI configuration on the stronger algorithm, until all consuming workloads support it. (Using the `signerCertificates` category field would hold back *every* signer, not just service-CA, so the named override is the correct tool here.)
+
+**Risk: Premature signer retirement breaks trust**
+
+Removing an old signer CA before every consumer has ingested the new trust bundle breaks any connection that still presents, or only trusts, a certificate signed by the retired CA. Retirement is irreversible (forward-only).
+
+*Mitigation:*
+- Signer retirement is an explicit, one-off administrator action, not automatic, keeping a human in the loop for a destructive step.
+- Pruning is preceded by documented cluster preparation (confirming rotation has converged, that every operator has distributed the new signers, and that off-cluster consumers and break-glass credentials are ready); the prune tooling may perform minimal sanity checks, but no central controller can observe off-cluster consumers for the administrator.
+- Operators report prune-readiness through status conditions (for example, latest CA bundle and leaf certificates distributed and loaded), starting minimal and growing more automatic over time (see [Pruning superseded signers](#pruning-superseded-signers)). Pruning a client-CA signer additionally requires explicit administrator acknowledgement that break-glass and critical-path client certificates have rotated, because those holders cannot all be observed in-cluster.
+- Cross-signing keeps existing leaf certificates valid during rotation, so serving/client switchover does not itself depend on cluster-wide bundle propagation.
+- Long-lived break-glass signers (e.g., `admin-kubeconfig-signer`, `kubelet-bootstrap-kubeconfig-signer`) are preserved so customer-held break-glass kubeconfigs are not stranded.
+
+**Risk: Rotation churn from immediate reconciliation**
+
+Reconciling a configuration change can reissue many non-conforming certificates at once, which can overload the API server and etcd and, in pathological cases, cascade (cf. rapid signer regeneration overflowing CA bundles). A continuous-reconfiguration disruption test is planned to characterize this.
+
+*Mitigation:*
+- Reconciliation is rate-limited / staged rather than regenerating everything simultaneously.
+- Some certificates cannot be reissued by the normal operator path (10-year installer signers, on-disk kubeconfigs); these are documented as limitations.
+
 ### Drawbacks
 
 **Increased Complexity**: This feature adds a new configuration surface that administrators must understand. However, it is entirely optional - clusters continue to work with defaults if not configured.
 
 **Maintenance Burden**: Each certificate-generating operator must be updated to support PKI configuration. However, the implementation is straightforward (read config, apply parameters), and the centralized configuration reduces operator-specific configuration sprawl.
 
-**Limited Day-1 Configuration**: Only signer certificate parameters are configurable at install time. However, this is appropriate given that all other certificates rotate within 24 hours.
+**Profile-only Day-1 Configuration**: install-config exposes only a named `pki.profile`, not full cryptographic configuration. This keeps bootstrap simple; fine-grained configuration is available Day-2 via the `PKI` resource.
 
-**No Automatic Re-keying**: Changing PKI configuration doesn't automatically regenerate all certificates. However, automatic re-keying of all certificates could be disruptive and is better handled through normal rotation or explicit forced rotation.
+**Selective, not wholesale, re-keying**: Changing the PKI configuration immediately re-keys the certificates that no longer conform, but does not regenerate certificates that already conform. This is deliberate (regenerating conforming certificates would cause needless disruption), but it means a configuration change does not touch every certificate at once.
 
 ## Alternatives (Not Implemented)
 
@@ -684,26 +841,57 @@ Instead of making cryptographic parameters configurable, simply change the platf
 **Not selected because:**
 - **Workload compatibility**: Some workloads, libraries, and tools assume RSA keys (e.g., older TLS stacks, certain HSMs, legacy Java clients). A non-configurable switch to ECDSA could break these workloads with no recourse. Configurability allows administrators to fall back to RSA where needed.
 - **Compliance mandates vary**: Some organizations specifically require RSA with minimum key sizes (e.g., RSA 4096), while others require ECDSA with specific curves (e.g., CNSA 2.0 mandates P-384). A single default cannot satisfy all compliance regimes.
-- **Upgrade safety**: Changing cryptographic algorithms for all certificates on upgrade is a high-risk operation. The `Unmanaged` mode ensures zero behavior change on upgrade, while `Default` mode provides an opt-in path to ECDSA when the administrator is ready.
+- **Upgrade safety**: Changing cryptographic algorithms for all certificates on upgrade is a high-risk operation. Leaving the cluster without a PKI resource ensures zero behavior change on upgrade, while creating one with the platform default profile provides an opt-in path to ECDSA when the administrator is ready.
 - **Category-level control**: Different certificate categories have different security and performance tradeoffs. Long-lived signer certificates benefit from stronger keys (e.g., ECDSA P-384 or RSA 4096), while short-lived leaf certificates can use faster, smaller keys (e.g., ECDSA P-256). A single default doesn't allow this differentiation.
 
-**Note:** The `Default` mode does adopt ECDSA as the platform default (P-384 for signers, P-256 for serving/client), so administrators who want ECDSA can simply set `mode: Default`. The configuration API exists for cases where the default doesn't fit.
+**Note:** The platform default profile does adopt ECDSA (P-384 for signers, P-256 for serving/client), so administrators who want ECDSA can simply apply that profile. The configuration API exists for cases where the default doesn't fit.
 
-Additionally, this configuration surface provides an extensibility point for future adoption of post-quantum cryptographic (PQC) algorithms. As NIST PQC standards (e.g., ML-KEM, ML-DSA) mature and Go adds library support, new algorithm options can be added to the `KeyConfig` union without requiring a new API. Administrators will be able to transition to PQC certificates through the same configuration mechanism.
+Additionally, this configuration surface provides an extensibility point for future adoption of post-quantum cryptographic (PQC) algorithms. As NIST PQC standards (e.g., ML-KEM, ML-DSA) mature and Go adds library support, new algorithm options can be added to the `KeyConfig` union without requiring a new API. Administrators will be able to transition to PQC certificates through the same configuration mechanism. The PQC algorithm options and migration mechanics themselves are delivered by the separate layered ML-DSA / PQC enhancement; this baseline EP only provides the configuration surface they plug into.
 
-### Alternative 5: Automatic Certificate Re-keying
+### Alternative 5: Defer configuration changes to natural rotation
 
-Automatically regenerate all certificates when PKI configuration changes.
+Apply a PKI configuration change only as each certificate reaches its next natural (expiry-driven) rotation, rather than reconciling immediately. This was the earlier design before cross-signing was adopted.
 
 **Not selected because:**
-- Could cause significant disruption (certificate rotation across entire cluster)
-- Difficult to orchestrate safely (race conditions, ordering)
-- Normal rotation will apply changes naturally over time
-- Forced rotation annotation provides escape hatch if immediate re-keying needed
+- It does not match how Kubernetes configuration APIs behave: changing a config resource is expected to take effect promptly through reconciliation, not to wait on an unrelated expiry timer.
+- Certificate lifetimes range from ~1 day to 1 year, and signer CAs up to 10 years, so a cluster could sit in a mixed, partially non-compliant state for months or years after an administrator sets a compliance-driven configuration.
+- Cross-signing (see [Cross-Signing to Ease Rotation](#cross-signing-to-ease-rotation)) removes the trust-continuity and ordering concerns that previously argued for deferring, so there is no longer a safety reason to wait.
+
+The adopted behavior is **immediate reconciliation** of non-conforming certificates when the configuration changes (see [Rotation and Signer Retirement](#rotation-and-signer-retirement)). Certificates that already conform are left untouched; regenerating every certificate wholesale (including conforming ones) is likewise not done, as it would cause needless disruption.
+
+### Alternative 6: Request resources or declarative policy fields for rotation and pruning
+
+Earlier drafts expressed rotation and pruning as either new request resources (CRDs modeled on `CertificateSigningRequest`) or as fields on the `PKI` resource. Both were **not** selected, in favor of immediate reconciliation for rotation plus a deliberate, documented administrator prune action (see [Rotation and Signer Retirement](#rotation-and-signer-retirement)).
+
+Variants considered:
+- **Standing policy enums** (for example `rollout.strategy: OnExpiry|Immediate`, `rollout.supersededSigners: Retain|Prune`). Rejected because a standing prune would keep retiring superseded signers automatically (the failure mode behind rapid-regeneration cascades).
+- **A `forceRedeploymentReason`-style nonce string** on the spec. Rejected because re-triggering is awkward and it offers no history.
+- **Request-resource CRDs.** Rejected to minimize complexity: the design is cluster-wide only, rotation is simply immediate reconciliation, and pruning is a one-off administrator action delivered through a configuration signal processed by the existing rotation controllers rather than a new control loop.
+
+### Alternative 7: Hypershift hosted control-plane PKI ownership
+
+**Unresolved**, pending Hypershift-team input. For a hosted cluster, the control plane runs on the management cluster, so the question is which PKI configuration governs those control-plane certificates. (Guest data-plane certificates are governed by the hosted cluster's own configuration regardless.)
+
+- **Per-HostedCluster only**: hosted control-plane PKI is configured at the HostedCluster level and is independent of the management cluster's PKI configuration. Cleanest multi-tenancy; each hosted cluster owns its policy. A candidate realization is a new field on the `HostedCluster` and `HostedControlPlane` APIs that mirrors the standalone `PKI` resource and applies to both the hosted control plane and the guest data plane.
+- **Management floor + HostedCluster override**: the management cluster sets a default/floor that hosted control planes inherit unless the HostedCluster overrides it. Enables fleet-wide compliance baselines, but couples tenant PKI to the host and is more complex.
+
+A further open sub-question is whether the break-glass customer/SRE admin certificates for a hosted cluster follow the HostedCluster-defined configuration. The choice also affects RBAC for the `control-plane-pki-operator` (see [Hypershift / Hosted Control Planes](#hypershift--hosted-control-planes)). The model and its topology details will be worked out with the HyperShift team before GA.
 
 ## Open Questions
 
-None at this time.
+- The exact prune interface (an `oc adm` subcommand — `oc adm pki prune-superseded-signers` is a candidate name — a documented procedure, or another configuration signal) and what minimal safety checks it performs, and which operator-reported readiness conditions gate it (see [Pruning superseded signers](#pruning-superseded-signers)).
+- Which core-platform certificates do not auto-rotate today, and which issuers support cross-signing (both under investigation).
+- Centralized versus per-operator reporting of PKI status (leaning per-operator / distributed).
+- Whether to detect and report conflicts between the PKI configuration and the cluster's TLS security profile (for example, ECDSA-only certificates under a profile that requires RSA key exchange). The two are treated as independent today; conflict detection is not yet designed.
+- Uniqueness enforcement for named-override names (CEL uniqueness is quadratic and would need a count cap, versus first-match-wins list ordering).
+- Whether the installer should accept a full PKI manifest at install time (for GitOps), given that some compile-time certificate paths may not pick it up.
+- **A `keyManagement` sibling to `certificateManagement` (for further discussion).** Some platform-generated signing keys are not X.509 certificates and so fall outside `certificateManagement`, yet they raise the same crypto-agility concerns (algorithm choice, rotation with verification overlap, eventual PQC/ML-DSA migration). A dedicated `keyManagement` section of the `PKI` resource could house them. Points to work through:
+  - **Candidate keys.** The clearest is **service-account token signing** (the bound SA signer, currently a hardcoded RSA 2048 keypair published as raw JWKs at the OIDC JWKS endpoint; and the legacy SA token signing key). Other possible future members: any in-cluster JWT issuer, JWT-SVID-style workload-identity signing, or cluster-generated attestation/image-signing keys. The set is small today, which itself raises whether a dedicated section is warranted versus handling these ad hoc per component.
+  - **Default vs named-only.** Unlike certificates (many, homogeneous, internally trusted), these bare keys are few and heterogeneous, and each has distinct *off-cluster* verifier constraints — e.g., changing the SA signing-key algorithm changes the JWT signature algorithm, which OIDC / workload-identity federation (AWS IRSA, Azure, GCP) and external auth proxies must support. A cluster-wide default could silently break those external verifiers. This argues for **named entries only, opt-in, with no inherited default**, rather than mirroring the `defaults` + category shape of `certificateManagement`.
+  - **Rollout behavior for token issuers.** For any JWT-issuing path that signs with one of these keys (most clearly the bound service-account token signer, whose public keys are published at the OIDC JWKS endpoint), changing the algorithm has a two-sided rollout analogous to certificate rotation but without X.509 chains: the issuer must mint new tokens under the configured signature algorithm, while the JWKS endpoint publishes the new-algorithm public keys **alongside** the old ones and drops the old keys only once tokens signed by them have aged out. This verification-overlap window is the key-space equivalent of a union trust bundle. It also eventually extends to ML-DSA signatures (changing the JWT `alg`), which is why it belongs with the broader crypto-agility story even though it is not a certificate. (Exactly which issuers sign JWTs today — and therefore which are in scope — needs to be confirmed against the implementation; the oauth-server's access tokens, for example, are not necessarily JWKS-published JWTs.)
+  - Whether such keys should ever inherit `certificateManagement.defaults`, or remain fully independent (the compatibility risk above leans toward independent).
+
+  Note: making service-account token signing (and the related oauth-server / JWKS behavior) configurable is a separate workstream tracked independently of this EP; it is captured here only to frame how a future `keyManagement` section might absorb it.
 
 ## Test Plan
 
@@ -796,7 +984,6 @@ Before the M.N release, all of the following criteria must be met:
 - Support procedures documented for common failure modes
 - Feature gate enabled by default
 - Hypershift integration tested and documented
-- MicroShift integration complete
 - Internal testing and feedback incorporated from development cycle
 
 ### Removing a deprecated feature
@@ -810,12 +997,11 @@ This enhancement does not deprecate or remove any existing features. It adds new
 When upgrading from a version without this feature to a version with it:
 
 1. The PKI CRD is installed during upgrade
-2. A PKI resource is automatically created with `spec.certificateManagement.mode: Unmanaged`
-3. With `spec.certificateManagement.mode: Unmanaged`, operators use their existing hardcoded defaults, ensuring zero behavior change
-4. Existing certificates continue to function unchanged
-5. Certificate rotation uses existing defaults until the PKI resource is updated
-6. Administrators can update the PKI resource post-upgrade to `spec.certificateManagement.mode: Default` or `spec.certificateManagement.mode: Custom` with configuration
-7. New parameters apply on the next rotation cycle after PKI resource is updated
+2. No PKI resource is created; its absence means operators use their existing hardcoded defaults, ensuring zero behavior change
+3. Existing certificates continue to function unchanged
+4. Certificate rotation uses existing defaults until a PKI resource is created
+5. Administrators can create the `cluster` PKI resource post-upgrade with `certificateManagement` configuration
+6. New parameters are reconciled and applied immediately
 
 This approach ensures zero disruption during upgrade and preserves backward compatibility.
 
@@ -827,16 +1013,16 @@ When downgrading from a version with this feature to a version without it:
 2. Operators revert to hardcoded defaults for new certificate generation
 3. Existing certificates continue to function (they don't change on downgrade)
 4. Certificate rotation uses hardcoded defaults
-5. The PKI resource remains in the cluster (cluster-scoped singleton resources are protected by admission and cannot be deleted)
+5. Any PKI resource remains in the cluster but is ignored by the older operators
 
 No manual intervention is required for downgrade. Certificates generated with non-default parameters continue to work (certificate verification doesn't change).
 
 **Version Skew:**
 
 During rolling upgrades, different operator versions will coexist:
-- A PKI resource with `spec.certificateManagement.mode: Unmanaged` is automatically created during upgrade
+- No PKI resource is created during upgrade; its absence means hardcoded defaults everywhere
 - Old operator versions don't know about PKI configuration and use hardcoded defaults
-- New operator versions check for PKI resource, find `mode: Unmanaged`, and use hardcoded defaults
+- New operator versions find no PKI resource and use hardcoded defaults
 - All operators use the same default parameters (typically RSA 2048), ensuring consistency
 - Administrator can update the PKI resource after upgrade completes to configure parameters
 - Certificate rotation is gradual and asynchronous
@@ -852,7 +1038,7 @@ Version skew is not a concern for this feature because:
 - Each operator independently manages its own certificates without coordination
 
 During upgrades:
-- The PKI resource created during upgrade with `mode: Unmanaged` ensures all operators (old and new) use consistent defaults
+- The absence of a PKI resource after upgrade ensures all operators (old and new) use consistent hardcoded defaults
 - Administrators can update PKI configuration after upgrade completes
 - Certificate rotation is gradual and asynchronous per existing mechanisms
 - Mixed certificate parameters across the cluster are explicitly supported
@@ -900,8 +1086,8 @@ However, there are some considerations:
 
 2. **Transient API Server Errors Reading PKI Resource**:
    - *Symptom*: Operator logs show transient errors watching or reading PKI resource
-   - *Impact*: Certificate generation is blocked until the operator can read the PKI resource. The PKI resource always exists (created at install or upgrade, protected by admission), so this indicates a transient API server or network issue.
-   - *Mitigation*: Investigate and resolve the underlying API server issue. The operator resumes certificate generation automatically once it can read the PKI resource.
+   - *Impact*: A confirmed-absent PKI resource is not an error; operators use hardcoded defaults. A transient error reading the resource means the operator cannot confirm the desired configuration, so it holds its last-known configuration rather than regenerating on incomplete information.
+   - *Mitigation*: Investigate and resolve the underlying API server issue. The operator resumes reconciliation automatically once it can read the PKI resource state.
    - *Detection*: Operator status shows `Degraded=True`, operator emits a warning event and logs errors
 
 3. **Unsupported Configuration**:
@@ -975,7 +1161,7 @@ However, there are some considerations:
 
 3. Compare against PKI configuration:
    ```bash
-   oc get pki cluster -o jsonpath='{.spec.certificateManagement.custom.servingCertificates.key}'
+   oc get pki cluster -o jsonpath='{.spec.certificateManagement.servingCertificates.key}'
    ```
 
 4. Check certificate generation time vs PKI configuration update time:
@@ -986,9 +1172,9 @@ However, there are some considerations:
 
 ### Reverting to Default State
 
-1. Set the PKI resource to Unmanaged mode to revert to hardcoded defaults:
+1. Delete the PKI resource to revert to hardcoded defaults:
    ```bash
-   oc patch pki cluster --type merge -p '{"spec":{"certificateManagement":{"mode":"Unmanaged","custom":null}}}'
+   oc delete pki cluster
    ```
 
 2. Operators will use hardcoded defaults (typically RSA 2048) for new certificate generation
@@ -999,7 +1185,7 @@ However, there are some considerations:
    - Natural rotation applies defaults over time (varies by certificate lifetime)
    - Force rotation by deleting certificate secrets if immediate change is needed
 
-**Note:** The PKI resource is a cluster-scoped singleton protected by admission and cannot be deleted. To revert to hardcoded defaults, patch the resource to `Unmanaged` mode.
+**Note:** The PKI resource is an optional cluster-scoped singleton named `cluster`. Its absence means hardcoded defaults; deleting it reverts subsequently generated certificates to hardcoded defaults.
 
 ### Recovery Procedures
 
@@ -1008,12 +1194,12 @@ However, there are some considerations:
 1. Edit the PKI resource to fix or revert the configuration:
    ```bash
    oc edit pki cluster
-   # Remove or fix invalid configuration, or set mode to Default
+   # Remove or fix invalid configuration
    ```
 
-2. Alternatively, patch the PKI resource to revert to hardcoded defaults:
+2. Alternatively, delete the PKI resource to revert to hardcoded defaults:
    ```bash
-   oc patch pki cluster --type merge -p '{"spec":{"certificateManagement":{"mode":"Unmanaged","custom":null}}}'
+   oc delete pki cluster
    ```
 
 3. Wait for natural certificate rotation, or force rotation by deleting certificate secrets:
@@ -1061,9 +1247,9 @@ However, there are some considerations:
 
 **Scenario: Need to revert all certificates to defaults**
 
-1. Set the PKI resource to Unmanaged mode:
+1. Delete the PKI resource to revert to hardcoded defaults:
    ```bash
-   oc patch pki cluster --type merge -p '{"spec":{"certificateManagement":{"mode":"Unmanaged","custom":null}}}'
+   oc delete pki cluster
    ```
 
 2. Wait for natural certificate rotation, or force rotation by deleting certificate secrets:
@@ -1090,96 +1276,11 @@ For documentation:
 
 The following features are not included in the initial release but may be added in future versions:
 
-### Named Certificate Overrides
+### Selector-Based Override Matching
 
-Named certificate overrides (targeting individual certificates by name) are deferred to a future release. The original design envisioned multiple `PKICertificateDefinition` parameter resources (one per operator) to register certificate names for validation. However, ValidatingAdmissionPolicy evaluates parameter resources one at a time, making cross-resource validation infeasible. A cluster-wide single resource that aggregates all registered certificate names is needed so validation can check all names at once. This redesign requires further work.
+Named certificate overrides are supported in the initial release, but each override targets a single certificate name. Matching multiple certificates by pattern (label selectors or regular expressions) is deferred to a future release, and would be added in a backward-compatible way (for example, a round-trippable migration from the single-name form to a selector form).
 
-The infrastructure needed includes:
-
-- **PKICertificateDefinition resource**: A cluster-wide resource that aggregates the certificates managed by all operators, enabling validation of certificate names in PKI overrides without hardcoding them in the CRD.
-
-- **Validation approach**: Certificate name validation (ensuring names in overrides reference registered certificates) requires further design. The approach needs to handle the bootstrapping challenge of operators registering certificates while the PKI resource may already reference them.
-
-**Well-known certificate names** that would be used in `namedCertificates` and registered via `PKICertificateDefinition` resources for runtime validation:
-
-#### Signer Certificates (Category: Signer)
-
-These CA certificates directly sign serving or client certificates. OpenShift uses a flat PKI topology rather than a hierarchical CA model.
-
-Certificate names use a `component.certname` dot-separated naming convention, where the component prefix identifies the managing operator.
-
-| Certificate Name                                   | Description                                                        | Managed By                       |
-|----------------------------------------------------|--------------------------------------------------------------------|----------------------------------|
-| `kube-apiserver.aggregator-front-proxy-signer`     | Signs aggregator client certificates for API server extension      | kube-apiserver-operator          |
-| `kube-apiserver.control-plane-client-signer`       | Signs control plane client certificates                            | kube-apiserver-operator          |
-| `kube-apiserver.kubelet-client-signer`             | Signs kube-apiserver to kubelet client certificates                | kube-apiserver-operator          |
-| `kube-apiserver.loadbalancer-serving-signer`       | Signs kube-apiserver load balancer serving certificates            | kube-apiserver-operator          |
-| `kube-apiserver.localhost-recovery-serving-signer` | Signs kube-apiserver localhost recovery serving certificates       | kube-apiserver-operator          |
-| `kube-apiserver.localhost-serving-signer`          | Signs kube-apiserver localhost serving certificates                | kube-apiserver-operator          |
-| `kube-apiserver.node-system-admin-signer`          | Signs node system admin client certificates                        | kube-apiserver-operator          |
-| `kube-apiserver.service-network-serving-signer`    | Signs kube-apiserver service network serving certificates          | kube-apiserver-operator          |
-| `etcd.signer`                                      | Signs etcd peer and client certificates                            | etcd-operator                    |
-| `etcd.metrics-signer`                              | Signs etcd metrics serving certificates                            | etcd-operator                    |
-| `kube-controller-manager.csr-signer-signer`        | Signs CSR signer certificates                                      | kube-controller-manager-operator |
-| `kube-controller-manager.csr-signer`               | Signs kubelet CSR certificates                                     | kube-controller-manager-operator |
-| `service-ca.service-serving-signer`                | Signs service serving certificates                                 | service-ca-operator              |
-| `network.signer`                                   | Signs OperatorPKI peer certificates                                | cluster-network-operator         |
-| `machine-config.machine-config-server-signer`      | Signs MCS serving certificate (installer root-ca)                  | machine-config-operator          |
-| `monitoring.grpc-tls-signer`                       | Signs Thanos GRPC TLS client and server certificates               | cluster-monitoring-operator      |
-| `installer.admin-kubeconfig-signer`                | Signs admin kubeconfig client certificates (10yr, Day-1 only)      | installer                        |
-| `installer.kubelet-csr-signer`                     | Signs kubelet CSR certificates (Day-1 only)                        | installer                        |
-| `installer.kubelet-bootstrap-kubeconfig-signer`    | Signs kubelet bootstrap kubeconfig certificates (10yr, Day-1 only) | installer                        |
-| `control-plane-pki.customer-admin-signer`          | Signs customer break-glass admin client certificates (HyperShift)  | control-plane-pki-operator       |
-| `control-plane-pki.sre-admin-signer`               | Signs SRE break-glass admin client certificates (HyperShift)       | control-plane-pki-operator       |
-
-#### Serving Certificates (Category: Serving)
-
-Serving certificates present server identity during TLS handshakes.
-
-| Certificate Name                               | Description                                             | Managed By                  |
-|------------------------------------------------|---------------------------------------------------------|-----------------------------|
-| `kube-apiserver.external-loadbalancer-serving` | External load balancer SNI endpoint                     | kube-apiserver-operator     |
-| `kube-apiserver.internal-loadbalancer-serving` | Internal load balancer SNI endpoint                     | kube-apiserver-operator     |
-| `kube-apiserver.localhost-recovery-serving`    | Localhost recovery SNI endpoint                         | kube-apiserver-operator     |
-| `kube-apiserver.localhost-serving`             | Localhost SNI endpoint                                  | kube-apiserver-operator     |
-| `kube-apiserver.service-network-serving`       | Service network SNI endpoint                            | kube-apiserver-operator     |
-| `etcd.serving`                                 | etcd client connections                                 | etcd-operator               |
-| `etcd.metrics-serving`                         | etcd metrics endpoint                                   | etcd-operator               |
-| `service-ca.service-serving`                   | Service serving certificates (on-demand)                | service-ca-operator         |
-| `machine-config.machine-config-server-serving` | MCS TLS serving certificate                             | machine-config-operator     |
-| `monitoring.grpc-tls-serving`                  | Prometheus GRPC server certificate                      | cluster-monitoring-operator |
-| `installer.ingress-router-initial`             | Initial ingress router serving certificate (Day-1 only) | installer                   |
-
-#### Client Certificates (Category: Client)
-
-Client certificates authenticate clients to servers.
-
-| Certificate Name                                 | Description                                                | Managed By                  |
-|--------------------------------------------------|------------------------------------------------------------|-----------------------------|
-| `kube-apiserver.aggregator-front-proxy-client`   | API server aggregation proxy                               | kube-apiserver-operator     |
-| `kube-apiserver.check-endpoints-client`          | Check endpoints client certificate                         | kube-apiserver-operator     |
-| `kube-apiserver.control-plane-node-admin-client` | Control plane node admin client certificate                | kube-apiserver-operator     |
-| `kube-apiserver.kube-controller-manager-client`  | Kube controller manager client certificate                 | kube-apiserver-operator     |
-| `kube-apiserver.kube-scheduler-client`           | Kube scheduler client certificate                          | kube-apiserver-operator     |
-| `kube-apiserver.kubelet-client`                  | API server authentication to kubelet                       | kube-apiserver-operator     |
-| `kube-apiserver.node-system-admin-client`        | Node system admin client certificate                       | kube-apiserver-operator     |
-| `monitoring.grpc-tls-client`                     | Thanos querier GRPC client certificate                     | cluster-monitoring-operator |
-| `installer.kubelet-client`                       | Kubelet bootstrap client certificate (Day-1 only)          | installer                   |
-| `control-plane-pki.customer-admin-client`        | Customer break-glass admin client certificate (HyperShift) | control-plane-pki-operator  |
-| `control-plane-pki.sre-admin-client`             | SRE break-glass admin client certificate (HyperShift)      | control-plane-pki-operator  |
-
-#### Peer Certificates (Category: Peer)
-
-Peer certificates authenticate both as client and server (dual ExtKeyUsage: ClientAuth + ServerAuth). PKI profile resolution compares the serving and client key configurations by NIST security strength in bits (RSA: 2048→112, 3072→128, 4096→152, 8192→200; ECDSA: P-256→128, P-384→192, P-521→256) and selects the configuration with higher security strength. On equal strength, ECDSA is preferred for its better performance characteristics.
-
-| Certificate Name                    | Description                                       | Managed By               |
-|-------------------------------------|---------------------------------------------------|--------------------------|
-| `etcd.peer-serving`                 | etcd peer communication                           | etcd-operator            |
-| `network.peer`                      | OperatorPKI peer certificate (server+client auth) | cluster-network-operator |
-| `installer.admin-kubeconfig-client` | Admin kubeconfig certificate (Day-1 only)         | installer                |
-| `installer.journal-gateway`         | Journal gateway certificate (Day-1 only)          | installer                |
-
-**Note:** These names will be available for use in `namedCertificates` once named certificate overrides are implemented.
+A future release may also add optional runtime validation of override names against the set of certificates actually registered by operators (for example, via a cluster-wide aggregating resource). This was explored during design but is not required for the initial release, where override names are validated for format only.
 
 ### Additional Certificate Configuration Options
 
@@ -1196,7 +1297,11 @@ The initial release supports RSA and ECDSA. Future releases may add:
 
 - **Ed25519**: Modern elliptic curve with excellent performance
 - **RSA-PSS**: Probabilistic signature scheme for RSA
-- **Post-quantum algorithms**: As standards mature
+- **Post-quantum algorithms** (ML-DSA): delivered by the separate layered ML-DSA / PQC enhancement as standards and runtime support mature
+
+### TLS Artifact Audit
+
+A **nice-to-have** future capability, building on the existing TLS artifact registry, would let a support engineer or administrator enumerate every certificate and CA bundle in the cluster together with the **cryptographic algorithm actually in use** and **ownership/management metadata** (which operator manages it, how it is managed). This would make it possible to verify conformance to the PKI configuration and to diagnose migration and coverage gaps — including whether all certificates have converged after a configuration change, and which artifacts fall outside automated coverage before a prune. It addresses the need to audit certificate and PKI coverage — a capability deferred from the initial release — and the open question on PKI status reporting.
 
 ### Certificate Expiry Monitoring
 
@@ -1205,3 +1310,86 @@ A separate enhancement may add comprehensive certificate monitoring:
 - Certificate expiry metrics and alerts
 - Compliance dashboards
 - Automated rotation recommendations
+
+## Well-Known Certificate Names
+
+Named certificate overrides are part of the initial release; the names below are what an administrator can target today. They are documented by the owning components (this list is an informative illustration of the certificates the platform generates):
+
+#### Signer Certificates (Category: Signer)
+
+These CA certificates directly sign serving or client certificates. OpenShift uses a flat PKI topology rather than a hierarchical CA model.
+
+Certificate names use the `openshift.io/<category>/component.certname` form: the `openshift.io/` prefix marks core-platform certificates, `<category>` is one of `signers`, `serving`, `clients`, or `peers`, and `component.certname` identifies the managing operator and certificate.
+
+| Certificate Name                                   | Description                                                        | Managed By                       |
+|----------------------------------------------------|--------------------------------------------------------------------|----------------------------------|
+| `openshift.io/signers/kube-apiserver.aggregator-front-proxy-signer`     | Signs aggregator client certificates for API server extension      | kube-apiserver-operator          |
+| `openshift.io/signers/kube-apiserver.control-plane-client-signer`       | Signs control plane client certificates                            | kube-apiserver-operator          |
+| `openshift.io/signers/kube-apiserver.kubelet-client-signer`             | Signs kube-apiserver to kubelet client certificates                | kube-apiserver-operator          |
+| `openshift.io/signers/kube-apiserver.loadbalancer-serving-signer`       | Signs kube-apiserver load balancer serving certificates            | kube-apiserver-operator          |
+| `openshift.io/signers/kube-apiserver.localhost-recovery-serving-signer` | Signs kube-apiserver localhost recovery serving certificates       | kube-apiserver-operator          |
+| `openshift.io/signers/kube-apiserver.localhost-serving-signer`          | Signs kube-apiserver localhost serving certificates                | kube-apiserver-operator          |
+| `openshift.io/signers/kube-apiserver.node-system-admin-signer`          | Signs node system admin client certificates                        | kube-apiserver-operator          |
+| `openshift.io/signers/kube-apiserver.service-network-serving-signer`    | Signs kube-apiserver service network serving certificates          | kube-apiserver-operator          |
+| `openshift.io/signers/etcd.signer`                                      | Signs etcd peer and client certificates                            | etcd-operator                    |
+| `openshift.io/signers/etcd.metrics-signer`                              | Signs etcd metrics serving certificates                            | etcd-operator                    |
+| `openshift.io/signers/kube-controller-manager.csr-signer-signer`        | Signs CSR signer certificates                                      | kube-controller-manager-operator |
+| `openshift.io/signers/kube-controller-manager.csr-signer`               | Signs kubelet CSR certificates                                     | kube-controller-manager-operator |
+| `openshift.io/signers/service-ca.service-serving-signer`                | Signs service serving certificates                                 | service-ca-operator              |
+| `openshift.io/signers/network.signer`                                   | Signs OperatorPKI peer certificates                                | cluster-network-operator         |
+| `openshift.io/signers/machine-config.machine-config-server-signer`      | Signs MCS serving certificate (installer root-ca)                  | machine-config-operator          |
+| `openshift.io/signers/monitoring.grpc-tls-signer`                       | Signs Thanos GRPC TLS client and server certificates               | cluster-monitoring-operator      |
+| `openshift.io/signers/installer.admin-kubeconfig-signer`                | Signs admin kubeconfig client certificates (10yr, Day-1 only)      | installer                        |
+| `openshift.io/signers/installer.kubelet-csr-signer`                     | Signs kubelet CSR certificates (Day-1 only)                        | installer                        |
+| `openshift.io/signers/installer.kubelet-bootstrap-kubeconfig-signer`    | Signs kubelet bootstrap kubeconfig certificates (10yr, Day-1 only) | installer                        |
+| `openshift.io/signers/control-plane-pki.customer-admin-signer`          | Signs customer break-glass admin client certificates (HyperShift)  | control-plane-pki-operator       |
+| `openshift.io/signers/control-plane-pki.sre-admin-signer`               | Signs SRE break-glass admin client certificates (HyperShift)       | control-plane-pki-operator       |
+
+#### Serving Certificates (Category: Serving)
+
+Serving certificates present server identity during TLS handshakes.
+
+| Certificate Name                               | Description                                             | Managed By                  |
+|------------------------------------------------|---------------------------------------------------------|-----------------------------|
+| `openshift.io/serving/kube-apiserver.external-loadbalancer-serving` | External load balancer SNI endpoint                     | kube-apiserver-operator     |
+| `openshift.io/serving/kube-apiserver.internal-loadbalancer-serving` | Internal load balancer SNI endpoint                     | kube-apiserver-operator     |
+| `openshift.io/serving/kube-apiserver.localhost-recovery-serving`    | Localhost recovery SNI endpoint                         | kube-apiserver-operator     |
+| `openshift.io/serving/kube-apiserver.localhost-serving`             | Localhost SNI endpoint                                  | kube-apiserver-operator     |
+| `openshift.io/serving/kube-apiserver.service-network-serving`       | Service network SNI endpoint                            | kube-apiserver-operator     |
+| `openshift.io/serving/etcd.serving`                                 | etcd client connections                                 | etcd-operator               |
+| `openshift.io/serving/etcd.metrics-serving`                         | etcd metrics endpoint                                   | etcd-operator               |
+| `openshift.io/serving/service-ca.service-serving`                   | Service serving certificates (on-demand)                | service-ca-operator         |
+| `openshift.io/serving/machine-config.machine-config-server-serving` | MCS TLS serving certificate                             | machine-config-operator     |
+| `openshift.io/serving/monitoring.grpc-tls-serving`                  | Prometheus GRPC server certificate                      | cluster-monitoring-operator |
+| `openshift.io/serving/installer.ingress-router-initial`             | Initial ingress router serving certificate (Day-1 only) | installer                   |
+
+#### Client Certificates (Category: Client)
+
+Client certificates authenticate clients to servers.
+
+| Certificate Name                                 | Description                                                | Managed By                  |
+|--------------------------------------------------|------------------------------------------------------------|-----------------------------|
+| `openshift.io/clients/kube-apiserver.aggregator-front-proxy-client`   | API server aggregation proxy                               | kube-apiserver-operator     |
+| `openshift.io/clients/kube-apiserver.check-endpoints-client`          | Check endpoints client certificate                         | kube-apiserver-operator     |
+| `openshift.io/clients/kube-apiserver.control-plane-node-admin-client` | Control plane node admin client certificate                | kube-apiserver-operator     |
+| `openshift.io/clients/kube-apiserver.kube-controller-manager-client`  | Kube controller manager client certificate                 | kube-apiserver-operator     |
+| `openshift.io/clients/kube-apiserver.kube-scheduler-client`           | Kube scheduler client certificate                          | kube-apiserver-operator     |
+| `openshift.io/clients/kube-apiserver.kubelet-client`                  | API server authentication to kubelet                       | kube-apiserver-operator     |
+| `openshift.io/clients/kube-apiserver.node-system-admin-client`        | Node system admin client certificate                       | kube-apiserver-operator     |
+| `openshift.io/clients/monitoring.grpc-tls-client`                     | Thanos querier GRPC client certificate                     | cluster-monitoring-operator |
+| `openshift.io/clients/installer.kubelet-client`                       | Kubelet bootstrap client certificate (Day-1 only)          | installer                   |
+| `openshift.io/clients/control-plane-pki.customer-admin-client`        | Customer break-glass admin client certificate (HyperShift) | control-plane-pki-operator  |
+| `openshift.io/clients/control-plane-pki.sre-admin-client`             | SRE break-glass admin client certificate (HyperShift)      | control-plane-pki-operator  |
+
+#### Peer Certificates (Category: Peer)
+
+Peer certificates authenticate both as client and server (dual ExtKeyUsage: ClientAuth + ServerAuth). PKI profile resolution compares the serving and client key configurations by NIST security strength in bits (RSA: 2048→112, 3072→128, 4096→152, 8192→200; ECDSA: P-256→128, P-384→192, P-521→256) and selects the configuration with higher security strength. On equal strength, ECDSA is preferred for its better performance characteristics.
+
+| Certificate Name                    | Description                                       | Managed By               |
+|-------------------------------------|---------------------------------------------------|--------------------------|
+| `openshift.io/peers/etcd.peer-serving`                 | etcd peer communication                           | etcd-operator            |
+| `openshift.io/peers/network.peer`                      | OperatorPKI peer certificate (server+client auth) | cluster-network-operator |
+| `openshift.io/peers/installer.admin-kubeconfig-client` | Admin kubeconfig certificate (Day-1 only)         | installer                |
+| `openshift.io/peers/installer.journal-gateway`         | Journal gateway certificate (Day-1 only)          | installer                |
+
+**Note:** These names illustrate certificates that can be targeted by named overrides; the owning components document the authoritative names.
