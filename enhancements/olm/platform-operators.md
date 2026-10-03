@@ -38,6 +38,10 @@ superseded-by: []
 
 # Platform Operators
 
+> [!WARNING]  
+> This enhancement is obsolete. The Platform Operators Tech Preview feature was removed in
+> OpenShift 4.16 and will not graduate to GA as described.
+
 ## Release Signoff Checklist
 
 - [x] Enhancement is `implementable`
