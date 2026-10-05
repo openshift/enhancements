@@ -826,7 +826,7 @@ boundary on HCP. Customers cannot delete or modify them
 because the policies are enforced by the API server itself,
 outside customer access.
 
-#### Karpenter CR deletion guard (standalone)
+**3. Karpenter CR deletion guard (standalone)**
 
 The operator adds a finalizer to the `Karpenter` CR. On delete,
 the operator blocks removal while any `NodeClaim` resources
@@ -837,24 +837,26 @@ after they are gone (see [Workflow](#workflow-description)).
 
 Today, Karpenter Go dependencies are embedded in the
 HyperShift repository (see [Current state](#current-state)),
-and upstream Karpenter AWS + Karpenter core rebases frequently
+and upstream Karpenter AWS and Karpenter core rebases frequently
 conflict with HyperShift's large dependency tree. After the refactoring (see
 [above](#hcp-karpenter-operator-refactoring)), Karpenter
-dependencies move to karpenter-operator's own go.mod which will be much
-easier to manage. A hypershift-operator release is still required to ship to HCP
-but for any karpenter specific functionality, the only HyperShift-side change
-will be a single image digest bump, ignoring any changes that may need to happen
-to HostedControlPlane status fields, or other HCP specific logic we can't port.
+dependencies will move to karpenter-operator's own `go.mod`,
+which will be much easier to manage. Additionally, Karpenter Operator changes
+currently have to go through the HyperShift development, review, and testing
+CI pipeline, which is time-consuming for changes to a contained project such
+as Karpenter Operator. A hypershift-operator release will still be required to
+ship changes to HCP, but ideally the only HyperShift-side change needed for
+Karpenter-specific functionality will be an image digest bump.
 
 ##### Development and release workflow
 
-After the refactor, development happens in
+After the refactor, Karpenter Operator development happens in
 [openshift/karpenter-operator](https://github.com/openshift/karpenter-operator).
-Builds go through ART's Konflux pipeline with two release
+Builds and releases go through the ART Konflux pipeline with two release
 streams from the same source repo:
 
 1. **HCP stream** - tied to main, shipped at the Autoscale
-   team's own cadence (ROSA/ARO).
+   team's own cadence (for Managed Services like ROSA/ARO).
 2. **OCP stream** - standard OCP release cadence (standalone).
 
 Development on main targets HCP; changes also flow into the
@@ -862,34 +864,34 @@ OCP stream. OCP backports do not affect the HCP stream.
 
 ##### HCP release process
 
-The ART pipeline auto-builds every commit on main to a
-staging registry. To cut a release the team raises an ART
-JIRA ticket (5 working days lead time), identifies and tests
+The ART Konflux pipeline auto-builds every commit on main to a
+staging registry. To cut a release, the team raises an ART
+Jira ticket (5 working days lead time), identifies and tests
 a staged build, and ART promotes it to production.
+Operator release Jira ticket template: [ART-14539](https://redhat.atlassian.net/browse/ART-14539).
+Example Karpenter Operator ART release ticket: [ART-21252](https://redhat.atlassian.net/browse/ART-21252).
 
-The karpenter-operator image is pinned as a digest in an
-overrides file in hypershift-operator source. After ART
-promotes an HCP build, the Autoscale team opens a manual PR
-bumping the digest to that exact build. AutoNode presubmits
-validate the bump; the team merges after review and notifies
+The karpenter-operator image is pinned by digest in an
+overrides file in the hypershift-operator source. After ART
+promotes an HCP build to `registry.redhat.io`, the Autoscale team opens a
+manual PR to update the digest to that exact build. AutoNode presubmits
+validate the bump; after review, the team merges the PR and notifies
 Managed Services of the new version.
 
-##### Image stream overlap risk
+##### QE and testing
 
-Both streams publish to the same Red Hat Registry image
-stream. Digest pinning does not prove a digest came from the
-intended HCP build: the most recently published image may be
-from the OCP stream.
+Autoscale QE tests bugs and features pre-merge on self-managed HCP.
+Before a release, Autoscale QE selects a candidate image from the ART staging
+registry, manually creates a self-managed HCP environment using the latest
+hypershift-operator image built from the `hypershift` main branch, and runs
+the HyperShift AutoNode tests against both versions. If validation succeeds,
+QE approves the candidate for release, and the Autoscale team requests that
+ART promote it. Ideally, this QE process is automated in the future.
 
-**Interim mitigation:** do not use Renovate (or any bot that
-selects "latest" from the shared stream) for HCP digest bumps.
-The team opens manual hypershift-operator PRs with the digest
-from the HCP build they cut and tested via ART.
-
-**Follow-up:** separate image streams, or provenance plus CI
-validation that a proposed digest is an approved HCP build
-compatible with the target HO version. Document that in a
-follow-up change to this enhancement.
+ROSA/ARO validation is handled separately by Managed
+Services QE in their own staging environments, post-merge.
+Managed Services should create their own tracking cards linked
+to the original OCPBUGS card for their post-merge testing.
 
 ##### Impact on Managed Services
 
@@ -909,51 +911,41 @@ The fix goes to main branch only. The team cuts an
 HCP stream release via ART, then opens a manual digest-bump PR
 in hypershift-operator.
 
-The change will still appear in the OCP
-payload changelog since both streams build from the same repo,
-but it is transparent to standalone clusters and will not be
-included in OCP release notes or documentation.
+The change remains in the shared karpenter-operator source, but because it
+is HCP-specific, it will not be announced as an OCP release note or
+documented as a standalone feature. It does not affect standalone clusters.
 
 ##### Shared bug fix
 
 The fix lands on main first. If applicable, the team
-backports it to the relevant OCP release branch(es). HCP
-consumes the fix from main automatically on the next release.
-Backports to previous OCP release branches (4.x, 5.x, etc.)
-are invisible to HCP and managed services. Each stream ships
-through its own mechanism (hypershift-operator digest bump for HCP,
-OCP z-stream release for standalone).
+backports it to the relevant OCP release branch(es). For HCP, the fix is
+delivered after ART releases the image and the Autoscale team updates the
+image digest in hypershift-operator; it reaches hosted clusters through a
+hypershift-operator release containing that digest update. When a bug affects
+both standalone and HCP, the team should prioritize an HCP release in a timely
+manner. Backports to previous OCP release branches (4.x, 5.x, etc.) are not
+included in the HCP stream. Each stream ships through its own mechanism
+(hypershift-operator digest bump for HCP, OCP z-stream release for standalone).
 
 ##### Standalone-only fix
 The fix goes to the relevant OCP release branch and can potentially
 be backported.
 
-If needed in the next OCP release, bug-fixes will be merged to main.
-However, any standalone-specific changes are transparent to HCP and no HCP Karpenter Operator release is needed.
-Regression periodic e2es targetting HCP platform will still be run to confirm no unintended side effects from the merge to main.
+If needed for the OCP release under development, bug fixes will be merged to
+main. Merging a standalone-only fix to main does not itself require a new HCP
+Karpenter Operator image; without an HCP impact or customer need, it can wait
+for a future HCP release. Periodic and presubmit Prow regression e2e tests
+targeting HCP will run to check for unintended side effects from merging the
+change to main.
 
-##### QE and testing
+##### Release Coordination and Communication
 
-Autoscale QE tests bugs and features pre-merge on self-managed
-HCP and standalone, using regression e2es and automated
-suites. Bug cards assigned to the Autoscale team targeting the
-`autoscaling / karpenter` component should and
-will be closed after self-managed HCP and standalone
-QE validation and signoff, irrespective of ROSA/ARO.
-
-ROSA/ARO validation is handled separately by Managed
-Services QE in their own staging environments, post-merge.
-Managed Services should create their own tracking cards linked
-to the original OCPBUGS card for their post-merge testing.
-
-##### Communication
-
-The dual-stream model requires tighter coordination with
-Managed Services writers and stakeholders. New features and
-bug fixes will be communicated through the team's forum
-channel and the `wg-rosa-hcp-karpenter` + `wg-aro-hcp-karpenter` Slack channels. Each
-karpenter-operator release will include a summary of changes for Managed
-Services consumers, and the next hypershift-operator release they will be available in.
+The new model requires tighter release coordination. New features and
+bug fixes will be communicated through the team's `forum-ocp-autoscaling`
+forum channel and the `wg-rosa-hcp-karpenter` and `wg-aro-hcp-karpenter`
+Slack channels. Each karpenter-operator release announcement will include a
+summary of changes and identify the next hypershift-operator release that
+includes the image digest update.
 
 ### Risks and Mitigations
 
