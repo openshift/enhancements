@@ -11,7 +11,7 @@ approvers:
 api-approvers:
   - "@everettraven" # For the Console Operator changes.
 creation-date: 2026-09-10
-last-updated: 2026-09-29
+last-updated: 2026-10-05
 status: provisional
 tracking-link:
   - "https://redhat.atlassian.net/browse/OCPSTRAT-3721"
@@ -430,8 +430,12 @@ on the management cluster, while the hosted cluster's Console runs in
 therefore differ.
 
 The [hosted workflow](#hypershift) defines the configuration handoff between
-operators. HyperShift's configuration-reference discovery must also include the
-new CA reference under `operatorConfiguration`.
+operators. HyperShift's existing configuration-reference discovery covers
+`spec.configuration` and cannot discover the new CA reference under its sibling
+`spec.operatorConfiguration`. Discovery and synchronization must therefore be
+extended to include that reference, even when `spec.configuration` is absent.
+Source CA updates and deletion/recreation must trigger reconciliation so trust
+changes propagate without requiring an edit to the HostedCluster.
 
 Console Operator reads the component proxy from its own
 `console.operator.openshift.io/cluster` resource on both topologies — it needs no
