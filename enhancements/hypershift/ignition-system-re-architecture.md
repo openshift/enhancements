@@ -289,7 +289,10 @@ This enhancement adds a new CRD and a finalizer:
    The CRD is **consumer-agnostic** — it carries no back-reference to a NodePool
    so that non-NodePool consumers can use it. Payload bytes do **not** live in
    status; the token is the key into the `PayloadStore`. The type is defined
-   here (v1alpha1, group `hypershift.openshift.io`):
+   here (v1beta1, group `hypershift.openshift.io`). Note: The API was placed in
+   v1beta1 instead of v1alpha1 to align with the existing v1beta1 API group
+   convention in HyperShift (see api/AGENTS.md), as it is a first-class production
+   API with no experimental status.
 
    ```go
    // IgnitionPayload is one consumer's ignition payload request: the consumer's
@@ -298,6 +301,7 @@ This enhancement adds a new CRD and a finalizer:
    // creates its own on demand). The type is consumer-agnostic — it carries no
    // back-reference to a NodePool so non-NodePool consumers can use it.
    //
+   // +genclient
    // +kubebuilder:object:root=true
    // +kubebuilder:subresource:status
    // +kubebuilder:resource:path=ignitionpayloads,shortName=ignpayload,scope=Namespaced
@@ -318,7 +322,6 @@ This enhancement adds a new CRD and a finalizer:
    	// status is written by the PayloadController and reports generation and
    	// rollout progress.
    	// +optional
-   	// +kubebuilder:validation:MinProperties=1
    	Status IgnitionPayloadStatus `json:"status,omitzero"`
    }
 
