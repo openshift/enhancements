@@ -833,7 +833,7 @@ the operator blocks removal while any `NodeClaim` resources
 exist. The operator reconciles the delete, watches NodeClaims, and removes the finalizer only
 after they are gone (see [Workflow](#workflow-description)).
 
-#### Build, Release, and Delivery to HCP
+### Build, Release, and Delivery to HCP
 
 Today, Karpenter Go dependencies are embedded in the
 HyperShift repository (see [Current state](#current-state)),
@@ -848,7 +848,7 @@ as Karpenter Operator. A hypershift-operator release will still be required to
 ship changes to HCP, but ideally the only HyperShift-side change needed for
 Karpenter-specific functionality will be an image digest bump.
 
-##### Development and release workflow
+#### Development and release workflow
 
 After the refactor, Karpenter Operator development happens in
 [openshift/karpenter-operator](https://github.com/openshift/karpenter-operator).
@@ -862,7 +862,7 @@ streams from the same source repo:
 Development on main targets HCP; changes also flow into the
 OCP stream. OCP backports do not affect the HCP stream.
 
-##### HCP release process
+#### HCP release process
 
 The ART Konflux pipeline auto-builds every commit on main to a
 staging registry. To cut a release, the team raises an ART
@@ -878,7 +878,7 @@ manual PR to update the digest to that exact build. AutoNode presubmits
 validate the bump; after review, the team merges the PR and notifies
 Managed Services of the new version.
 
-##### QE and testing
+#### QE and testing
 
 Autoscale QE tests bugs and features pre-merge on self-managed HCP.
 Before a release, Autoscale QE selects a candidate image from the ART staging
@@ -893,7 +893,7 @@ Services QE in their own staging environments, post-merge.
 Managed Services should create their own tracking cards linked
 to the original OCPBUGS card for their post-merge testing.
 
-##### Impact on Managed Services
+#### Impact on Managed Services
 
 The refactor will be transparent to Managed Services
 (ROSA/ARO). Managed Services will continue consuming
@@ -938,7 +938,7 @@ for a future HCP release. Periodic and presubmit Prow regression e2e tests
 targeting HCP will run to check for unintended side effects from merging the
 change to main.
 
-##### Release Coordination and Communication
+#### Release Coordination and Communication
 
 The new model requires tighter release coordination. New features and
 bug fixes will be communicated through the team's `forum-ocp-autoscaling`
@@ -1127,29 +1127,29 @@ Secrets as the contract, avoids that skew. See
 
 ## Test Plan
 
-Testing follows a three-tier strategy:
+This enhancement's test plan focuses on Hosted Control Planes (HCP).
+Standalone OCP testing is out of scope.
 
-1. **HCP e2e tests**: `TestKarpenter` and
-   `TestKarpenterUpgradeControlPlane` in the HyperShift test
-   suite serve as regression coverage for the
-   karpenter-operator refactoring on AWS HCP clusters.
+### HCP pre-merge CI
 
-2. **Standalone OCP e2e tests**: presubmits in the
-   karpenter-operator repository cover provisioning,
-   scale-down/consolidation, drift, disruption budgets,
-   ClusterOperator status, and upgrade rollout.
+Pre-merge CI runs for pull requests in
+`openshift/karpenter-operator`, `openshift/hypershift`, and the supported
+Karpenter provider repositories (for example,
+`openshift/aws-karpenter-provider-aws`). For each pull request, these jobs
+test the relevant karpenter-operator and hypershift-operator builds together
+on HCP clusters running the current OCP development version (e.g., 5.1).
+The jobs cover all supported provider platforms (e.g., AWS and Azure).
 
-3. **autoscale-tests common suite**: runs upstream Karpenter
-   core library tests shared across provider implementations.
+### HCP post-merge periodic CI
 
-Pre-merge (karpenter-operator repo): `e2e-aws-hypershift`
-presubmit runs `TestKarpenter` and
-`TestKarpenterUpgradeControlPlane` against the PR's image
-and latest HyperShift operator. Pre-merge (hypershift repo):
-manual digest-bump PRs run standard HyperShift operator
-presubmits including Karpenter e2e. Post-merge periodics:
-daily AutoNode jobs run the full Karpenter test suite on
-current OCP and n-1.
+The `openshift/karpenter-operator` repository runs daily post-merge periodics
+against the latest karpenter-operator and hypershift-operator builds. These
+jobs run the HyperShift e2e suite across every supported hosted cluster
+version (e.g., 4.22, 5.0, and 5.1) and every supported platform (e.g.,
+AWS and Azure).
+
+Testing an ART staging image for a Karpenter Operator release is described in
+the [HCP release process](#build-release-and-delivery-to-hcp).
 
 ## Graduation Criteria
 
