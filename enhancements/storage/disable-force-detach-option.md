@@ -10,7 +10,7 @@ approvers:
 api-approvers:
   - "@JoelSpeed"
 creation-date: 2026-01-30
-last-updated: 2026-09-21
+last-updated: 2026-10-05
 tracking-link:
   - "https://issues.redhat.com/browse/STOR-2789"
 see-also:
@@ -52,11 +52,11 @@ Create a new config object for kube-controller-manager with a force detach optio
 
 ### Workflow Description
 
-The cluster admin sets `.spec.forceDetachOnTimeout="Disabled"` in the `cluster` ControllerManager object. `cluster-kube-controller-manager-operator` is notified of this change via an informer, and it updates the KCM target config to include the `disable-force-detach-on-timeout` option. KCM restarts and reads the new config option.
+The cluster admin sets `.spec.volumeForceDetach="OnOutOfServiceTaintOnly"` in the `cluster` ControllerManager object. `cluster-kube-controller-manager-operator` is notified of this change via an informer, and it updates the KCM target config to include the `disable-force-detach-on-timeout` option. KCM restarts and reads the new config option. Rollout progress is reported by the kube-controller-manager cluster operator.
 
 ### API Extensions
 
-There is already a [KubeControllerManager](https://github.com/openshift/api/blob/master/operator/v1/types_kubecontrollermanager.go) operator type to configure cluster-kube-controller-manager-operator, and this enhancement introduces a `ControllerManager` config type to configure kube-controller-manager.
+There is already a [KubeControllerManager](https://github.com/openshift/api/blob/master/operator/v1/types_kubecontrollermanager.go) operator type to configure `cluster-kube-controller-manager-operator`, and this enhancement introduces a `ControllerManager` config type to configure kube-controller-manager.
 This is approach is consistent with other workload components like
 [KubeAPIServer](https://github.com/openshift/api/blob/master/operator/v1/types_kubeapiserver.go) / [APIServer](https://github.com/openshift/api/blob/master/config/v1/types_apiserver.go) and
 [KubeScheduler](https://github.com/openshift/api/blob/master/operator/v1/types_scheduler.go) / [Scheduler](https://github.com/openshift/api/blob/master/config/v1/types_scheduling.go).
@@ -68,10 +68,12 @@ kind: ControllerManager
 metadata:
   name: cluster
 spec:
-  forceDetachOnTimeout: Disabled
+  volumeForceDetach: OnOutOfServiceTaintOnly
 ```
 
-Feature gates: the top-level ControllerManager type is gated by `ControllerManagerConfig`, and the forceDetachOnTimeout field is gated by `DisableForceDetachOnTimeout`. These gates should be promoted together as this enhancement progresses.
+`volumeForceDetach: OnOutOfServiceTaintOnly` disables force detach on timeout, and `volumeForceDetach: OnUnmountTimeout` enables force detach on timeout.
+
+Feature gates: the top-level ControllerManager type is gated by `ControllerManagerConfig`. Controller logic in `cluster-kube-controller-manager-operator` should also be behind this gate. This gate should be promoted as this enhancement progresses.
 
 API PR: <https://github.com/openshift/api/pull/2668>
 
@@ -126,15 +128,15 @@ None
 
 - Unit tests and API tests
 - Manual validation of code changes
-- e2e test scenarios below when the ControllerManagerConfig and DisableForceDetachOnTimeout feature gates are enabled
+- e2e test scenarios below when the ControllerManagerConfig feature gate is enabled
 
 | Test scenario | Type | Where | Test link | Notes |
 | :---- | :---- | :---- | :---- | :---- |
-| Default behavior should remain the same (force detach enabled). | Automated |  |  | |
-| `.spec.forceDetachOnTimeout="Disabled"` should disable force detach on the cluster. | Automated |  |  | |
-| `.spec.forceDetachOnTimeout="Enabled"` should enable force detach on the cluster. | Automated |  |  | |
-| Disable force detach, create pod, make node NotReady, force delete pod. Volume should NOT be force-detached after the timeout. | Automated |  |  | |
-| Enable force detach, create pod, make node NotReady, force delete pod. Volume should be force-detached after the timeout. | Automated |  |  | |
+| Default behavior should remain the same (force detach on timeout enabled). | Automated |  |  | |
+| `.spec.volumeForceDetach="OnOutOfServiceTaintOnly"` should disable force detach on timeout on the cluster. | Automated |  |  | |
+| `.spec.volumeForceDetach="OnUnmountTimeout"` should enable force detach on timeout on the cluster. | Automated |  |  | |
+| Disable force detach on timeout, create pod, make node NotReady, force delete pod. Volume should NOT be force-detached after the timeout. | Automated |  |  | |
+| Enable force detach on timeout, create pod, make node NotReady, force delete pod. Volume should be force-detached after the timeout. | Automated |  |  | |
 
 Test configurations: standalone and hypershift clusters. Hypershift tests will only be available once the API reaches v1 and hypershift support is implemented.
 
@@ -153,7 +155,7 @@ Test configurations: standalone and hypershift clusters. Hypershift tests will o
 - Ability to utilize the enhancement end to end
 - End user documentation, relative API stability
 - e2e tests implemented
-- Promote ControllerManagerConfig and DisableForceDetachOnTimeout feature gates
+- Promote ControllerManagerConfig feature gate
 
 ### Tech Preview -> GA
 
@@ -162,7 +164,7 @@ Test configurations: standalone and hypershift clusters. Hypershift tests will o
 - High severity bugs are fixed.
 - Reliable CI signal, minimal test flakes.
 - User facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/)
-- Promote ControllerManagerConfig and DisableForceDetachOnTimeout feature gates
+- Promote ControllerManagerConfig feature gate
 
 ### Removing a deprecated feature
 
@@ -170,9 +172,9 @@ N/A
 
 ## Upgrade / Downgrade Strategy
 
-The ForceDetachOnTimeout API field will be optional. If it is omitted, it will behave the same as "Enabled" (current default). So upgraded clusters will still have this option enabled unless the admin decides to set it explicitly to "Disabled".
+The `volumeForceDetach` API field will be optional. If it is omitted, it will behave the same as "OnUnmountTimeout" (current default). So upgraded clusters will still have force detach on timeout enabled unless the admin decides to set it explicitly to "OnOutOfServiceTaintOnly".
 
-A cluster with `forceDetachOnTimeout: Disabled` that is downgraded to a version (like 5.0) without the `cluster-kube-controller-manager-operator` code changes will simply ignore that field and use the default "Enabled" behavior as usual in prior releases.
+A cluster with `volumeForceDetach: OnOutOfServiceTaintOnly` that is downgraded to a version (like 5.0) without the `cluster-kube-controller-manager-operator` code changes will simply ignore that field and use the default "OnUnmountTimeout" behavior as usual in prior releases.
 
 ## Version Skew Strategy
 
