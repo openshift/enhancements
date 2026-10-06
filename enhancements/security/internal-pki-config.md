@@ -315,7 +315,7 @@ stateDiagram-v2
 
 3. To adopt a stronger configuration, the cluster administrator edits the PKI resource post-upgrade, which operators reconcile and apply immediately. On new installs, the installer populates the resource from the selected profile, and the installer-provided configuration takes precedence over the default the cluster ships.
 
-4. To revert to the pre-feature defaults, the administrator sets the PKI configuration back to the `Legacy` profile; the resource itself remains present as the cluster-scoped singleton. The `Legacy` profile's exact parameters are documented under [Day-1 (Installer) Integration](#day-1-installer-integration) so an administrator knows precisely what reverting restores.
+4. To revert to the pre-feature defaults, the administrator restores the equivalent configuration from backup or documentation. Profiles such as `Legacy` are an install-time convenience and are not a Day-2 API value, so there is no Day-2 "select profile" action; the concrete parameters the `Legacy` profile resolves to are documented under [Day-1 (Installer) Integration](#day-1-installer-integration), so the administrator knows precisely what to restore.
 
 5. Existing certificates continue to function until their natural rotation.
 
