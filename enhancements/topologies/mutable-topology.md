@@ -189,7 +189,11 @@ Administrators should reduce non-critical workload risk accordingly. Administrat
 9. The controller updates the infrastructure status fields:
    - `controlPlaneTopology` transitions from `SingleReplica` to `HighlyAvailable`
    - `infrastructureTopology` transitions from `SingleReplica` to `HighlyAvailable` (no dedicated workers, so it matches control plane topology)
-   - `topologyTransitionStatus.State` transitions to `TopologyTransitionInProgress`, becoming the authoritative record administrators and tooling should read for transition progress
+   - `topologyTransitionStatus.currentTransition` is populated with:
+     - `state: Partial`
+     - `reason: TransitionInProgress`
+     - `message: "Applying topology transition to HighlyAvailable"`
+     - `startedTime: <current time>`
 
 10. **Topology-driven operator reactions** — operators that watch the infrastructure status topology fields reconcile against the new values and adjust their deployment strategies, replica counts, and placement policies.
     This is a distinct phase from step 2: step 2 covers operators reacting to node presence before the transition is even admitted, step 10 covers operators reacting to the topology status change after admission.
@@ -201,21 +205,30 @@ Administrators should reduce non-critical workload risk accordingly. Administrat
 
 11. After a soak period (5 minutes) following the `Progressing` condition, the controller checks that control-plane/worker node readiness, etcd health, MachineConfig rollout, ingress router replicas, and API server operator replica counts have reconciled to the target values
 12. Once all checks pass, the controller clears the `Progressing` condition and sets `Upgradeable=True`.
-13. The controller sets the topology transition status to `TopologyTransitionComplete`. The infrastructure status reflects the completed transition — `spec.controlPlaneTopology` matches `status.controlPlaneTopology`, so no further action is taken.
+13. The controller updates `currentTransition` to:
+    - `state: Completed`
+    - `reason: PostTransitionChecksPassed`
+    - `message: "Topology transition completed successfully"`
+    - `completionTime: <current time>`
 
-The CLI returns immediately after patching `spec.controlPlaneTopology` (step 5). Administrators can monitor transition progress by watching the status field on the Infrastructure object (e.g., `oc get infrastructure cluster -o jsonpath='{.status.topologyTransitionStatus}'`), or the `Progressing`/`Upgradeable` conditions on the CCO `ClusterOperator` (e.g., `oc get clusteroperator cluster-config-operator -o yaml`).
+    The infrastructure status reflects the completed transition — `spec.controlPlaneTopology` matches `status.controlPlaneTopology`, so no further action is taken.
+
+The CLI returns immediately after patching `spec.controlPlaneTopology` (step 5). Administrators can monitor transition progress through:
+- Check if transitions are available: `oc get infrastructure cluster -o jsonpath='{.status.topologyTransitionStatus.supportedTransitions}'`
+- Check current transition state: `oc get infrastructure cluster -o jsonpath='{.status.topologyTransitionStatus.currentTransition.state}'`
+- Check evaluation status: `oc get infrastructure cluster -o jsonpath='{.status.topologyTransitionStatus.conditions[?(@.type=="TopologyTransitionsEvaluated")]}'`
+- Full status: `oc get infrastructure cluster -o yaml | yq .status.topologyTransitionStatus`
+- CCO ClusterOperator conditions: `oc get clusteroperator cluster-config-operator -o yaml`
 
 ##### Failure Handling
 
 The controller recognizes two distinct failure windows, and makes no guarantees about the node-driven etcd scaling itself:
 
-- **Before admission**: if a precondition never becomes true — for example etcd never finishes scaling to 3 voting members, or a control-plane node never becomes `Ready` — the controller simply never admits the transition.
-  `spec.controlPlaneTopology` remains diverged from `status.controlPlaneTopology` indefinitely, and `status.topologyTransitionStatus.State` is set to `PreflightCheckFailed` — with the specific reason reported in the `Message` field and as a Warning Event on the Infrastructure object, and the CCO `ClusterOperator`'s `Progressing` and `Upgradeable` conditions both carrying a matching reason (`Progressing=False`, `Upgradeable=False`) that the administrator to inspect.
+- **Before admission**: if a precondition never becomes true — for example etcd never finishes scaling to 3 voting members, or a control-plane node never becomes `Ready` — the controller does not populate `currentTransition`. The `supportedTransitions` array will either be empty or contain the requested transition with `reason` and `message` fields explaining why preconditions failed. The administrator inspects the `TopologyTransitionsEvaluated` condition status and the transition's `reason`/`message` to understand what failed.
   Failures in the node-driven etcd scaling itself — including quorum loss in the 2-member window, which requires manual recovery via `quorum-restore.sh` — are cluster-etcd-operator's existing failure domain; the topology transition controller neither triggers nor is able to recover from them, since they occur before it admits the transition.
 
-- **After admission**: if a post-transition validation criterion never passes (e.g., an operator fails to reconcile), `status.topologyTransitionStatus.State` remains `TopologyTransitionInProgress` and the `Progressing`/`Upgradeable` conditions remain `True`/`False` indefinitely. The administrator inspects CCO and the relevant operator's logs and Events for details.
-  `spec.controlPlaneTopology` remains unchanged — the controller re-evaluates reconciliation on every sync. To cancel a transition that has not yet reached the status update (step 9), the administrator resets `spec.controlPlaneTopology` to match the current `status.controlPlaneTopology` (e.g., `oc adm transition topology SingleReplica`).
-  After the status fields have been updated, the transition is effectively complete and cannot be cancelled — the cluster is in the new topology. This follows the standard Kubernetes pattern where controllers continuously reconcile toward the desired state until the user changes intent
+- **After admission**: if post-transition validation never passes (e.g., an operator fails to reconcile), `currentTransition.state` remains `Partial` indefinitely. The administrator inspects `currentTransition.reason` and `currentTransition.message`, CCO logs, and the relevant operator's logs for details. To cancel a transition that has started, the controller does not support cancellation — the transition must either complete or be manually recovered.
+  `spec.controlPlaneTopology` remains unchanged — the controller re-evaluates reconciliation on every sync. After the status fields have been updated, the transition is effectively complete and cannot be cancelled — the cluster is in the new topology. This follows the standard Kubernetes pattern where controllers continuously reconcile toward the desired state until the user changes intent
 
 ### API Extensions
 
@@ -280,67 +293,170 @@ ControlPlaneTopology TopologyMode `json:"controlPlaneTopology"`
 // +kubebuilder:default=HighlyAvailable
 InfrastructureTopology TopologyMode `json:"infrastructureTopology,omitempty"`
 
-// TopologyTransitionStatus reports the current status of the topology transition.
+// topologyTransitionStatus reports available topology transitions and current progress, if any.
+// It is omitted until the topology controller evaluates transitions.
+// +openshift:enable:FeatureGate=MutableTopology
 // +optional
 TopologyTransitionStatus *TopologyTransitionStatus `json:"topologyTransitionStatus,omitempty"`
 ```
 
-The `TopologyTransitionStatus` structure is defined with 2 fields: `State` and `Message`. `State` is a string enum which reflects the last observed state of the transition. `Message` will contain a human readable explanation for the `State`
+The `TopologyTransitionStatus` structure reports which transitions are supported and tracks progress of any initiated transition:
 
-```
+```go
+// TopologyTransitionStatus reports available topology transitions and current progress, if any.
 type TopologyTransitionStatus struct {
-	// Status is one of UnsupportedTransition, PreflightCheckFailed,
-	// TopologyTransitionInProgress, TopologyTransitionComplete, or AsExpected.
-	// +kubebuilder:validation:Enum=UnsupportedTransition;PreflightCheckFailed;TopologyTransitionInProgress;TopologyTransitionComplete;AsExpected
-	State TopologyTransitionState `json:"state,omitempty"`
+	// conditions reports whether supported transitions have been evaluated.
+	// TopologyTransitionsEvaluated is Unknown before evaluation, True when evaluation
+	// succeeds (even if no transitions are supported), and False when evaluation fails.
+	// At most one condition is present.
+	// +kubebuilder:validation:MaxItems=1
+	// +optional
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
-	// Message is human readable information about the reason for the current status.
+	// supportedTransitions represents the transitions valid for this cluster.
+	// An empty list means no transitions are currently supported from the current topology.
+	// At most one transition is supported currently (SNO to HA Compact).
+	// +kubebuilder:validation:MaxItems=1
+	// +required
+	SupportedTransitions []TopologyTransition `json:"supportedTransitions"`
+
+	// currentTransition is omitted until a topology transition starts.
+	// +optional
+	CurrentTransition *TopologyTransitionProgress `json:"currentTransition,omitempty"`
+}
+
+// TopologyState describes control-plane and infrastructure topology at one end of a transition.
+type TopologyState struct {
+	// controlPlaneTopology: Valid values are SingleReplica and HighlyAvailable.
+	// +kubebuilder:validation:Enum=SingleReplica;HighlyAvailable
+	// +required
+	ControlPlaneTopology TopologyMode `json:"controlPlaneTopology,omitempty"`
+
+	// infrastructureTopology: Valid values are SingleReplica and HighlyAvailable.
+	// +kubebuilder:validation:Enum=SingleReplica;HighlyAvailable
+	// +required
+	InfrastructureTopology TopologyMode `json:"infrastructureTopology,omitempty"`
+}
+
+// TopologyTransition represents one supported transition from source to target topology.
+type TopologyTransition struct {
+	// source is the topology this transition was evaluated from.
+	// +required
+	Source TopologyState `json:"source,omitempty,omitzero"`
+
+	// target is the topology this transition would move to.
+	// +required
+	Target TopologyState `json:"target,omitempty,omitzero"`
+
+	// reason is a CamelCase machine-readable explanation (e.g. PreflightCheckFailed).
+	// Must match ^[A-Z][A-Za-z0-9]*$ and be 1-128 characters.
+	// +optional
+	Reason string `json:"reason,omitempty"`
+
+	// message is a human-readable explanation, primarily for unavailable transitions.
+	// 1-2048 characters when present.
+	// +optional
 	Message string `json:"message,omitempty"`
 }
 
-// TopologyTransitionState tracks the last observed state of a topology transition
-// requested via spec.controlPlaneTopology.
-type TopologyTransitionState string
+// TopologyTransitionProgress describes a transition that has started.
+type TopologyTransitionProgress struct {
+	// state indicates current state: Completed, Partial (in progress/incomplete), or Failed.
+	// +kubebuilder:validation:Enum=Completed;Partial;Failed
+	// +required
+	State TransitionState `json:"state,omitempty"`
+
+	// reason indicates why state is as reported. 1-128 characters.
+	// +required
+	Reason string `json:"reason,omitempty"`
+
+	// message is human-readable information about the reason. 1-2048 characters.
+	// +required
+	Message string `json:"message,omitempty"`
+
+	// startedTime is when the transition was started.
+	// +optional
+	StartedTime *metav1.Time `json:"startedTime,omitempty"`
+
+	// completionTime is when the transition was fully applied.
+	// +optional
+	CompletionTime *metav1.Time `json:"completionTime,omitempty"`
+}
+
+// TransitionState tracks the state of a requested transition.
+type TransitionState string
 
 const (
-	// TopologyTransitionStatusUnsupportedTransition indicates that the requested
-	// topology transition is not supported.
-	TopologyTransitionStatusUnsupportedTransition TopologyTransitionState = "UnsupportedTransition"
-
-	// TopologyTransitionStatusPreflightCheckFailed indicates that a preflight
-	// check for the requested topology transition failed.
-	TopologyTransitionStatusPreflightCheckFailed TopologyTransitionState = "PreflightCheckFailed"
-
-	// TopologyTransitionStatusInProgress indicates that a topology transition is
-	// currently in progress.
-	TopologyTransitionStatusInProgress TopologyTransitionState = "TopologyTransitionInProgress"
-
-	// TopologyTransitionStatusComplete indicates that a topology transition has
-	// completed successfully.
-	TopologyTransitionStatusComplete TopologyTransitionState = "TopologyTransitionComplete"
-
-	// TopologyTransitionStatusAsExpected indicates that no topology transition is in progress
-	TopologyTransitionStatusAsExpected TopologyTransitionState = "AsExpected"
+	CompletedTransition TransitionState = "Completed" // Successfully completed
+	PartialTransition   TransitionState = "Partial"   // In progress or incomplete
+	FailedTransition    TransitionState = "Failed"    // Failed to apply
 )
+
+// Condition type for topology transition evaluation
+const TopologyTransitionsEvaluatedConditionType = "TopologyTransitionsEvaluated"
 ```
+
+**API Validation Constraints:**
+- `supportedTransitions`: required field, max 1 item (currently SNO→HA only), atomic list
+- `conditions`: max 1 item (TopologyTransitionsEvaluated), optional, map list keyed by type
+- `reason` in TopologyTransition: CamelCase matching `^[A-Z][A-Za-z0-9]*$`, 1-128 chars
+- `state` in TopologyTransitionProgress: required, enum-validated
+- `message` fields: 1-2048 characters when present
+- TopologyState fields: both required, enum-validated (SingleReplica, HighlyAvailable)
 
 No new enum values are added to `TopologyMode`. The existing values (`SingleReplica`, `HighlyAvailable`, `DualReplica`, `HighlyAvailableArbiter`) are sufficient.
 
-**Transition progress** will be reported via the `TopologyTransitionStatus` field of the `infrastructures.config.openshift.io` API object called "cluster".
+#### Design Rationale: Proactive Transition Availability
 
-The following table enumerates the possible values of the topology transition status field and what they represent, along with the `Progressing`/`Upgradeable` condition state each value drives.
-| Status | Meaning | `Progressing` condition | `Upgradeable` condition |
-|--------------|---------|--------------------------|--------------------------|
-| `AsExpected` | No topology transition is in progress (`spec.controlPlaneTopology` matches `status.controlPlaneTopology`). | `status: False`, `reason: AsExpected` | `status: True`, `reason: AsExpected` |
-| `TopologyTransitionInProgress` | A topology transition has been requested and admitted, and the controller is actively reconciling the cluster to the new topology. | `status: True`, `reason: TopologyTransitionInProgress` | `status: False`, `reason: TopologyTransitionInProgress` |
-| `UnsupportedTransition` | A requested topology transition could not be admitted because the requested topology change is not a supported transition. The specific reason is reported in the `Message` field. | `status: False`, `reason: UnsupportedTransition` | `status: True`, `reason: UnsupportedTransition` |
-| `PreflightCheckFailed` | A requested topology transition could not be admitted because a precondition was not met. The specific reason is reported in the `Message` field. | `status: False`, `reason: "AsExpected"` | `status: True`, `reason: "AsExpected"` |
-| `TopologyTransitionComplete` | A topology transition completed successfully. The field remains `TopologyTransitionComplete` for the lifetime of the cluster once reached. | `status: False`, `reason: TopologyTransitionComplete` | `status: True`, `reason: TopologyTransitionComplete` |
+The `TopologyTransitionStatus` structure enables administrators to discover available transitions before requesting one:
 
-| Condition Type | Meaning |
-| -------------- | ------- |
-| `TopologyTransitionControllerProgressing` | A transition has been admitted and post-transition validation has not yet passed. `status: True` while awaiting downstream reconciliation, `status: False` when idle, rejected, or complete. |
-| `TopologyTransitionControllerUpgradeable` | Whether CVO may start an upgrade. `status: False` while a transition is requested, pending, or in progress; `status: True` when idle or complete. |
+**Proactive Evaluation:**
+1. Controller continuously evaluates which transitions are supported based on current cluster state
+2. `supportedTransitions` array publishes available options with their source and target topologies
+3. When preconditions fail, the transition includes `reason` and `message` explaining why it's unavailable
+4. `TopologyTransitionsEvaluated` condition indicates whether the array reflects current state
+
+**Separation of Concerns:**
+- **Availability**: `supportedTransitions` array shows what transitions are possible
+- **Progress**: `currentTransition` tracks the state of an initiated transition
+- **Evaluation Status**: `TopologyTransitionsEvaluated` condition indicates staleness
+
+**Benefits:**
+- CLI can query available transitions without duplicating precondition checks
+- Administrators see why a transition is unavailable before requesting it
+- Transition failures provide structured reason/message fields for troubleshooting
+- Controller reports one transition at a time (`maxItems: 1`) reflecting current SNO→HA support
+
+**Transition Status Reporting**
+
+The controller reports transition status through three mechanisms:
+
+**1. TopologyTransitionsEvaluated Condition** (in `status.topologyTransitionStatus.conditions`):
+- **Unknown**: Before evaluation or while refreshing checks
+- **True**: Evaluation finished successfully (even if no transitions are supported)
+- **False**: Evaluation failed
+- **Purpose**: Indicates whether `supportedTransitions` array reflects current state
+
+**2. supportedTransitions Array** (in `status.topologyTransitionStatus`):
+- Contains transitions valid for current cluster state
+- Empty array is valid when evaluation succeeds but no transitions are supported
+- Controller populates this proactively (before a transition is requested)
+- Administrators/CLI can inspect this to determine available options
+
+**3. currentTransition Progress** (in `status.topologyTransitionStatus`):
+- Omitted until a transition starts
+- `state` field values:
+  - **Completed**: Transition successfully applied
+  - **Partial**: Transition in progress or not completely applied
+  - **Failed**: Transition failed to apply
+- Includes `reason`, `message`, `startedTime`, `completionTime` for observability
+
+**ClusterOperator-level Conditions** (on CCO `ClusterOperator`):
+
+| Condition | Relationship to TopologyTransitionStatus |
+|-----------|------------------------------------------|
+| `Progressing` | Set to `True` while `currentTransition.state` is `Partial` |
+| `Upgradeable` | Set to `False` while a transition is in progress |
 
 These are existing operator conditions on the CCO `ClusterOperator`, not dedicated transition condition types.
 There is no separate status for etcd scaling — that scaling is a precondition the controller checks, not a state it tracks or reports on directly (see [Failure Handling](#failure-handling)). Reason values will be refined during dev preview implementation.
@@ -407,10 +523,13 @@ These preconditions mean the administrator's node join and CEO's existing node-d
 
 1. Set `Upgradeable=False` and a `Progressing` condition on the CCO `ClusterOperator` in the same update, so CVO cannot start an upgrade while the transition is applied
 2. Re-read the Infrastructure CR and confirm the requested spec has not changed since preconditions were checked
-3. Update `status.controlPlaneTopology`, `status.infrastructureTopology`, and `status.topologyTransitionStatus.State` (set to `TopologyTransitionInProgress`) together in a single Infrastructure status update.
+3. Update status fields together in a single Infrastructure status update:
+   - `status.controlPlaneTopology` → `HighlyAvailable`
+   - `status.infrastructureTopology` → `HighlyAvailable`
+   - `status.topologyTransitionStatus.currentTransition` populated with state=Partial, reason, message, startedTime
 4. On later syncs, wait a soak period (5 minutes) anchored on the `Progressing` condition's `LastTransitionTime` (not `Upgradeable`'s — see [Workflow Description](#workflow-description) for why) — then begin checking post-transition validation criteria
 
-If no supported transition matches, or a precondition fails, the controller sets `status.topologyTransitionStatus.State` to `UnsupportedTransition` or `PreflightCheckFailed` (as appropriate), posts a Warning Event on the Infrastructure object, and sets `Progressing=False`/`Upgradeable=True` on the ClusterOperator.
+If preconditions fail, the controller updates `supportedTransitions` to either be empty (if no transitions are possible) or contain the transition with appropriate `reason` and `message` explaining the failure. The controller does not populate `currentTransition` until preconditions pass.
 
 **Validation criteria** (checked once the soak period has elapsed; all must pass to consider the transition complete):
 
@@ -421,9 +540,7 @@ If no supported transition matches, or a precondition fails, the controller sets
 - The default IngressController reports a minimum of 2 available router replicas
 - kube-apiserver reports status for 3 nodes and openshift-apiserver reports 3 ready replicas
 
-Once all criteria pass, the controller sets `status.topologyTransitionStatus` to
-`TopologyTransitionComplete` and sets `Progressing=False` and `Upgradeable=True` on
-the ClusterOperator.
+Once all criteria pass, the controller updates `currentTransition` to state=Completed with appropriate reason, message, and completionTime, and sets `Progressing=False` and `Upgradeable=True` on the ClusterOperator.
 
 #### `oc adm transition topology` CLI Command
 
@@ -760,19 +877,14 @@ The `DesiredControlPlaneTopologyMode` named type provides API-server-level valid
 ### Detecting Issues
 
 **Transition Stuck or Failed:**
-- Symptom: the topology transition status field on the Infrastructure object shows
-  `TopologyTransitionInProgress`, `UnsupportedTransition`, or `PreflightCheckFailed` for
-  an extended period
-- Check: `oc get infrastructure cluster -o jsonpath='{.status.topologyTransitionStatus}'`
-  and `oc describe infrastructure cluster` for Warning Events recorded on the
-  Infrastructure object, and `oc get clusteroperator cluster-config-operator -o yaml`
-  for the `Progressing`/`Upgradeable` conditions
+- Symptom: the `currentTransition` field shows state=Partial for an extended period, or `supportedTransitions` is empty when a transition should be available
+- Check current state: `oc get infrastructure cluster -o jsonpath='{.status.topologyTransitionStatus.currentTransition.state}'`
+- Check progress details: `oc get infrastructure cluster -o jsonpath='{.status.topologyTransitionStatus.currentTransition.reason}'`
+- Check supported options: `oc get infrastructure cluster -o jsonpath='{.status.topologyTransitionStatus.supportedTransitions}'`
+- Check ClusterOperator conditions: `oc get clusteroperator cluster-config-operator -o yaml`
 - Check: cluster-config-operator logs for transition controller errors
 - Check: CEO logs for etcd scaling operations
-- Resolution: For `UnsupportedTransition` or `PreflightCheckFailed`, address the
-  reported precondition or unsupported request and allow a relevant cluster-object
-  change to trigger reevaluation. Inspect the `Message` field for details. Contact
-  support if the condition persists.
+- Resolution: If transition is unavailable, inspect the transition's `reason` and `message` fields in `supportedTransitions` to understand what failed. Address the reported precondition and allow cluster-object changes to trigger reevaluation. Contact support if the condition persists.
 
 **etcd Scaling Failures:**
 - Symptom: etcd cluster unhealthy during the node-driven prerequisite scaling — the transition controller will not admit the transition until this resolves
@@ -784,7 +896,7 @@ The `DesiredControlPlaneTopologyMode` named type provides API-server-level valid
 
 | Failure Mode | Impact | Recovery |
 | ------------ | ------ | -------- |
-| Admission precondition is false | No impact — transition not admitted; `topologyTransitionStatus=PreflightCheckFailed` or `UnsupportedTransition`; a Warning Event identifies the reason | Address the precondition; a relevant cluster-object change triggers reevaluation |
+| Admission precondition is false | No impact — transition not admitted; `currentTransition` not populated; `supportedTransitions` either empty or contains transition with failure reason/message | Address the precondition; controller re-evaluates and updates `supportedTransitions` |
 | Sync/API error during reconciliation | Transition progress is interrupted; the controller reports the error | Inspect the error; standard rate-limited workqueue backoff retries the sync |
 | etcd quorum loss during prerequisite scaling (2-member window, pre-admission) | API unavailable — no automated recovery possible; transition controller cannot help since the transition was never admitted | Manual intervention required: administrator runs `quorum-restore.sh` per standard etcd disaster recovery procedures, independent of the transition controller |
 | Operator fails to reconcile post-transition | Operator-specific impact | Investigate operator logs; file bug against the operator component |
