@@ -79,34 +79,26 @@ Today every `MustGather` author must independently know and repeat the right sto
 
 ## Proposal
 
-An administrator creates a `MustGatherPolicy`. When a `MustGather` is reconciled,
-the operator resolves the applicable policy, merges the policy-provided defaults
-with the `MustGather` spec, provisions or reuses a PVC accordingly, applies the
-resource requests/limits and (optionally) the gather-pod `NetworkPolicy`,
-validates the requested upload target against the allow list, and records the
-resolved policy reference and observed revision in `MustGather.status`.
+An administrator creates a `MustGatherPolicy`. On each `MustGather` reconcile the
+operator resolves the applicable policy, merges its defaults with the spec,
+provisions or reuses a PVC, applies the resource limits and gather-pod
+`NetworkPolicy`, checks the upload target against the allow list, and records the
+policy reference and observed revision in `MustGather.status`. A separate
+controller reconciles the policy itself.
 
-A dedicated controller reconciles `MustGatherPolicy` (validating it and surfacing
-status), separate from the existing `MustGather` controller which consumes the
-resolved policy.
-
-Policy inheritance is **opt-in and OFF by default**: until the administrator
-creates a `MustGatherPolicy`, `MustGather` behavior is unchanged and
-`status.inheritsPolicy` is unset.
+Inheritance is opt-in and OFF by default: with no `MustGatherPolicy` present,
+`MustGather` behaves as it does today and `status.inheritsPolicy` is unset.
 
 ### API Extensions
 
-Two new kinds are introduced under the existing `operator.openshift.io` group,
-plus additive changes to the existing `MustGather` kind. The API is versioned so
-that Phase 1 ships `v1alpha1` and Phase 2 promotes to `v1`.
+One new kind, `MustGatherPolicy`, plus additive changes to `MustGather`. Phase 1
+ships `v1alpha1`; Phase 2 promotes to `v1`.
 
 #### Phase 1 (Tech Preview): `v1alpha1` singleton `MustGatherPolicy`
 
-`MustGatherPolicy` is **cluster-scoped** and, in Phase 1, a **singleton**: the
-only accepted name is `cluster`. This mirrors the well-established OpenShift
-config singleton convention (e.g. `config.openshift.io` resources) and avoids the
-ambiguity of "which policy applies" before the selection mechanism exists in
-Phase 2.
+`MustGatherPolicy` is cluster-scoped and, in Phase 1, a singleton named `cluster`,
+following the OpenShift config-singleton convention. A singleton sidesteps "which
+policy applies" until Phase 2 adds selection.
 
 Example:
 
@@ -244,8 +236,7 @@ type NetworkPolicyProfile struct {
 }
 ```
 
-Additive change to `MustGather` in Phase 1 — a new **status** field only (no spec
-change):
+Phase 1 adds a status field to `MustGather`; the spec is untouched:
 
 ```go
 // api/v1/mustgather_types.go (and v1alpha1)
@@ -253,6 +244,11 @@ change):
 // MustGatherStatus defines the observed state of MustGather
 type MustGatherStatus struct {
 	// ... existing fields unchanged ...
+
+	// observedGeneration is the metadata.generation of this MustGather that the
+	// controller has most recently reconciled.
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
 	// inheritsPolicy records the MustGatherPolicy that was resolved and applied
 	// to this MustGather, and the policy revision that was observed. It is unset
@@ -274,20 +270,24 @@ type InheritedPolicyStatus struct {
 }
 ```
 
-`observedGeneration` records the policy's `metadata.generation` that was last
-reconciled into this `MustGather`. Because Phase 1 adds only an optional `status` field, it is fully backward
-compatible. The existing `MustGather` spec-immutability validation
-(`self.spec == oldSelf.spec`) is unaffected because no spec field is added.
+Two `observedGeneration` values, each tracking its own object:
+
+- `status.observedGeneration` — the `MustGather` generation last reconciled.
+- `status.inheritsPolicy.observedGeneration` — the `MustGatherPolicy` generation
+  last applied to this run, for drift detection against the live policy.
+
+Adding only optional status fields is backward compatible, and the existing
+spec-immutability rule (`self.spec == oldSelf.spec`) is untouched since no spec
+field changes.
 
 #### Phase 2 (GA): `v1` multiple policies + user-selectable inheritance
 
-The API graduates to `v1`. `MustGatherPolicy` is no longer a singleton: multiple
-policies may exist, and a `MustGather` selects one to inherit. The policy also
-gains the ability to declare which inherited fields a user may override.
+The API graduates to `v1`. The singleton restriction is dropped: multiple policies
+may coexist, a `MustGather` selects one to inherit, and a policy can declare which
+inherited fields a user may override.
 
-Additive change to `MustGather` in Phase 2 — a new optional **spec** field
-(set at creation, consistent with the existing immutable-spec model), plus reuse
-of the same `status.inheritsPolicy` introduced in Phase 1:
+Phase 2 adds an optional spec field to `MustGather` (set at creation, per the
+immutable-spec model) and reuses the Phase 1 `status.inheritsPolicy`:
 
 ```go
 // api/v1/mustgather_types.go
@@ -302,11 +302,10 @@ type MustGatherSpec struct {
 }
 ```
 
-The `status.inheritsPolicy` field is identical to Phase 1, which is what makes
-the transition forward compatible: a Phase 1 client that only reads
-`status.inheritsPolicy` continues to work unchanged; in Phase 2 the reconciler
-simply resolves the policy named in `spec.inheritsPolicy` (instead of the
-singleton) and records the same reference + `observedGeneration` in status.
+Keeping `status.inheritsPolicy` identical across phases is what makes the
+transition forward compatible: a Phase 1 client reading that field keeps working,
+and the Phase 2 reconciler resolves the policy from `spec.inheritsPolicy` instead
+of the singleton, recording the same reference and `observedGeneration`.
 
 Per-field override control is added to the policy spec:
 
@@ -333,51 +332,137 @@ type MustGatherPolicySpec struct {
 type MustGatherOverridableField string
 ```
 
-The migration from `v1alpha1` to `v1` follows the same identity-conversion
-pattern already used for `MustGather` (v1 is a superset/compatible copy of
-v1alpha1, so Kubernetes performs identity conversion without a conversion
-webhook; v1 becomes the storage version and v1alpha1 remains served).
+`v1alpha1`→`v1` uses identity conversion, as `MustGather` already does: `v1` is a
+compatible superset, so no conversion webhook is needed. `v1` becomes the storage
+version; `v1alpha1` stays served.
+
+#### Child objects: ownership, discovery, and status
+
+Applying a policy produces two kinds of child objects:
+
+- a **NetworkPolicy** in **every namespace**, and
+- a **PVC** provisioned **lazily, per `MustGather` run** (the policy holds only the
+  storage *profile*).
+
+Fan-out to every namespace is unbounded, so the policy status must not enumerate
+its children: a per-namespace `(name, namespace)` list on a cluster-scoped
+singleton grows with the namespace count, can exceed the etcd object-size limit,
+and makes every status write a conflict hotspot. Other OpenShift fan-out designs
+([trust-manager](../cert-manager/trust-manager-controller.md),
+[cert-manager network policies](../cert-manager/cert-manager-network-policies.md),
+[external-secrets network policy](../external-secrets-operator/external-secrets-network-policy.md))
+track children via ownerReferences and labels instead. Three mechanisms cover it:
+
+**1. OwnerReferences (lifecycle / GC).**
+Each namespaced `NetworkPolicy` is owned by the cluster-scoped `MustGatherPolicy`.
+A namespaced dependent with a cluster-scoped owner is garbage-collected, so
+deleting the policy cascades to every NetworkPolicy — the mechanism OLM uses to
+clean up across namespaces (see [olm/simplify-apis](../olm/simplify-apis.md)).
+
+> [etcd/automated-backups](../etcd/automated-backups.md) cautions that
+> cluster-scoped→namespaced GC "will not be enforced." That reads the rule
+> backwards: a namespaced dependent with a cluster-scoped owner *is* collected;
+> only the reverse is not. Re-verify against the target Kubernetes version. A
+> finalizer on the policy backstops cleanup regardless, removing every fanned-out
+> NetworkPolicy before the policy object is released.
+
+The per-run **PVC** is owned by its `MustGather` and cleaned up with the run,
+subject to the retention policy.
+
+**2. Labels (discovery).**
+Every child carries labels so enumeration is a selector query, not a status read:
+
+- `app.kubernetes.io/managed-by: must-gather-operator`
+- `must-gather.openshift.io/policy-name: <name>`
+- `must-gather.openshift.io/policy-uid: <uid>` (survives name reuse)
+- `must-gather.openshift.io/policy-generation: <generation>` — the policy
+  generation the child was rendered from
+
+`oc get networkpolicy -A -l must-gather.openshift.io/policy-name=cluster` lists
+them. The `policy-generation` label acts as a per-child observed generation:
+children below `policy.metadata.generation` are stale, and a selector finds them.
+
+**3. Conditions + observedGeneration (rollout summary).**
+The policy status stays O(1) regardless of namespace count:
+
+```go
+// api/v1alpha1/mustgatherpolicy_types.go
+
+// MustGatherPolicyStatus defines the observed state of MustGatherPolicy.
+type MustGatherPolicyStatus struct {
+	// observedGeneration is the most recent generation observed for this policy.
+	// Rollout for a given spec is complete when observedGeneration equals
+	// metadata.generation and the Progressing condition is False.
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
+	// conditions represent the latest available observations of the policy rollout.
+	//   Available:   the policy has been applied cluster-wide.
+	//   Progressing: rollout to namespaces is in progress.
+	//   Degraded:    one or more namespaces failed; the message carries the count,
+	//                e.g. "2 of 42 namespaces failed".
+	// +listType=map
+	// +listMapKey=type
+	// +optional
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
+}
+```
+
+Failing namespaces are named in the `Degraded` message, not in a structured list.
+A later revision could add a `MaxItems`-capped list of only the failing namespaces
+(as [subscription-injection](../subscription-content/subscription-injection.md)
+does); Phase 1 stays conditions-only.
+
+Per-run children are tracked the same way: the PVC and NetworkPolicy a `MustGather`
+uses are owned by it and carry the discovery labels, so their names need not be
+copied into `MustGather.status`. That keeps `MustGather.status` to the two
+`observedGeneration` values and the policy reference.
 
 ### Implementation Details/Notes/Constraints
 
-- **Opt-in / OFF by default.** The `MustGather` controller only consults a policy
-  when one exists. In Phase 1 that means the singleton `MustGatherPolicy/cluster`;
-  in Phase 2 it means a policy named by `spec.inheritsPolicy`. Absent that,
-  behavior is exactly as it is today and `status.inheritsPolicy` stays unset.
+- **Opt-in / OFF by default.** The `MustGather` controller consults a policy only
+  when one exists — the singleton in Phase 1, or the policy named by
+  `spec.inheritsPolicy` in Phase 2. Otherwise behavior is unchanged and
+  `status.inheritsPolicy` stays unset.
 
-- **Resolution & merge order.** For each inheritable field, the effective value is:
-  the user-set `MustGather` spec value if present and permitted, otherwise the
-  policy value, otherwise the operator default. In Phase 2, if a field is *not*
-  in the policy's `allowUserOverrides` and the user set it, the run is rejected.
+- **Resolution & merge order.** Per inheritable field: the user's spec value if set
+  and permitted, else the policy value, else the operator default. In Phase 2, a
+  user value for a field absent from `allowUserOverrides` rejects the run.
 
 - **Inheritance scope.** Only `storage`, `resources`, `uploadTarget`, and
-  `networkPolicy` participate in inheritance. `serviceAccountName`,
-  `imageStreamRef`, and `obfuscate` are explicitly excluded for now (see
-  Non-Goals).
+  `networkPolicy` are inherited. `serviceAccountName`, `imageStreamRef`, and
+  `obfuscate` are excluded for now (see Non-Goals).
 
-- **Status recording.** On every successful reconcile the controller sets
-  `status.inheritsPolicy.name` and `status.inheritsPolicy.observedGeneration` to
-  the policy actually applied. Downstream tooling can compare
-  `observedGeneration` against the live policy's `metadata.generation` to detect
-  runs made under a stale policy.
+- **Two controllers.** A new controller owns `MustGatherPolicy`: validation,
+  rollout status, and fan-out/cleanup of the per-namespace NetworkPolicies. The
+  `MustGather` controller owns the per-run PVC — provisioning it from the profile
+  and applying the policy's retention, full-threshold, and expansion settings.
+  Retention/reclaim must not race with a run still mounting the volume.
 
-- **Two controllers.** A new controller owns `MustGatherPolicy` (validation,
-  status, and lifecycle of managed PVCs — retention, full-threshold handling,
-  optional expansion). The existing `MustGather` controller consumes the resolved
-  policy. Care is needed so PVC lifecycle actions (retention/reclaim) do not race
-  with in-flight `MustGather` runs still mounting the volume.
+- **Singleton enforcement (Phase 1).** A CEL `XValidation` rule pins
+  `metadata.name == "cluster"`.
 
-- **Singleton enforcement (Phase 1).** Enforced via a CEL/`XValidation` rule
-  pinning `metadata.name == "cluster"`, matching OpenShift config-singleton
-  conventions.
+- **NetworkPolicy ownership.** The operator sets the `podSelector` itself so each
+  `NetworkPolicy` targets only its gather pods; a user-supplied `podSelector` is
+  ignored, keeping unrelated workloads unaffected.
 
-- **NetworkPolicy ownership.** The operator overwrites the `podSelector` of the
-  materialized `NetworkPolicy` so it can only ever target the gather pods it
-  creates; a user-supplied `podSelector` is ignored to prevent a policy from
-  affecting unrelated workloads.
+- **NetworkPolicy fan-out.** The policy controller writes the `NetworkPolicy` to
+  every namespace and watches `Namespace` creation so new namespaces converge.
+  Each object is owned by the policy and carries the discovery labels.
+
+- **Lazy PVC provisioning.** The PVC is created only when a run needs one, in the
+  run's namespace, owned by its `MustGather`.
+
+- **Cleanup.** Deleting the policy cascades to its NetworkPolicies via
+  ownerReference GC, backstopped by the controller finalizer.
 
 ### Topology Considerations
-Nil
+
+The feature needs the `NetworkPolicy` API and a CSI/StorageClass. Where either is
+absent, inheritance degrades gracefully: fan-out is a no-op and storage falls back
+to ephemeral. On **SNO** the resource-limit guardrails matter most, bounding a
+gather run on a constrained node. **MicroShift**, **Hypershift/HCP**, and **OKE**
+specifics are TBD.
 
 ## Implementation History
 
@@ -411,30 +496,58 @@ Nil
 
 ## Upgrade / Downgrade Strategy
 
-All `MustGather` changes are additive (a status field in Phase 1, an optional
-spec field in Phase 2), so upgrading the operator never breaks existing
-`MustGather` objects. 
-
-The `v1alpha1` -> `v1` API graduation uses identity conversion, so no conversion webhook is required and stored objects
-convert transparently.
+All `MustGather` changes are additive, so upgrading the operator never breaks
+existing objects. The `v1alpha1`→`v1` graduation uses identity conversion, so no
+webhook is needed and stored objects convert transparently.
 
 ## Operational Aspects of API Extensions
 
-**Storage**:
-- Two reconcilers are added. The `MustGatherPolicy` controller manages PVC lifecycle; operator should surface `Degraded`/`Progressing`-style conditions on the policy status and metrics for provisioned/retained/reclaimed volumes.
-- Failure modes to define: policy references an invalid/unavailable StorageClass; requested upload target not in the allow list (must fail the run clearly); `NetworkPolicy` unsupported on the platform; PVC full and expansion not possible.
+- The policy controller fans out NetworkPolicies and reports
+  `Available`/`Progressing`/`Degraded` plus `observedGeneration`. The `MustGather`
+  controller owns per-run PVCs and emits metrics for
+  provisioned/retained/reclaimed volumes.
+- Failure modes to define: invalid or unavailable StorageClass; upload target not
+  in the allow list (fail the run clearly); `NetworkPolicy` unsupported on the
+  platform; PVC full with expansion impossible; a subset of namespaces failing
+  fan-out (reported via `Degraded`).
 
 ## Test Plan
 
-<!--
 ### Risks and Mitigations
+
+- **Fan-out blast radius.** Writing a `NetworkPolicy` to every namespace touches
+  `kube-system`, `openshift-*`, and the rest. *Mitigation:* the operator owns the
+  `podSelector`, so a policy only ever selects its own gather pods, and an opt-out
+  (namespace annotation or exclusion list) lets admins skip sensitive namespaces.
+- **Stale children after an update.** Rollout is asynchronous, so a namespace may
+  briefly hold an older-generation NetworkPolicy. *Mitigation:* the
+  `policy-generation` label surfaces stale objects, and `status.observedGeneration`
+  with the `Progressing` condition reports incomplete rollout.
+- **GC direction assumption.** Cleanup assumes cluster-scoped-owner →
+  namespaced-dependent GC. *Mitigation:* the finalizer backstops it; re-verify
+  against the target Kubernetes version.
 
 ### Drawbacks
 
+- Fan-out adds reconcile load proportional to namespace count and a `Namespace`
+  watch, for a feature many namespaces never use.
+- A second controller and a finalizer widen the operational surface.
+
 ### Removing a deprecated feature
+
+N/A — nothing is removed; all changes are additive.
 
 ## Version Skew Strategy
 
+Changes are additive and both API versions are served during graduation, so mixed
+control-plane/operator versions interoperate: an older operator ignores the new
+`spec`/`status` fields, and the fanned-out NetworkPolicies remain valid on their
+own.
+
 ## Support Procedures
 
--->
+- List fanned-out objects:
+  `oc get networkpolicy -A -l must-gather.openshift.io/policy-name=<name>`.
+- Find stale children: select on `must-gather.openshift.io/policy-generation` and
+  compare to the policy's `metadata.generation`.
+- Check rollout: `oc get mustgatherpolicy <name> -o jsonpath='{.status}'`.
