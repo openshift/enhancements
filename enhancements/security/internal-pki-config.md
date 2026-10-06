@@ -393,8 +393,8 @@ spec:
         algorithm: ECDSA
         ecdsa:
           curve: P256
-    # Optional. Overrides for specific named certificates (highest precedence);
-    # the exact field name and uniqueness mechanism are defined by the API PR.
+    # Optional. Overrides for specific named certificates (highest precedence).
+    # Modeled as a list keyed by name (+listType=map / +listMapKey=name), so names are unique.
     namedCertificates:
       - name: openshift.io/service-ca.service-serving-signer
         key:
@@ -745,6 +745,7 @@ The PKI API uses **CRD-level CEL validation** for comprehensive validation.
 
 5. **Named override names:**
    - Override names are validated for **format only** (a syntactically valid name). No static list of valid names is enforced, because certificates can be registered dynamically (for example, by OLM operators). Names outside the core platform must not use the `openshift.io` prefix; some names may map to multiple certificates (for example, etcd per-node serving certs) and are documented by the owning component.
+   - Named overrides are modeled as a list keyed by name (`+listType=map`, `+listMapKey=name`), so the API server enforces that a given name appears at most once without a CEL expression. This is structural uniqueness only; it does not validate that the name refers to an existing certificate.
 
 **Additional Runtime Validation:**
 - Operators validate that certificate lifetimes are compatible with key sizes (e.g., log warning if using RSA 2048 for a 10-year certificate)
@@ -1016,7 +1017,6 @@ A considered alternative was to treat a nil `PKI` spec as "Unmanaged" (operators
 - PKI status reporting is distributed (per-operator), reusing existing operator conditions; migration documentation will include an `oc get clusteroperators` convergence check. (Still open: whether an aggregated view is worth adding later.)
 - Whether rollout coordination across control-plane instances is needed to prevent simultaneous reissue or restart during a reconfiguration (relevant to multi-node clusters, most impactful on SNO).
 - Whether to detect and report conflicts between the PKI configuration and the cluster's TLS security profile (for example, ECDSA-only certificates under a profile that requires RSA key exchange). The two are treated as independent today; conflict detection is not yet designed.
-- Uniqueness enforcement for named-override names (CEL uniqueness is quadratic and would need a count cap, versus first-match-wins list ordering).
 - Whether the installer should accept a full PKI manifest at install time (for GitOps), given that some compile-time certificate paths may not pick it up.
 - **`keyManagement` is in scope (see [Key Management](#key-management-service-account-token-signing)), with the bound service-account token signer as the first entry.** The design choices and residual open points:
   - **Candidate keys.** The clearest is **service-account token signing** (the bound SA signer, currently a hardcoded RSA 2048 keypair published as raw JWKs at the OIDC JWKS endpoint; and the legacy SA token signing key). Other possible future members: any in-cluster JWT issuer, JWT-SVID-style workload-identity signing, or cluster-generated attestation/image-signing keys. The set is small today, which itself raises whether a dedicated section is warranted versus handling these ad hoc per component.
