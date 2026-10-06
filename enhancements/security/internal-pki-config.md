@@ -317,8 +317,6 @@ stateDiagram-v2
 
 4. To revert to the pre-feature defaults, the administrator restores the equivalent configuration from backup or documentation. Profiles such as `Legacy` are an install-time convenience and are not a Day-2 API value, so there is no Day-2 "select profile" action; the concrete parameters the `Legacy` profile resolves to are documented under [Day-1 (Installer) Integration](#day-1-installer-integration), so the administrator knows precisely what to restore.
 
-5. Existing certificates continue to function until their natural rotation.
-
 ### API Extensions
 
 This enhancement adds a new Custom Resource Definition (CRD) to the OpenShift API:
