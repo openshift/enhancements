@@ -83,8 +83,8 @@ alert rules join three metric streams:
   (already present) — PV/PVC metadata: maps a CSI volume handle to its PV and
   bound PVC name and namespace.
 - [`csi-volume-device-exporter`](https://github.com/csi-addons/csi-volume-device-exporter)
-  (new) — the missing link: maps each CSI volume handle to the block device
-  name visible to the node, so the other two streams can be joined.
+  (new, introduced by this KEP) — the missing link: maps each CSI volume handle to the
+  block device name visible to the node, so the other two streams can be joined.
 
 CSO manages the exporter DaemonSet and the alert rules together, gated on the
 `StoragePathAlert` feature gate. When the gate is enabled, CSO reconciles the
@@ -180,6 +180,12 @@ CSO is responsible for two things:
   disappears entirely from sysfs, the mapping metric disappears with it, losing
   the PVC label exactly when a path-loss alert is most needed. Alert rules must
   treat a missing mapping as an unknown state, not as recovery.
+- **Test environment availability:** Only a few CI environments provide multipath
+  connectivity to backend storage through Fibre Channel (FC), NVMe-oF, or iSCSI.
+  Run end-to-end functional tests in environments that provide these capabilities.
+  In other environments, run regression tests to verify that the new component
+  does not disrupt existing functionality.
+  Let promotion approvers acklowledge any exception from 5 functional tests on all platforms rule.
 
 ### Drawbacks
 
@@ -202,19 +208,85 @@ that use only single non-multipath devices and therefore produce no path alerts.
 - **Other lifecycle owner:** CSO already owns storage deployment; no other
   operator has a better fit.
 
-
 ## Test Plan
 
-- **End-to-end tests** (the primary validation gate)
-  - Using a software iSCSI or NVMe-oF target, provision a multipath CSI PVC,
-    simulate partial path degradation and full path loss, and verify that the
-    correct `CSIAddonsVolumeMultipath*` or `CSIAddonsVolumeNVMeSubsystem*` alert
-    fires with the expected PV and PVC labels. Verify the alert clears after
-    path restoration.
-  - These tests require dedicated CI infrastructure with reproducible multipath
-    storage; for initial Tech Preview delivery they could be manual.
+### End-to-end tests (the primary validation gate)
 
-- **Scale and lifecycle tests**
+   Using a software iSCSI or NVMe-oF target, provision a multipath CSI PVC,
+   simulate partial path degradation and full path loss, and verify that the
+   correct `CSIAddonsVolumeMultipath*` or `CSIAddonsVolumeNVMeSubsystem*` alert
+   fires with the expected PV and PVC labels. Verify the alert clears after
+   path restoration.
+
+#### Test environment requirements
+
+  - iSCSI multipath: An OpenShift cluster with a CSI driver that provisions block
+    PVCs from a reproducible software iSCSI target over at least two independently
+    controllable paths.
+  - NVMe-oF: An OpenShift cluster with a CSI driver that provisions block PVCs from
+    a reproducible NVMe-oF target with at least two independently controllable controller paths.
+
+#### Available test environments
+
+  So far two environemnts are available:
+  - A real NetApp ONTAP server on AWS. It is slow (>30 minutes to start NetApp in CI),
+    expensive ( +/- doubles cost of the whole CI job), but it provides full end to end coverage
+    with all the features we need (iSCSI, NVMeoF, both with LUKS on top of multipath, both filesystem
+    and  raw block volumes).
+  - Bare Linux iSCSI configured manually over loopback and csi-driver-host-path on any cloud,
+    i.e. with a fake CSI driver. We will be able to test only filesystem volumes on iSCSI + multipath + LUKS.
+    No raw block volumes, probably without NVMeoF. 
+
+  No test environment with CSI volumes backed by a physical FC fabric has been identified.
+  Because customers running bare-metal deployments with FC-backed storage are expected to benefit
+  from this feature, access to such an environment is strongly recommended for at least manual
+  validation of alert behavior.
+
+#### Test table
+
+  The following table lists the test scenarios. Run the applicable scenarios on each test platform,
+  according to its support for iSCSI, NVMe-oF, and LUKS encryption.
+
+| ID | Test | Alert to check | Severity | What to verify |
+| --- | --- | --- | --- | --- |
+| T1 | iSCSI, unencrypted: one path fails and recovers | CSIAddonsVolumeMultipathDegraded | Warning | Alert fires after 5 minutes with the alert-contract labels; clears after all path restoration. |
+| T2 | iSCSI, unencrypted: all paths fail and recover	| CSIAddonsVolumeMultipathLost | Critical | Alert fires after 1 minute with the alert-contract labels; clears when at least one path becomes available again. |
+| T3 | iSCSI, LUKS-encrypted: one path fails and recover | CSIAddonsVolumeMultipathDegraded | Warning | Alert fires after 5 minutes and identifies the PVC above the encrypted device stack; clears after all path restoration. |
+| T4 | iSCSI, LUKS-encrypted: all paths fail | CSIAddonsVolumeMultipathLost | Critical | Alert fires after 1 minute with the alert-contract labels; clears when at least one path becomes available again. |
+| T5 | NVMe-oF, unencrypted: one controller path fails and recover | CSIAddonsVolumeNVMeSubsystemDegraded	| Warning | Alert fires after 5 minutes with the alert-contract labels; clears after all paths restoration. |
+| T6 | NVMe-oF, unencrypted: all controller paths fail and recover | CSIAddonsVolumeNVMeSubsystemLost | Critical | Alert fires after 1 minute with the alert-contract labels; clears when at least one path becomes available again. |
+| T7 | NVMe-oF, LUKS-encrypted: one controller path fails	| CSIAddonsVolumeNVMeSubsystemDegraded	| Alert | Alert fires after 5 minutes and  identifies the PVC above the encrypted device stack; clears after all paths restoration. |
+| T8 | NVMe-oF, LUKS-encrypted: all controller paths fail	| CSIAddonsVolumeNVMeSubsystemLost	| Critical | Alert fires after 1 minute and identifies the PVC; clears when at least one path becomes available again. |
+| T9 | Normal detach, PVC deletion, exporter restart, and device-name reuse	| No alert | | No stale alert expected after legitimate detach/deletion, historical context is cleaned up as specified; a newly attached volume cannot inherit the old PVC labels. |
+
+  - alert-contract for every test: the firing alert must carry alertname, severity, persistentvolume,
+    persistentvolumeclaim, multipath device name and node. Those labels must identify the affected bound
+    PVC and node, with no labels borrowed from another volume. Degraded alerts have severity="warning";
+    lost alerts have severity="critical".
+  - Each test, T1-T8, will have Filesystem and raw-block PVC variant, thus is sum ups to 18 tests.
+  - T9 falls into explaratory testing category -- only actions described in the T1-T8 can fire
+    CSIAddonsVolumeN* alerts, no other action should trigger these alerts
+  - the primary environment, where all tests will be executed is AWS with NetApp ONTAP server
+  - In environment with FC-backed storage, execute test T1 and T2.
+
+  ***Test Scope and Common Requirements:***
+  - Alert contract: For every test, a firing alert must include the alertname, severity, persistentvolume,
+    persistentvolumeclaim, multipath device name, and node labels. These labels must consistently identify
+    the affected bound PVC and node; labels from another volume must not be present. Degraded-state alerts
+    must use severity="warning", while lost-volume alerts must use severity="critical".
+  - PVC modes: Execute tests T1-T8 with both filesystem-mode and raw-block PVCs.
+  - Exploratory testing: T9 verifies that only the actions covered by T1-T8 trigger CSIAddonsVolumeN* alerts.
+    No unrelated action should trigger these alerts.
+  - Primary environment: Execute the complete test suite on AWS with a NetApp ONTAP storage system.
+  - FC validation: In an environment using FC-backed storage, execute tests T1 and T2.
+
+  Note: T1-T8 with two PVC variants gives 16 tests which should be automated for at least primary testing
+  environment.
+
+#### Scale and lifecycle tests
+  The following tests may be performed manually. Document the environment, procedure, and results to
+  support resource-sizing and compatibility conclusions:
+
   - At least 100 PVCs per node at target cluster scale; measure CPU, memory, and
     scrape cardinality; results must justify production resource settings.
   - Verify the exporter tolerates unknown kubelet metadata fields and skips
@@ -225,14 +297,16 @@ that use only single non-multipath devices and therefore produce no path alerts.
 
 ### Dev Preview -> Tech Preview
 
-- Security review of host access and SELinux confinement complete.
-- Path alerts verified end to end for at least one driver/protocol/encryption
-  combination using a reproducible multipath or NVMe-oF test setup.
+- Security review of host access complete.
+- Tests presented in the Test Plan were executed for at least one
+  driver/protocol/encryption combination without any major defect detected.
+  Automatic execution is preferable, but manuall execution of the tests is
+  acceptable too.
 
 ### Tech Preview -> GA
 
 - Automated e2e path-failure CI covering all advertised driver and protocol
-  combinations.
+  combinations. For 
 - Scale results justify production resource settings.
 
 ### Removing a deprecated feature
@@ -253,9 +327,10 @@ alert rule failures must not affect CSI provisioning, attachment, or mounts.
 
 ## Support Procedures
 
-Debugging guidance and runbooks are published separately. Must-gather must
-collect exporter logs and mapping metrics without copying workload volume
-contents or driver tracking files that may contain credentials.
+Debugging guidance and [runbooks](https://github.com/openshift/runbooks) are
+published separately. Must-gather must collect exporter logs and mapping metrics
+without copying workload volume contents or driver tracking files that may contain
+credentials.
 
 ## Infrastructure Needed
 
