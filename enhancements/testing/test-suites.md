@@ -81,9 +81,10 @@ that gap from the start.
 * As a CI infrastructure engineer, I want explicitly sharded suites
   so that I can schedule jobs predictably in resource-constrained
   environments.
-* As a component team lead, I want spot-check suites for features
-  requiring uncommon cluster configurations so that specialized
-  tests do not pollute the main conformance signal.
+* As a component team lead, I want dedicated suites for tests that must run
+  in their own job — whether because their setup reconfigures the shared
+  cluster or because they need an uncommon cluster configuration — so that
+  these tests do not pollute the main conformance signal.
 * As a member of the quality staff engineer team, I want shard runtimes
   balanced within 10% of mean so that CI pipelines complete in
   predictable and roughly equal time windows.
@@ -111,8 +112,9 @@ that gap from the start.
 5. Define a test lifecycle flow (`Lifecycle: Draft`, `Informing`,
    `Blocking`, `Stable`) with clear pass-rate thresholds and duration
    expectations for each stage.
-6. Introduce `spot-check/<feature>` suites for features requiring
-   uncommon cluster configurations.
+6. Introduce dedicated `Suite`-tagged suites for tests that must run in
+   their own job (setup that reconfigures the shared cluster, or an uncommon
+   cluster configuration), excluded from the lifecycle hierarchy.
 7. Establish a shard-balancing workflow using Sippy data to keep all
    shards within 10% of mean runtime.
 8. Provide an automation agent (a scheduled prow job) that drives
@@ -269,18 +271,69 @@ Graduation is also performed by the lifecycle agent.
    holds a roughly 95% pass rate (a promoted test near 100% may drift
    down by up to Component Readiness's tolerance, currently ~5%).
 
-#### Setting Up a Spot-Check Suite
+#### Dedicated Suites
 
-1. The test author identifies tests requiring uncommon cluster
-   configurations (e.g., etcd scaling, realtime nodes, external OIDC).
-2. The test author creates a suite under `openshift/spot-check/<feature>`
-   with dedicated CI jobs using specialized cluster configs.
-3. During development, the spot-check job runs frequently for pass-rate
-   analysis (cadence chosen by the owning team; e.g., ~2x daily, or
-   ~1x/week for expensive configs such as etcd-scaling).
-4. Post-GA + 1 release, the frequency drops to approximately 1x/month.
-5. Spot-check suite health is monitored by Component Readiness. The
-   lifecycle agent does not manage spot-check suites or jobs.
+Some tests should not run in the shared lifecycle hierarchy at all. The two
+common cases are a test whose **setup reconfigures the shared cluster**
+(rolling the control plane, changing an install-time topology, applying a
+cluster-wide config — running this inside a shared suite mutates the
+environment for every other test in the run), and a test that needs an
+**uncommon cluster configuration** (etcd scaling, realtime nodes, external
+OIDC). Either way the test belongs in its own dedicated job, not in
+`active`/`stable`/`minimal`.
+
+A test opts out of the lifecycle hierarchy by carrying a `Suite` tag. Its
+dedicated suite selects on that tag, and because every lifecycle-hierarchy
+qualifier carries a `!has(test.tags.Suite)` guard, the test runs **only**
+in its own job:
+
+```go
+// This test scales etcd from three to five members — uncommon infra that
+// must run in its own job. The Suite tag places it in a dedicated suite
+// and excludes it from active/stable/minimal.
+g.It("should scale etcd from three to five members [Serial]",
+    ote.Tag("Suite", "etcd-scaling"),
+    ote.Tag("Lifecycle", "Informing"), // still gates within its own job
+    func() { ... },
+)
+
+// Suite registration in the extension binary:
+ext.AddSuite(e.Suite{
+    Name: "openshift/etcd-scaling",
+    Qualifiers: []string{
+        `has(test.tags.Suite) && test.tags.Suite=="etcd-scaling"`,
+    },
+})
+```
+
+Notes:
+
+1. **The test keeps a `Lifecycle`.** A `Suite`-tagged test is still
+   `Informing` or `Blocking`, so OTE's native gating applies *within its own
+   job* and the lifecycle agent can still promote it (`Informing →
+   Blocking → Stable`) on the usual evidence. What the agent never does is
+   rewrite its `Suite`: promotion changes gating, not which job it runs in,
+   so a dedicated test is never pulled back into the shared shards.
+2. **Selection is positive on both sides.** The dedicated suite selects
+   `has(test.tags.Suite) && test.tags.Suite=="<name>"`; the lifecycle
+   suites exclude it with a single `!has(test.tags.Suite)` guard. There is
+   no per-suite special-casing beyond that one guard.
+3. **Dedicated suites must have a registered suite and job.** Every `Suite`
+   value must correspond to a suite registered via `AddSuite` with a backing
+   CI job; the metadata-validation check **fails** a `Suite` value that has
+   no registered suite (the same spirit as the `Shard`-registry check), so a
+   `Suite` tag can never silently drop a test into nothing.
+4. **Health monitoring.** A dedicated suite's health is monitored by
+   Component Readiness like any other job. The lifecycle agent does not
+   manage dedicated suites or their jobs.
+
+The `Suite` tag is only for tests that must leave the lifecycle hierarchy.
+A test that merely wants a queryable grouping label — but should still run
+in `active`/`stable` on the normal `Lifecycle`/`Shard` path — does **not**
+use `Suite`; it uses an ordinary opaque ginkgo label (e.g. `Feature:etcd`),
+which is not a metadata tag and does not affect suite membership (see the
+decorator note in
+[OTE API Extension: Inline Tags](#ote-api-extension-inline-tags)).
 
 ### API Extensions
 
@@ -365,9 +418,22 @@ Rules governing the metadata:
   - `Blocking` — runs in the `active` suites and gates.
   - `Stable` — graduated (after GA + 1); runs in the `stable` suites and
     gates permanently.
-- **Suite membership derives from `Lifecycle`:** `active` selects
-  `Informing` or `Blocking`; `stable` selects `Stable`. Suite qualifiers
-  exclude `Draft` implicitly (it matches neither selection).
+- **Lifecycle-hierarchy membership derives from `Lifecycle`:** `active`
+  selects `Informing` or `Blocking`; `stable` selects `Stable`. Suite
+  qualifiers exclude `Draft` implicitly (it matches neither selection), and
+  exclude any test carrying a `Suite` tag (see next bullet).
+- **`Suite` opts a test out of the lifecycle hierarchy into a dedicated
+  job.** A test that must run **only** in its own job — because its setup
+  reconfigures the shared cluster, or it needs an uncommon cluster config —
+  carries `ote.Tag("Suite", "<name>")`. Its dedicated suite selects on that
+  tag positively (`has(test.tags.Suite) && test.tags.Suite=="<name>"`), and
+  every lifecycle-hierarchy suite (`active`, `stable`, `minimal`) carries a
+  `!has(test.tags.Suite)` guard so the test never also runs there. A
+  `Suite`-tagged test still carries a `Lifecycle`, so it can be `Informing`
+  or `Blocking` (and gate) *within its own job*, and the lifecycle agent
+  still advances its `Lifecycle` — but the agent never rewrites its `Suite`,
+  so promotion never pulls it back into the shared shards. See
+  [Dedicated Suites](#dedicated-suites).
 - **Default `Lifecycle` is `Informing`.** If a test carries no explicit
   `Lifecycle` tag, it is treated as `Lifecycle: Informing`. Tests are
   never automatically moved *out* of `Draft` — a test owner does that by
@@ -418,11 +484,12 @@ selecting its members by metadata tag:
 | `openshift/conformance/parallel/stable-01` | `Lifecycle: Stable` | Stable tests, parallel, shard 1 |
 | `openshift/conformance/parallel/stable-02` | `Lifecycle: Stable` | Stable tests, parallel, shard 2 |
 | `openshift/conformance/serial/stable-01` | `Lifecycle: Stable` | Stable tests, serial, shard 1 |
-| `openshift/spot-check/<feature>` | (own qualifier) | Uncommon cluster configs |
+| `openshift/<name>` (dedicated) | `Suite: <name>` | A test set that runs **only** in its own job — setup that reconfigures the shared cluster, or an uncommon cluster config. Opts out of the lifecycle hierarchy via the `Suite` tag (see [Dedicated Suites](#dedicated-suites)) |
 
-Every suite name keeps the `conformance` prefix so the naming stays
-consistent with the existing conformance suites. Each shard suite's
-qualifier combines the `Lifecycle` selection with the shard tag (see
+Every lifecycle-hierarchy suite name keeps the `conformance` prefix so the
+naming stays consistent with the existing conformance suites. Each shard
+suite's qualifier combines the `Lifecycle` selection, the shard tag, and a
+`!has(test.tags.Suite)` guard (see
 [Shard Membership Qualifiers](#shard-membership-qualifiers)).
 
 Two situations are handled differently, depending on whether the suite
@@ -464,11 +531,11 @@ touching the existing suite's definition at all.** See
 the exact scope, and [Graduation Criteria](#graduation-criteria) for when
 this happens.
 
-The `<feature>` portion of a `spot-check/<feature>` name is
-informational for human readers and for organizing the dedicated prow
-jobs. It carries no OTE-level functionality. The lifecycle agent does
-not manage spot-check suites or jobs; their health is monitored by
-Component Readiness.
+The `<name>` of a dedicated `Suite` is both the suite's identity (its
+qualifier selects on `test.tags.Suite=="<name>"`) and the organizing label
+for its dedicated prow job. The lifecycle agent does not manage dedicated
+suites or their jobs; their health is monitored by Component Readiness like
+any other job.
 
 #### Minimal-Suite Membership
 
@@ -505,11 +572,14 @@ for how this is expressed).
 | `Informing` | `active` | Failures non-blocking | >= 2–3 sprints |
 | `Blocking` | `active` | >= 99% over measurement window | Until GA + 1 release |
 | `Stable` | `.../parallel/stable-01`, `.../parallel/stable-02`, `.../serial/stable-01`, … (explicit shard) | Governed by Component Readiness (~95%) | Permanent |
-| Specialized (own qualifier) | `spot-check/<feature>` | N/A (own job) | Own cadence |
+| Dedicated (`Suite` tag) | `openshift/<name>` | Governed by Component Readiness | Own cadence |
 
-The four `Lifecycle` values are the single ordered lifecycle axis; each
-row above is one value of that axis, not a separate dimension. `active`
-selects `Informing`/`Blocking`; `stable` selects `Stable`.
+The four `Lifecycle` values are the single ordered lifecycle axis; each of
+the first four rows above is one value of that axis, not a separate
+dimension. `active` selects `Informing`/`Blocking`; `stable` selects
+`Stable`. The last row is not a lifecycle stage: a dedicated `Suite`-tagged
+test still carries a `Lifecycle` but runs only in its own job, excluded from
+the hierarchy (see [Dedicated Suites](#dedicated-suites)).
 
 The `Draft` stage is pre-CI: the test exists in source but is excluded
 from every suite until its owner manually moves it to `Informing`. The
@@ -568,7 +638,9 @@ Either way it is one value change for one test. Sibling tests for
 the same feature are unaffected, and a newly added test starts at its
 own `Lifecycle` (`Informing` by default) regardless of how long its
 feature's other tests have been `Blocking` or `Stable`. There is no
-notion of a whole feature suite being promoted as a unit.
+notion of a whole feature's test set being promoted as a unit (this is
+about lifecycle-promotion granularity, distinct from the dedicated
+`Suite`-tagged suites in [Dedicated Suites](#dedicated-suites)).
 
 The bulk, pattern-matching form below (`Select(NameContains(...))`) is
 **reserved for externally-sourced test sets that cannot be edited
@@ -641,10 +713,13 @@ purpose**, and forbids it for the others:
 
 ##### Shard Membership Qualifiers
 
-Each shard suite is defined by a qualifier that combines three
+Each shard suite is defined by a qualifier that combines four
 predicates: the `Lifecycle` selection, the execution-mode predicate
-(`[Serial]` present or absent), and the `Shard` tag the balancing
-workflow assigns. During bring-up **no shard suite declares `Parents`**;
+(`[Serial]` present or absent), the `Shard` tag the balancing
+workflow assigns, and a `!has(test.tags.Suite)` guard that keeps tests
+opted out into a dedicated `Suite` (see
+[Dedicated Suites](#dedicated-suites)) out of the lifecycle hierarchy.
+During bring-up **no shard suite declares `Parents`**;
 `Parents` is reserved for grafting into the existing conformance suite at
 maturity (see
 [Exclusive Membership and Rollout](#exclusive-membership-and-rollout)):
@@ -655,7 +730,10 @@ maturity (see
 // false, so an unguarded read would fault the whole qualifier against
 // any spec that lacks the key. Lifecycle and Shard are mandatory on
 // non-Draft tests, but are guarded anyway so a not-yet-normalized spec
-// is simply excluded rather than raising an evaluation error.
+// is simply excluded rather than raising an evaluation error. The
+// !has(test.tags.Suite) guard excludes tests that have opted out into a
+// dedicated Suite, so they run only in their own job and never leak into
+// the lifecycle shards (see Dedicated Suites).
 //
 // Parallel stable shards: Stable, NOT serial, one per shard value.
 ext.AddSuite(e.Suite{
@@ -663,7 +741,8 @@ ext.AddSuite(e.Suite{
     Qualifiers: []string{
         `has(test.tags.Lifecycle) && test.tags.Lifecycle=="Stable" && ` +
             `!test.name.contains("[Serial]") && ` +
-            `has(test.tags.Shard) && test.tags.Shard=="01"`,
+            `has(test.tags.Shard) && test.tags.Shard=="01" && ` +
+            `!has(test.tags.Suite)`,
     },
 })
 ext.AddSuite(e.Suite{
@@ -671,7 +750,8 @@ ext.AddSuite(e.Suite{
     Qualifiers: []string{
         `has(test.tags.Lifecycle) && test.tags.Lifecycle=="Stable" && ` +
             `!test.name.contains("[Serial]") && ` +
-            `has(test.tags.Shard) && test.tags.Shard=="02"`,
+            `has(test.tags.Shard) && test.tags.Shard=="02" && ` +
+            `!has(test.tags.Suite)`,
     },
 })
 // Serial stable shard: same Lifecycle/Shard space, but [Serial] tests.
@@ -682,7 +762,8 @@ ext.AddSuite(e.Suite{
     Qualifiers: []string{
         `has(test.tags.Lifecycle) && test.tags.Lifecycle=="Stable" && ` +
             `test.name.contains("[Serial]") && ` +
-            `has(test.tags.Shard) && test.tags.Shard=="01"`,
+            `has(test.tags.Shard) && test.tags.Shard=="01" && ` +
+            `!has(test.tags.Suite)`,
     },
 })
 // The active shards accept both Informing and Blocking tests.
@@ -693,7 +774,8 @@ ext.AddSuite(e.Suite{
             `(test.tags.Lifecycle=="Informing" || ` +
             `test.tags.Lifecycle=="Blocking") && ` +
             `!test.name.contains("[Serial]") && ` +
-            `has(test.tags.Shard) && test.tags.Shard=="01"`,
+            `has(test.tags.Shard) && test.tags.Shard=="01" && ` +
+            `!has(test.tags.Suite)`,
     },
 })
 ```
@@ -711,7 +793,8 @@ ext.AddSuite(e.Suite{
     Qualifiers: []string{
         `has(test.tags.Lifecycle) && test.tags.Lifecycle=="Stable" && ` +
             `!test.name.contains("[Serial]") && ` +
-            `has(test.tags.Shard) && test.tags.Shard=="01"`,
+            `has(test.tags.Shard) && test.tags.Shard=="01" && ` +
+            `!has(test.tags.Suite)`,
     },
 })
 ```
@@ -740,13 +823,15 @@ the execution-mode predicate and an explicit non-`Draft` guard so a
 // subset of tests, so every qualifier that reads an optional tag guards
 // it with has() first. Lifecycle is mandatory on non-Draft tests, but is
 // guarded too for uniformity and to stay correct against any not-yet-
-// normalized spec.
+// normalized spec. The !has(test.tags.Suite) guard keeps a Core test that
+// has opted out into a dedicated Suite from also running in minimal.
 ext.AddSuite(e.Suite{
     Name: "openshift/conformance/parallel/minimal",
     Qualifiers: []string{
         `has(test.tags.Criticality) && test.tags.Criticality=="Core" && ` +
             `has(test.tags.Lifecycle) && test.tags.Lifecycle!="Draft" && ` +
-            `!test.name.contains("[Serial]")`,
+            `!test.name.contains("[Serial]") && ` +
+            `!has(test.tags.Suite)`,
     },
 })
 ext.AddSuite(e.Suite{
@@ -754,7 +839,8 @@ ext.AddSuite(e.Suite{
     Qualifiers: []string{
         `has(test.tags.Criticality) && test.tags.Criticality=="Core" && ` +
             `has(test.tags.Lifecycle) && test.tags.Lifecycle!="Draft" && ` +
-            `test.name.contains("[Serial]")`,
+            `test.name.contains("[Serial]") && ` +
+            `!has(test.tags.Suite)`,
     },
 })
 ```
@@ -1122,35 +1208,50 @@ field (to `informing`) and applies stage promotions at the source together
 with removal of any stale native annotation, all materialized in the test
 source rather than at build time.
 
-#### Spot-Check Suite Details
+#### Dedicated Suite Details
 
-- **Ownership**: Managed by the specific component team.
-- **CI Configuration**: Dedicated jobs with specialized cluster
-  configs.
-- **Development Phase**: Frequent runs for pass-rate analysis; cadence
-  is chosen by the owning team based on cost (e.g., ~2x daily for cheap
-  configs, ~1x/week for expensive ones such as etcd-scaling, ideally
-  paired with an automatic retry-on-failure mechanism once available).
-- **Maintenance Phase**: Post-GA + 1 release, frequency drops to
-  ~1x/month.
-- **Health monitoring**: Spot-check suite health is monitored by
-  Component Readiness. The lifecycle agent does not manage spot-check
-  suites or jobs.
+- **Ownership**: Managed by the component team that owns the tests.
+- **CI Configuration**: A dedicated job whose `openshift/release` config
+  stands up whatever the tests need — a reconfigured cluster environment
+  (e.g. a control-plane roll or other mutating setup) or a specialized
+  cluster config — and then runs **only** that suite's tests.
+- **Run frequency**: Chosen by the owning team to fit the case. A job whose
+  tests must catch regressions promptly must run at least Component
+  Readiness's minimum cadence — roughly **once per day** — because that is
+  what CR needs to produce reliable regression signal. A job guarding an
+  expensive or rarely-changing configuration may run much less often (e.g.
+  ~1x/week, or ~1x/month in steady state); such a low-frequency job falls
+  under the **spot-check** exception (see below). Cadence is a property of
+  the job, not of the `Suite` tag.
+- **Component Readiness gating**: The job takes one of the existing standard
+  job tiers; the tier determines whether its data feeds Component Readiness
+  and how it gates (blocking/informing), exactly as for any other job. There
+  is no separate tier for dedicated suites. One cross-cutting exception still
+  applies by frequency, not by suite type: a job that runs too rarely for
+  CR's normal regression analysis (daily-ish) is marked as a **spot-check**
+  job in the Sippy variant registry, and Component Readiness applies its
+  existing special handling for low-frequency jobs to any job carrying that
+  variant. This marking is made **by developers** through a reviewed change
+  to the variant registry — it is not assigned automatically by the
+  lifecycle agent. Spot-check is thus a frequency-driven CR trait — recorded
+  on the job in the Sippy variant registry, not on the suite — that any
+  dedicated job may fall under, not a separate suite category in this
+  hierarchy.
+- **Health monitoring**: A dedicated suite's health is monitored by
+  Component Readiness. The lifecycle agent does not manage dedicated suites
+  or their jobs.
 - **Monitoring**: Monitortests collect data but avoid generating
   failure JUnits to prevent alerts on known specialized configs.
-- **Approval**: Because spot-check suites bring dedicated jobs and
-  specialized cluster configs, adding one is not unchecked. The suite
-  and its job configuration land through the normal config pull-request
-  review, giving reviewers a predictable, agreed environment for the
-  test rather than an ad-hoc one.
-- **Longevity**: Spot-check suites are not expected to retire. Rather
-  than being removed after a feature matures, a suite settles into its
-  minimum run interval (see the maintenance-phase cadence above) and
-  continues to run indefinitely, with its health tracked through
-  Component Readiness (see
-  [Risks and Mitigations](#risks-and-mitigations)). This keeps the
-  total number of active configurations bounded through low-frequency
-  steady-state execution rather than through eventual deletion.
+- **Approval**: Because a dedicated suite brings a new job and often a
+  specialized cluster config, adding one is not unchecked. The suite and its
+  job configuration land through the normal config pull-request review,
+  giving reviewers a predictable, agreed environment for the test rather
+  than an ad-hoc one.
+- **Longevity**: Dedicated suites are not expected to retire. Rather than
+  being removed after a feature matures, a suite settles into its steady
+  run interval and continues to run indefinitely, with its health tracked
+  through Component Readiness (see
+  [Risks and Mitigations](#risks-and-mitigations)).
 
 #### Shard Balancing
 
@@ -1199,7 +1300,9 @@ of `Draft` is a manual, owner-driven action. Promotion is one-way: the
 agent never demotes a blocking test back to `Informing` and never moves
 a test to a lower suite. A subsequent pass-rate degradation is a
 regression to be fixed by the owning component, not something the agent
-reverses. The agent also does not manage spot-check suites or jobs.
+reverses. The agent also does not manage dedicated (`Suite`-tagged)
+suites or their jobs; it advances the `Lifecycle` of a dedicated
+suite's tests but never adds, removes, or rewrites their `Suite` tag.
 
 Precedent exists for this style of automated, PR-driven maintenance in
 the TRT tooling ecosystem. All actions are proposals: the agent opens
@@ -1444,11 +1547,13 @@ teams have a defined number of days to respond, after which an architect
 or staff engineer may approve and merge. This keeps the pipeline moving
 while preserving a human approval step.
 
-**Risk**: Spot-check suites with low run frequency may go stale
-without detection.
-**Mitigation**: Spot-check suite health is monitored by Component
-Readiness rather than by the lifecycle agent; Component Readiness
-surfaces suites that stop reporting results.
+**Risk**: Low-frequency (spot-check) jobs may go stale without detection,
+since they run too rarely for Component Readiness's normal daily-cadence
+regression analysis.
+**Mitigation**: Such jobs are marked as spot-check in the Sippy variant
+registry and handled by Component Readiness's existing special handling
+for spot-check (low-frequency) jobs rather than by the lifecycle agent;
+Component Readiness surfaces jobs that stop reporting results.
 
 ### Drawbacks
 
