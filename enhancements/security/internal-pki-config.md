@@ -360,6 +360,61 @@ Key aspects of the API:
 - **`keyManagement`** is a sibling of `certificateManagement` that configures in-scope non-certificate signing keys as named, opt-in entries with no inherited default; the bound service-account token signer is the first entry (see [Key Management](#key-management-service-account-token-signing)).
 - **Rotation is immediate and signer retirement is a deliberate administrator action**, not fields on the `PKI` resource: operators reconcile configuration changes immediately, and superseded signer CAs are pruned as the final step of an algorithm migration. See [Rotation and Signer Retirement](#rotation-and-signer-retirement).
 
+An illustrative example of the full API surface as an administrator would see it (the API PR is authoritative for exact field names, defaults, and validation):
+
+```yaml
+apiVersion: config.openshift.io/v1alpha1
+kind: PKI
+metadata:
+  name: cluster
+spec:
+  # Certificate cryptographic parameters, resolved most-specific-wins:
+  # named certificate, then category, then defaults.
+  certificateManagement:
+    # Required. Global default for every certificate without a more-specific setting.
+    defaults:
+      key:
+        algorithm: ECDSA
+        ecdsa:
+          curve: P384
+    # Optional per-category overrides.
+    signerCertificates:
+      key:
+        algorithm: ECDSA
+        ecdsa:
+          curve: P384
+    servingCertificates:
+      key:
+        algorithm: ECDSA
+        ecdsa:
+          curve: P256
+    clientCertificates:
+      key:
+        algorithm: ECDSA
+        ecdsa:
+          curve: P256
+    # Optional. Overrides for specific named certificates (highest precedence);
+    # the exact field name and uniqueness mechanism are defined by the API PR.
+    namedCertificates:
+      - name: openshift.io/service-ca.service-serving-signer
+        key:
+          algorithm: RSA
+          rsa:
+            keySize: 2048
+  # Non-certificate signing keys: named, opt-in, with no inherited default, in the
+  # same named-list style as namedCertificates. The bound service-account token signer
+  # is the first entry. (Exact field names are defined by the API PR.)
+  keyManagement:
+    namedKeys:
+      - name: openshift.io/kube-apiserver.bound-service-account-token-signer
+        key:
+          algorithm: RSA
+          rsa:
+            keySize: 4096
+```
+
+Peer certificates are intentionally absent from the surface: their parameters are derived (see [Peer Certificates](#peer-certificates-category-peer)), not set directly.
+
 #### Platform Default Profile
 
 When `certificateManagement` is not configured, operators use their existing hardcoded defaults (mostly RSA 2048, though a small number of leaf certificates already use ECDSA P-256 today: kubelet client/serving certs generated via the Kubernetes CSR mechanism, and OLM-managed certs), so existing clusters see zero behavior change.
@@ -383,7 +438,7 @@ Administrators may override any of these by setting `defaults` and the category 
 
 Some platform-generated signing material is not an X.509 certificate and so falls outside `certificateManagement`, yet it raises the same crypto-agility concerns (algorithm choice, rotation with verification overlap, and an eventual post-quantum migration). The in-scope example is the bound service-account token signing key: the kube-apiserver signs bound service-account tokens with a bare signing key (currently a hardcoded RSA 2048 keypair) whose public half is published as raw JWKs at the OIDC JWKS endpoint. There is no certificate involved.
 
-These keys are configured through a `keyManagement` section of the `PKI` resource, a sibling to `certificateManagement`. Because such keys are few, heterogeneous, and each has distinct off-cluster verifier constraints, `keyManagement` uses named, opt-in entries with no inherited default: changing one of these algorithms is an explicit administrator action, never a side effect of a cluster-wide certificate default. The bound service-account token signer is the first in-scope entry.
+These keys are configured through a `keyManagement` section of the `PKI` resource, a sibling to `certificateManagement`. Because such keys are few, heterogeneous, and each has distinct off-cluster verifier constraints, `keyManagement` uses named, opt-in entries with no inherited default, in the same named-list style as certificate named overrides: changing one of these algorithms is an explicit administrator action, never a side effect of a cluster-wide certificate default. The bound service-account token signer is the first in-scope entry.
 
 Out of scope for this workstream: the OAuth server access-token keys are random 256-bit secrets rather than asymmetric signing keys, so they need no algorithm configuration and are unchanged. Rotation of external or third-party token issuers is also out of scope. Which in-cluster issuers actually sign JWKS-published JWTs, and are therefore in scope, is still being confirmed against the implementation (see [Open Questions](#open-questions)).
 
