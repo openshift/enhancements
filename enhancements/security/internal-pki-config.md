@@ -12,6 +12,8 @@ reviewers:
   - "@hasbro17" # etcd team, etcd certificate configuration and rotation
   - "@dusk125"  # etcd team, etcd certificate configuration and rotation
   - "@p0lyn0mial" # authentication team, service-ca and client certificate management
+  - "@csrwng" # hypershift team, hosted control-plane PKI
+  - "@tthvo" # installer implementation
 approvers:
   - "@sjenning" # staff engineer with PKI and security expertise
 api-approvers:
@@ -178,7 +180,7 @@ At a high level, the changes include:
 3. **Installer Integration**: Day-1 configuration via a named `pki.profile` that seeds the initial PKI resource
 4. **Operator Updates**: Modifications to PKI-managing operators to:
    - Watch and consume the PKI configuration independently
-5. **Certificate Rotation**: Operators apply PKI configuration parameters during existing certificate rotation cycles (no changes to rotation mechanisms themselves)
+5. **Certificate Rotation**: Operators reissue non-conforming certificates immediately when the configuration changes (reconciliation), reusing the existing rotation primitives (no new rotation mechanism)
 
 Note: There is **no central PKI controller**. A **PKI-managing operator** (the term used throughout this document) is any operator that watches the PKI resource and applies the resolved configuration to the certificates (and, where in scope, the signing keys) it owns. Each PKI-managing operator reconciles its own material directly; there is no component that orchestrates, aggregates, or gates on its behalf.
 
@@ -313,7 +315,7 @@ stateDiagram-v2
 
 3. To adopt a stronger configuration, the cluster administrator edits the PKI resource post-upgrade, which operators reconcile and apply immediately. On new installs, the installer populates the resource from the selected profile, and the installer-provided configuration takes precedence over the default the cluster ships.
 
-4. To revert to the pre-feature defaults, the administrator sets the PKI configuration back to the `Legacy` profile; the resource itself remains present as the cluster-scoped singleton.
+4. To revert to the pre-feature defaults, the administrator sets the PKI configuration back to the `Legacy` profile; the resource itself remains present as the cluster-scoped singleton. The `Legacy` profile's exact parameters are documented under [Day-1 (Installer) Integration](#day-1-installer-integration) so an administrator knows precisely what reverting restores.
 
 5. Existing certificates continue to function until their natural rotation.
 
@@ -498,8 +500,6 @@ For Hypershift deployments, a hosted cluster's control plane runs as pods on a m
 The likely shape is a new field on the `HostedCluster` and `HostedControlPlane` APIs that mirrors the standalone `PKI` resource's configuration, with the configured parameters applied to both the hosted control plane and the guest data plane. The precise component-by-component topology (which certificates are governed where) is to be worked out with HyperShift SMEs, and a Hypershift-team feedback session is planned. A rejected alternative, a management-cluster floor that hosted clusters inherit, is recorded in [Alternative 7](#alternative-7-management-floor-plus-hostedcluster-override-for-hypershift).
 
 An open sub-question is whether the **break-glass customer and SRE admin certificates** generated for a hosted cluster follow the hosted cluster's PKI configuration or are configured independently.
-
-- **RBAC Considerations**: Because the configuration is owned per hosted cluster rather than by the management cluster, the `control-plane-pki-operator` (which runs per hosted cluster in the HCP namespace with namespace-scoped RBAC, and manages break-glass customer and SRE admin certificates) reads the hosted cluster's configuration and does not require read access to any management-cluster PKI resource.
 
 #### Standalone Clusters
 
@@ -865,7 +865,7 @@ Example: Signing a certificate with a stronger key than the CA itself
 *Mitigation:*
 - On upgrade, the PKI resource is created with a `Legacy` configuration that reproduces existing behavior with no rollout
 - An administrator must explicitly create or change the PKI configuration before anything is reissued; the platform never changes cryptography on its own
-- Cross-signing keeps existing clients working while an applied change reconciles, so immediate reconciliation does not break in-flight connections
+- Cross-signing keeps existing clients working across an applied change. A change that triggers a revisioned rollout can still drop in-flight connections when the operand restarts, but cross-signing lets clients reconnect without waiting for a trust-store update once the rollout completes
 
 **Risk: Security downgrade if configuration allows weak parameters**
 
@@ -1014,7 +1014,7 @@ If a `Legacy` configuration cannot be made to reproduce the pre-feature defaults
 
 - The exact prune interface (an `oc adm` subcommand, for which `oc adm pki prune-superseded-signers` is a candidate name, a documented procedure, or another configuration signal) and what minimal safety checks it performs, and which operator-reported readiness conditions gate it (see [Pruning superseded signers](#pruning-superseded-signers)).
 - Which core-platform certificates do not auto-rotate today, and which issuers support cross-signing (both under investigation).
-- Centralized versus per-operator reporting of PKI status (leaning per-operator / distributed).
+- PKI status reporting is distributed (per-operator), reusing existing operator conditions; migration documentation will include an `oc get clusteroperators` convergence check. (Still open: whether an aggregated view is worth adding later.)
 - Whether rollout coordination across control-plane instances is needed to prevent simultaneous reissue or restart during a reconfiguration (relevant to multi-node clusters, most impactful on SNO).
 - Whether to detect and report conflicts between the PKI configuration and the cluster's TLS security profile (for example, ECDSA-only certificates under a profile that requires RSA key exchange). The two are treated as independent today; conflict detection is not yet designed.
 - Uniqueness enforcement for named-override names (CEL uniqueness is quadratic and would need a count cap, versus first-match-wins list ordering).
