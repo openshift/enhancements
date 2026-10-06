@@ -643,15 +643,15 @@ pki:
 
 A profile is an **installer-only, version-defined** bundle of cryptographic settings. At install time the installer resolves the named profile and writes the resolved values into the initial `PKI` resource; the profile name itself does not persist in the API.
 
-A profile is a bundle of **category defaults** (signers are configured stronger and longer-lived than leaves), not a single key size. Two kinds of named profiles are offered:
+A profile is a bundle of **category defaults** (signers are configured stronger and longer-lived than leaves), not a single key size. Named profiles come in three kinds:
 
 - **Opinionated algorithm profiles** bake a sensible signer-stronger-than-leaf split for an algorithm family. Their resolved parameters may be refined across installer versions (new installs only; existing clusters are never changed on upgrade):
   - `Default` / `ECDSA` - ECDSA P-384 signers, P-256 serving/client (the platform default profile above)
   - `RSA` - RSA 4096 signers, RSA 2048 serving/client
   - `PostQuantum` / `MLDSA` - **name reserved here; parameters delivered by the layered ML-DSA / PQC enhancement** once ML-DSA algorithm support (and the required Go runtime support) lands. The name is reserved now so there is a stable, documented install-time intent for the post-quantum migration driven by the end-of-2027 federal guidance; selecting it before the layered enhancement ships is rejected by the installer.
 - **Explicit all-uniform pins** apply one concrete parameter set to every category and are **not** redefined across installer versions, for compliance regimes that must pin exact parameters:
-  - e.g. `RSA4096All`, `ECDSAP384All`
-  - `Legacy` / `RSA2048All` - replicates exactly what the platform ships pre-PKI-config (RSA 2048 for every category), for administrators who must match today's behavior at install time rather than adopt the stronger `Default`.
+  - e.g. `RSA4096All`, `ECDSAP384All`, `RSA2048All` (`RSA2048All` pins uniform RSA 2048 for every category)
+- **`Legacy`** is a special profile that reproduces the platform's pre-feature defaults *exactly*: mostly RSA 2048, but preserving the specific leaf certificates that are ECDSA P-256 today (kubelet client/serving certs via the Kubernetes CSR mechanism, and OLM-managed certs). It is the profile the upgrade applies so existing clusters see zero behavior change, and the configuration an administrator restores to revert. Unlike `RSA2048All`, it is **not** uniform: `RSA2048All` would switch those ECDSA P-256 leaves to RSA 2048.
 
 Administrators who need arbitrary per-category day-0 values (rather than a named bundle) are covered by the open question on accepting a full PKI manifest at install time (see [Open Questions](#open-questions)); Day-2 the full `PKI` resource provides complete per-category control.
 
