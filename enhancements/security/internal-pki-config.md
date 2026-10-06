@@ -1507,7 +1507,7 @@ Client certificates authenticate clients to servers.
 
 #### Peer Certificates (Category: Peer)
 
-Peer certificates authenticate both as client and server (dual ExtKeyUsage: ClientAuth + ServerAuth). PKI profile resolution compares the serving and client key configurations by NIST security strength in bits (RSA: 2048→112, 3072→128, 4096→152, 8192→200; ECDSA: P-256→128, P-384→192, P-521→256) and selects the configuration with higher security strength. On equal strength, ECDSA is preferred for its better performance characteristics.
+Peer certificates authenticate both as client and server (dual ExtKeyUsage: ClientAuth + ServerAuth). PKI profile resolution compares the serving and client key configurations by NIST security strength in bits (RSA: 2048→112, 3072→128, 4096→152, 8192→200; ECDSA: P-256→128, P-384→192, P-521→256) and selects the configuration with higher security strength. On equal strength, ECDSA is preferred for its better performance characteristics. This comparison is implemented once in shared library-go (the common certificate-generation code), so every component that issues peer certificates derives identical parameters.
 
 | Certificate Name                    | Description                                       | Managed By               |
 |-------------------------------------|---------------------------------------------------|--------------------------|
