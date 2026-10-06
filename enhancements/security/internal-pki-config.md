@@ -261,7 +261,7 @@ spec:
 
 When an administrator changes the `PKI` configuration, operators reconcile it **immediately**: certificates that no longer match the configuration are reissued, without waiting for natural expiry. Cross-signing (see [Cross-Signing to Ease Rotation](#cross-signing-to-ease-rotation)) keeps existing clients working during the change, so there is no need to confirm cluster-wide trust-bundle propagation before new serving or client certificates are issued.
 
-Retiring the superseded signer CAs is a separate, deliberate step, performed as the final part of migrating from one algorithm to another while disabling the old one. It is forward-only (there is no rollback once an old signing key is removed). The administrator prepares the cluster first (confirming rotation has converged and that off-cluster consumers and break-glass credentials are ready), then prunes. See [Rotation and Signer Retirement](#rotation-and-signer-retirement) for details.
+In the normal case nothing further is needed: the superseded signer CAs are left in place and age out on their own, per their X.509 validity. Explicitly retiring (pruning) a superseded signer is an exception, used only when an administrator does not want a still-valid old signer to remain trusted, for example to complete an algorithm migration by disabling the old algorithm before its signers would otherwise expire. That prune is a separate, deliberate, forward-only step (there is no rollback once an old signing key is removed): the administrator prepares the cluster first (confirming rotation has converged and that off-cluster consumers and break-glass credentials are ready), then prunes. See [Rotation and Signer Retirement](#rotation-and-signer-retirement) for details.
 
 #### End-to-end rollout walkthrough
 
@@ -315,7 +315,7 @@ stateDiagram-v2
 
 3. To adopt a stronger configuration, the cluster administrator edits the PKI resource post-upgrade, which operators reconcile and apply immediately. On new installs, the installer populates the resource from the selected profile, and the installer-provided configuration takes precedence over the default the cluster ships.
 
-4. To revert to the pre-feature defaults, the administrator restores the equivalent configuration from backup or documentation. Profiles such as `Legacy` are an install-time convenience and are not a Day-2 API value, so there is no Day-2 "select profile" action; the concrete parameters the `Legacy` profile resolves to are documented under [Day-1 (Installer) Integration](#day-1-installer-integration), so the administrator knows precisely what to restore.
+4. To revert to the pre-feature defaults, the administrator restores the equivalent configuration from backup or documentation. Profiles such as `Legacy` are an install-time convenience and are not a Day-2 API value. The parameters that define the `Legacy` profile are documented under [Day-1 (Installer) Integration](#day-1-installer-integration), so the administrator knows precisely what to restore.
 
 ### API Extensions
 
@@ -349,7 +349,7 @@ The compatibility level is enforced through the `+openshift:compatibility-gen:le
 
 #### PKI Resource
 
-The `PKI` resource is a cluster-scoped singleton named `cluster` in the `config.openshift.io/v1alpha1` API group.
+The `PKI` resource is a cluster-scoped singleton named `cluster` in the `config.openshift.io/v1alpha1` API group. It is a required, always-present singleton: the installer creates it on new installs and the upgrade creates it with a `Legacy` configuration, and it cannot be deleted (deletion is rejected). Administrators change PKI behavior by editing it, never by creating or removing it.
 
 The full API type definitions are available in the API PR: [openshift/api#2645](https://github.com/openshift/api/pull/2645).
 
@@ -357,7 +357,7 @@ Key aspects of the API:
 
 - **`PKISpec`** contains a `certificateManagement` object holding the cryptographic configuration directly: a required `defaults`, optional category overrides (`signerCertificates`, `servingCertificates`, `clientCertificates`), and optional overrides for specific named certificates. The most-specific setting wins (named override, then category, then defaults). (Earlier drafts wrapped these in a management-`mode` discriminated union and a `custom` container; those are removed. The fields are flattened up one level, and the removed v1alpha1 fields are tombstoned in the API types.)
 - **`KeyConfig`** is a discriminated union on `algorithm` (`RSA` or `ECDSA`), with `RSAKeyConfig` (key sizes 2048-4096) and `ECDSAKeyConfig` (curves P256, P384, P521) as union member types.
-- **`keyManagement`** is a sibling of `certificateManagement` that configures in-scope non-certificate signing keys as named, opt-in entries with no inherited default; the bound service-account token signer is the first entry (see [Key Management](#key-management-service-account-token-signing)).
+- **`KeyManagement`** is a sibling of `certificateManagement` that configures in-scope non-certificate signing keys as named, opt-in entries with no inherited default; the bound service-account token signer is the first entry (see [Key Management](#key-management-service-account-token-signing)).
 - **Rotation is immediate and signer retirement is a deliberate administrator action**, not fields on the `PKI` resource: operators reconcile configuration changes immediately, and superseded signer CAs are pruned as the final step of an algorithm migration. See [Rotation and Signer Retirement](#rotation-and-signer-retirement).
 
 An illustrative example of the full API surface as an administrator would see it (the API PR is authoritative for exact field names, defaults, and validation):
@@ -417,7 +417,7 @@ Peer certificates are intentionally absent from the surface: their parameters ar
 
 #### Platform Default Profile
 
-When `certificateManagement` is not configured, operators use their existing hardcoded defaults (mostly RSA 2048, though a small number of leaf certificates already use ECDSA P-256 today: kubelet client/serving certs generated via the Kubernetes CSR mechanism, and OLM-managed certs), so existing clusters see zero behavior change.
+On upgrade the resource is created with a `Legacy` configuration that reproduces the existing hardcoded defaults (mostly RSA 2048, though a small number of leaf certificates already use ECDSA P-256 today: kubelet client/serving certs generated via the Kubernetes CSR mechanism, and OLM-managed certs), so existing clusters see zero behavior change.
 
 The platform default profile, used by the installer `Default` profile and recommended for new configurations, specifies:
 
@@ -444,10 +444,10 @@ Out of scope for this workstream: the OAuth server access-token keys are random 
 
 #### Rotation and Signer Retirement
 
-Moving a cluster from one PKI configuration to another involves two operations, both **cluster-wide** (never per-certificate or per-signer):
+Changing the PKI configuration normally involves a single operation, **rotation**; the superseded signer CAs are then left to **expire on their own** per their X.509 validity. A second operation, **pruning**, is optional and used only to retire a still-valid superseded signer early, for example to finish an algorithm migration by disabling the old algorithm before its signers would otherwise expire. Both operations are **cluster-wide** (never per-certificate or per-signer):
 
-- **Rotation** reissues certificates under the new configuration.
-- **Pruning** removes the now-superseded signer CAs from trust, as the final step of a migration that disables an old algorithm.
+- **Rotation** (always) reissues certificates under the new configuration.
+- **Pruning** (migration only) removes a still-valid superseded signer CA from trust before it would expire.
 
 ##### Immediate reconciliation (rotation)
 
@@ -623,7 +623,7 @@ When generating a certificate, the cryptographic parameters are determined by th
 1. **Named Override**: If an override targets the specific certificate by name, use those parameters
 2. **Category Override**: If the corresponding category field (`signerCertificates`, `servingCertificates`, or `clientCertificates`) is set, use those parameters
 3. **Default Configuration**: Use the `defaults` configuration
-4. **Hardcoded Defaults**: Use hardcoded defaults (typically RSA 2048) when no PKI resource exists
+4. **Hardcoded Defaults**: the operator's built-in defaults, a last-resort fallback used only if the PKI resource cannot be read. The resource is a required, always-present singleton with a required `defaults`, so normal resolution terminates at `defaults`.
 
 Peer certificates (dual client/server authentication) have no category override field of their own. Absent a named override, their parameters are **derived** as the stronger (by NIST security strength) of the resolved serving and client configurations, with ECDSA preferred on ties; a named override that targets a peer certificate by name still takes precedence over the derived value (see [Peer Certificates](#peer-certificates-category-peer)).
 
@@ -696,8 +696,7 @@ The [service-ca-operator](https://github.com/openshift/service-ca-operator) gene
 - **Signer certificate (`service-ca`)**: Can be configured via the `signerCertificates` field to specify cryptographic parameters for the service CA itself
 - **Service serving certificates**: Generated on-demand and will use:
   - **`servingCertificates`** field if specified in the PKI resource
-  - **Defaults** configuration if specified in the PKI resource
-  - Hardcoded defaults (RSA 2048) when no PKI resource exists
+  - otherwise the required **`defaults`** configuration
 
 **Important limitation**: Individual service serving certificates cannot be configured independently because:
 - They are generated dynamically in response to service annotations
@@ -922,7 +921,7 @@ Cross-signing is the main new security-relevant mechanism this enhancement intro
 
 ### Drawbacks
 
-**Increased Complexity**: This feature adds a new configuration surface that administrators must understand. However, it is entirely optional - clusters continue to work with defaults if not configured.
+**Increased Complexity**: This feature adds a new configuration surface that administrators must understand. However, customizing it is optional: clusters keep working with the shipped profile (`Default` on new installs, `Legacy` on upgrades) unless an administrator changes it.
 
 **Maintenance Burden**: Each PKI-managing operator must be updated to support PKI configuration. However, the implementation is straightforward (read config, apply parameters), and the centralized configuration reduces operator-specific configuration sprawl.
 
@@ -969,7 +968,7 @@ Instead of making cryptographic parameters configurable, simply change the platf
 **Not selected because:**
 - **Workload compatibility**: Some workloads, libraries, and tools assume RSA keys (e.g., older TLS stacks, certain HSMs, legacy Java clients). A non-configurable switch to ECDSA could break these workloads with no recourse. Configurability allows administrators to fall back to RSA where needed.
 - **Compliance mandates vary**: Some organizations specifically require RSA with minimum key sizes (e.g., RSA 4096), while others require ECDSA with specific curves (e.g., CNSA 2.0 mandates P-384). A single default cannot satisfy all compliance regimes.
-- **Upgrade safety**: Changing cryptographic algorithms for all certificates on upgrade is a high-risk operation. Leaving the cluster without a PKI resource ensures zero behavior change on upgrade, while creating one with the platform default profile provides an opt-in path to ECDSA when the administrator is ready.
+- **Upgrade safety**: Changing cryptographic algorithms for all certificates on upgrade is a high-risk operation. Creating the PKI resource with a `Legacy` configuration that reproduces the existing defaults ensures zero behavior change on upgrade, while selecting a stronger profile provides an opt-in path to ECDSA when the administrator is ready.
 - **Category-level control**: Different certificate categories have different security and performance tradeoffs. Long-lived signer certificates benefit from stronger keys (e.g., ECDSA P-384 or RSA 4096), while short-lived leaf certificates can use faster, smaller keys (e.g., ECDSA P-256). A single default doesn't allow this differentiation.
 
 **Note:** The platform default profile does adopt ECDSA (P-384 for signers, P-256 for serving/client), so administrators who want ECDSA can simply apply that profile. The configuration API exists for cases where the default doesn't fit.
@@ -1006,7 +1005,9 @@ A further open sub-question is whether the break-glass customer and SRE admin ce
 
 ### Alternative 8: Nil (Unmanaged) spec with Upgradeable=false
 
-If a `Legacy` configuration cannot be made to reproduce the pre-feature defaults faithfully, the fallback is to treat a nil `PKI` spec as "Unmanaged": operators revert to their previous hardcoded code paths, and the cluster reports `Upgradeable=false` until an administrator defines the spec. This keeps upgraded clusters running unchanged, at the cost of an explicit configuration step before the next upgrade. The `Legacy`-configuration model is preferred because it does not block upgrades; this remains the fallback pending confirmation that a `Legacy` configuration reproduces the old defaults.
+A considered alternative was to treat a nil `PKI` spec as "Unmanaged" (operators keep their previous hardcoded code paths) and report `Upgradeable=false` until an administrator defines the spec.
+
+**Not selected.** We are confident the `Legacy` configuration reproduces the pre-feature defaults, so on upgrade the resource is created with that configuration and is a required, undeletable singleton. There is no nil or absent state to handle, and upgrades are never blocked on PKI configuration.
 
 ## Open Questions
 
@@ -1218,7 +1219,7 @@ However, there are some considerations:
 
 2. **Transient API Server Errors Reading PKI Resource**:
    - *Symptom*: Operator logs show transient errors watching or reading PKI resource
-   - *Impact*: A confirmed-absent PKI resource is not an error; operators use hardcoded defaults. A transient error reading the resource means the operator cannot confirm the desired configuration, so it holds its last-known configuration rather than regenerating on incomplete information.
+   - *Impact*: The PKI resource is always present (a required, undeletable singleton), so a read failure is transient: the operator cannot confirm the desired configuration, so it holds its last-known configuration rather than regenerating on incomplete information.
    - *Mitigation*: Investigate and resolve the underlying API server issue. The operator resumes reconciliation automatically once it can read the PKI resource state.
    - *Detection*: Operator status shows `Degraded=True`, operator emits a warning event and logs errors
 
@@ -1304,20 +1305,16 @@ However, there are some considerations:
 
 ### Reverting to Default State
 
-1. Delete the PKI resource to revert to hardcoded defaults:
+The PKI resource is a required, undeletable singleton, so reverting means restoring its configuration, not deleting the resource.
+
+1. Edit the PKI resource and restore the pre-feature (Legacy-equivalent) configuration from backup or the documented `Legacy` parameters:
    ```bash
-   oc delete pki cluster
+   oc edit pki cluster
    ```
 
-2. Operators will use hardcoded defaults (typically RSA 2048) for new certificate generation
+2. Operators reconcile immediately, reissuing non-conforming certificates under the restored configuration; cross-signing keeps existing clients working during the change.
 
-3. **Certificates transition gradually:**
-   - Existing certificates continue to function unchanged
-   - New certificates generated during rotation use hardcoded defaults
-   - Natural rotation applies defaults over time (varies by certificate lifetime)
-   - Force rotation by deleting certificate secrets if immediate change is needed
-
-**Note:** The PKI resource is a cluster-scoped singleton named `cluster` that the cluster keeps present with a `Legacy` default. Deleting it causes the cluster to recreate the `Legacy` default, reverting subsequently generated certificates to the hardcoded defaults.
+**Note:** `oc delete pki cluster` is rejected; the singleton cannot be removed. Revert by restoring the configuration, not by deleting the resource.
 
 ### Recovery Procedures
 
@@ -1329,12 +1326,7 @@ However, there are some considerations:
    # Remove or fix invalid configuration
    ```
 
-2. Alternatively, delete the PKI resource to revert to hardcoded defaults:
-   ```bash
-   oc delete pki cluster
-   ```
-
-3. Wait for natural certificate rotation, or force rotation by deleting certificate secrets:
+2. Operators reconcile the corrected configuration immediately; cross-signing keeps existing clients working while non-conforming certificates are reissued. To force a specific certificate to regenerate now, delete its secret:
    ```bash
    # Each operator regenerates certificates when secrets are deleted
    # Example for kube-apiserver serving certificate:
@@ -1379,12 +1371,12 @@ However, there are some considerations:
 
 **Scenario: Need to revert all certificates to defaults**
 
-1. Delete the PKI resource to revert to hardcoded defaults:
+1. Edit the PKI resource and restore the pre-feature (Legacy-equivalent) configuration:
    ```bash
-   oc delete pki cluster
+   oc edit pki cluster
    ```
 
-2. Wait for natural certificate rotation, or force rotation by deleting certificate secrets:
+2. Operators reconcile immediately. To force a specific certificate to regenerate now, delete its secret:
    ```bash
    # Delete certificate secrets to force regeneration
    # Example for kube-apiserver serving certificate:
