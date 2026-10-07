@@ -268,11 +268,11 @@ In the normal case nothing further is needed: the superseded signer CAs are left
 This walks a single algorithm migration from a configuration change through optional signer retirement, to make the sequence and its gates explicit.
 
 1. **Configuration change.** The administrator edits the `PKI` resource (for example, RSA to ECDSA). Changing the configuration is the trigger; there is no separate apply step.
-2. **Immediate reconciliation.** Each PKI-managing operator detects the mismatch and reconciles immediately. For each affected signer it mints a new signer with the same subject, cross-signed by the old signer, and adds the bridges to the trust bundle and to the leaves it serves.
+2. **Immediate reconciliation.** Each PKI-managing operator detects the mismatch and reconciles immediately. For each affected signer it mints a new signer with the same subject and ships a forward cross-signing certificate (old signs new) with the new leaves, so consumers that still trust only the old CA keep validating. A routine same-strength rotation would also add a backward cross-signing certificate to the trust bundle; a strength-increasing migration (like this RSA-to-ECDSA example) does not (see Cross-Signing to Ease Rotation).
 3. **Trust distribution.** Updated trust bundles propagate. Because of cross-signing, new-signer leaves already validate against still-old trust, so leaves can be reissued without waiting for every consumer to observe the new bundle.
 4. **Leaf reissue.** Non-conforming serving and client certificates are reissued under the new configuration; conforming certificates are left untouched.
 5. **Convergence and readiness.** The cluster converges when every consumer trusts the new anchors directly and every presenter has rotated to a new-signer leaf. Each operator reports prune-readiness through status conditions.
-6. **Optional prune.** Once converged and the administrator has prepared off-cluster consumers and break-glass credentials, the out-of-band prune tooling removes the now-orphaned old signer CA certs from the trust bundles, which also drops the cross-signing bridges. This step is forward-only.
+6. **Optional prune.** Once converged and the administrator has prepared off-cluster consumers and break-glass credentials, the out-of-band prune tooling removes the now-orphaned old signer CA certs from the trust bundles, which also drops any cross-signing certificates that depend on them. This step is forward-only.
 7. **Optional further rotation.** A later configuration change repeats the sequence; a post-quantum migration is the same reissue-then-prune sequence, with ML-DSA specifics owned by the separate layered enhancement.
 
 The rotation-then-prune sequence:
@@ -553,7 +553,7 @@ OpenShift's internal PKI uses a **flat topology** rather than a traditional hier
 
 OpenShift manages certificate rotation through a combination of operator-driven processes and the cluster's internal PKI infrastructure:
 
-- **Signer rotation**: When a signer certificate is rotated (rare event), the system may temporarily create a cross-signing certificate to maintain trust during the transition. The new signer signs a certificate for the old signer's public key, allowing old leaf certificates to remain valid while new ones are issued.
+- **Signer rotation**: When a signer is rotated, cross-signing certificates maintain trust during the transition. A **forward cross-signing certificate** (the old signer signs the new signer) is always created and shipped with new-signer leaves, so consumers that still trust only the old CA accept new-signer leaves. A **backward cross-signing certificate** (the new signer signs the old signer) is created only for routine rotations that do not increase security strength, and is omitted for strength-increasing migrations (see [Cross-Signing to Ease Rotation](#cross-signing-to-ease-rotation)).
 
 - **CA bundle management**: The cluster automatically manages CA bundles (collections of trusted signer certificates) and updates them when signers are rotated. Components watch these bundles and reload them to maintain trust relationships.
 
@@ -577,44 +577,50 @@ The current rotation machinery (library-go `certrotation`) manages that gap with
 
 Nothing hard-enforces that every consumer has actually ingested the new bundle before a new-signer leaf is presented: the only backstops are the signer's ~10% minimum age, the certificate validity overlap, and the expectation ("hope") that consumers reload in time. This works, but it is a race against a clock: a component that is slow to reload, or cannot hot-reload at all, can miss the window and break. It also couples leaf rotation to an arbitrary delay.
 
-##### How cross-signing works: two small "bridge" certificates
+##### How cross-signing works: forward and, conditionally, backward cross-signing certificates
 
-When a signer rotates, we mint a new CA that keeps the **same identity (subject)** as the old one, plus **two bridge certificates**:
+When a signer rotates, the new CA keeps the **same identity (subject)** as the old one, and up to two cross-signing certificates are minted:
 
-| Bridge certificate          | Plain meaning                          | Where it lives                                                                     |
-|-----------------------------|----------------------------------------|------------------------------------------------------------------------------------|
-| **old-CA-signed-by-new-CA** | "I, the new CA, vouch for the old CA." | Added to the **trust bundle**                                                      |
-| **new-CA-signed-by-old-CA** | "I, the old CA, vouch for the new CA." | **Shipped alongside** every leaf (serving/client) certificate issued by the new CA |
+- **Forward cross-signing certificate** (the old CA signs the new CA, so the old CA vouches for the new CA). **Always minted**, and shipped alongside every new-signer leaf, so a consumer that still trusts only the old CA validates a new-signer leaf via `leaf -> new CA -> forward cross-signing certificate -> old CA`.
+- **Backward cross-signing certificate** (the new CA signs the old CA, so the new CA vouches for the old CA). Placed in the trust bundle, so a consumer that already has the new CA validates a not-yet-rotated old-signer leaf via `new CA -> backward cross-signing certificate -> old CA`. This is what `service-ca-operator` does today. It is minted **only for routine rotations**, per the rule below.
 
-Because each bridge lets trust flow from one CA to the other, **trust is continuous from the moment of rotation**, with no clock involved.
+**Routine rotation versus strength-increasing migration.** The backward certificate makes the new CA vouch for the old CA, which caps a new-anchor consumer's effective security at the old anchor's. That is only harmful when the new signer is **stronger** than the old. The platform therefore compares the new and old signers' NIST security strength (the bits used for peer derivation; see [Peer Certificates](#peer-certificates-category-peer)), treating a quantum-resistant (ML-DSA) signer as strictly stronger than any classical signer because against a cryptographically-relevant quantum computer a classical signer's effective strength is 0:
+
+- **New no stronger than old (routine rotation): mint both certificates.** When the new signer's strength is equal to or lower than the old signer's (most commonly a periodic refresh with the same algorithm and parameters), there is no asymmetry, so the backward certificate does not lower the security bar and is minted for smooth overlap. An attacker gains nothing by targeting the old signer instead of the new one, because both require breaking the same strength. The one residual exception, compromise of the old signer's private key, is not a routine rotation; it is handled by the deliberate prune that removes the old signer from trust (see [Rotation and Signer Retirement](#rotation-and-signer-retirement)), not by cross-signing.
+- **New stronger than old (strength-increasing migration): forward only.** A larger RSA key, a stronger ECDSA curve, or a classical-to-post-quantum move omits the backward certificate. Post-rotation consumers validate not-yet-rotated old-signer leaves via the **old CA retained as a co-anchor in the union trust bundle** until it is pruned or expires, not via a new-vouches-for-old certificate, and the migration is completed by the deliberate prune that drops the old anchor. Any classical-to-ML-DSA rotation is therefore always forward-only. (ML-DSA specifics are owned by the layered ML-DSA / PQC enhancement.)
+
+In all cases new-signer leaves validate old-to-new via the forward certificate, so **trust is continuous from the moment of rotation**, with no clock involved.
 
 ##### Why it helps: walking through the scenarios
 
 The key move: a server (or client) always presents a chain that ends at a CA the other side *already* trusts.
 
-| Situation                                                                                                                          | What is presented                              | How it validates                                                                    |
-|------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------|-------------------------------------------------------------------------------------|
-| An **un-updated** consumer (still trusts only the old CA) is handed a **new-CA** certificate                                       | leaf + `new-CA-signed-by-old-CA` bridge        | chain ends at the **old** CA it still trusts → accepted immediately, no reload      |
-| An **updated** consumer (has the new bundle) is handed an **old-CA** certificate (e.g. a not-yet-rotated leaf)                     | leaf                                           | chain ends via `old-CA-signed-by-new-CA` in its bundle at the **new** CA → accepted |
-| **mTLS / client direction**: a client rotates to a new client-CA and connects to a server that still trusts only the old client-CA | client leaf + `new-CA-signed-by-old-CA` bridge | server validates the presented chain back to the **old** client-CA → accepted       |
+| Situation | What is presented | How it validates |
+|---|---|---|
+| An **un-updated** consumer (trusts only the old CA) is handed a **new-signer** leaf | leaf + forward cross-signing certificate | chain ends at the **old** CA it still trusts, accepted immediately, no reload |
+| An **updated** consumer is handed a not-yet-rotated **old-signer** leaf, **routine rotation** | leaf | validated via the backward cross-signing certificate in its bundle, ending at the **new** CA, accepted |
+| An **updated** consumer is handed a not-yet-rotated **old-signer** leaf, **strength-increasing migration** | leaf | validated via the **old CA retained in its union bundle** (no backward certificate), accepted |
+| **mTLS / client direction**: a client on a new client-CA connects to a server that still trusts only the old client-CA | client leaf + forward cross-signing certificate | server validates the chain back to the **old** client-CA, accepted |
 
-In every case the connection succeeds *without waiting* for the peer to reload anything.
+In every case the connection succeeds *without waiting* for the peer to reload anything, provided the peer can verify the leaf's key algorithm (a cross-signing certificate supplies a trust path, not algorithm support; see Costs and constraints).
 
 ##### Improving the time-based checkpoints
 
-With bridges in place, the timing gates become unnecessary or soften into eventual consistency:
+With cross-signing in place, the timing gates become unnecessary or soften into eventual consistency:
 
 - The **~10% signer-age delay** before leaves may use the new signer is **removed**. Leaves can re-issue immediately or lazily, in any order, because both old- and new-issued leaves are trusted throughout.
-- Bundle reload changes from a **deadline** into **eventual consistency**: an un-updated consumer still validates via the served bridge; it only needs to reload eventually, to drop the *expired* old root. No component has to be restarted to stay connected.
-- The **union bundle** idea is kept, now augmented with bridges.
+- Bundle reload changes from a **deadline** into **eventual consistency**: an un-updated consumer still validates via the forward cross-signing certificate served with the leaf; it only needs to reload eventually, to drop the *expired* old root. No component has to be restarted to stay connected.
+- The **union bundle** idea is kept, augmented with the forward cross-signing certificate (and, for routine rotations, the backward cross-signing certificate).
 
 This is what makes immediate reconciliation safe: because trust is continuous from t=0, there is no need to first confirm that the new trust bundle has propagated everywhere before issuing new certificates.
 
 ##### Costs and constraints (so readers know the trade-offs)
 
-- The **old signer's key is used once**, at rotation time, to sign the `new-CA-signed-by-old-CA` bridge. (The prior signer secret still exists, so the key is available.)
-- **Every endpoint must present its full chain** (leaf + bridge), not a bare leaf. This is transparent for standard Go TLS servers/clients (Go serves and builds chains automatically); the audit burden is non-Go proxies, CA-pinning consumers, or code that reads only the first certificate.
-- Each active CA generation adds **~2 small bridge certificates** to the bundle (pruned on expiry). This removes the *time pressure* to rotate/reload quickly, but by itself does **not** fix trust-bundle overflow from rapid regeneration; that root cause still needs its own guard.
+- The **old signer's key is used once** at rotation time to sign the forward cross-signing certificate (and, for routine rotations, the new signer's key signs the backward one). The prior signer secret still exists, so the key is available.
+- **Every endpoint must materialize its full chain in the served Secret** (leaf + forward cross-signing certificate), not a bare leaf. Go serves and validates whatever chain the Secret contains, but it will not synthesize a cross-signing certificate from a trust pool, so PKI-managing operators must write the full chain into the Secret. Standard Go TLS clients then validate automatically; the audit burden is non-Go proxies, CA-pinning consumers, and code that reads only the first certificate. Test both Go and non-Go consumers.
+- A cross-signing certificate provides a **trust path, not algorithm support**: a consumer that cannot negotiate or verify the new key algorithm still rejects the leaf even when the chain reaches a trusted CA. Immediate reissue to a new algorithm therefore requires algorithm-compatible consumers (or a named override to hold a laggard), exactly as for the service-CA signer.
+- Continuity for an old-anchor consumer is **bounded by the old CA's validity**: the forward cross-signing certificate's chain ends at the old CA, so once it expires or is pruned that path fails. Consumers must adopt the new trust anchor before then. Cross-signing certificates are **short-lived** (not matched to the signer's full lifetime), so they are not a long-term dependency.
+- Each active CA generation adds **one or two small cross-signing certificates** (they expire or prune out). This removes the *time pressure* to rotate/reload quickly, but by itself does **not** fix trust-bundle overflow from rapid regeneration; that root cause still needs its own guard.
 
 #### Configuration Resolution Order
 
@@ -912,11 +918,11 @@ Certificates generated under this feature are not revisioned, so if a reconfigur
 
 Cross-signing is the main new security-relevant mechanism this enhancement introduces, so it warrants explicit due diligence.
 
-**Trust flows in one direction only.** During a signer rotation the new CA is cross-signed by the old CA (the `new-CA-signed-by-old-CA` bridge, presented alongside new-signer leaves), and the old CA is cross-signed by the new CA (added to the trust bundle). Because the bridge that lets new leaves validate against old trust is new-signed-by-old, trust only extends forward from an already-trusted old anchor to new leaves. It does not let an attacker present old-algorithm material to downgrade a verifier that has already moved to the new anchor. This one-way property is what makes a post-quantum migration safe against a reverse-order downgrade attack: once the old CA is pruned, a verifier that trusts the new anchor will not accept a chain that depends on the weaker old anchor.
+**Trust does not flow from a stronger new anchor to a weaker old one.** New-signer leaves always validate old-to-new via the forward cross-signing certificate. For the reverse direction, the new CA vouches for the old CA (a backward cross-signing certificate) **only when the new signer is no stronger than the old**; when the new signer is stronger (a key-size or curve increase, or a classical-to-post-quantum move) the backward certificate is omitted and the old CA is retained as a co-anchor in the union bundle until pruned. This keeps the new anchor from ever vouching for a weaker old one, which is what makes a post-quantum migration safe: if the old classical algorithm is later broken, nothing lets a forged old-CA certificate be accepted by consumers that trust the new (PQC) anchor. We eliminate the backward direction for migrations rather than constrain it, because OpenShift has no revocation primitive (a backward certificate could not be withdrawn once issued) and X.509 path constraints (`pathLenConstraint`, `NameConstraints`) are not honored by all clients.
 
-**Chain verification is required end to end.** Cross-signing depends on every endpoint presenting its full chain (leaf plus bridge) rather than a bare leaf, and on verifiers building the chain to an anchor they trust. Standard Go TLS clients and servers do this automatically. The due-diligence burden is on non-Go proxies, CA-pinning consumers, and any code that inspects only the first certificate in a presented chain; these must be audited to confirm they validate the full chain and do not pin to an intermediate that cross-signing will rotate.
+**Chain verification is required end to end.** Cross-signing depends on every endpoint presenting its full chain (leaf plus the forward cross-signing certificate) rather than a bare leaf, and on verifiers building the chain to an anchor they trust. Standard Go TLS clients and servers do this automatically. The due-diligence burden is on non-Go proxies, CA-pinning consumers, and any code that inspects only the first certificate in a presented chain; these must be audited to confirm they validate the full chain and do not pin to an intermediate that cross-signing will rotate.
 
-**Key exposure is unchanged.** The old signer key is used once more, at rotation time, to sign the `new-CA-signed-by-old-CA` bridge. The prior signer secret already exists, so this introduces no exposure of key material beyond its existing storage. Pruning removes the old CA from trust and drops the bridge with it, which is why the old anchor can be pruned only once every verifier trusts the new anchor directly.
+**Key exposure is unchanged.** The old signer key is used once more, at rotation time, to sign the forward cross-signing certificate (and the new signer key signs the backward one for routine rotations). The prior signer secret already exists, so this introduces no exposure of key material beyond its existing storage. Pruning removes the old CA from trust, which is why the old anchor can be pruned only once every verifier trusts the new anchor directly.
 
 **No weakening of verification is intended.** Cross-signing shortens the window in which a rotation can break connections; it does not relax any verification requirement, bypass expiry, or introduce a new trust root. The union trust bundle continues to hold only CAs the platform already manages.
 
