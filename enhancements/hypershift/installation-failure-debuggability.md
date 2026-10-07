@@ -2,12 +2,13 @@
 title: installation-failure-debuggability
 authors:
   - "@sdminonne"
-reviewers: # Before `implementable`: populate with HyperShift maintainers
-  - TBD
-approvers: # Before `implementable`: populate with HyperShift leads
-  - TBD
-api-approvers: # Before `implementable`: request from #forum-api-review (HyperShift CRDs are v1beta1 in openshift/hypershift, not openshift/api)
-  - TBD
+reviewers:
+  - "@georgelipceanu"
+  - "@jparril"
+approvers:
+  - "@csrwng"
+api-approvers:
+  - "@JoelSpeed"
 creation-date: 2026-10-05
 last-updated: 2026-10-06
 tracking-link:
@@ -147,7 +148,7 @@ automation tools consume.
    failures) are out of scope. **Exception**:
    `ManagementClusterResourcePressure` persists into
    day-2 as a continuous health signal. This is the only
-   condition that crosses the day-0/day-2 boundary, for
+   condition that crosses the day-1/day-2 boundary, for
    three reasons: (a) management cluster scheduling
    pressure affects running hosted clusters — not just
    new installations — so removing the signal after
@@ -408,7 +409,7 @@ HyperShift deployments (ARO HCP, ROSA HCP, self-managed):
 | 1.1 | API server route not admitted or unreachable | Add diagnostic detail to `InfrastructureReady` condition message with actual route admission status |
 | 1.2 | Hosted control-plane kubeconfig never created | Already surfaced via `Available=False, Reason=KubeconfigWaitingForCreate`. No change needed. |
 | 1.3 | Control-plane deployment has unavailable replicas | Add diagnostic detail to CPC `Available` condition message with pod-level failure reasons (scheduling, crash loop, image pull) |
-| 1.4 | Required operators never become available | Set `Reason=OperatorDegraded` on `ClusterVersionSucceeding`; pass through the CVO message verbatim (no parsing) |
+| 1.4 | Required operators not yet available or degraded | Set `Reason=OperatorDegraded` on `ClusterVersionSucceeding`; pass through the CVO message verbatim (no parsing) |
 | 1.5 | HostedCluster has no installed version or stops progressing | New `installationStage` status field |
 | 1.6 | Management cluster capacity exhaustion — pod scheduling failures | New `ManagementClusterResourcePressure` condition |
 | 1.7 | Opaque timeout masking root cause | Addressed by all of the above — diagnostic conditions replace the opaque timeout with specifics |
@@ -633,6 +634,31 @@ var stageOrdinal = map[InstallationStage]int{
 }
 ```
 
+**Stage transition trigger conditions:**
+
+Each stage transition is evaluated by the CPO on every
+reconciliation of the `HostedControlPlane`. The CPO
+checks the trigger condition for each stage and sets
+the field to the latest stage whose trigger is
+satisfied (subject to the forward-only ordinal
+constraint above):
+
+| Transition | Trigger Condition | What the CPO checks |
+|---|---|---|
+| → `Initializing` | HCP reconciliation starts | The CPO's `Reconcile()` is invoked for this `HostedControlPlane`. Set unconditionally on first reconciliation if `installationStage` is empty. |
+| `Initializing` → `ControlPlaneProvisioning` | At least one control-plane component deployment has been created | The CPO has called `CreateOrUpdate` for any CPC deployment (kube-apiserver, etcd, etc.) in the HCP namespace. |
+| `ControlPlaneProvisioning` → `WaitingForKubeconfig` | All required control-plane component deployments have `AvailableReplicas > 0` | `controlPlaneComponentsAvailable()` returns true — every CPC's `Available` condition is `True`. |
+| `WaitingForKubeconfig` → `WaitingForOperators` | The hosted cluster kubeconfig secret exists | The CPO confirms the kubeconfig secret (named `<infraID>-admin-kubeconfig`) is present in the HCP namespace. This is the same check that drives the existing `Available=False, Reason=KubeconfigWaitingForCreate` condition. |
+| `WaitingForOperators` → `InstallationComplete` | The CVO reports the cluster version is available | The `ClusterVersionAvailable` condition on the `HostedControlPlane` is `True`. This indicates the CVO in the guest cluster has successfully rolled out all required cluster operators for the target version. |
+
+Note: the CPO evaluates all trigger conditions on
+every reconciliation loop, not only the "next" one.
+Because of the forward-only constraint, if multiple
+triggers become true simultaneously (e.g., after a
+fast installation or an informer cache catch-up), the
+stage jumps directly to the latest satisfied stage
+without pausing at intermediate values.
+
 **Diagnostic detail in existing conditions — reason code analysis:**
 
 These are changes to condition *messages* and *reasons* on
@@ -780,6 +806,23 @@ set controlled by HyperShift. Downstream consumers
 should not switch on `Reason` values for this
 condition other than `StatusUnknown` and the new
 `OperatorDegraded`.
+
+**Interpretation guidance:** `Reason=OperatorDegraded`
+is a point-in-time signal, not a terminal verdict. It
+indicates the CVO currently reports a failing operator,
+which may be a transient state (operator still starting)
+or a persistent failure. The accompanying `Message`
+(verbatim from the CVO) provides the specific operator
+name and failure detail. Debuggers should correlate the
+condition's `lastTransitionTime` with the cluster age
+to distinguish a slow start from a genuinely stuck
+operator — for example, `OperatorDegraded` set within
+the first few minutes of installation is likely
+transient, while the same reason persisting beyond the
+expected operator startup window warrants investigation.
+This condition is level-driven: it automatically clears
+to `Status=True` when the CVO reports success, so no
+manual intervention is needed for transient cases.
 
 **`InfrastructureReady` condition:**
 
@@ -2142,18 +2185,35 @@ minutes:**
      HyperShift ships independently from OCP and a fix
      can be deployed within days.
 
-**Recovering a stuck `installationStage`:**
+**Emergency status correction for a stuck
+`installationStage`:**
 
-If `installationStage` is stuck at an intermediate
-value on a cluster that is otherwise healthy
-(`Available=True`), the stage can be corrected
-manually. The CPO writes `installationStage` on the
+> **Warning:** A persistently intermediate
+> `installationStage` on a cluster where
+> `Available=True` is a symptom of a CPO
+> reconciliation bug or an unhandled edge case —
+> the CPO should have advanced the stage
+> automatically when the trigger condition was met.
+> The manual patch below is an emergency status
+> correction, not a substitute for investigating and
+> fixing the root cause. Only use this procedure if
+> you have confirmed that the cluster is genuinely
+> healthy (all expected workloads running, CVO
+> reports success) and the stage field is the only
+> inconsistency. File a bug against the HyperShift
+> component with the stuck stage value, the
+> `Available` and `ClusterVersionAvailable` condition
+> states, and the CPO logs covering the installation
+> window.
+
+The CPO writes `installationStage` on the
 `HostedControlPlane`, and the HO mirrors it to the
-`HostedCluster`. To fix a stuck stage, patch the
+`HostedCluster`. To correct a stuck stage, patch the
 **`HostedControlPlane`** (the source of truth):
 
 ```bash
-# Patch the HCP (source of truth — the CPO writes here)
+# Emergency status correction — patch the HCP
+# (source of truth; the CPO writes here)
 oc patch hostedcontrolplane <name> -n <hcp-namespace> \
   --subresource=status --type=merge \
   -p '{"status":{"installationStage":"InstallationComplete"}}'
@@ -2165,10 +2225,14 @@ within 1 minute). Patching the `HostedCluster`
 directly would appear to work but would be
 overwritten on the next HO mirror sync.
 
-The CPO enforces forward-only transitions, so it will
-not regress a manually corrected stage on the next
-reconciliation. This should only be needed if a bug
-in the CPO prevents stage advancement.
+The CPO enforces forward-only transitions during
+initial installation, so it will not regress a
+manually corrected stage on the next reconciliation.
+Note that `installationStage` tracks only the initial
+installation phase — it is not continuously
+reconciled after reaching `InstallationComplete` and
+has no role during upgrades. Upgrades are tracked
+separately by `ControlPlaneVersionStatus.History`.
 
 **Example: diagnosing a stuck installation with diagnostic
 conditions:**
