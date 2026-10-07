@@ -106,11 +106,10 @@ The controller watches labeled Secrets in `openshift-config`. On first activatio
 - The key `.dockerconfigjson` exists in `data`.
 - The value under `.dockerconfigjson` is valid JSON and contains an `auths` map.
 
-Failure examples:
+The Kubernetes API server already enforces the second and third checks (key presence and well-formed JSON) for Secrets created with type `kubernetes.io/dockerconfigjson`; it does not enforce the Secret type itself or the presence of an `auths` map inside the JSON. The controller therefore only needs to additionally reject the cases below:
 
-- A Secret of type `Opaque` → rejected (`GlobalPullSecretSourceInvalid` event, naming the Secret).
-- A Secret missing the `.dockerconfigjson` key → rejected.
-- A Secret whose `.dockerconfigjson` value is `not-json` → rejected.
+- A Secret of type `Opaque` labeled for aggregation → not rejected by the API (type is unrestricted), rejected by the controller (`GlobalPullSecretSourceInvalid` event, naming the Secret).
+- A Secret of type `kubernetes.io/dockerconfigjson` whose JSON has no `auths` key → passes API validation, rejected by the controller.
 - Two modular Secrets both valid, but one invalid Secret also exists in the labeled set → **entire reconcile blocked**, last-known-good retained, `Degraded` condition set.
 
 **Merge algorithm:**
@@ -123,6 +122,25 @@ Failure examples:
    - Otherwise, write to the effective map (a later, higher-precedence Secret overwrites an earlier one for the same key).
 5. Serialize the effective `auths` map with **registry hostname keys in sorted order** to guarantee byte-identical output for identical inputs.
 6. Write to `openshift-config/pull-secret` only if the serialized content differs from the current value, avoiding no-op updates.
+
+A labeled Secret with the priority annotation looks like:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: team-a-quay
+  namespace: openshift-config
+  labels:
+    config.openshift.io/global-pull-secret: "true"
+  annotations:
+    config.openshift.io/global-pull-secret-priority: "10" # exact key TBD, see Open Questions
+type: kubernetes.io/dockerconfigjson
+data:
+  .dockerconfigjson: <base64>
+```
+
+**Example:** Baseline already has `registry.redhat.io`. `team-a-quay` (priority 10) and `team-b-quay` (priority 10) both set `quay.io`; since priority is equal, Secret name breaks the tie and `team-b-quay` (sorts after `team-a-quay`) is applied last and wins for `quay.io`. If either Secret also sets `registry.redhat.io`, that entry is skipped because the baseline always wins.
 
 On each labeled Secret create, update, or delete the controller re-runs the full algorithm above — never treating the already-merged `pull-secret` as baseline — then writes to `pull-secret` only when all contributing sources are valid.
 
@@ -160,7 +178,7 @@ It was rejected because multiple critical consumers hardcode the literal name `p
 ## Open Questions
 
 1. **Controller ownership** — proposed direction is a small dedicated controller (not MCO, not `cluster-config-operator`); not yet confirmed by the owning team.
-2. **Baseline storage mechanism** — where/how the preserved pre-controller `pull-secret` content is stored (e.g. annotation, status field, internal object) is not yet decided.
+2. **Baseline storage mechanism** — where/how the preserved pre-controller `pull-secret` content is stored (e.g. annotation, status field, internal object, or an installer-provided baseline Secret) is not yet decided.
 3. **Priority annotation key** — the exact annotation key name is deferred to implementation; higher numeric priority wins per the merge algorithm above.
 4. **HyperShift control-plane execution model** — where the aggregator runs in Hosted Control Planes and how it aligns with HyperShift's `kube-system/additional-pull-secret` model is unresolved.
 
