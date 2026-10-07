@@ -713,6 +713,8 @@ This design is intentional and maintains consistency with the PKI API's philosop
 
 **Migration constraint**: Because the `service-ca` signer is configurable only cluster-wide (there is no per-service override), its algorithm is effectively shared by every consumer of service-CA-issued certificates, both OpenShift platform components and customer workloads that rely on service-CA serving certificates. As a consequence, an administrator cannot migrate the `service-ca` signer to a new algorithm until **all** consuming workloads support that algorithm; changing the signer affects all of them at once. A customer whose workloads cannot yet support a stronger algorithm must keep the `service-ca` signer on an algorithm those workloads accept, which also holds back any platform component issuing through service-CA.
 
+**Cross-signing**: Today `service-ca-operator` unconditionally mints both cross-signing certificates on every rotation. Under this enhancement it is updated to apply the shared strength rule (see [Cross-Signing to Ease Rotation](#cross-signing-to-ease-rotation)): it continues to mint both for a routine (same-or-lower-strength) rotation, but for a strength-increasing migration it mints only the forward cross-signing certificate and retains the old self-signed CA in the bundle until it is pruned or expires. The strength comparison and this decision live in shared library-go so service-ca and the other PKI-managing operators behave identically.
+
 **Special Case: OLM / layered products**
 
 OLM consumes the PKI configuration for the certificates it manages. The deeper design is being worked out with the OLM team; the main points for this EP are:
