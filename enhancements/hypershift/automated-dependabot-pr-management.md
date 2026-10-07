@@ -3,18 +3,17 @@ title: automated-dependabot-pr-management
 authors:
   - "@bryan-cox"
 reviewers:
-  - TBD # HyperShift: dependency scope, repair behavior, and maintainer workflow.
-  - TBD # Test Platform: Prow authorization, test triggering, and Tide merge gates.
-  - TBD # Security: dependency exclusions, untrusted content, and credential isolation.
+  - "@csrwng" # HyperShift: dependency scope, repair behavior, and maintainer workflow.
+  - "@enxebre" # HyperShift: automation design, testing, and integration boundaries.
 approvers:
-  - TBD # Select one approver to coordinate review and establish consensus.
+  - "@celebdor" # Coordinate review and establish consensus.
 api-approvers:
   - None
 creation-date: 2026-10-01
-last-updated: 2026-10-01
+last-updated: 2026-10-07
 status: provisional
 tracking-link:
-  - TBD # Add the issue tracking this enhancement.
+  - https://github.com/openshift/enhancements/pull/2126
 see-also: []
 replaces: []
 superseded-by: []
@@ -319,7 +318,7 @@ These implementation details remain to be resolved. Direct individual PRs, human
 3. **Approver notifications:** What Slack destination, path-to-approver routing, and notification retry policy should Chai use? Owners: HyperShift maintainers.
 4. **Routine scheduling:** Should this run as a routine configured in Chai bot, or should a periodic CI job invoke Chai? Chai remains the workflow owner either way. Owners: HyperShift maintainers and CI configuration owners.
 
-Reviewer identities, one coordinating approver, and the enhancement's tracking issue must also be supplied before submission. No existing prerequisite issue is assumed to track the complete proposal.
+Additional Test Platform and Security reviewers remain to be identified for Prow integration and credential isolation. The enhancement PR tracks the proposal; no separate implementation tracking issue is assumed.
 
 ## Test Plan
 
