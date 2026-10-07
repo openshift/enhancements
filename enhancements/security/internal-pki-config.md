@@ -14,6 +14,7 @@ reviewers:
   - "@p0lyn0mial" # authentication team, service-ca and client certificate management
   - "@csrwng" # hypershift team, hosted control-plane PKI
   - "@tthvo" # installer implementation
+  - "@joelanford" # OLM team, OLM certificate generation and layered products
 approvers:
   - "@sjenning" # staff engineer with PKI and security expertise
 api-approvers:
