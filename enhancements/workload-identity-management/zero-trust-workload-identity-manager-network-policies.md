@@ -10,7 +10,7 @@ approvers:
 api-approvers:
   - None
 creation-date: 2026-04-08
-last-updated: 2026-09-29
+last-updated: 2026-10-07
 status: provisional
 tracking-link:
   - https://redhat.atlassian.net/browse/SPIRE-212
@@ -37,6 +37,11 @@ ingress are derived from existing spec and operator proxy configuration
 `networkPolicyRefs`.
 
 ### Supported Platforms
+
+This table lists **OpenShift versions and topologies where the cluster CNI
+enforces Kubernetes NetworkPolicy**. It is **not** a statement of which
+platforms the ZeroTrustWorkloadIdentityManager operator or its operands may
+be installed on.
 
 | OpenShift version | CNI | Topology | Notes |
 |-------------------|-----|----------|-------|
@@ -418,14 +423,19 @@ proxy egress NetworkPolicy).
 the **deduplicated union** of all conditional TCP ports above. When the
 union is empty, delete that policy by name.
 
-**Parsing limits (documented, not blocking):**
+**Port derivation defaults (external database):**
 
-* Port-only egress does not restrict destination IP or hostname.
-* Database connection strings may be ambiguous; use type defaults when
-  parse fails and append to `status.networkPolicy.warnings` (condition
-  remains `True` if policies were applied).
-* Outbound traffic via corporate proxy uses **proxy** ports, not remote
-  URL ports, unless `NO_PROXY` bypasses the proxy for those hosts.
+* When `datastore.databaseType` is not `sqlite3` and `connectionString`
+  **omits a port**, the operator uses **5432/TCP** for Postgres-compatible
+  types and **3306/TCP** for MySQL-compatible types, matching typical client
+  driver defaults. When the port is present in the string (`:port` in a URL,
+  `port=` in a DSN, and similar), the operator parses it for feature egress
+  (see capability table and Capability-Derived Egress).
+* **Parse failures (documented, not blocking):** If the connection string
+  cannot be parsed reliably, the operator applies the same type defaults,
+  records the issue in `status.networkPolicy.warnings`, and still sets
+  `NetworkPoliciesAvailable` to **True** when operator-managed policies were
+  successfully applied.
 
 **Naming conventions:**
 
@@ -680,8 +690,8 @@ derived as follows (proxy egress is server-only; see capability table):
 
 cert-manager upstream adds no extra ports beyond baseline API **6443**.
 
-If parsing fails, apply the default port for the database type and record a
-warning in `status.networkPolicy.warnings`.
+On parse failure, behavior matches **Port derivation defaults** above
+(default port + `status.networkPolicy.warnings`; reconcile not blocked).
 
 ### Constraints
 
