@@ -69,6 +69,8 @@ join path health to PV and PVC context automatically.
 - A per-cluster opt-out beyond the `StoragePathAlert` feature gate. Once the
   gate is in `Default`, the alerts are unconditionally active on all eligible
   clusters.
+- Clusters that opt out of the Storage cluster capability during installation will
+  not include CSO or this alerting functionality.
 
 ## Proposal
 
@@ -130,8 +132,8 @@ including control-plane nodes that can host CSI volumes.
 SNO uses one exporter pod. Resource requests and limits must be established by
 scale and SNO testing before GA; initial values require platform resource
 review because cluster components normally use requests without limits. Reboots
-temporarily interrupt alert coverage. Because there is no opt-out, the resource
-cost applies to every SNO cluster.
+temporarily interrupt alert coverage. The resource cost applies to every SNO
+cluster that enables the Storage cluster capability.
 
 MicroShift is out of scope: the alerting stack here relies on CSO and the
 OpenShift platform monitoring stack.
