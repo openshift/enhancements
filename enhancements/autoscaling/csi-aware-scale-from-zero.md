@@ -5,9 +5,8 @@ authors:
 reviewers:
   - "@elmiko"
   - "@jsafrane"
+  - "@joelspeed"  
 approvers:
-  - "@joelspeed"
-  - "@jsafrane"
   - "@elmiko"  
 api-approvers:
   - None
@@ -78,7 +77,7 @@ set to `true`.
 
 The Cluster Autoscaler(CA) version shipped in OpenShift
 5.1 likewise enables CSI node-aware scheduling by default. For scaling nodes
-in nodegroups with existing nodes, the new scheduler behaviour requires no further
+in nodegroups with existing nodes, the new Auto Scaler behaviour requires no further
 changes from underlying Kubernetes distribution(Openshift). 
 
 For scaling from zero, CA requires some sort of help from underlying cloudprovider/platform
@@ -102,6 +101,10 @@ The value is illustrative. Providers derive conservative limits from the
 MachineSet template and supported CSI driver configuration, including for
 MachineSets created at zero replicas.
 
+We also need to update openshift cloudprovider in downstream fork of Cluster AutoScaler
+https://github.com/openshift/kubernetes-autoscaler/blob/main/cluster-autoscaler/cloudprovider/openshift/openshift_nodegroup.go
+to handle machineapi correctly.
+
 This feature should have no negative interaction and will be introduced as a
 techPreview feature(which we aim to remove before 5.1 release) called - `AutoscalerCSILimits`.
 
@@ -113,7 +116,18 @@ only be enabled if CA is correctly configured to calculate volume limits.
 
 In Openshift-5.1 when `AutoscalerCSILimits` featuregate is enabled, we will
 set `preventPodSchedulingIfMissing` to `true` on those platforms
-and deployments.
+and deployments. We will initially target following platforms:
+
+- AWS
+- GCP
+- Azure
+
+In these 3 environments if `AutoScalerCSILimits` featuregate is enabled and 
+if corresponding `MachineSet` objects has required CSI annotations then `preventPodSchedulingIfMissing`
+will be enabled on those platforms.
+
+In Hypershift platform we have to look for `machineset.cluster.x-k8s.io` objects
+rather than `machineset.machine.openshift.io` object.
 
 ### Workflow Description
 
@@ -131,10 +145,16 @@ Propose `AutoscalerCSILimits` as a new TechPreviewNoUpgrade featuregate in OCP.
 HyperShift uses Cluster Autoscaler with Cluster API resources backing its
 NodePools. Scale-from-zero support requires CSI capacity annotations on those
 resources in the management cluster, using limits appropriate to the hosted
-cluster's workers. The proposed writer is the HyperShift Operator's NodePool
-controller, which already reconciles scale-from-zero capacity annotations on
-backing MachineDeployments or MachineSets. It needs access to the hosted
-cluster's CSI limits and end-to-end coverage.
+cluster's workers. 
+
+NodePool controller will derive CSI limits and write to MachineDeployment annotations (for replace node).
+For inplace mode, NodePool controller will directly write the CSI annotations to MachineSet objects.
+The values will be determined by Cloud Provider instance types as done today
+for CPU and Memory.
+
+The Node pool controller will write the annotations unconditionally without
+any featuregate because annotations are inert on themselves and cause no harm
+even if overall feature is disabled.
 
 #### Standalone Clusters
 
@@ -161,6 +181,8 @@ The following downstream integration is required:
   node-aware behavior and does not add a command-line flag.
 * OpenShift CSI driver operators set
   `preventPodSchedulingIfMissing` for drivers supported in OpenShift 5.1.
+* Openshift cloud provider in downstream fork https://github.com/openshift/kubernetes-autoscaler/blob/main/cluster-autoscaler/cloudprovider/openshift/openshift_nodegroup.go
+   needs to be updated.
 
 ### Risks and Mitigations
 
@@ -168,7 +190,9 @@ I think the main risk is if `preventPodSchedulingIfMissing` is set to `true`
 and some issue causes Cluster AutoScaler to not take into account CSI attach
 limits from Cluster API objects, in whicah case scaling from zero may be broken.
 
-We should also verify if this works correctly in Clusters that use Karpenter.
+Karpenter does not run scheduler plugins which are affected by `preventPodSchedulingIfMissing` 
+and hence it should be safe to disable pod placement via `preventPodSchedulingIfMissing`
+in clusters that use Karpenter.
 
 We will iron out any issues regarding this via TechPreviewNoUpgrade featureGate.
 
@@ -187,7 +211,7 @@ Should we have a separate featureGate for `preventPodSchedulingIfMissing` featur
 
 ## Test Plan
 
-OpenShift end-to-end tests verify the default configuration:
+OpenShift end-to-end tests verify the default configuration on AWS, Azure and GCP:
 
 * scale-up from a nonzero node group creates enough nodes for pending volumes.
   Verify that machinesets created have right annotations that indicate CSI driver limits.
@@ -244,6 +268,10 @@ group's template `CSINode` data, the real node's `CSINode`, the driver's
 `preventPodSchedulingIfMissing` setting, and Cluster Autoscaler logs. A mismatch
 between the template and real attachment limit is a product defect for a
 supported driver and platform.
+
+There should additionally be events attached to a failed scaling event if node
+scaling fails because of missing CSI driver node.
+
 
 ## Infrastructure Needed [optional]
 
