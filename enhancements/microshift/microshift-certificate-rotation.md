@@ -12,7 +12,7 @@ approvers:
 api-approvers:
   - None
 creation-date: 2026-09-08
-last-updated: 2026-09-24
+last-updated: 2026-10-02
 tracking-link:
   - https://redhat.atlassian.net/browse/OCPSTRAT-2899
 see-also:
@@ -25,18 +25,20 @@ see-also:
 ## Summary
 
 MicroShift currently includes a certificate validity monitoring system that
-forces an unplanned process exit when any certificate enters the "red zone"
-(approaching expiry). This behavior causes unplanned downtime on edge devices
-deployed in environments where maintenance windows must be tightly controlled,
-such as telecommunications networks.
+forces an unplanned process exit when any certificate approaches expiry. This
+behavior causes unplanned downtime on edge devices deployed in environments
+where maintenance windows must be tightly controlled, such as telecommunications
+networks.
 
 This enhancement introduces controlled, on-demand certificate and CA renewal via
 the `microshift certs` CLI subcommand family, allowing administrators to check
 certificate status and trigger renewal during planned maintenance windows. The
-forced process exit on red-zone certificates is made configurable via a
-`certificates.forceRestartOnRedZone` configuration option. The option defaults
+forced process exit for certificates with `ExpirationImminent` status is made
+configurable via the
+`certificates.forceRestartOnExpirationImminent` configuration option.
+The option defaults
 to `true` to preserve existing behavior on upgrades. Administrators can set it
-to `false` to use a warn-only policy that surfaces certificate zone status via
+to `false` to use a warn-only policy that surfaces certificate status via
 `certs status` and healthcheck without forcing an unplanned restart.
 Administrators can also configure the validity of internally generated serving
 and CA certificates; the defaults remain one year and ten years, respectively.
@@ -72,13 +74,13 @@ As a MicroShift administrator, I want to preview what a renewal operation would
 do before executing it, so that I can validate the scope of changes and
 communicate the expected downtime to stakeholders.
 
-#### Story 5: Configurable Red-Zone Behavior
+#### Story 5: Configurable Expiration-Imminent Behavior
 
-As a MicroShift administrator running MicroShift at edge sites, I want the
-red-zone forced process exit to be configurable so that I can opt out of
-unplanned restarts, maintain my SLA commitments, and renew certificates during
-planned maintenance windows without changing the default behavior of existing
-deployments.
+As a MicroShift administrator running MicroShift at edge sites, I want the forced
+process exit associated with `ExpirationImminent` certificates to be
+configurable so that I can opt out of unplanned restarts, maintain my SLA
+commitments, and renew certificates during planned maintenance windows without
+changing the default behavior of existing deployments.
 
 #### Story 6: Configurable Certificate Validity
 
@@ -97,8 +99,8 @@ tables.
 ### Goals
 
 1. Provide a CLI-based mechanism to inspect the status of all MicroShift-managed
-   certificates, including their expiry dates and zone classification
-   (green/yellow/red).
+   certificates, including their expiry dates and status classification
+   (`Healthy`, `ExpiresSoon`, `ExpirationImminent`, `Expired`, or `NotYetValid`).
 
 2. Provide a CLI-based mechanism to renew serving/client certificates
    independently of CA certificates.
@@ -109,14 +111,15 @@ tables.
 4. Support `--dry-run` for all renewal operations to allow validation before
    execution.
 
-5. Make the forced process exit on red-zone certificates configurable. By
-   default, preserve the existing auto-restart behavior. Provide a
-   `certificates.forceRestartOnRedZone` configuration option that administrators
-   can disable to log warnings and surface status in `certs status` and
-   healthcheck without forcing a restart.
+5. Make the forced process exit associated with `ExpirationImminent`
+   certificates configurable. By default, preserve the existing auto-restart
+   behavior. Provide a
+   `certificates.forceRestartOnExpirationImminent` configuration option that
+   administrators can disable to log warnings and surface status in `certs
+status` and healthcheck without forcing a restart.
 
-6. Preserve the existing behavior where yellow-zone certificates are
-   automatically regenerated on service start.
+6. Preserve the existing behavior where certificates with `ExpiresSoon` status
+   are automatically regenerated on service start.
 
 7. Introduce a PKI inventory abstraction that decouples CLI operations from the
    specific certificate layout, enabling future CA consolidation work.
@@ -264,27 +267,28 @@ API object with these top-level fields:
 
 The required `config` object contains:
 
-| Field                   | Type    | Nullable | Required value or meaning                        |
-| ----------------------- | ------- | -------- | ------------------------------------------------ |
-| `forceRestartOnRedZone` | boolean | No       | Effective red-zone forced-restart setting        |
-| `servingValidity`       | string  | No       | Effective serving validity as a Go duration      |
-| `caValidity`            | string  | No       | Effective CA validity as a Go duration           |
+| Field                              | Type    | Nullable | Required value or meaning                      |
+| ---------------------------------- | ------- | -------- | ---------------------------------------------- |
+| `forceRestartOnExpirationImminent` | boolean | No       | Effective `ExpirationImminent` restart setting |
+| `servingValidity`                  | string  | No       | Effective serving validity as a Go duration    |
+| `caValidity`                       | string  | No       | Effective CA validity as a Go duration         |
 
 Every member of `items` contains:
 
-| Field              | Type            | Nullable | Required value or meaning                                  |
-| ------------------ | --------------- | -------- | ---------------------------------------------------------- |
-| `service`          | string          | No       | Owning service or function                                 |
-| `name`             | string          | No       | Stable inventory name                                      |
-| `role`             | string          | No       | `ca`, `serving`, `client`, or `peer`                       |
-| `rotationPolicy`   | string          | No       | `standard` or `extended`                                   |
-| `zone`             | string          | No       | `green`, `yellow`, or `red`                                |
-| `notBefore`        | RFC 3339 string | No       | Beginning of the certificate validity interval             |
-| `notAfter`         | RFC 3339 string | No       | End of the certificate validity interval                   |
-| `remainingSeconds` | integer         | No       | Signed `notAfter - generatedAt` duration in whole seconds  |
+| Field              | Type            | Nullable | Required value or meaning                                    |
+| ------------------ | --------------- | -------- | ------------------------------------------------------------ |
+| `service`          | string          | No       | Owning service or function                                   |
+| `name`             | string          | No       | Stable inventory name                                        |
+| `role`             | string          | No       | `ca`, `serving`, `client`, or `peer`                         |
+| `rotationPolicy`   | string          | No       | `standard` or `extended`                                     |
+| `status`           | string          | No       | `Healthy`, `ExpiresSoon`, `ExpirationImminent`, `Expired`, or `NotYetValid` |
+| `notBefore`        | RFC 3339 string | No       | Beginning of the certificate validity interval               |
+| `notAfter`         | RFC 3339 string | No       | End of the certificate validity interval                     |
+| `remainingSeconds` | integer         | No       | Signed `notAfter - generatedAt` duration in whole seconds    |
 
-Items are ordered by `service` and then `name`. An expired certificate has a
-zero or negative `remainingSeconds` value and a `red` zone.
+Items are ordered by `service` and then `name`. `Expired` takes precedence over
+the policy-derived status when `remainingSeconds` is zero or negative.
+Otherwise, an item is `NotYetValid` when `generatedAt` is before `notBefore`.
 
 ```json
 {
@@ -292,7 +296,7 @@ zero or negative `remainingSeconds` value and a `red` zone.
   "kind": "CertificateStatusList",
   "generatedAt": "2026-09-08T10:30:00Z",
   "config": {
-    "forceRestartOnRedZone": true,
+    "forceRestartOnExpirationImminent": true,
     "servingValidity": "8760h",
     "caValidity": "87600h"
   },
@@ -302,7 +306,7 @@ zero or negative `remainingSeconds` value and a `red` zone.
       "name": "etcd-serving",
       "role": "peer",
       "rotationPolicy": "extended",
-      "zone": "yellow",
+      "status": "ExpirationImminent",
       "notBefore": "2016-11-03T08:00:00Z",
       "notAfter": "2026-11-01T08:00:00Z",
       "remainingSeconds": 4656600
@@ -429,13 +433,14 @@ function and then by certificate name. Safe to run while MicroShift is running.
 
 ```console
 $ sudo microshift certs status
-SERVICE            CERTIFICATE              STATUS    EXPIRY                  REASON          MESSAGE
-authentication     admin-kubeconfig-signer   Green     2035-09-08T10:30:00Z    NotExpiring     Valid for 3287 days
-etcd               etcd-signer               Green     2035-09-08T10:30:00Z    NotExpiring     Valid for 3287 days
-etcd               etcd-serving              Yellow    2026-11-01T08:00:00Z    Expiring        Expires in 54 days
-kube-apiserver     kube-apiserver-serving    Green     2027-03-15T10:30:00Z    NotExpiring     Valid for 188 days
-kubelet            kubelet-client            Green     2027-03-15T10:30:00Z    NotExpiring     Valid for 188 days
-service-ca         service-ca                Green     2035-09-08T10:30:00Z    NotExpiring     Valid for 3287 days
+SERVICE            CERTIFICATE              STATUS               EXPIRY                  REASON          MESSAGE
+authentication     admin-kubeconfig-signer   Healthy             2035-09-08T10:30:00Z    NotExpiring     Valid for 3287 days
+etcd               etcd-signer               Healthy             2035-09-08T10:30:00Z    NotExpiring     Valid for 3287 days
+etcd               etcd-serving              ExpirationImminent  2026-11-01T08:00:00Z    Expiring        Expires in 54 days
+kube-apiserver     kube-apiserver-serving    ExpiresSoon         2027-03-15T10:30:00Z    Expiring        Expires in 188 days
+kubelet            kubelet-client            ExpiresSoon         2027-03-15T10:30:00Z    Expiring        Expires in 188 days
+service-ca         service-ca                Healthy             2035-09-08T10:30:00Z    NotExpiring     Valid for 3287 days
+authentication     admin-kubeconfig-client   Expired             2026-09-01T10:30:00Z    Expired         Expired 7 days ago
 ...
 ```
 
@@ -460,9 +465,9 @@ reloaded or restarted after renewal.
 $ sudo microshift certs renew --serving
 Renewed 18 serving/client certificates.
 SERVICE            CERTIFICATE              STATUS    EXPIRY                  REASON          MESSAGE
-etcd               etcd-serving              Green     2027-09-08T10:30:00Z    NotExpiring     Valid for 365 days
-kube-apiserver     kube-apiserver-serving    Green     2027-09-08T10:30:00Z    NotExpiring     Valid for 365 days
-kubelet            kubelet-client            Green     2027-09-08T10:30:00Z    NotExpiring     Valid for 365 days
+etcd               etcd-serving              Healthy   2027-09-08T10:30:00Z    NotExpiring     Valid for 365 days
+kube-apiserver     kube-apiserver-serving    Healthy   2027-09-08T10:30:00Z    NotExpiring     Valid for 365 days
+kubelet            kubelet-client            Healthy   2027-09-08T10:30:00Z    NotExpiring     Valid for 365 days
   ...
 WARNING: Applications that cache certificates or CA bundles may need to be
 reloaded or restarted after renewal.
@@ -522,15 +527,15 @@ MicroShift adds the following fields to `/etc/microshift/config.yaml`:
 
 ```yaml
 certificates:
-  forceRestartOnRedZone: true
+  forceRestartOnExpirationImminent: true
   servingValidity: 8760h
   caValidity: 87600h
 ```
 
-`forceRestartOnRedZone` controls only whether entering the red zone forces
-MicroShift to restart. It defaults to `true` to preserve the behavior of
-existing deployments. It does not control regeneration during a later manual
-service start.
+`forceRestartOnExpirationImminent` controls only whether entering the
+`ExpirationImminent` status forces MicroShift to restart. It defaults to `true`
+to preserve the behavior of existing deployments. It does not control
+regeneration during a later manual service start.
 
 `servingValidity` applies to all serving certificates generated and managed by
 MicroShift. `caValidity` applies to all CA certificates generated and managed by
@@ -552,9 +557,9 @@ rotation path. The `certs status` command evaluates each existing certificate
 using the validity encoded in that certificate, not the currently configured
 duration.
 
-### Certificate Zone Model
+### Certificate Status Model
 
-Zone thresholds are derived from the validity encoded in each certificate so
+Status thresholds are derived from the validity encoded in each certificate so
 they remain meaningful for configured durations such as a six-week serving
 certificate. For each item, total validity is `NotAfter - NotBefore`, remaining
 validity is `NotAfter - now`, and remaining percentage is remaining validity
@@ -562,13 +567,13 @@ divided by total validity.
 
 The PKI inventory records certificate role (CA, serving, client, or peer) and
 rotation policy as separate attributes. Role determines how a certificate is
-reported and selected for renewal; rotation policy determines its zone
+reported and selected for renewal; rotation policy determines its status
 thresholds. Certificate duration is not used to infer either attribute:
 
-| Rotation policy | Assignment                                        | Green           | Yellow                            | Red           |
-| --------------- | ------------------------------------------------- | --------------- | --------------------------------- | ------------- |
-| Standard        | Serving and explicitly assigned client/peer certs | More than 58.3% | More than 33.3% and at most 58.3% | At most 33.3% |
-| Extended        | All CAs and explicitly assigned client/peer certs | More than 15%   | More than 10% and at most 15%     | At most 10%   |
+| Rotation policy | Assignment                                        | `Healthy`       | `ExpiresSoon`                     | `ExpirationImminent`           |
+| --------------- | ------------------------------------------------- | --------------- | --------------------------------- | ------------------------------ |
+| Standard        | Serving and explicitly assigned client/peer certs | More than 58.3% | More than 33.3% and at most 58.3% | More than 0% and at most 33.3% |
+| Extended        | All CAs and explicitly assigned client/peer certs | More than 15%   | More than 10% and at most 15%     | More than 0% and at most 10%   |
 
 All CAs use the extended policy and all serving certificates use the standard
 policy. This intentionally normalizes existing signer CAs that currently use the
@@ -581,34 +586,52 @@ must declare their policy explicitly.
 For the default validity durations, these percentages retain the current
 boundaries of approximately seven and four months remaining for standard-policy
 certificates and 18 and 12 months remaining for extended-policy certificates. A
-certificate that is expired or not yet valid is always in the red zone.
+certificate is `Expired` when `now` is at or after `NotAfter`, regardless of
+rotation policy. Otherwise, a certificate is `NotYetValid` when `now` is before
+`NotBefore`. These invalid states are reported independently of the remaining
+validity thresholds; at `NotBefore`, the policy-derived status applies.
 
-**Behavioral changes by zone:**
+The status names replace the earlier color-zone vocabulary: `Healthy` maps to
+green, `ExpiresSoon` maps to yellow, and `ExpirationImminent` maps to red.
+Certificates that have passed `NotAfter` or have not reached `NotBefore`, which
+were previously included in the red zone, are reported separately as `Expired`
+and `NotYetValid`, respectively.
 
-- **Green zone**: No action needed. Certificates are valid and not approaching
+**Behavior by status:**
+
+- **`Healthy`**: No action needed. Certificates are valid and not approaching
   expiry.
-- **Yellow zone**: Warning logged. Certificates in this zone are automatically
-  regenerated the next time MicroShift is manually started or restarted
-  (preserving existing behavior). Entering the yellow zone while MicroShift is
-  running does not itself stop or restart the service.
-- **Red zone (changed)**: Behavior is now governed by the
-  `certificates.forceRestartOnRedZone` configuration option:
-  - **`forceRestartOnRedZone: true`** (default and legacy behavior): MicroShift
-    cancels the run context via `WhenToRotateAtEarliest` /
+- **`ExpiresSoon`**: Warning logged. Certificates with this status are
+  automatically regenerated the next time MicroShift is manually started or
+  restarted (preserving existing behavior). Entering this status while
+  MicroShift is running does not itself stop or restart the service.
+- **`ExpirationImminent` (changed)**: Behavior is governed by the
+  `certificates.forceRestartOnExpirationImminent` configuration option:
+  - **`forceRestartOnExpirationImminent: true`** (default and legacy behavior):
+    MicroShift cancels the run context via `WhenToRotateAtEarliest` /
     `context.WithDeadline` in `pkg/cmd/run.go`, causing systemd to restart the
     process.
-  - **`forceRestartOnRedZone: false`**: Warning logged; MicroShift does _not_
-    force a process exit. The cluster continues to run until certificates are
-    actually invalid. Near-expiry is visible in logs, `certs status` output
-    (zone, time until `NotAfter`, and whether `forceRestartOnRedZone` is
-    enabled), and healthcheck. The administrator decides when to perform renewal
-    in a maintenance window.
+  - **`forceRestartOnExpirationImminent: false`**: Warning logged; MicroShift
+    does _not_ force a process exit. The cluster continues to run until
+    certificates are actually invalid. Near-expiry is visible in logs, `certs
+status` output (status, time until `NotAfter`, and whether
+    `forceRestartOnExpirationImminent` is enabled), and healthcheck. The
+    administrator decides when to perform renewal in a maintenance window.
+- **`Expired`**: The certificate is no longer valid. `certs status` reports this
+  state distinctly so the administrator can renew it immediately. This status
+  is not controlled by the rotation-policy percentage thresholds.
+- **`NotYetValid`**: The certificate is not valid at the report timestamp.
+  `certs status` reports this unhealthy state distinctly in table, JSON, and YAML
+  output, with `Valid in ...` in the table message. Check clock synchronization
+  and certificate issuance before deciding whether renewal is needed; this is
+  not an impending-expiration condition. This reporting distinction does not
+  change existing startup certificate generation or validity checks.
 
-  > **Note:** The existing yellow-zone behavior where certificates are
+  > **Note:** The existing behavior where `ExpiresSoon` certificates are
   > automatically regenerated on manual service start (`certsToRegenerate`) is
-  > _not_ affected by this configuration. The `forceRestartOnRedZone` setting
-  > controls only the in-process red-zone deadline, not the "regenerate on
-  > start" behavior.
+  > _not_ affected by this configuration. The
+  > `forceRestartOnExpirationImminent` setting controls only the in-process
+  > `ExpirationImminent` deadline, not the "regenerate on start" behavior.
 
 ### PKI Inventory
 
@@ -647,7 +670,7 @@ the number of CAs without modifying the CLI commands.
    device.
 2. It checks the process exit code and the output `apiVersion` before consuming
    the document.
-3. It records `generatedAt`, certificate identity, role, zone, and `notAfter`
+3. It records `generatedAt`, certificate identity, role, status, and `notAfter`
    values together with the device identity supplied by the fleet system.
 4. It alerts or schedules maintenance according to the aggregated certificate
    state. MicroShift does not contact or depend on a central fleet service.
@@ -655,7 +678,8 @@ the number of CAs without modifying the CLI commands.
 #### Serving/Client Certificate Renewal
 
 1. Administrator runs `microshift certs status` to assess certificate state.
-2. Administrator identifies certificates in yellow or red zone.
+2. Administrator identifies certificates with `ExpiresSoon`,
+   `ExpirationImminent`, or `Expired` status.
 3. Administrator plans a maintenance window.
 4. Administrator runs `microshift certs renew --serving --dry-run` to validate
    the scope.
@@ -689,15 +713,16 @@ the number of CAs without modifying the CLI commands.
    inspect the effective durations. Existing certificates are not changed solely
    because their configured validity changed.
 3. The administrator uses `microshift certs renew --serving` or `microshift
-   certs renew --ca` during a maintenance window when the new validity should take
+certs renew --ca` during a maintenance window when the new validity should take
    effect.
 4. Newly issued certificates use the configured duration. `certs status` reports
-   their resulting `NotAfter` values and proportionally calculated zones.
+   their resulting `NotAfter` values and proportionally calculated statuses.
 
 ### API Extensions
 
 This enhancement does not introduce or modify resources served by the
-Kubernetes API server. It adds the `certificates.forceRestartOnRedZone`,
+Kubernetes API server. It adds the
+`certificates.forceRestartOnExpirationImminent`,
 `certificates.servingValidity`, and `certificates.caValidity` fields to the
 host-local MicroShift configuration file. The versioned CLI documents are
 Kubernetes API objects so that clients can use standard object identification
@@ -861,11 +886,13 @@ which certificates exist and their parent-child relationships.
 ---
 
 **Risk**: A very short configured validity increases renewal frequency and can
-cause certificates to enter warning zones soon after issuance.
+cause certificates to reach `ExpiresSoon` or `ExpirationImminent` soon after
+issuance.
 
-**Mitigation**: Zone thresholds scale with each certificate's encoded validity,
-configuration validation rejects non-positive or inconsistent CA/serving
-durations, and `certs status` exposes the resulting absolute expiration time.
+**Mitigation**: Status thresholds scale with each certificate's encoded
+validity, configuration validation rejects non-positive or inconsistent
+CA/serving durations, and `certs status` exposes the resulting absolute
+expiration time.
 
 ### Drawbacks
 
@@ -906,11 +933,11 @@ rejected because:
 3. The controlled approach gives administrators explicit control over when the
    service restart occurs.
 
-### Alternative C: Make Forced Exit on Red-Zone Mandatory
+### Alternative C: Make Forced Exit on Expiration-Imminent Status Mandatory
 
-Keep the existing behavior of forcing a process exit when certificates enter the
-red zone without allowing administrators to disable it. This was rejected
-because:
+Keep the existing behavior of forcing a process exit when certificates reach
+`ExpirationImminent` without allowing administrators to disable it. This was
+rejected because:
 
 1. Telecommunications customers reported that unplanned restarts may violate
    their SLA commitments.
@@ -937,18 +964,20 @@ retained as defaults instead.
 3. Should the ProdSec review (OCPEDGE-3002) identify any certificates that
    require different rotation policies?
 
-4. Should administrators be able to configure the spans of the green, yellow,
-   and red zones, or should MicroShift define fixed proportional thresholds for
-   all installations? If configurable, what validation prevents overlapping or
-   unsafe zone boundaries?
+4. Should administrators be able to configure the spans of `Healthy`,
+   `ExpiresSoon`, and `ExpirationImminent`, or should MicroShift define fixed
+   proportional thresholds for all installations? If configurable, what
+   validation prevents overlapping or unsafe status boundaries?
 
 ## Test Plan
 
 ### Unit Tests
 
 - PKI inventory construction and parent-child relationship tracking.
-- Zone classification for standard and extended policies across default and
-  custom certificate durations.
+- Status classification for standard and extended policies across default and
+  custom certificate durations, including every threshold boundary, `Expired`
+  precedence at `NotAfter`, and `NotYetValid` before `NotBefore` with the
+  policy-derived status taking effect exactly at `NotBefore`.
 - Explicit role and rotation-policy assignment without duration heuristics,
   including CA policy normalization and preservation of long-lived client and
   peer behavior.
@@ -977,7 +1006,7 @@ retained as defaults instead.
   serving and CA renewals. Each successful invocation produces one schema-valid
   JSON document on standard output with no human-readable text mixed into it.
 - Verify table and JSON renderings contain the same certificates, calculated
-  zones, impact, and expiry dates.
+  statuses, impact, and expiry dates.
 - Verify JSON-mode failures return non-zero, leave standard output empty, and
   produce a schema-valid error document on standard error.
 - End-to-end `certs renew --serving` followed by service restart, verifying all
@@ -989,20 +1018,21 @@ retained as defaults instead.
 - Successful serving and CA renewal output includes the new expiry date for
   every renewed certificate.
 - Renewal is refused while MicroShift is running.
-- With `forceRestartOnRedZone: true`, a red-zone certificate preserves the
-  existing forced-restart behavior; with `false`, it produces warnings without
-  forcing a process exit.
-- Entering the yellow zone while running does not restart MicroShift, and the
+- With `forceRestartOnExpirationImminent: true`, an `ExpirationImminent`
+  certificate preserves the existing forced-restart behavior; with `false`, it
+  produces warnings without forcing a process exit.
+- Entering `ExpiresSoon` while running does not restart MicroShift, and the
   certificate is regenerated on the next manual service start.
 - A custom six-week `servingValidity` is reflected in newly issued serving
-  certificates without placing them immediately in the yellow or red zone.
+  certificates without placing them immediately in `ExpiresSoon` or
+  `ExpirationImminent`.
 - A custom `caValidity` is reflected in newly issued CAs, and no descendant
   certificate expires after its signer.
 
 ### Scenario Tests
 
-- Simulate certificate approaching red zone, verify warning behavior, execute
-  planned renewal, verify recovery.
+- Simulate a certificate approaching `ExpirationImminent`, verify warning
+  behavior, execute planned renewal, and verify recovery.
 - Simulate CA renewal, verify kubeconfig regeneration, verify clients can
   authenticate with new kubeconfig.
 - Verify an application that caches an old certificate or CA bundle is called
@@ -1022,11 +1052,11 @@ N/A This feature is targeted for GA directly.
 --serving`, `certs renew --ca`, `--dry-run`, and `-o json|yaml`).
 - Versioned Kubernetes API object contracts for JSON/YAML status, renewal,
   dry-run, and error output are documented and validated in CI.
-- `forceRestartOnRedZone` implemented with a compatibility-preserving `true`
-  default and a warn-only `false` mode.
+- `forceRestartOnExpirationImminent` implemented with a
+  compatibility-preserving `true` default and a warn-only `false` mode.
 - PKI inventory abstraction implemented and validated.
 - Configurable serving and CA validity implemented with one-year and ten-year
-  defaults and proportional rotation zones.
+  defaults and proportional status thresholds.
 - ProdSec review completed (OCPEDGE-3002).
 - Documentation published (OCPEDGE-3003).
 - Automated test coverage in CI (OCPEDGE-3001).
@@ -1042,9 +1072,9 @@ N/A
 On upgrade to a MicroShift version containing this enhancement:
 
 - The `microshift certs` CLI subcommands become available.
-- `certificates.forceRestartOnRedZone` defaults to `true`, so the existing
-  red-zone forced-restart behavior is unchanged unless an administrator
-  explicitly opts out.
+- `certificates.forceRestartOnExpirationImminent` defaults to `true`, so the
+  existing forced-restart behavior at the `ExpirationImminent` threshold is
+  unchanged unless an administrator explicitly opts out.
 - No certificate renewal is triggered by the upgrade itself.
 - Existing certificates remain valid with their current expiry dates.
 - Omitted lifetime settings resolve to the existing one-year serving and
@@ -1056,8 +1086,9 @@ On upgrade to a MicroShift version containing this enhancement:
 On downgrade to a MicroShift version without this enhancement:
 
 - The `microshift certs` CLI subcommands are no longer available.
-- The red-zone forced-restart behavior is unconditional. A previously configured
-  `forceRestartOnRedZone: false` setting is not honored.
+- The forced-restart behavior at the former red-zone threshold is unconditional.
+  A previously configured `forceRestartOnExpirationImminent: false` setting is
+  not honored.
 - Certificates renewed by this enhancement remain valid; no rollback of
   certificate state occurs.
 - The older binary ignores the unsupported `certificates` fields and returns to
@@ -1086,8 +1117,10 @@ defined by this enhancement are emitted only by the `microshift certs` CLI.
    through fleet automation.
 3. Check MicroShift logs for certificate-related warnings: `journalctl -u
 microshift -g "certificate"`.
-4. If certificates are in red zone, plan a maintenance window and use the
-   renewal commands.
+4. If certificates are `ExpiresSoon`, `ExpirationImminent`, or `Expired`, plan a
+   maintenance window and use the renewal commands.
+5. If certificates are `NotYetValid`, check system time, clock synchronization,
+   and the certificate's `notBefore` value before deciding whether to renew.
 
 ### Recovery from Expired Certificates
 
