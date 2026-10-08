@@ -10,7 +10,7 @@ approvers:
 api-approvers:
   - everettraven
 creation-date: 2025-11-19
-last-updated: 2026-05-07
+last-updated: 2026-10-08
 tracking-link: # link to the tracking ticket (for example: Jira Feature or Epic ticket) that corresponds to this enhancement
   - https://issues.redhat.com/browse/HPCASE-153
 ---
@@ -157,16 +157,16 @@ section for the full list of configuration sources and their precedence.
 
 - Adds a `groups` field to the `spec.tlsSecurityProfile`
   (https://github.com/openshift/api/pull/2583/files#diff-2101eac4196d9b14cf061c8a6a4d40f9d8e5a77fc2690f969e7293294218afe3R267)
-- The field is gated behind the `TLSCurvePreferences` feature gate, enabled in
+- The field is gated behind the `TLSGroupPreferences` feature gate, enabled in
   `DevPreviewNoUpgrade` and `TechPreviewNoUpgrade` tiers
 - The addition of this field should not affect existing API behaviour
-- **Component implementors do not need to check for the feature gate.** Because
-  the field is optional (`+optional`, `omitempty`), the field's presence is
-  sufficient signal. When the field is set, components use the specified groups;
-  when absent, they fall back to the TLS implementation's defaults. When the
-  feature gate is not enabled, the API server will not persist the field, so it
-  will never be set — components therefore continue behaving exactly as they do
-  today without any feature-gate awareness.
+- **Component implementors must check the feature gate before observing or
+  applying groups.** In particular, a component using
+  `ObserveTLSSecurityProfileWithGroupPaths` must invoke it only when
+  `TLSGroupPreferences` is enabled (or pass an empty groups path / ignore the
+  observed groups when it is disabled). The observer resolves named TLS profiles
+  to their default groups, so the absence of `groups` in the API object alone is
+  not sufficient to preserve the pre-feature behavior.
 
 ### Topology Considerations
 
@@ -493,7 +493,7 @@ group set when not specified.
 
 ### Dev Preview -> Tech Preview
 
-- Ability to specify supported groups via the `TLSCurvePreferences` feature
+- Ability to specify supported groups via the `TLSGroupPreferences` feature
   gate.
 
 ### Tech Preview -> GA
