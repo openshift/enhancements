@@ -14,7 +14,7 @@ approvers:
 api-approvers:
   - None
 creation-date: 2026-09-09
-last-updated: 2026-09-22
+last-updated: 2026-10-08
 status: provisional
 tracking-link:
   - https://issues.redhat.com/browse/OCPSTRAT-3365
@@ -239,13 +239,14 @@ that use only single non-multipath devices and therefore produce no path alerts.
 
   No test environment with CSI volumes backed by a physical FC fabric has been identified.
   Because customers running bare-metal deployments with FC-backed storage are expected to benefit
-  from this feature, access to such an environment is strongly recommended for at least manual
+  from this feature, access to such an environment is recommended for at least manual
   validation of alert behavior.
 
 #### Test table
 
-  The following table lists the test scenarios. Run the applicable scenarios on each test platform,
-  according to its support for iSCSI, NVMe-oF, and LUKS encryption.
+  The following table lists the test scenarios. Run the applicable scenarios on each on AWS
+  with NetApp Ontap as the storage backend and Trident as the CSI driver. Tests T1-T8 will be automated in CI,
+  but only on AWS.
 
 | ID | Test | Alert to check | Severity | What to verify |
 | --- | --- | --- | --- | --- |
@@ -255,7 +256,7 @@ that use only single non-multipath devices and therefore produce no path alerts.
 | T4 | iSCSI, LUKS-encrypted: all paths fail | CSIAddonsVolumeMultipathLost | Critical | Alert fires after 1 minute with the alert-contract labels; clears when at least one path becomes available again. |
 | T5 | NVMe-oF, unencrypted: one controller path fails and recover | CSIAddonsVolumeNVMeSubsystemDegraded	| Warning | Alert fires after 5 minutes with the alert-contract labels; clears after all paths restoration. |
 | T6 | NVMe-oF, unencrypted: all controller paths fail and recover | CSIAddonsVolumeNVMeSubsystemLost | Critical | Alert fires after 1 minute with the alert-contract labels; clears when at least one path becomes available again. |
-| T7 | NVMe-oF, LUKS-encrypted: one controller path fails	| CSIAddonsVolumeNVMeSubsystemDegraded	| Alert | Alert fires after 5 minutes and  identifies the PVC above the encrypted device stack; clears after all paths restoration. |
+| T7 | NVMe-oF, LUKS-encrypted: one controller path fails	| CSIAddonsVolumeNVMeSubsystemDegraded	| Warning | Alert fires after 5 minutes and  identifies the PVC above the encrypted device stack; clears after all paths restoration. |
 | T8 | NVMe-oF, LUKS-encrypted: all controller paths fail	| CSIAddonsVolumeNVMeSubsystemLost	| Critical | Alert fires after 1 minute and identifies the PVC; clears when at least one path becomes available again. |
 | T9 | Normal detach, PVC deletion, exporter restart, and device-name reuse	| No alert | | No stale alert expected after legitimate detach/deletion, historical context is cleaned up as specified; a newly attached volume cannot inherit the old PVC labels. |
 
@@ -263,25 +264,11 @@ that use only single non-multipath devices and therefore produce no path alerts.
     persistentvolumeclaim, multipath device name and node. Those labels must identify the affected bound
     PVC and node, with no labels borrowed from another volume. Degraded alerts have severity="warning";
     lost alerts have severity="critical".
-  - Each test, T1-T8, will have Filesystem and raw-block PVC variant, thus is sum ups to 18 tests.
+  - each test, T1-T8, will have Filesystem and raw-block PVC variant, thus is sum ups to 16 tests.
   - T9 falls into explaratory testing category -- only actions described in the T1-T8 can fire
     CSIAddonsVolumeN* alerts, no other action should trigger these alerts
   - the primary environment, where all tests will be executed is AWS with NetApp ONTAP server
-  - In environment with FC-backed storage, execute test T1 and T2.
-
-  ***Test Scope and Common Requirements:***
-  - Alert contract: For every test, a firing alert must include the alertname, severity, persistentvolume,
-    persistentvolumeclaim, multipath device name, and node labels. These labels must consistently identify
-    the affected bound PVC and node; labels from another volume must not be present. Degraded-state alerts
-    must use severity="warning", while lost-volume alerts must use severity="critical".
-  - PVC modes: Execute tests T1-T8 with both filesystem-mode and raw-block PVCs.
-  - Exploratory testing: T9 verifies that only the actions covered by T1-T8 trigger CSIAddonsVolumeN* alerts.
-    No unrelated action should trigger these alerts.
-  - Primary environment: Execute the complete test suite on AWS with a NetApp ONTAP storage system.
-  - FC validation: In an environment using FC-backed storage, execute tests T1 and T2.
-
-  Note: T1-T8 with two PVC variants gives 16 tests which should be automated for at least primary testing
-  environment.
+  - optionally, if an environment with FC-backed storage is available, execute manually tests T1 and T2 there
 
 #### Scale and lifecycle tests
   The following tests may be performed manually. Document the environment, procedure, and results to
