@@ -11,7 +11,7 @@ approvers:
 api-approvers:
   - "@everettraven" # For the Console Operator changes.
 creation-date: 2026-09-10
-last-updated: 2026-10-05
+last-updated: 2026-10-08
 status: provisional
 tracking-link:
   - "https://redhat.atlassian.net/browse/OCPSTRAT-3721"
@@ -309,6 +309,10 @@ same [update and removal behavior](#configuration-updates-and-ca-reload) applies
 
 ### API Extensions
 
+The YAML examples below show the relevant fields; unrelated resource fields are
+omitted. They illustrate the proposed API shape and are not complete installation
+manifests.
+
 #### Existing Authentication Operator API
 
 Reuse `Authentication.spec.proxy` in `operator.openshift.io/v1`, defined by
@@ -316,6 +320,25 @@ Reuse `Authentication.spec.proxy` in `operator.openshift.io/v1`, defined by
 Its fields remain `httpProxy`, `httpsProxy`, `noProxy`, and `trustedCA`; this
 proposal extends their use to the External OIDC webhook without changing the API
 shape.
+
+```yaml
+apiVersion: operator.openshift.io/v1
+kind: Authentication
+metadata:
+  name: cluster
+spec:
+  managementState: Managed
+  proxy:
+    httpProxy: http://proxy.example.com:3128
+    httpsProxy: http://proxy.example.com:3128
+    noProxy:
+      - idp.internal.example.com
+    trustedCA:
+      name: auth-proxy-ca
+```
+
+Here, `trustedCA` refers to `openshift-config/auth-proxy-ca`. The reference is
+optional; when present, the ConfigMap must contain `ca-bundle.crt`.
 
 #### New Console Operator API
 
@@ -328,6 +351,26 @@ independent of the authentication operator field, so each operator owns its prox
 on its own resource. The proposed field name is `authProxy` since bare `proxy` risks
 confusion with Console's existing plugin reverse-proxy configuration. The field is gated by
 `AuthenticationComponentProxyExternalOIDC`.
+
+```yaml
+apiVersion: operator.openshift.io/v1
+kind: Console
+metadata:
+  name: cluster
+spec:
+  managementState: Managed
+  authProxy:
+    httpProxy: http://proxy.example.com:3128
+    httpsProxy: http://proxy.example.com:3128
+    noProxy:
+      - idp.internal.example.com
+    trustedCA:
+      name: auth-proxy-ca
+```
+
+This `trustedCA` also refers to a ConfigMap in `openshift-config`, so standalone
+Authentication and Console resources can reference the same bundle. On hosted
+clusters, HCCO writes this field with a reference to the synchronized guest copy.
 
 #### HyperShift API Additions
 
@@ -354,7 +397,54 @@ synchronizes the referenced CA and ensures the HCP reference points to that loca
 copy. From the HCP block, CPO configures the webhook and HCCO writes the guest
 `console.operator.openshift.io/cluster` proxy field (see
 [Topology Considerations](#hypershift--hosted-control-planes)). CA ConfigMaps must
-contain `ca-bundle.crt`. See the [HyperShift workflow](#hypershift) for an example.
+contain `ca-bundle.crt`.
+
+For example, the administrator configures the HostedCluster on the management
+cluster as follows:
+
+```yaml
+apiVersion: hypershift.openshift.io/v1beta1
+kind: HostedCluster
+metadata:
+  name: example
+  namespace: clusters
+spec:
+  operatorConfiguration:
+    authentication:
+      proxy:
+        httpProxy: http://proxy.example.com:3128
+        httpsProxy: http://proxy.example.com:3128
+        noProxy:
+          - idp.internal.example.com
+        trustedCA:
+          name: auth-proxy-ca
+```
+
+The source CA ConfigMap is `clusters/auth-proxy-ca` on the management cluster.
+The HyperShift operator generates the corresponding HostedControlPlane field,
+rewriting `trustedCA.name` to the synchronized ConfigMap's name in the HCP
+namespace. For an HCP in `clusters-example`, this could look like:
+
+```yaml
+apiVersion: hypershift.openshift.io/v1beta1
+kind: HostedControlPlane
+metadata:
+  name: example
+  namespace: clusters-example
+spec:
+  operatorConfiguration:
+    authentication:
+      proxy:
+        httpProxy: http://proxy.example.com:3128
+        httpsProxy: http://proxy.example.com:3128
+        noProxy:
+          - idp.internal.example.com
+        trustedCA:
+          name: managed-auth-proxy-ca
+```
+
+Here, `managed-auth-proxy-ca` is an illustrative name for the synchronized
+ConfigMap in `clusters-example`, also on the management cluster.
 
 #### Feature Gates
 
@@ -409,9 +499,47 @@ additions:
   `proxyTrustedCA` path pointing at the mounted proxy CA bundle (the proxy URLs
   themselves are passed as environment variables). See
   [OAuth API Server Deployment and Trust](#oauth-api-server-deployment-and-trust).
-- Console's generated `console-config.yaml` gains an `auth.proxy` block holding the
-  proxy URLs, `noProxy`, and a `trustedCAFile` path. See
-  [Console Login and Token Refresh](#console-login-and-token-refresh).
+- Console Operator renders `Console.spec.authProxy` into an `auth.proxy` block in
+  Console's generated `console-config.yaml`, holding the proxy URLs, resolved
+  `noProxy` list, and a `trustedCAFile` path.
+
+For example, the generated webhook configuration includes the following fields,
+alongside its existing `jwt` configuration. The path is illustrative and must
+match the operator-managed CA mount:
+
+```yaml
+apiVersion: authentication.openshift.io/v1alpha1
+kind: AuthenticationConfiguration
+proxyTrustedCA: /var/auth-proxy-ca/ca-bundle.crt
+```
+
+For the Console operator resource shown above, Console Operator generates the
+following configuration fragment when the feature prerequisites are satisfied:
+
+```yaml
+auth:
+  authType: oidc
+  oidcIssuer: https://idp.example.com
+  proxy:
+    httpProxy: http://proxy.example.com:3128
+    httpsProxy: http://proxy.example.com:3128
+    noProxy:
+      - idp.internal.example.com
+      - ".cluster.local"
+      - ".cluster.local."
+      - ".svc"
+      - ".svc."
+      - localhost
+      - localhost.
+      - "127.0.0.1"
+      # The Kubernetes service IP is also appended when available.
+    trustedCAFile: /var/auth-proxy-ca/ca-bundle.crt
+```
+
+Console Operator expands `noProxy` with the internal defaults and translates the
+`trustedCA` ConfigMap reference into the mounted bundle's `trustedCAFile` path.
+The path is illustrative and must match the mount it configures on the Console
+Deployment. The existing `authType` and `oidcIssuer` fields are shown for context.
 
 ### Topology Considerations
 
@@ -777,20 +905,8 @@ optional `auth.proxy` block in Console's existing `console-config.yaml`. When a 
 CA is configured, it synchronizes the referenced bundle into `openshift-console` and
 mounts it separately from issuer trust.
 
-For example, the generated configuration could contain:
-
-```yaml
-auth:
-  authType: oidc
-  oidcIssuer: https://idp.example.com
-  proxy:
-    httpsProxy: http://auth-proxy.example.com:3128
-    noProxy:
-      - ".svc"
-      - ".svc."
-      # ... plus the remaining internal-hostname defaults from Proxy Resolution
-    trustedCAFile: /var/auth-proxy-ca/ca-bundle.crt
-```
+See [Generated Operand Configuration](#generated-operand-configuration) for an
+example of the Console configuration rendered from `Console.spec.authProxy`.
 
 The proposed block contains `httpProxy`, `httpsProxy`, the resolved `noProxy` list
 including implicit defaults, and an optional `trustedCAFile` path. The existing
