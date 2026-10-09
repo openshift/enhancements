@@ -12,7 +12,7 @@ approvers:
 api-approvers:
   - "None"
 creation-date: 2026-10-07
-last-updated: 2026-10-08
+last-updated: 2026-10-09
 status: provisional
 tracking-link:
   - https://redhat.atlassian.net/browse/NE-2877
@@ -89,10 +89,13 @@ real-world feedback to inform the eventual supported interface.
   configuration.
 - Keep a single router image and configuration path that works unmodified on
   both QAT-capable and commodity hardware; there is no separate "QAT image."
-- Guarantee router pods never crash-loop because of QAT: the HAProxy
-  configuration must omit the `ssl-provider qatprovider` directive entirely
-  unless a preflight sequence has confirmed the device and provider
-  actually work.
+- Guarantee router pods never crash-loop because of QAT after a successful
+  initialization: the HAProxy configuration must omit the
+  `ssl-provider qatprovider` directive entirely unless a preflight sequence
+  has confirmed the device and provider actually work, and a bounded
+  startup retry (see Implementation Details) protects against a device that
+  fails the narrow race between preflight and HAProxy's own provider
+  initialization.
 - Provide a documented, unsupported escape hatch
   (`spec.unsupportedConfigOverrides`) that lets early adopters disable the
   automatic behavior while Red Hat gathers feedback ahead of a stable API.
@@ -131,13 +134,17 @@ real-world feedback to inform the eventual supported interface.
 
 ## Proposal
 
-QAT-capable worker nodes are required to run the RHCOS10 stream; this is a
-hard kernel-compatibility requirement, not an arbitrary choice of track.
-Intel's QATlib documentation requires a kernel driver version of 5.15.3 or
-newer for QAT 4xxx crypto offload. OCP 5.1 ships two RHCOS streams: RHCOS9
-(kernel 5.14.0.x) and RHCOS10 (kernel 6.12.0.x). Only RHCOS10's kernel meets
-that minimum, so QAT acceleration cannot work on RHCOS9 regardless of any
-other configuration.
+QAT-capable worker nodes are required to run the RHCOS10 stream for this
+enhancement's initial profile. Intel's QATlib documentation lists a minimum
+upstream kernel driver version of 5.15.3 for QAT 4xxx crypto offload. OCP
+5.1 ships two RHCOS streams: RHCOS9 (kernel 5.14.0.x) and RHCOS10 (kernel
+6.12.0.x). RHCOS9's kernel version string is below that minimum, but RHEL
+kernels can carry backported drivers, so a 5.14.0.x version string alone
+does not prove QAT is unsupportable on RHCOS9 - it is unsupported for this
+enhancement's initial profile until someone does the functional validation
+to say otherwise. RHCOS10's kernel does meet the documented minimum, so this
+enhancement scopes its initial profile to RHCOS10 and leaves RHCOS9 support
+as a possible future validation effort rather than a closed question.
 
 This enhancement spans the router image/binary, the router's control-plane
 logic, and the cluster-ingress-operator:
@@ -145,28 +152,33 @@ logic, and the cluster-ingress-operator:
 - The haproxy34 (RHEL10) router image installs the `qatengine` RPM
   unconditionally. The package is small and inert on hardware without a QAT
   device, so no separate "QAT image" variant is needed.
-- The router's control plane runs a sidecar preflight sequence before
-  HAProxy starts: it checks that a QAT virtual function device is visible in
-  the container, that OpenSSL can load the `qatprovider.so` Provider, that
-  activating it would not conflict with the cluster's FIPS configuration,
-  and that the fully-rendered HAProxy configuration validates. Only if every
-  check passes does the router render `ssl-provider default` followed by
-  `ssl-provider qatprovider`; otherwise both directives are omitted and
-  HAProxy starts with software-only TLS. Loading `qatprovider` explicitly
-  disables OpenSSL's automatic loading of the `default` provider, so
-  `default` must also be loaded explicitly, or any TLS algorithm not
-  implemented by `qatprovider` would fail silently or error out. This
-  check-then-render ordering is required because a failed provider load is
-  fatal to HAProxy startup.
-- The cluster-ingress-operator reads `Node` objects and automatically adds
-  the `qat.intel.com/cy` extended resource request to the router
-  deployment's container only when at least one node the IngressController's
-  `spec.nodePlacement` would consider actually advertises that resource in
-  its allocatable capacity (i.e., the Intel Device Plugin Operator is
-  installed and has provisioned virtual functions there). On clusters with
-  no QAT-capable nodes, or where `spec.nodePlacement` does not target any,
-  the operator injects nothing and router deployments are unaffected. The
-  operator does not alter placement itself.
+- The cluster-ingress-operator computes a single eligibility decision per
+  router deployment - the target node capability (a node matching the
+  IngressController's `spec.nodePlacement` actually advertises
+  `qat.intel.com/cy`, i.e., the Intel Device Plugin Operator has provisioned
+  virtual functions there) combined with RHCOS10/kernel compatibility
+  resolved from `MachineConfigPool` status (see Implementation Details) -
+  and, when eligible, sets both the `qat.intel.com/cy` resource request
+  *and* a `ROUTER_QAT=true` environment variable on the router container.
+  When not eligible (no matching QAT-capable node, or the admin has set the
+  unsupported opt-out), the operator sets neither, and the router does not
+  attempt any QAT-related logic at all. The operator does not alter
+  placement itself.
+- The router's control plane only runs its preflight sequence when
+  `ROUTER_QAT=true` is set: it checks that a QAT virtual function device is
+  visible in the container, that OpenSSL can load the `qatprovider.so`
+  Provider, that FIPS is not independently detected as enabled on the node
+  (see Implementation Details - this is checked locally by the router
+  itself, not inferred from `ROUTER_QAT`), and that the fully-rendered
+  HAProxy configuration validates. Only if every check passes does the
+  router render `ssl-provider default` followed by `ssl-provider
+  qatprovider`; otherwise both directives are omitted and HAProxy starts
+  with software-only TLS. Loading `qatprovider` explicitly disables
+  OpenSSL's automatic loading of the `default` provider, so `default` must
+  also be loaded explicitly, or any TLS algorithm not implemented by
+  `qatprovider` would fail silently or error out. This check-then-render
+  ordering is required because a failed provider load is fatal to HAProxy
+  startup.
 - Administrators who do not want this behavior can set a documented, but
   explicitly unsupported, override under `spec.unsupportedConfigOverrides`
   to disable detection, activation, and the associated resource request.
@@ -200,25 +212,34 @@ load-balances ingress traffic.
 3. As a prerequisite, the cluster administrator sets the IngressController's
    existing `haproxyVersion` field to select haproxy34 (HAProxy 3.4), since
    HAProxy 3.2 remains the OCP 5.1 default and this capability only applies
-   to haproxy34 or newer (see `select-haproxy-version.md`). None of the
+   to haproxy34 or newer (see `select-haproxy-version.md` and
+   [NE-2912](https://redhat.atlassian.net/browse/NE-2912), which tracks
+   haproxy34 being selectable but non-default in OCP 5.1). None of the
    automatic behavior described below applies until this explicit,
    non-default version selection is made.
 4. Unless the administrator has set the unsupported opt-out described
    below, the cluster-ingress-operator checks whether a node matching the
    IngressController's `spec.nodePlacement` advertises the
-   `qat.intel.com/cy` resource in its allocatable capacity, and if so,
-   automatically adds a matching resource request to the router container.
-   The operator continues to watch `Node` objects afterward, so the
-   resource request is added or removed as matching nodes' QAT
-   advertisement appears or disappears (for example, as the Intel Device
-   Plugin Operator finishes provisioning virtual functions).
+   `qat.intel.com/cy` resource in its allocatable capacity and is running a
+   kernel compatible with QAT (resolved from `MachineConfigPool` status; see
+   Implementation Details), and if so, automatically adds a matching
+   resource request and a `ROUTER_QAT=true` environment variable to the
+   router container. Neither is added otherwise. The operator continues to
+   watch `Node` objects afterward, so the resource request and environment
+   variable are added or removed as matching nodes' QAT advertisement
+   appears or disappears (for example, as the Intel Device Plugin Operator
+   finishes provisioning virtual functions).
 5. The scheduler places router pods according to the administrator's
    `spec.nodePlacement` and the injected resource request, following
    standard Kubernetes scheduling semantics.
-6. On startup, before HAProxy launches, the router runs its preflight
-   sequence: RHCOS10/OS-stream and kernel version assertion, QAT device
-   visibility, OpenSSL Provider loadability, FIPS compatibility, and
-   HAProxy configuration validation.
+6. On startup, if `ROUTER_QAT=true` is not set, the router skips QAT
+   detection entirely and starts HAProxy with software-only TLS, with no
+   preflight overhead. If `ROUTER_QAT=true` is set, the router runs its
+   preflight sequence before HAProxy launches: QAT device visibility,
+   OpenSSL Provider loadability, an independent local check that FIPS is
+   not enabled on the node (see Implementation Details - checked directly
+   by the router, not inferred from `ROUTER_QAT`), and HAProxy configuration
+   validation.
 7. If every preflight check passes, the router renders `ssl-provider
    default` and `ssl-provider qatprovider` into the HAProxy configuration
    and starts HAProxy with QAT offload active. Both directives are required
@@ -226,8 +247,10 @@ load-balances ingress traffic.
    `default`, and without `default` any TLS algorithm not implemented by
    `qatprovider` would fail silently or error out.
 8. If any preflight check fails, the router omits both `ssl-provider`
-   directives and starts HAProxy with software-only TLS, never risking a
-   crash-loop due to QAT.
+   directives and starts HAProxy with software-only TLS. If HAProxy still
+   fails to start despite a passing preflight (the narrow race described in
+   Implementation Details), the router falls back to a bounded retry without
+   the `ssl-provider` directives rather than crash-looping.
 9. The router exposes Prometheus metrics for offload-active state,
    software-fallback count, device resets, and queue depth so operators can
    confirm whether acceleration is engaged and healthy.
@@ -246,19 +269,19 @@ sequenceDiagram
 
     Admin->>IC: Set spec.nodePlacement for QAT-capable nodes
     Operator->>IC: Watch IngressController
-    alt Unsupported override not set
-        Operator->>Router: Inject qat.intel.com/cy resource request
+    alt Eligible node found and no unsupported override
+        Operator->>Router: Inject qat.intel.com/cy request + ROUTER_QAT=true
         Sched->>Router: Schedule pod per nodePlacement + resource request
-        Router->>Router: Run preflight (device, provider, FIPS, config)
+        Router->>Router: ROUTER_QAT=true: run preflight (device, provider, local FIPS check, config)
         alt Preflight passes
             Router->>Router: Render ssl-provider default + qatprovider, start HAProxy
         else Preflight fails
             Router->>Router: Omit ssl-provider, start HAProxy (software TLS)
         end
         Router-->>Operator: Expose metrics (offload state, fallbacks, errors)
-    else Unsupported override set
-        Operator->>Router: Do not inject resource request
-        Router->>Router: Skip QAT detection, start HAProxy (software TLS)
+    else Not eligible, or unsupported override set
+        Operator->>Router: Do not inject resource request or ROUTER_QAT
+        Router->>Router: ROUTER_QAT unset: skip QAT entirely, start HAProxy (software TLS)
     end
 ```
 
@@ -341,22 +364,31 @@ required for Provider loading (`ssl-provider`/`ssl-provider-path` only
 require `USE_OPENSSL=1` and OpenSSL >= 3.0, already satisfied).
 
 **Router preflight and config-generation**: New Go-side logic (likely in the
-router's config-templating package) implements the sidecar preflight
-sequence described in the Proposal and Workflow Description, keying
+router's config-templating package) implements the preflight sequence
+described in the Proposal and Workflow Description, gated entirely by the
+`ROUTER_QAT` environment variable the cluster-ingress-operator sets (see
+below). When `ROUTER_QAT` is not `true`, the router does not run any
+QAT-related logic at all - no device probing, no config branching - which
+keeps the cost of this enhancement at zero for the vast majority of router
+pods that never run on QAT-capable nodes. When `ROUTER_QAT=true`, the
+preflight checks device visibility and provider loadability, keying
 detection off the presence of the `qatprovider.so` artifact rather than
 assuming a fixed relationship between OS/image version and interface, since
 that relationship is not guaranteed to stay stable across RHEL major
-versions. Since OCP 5.1 ships both RHCOS9 and RHCOS10 streams, and only
-RHCOS10's kernel meets QAT's minimum kernel-driver requirement (see
-Proposal), the preflight sequence also asserts the node's OS stream, kernel
-version, and container runtime (`crun`) match what the RHCOS10/haproxy34
-QAT path was validated against, rather than assuming the
-`MachineConfigPool`'s
-`spec.osImageStream.name: rhel-10` setting from step 1 of the Workflow
-Description was actually applied to the node the pod landed on. The
-preflight sequence must run, and must gate config rendering, on every
-router start/reload, since a previously-usable device can become unusable
-(driver reset, VF revoked) between reloads.
+versions. The preflight does not itself re-verify RHCOS stream or kernel
+version: that eligibility decision belongs to the operator (see below,
+and Proposal), and a node that was wrongly deemed kernel-compatible would
+still be caught by the device/provider-loadability checks failing naturally
+- there is no separate correctness-critical path that depends on the router
+re-deriving that decision. FIPS is the one exception: the preflight
+independently checks whether FIPS is enabled on the node by reading
+`/proc/sys/crypto/fips_enabled` directly (a kernel-wide value visible to any
+container on the node regardless of the container's own base image) rather
+than trusting `ROUTER_QAT` for that determination - see Risks and Mitigations
+for why this stays independent of the operator's own FIPS
+check. The preflight sequence must run, and must gate config rendering, on
+every router start/reload, since a previously-usable device can become
+unusable (driver reset, VF revoked) between reloads.
 
 Gating only at start/reload is not sufficient on its own: reloads are driven
 by route/config changes, so a cluster with a stable set of routes can run
@@ -371,18 +403,46 @@ fallback to software crypto when the hardware fails mid-operation (as
 opposed to failing the handshake outright) is not established by current
 research and needs empirical confirmation; see Open Questions.
 
-**cluster-ingress-operator**: Adds logic to read `Node` objects and
-automatically set the `qat.intel.com/cy` resource request/limit on the
-router deployment's container only when a node matching the
-IngressController's `spec.nodePlacement` advertises that resource in its
-allocatable capacity, and to recognize the unsupported opt-out key described
-in API Extensions. Reconciling on `Node` changes (not just on
-IngressController changes) ensures the resource request is added once the
-Intel Device Plugin Operator finishes provisioning virtual functions on a
-targeted node, without requiring an unrelated IngressController edit to
-trigger it. The operator does not compute or alter node placement; that
-remains entirely driven by the administrator's existing `spec.nodePlacement`
-configuration.
+A passing preflight does not, by itself, guarantee HAProxy's own internal
+provider initialization will succeed: the device or provider could fail in
+the narrow window between the preflight check and HAProxy actually loading
+the provider at process start (for example, a VF revoked a moment later).
+To keep the no-crash-loop guarantee honest, the router performs a bounded
+startup retry: if HAProxy fails to start with the `ssl-provider` directives
+present, the router re-renders the configuration without them and restarts
+HAProxy with software-only TLS, rather than retrying indefinitely with the
+same failing configuration.
+
+**cluster-ingress-operator**: Adds logic to read `Node` and
+`MachineConfigPool` objects and compute a single eligibility decision per
+router deployment: a node matching the IngressController's
+`spec.nodePlacement` must advertise `qat.intel.com/cy` in its allocatable
+capacity, and that node's resolved RHCOS stream/kernel (from
+`MachineConfigPool` status, using the RBAC the operator already has for
+this) must meet QAT's minimum kernel-driver requirement (see Proposal).
+When eligible, the operator sets both the `qat.intel.com/cy` resource
+request/limit and a `ROUTER_QAT=true` environment variable on the router
+deployment's container; when not eligible, or when the administrator has
+set the unsupported opt-out key described in API Extensions, it sets
+neither. Collapsing node-capability and kernel-compatibility into a single
+flag is deliberate: unlike FIPS (see below), getting this one wrong is
+low-stakes, since the router's own device/provider-loadability checks would
+still catch a node that was incorrectly deemed compatible. FIPS is handled
+as a separate, independent check: the operator also reuses its existing
+`detectFIPS()` logic (including its Hypershift-aware handling of a FIPS
+management cluster with a non-FIPS guest cluster, via the `FIPS_ENABLED`
+environment variable) to skip setting `ROUTER_QAT` and the resource request
+entirely on a FIPS-enabled cluster, rather than scheduling a pod onto a QAT
+node and consuming a VF only for the router to disable QAT locally - see
+Risks and Mitigations for why the router still independently re-verifies
+FIPS state itself rather than trusting this operator-level check alone.
+Reconciling on `Node` and `MachineConfigPool` changes (not just on
+IngressController changes) ensures the resource request and environment
+variable are added once the Intel Device Plugin Operator finishes
+provisioning virtual functions on a targeted node, without requiring an
+unrelated IngressController edit to trigger it. The operator does not
+compute or alter node placement; that remains entirely driven by the
+administrator's existing `spec.nodePlacement` configuration.
 
 **No feature gate for this delivery**: OpenShift's standard process requires
 all new features to ship behind a feature gate, disabled by default. This
@@ -402,9 +462,11 @@ in an appropriate feature set (`DevPreviewNoUpgrade` or
 
 The absence of a dedicated feature gate is further mitigated by this
 capability's dependency on HAProxy version selection (see
-`select-haproxy-version.md`): HAProxy 3.4 (haproxy34) is not available at
-all until it is introduced, as a non-default, explicitly-selectable version
-via the existing `haproxyVersion` field, alongside this enhancement. It
+`select-haproxy-version.md` and
+[NE-2912](https://redhat.atlassian.net/browse/NE-2912)): HAProxy 3.4
+(haproxy34) is not available at all until it is introduced, as a
+non-default, explicitly-selectable version via the existing
+`haproxyVersion` field, alongside this enhancement. It
 cannot be pinned today because it does not exist in OCP 5.0. QAT activation
 is conditioned on the IngressController running haproxy34 or newer, so an
 administrator must already have explicitly set `haproxyVersion` to this new,
@@ -413,6 +475,19 @@ apply. This naturally limits exposure to clusters that have deliberately
 opted in to the new HAProxy version, even without a feature gate of its own.
 
 ### Risks and Mitigations
+
+**Risk**: A passing preflight does not guarantee HAProxy's own provider
+initialization will succeed at startup; the device or provider could fail
+in the narrow window between the preflight check and HAProxy actually
+loading the provider, which would otherwise crash-loop the pod.
+
+**Mitigation**: The router performs a bounded startup retry: on an
+HAProxy startup failure with the `ssl-provider` directives present, it
+re-renders the configuration without them and restarts with software-only
+TLS, instead of retrying indefinitely against the same failing
+configuration. The no-crash-loop guarantee in Goals is scoped accordingly to
+"no crash-loop after a successful initialization," not to every conceivable
+startup race.
 
 **Risk**: Loading the `qatprovider` OpenSSL provider disables OpenSSL's
 automatic loading of the `default` provider. Without `default` also loaded
@@ -478,12 +553,39 @@ on shared or multi-tenant QAT-capable node pools.
 metrics, and can be disabled cluster-wide (per IngressController) through
 the unsupported override.
 
-**Risk**: FIPS-enabled clusters must never activate a non-FIPS-validated
-crypto path.
+**Risk**: Collapsing node-capability, kernel-compatibility, and the
+unsupported opt-out into a single `ROUTER_QAT` flag means the router pod
+itself cannot tell *why* the flag is unset (no matching node, incompatible
+kernel, or explicit opt-out), which could make support harder.
 
-**Mitigation**: The preflight sequence explicitly checks FIPS compatibility
-and refuses to activate QAT when it is not safe to do so; this enhancement's
-scope is limited to non-FIPS clusters (see Non-Goals).
+**Mitigation**: The pod does not need to know why, only what to do; the
+"why" is diagnosable from the cluster-ingress-operator's own logs and
+events, which record the specific reason (resource unavailability, kernel
+incompatibility, FIPS, or opt-out) for each IngressController it reconciles
+(see Support Procedures).
+
+**Risk**: FIPS-enabled clusters must never activate a non-FIPS-validated
+crypto path, and a FIPS pod should not needlessly consume a QAT VF just to
+have the router disable QAT in the preflight. Unlike the node-capability and
+kernel-compatibility checks (which are deliberately collapsed into the
+single `ROUTER_QAT` flag, since getting them wrong is low-stakes), FIPS is
+not something the router should take on the operator's word alone: a stale
+reconcile or a bug in the operator's eligibility computation could otherwise
+silently activate a non-FIPS-validated crypto path on a FIPS cluster.
+
+**Mitigation**: This is enforced at two genuinely independent layers rather
+than one flag checked twice. The cluster-ingress-operator skips setting
+`ROUTER_QAT` and the `qat.intel.com/cy` resource request in the first place
+when the cluster is in FIPS mode (using the existing `detectFIPS()` logic,
+including its Hypershift-aware handling), so a FIPS pod is not scheduled
+onto a QAT node and does not consume a VF. Independently of that, and
+regardless of what `ROUTER_QAT` says, the router's own preflight sequence
+reads `/proc/sys/crypto/fips_enabled` directly - a kernel-wide value visible
+to the container without any special privilege or operator involvement - and
+refuses to activate QAT if it reports FIPS is enabled. Because this check
+does not depend on the operator's computation at all, it remains a true
+backstop even if the operator-level check is bypassed or stale. This
+enhancement's scope is limited to non-FIPS clusters (see Non-Goals).
 
 ### Drawbacks
 
@@ -543,18 +645,21 @@ without asking them to learn a new, soon-to-be-replaced API field.
    router's independent health-check timer forces a reload? This determines
    how fast a runtime device failure is actually reflected in router
    behavior.
-10. The RHCOS10 kernel requirement itself is settled (see Proposal), but
-    the exact supported tuple built on top of it (`crun` version, OpenSSL
-    3.x, `qatprovider`, QAT 4xxx firmware/driver) is not yet pinned, and
-    neither is the package source for `qatengine` on RHEL10. At the time of
-    writing, Brew shows `haproxy34-3.4.5-1.rhaos5.1.el10` (build 4122540)
-    and `qatengine-2.1.0-1.el10` (build 4048100) in `rhel-10.3-candidate`,
-    the latest RHCOS10 candidate kernel is `6.12.0-211.64.1.el10_2` (build
+10. **Pre-implementation blocker**: the RHCOS10 kernel requirement itself is
+    settled (see Proposal), but the exact supported tuple built on top of
+    it (`crun` version, OpenSSL 3.x, `qatprovider`, QAT 4xxx firmware/
+    driver) is not yet pinned, and neither is the package source for
+    `qatengine` on RHEL10. At the time of writing, Brew shows
+    `haproxy34-3.4.5-1.rhaos5.1.el10` (build 4122540) and
+    `qatengine-2.1.0-1.el10` (build 4048100) in `rhel-10.3-candidate`, the
+    latest RHCOS10 candidate kernel is `6.12.0-211.64.1.el10_2` (build
     4127236), but `qatengine` is not yet present in
     `rhaos-5.1-rhel-10-candidate`. It is not yet decided whether `qatengine`
     will be consumed directly from RHEL AppStream or needs its own
-    `rhaos`-candidate build; this must be resolved, and the exact tuple
-    pinned, before implementation.
+    `rhaos`-candidate build. Unlike the other open questions in this list,
+    this one is a hard pre-implementation gate, not something that can be
+    deferred to early-adopter feedback: someone must determine the package
+    source and pin the exact NVRs before implementation starts.
 
 ## Test Plan
 
@@ -586,9 +691,22 @@ The following do not require real QAT hardware:
   health described in Risks and Mitigations, confirming it triggers a
   reload to software-only TLS when a previously-usable device is found
   unusable between route-driven reloads.
-- Unit tests for the operator's node-capability detection (only injecting
-  `qat.intel.com/cy` when a matching node advertises it), its reaction to
-  `Node` add/update events, and its handling of the unsupported opt-out key.
+- Unit tests for the bounded startup retry (simulating an HAProxy startup
+  failure despite a passing preflight), confirming the router retries
+  without the `ssl-provider` directives instead of crash-looping.
+- Unit tests for the operator's eligibility computation: only setting
+  `qat.intel.com/cy` and `ROUTER_QAT=true` together when a matching node
+  advertises the resource and its resolved kernel (from `MachineConfigPool`
+  status) meets QAT's minimum, never setting either when the cluster is in
+  FIPS mode (the FIPS guard), reaction to `Node`/`MachineConfigPool`
+  add/update events, and handling of the unsupported opt-out key.
+- Unit tests confirming the router runs no QAT-related logic whatsoever when
+  `ROUTER_QAT` is unset (no device probing, no config branching), and runs
+  the full preflight when it is `true`.
+- Unit tests for the router's independent local FIPS check
+  (`/proc/sys/crypto/fips_enabled`), confirming it blocks QAT activation
+  regardless of `ROUTER_QAT`'s value, including the case where `ROUTER_QAT`
+  is (incorrectly) `true` on a FIPS-enabled node.
 
 The following require real QAT hardware, since no credible software
 emulator exists for the QAT PCI accelerator:
@@ -695,9 +813,10 @@ API server, or finalizer.
 ### Detecting Failures
 
 * **Symptom 1**: Router pod logs show a preflight check failure message
-  (device, provider load, FIPS, or config validation).
+  (device, provider load, FIPS, or config validation). Target the `router`
+  container explicitly, since the preflight sequence run there.
   ```bash
-  oc logs -n openshift-ingress <router-pod-name>
+  oc logs -n openshift-ingress <router-pod-name> -c router
   ```
 
 * **Symptom 2**: Router pods stuck `Pending` due to an unsatisfiable
@@ -709,14 +828,26 @@ API server, or finalizer.
 * **Symptom 3**: Router metrics show QAT offload inactive or a rising
   software-fallback count despite QAT hardware being expected to be in use.
 
+* **Symptom 4**: `ROUTER_QAT` is unexpectedly unset on a router pod expected
+  to have QAT acceleration. Since the flag itself does not carry a reason,
+  check the cluster-ingress-operator's logs and events for the
+  IngressController, which record why eligibility was not met (no matching
+  node resource, incompatible kernel, FIPS mode, or the unsupported
+  opt-out).
+  ```bash
+  oc get pod -n openshift-ingress <router-pod-name> -o jsonpath='{.spec.containers[?(@.name=="router")].env}'
+  oc logs -n openshift-ingress-operator deployment/ingress-operator
+  ```
+
 ### Graceful Degradation
 
 The feature fails gracefully by design: any preflight failure results in a
 router that starts and serves traffic using software-only TLS, never a
 crash-loop. An administrator can disable the behavior entirely at any time
 via the unsupported override in `spec.unsupportedConfigOverrides`; on the
-next rollout, the operator stops injecting the resource request and the
-router stops attempting QAT detection.
+next rollout, the operator stops setting both the resource request and
+`ROUTER_QAT`, and the router - seeing `ROUTER_QAT` unset - does not attempt
+QAT detection at all.
 
 ## Infrastructure Needed [optional]
 
