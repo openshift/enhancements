@@ -711,7 +711,7 @@ This design is intentional and maintains consistency with the PKI API's philosop
 
 **Migration constraint**: Because the `service-ca` signer is configurable only cluster-wide (there is no per-service override), its algorithm is effectively shared by every consumer of service-CA-issued certificates, both OpenShift platform components and customer workloads that rely on service-CA serving certificates. As a consequence, an administrator cannot migrate the `service-ca` signer to a new algorithm until **all** consuming workloads support that algorithm; changing the signer affects all of them at once. A customer whose workloads cannot yet support a stronger algorithm must keep the `service-ca` signer on an algorithm those workloads accept, which also holds back any platform component issuing through service-CA.
 
-**Cross-signing**: like the other PKI-managing operators, `service-ca-operator` uses append-only trust propagation with the forward cross-signing certificate: on rotation it appends the new CA to the trust bundle (the old CA remains until pruned or expires) and ships the forward cross-signing certificate with its serving certs, consistent with library-go `certrotation`.
+**Cross-signing**: like the other PKI-managing operators, `service-ca-operator` is updated to use append-only trust propagation with the forward cross-signing certificate: on rotation it appends the new CA to the trust bundle (the old CA remains until pruned or expires) and ships the forward cross-signing certificate with its serving certs, consistent with library-go `certrotation`.
 
 **Special Case: OLM / layered products**
 
@@ -1101,6 +1101,7 @@ Before the M.N release, all of the following criteria must be met:
 
 - All PKI-managing operators:
   - Support PKI configuration for certificate generation
+  - `service-ca-operator` updated to append-only trust propagation, replacing its atomic bundle replacement and backward cross-signing certificate
 - Thorough e2e test coverage including upgrade scenarios
 - **API promoted to v1 at Compatibility Level 1:**
   - PKI API stable
