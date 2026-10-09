@@ -77,7 +77,6 @@ When working on OpenShift:
 | **Webhooks** | `./ai-docs/platform/operator-patterns/webhooks.md` | Validation/mutation/conversion |
 | **Finalizers** | `./ai-docs/platform/operator-patterns/finalizers.md` | Cleanup external resources on deletion |
 | **RBAC** | `./ai-docs/platform/operator-patterns/rbac.md` | Service account permissions |
-| **must-gather** | `./ai-docs/platform/operator-patterns/must-gather.md` | Debugging and diagnostics |
 | **Upgrade safety** | `./ai-docs/platform/openshift-specifics/upgrade-strategies.md` | N→N+1 version skew, CVO coordination |
 
 ---
@@ -86,7 +85,7 @@ When working on OpenShift:
 
 | Area | Index | Description |
 |------|-------|-------------|
-| **Testing** | `./ai-docs/practices/testing/` | Pyramid (60/30/10), e2e framework |
+| **Testing** | `./ai-docs/practices/testing/` | Testing pyramid, e2e framework |
 | **Security** | `./ai-docs/practices/security/` | STRIDE, RBAC patterns, secret handling |
 | **Reliability** | `./ai-docs/practices/reliability/` | SLI/SLO/SLA, degraded-mode patterns |
 | **Development** | `./ai-docs/practices/development/` | API evolution, compatibility |
@@ -121,9 +120,9 @@ When working on OpenShift:
 **Index**: See `./ai-docs/decisions/index.md`
 
 **Common ADRs**:
-- Why etcd as backend
 - Why CVO orchestration model
 - Why immutable nodes (RHCOS + rpm-ostree)
+- Why standardized status conditions pattern
 
 ---
 
@@ -166,8 +165,8 @@ When working on OpenShift:
 │   ├── operator-patterns/        # Controller runtime, status, webhooks
 │   └── openshift-specifics/      # Upgrade safety, CVO coordination
 ├── domain/                       # Core API concepts
-│   ├── kubernetes/               # Pod, Service, CRD, Node
-│   └── openshift/                # ClusterOperator, ClusterVersion, Machine
+│   ├── kubernetes/               # Pod, Service, CRD
+│   └── openshift/                # ClusterOperator, ClusterVersion
 ├── practices/                    # Cross-cutting concerns
 │   ├── testing/                  # Pyramid, e2e framework
 │   ├── security/                 # STRIDE, RBAC, secrets
