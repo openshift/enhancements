@@ -371,6 +371,28 @@ these principles:
   available again. The condition persists into day-2 as a
   continuous health signal (see Non-Goal 2 for the explicit
   exception).
+  **Day-2 transient behavior during rolling updates:**
+  When the CPO orchestrates an OCP upgrade, pods may
+  transiently show `FailedScheduling` due to pod
+  disruption budgets or temporary resource contention
+  during pod churn. This can cause the condition to
+  briefly transition to `True` during an otherwise
+  healthy upgrade. This is expected and mitigated by
+  three factors: (1) the 60-second reconciliation
+  interval provides natural damping — pressure that
+  resolves between reconciliations is never surfaced;
+  (2) the recommended alerts use a 15-minute `for:`
+  duration, filtering out transient upgrade activity;
+  (3) the condition is level-driven and self-clears
+  as soon as scheduling pressure resolves, typically
+  within seconds of pod rescheduling. Note that
+  `CrashLoopBackOff` and `ImagePullBackOff` during
+  upgrades do NOT trigger this condition — it is
+  scoped to scheduling failures only. If false
+  positives during upgrades prove to be a problem in
+  practice, a follow-up can suppress the condition
+  when `ControlPlaneVersionStatus.History` shows an
+  active rollout.
 
 - **`installationStage`**: Persists as `InstallationComplete`
   after installation finishes. On day-2, it serves as a
@@ -409,7 +431,7 @@ HyperShift deployments (ARO HCP, ROSA HCP, self-managed):
 | 1.1 | API server route not admitted or unreachable | Add diagnostic detail to `InfrastructureReady` condition message with actual route admission status |
 | 1.2 | Hosted control-plane kubeconfig never created | Already surfaced via `Available=False, Reason=KubeconfigWaitingForCreate`. No change needed. |
 | 1.3 | Control-plane deployment has unavailable replicas | Add diagnostic detail to CPC `Available` condition message with pod-level failure reasons (scheduling, crash loop, image pull) |
-| 1.4 | Required operators not yet available or degraded | Set `Reason=OperatorDegraded` on `ClusterVersionSucceeding`; pass through the CVO message verbatim (no parsing) |
+| 1.4 | Required operators not yet available or degraded | Set `Reason=ClusterVersionFailing` on `ClusterVersionSucceeding`; pass through the CVO message verbatim (no parsing) |
 | 1.5 | HostedCluster has no installed version or stops progressing | New `installationStage` status field |
 | 1.6 | Management cluster capacity exhaustion — pod scheduling failures | New `ManagementClusterResourcePressure` condition |
 | 1.7 | Opaque timeout masking root cause | Addressed by all of the above — diagnostic conditions replace the opaque timeout with specifics |
@@ -417,6 +439,45 @@ HyperShift deployments (ARO HCP, ROSA HCP, self-managed):
 Note: IP/inode/FD exhaustion was removed from the
 failure case table. See [Non-Goals](#non-goals)
 item 7.
+
+**Known gap — CPO unavailability:** When the CPO
+itself is unavailable (CrashLoopBackOff,
+unschedulable, OOMKilled), the `HostedCluster` shows
+`Available=False, Reason=WaitingForAvailable,
+Message="Waiting for hosted control plane to be
+healthy"` — a generic message with no root cause.
+Because the CPO is the controller that writes
+diagnostic conditions on the `HostedControlPlane`,
+all diagnostic enrichment from this enhancement
+requires the CPO to be running. If the CPO is dead,
+diagnostics go dark. The HO detects CPO
+unavailability indirectly as a stale HCP (no
+condition updates), but cannot provide pod-level
+diagnostic detail for the CPO's own pods — that
+would require the HO to inspect CPO pod status
+directly, which is a separate concern. Enriching
+this case is deferred to future work.
+
+**Known gap — Konnectivity tunnel failures:** When
+the Konnectivity tunnel between the management
+cluster and the guest cluster is broken, the HCCO
+cannot mirror CVO conditions, so
+`ClusterVersionSucceeding` remains at
+`Status=Unknown, Reason=StatusUnknown`. The user
+sees `installationStage=WaitingForOperators` with
+no indication that the root cause is connectivity.
+However, this gap is partially covered by existing
+conditions: `KubeAPIServerAvailable` tracks KAS
+readiness, `KASLoadBalancerNotReachable` (reason on
+HCP `Available`) signals LB-level failures, and
+`ControlPlaneConnectionAvailable` checks
+data-plane-to-control-plane connectivity via the
+kas-connection-checker. The remaining uncovered
+case is when KAS is reachable (forward path) but
+the Konnectivity reverse tunnel is broken —
+preventing the HCCO from mirroring CVO state.
+Dedicated Konnectivity health diagnostics are
+deferred to future work.
 
 ### Workflow Description
 
@@ -659,6 +720,27 @@ fast installation or an informer cache catch-up), the
 stage jumps directly to the latest satisfied stage
 without pausing at intermediate values.
 
+**Backfill for pre-existing clusters:** The trigger
+evaluation described above applies only to clusters
+whose installation is being tracked from the start.
+For clusters that were already installed before this
+feature was deployed, the CPO applies an explicit
+backfill rule: if `installationStage` is empty AND
+the HCP `Available` condition is currently `True`,
+the CPO unconditionally sets
+`installationStage=InstallationComplete` — bypassing
+trigger evaluation entirely. This prevents a
+pre-existing cluster from being incorrectly assigned
+an intermediate stage (e.g., `WaitingForOperators`)
+if `ClusterVersionAvailable` happens to be transiently
+`False` at the moment of the first post-upgrade
+reconciliation (e.g., during a concurrent OCP
+upgrade). The `Available=True` check is the right
+signal because a cluster that has been `Available`
+has, by definition, completed installation. Once
+`InstallationComplete` is set, the forward-only
+constraint prevents any subsequent regression.
+
 **Diagnostic detail in existing conditions — reason code analysis:**
 
 These are changes to condition *messages* and *reasons* on
@@ -706,10 +788,11 @@ const (
     // admitted by any IngressController.
     ReasonRouteNotAdmitted = "RouteNotAdmitted"
 
-    // ReasonOperatorDegraded indicates a required
-    // operator in the guest cluster is in a degraded
-    // state.
-    ReasonOperatorDegraded = "OperatorDegraded"
+    // ReasonClusterVersionFailing indicates the CVO
+    // reports a failure. This may be an operator
+    // degradation, an internal CVO error, a
+    // precondition failure, or a capability mismatch.
+    ReasonClusterVersionFailing = "ClusterVersionFailing"
 
     // ReasonControlPlanePodStatusUnavailable indicates
     // control-plane pod status could not be retrieved
@@ -788,11 +871,11 @@ existing reason codes on this condition are therefore:
 
 | Existing Reason Codes | Source | New Reason Codes |
 |---|---|---|
-| `StatusUnknown` | HO/HCCO: CVO condition not found or error retrieving ClusterVersion | `OperatorDegraded` |
+| `StatusUnknown` | HO/HCCO: CVO condition not found or error retrieving ClusterVersion | `ClusterVersionFailing` |
 | `FromClusterVersion` | HCCO: CVO condition has an empty `Reason` field (reason is optional in `ClusterOperatorStatusCondition`) | |
 | (CVO passthrough) | HCCO: whatever `Reason` the CVO `Failing` condition carries — this is not a fixed set and varies by OCP version | |
 
-`OperatorDegraded` replaces the CVO's passthrough
+`ClusterVersionFailing` replaces the CVO's passthrough
 `Reason` when the inverted `ClusterVersionSucceeding`
 condition has `Status=False`. This is safe because the
 existing CVO passthrough reason values are not
@@ -805,24 +888,45 @@ Note: the CVO passthrough reasons are not a fixed
 set controlled by HyperShift. Downstream consumers
 should not switch on `Reason` values for this
 condition other than `StatusUnknown` and the new
-`OperatorDegraded`.
+`ClusterVersionFailing`.
 
-**Interpretation guidance:** `Reason=OperatorDegraded`
+**Interpretation guidance:** `Reason=ClusterVersionFailing`
 is a point-in-time signal, not a terminal verdict. It
-indicates the CVO currently reports a failing operator,
-which may be a transient state (operator still starting)
-or a persistent failure. The accompanying `Message`
-(verbatim from the CVO) provides the specific operator
-name and failure detail. Debuggers should correlate the
-condition's `lastTransitionTime` with the cluster age
-to distinguish a slow start from a genuinely stuck
-operator — for example, `OperatorDegraded` set within
+indicates the CVO currently reports a failure — which
+may be operator degradation, an internal CVO error,
+a precondition failure, or a capability mismatch. The
+failure may be a transient state (operator still
+starting) or persistent. The accompanying `Message`
+(verbatim from the CVO) provides the specific failure
+detail. Debuggers should correlate the condition's
+`lastTransitionTime` with the cluster age to
+distinguish a slow start from a genuinely stuck
+state — for example, `ClusterVersionFailing` set within
 the first few minutes of installation is likely
 transient, while the same reason persisting beyond the
 expected operator startup window warrants investigation.
 This condition is level-driven: it automatically clears
 to `Status=True` when the CVO reports success, so no
 manual intervention is needed for transient cases.
+
+**Triage location — control plane vs guest cluster:**
+`ClusterVersionSucceeding` always reflects guest
+cluster state — it mirrors the CVO, which runs
+inside the hosted cluster and reports on guest
+cluster operators. When `ClusterVersionFailing` is
+the reason, the SRE should investigate the guest
+cluster (CVO logs, cluster operator status).
+Control-plane component failures (running in the
+HCP namespace on the management cluster) are
+surfaced through a separate path: CPC `Available`
+→ HCP `Available` → HC `Available`, with reasons
+like `PodSchedulingFailed`, `CrashLoopBackOff`, or
+`ComponentsNotAvailable`. The CP vs DP distinction
+is therefore already encoded in the condition type:
+`Available` with `ComponentsNotAvailable` points to
+the management cluster; `ClusterVersionSucceeding`
+with `ClusterVersionFailing` points to the guest
+cluster.
 
 **`InfrastructureReady` condition:**
 
@@ -838,11 +942,22 @@ full set of existing reason codes:
 | `InfraStatusFailure` | Error calling `reconcileInfrastructureStatus` (line 790) | |
 | `WaitingOnInfrastructureReady` | Infrastructure not ready but no error — e.g., LB Service not yet provisioned (line 818) | |
 
-`RouteNotAdmitted` is set only when the LB Service is
-ready but the route is not admitted. When the LB
-Service itself is not ready, the existing
-`WaitingOnInfrastructureReady` reason is used. When
-there is an error determining infrastructure status,
+`RouteNotAdmitted` is set only when the endpoint
+publishing strategy uses Routes (i.e.,
+`spec.services[].servicePublishingStrategy.type=Route`)
+AND the LB Service is ready but the Route is not
+admitted. The existing CPO infrastructure
+reconciliation logic (`infra.go`) already gates Route
+inspection on the endpoint publishing strategy —
+clusters using `NodePort`, `LoadBalancer`, or `None`
+strategies (e.g., private clusters, KubeVirt, Agent
+platform) skip the Route check entirely and never
+produce `RouteNotAdmitted`. No platform-type or
+topology gating is needed beyond the existing strategy
+check. When the LB Service itself is not ready, the
+existing `WaitingOnInfrastructureReady` reason is used.
+When there is an error determining infrastructure
+status,
 `InfraStatusFailure` is used. New and existing reasons
 are mutually exclusive — they correspond to different
 branches in the CPO's infrastructure status
@@ -859,14 +974,14 @@ and consumers that need confirmation:
 | `PodSchedulingFailed` | CPC `Available` | CPC conditions are internal to the HCP namespace — no external consumers. CPO-only. |
 | `CrashLoopBackOff` | CPC `Available` | Same as above — CPO-only. |
 | `ImagePullBackOff` | CPC `Available` | Same as above — CPO-only. |
-| `OperatorDegraded` | `ClusterVersionSucceeding` | ROSA/ARO fleet management, ACM/MCE, OCM console |
+| `ClusterVersionFailing` | `ClusterVersionSucceeding` | ROSA/ARO fleet management, ACM/MCE, OCM console |
 | `RouteNotAdmitted` | `InfrastructureReady` | ROSA/ARO fleet management, ACM/MCE, OCM console |
 | `NoPressure` | `ManagementClusterResourcePressure` | New condition — no existing consumers. |
 | `FailedScheduling` | `ManagementClusterResourcePressure` | New condition — no existing consumers. |
 | `ControlPlanePodStatusUnavailable` | `ManagementClusterResourcePressure` | New condition — no existing consumers. |
 
 **Risk is concentrated in two reason codes**:
-`OperatorDegraded` (on `ClusterVersionSucceeding`)
+`ClusterVersionFailing` (on `ClusterVersionSucceeding`)
 and `RouteNotAdmitted` (on `InfrastructureReady`).
 These are the only new reasons added to existing
 conditions that are visible on the `HostedCluster`
@@ -896,7 +1011,7 @@ and consumed by external automation.
 
 Risk is limited to two reason codes on two conditions
 that are visible on `HostedCluster` and consumed by
-external automation: `OperatorDegraded` on
+external automation: `ClusterVersionFailing` on
 `ClusterVersionSucceeding` and `RouteNotAdmitted` on
 `InfrastructureReady`. All other new reasons are on
 CPC conditions (CPO-internal, not mirrored to HC) or
@@ -917,9 +1032,9 @@ consumer keys on `Reason` values and would break, the
 fallback is to keep the existing `Reason` values
 unchanged and move diagnostic detail to the `Message`
 field only. For example, instead of
-`Reason=OperatorDegraded, Message="Cluster operator
+`Reason=ClusterVersionFailing, Message="Cluster operator
 ingress is degraded..."`, the condition would use
-`Reason=FromClusterVersion, Message="OperatorDegraded:
+`Reason=FromClusterVersion, Message="ClusterVersionFailing:
 Cluster operator ingress is degraded..."`. This
 preserves backward compatibility while still surfacing
 diagnostic information. The diagnostic code paths are
@@ -931,7 +1046,7 @@ affecting other diagnostic additions.
 |---|---|---|
 | CPC `Available` | When `AvailableReplicas == 0`, inspect pods for `FailedScheduling` events, `CrashLoopBackOff`, `ImagePullBackOff`. Include the reason in the condition message. | `Available=False, Reason=PodSchedulingFailed, Message="kube-apiserver: 0/3 replicas available — FailedScheduling: Insufficient cpu"` |
 | HCP `Available` (reason `ComponentsNotAvailable`) | Include the first unavailable CPC's reason and message in the aggregated condition, instead of only listing component names. | `Available=False, Reason=ComponentsNotAvailable, Message="2 components unavailable. First failure: etcd — CrashLoopBackOff: OOMKilled"` |
-| `ClusterVersionSucceeding` | Set `Reason=OperatorDegraded` when the CVO reports a failure. The `Message` is passed through from the CVO verbatim — no parsing is performed. The CVO message format is not a stable API and may change across OCP versions; parsing it would create a fragile coupling. If the CVO message format becomes structured in a future OCP version, the diagnostic detail can be revisited. | `ClusterVersionSucceeding=False, Reason=OperatorDegraded, Message="Cluster operator ingress is degraded: IngressController default not admitted"` |
+| `ClusterVersionSucceeding` | Set `Reason=ClusterVersionFailing` when the CVO reports a failure. The `Message` is passed through from the CVO verbatim — no parsing is performed. The CVO message format is not a stable API and may change across OCP versions; parsing it would create a fragile coupling. If the CVO message format becomes structured in a future OCP version, the diagnostic detail can be revisited. | `ClusterVersionSucceeding=False, Reason=ClusterVersionFailing, Message="Cluster operator ingress is degraded: IngressController default not admitted"` |
 | `InfrastructureReady` | When the LB Service is ready but the route is not admitted, include the actual route admission status. | `InfrastructureReady=False, Reason=RouteNotAdmitted, Message="API server route not admitted: IngressController default has no matching domain"` |
 
 **New condition types (Phase 1 only):**
@@ -951,6 +1066,32 @@ detected, `False` means no pressure.
 `observedGeneration` is not applicable to this
 condition because it is event-driven (derived from
 pod status and scheduling events), not spec-driven.
+
+**Architectural note — why the HO, not MCE:** Management
+cluster resource pressure is a cross-cutting concern,
+and one could argue it belongs in the MCE
+(Multicluster Engine) layer or a dedicated management
+cluster health operator. The HO is chosen as the home
+for Phase 1 for pragmatic reasons: (1) the HO already
+watches pods in HCP namespaces — the data is local,
+requiring no new component dependency; (2) MCE is not
+present in all deployments — self-managed HyperShift
+does not require MCE, so an MCE-only signal would
+leave self-managed users without coverage; (3) the
+condition is not always identical across HCs —
+scheduling pressure can affect some HCs more than
+others depending on resource requests, node affinity,
+and priority classes, so a per-HC signal is more
+precise than a cluster-wide one; (4) a per-HC
+condition is directly visible on `oc get hostedcluster`
+without requiring knowledge of MCE resources. The
+`ManagementClusterWidePressure` alert (recommended
+above) aggregates the per-HC signals into a single
+fleet-level alert, addressing the "N identical
+conditions" concern at the alerting layer. If MCE
+gains management cluster health monitoring in the
+future, the condition's architectural home can be
+revisited.
 
 **Security consideration for managed services**: In managed
 service environments (ROSA, ARO), the `HostedCluster`
@@ -1003,7 +1144,11 @@ to disable diagnostic detail. Rationale:
 
 ### Kubernetes Events Strategy
 
-Kubernetes Events are not used in Phase 1. Rationale:
+Kubernetes Events are not *emitted* by this enhancement
+in Phase 1. Note: existing Kubernetes Events (e.g.,
+`FailedScheduling`) are *consumed* as input signals —
+specifically by the `ManagementClusterResourcePressure`
+detection logic. Rationale for not emitting new Events:
 Events are ephemeral (default TTL 1 hour), not queryable
 at fleet scale, and add implementation complexity.
 Persistent conditions and metrics cover the diagnostic
@@ -1137,7 +1282,7 @@ components:
   the aggregated HCP `Available` condition.
 - Add diagnostic detail to `ClusterVersionSucceeding` condition mirroring
   in the HCCO -> HCP -> HC pipeline: set
-  `Reason=OperatorDegraded` when the CVO reports a
+  `Reason=ClusterVersionFailing` when the CVO reports a
   failure. The CVO message is passed through verbatim
   — no parsing of the message string is performed.
   The CVO `Failing` condition's `Reason` and `Message`
@@ -1145,7 +1290,7 @@ components:
   (`hcpstatus.go:212-223`); the HO inverts the status
   but preserves reason/message. This enhancement only
   changes the `Reason` field (from the CVO's original
-  reason to `OperatorDegraded`) when the condition
+  reason to `ClusterVersionFailing`) when the condition
   indicates a failure. The `Message` remains the raw
   CVO output, avoiding a fragile coupling to the CVO
   message format which is not a stable API and may
@@ -1239,6 +1384,24 @@ components:
   other resources at similar scale. The pod informer
   overhead is negligible for steady-state clusters
   where no pods are Pending.
+  **Compact cluster behavior**: On compact
+  self-managed deployments (e.g., 3-node management
+  cluster co-located with workloads), transient
+  `FailedScheduling` events are more common during
+  normal operation due to tighter resource margins.
+  The condition may be frequently or perpetually
+  `True` on these clusters, which is accurate —
+  scheduling pressure genuinely exists — but may
+  create alert fatigue. The condition itself does
+  not use configurable thresholds; it reports
+  observed scheduling state as-is. Fleet operators
+  in compact deployments should tune the recommended
+  alerts: increase the `for:` duration beyond 15
+  minutes, raise the HC count threshold on
+  `ManagementClusterWidePressure`, or suppress the
+  alerts entirely if perpetual scheduling pressure
+  is an accepted operational baseline. This is an
+  alerting-layer concern, not a condition-layer one.
 - `ManagementClusterResourcePressure` is **set
   directly on the `HostedCluster`** by the HO. It
   is NOT added to the HCP -> HC condition mirroring
@@ -1326,7 +1489,7 @@ components:
   label is constrained to a fixed enumerated set:
   `PodSchedulingFailed`, `CrashLoopBackOff`,
   `ImagePullBackOff`, `RouteNotAdmitted`,
-  `OperatorDegraded`, `Unknown`. This prevents
+  `ClusterVersionFailing`, `Unknown`. This prevents
   unbounded cardinality from dynamic content (pod
   event messages, node names). This complements the
   existing `hypershift_hostedclusters_failure_conditions`
@@ -1759,21 +1922,17 @@ the diagnostic logic will be deployed to a ROSA/ARO
 staging fleet before production (per the contingency
 plan in the Risks section). If the staging rollout
 reveals issues, the HO and CPO can be rolled back
-within hours. As an additional safety net, the
-implementation will support a temporary environment
-variable
-(`HYPERSHIFT_DISABLE_DIAGNOSTIC_DETAIL=true`) on
-the HO and CPO Deployments that disables all
-diagnostic logic (pod inspection, event watching,
-stage tracking, new reason codes). This env var is
-for emergency rollback only — it is not a permanent
-API field, not documented for end users, and will be
-removed once the feature graduates to GA. This
-addresses the concern that the feature gate exemption
-is self-asserted: the env var provides an escape
-hatch equivalent to a feature gate during the initial
-rollout, while avoiding permanent API surface for a
-diagnostic feature.
+within hours. No separate disable toggle (env var or
+feature gate) is provided — the arguments in the
+"No Per-Cluster Disable Toggle" section apply equally
+to a global toggle. An undocumented env var would add
+dead code paths that are never exercised in CI,
+creating a false sense of safety. The actual escape
+hatch is HyperShift's independent release process:
+a fix or rollback can be shipped within days, and
+level-driven condition semantics ensure that any bug
+self-corrects on the next reconciliation after a
+fix is deployed.
 
 Testing strategy:
 
@@ -1784,7 +1943,7 @@ Testing strategy:
      from container status
    - Per-component detail preservation in HCP
      `Available` aggregation
-   - CVO condition reason override to `OperatorDegraded`
+   - CVO condition reason override to `ClusterVersionFailing`
      with message passthrough (no parsing)
    - Route admission status inspection
    - `ManagementClusterResourcePressure` detection from
@@ -1822,7 +1981,7 @@ Testing strategy:
      `RouteNotAdmitted` reason and message
    - CVO operator degraded — verifies
      `ClusterVersionSucceeding` has
-     `Reason=OperatorDegraded` and CVO message is
+     `Reason=ClusterVersionFailing` and CVO message is
      passed through verbatim (not parsed)
    - Event TTL expiry fallback — verifies
      `ManagementClusterResourcePressure` still detects
@@ -2245,7 +2404,7 @@ $ oc get hostedcluster my-cluster -o jsonpath='{.status.conditions}' | jq '.[] |
 {
   "type": "ClusterVersionSucceeding",
   "status": "False",
-  "reason": "OperatorDegraded",
+  "reason": "ClusterVersionFailing",
   "message": "Cluster operator ingress is degraded"
 }
 
@@ -2403,13 +2562,24 @@ environment:
       detected for {{ $labels.name }}
 
 # Alert: installation stuck at intermediate stage
-# for more than 45 minutes
+# for more than 45 minutes.
+# Note: excludes paused clusters — when
+# spec.pausedUntil is set, the HO stops reconciling
+# and installationStage freezes. The
+# hypershift_cluster_paused metric (gauge, 1 when
+# paused) is used to filter these out. Fleet
+# operators should verify this metric is available
+# in their monitoring stack and adapt the expression
+# if their HyperShift version uses a different
+# metric name or label for pause state.
 - alert: HostedClusterInstallationStuck
   expr: |
     (hypershift_hostedclusters_installation_stage == 1)
       unless on(namespace, name)
         (hypershift_hostedclusters_installation_stage{
           stage="InstallationComplete"} == 1)
+      unless on(namespace, name)
+        (hypershift_cluster_paused == 1)
   for: 45m
   labels:
     severity: warning
