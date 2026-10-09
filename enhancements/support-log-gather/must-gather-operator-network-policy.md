@@ -125,8 +125,15 @@ spec:
     - Ingress
     - Egress
   egress:
-    # DNS resolution
-    - ports:
+    # DNS resolution (scoped to openshift-dns namespace)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openshift-dns
+          podSelector:
+            matchLabels:
+              dns.operator.openshift.io/daemonset-dns: default
+      ports:
         - protocol: TCP
           port: 5353
         - protocol: UDP
@@ -135,11 +142,11 @@ spec:
           port: 53
         - protocol: UDP
           port: 53
-    # Kubernetes API server
+    # Kubernetes API server (port-only -- see rationale below)
     - ports:
         - protocol: TCP
           port: 6443
-    # SFTP pre-flight credential validation
+    # SFTP pre-flight credential validation (port-only -- host varies per CR)
     - ports:
         - protocol: TCP
           port: 22
@@ -162,13 +169,13 @@ The operator's allowed traffic:
 
 | Direction | Port | Protocol | Purpose |
 |-----------|------|----------|---------|
-| Egress | 53, 5353 | TCP/UDP | DNS resolution (CoreDNS / openshift-dns) |
+| Egress | 53, 5353 | TCP/UDP | DNS resolution (scoped to `openshift-dns` namespace via `namespaceSelector` + `podSelector`) |
 | Egress | 6443 | TCP | Kubernetes API server |
 | Egress | 22 | TCP | SFTP pre-flight credential validation (unconditionally allowed) |
 | Ingress | 8080 | TCP | Prometheus metrics scraping (from monitoring namespace) |
 | Ingress | 8081 | TCP | Health/readiness probes |
 
-All other ingress and egress traffic is implicitly denied.
+All other ingress and egress traffic is implicitly denied by this policy. Note that Kubernetes combines matching NetworkPolicy rules additively -- if other NetworkPolicies in the namespace also select the operator pod, they may allow additional traffic beyond what is listed here.
 
 #### Layer 2: Must-Gather Job NetworkPolicy (Two-Tier Model)
 
@@ -195,7 +202,15 @@ spec:
     - Ingress
     - Egress
   egress:
-    - ports:
+    # DNS resolution (scoped to openshift-dns namespace)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openshift-dns
+          podSelector:
+            matchLabels:
+              dns.operator.openshift.io/daemonset-dns: default
+      ports:
         - protocol: TCP
           port: 53
         - protocol: UDP
@@ -204,12 +219,20 @@ spec:
           port: 5353
         - protocol: UDP
           port: 5353
+    # Kubernetes API server (port-only -- see rationale below)
     - ports:
         - protocol: TCP
           port: 6443
 ```
 
 **Why only DNS + API server?** All must-gather data collection (`oc get`, `oc adm inspect`, `oc exec`, `oc cp`, `oc adm node-logs`, `oc debug`, `oc get --raw`) flows through the Kubernetes API server on port 6443. Kubelet interactions (logs, exec, cp) are proxied by the API server. The gather container does not make direct TCP connections to kubelet port 10250.
+
+**Egress destination scoping strategy:** Each egress rule is scoped as tightly as practical:
+
+- **DNS (ports 53, 5353)** -- scoped to the `openshift-dns` namespace using `namespaceSelector` (`kubernetes.io/metadata.name: openshift-dns`) and `podSelector` (`dns.operator.openshift.io/daemonset-dns: default`). This follows the HPSTRAT-104 pattern and ensures DNS traffic is restricted to the cluster DNS pods.
+- **API server (port 6443)** -- port-only, no `to:` destination. The API server runs with `hostNetwork: true`, which means `podSelector` / `namespaceSelector` cannot reliably match it. The API server IP varies per cluster and topology, so static `ipBlock` rules are not portable. This is a documented limitation shared by all HPSTRAT-104 operators (console-operator, cluster-samples-operator, controller-manager-operator).
+- **SFTP (port 22)** -- port-only, no `to:` destination. The SFTP host is user-specified via the MustGather CR and varies per invocation. Resolving the hostname to an IP at policy-creation time is fragile (DNS records can change). The port restriction limits the attack surface while remaining compatible with any SFTP endpoint.
+- **Proxy (Tier 2 only)** -- port-only, no `to:` destination. Proxy endpoints are configured via environment variables (`HTTP_PROXY` / `HTTPS_PROXY`) and vary per cluster configuration.
 
 Lifecycle:
 - **Created**: when the first must-gather job runs in the namespace
@@ -224,12 +247,18 @@ Short-lived NetworkPolicies are created for:
 
 All Tier 2 policies are named using the MustGather CR name (e.g., `must-gather-<cr-name>-netpol`). Since the MustGather CR name is unique within a namespace and the spec is immutable, this guarantees each policy is unique per job. No hashing, random numbers, or shared-policy reference counting is needed.
 
+Each job pod carries two labels:
+- `must-gather.openshift.io/network-policy: default` -- for Tier 1 selection (shared, long-lived)
+- `must-gather.openshift.io/job: <cr-name>` -- for Tier 2 selection (unique per job)
+
+Tier 2 policies select on the `must-gather.openshift.io/job` label, ensuring each Tier 2 policy matches only its corresponding job pod. This prevents one job's SFTP/proxy egress allowance from applying to other concurrent jobs in the same namespace.
+
 ###### SFTP/Proxy Egress (Per-Job)
 
 When a MustGather CR specifies an SFTP upload target, the operator creates a short-lived NetworkPolicy named `must-gather-<cr-name>-sftp` with the SFTP egress rule. If proxy environment variables are set, the proxy port(s) are included in the same policy.
 
 - The SFTP port defaults to 22 but respects a custom port in `spec.uploadTarget.sftp.host` (e.g., `sftp.example.com:2222`).
-- Proxy ports are extracted from `HTTP_PROXY` / `HTTPS_PROXY` URLs. Defaults: http -> 3128, https -> 3129. Duplicate ports are deduplicated.
+- Proxy ports are extracted from `HTTP_PROXY` / `HTTPS_PROXY` URLs. When a URL includes an explicit port (e.g., `http://proxy:8080`), that port is used. When no port is specified, conventional proxy defaults are used: 3128 for HTTP proxies, 3129 for HTTPS proxies (standard Squid proxy ports, not HTTP scheme ports 80/443). Duplicate ports are deduplicated.
 
 ###### Custom Image Egress (Future -- with Admin Config Resource)
 
@@ -291,16 +320,23 @@ Lifecycle:
 
 ##### Pod Label Assignment and Policy Routing
 
-| Scenario | `must-gather.openshift.io/network-policy` value | NetworkPolicies Applied |
-|----------|--------------------------------------------------|------------------------|
-| Default image, no upload | `default` | `must-gather-default` (Tier 1) |
-| Default image, with SFTP upload | `default` | `must-gather-default` (Tier 1) + `must-gather-<cr-name>-sftp` (Tier 2) |
-| Custom image WITH imageNetworkPolicies entry | `default` | `must-gather-default` (Tier 1) + `must-gather-<cr-name>-netpol` (Tier 2) |
-| Custom image WITHOUT imageNetworkPolicies entry | `default` | `must-gather-default` (Tier 1) |
+Every job pod gets two labels:
 
-All job pods use the same label value (`default`) for Tier 1 coverage. Tier 2 policies also select on `default`, but are named per-CR for independent lifecycle management. Kubernetes unions all matching policies, so the pod's effective egress is the combination of all applicable policies.
+```yaml
+labels:
+  must-gather.openshift.io/network-policy: default    # Tier 1 selector
+  must-gather.openshift.io/job: <cr-name>              # Tier 2 selector
+  app.kubernetes.io/name: must-gather                  # general identification (not for NetworkPolicy)
+```
 
-The `app.kubernetes.io/name: must-gather` label remains on all job pods for general identification and `oc get` filtering, but is not used for NetworkPolicy pod selection.
+| Scenario | Tier 1 (selects on `network-policy: default`) | Tier 2 (selects on `job: <cr-name>`) |
+|----------|------------------------------------------------|--------------------------------------|
+| Default image, no upload | `must-gather-default` | (none) |
+| Default image, with SFTP upload | `must-gather-default` | `must-gather-<cr-name>-sftp` |
+| Custom image WITH imageNetworkPolicies entry | `must-gather-default` | `must-gather-<cr-name>-netpol` |
+| Custom image WITHOUT imageNetworkPolicies entry | `must-gather-default` | (none) |
+
+Kubernetes unions all matching policies. The pod's effective egress is the combination of Tier 1 (base) + Tier 2 (job-specific). Because Tier 2 selects on the per-job label, one job's SFTP/proxy egress never leaks to another concurrent job.
 
 #### Design Rationale
 
