@@ -12,12 +12,15 @@ approvers:
 api-approvers:
   - JoelSpeed
 creation-date: 2025-10-08
-last-updated: 2025-10-15
+last-updated: 2026-10-21
 tracking-link:
   - https://issues.redhat.com/browse/OCPSTRAT-2095
   - https://issues.redhat.com/browse/CNTRLPLANE-1539
   - https://github.com/openshift/api/pull/2520
   - https://github.com/openshift/api/pull/2525
+  - https://issues.redhat.com/browse/OCPSTRAT-3679
+  - https://issues.redhat.com/browse/CNTRLPLANE-4415
+  - https://issues.redhat.com/browse/CNTRLPLANE-4416
 status: proposed
 see-also:
 replaces:
@@ -28,9 +31,16 @@ superseded-by:
 
 ## Summary
 
-This enhancement describes a configuration option in the operator API to configure the event-ttl setting for the kube-apiserver. The event-ttl setting controls how long events are retained in etcd before being automatically deleted.
+This enhancement describes a configuration option to configure the event-ttl setting for the kube-apiserver. The event-ttl setting controls how long events are retained in etcd before being automatically deleted.
 
 Currently, OpenShift uses a default event-ttl of 3 hours (180 minutes), while upstream Kubernetes uses 1 hour. This enhancement allows customers to configure this value based on their specific requirements, with a range of 5 minutes to 3 hours (180 minutes), with a default of 180 minutes (3 hours).
+
+The enhancement covers two topologies, each with its own API surface because they have different control plane architectures:
+
+- **Standalone OpenShift** (including SNO): an `eventTTLMinutes` field on the `KubeAPIServer` operator resource, reconciled by the kube-apiserver-operator. This part of the enhancement is already proposed and implemented; see [openshift/enhancements#1857](https://github.com/openshift/enhancements/pull/1857).
+- **Hosted control planes (HyperShift)**: a new `eventTTLMinutes` field on the `HostedCluster` resource, reconciled by the HyperShift operator and the control-plane-operator. Hosted control planes have no kube-apiserver operator, so the standalone mechanism cannot be reused. This part of the enhancement is new; the design is described in [Hosted Control Planes (HyperShift)](#hosted-control-planes-hypershift).
+
+Both topologies share the same units (minutes), the same accepted range (5-180), and the same effective default (180 minutes / 3 hours).
 
 ## Motivation
 
@@ -42,22 +52,43 @@ The event-ttl setting in kube-apiserver controls the retention period for events
 
 The maximum value of 3 hours (180 minutes) was chosen to align with the current OpenShift default value. While upstream Kubernetes uses 1 hour as the default, OpenShift's 3-hour default was established to support CI runs that may need to retain events for the entire duration of a test run. For customer use cases, the 3-hour maximum provides sufficient retention for compliance and debugging needs, while the 1-hour upstream default would be more appropriate for general customer workloads.
 
+### Motivation for Hosted Control Planes
+
+In a hosted control plane the kube-apiserver is started with `--event-ttl=3h`, hardcoded in the control-plane-operator (`args.Set("event-ttl", "3h")` in [`control-plane-operator/controllers/hostedcontrolplane/v2/kas/config.go`](https://github.com/openshift/hypershift/blob/main/control-plane-operator/controllers/hostedcontrolplane/v2/kas/config.go)).
+Neither the HostedCluster owner nor the service provider's SRE team has a supported way to change it.
+
+This matters more for hosted control planes than for standalone clusters because the hosted etcd is part of the managed control plane and is sized and paid for by the service provider:
+
+- Event-heavy workloads (CI/CD, GitOps controllers, pipelines) can retain a large number of events for the full 3 hours, consuming hosted etcd storage that the hosted cluster owner cannot reclaim.
+- In a managed fleet, many hosted control planes share the same management cluster, so the aggregate etcd footprint of events scales with the number of hosted clusters.
+- Hosted clusters are frequently short-lived or purpose-built, and a 3-hour retention window is often longer than the cluster owner needs.
+
+Because hosted control planes have no kube-apiserver operator, the standalone `operator.openshift.io/v1` `KubeAPIServer` resource does not exist in a hosted cluster, and the standalone mechanism described in this enhancement cannot be reused as-is. The capability therefore has to be exposed through the HyperShift API.
+
 ### Goals
 
 1. Allow customers to configure the event-ttl setting for kube-apiserver through the OpenShift API
 2. Provide a reasonable range of values (5 minutes to 3 hours) that covers most customer needs
 3. Maintain backward compatibility with the current default of 3 hours (180 minutes)
 4. Ensure the configuration is properly validated and applied
+5. Allow the same configuration for HyperShift hosted clusters through the `HostedCluster` API, with the same units, range, and default as standalone OpenShift
+6. Propagate a configured value to the hosted kube-apiserver without requiring the hosted cluster to be recreated
 
 ### Non-Goals
 
-- Changing the default event-ttl value (will remain 3 hours/180 minutes)
+- Changing the effective default event-ttl as part of this enhancement. It stays at 180 minutes (3 hours) for both standalone OpenShift and hosted control planes, and no existing cluster sees a change in event retention.
+  This is a scope statement about this enhancement, not an API-level promise that the default is frozen forever; see [Defaulting](#rationale-for-location-type-units-defaulting-and-validation) for how that squares with the field's godoc
 - Supporting event-ttl values outside the recommended range (5-180 minutes)
 - Modifying the underlying etcd compaction behavior beyond what the event-ttl setting provides
+- Making the standalone `operator.openshift.io/v1` `KubeAPIServer` resource available inside a hosted cluster
+- Allowing the setting to be changed from inside the hosted cluster; it is a control plane setting owned by whoever owns the `HostedCluster` resource
+- Applying the setting to the management cluster's own kube-apiserver
 
 ## Proposal
 
 We propose to add an `eventTTLMinutes` field to the operator API that allows customers to configure the event-ttl setting for kube-apiserver.
+
+For hosted control planes, where no kube-apiserver operator exists, we propose to add an equivalent `eventTTLMinutes` field to the `HostedCluster` API under the existing per-component configuration stanza `spec.operatorConfiguration.kubeAPIServer`.
 
 ### User Stories
 
@@ -67,11 +98,24 @@ As a cluster administrator with limited etcd storage, I want to configure a shor
 #### Story 2: Default Behavior
 As a cluster administrator, I want the current default behavior to be preserved so that existing clusters continue to work without changes.
 
+#### Story 3: Hosted Cluster Storage Optimization
+As the owner of a HyperShift `HostedCluster` running event-heavy workloads (CI/CD, GitOps, pipelines), I want to lower the event retention period for my hosted cluster so that accumulated events do not consume hosted etcd storage for three hours, without having to recreate the hosted cluster and without needing the service provider to change a hardcoded value.
+
+#### Story 4: Hosted Cluster Default Behavior
+As a service provider operating a fleet of hosted control planes, I want hosted clusters that do not set the field to keep the existing 3-hour retention, so that upgrading the HyperShift operator does not change the behavior of any existing hosted cluster.
+
 ### API Extensions
 
-This enhancement modifies the operator API by adding a new `eventTTLMinutes` field.
+This enhancement modifies two APIs:
+
+- `operator.openshift.io/v1` `KubeAPIServer` (standalone OpenShift): adds a new `spec.eventTTLMinutes` field. See [openshift/api PR #2520](https://github.com/openshift/api/pull/2520).
+- `hypershift.openshift.io/v1beta1` `HostedCluster` and `HostedControlPlane` (hosted control planes): adds a new `spec.operatorConfiguration.kubeAPIServer.eventTTLMinutes` field. The field is added to the shared `KubeAPIServerOperatorSpec` type, which is already embedded in both resources, so a single type change covers both.
+
+Neither change adds a webhook, aggregated API server, or new CRD. Both are optional fields with CRD-level range validation.
 
 ### Workflow Description
+
+#### Standalone OpenShift Workflow
 
 The workflow for configuring event-ttl is straightforward:
 
@@ -85,11 +129,26 @@ The workflow for configuring event-ttl is straightforward:
 
 The configuration change takes effect immediately for new events, while existing events continue to use their original TTL until they expire.
 
+#### Hosted Control Planes Workflow
+
+1. **HostedCluster owner** edits the `HostedCluster` resource on the management cluster, setting `spec.operatorConfiguration.kubeAPIServer.eventTTLMinutes` to the desired value in minutes (e.g., 60)
+2. The **management cluster kube-apiserver** rejects the request at admission if the value is outside the 5-180 range
+3. The **HyperShift operator** copies `spec.operatorConfiguration` onto the corresponding `HostedControlPlane` resource
+4. The **control-plane-operator** regenerates the kube-apiserver configuration for the hosted control plane with the new `--event-ttl` value and writes it to the kube-apiserver config `ConfigMap`
+5. The **control-plane-operator** recomputes the pod template config hash, which triggers a rollout of the hosted kube-apiserver `Deployment`
+6. The hosted **kube-apiserver** comes up with the new event-ttl setting and new events in the hosted etcd use the new retention policy
+
+As with standalone, the change applies to events created after the rollout; events already stored keep the TTL they were created with until they expire.
+
 ### Topology Considerations
 
 #### Hypershift / Hosted Control Planes
 
-For HyperShift, this enhancement will use an annotation-based approach on the `HostedCluster` resource, just as with other kube-apiserver configurations such as `goaway-chance`. Users can control the event-ttl setting by specifying the `hypershift.openshift.io/event-ttl-minutes` annotation. The control-plane-operator will read this annotation and update the kube-apiserver deployment in the hosted control plane accordingly (following the pattern described in [openshift/hypershift#6019](https://github.com/openshift/hypershift/pull/6019)). HyperShift continues to use the same 3-hour default as standalone OpenShift clusters unless overridden.
+Hosted control planes are explicitly in scope for this enhancement. Because there is no kube-apiserver operator in a hosted control plane, the setting is exposed as a field on the `HostedCluster` resource rather than on the `KubeAPIServer` operator resource, and is reconciled by the HyperShift operator and the control-plane-operator.
+HyperShift continues to use the same 3-hour default as standalone OpenShift clusters unless explicitly configured otherwise.
+
+An earlier iteration of this enhancement proposed an annotation (`hypershift.openshift.io/event-ttl-minutes`) instead, following the pattern used for `goaway-chance` in [openshift/hypershift#6019](https://github.com/openshift/hypershift/pull/6019).
+That approach was prototyped in [openshift/hypershift#7202](https://github.com/openshift/hypershift/pull/7202) (closed without merging). This enhancement replaces it with a typed API field; see [Hosted Control Planes (HyperShift)](#hosted-control-planes-hypershift) for the full design and [Alternatives](#alternatives-not-implemented) for the rationale.
 
 #### Standalone Clusters
 
@@ -101,7 +160,13 @@ For single-node OpenShift (SNO) deployments, this enhancement will work as expec
 
 For MicroShift, this enhancement is not directly applicable as MicroShift uses a different architecture and may not have the same event-ttl configuration options. MicroShift also uses a 3-hour TTL by default, but since it doesn't use the kube-apiserver operator, the configuration approach described in this enhancement may not work. 
 
+#### OpenShift Kubernetes Engine
+
+OKE clusters run the same kube-apiserver and the same kube-apiserver-operator as standalone OpenShift, so the standalone behavior described here applies unchanged. No OKE-specific work is required.
+
 ### Implementation Details/Notes/Constraints
+
+#### Standalone OpenShift
 
 The proposed API looks like this:
 
@@ -139,6 +204,134 @@ type KubeAPIServerSpec struct {
 }
 ```
 
+#### Hosted Control Planes (HyperShift)
+
+A hosted control plane has no kube-apiserver operator, so there is no `operator.openshift.io/v1` `KubeAPIServer` resource to configure and the standalone design above does not apply. The hosted kube-apiserver's flags are rendered by the control-plane-operator (CPO) from the `HostedControlPlane` resource, and `--event-ttl` is currently a constant.
+
+##### Proposed API
+
+We propose to add `eventTTLMinutes` to the existing `KubeAPIServerOperatorSpec` type, which is reachable on the `HostedCluster` as `spec.operatorConfiguration.kubeAPIServer`:
+
+```yaml
+apiVersion: hypershift.openshift.io/v1beta1
+kind: HostedCluster
+metadata:
+  name: example
+  namespace: clusters
+spec:
+  operatorConfiguration:
+    kubeAPIServer:
+      eventTTLMinutes: 60
+```
+
+```go
+// KubeAPIServerOperatorSpec specifies the configuration for the Kube API Server.
+// +kubebuilder:validation:MinProperties=1
+type KubeAPIServerOperatorSpec struct {
+	ComponentLogLevelSpec `json:",inline"`
+
+	// eventTTLMinutes specifies the amount of time, in minutes, that events are stored
+	// in etcd before being deleted.
+	// The TTL is allowed between 5 minutes minimum up to a maximum of 180 minutes (3 hours).
+	//
+	// Lowering this value will reduce the storage required in etcd. Note that this setting
+	// will only apply to new events being created and will not update existing events.
+	//
+	// Changing this value causes the kube-apiserver to be rolled out with the new setting.
+	//
+	// When omitted this means no opinion, and the platform is left to choose a reasonable
+	// default, which is subject to change over time.
+	// The current default value is 180 minutes (3 hours).
+	//
+	// +kubebuilder:validation:Minimum=5
+	// +kubebuilder:validation:Maximum=180
+	// +openshift:enable:FeatureGate=KubeAPIServerEventTTL
+	// +optional
+	EventTTLMinutes int32 `json:"eventTTLMinutes,omitempty"`
+}
+```
+
+`KubeAPIServerOperatorSpec` is embedded in both `HostedCluster.spec.operatorConfiguration` and `HostedControlPlane.spec.operatorConfiguration`, so this single type change exposes the field on both resources. `HostedControlPlane` is an internal API; users configure the `HostedCluster`.
+
+The field is introduced behind a new HyperShift feature gate, `KubeAPIServerEventTTL`, enabled in `TechPreviewNoUpgrade` and disabled in `Default`.
+Its parent field, `spec.operatorConfiguration.kubeAPIServer`, is gated on `HCPUserFacingOperatorLogs`. A field gated solely on a different gate is pruned along with its parent in that gate's CRD variant, so `kubeAPIServer` is declared on both gates: `logLevel` is unchanged in `Default`, and `eventTTLMinutes` appears only in `TechPreviewNoUpgrade`.
+
+##### Rationale for location, type, units, defaulting, and validation
+
+**Location.** `spec.operatorConfiguration` is the stanza HyperShift already uses for user-facing, per-control-plane-component settings, and `spec.operatorConfiguration.kubeAPIServer` already exists and already carries a kube-apiserver tuning knob (`logLevel`). Putting `eventTTLMinutes` there groups it with the component it configures and avoids inventing a new top-level field.
+The two obvious alternatives were rejected:
+
+- `spec.configuration.apiServer` is `config.openshift.io/v1` `APIServerSpec`, the same type the hosted cluster's own `APIServer` config object uses. It is a hosted-cluster-facing config API shared with standalone OpenShift, and event-ttl is not part of it. Adding a HyperShift-only field there is not possible without changing the shared OpenShift config API.
+- A new top-level `HostedClusterSpec` field would be inconsistent with how other kube-apiserver settings are now modeled.
+
+**Type and units.** `int32` minutes, matching the standalone `eventTTLMinutes` field exactly.
+Keeping the type, the name, the units, and the bounds identical across the two topologies means a single documented range and a single mental model for users and for support, and it avoids a unit conversion that is only correct in one direction (`metav1.Duration` would accept `90s`, which has no representation in the standalone field).
+`metav1.Duration` has precedent in the HyperShift API (`NodePool.spec.nodeDrainTimeout`) and remains an option if API review prefers it; this is listed under [Open Questions](#open-questions).
+
+**Defaulting.** The field is `+optional` with no CRD-level default. An unset field means "no opinion" and the platform picks the default, consistent with the OpenShift API convention already used by the standalone field.
+The effective default of 180 minutes (3 hours) is applied by the control-plane-operator when it renders the kube-apiserver arguments, exactly where the `3h` constant lives today.
+Deliberately not setting a CRD default keeps the API honest about the platform owning the default, and means the default can be changed in a future release without having to migrate values that were written into every existing `HostedCluster` by the API server.
+
+The godoc says the default "is subject to change over time" while the [Non-Goals](#non-goals) say the default stays at 180 minutes. These are two different statements and both hold:
+
+- The godoc is an **API contract**. [`dev-guide/api-conventions.md`](https://github.com/openshift/enhancements/blob/master/dev-guide/api-conventions.md#configuration-vs-workload-apis) requires that a configuration-API field defaulted by a controller reserve the right to change its default, and says so in those words.
+  It tells clients they must not depend on a particular default, and it is what makes a future change possible without an API break. The merged standalone `eventTTLMinutes` field carries the same sentence.
+- The Non-Goal is a **scope statement for this enhancement**. No default changes here: 180 minutes before, 180 minutes after, on every topology.
+
+Concretely, for anyone implementing this: render the default from a single named constant in the control-plane-operator (`defaultEventTTL`), not as a literal at the call site, and do not add a CRD `+kubebuilder:default`. The value of that constant is 180 minutes today and this enhancement does not change it.
+
+**Validation.** `Minimum=5` and `Maximum=180` are enforced by the CRD schema, so an out-of-range value is rejected by the management cluster's kube-apiserver at admission time, and the user gets an immediate error on `oc apply`.
+Because validation happens at admission, there is no code path in which an out-of-range value reaches the hosted kube-apiserver.
+
+`eventTTLMinutes` is a non-pointer `int32`, following the convention that [optional fields should not be pointers in custom resource based APIs](https://github.com/openshift/enhancements/blob/master/dev-guide/api-conventions.md#optional-fields-should-not-be-pointers-in-custom-resource-based-apis).
+It is worth spelling out what that means for `0`, because the answer differs depending on how the object is submitted, and in neither case is `0` a usable value:
+
+- **Submitted explicitly** as `eventTTLMinutes: 0` in YAML or JSON: the API server sees the field, and `Minimum=5` rejects the request exactly as it would for any other below-minimum value. `omitempty` is a Go marshalling directive and does not make an explicitly submitted zero absent.
+- **Left at the Go zero value** by a client that builds the struct directly: `omitempty` drops the field at marshalling time, so the API server sees an omitted field, the object is accepted with nothing stored, and the control-plane-operator applies the 180-minute default.
+
+So `0` can never be persisted and `--event-ttl=0` is unreachable; the field cannot be used to disable event expiry. The only residual effect of the non-pointer type is that a Go client cannot distinguish "the user asked for `0`" from "the user said nothing", and since `0` is not an accepted value, that distinction carries no meaning for this field.
+
+##### Why an API field rather than an annotation
+
+An annotation-based design (`hypershift.openshift.io/event-ttl-minutes`) was proposed in the original version of this enhancement and prototyped in [openshift/hypershift#7202](https://github.com/openshift/hypershift/pull/7202), following the pattern used for `goaway-chance`. That PR was approved but closed without merging. We are not carrying that design forward, for the following reasons:
+
+- **No validation.** The prototype read the annotation and did `fmt.Sprintf("%sm", value)` with no parsing or range check.
+  An annotation value of `abc` would have produced `--event-ttl=abcm` and a kube-apiserver that fails to start; `0` would have produced `--event-ttl=0m`, which is exactly the "events are never deleted" case that the standalone design explicitly guards against. Annotations are untyped strings, so there is no way to get admission-time validation without adding a webhook.
+- **Not discoverable.** Annotations do not appear in the CRD schema, so they are invisible to `oc explain`, to generated API documentation, and to UIs.
+- **HyperShift is moving away from annotations for user-facing settings.** The `hypershift.openshift.io/kube-apiserver-verbosity-level` annotation has already been deprecated in favor of `spec.operatorConfiguration.kubeAPIServer.logLevel`, with the field taking precedence and the annotation slated for removal.
+  Introducing a new annotation for a sibling setting on the same component would move against that direction and create a second deprecation to carry later.
+- **Annotations are a weaker support contract.** HyperShift annotations are generally treated as unsupported or service-provider-level escape hatches; this feature is intended as a supported, customer-facing configuration option, which is what OCPSTRAT-3679 asks for.
+
+The cost of the API field is that it requires openshift/hypershift API review and a feature gate, whereas an annotation would not. We consider that cost appropriate for a supported, customer-facing setting.
+
+##### Propagation to the hosted kube-apiserver
+
+The configured value reaches the hosted kube-apiserver through the existing `operatorConfiguration` path; no new controller or plumbing mechanism is introduced. The verified path in openshift/hypershift is:
+
+1. The user sets `HostedCluster.spec.operatorConfiguration.kubeAPIServer.eventTTLMinutes`.
+2. The HyperShift operator's `HostedCluster` controller deep-copies `spec.operatorConfiguration` onto `HostedControlPlane.spec.operatorConfiguration` (in `hypershift-operator/controllers/hostedcluster/hostedcluster_controller.go`). This is the same mechanism that already carries `kubeAPIServer.logLevel`, so nothing has to be added to the list of mirrored settings.
+3. In the control-plane-operator, `kas.NewConfigParams(hcp, featureGates)` (`control-plane-operator/controllers/hostedcontrolplane/v2/kas/params.go`) resolves the effective value: if `hcp.Spec.OperatorConfiguration` is non-nil and `KubeAPIServer.EventTTLMinutes` is non-zero, use it; otherwise use the existing default.
+   This is the same function that already resolves `goAwayChance`, `maxRequestsInflight`, and friends, and it is the natural home for the default constant that is inlined as `3h` today.
+4. `generateConfig` (`control-plane-operator/controllers/hostedcontrolplane/v2/kas/config.go`) replaces the current `args.Set("event-ttl", "3h")` with the resolved value rendered as a Go duration string (e.g. `60m`), and the resulting `KubeAPIServerConfig` is written to the kube-apiserver config `ConfigMap` in the hosted control plane namespace.
+5. The CPO v2 control-plane-component framework computes a composite hash over the component's mounted ConfigMaps and Secrets and records it on the pod template as `component.hypershift.openshift.io/config-hash` (`support/controlplane-component/defaults.go`). A change to the rendered config changes the hash, which changes the pod template, which causes the kube-apiserver `Deployment` to roll.
+
+Because the field is resolved in `NewConfigParams` rather than at the `HostedCluster` admission layer, the hosted kube-apiserver always has an explicit `--event-ttl` value; there is no case in which the flag is omitted.
+
+##### Mutability and rollout
+
+The field is proposed as **mutable after cluster creation** (day-2), not day-1 only. Rationale: the standalone field is mutable; the sibling `kubeAPIServer.logLevel` field in the same stanza is mutable and is documented as triggering a rolling restart of the component; and the epic acceptance criteria require that changes take effect without recreating the cluster. No immutability CEL rule is proposed.
+
+Rollout behavior follows from the propagation path above and is the same as for any other kube-apiserver configuration change in HyperShift:
+
+- Updating the field triggers reconciliation of the `HostedCluster`, then of the `HostedControlPlane`, then of the kube-apiserver component. The change in the rendered config changes the pod template config hash and the kube-apiserver `Deployment` rolls.
+- For `HighlyAvailable` control planes the kube-apiserver runs multiple replicas behind the control plane's service, so the rollout is a normal rolling update and the hosted cluster's API should remain available throughout, subject to the usual brief per-replica connection resets as pods are replaced.
+- For `SingleReplica` control planes there is a single kube-apiserver pod, so the rollout causes a short window in which the hosted cluster's API is unavailable, the same as for any other kube-apiserver configuration change (for example, a `logLevel` change) in that topology.
+- The hosted cluster's `Available` and `Progressing` conditions reflect the rollout; no new conditions are introduced.
+- Convergence: once the new pods are ready, every subsequently created event carries the new TTL. Events already in etcd retain the TTL they were created with, so after lowering the value the storage reduction is only fully realized once the previously created events have expired (up to the old TTL, so at most 3 hours) and etcd has compacted and defragmented.
+  Raising the value has no effect on already-stored events either; they still expire on their original schedule.
+
+Operators should expect one kube-apiserver rollout per change to this field. It is therefore not a field to flip repeatedly; it is a configuration setting, and the enhancement does not propose any rate limiting or coalescing beyond what the existing reconciliation already provides.
+
 ### Impact of Lower TTL Values
 
 etcd uses an optimized lease expiration mechanism where a lessor runs in the background, polling every 500ms for expired leases using a queue ordered by expiration time (not O(N) iteration over all leases). The leader processes expired leases in parallel, and lease deletions are published via raft. 
@@ -174,12 +367,27 @@ There were no long-term increases in CPU/memory usage found after configuring a 
 ### Risks and Mitigations
 
 **Risk**: Customers might set the value to 0, which means that the events will never be deleted
-**Mitigation**: The API validation and operator ensures the values are within a reasonable range and never zero (5-180 minutes).
+**Mitigation**: The API validation and operator ensures the values are within a reasonable range and never zero (5-180 minutes). On the HyperShift side an explicitly submitted `eventTTLMinutes: 0` is rejected by the `Minimum=5` CRD validation, and a Go client that leaves the field at its zero value sends no field at all, so the platform default of 180 minutes applies.
+`--event-ttl=0` is unreachable either way; see [Validation](#rationale-for-location-type-units-defaulting-and-validation).
+
+**Risk** (HCP): Lowering the value loses event history. Events that already exist are not deleted retroactively, since they keep the TTL they were created with, but every event created after the rollout is removed sooner than it would have been.
+At the 5-minute minimum an event is typically gone before anyone looks at it, so an administrator who lowers the value to save etcd storage is also giving up the event trail that incident response and support cases rely on.
+**Mitigation**: Losing older events is the purpose of the field rather than a side effect, so the controls are on how the trade-off is entered, not on undoing it.
+The field is opt-in and the default is unchanged, so nothing lowers retention implicitly; the `Minimum=5` floor stops a value that would make events useless altogether; and the trade-off is stated in the field godoc and the HyperShift documentation so the choice is an informed one.
+Events in etcd are not a durable audit trail at any TTL, including today's 3 hours, so anyone who needs history beyond the configured window should export events to a logging pipeline — the same recommendation that applies without this feature.
+
+**Risk** (HCP): The hosted cluster's own administrators cannot see the `HostedCluster` resource, so they may not know the value was lowered and may read missing events as a cluster malfunction.
+**Mitigation**: This is a diagnosis problem, and the effective value is observable at every step of the path: as `eventTTLMinutes` on the `HostedCluster` and `HostedControlPlane`, as `--event-ttl` in the rendered kube-apiserver config, and on the running kube-apiserver pods.
+HyperShift must-gather collects all three, so a support case can establish the configured TTL without access to the management cluster. Surfacing the value inside the hosted cluster itself is out of scope for this enhancement.
+
+**Risk** (HCP): Lowering the value does not immediately reduce etcd usage, which may be read as the setting not working.
+**Mitigation**: Documented explicitly: existing events keep their original TTL, so the full effect is only visible after the old events expire (up to 3 hours) and etcd compacts and defragments.
 
 ### Drawbacks
 
 - Adds complexity to the configuration API
 - Additional validation and error handling required
+- The same capability is now exposed through two different APIs, one per topology, which has to be kept consistent (units, range, default) as either side evolves
 
 ## Alternatives (Not Implemented)
 
@@ -192,6 +400,31 @@ There were no long-term increases in CPU/memory usage found after configuring a 
 3. **Separate CRD**: Create a separate CRD for event configuration
    - **Rejected**: Overkill for a single setting, better to include in existing APIServer resource
 
+4. **HyperShift annotation instead of an API field**: Expose the setting as `hypershift.openshift.io/event-ttl-minutes` on the `HostedCluster`, as prototyped in [openshift/hypershift#7202](https://github.com/openshift/hypershift/pull/7202)
+   - **Rejected**: Annotations are untyped and cannot be validated at admission without a webhook, are not discoverable via `oc explain` or generated API docs, and carry a weaker support contract.
+     It also runs counter to HyperShift's ongoing migration of kube-apiserver settings from annotations to `spec.operatorConfiguration.kubeAPIServer`; the verbosity-level annotation is already deprecated in favor of the `logLevel` field.
+     See [Why an API field rather than an annotation](#why-an-api-field-rather-than-an-annotation).
+
+5. **Reuse the standalone `KubeAPIServer` operator resource in hosted clusters**: Make the `operator.openshift.io/v1` `KubeAPIServer` resource available inside the hosted cluster and have something in the hosted control plane read it
+   - **Rejected**: There is no kube-apiserver operator in a hosted control plane, and the hosted cluster's control plane configuration is deliberately owned by the `HostedCluster` resource on the management cluster, not by resources inside the hosted cluster. This would also let a hosted cluster administrator change a setting that affects management-cluster-hosted etcd.
+
+6. **A top-level `HostedClusterSpec.eventTTLMinutes` field**: Add the field directly to `HostedClusterSpec` rather than under `spec.operatorConfiguration.kubeAPIServer`
+   - **Rejected**: Inconsistent with how other per-component control plane settings are now modeled; `spec.operatorConfiguration.kubeAPIServer` already exists for exactly this purpose.
+
+## Open Questions
+
+Still open:
+
+1. **Visibility when a configured value is not yet honored.** During a HyperShift-operator/control-plane-operator skew window the field is accepted and persisted but silently ignored, with no condition telling the user their input has not taken effect; see [Version Skew Strategy](#version-skew-strategy).
+   The fix belongs at the `operatorConfiguration` level rather than in this field, since every setting in that stanza has the same gap, and there has been prior work toward a generic condition for it. Tracked as a follow-up, not as part of this enhancement. Raised by @muraee.
+2. **Reviewers and approvers.** The `reviewers`/`approvers` metadata on this enhancement currently reflects the standalone kube-apiserver work only. HyperShift representation should be added before merge.
+3. **Release target.** No release target is claimed for the HCP portion of this enhancement.
+
+Settled since the first draft, recorded here because earlier revisions of this enhancement left them open:
+
+- **Field type**: `int32` minutes named `eventTTLMinutes`, for exact parity with the standalone field. `metav1.Duration` (precedent: `NodePool.spec.nodeDrainTimeout`) was considered and not taken, because it would diverge from standalone and would accept sub-minute values the standalone field cannot represent.
+- **Feature gate**: `KubeAPIServerEventTTL`, enabled in `TechPreviewNoUpgrade` and disabled in `Default`. The parent `kubeAPIServer` field is declared on both `HCPUserFacingOperatorLogs` and `KubeAPIServerEventTTL` so that `logLevel` is unaffected in `Default` while `eventTTLMinutes` appears only in `TechPreviewNoUpgrade`.
+
 ## Test Plan
 
 The test plan will include:
@@ -200,11 +433,61 @@ The test plan will include:
 2. **E2E Tests**: Test that the event TTL is properly configured on all apiserver after applying the setting
 3. **Performance Tests**: Test the impact of different TTL values on etcd performance
 
+### Hosted Control Planes Test Coverage
+
+Test coverage for the HCP portion, matching the layers that already exist in openshift/hypershift:
+
+1. **API validation (envtest / CRD schema tests)**
+   - Values below 5 and above 180 are rejected by the API server at admission, on both create and update.
+   - An explicitly submitted `eventTTLMinutes: 0` is rejected by the same below-minimum validation, covering the user who writes `0` in YAML expecting it to mean "never expire".
+   - Boundary values 5 and 180 are accepted.
+   - An omitted field is accepted and the stored object has no value for it.
+   - Updating the field on an existing `HostedCluster` is accepted (the field is mutable).
+
+2. **Defaulting and resolution (unit tests in `kas/params_test.go`)**
+   - `HostedControlPlane` with no `operatorConfiguration` resolves to the 3-hour default.
+   - `HostedControlPlane` with `operatorConfiguration` set but `eventTTLMinutes` unset (zero) resolves to the 3-hour default.
+   - `HostedControlPlane` with `eventTTLMinutes: 60` resolves to `60m`.
+
+3. **Propagation**
+   - Unit test that the HyperShift operator copies `spec.operatorConfiguration` (including `eventTTLMinutes`) from `HostedCluster` to `HostedControlPlane`.
+   - Unit test on `generateConfig` that the rendered kube-apiserver config contains `--event-ttl` with the resolved value, and that the default case renders `180m`.
+
+4. **Day-2 update and rollout (e2e)**
+   - Create a hosted cluster without the field, assert the hosted kube-apiserver runs with the default `--event-ttl=180m`.
+   - Update the `HostedCluster` to set `eventTTLMinutes`, assert the kube-apiserver `Deployment` rolls and that the new pods run with the new `--event-ttl`.
+   - Assert the hosted cluster returns to `Available` after the rollout.
+   - Assert that creating an event after the change results in it being removed at approximately the configured TTL (for a short TTL such as 5 minutes, this is feasible within an e2e run).
+
+5. **Upgrade compatibility**
+
+   Take a hosted cluster created before the field existed and upgrade its HyperShift operator and CPO to a version that has it. The claim breaks into four assertions, verified separately because they are not all true in the same way:
+   - Event retention is unchanged at 180 minutes.
+   - The field is still absent from the stored `HostedCluster` spec; nothing defaulted a value into it.
+   - The rendered flag moves from `--event-ttl=3h` to `--event-ttl=180m` exactly once, and never to any other value.
+   - The kube-apiserver rollout count across the upgrade is no higher than for a control plane upgrade that does not carry this change, i.e. the config-hash change is absorbed by the upgrade rather than adding a rollout.
+
+   This is covered as TC-010 in [hypershift-community/test-results-verification#11](https://github.com/hypershift-community/test-results-verification/pull/11), with the rollout count measured across several hosted clusters.
+
+6. **Downgrade and re-upgrade**
+
+   Pruning is lazy, so the downgrade path has several distinct outcomes and the EP deliberately does not assume which one holds; each is pinned by test:
+   - Set `eventTTLMinutes`, then disable the `KubeAPIServerEventTTL` gate. Assert whether the value survives in the stored object, and whether a control-plane-operator that still has the field in its Go types keeps honoring it.
+   - With the field out of schema, perform a full update of the `HostedCluster` spec and assert the field is pruned and the kube-apiserver falls back to the default.
+   - Re-enable the gate with no intervening spec-rewriting write and assert whether the previously stored value reappears and takes effect.
+   - Roll the control-plane-operator back to a version predating the field and assert the kube-apiserver renders that version's default, `3h`.
+
+7. **Standalone regression**
+   - The existing standalone kube-apiserver-operator unit and e2e tests for `eventTTLMinutes` continue to pass unchanged; the HCP work must not alter standalone behavior or defaults.
+
 ## Tech Preview
 
 The EventTTL feature is controlled by the `EventTTL` feature gate, which is enabled by default in both DevPreview and TechPreview feature sets. This allows the feature to be available for testing and evaluation without requiring additional configuration.
 
 The EventTTL feature gate is implemented in [openshift/api PR #2525](https://github.com/openshift/api/pull/2525) and will be removed when the feature graduates to GA, as the functionality will become a standard part of the platform.
+
+The HyperShift API has its own feature gate sets (`api/hypershift/v1beta1/featuregates`), separate from the OpenShift `EventTTL` gate, so the `HostedCluster` field is introduced behind a HyperShift gate and graduates independently of the standalone field.
+That gate is `KubeAPIServerEventTTL`, enabled in `TechPreviewNoUpgrade` and disabled in `Default`.
 
 ## Graduation Criteria
 
@@ -216,6 +499,13 @@ The EventTTL feature gate is implemented in [openshift/api PR #2525](https://git
 - Sufficient test coverage
 - EventTTL feature gate is enabled in DevPreview and TechPreview feature sets
 
+For hosted control planes:
+
+- The `HostedCluster` field is implemented behind the `KubeAPIServerEventTTL` gate, enabled in `TechPreviewNoUpgrade`
+- Validation, defaulting, and propagation unit tests are in place
+- An e2e test demonstrates a day-2 change propagating to the hosted kube-apiserver
+- Upstream HyperShift documentation describes the field
+
 ### Tech Preview -> GA
 
 - More comprehensive testing (upgrade, downgrade, scale)
@@ -223,6 +513,12 @@ The EventTTL feature gate is implemented in [openshift/api PR #2525](https://git
 - User feedback incorporated
 - Documentation updated in openshift-docs
 - EventTTL feature gate is removed as the feature becomes GA
+
+For hosted control planes:
+
+- Upgrade compatibility verified: hosted clusters created before the field existed keep 180-minute retention after the control plane is upgraded, and the one-time change of the rendered default literal adds no kube-apiserver rollout beyond the upgrade's own
+- Rollout behavior verified for both `SingleReplica` and `HighlyAvailable` control planes
+- The `KubeAPIServerEventTTL` gate is enabled in `Default` and then removed as the field becomes GA
 
 ### Removing a deprecated feature
 
@@ -236,17 +532,49 @@ This enhancement does not remove any existing features. It only adds new configu
 - No changes required for existing clusters
 - New configuration option is available immediately
 
+For hosted control planes:
+
+- Existing `HostedCluster` resources predate the field, so it is absent from their spec. Absent means "no opinion", which the control-plane-operator resolves to the same 180-minute retention that is hardcoded today, so **event retention does not change for any existing hosted cluster**.
+- The rendered flag does change once, from `--event-ttl=3h` to `--event-ttl=180m`. The two are the same duration, but the implementation expresses the default in minutes so that it is lexically identical to what `eventTTLMinutes: 180` renders; otherwise explicitly asking for the default value would rewrite the config and roll the kube-apiserver for no semantic change.
+  The price of that choice is a one-time change to the rendered literal on the release in which the field lands.
+  Because the rendered config feeds the component config hash, that one-time change would roll the kube-apiserver on its own. In practice it is absorbed rather than additive: the control-plane-operator ships in the OCP release payload, so the new literal only reaches a hosted cluster as part of a control plane upgrade, which rolls the kube-apiserver anyway.
+  The claim to verify is therefore "no *additional* rollout", not "no rollout". The test plan measures the rollout count across several hosted clusters through an upgrade to confirm it; see TC-010 in [hypershift-community/test-results-verification#11](https://github.com/hypershift-community/test-results-verification/pull/11).
+- Because the field has no CRD-level default, the API server does not write a value into existing `HostedCluster` objects when the new CRD is applied, so no stored object is modified by the upgrade.
+- A hosted cluster upgraded from a version predating the field can opt in at any time after the control plane components support it; the first time the field is set, the kube-apiserver rolls as described in [Mutability and rollout](#mutability-and-rollout).
+
 ### Downgrade Strategy
 
 - Configuration will be ignored by older versions
 - No impact on cluster functionality
 - Events will continue to use the default TTL (180 minutes)
 
+For hosted control planes, a configured value is **not** necessarily lost when the field goes out of schema. Pruning of fields absent from the served schema happens on write, not on read, so disabling the `KubeAPIServerEventTTL` gate or rolling the HyperShift CRDs back to a version without the field leaves any previously stored `eventTTLMinutes` sitting in etcd.
+What happens from there depends on the case:
+
+- **The rollback itself**: no client can set or change the field any more, but the stored value is untouched and nothing rolls the kube-apiserver at this point.
+- **Reconciliation by a control-plane-operator that still has the field in its Go types**, which is the gate-disabled case where only the CRD variant changed: the stored value may still be readable, and therefore still honored, precisely because the API server does not prune on read. This is the case the test plan has to pin down rather than assume.
+- **Reconciliation by a control-plane-operator that predates the field**: the value is ignored and the kube-apiserver renders that version's default literal, `3h`.
+- **The first full update or other spec-rewriting write through the older schema**: the field is pruned for real and the configured value is gone permanently.
+- **Re-enabling the gate, or re-upgrading the CRDs, before any such write**: the value is still in etcd, becomes visible again, and takes effect again.
+
+Users should therefore not rely on a configured value either surviving or being cleared by a downgrade, since whether a pruning write lands in the interim is not under their control. That indeterminacy, rather than guaranteed data loss, is part of why the field is introduced behind a feature gate.
+
 ## Version Skew Strategy
 
 - The event-ttl setting is a kube-apiserver configuration
 - No coordination required with other components
-- Version skew is not a concern for this enhancement
+- Version skew is not a concern for standalone OpenShift
+
+For hosted control planes there is a management/hosted split and a HyperShift-operator/control-plane-operator split to consider:
+
+- There is no skew with the hosted cluster. `--event-ttl` is a kube-apiserver flag only; nothing inside the hosted cluster reads or depends on the configured value.
+- Skew between the HyperShift operator and the control-plane-operator is possible during an upgrade. If the HyperShift operator mirrors `operatorConfiguration` containing `eventTTLMinutes` onto a `HostedControlPlane` that is reconciled by an older control-plane-operator, the older CPO simply does not read the field and continues to render the default.
+  The value is preserved in the spec and takes effect once the CPO is upgraded. This is a no-op, not an error, because the field travels inside the already-mirrored `operatorConfiguration` struct.
+- If the CRDs are upgraded before the HyperShift operator, the field can be set but is not yet mirrored or consumed; again a no-op until the operator is upgraded.
+- In both skew windows the user's input is **silently ignored**: the field is accepted and persisted, the cluster stays `Available`, and nothing reports that the requested TTL is not the one in effect. The only way to tell is to read `--event-ttl` off the rendered config or the running pods.
+  Reporting this properly needs a condition on the `HostedCluster`, and the right shape is a generic one covering every `operatorConfiguration` field that a lagging control plane does not yet honor, not a condition specific to event-ttl. There has been prior work toward such a generic condition. This enhancement does not introduce one; it is recorded as a follow-up in [Open Questions](#open-questions).
+- The feature gate is evaluated where the CRDs are served, on the management cluster, so a gate that is off prevents the field from being set at all rather than producing partial behavior.
+  That applies to new writes only. A value stored while the gate was on is not erased by turning the gate off, because pruning happens on write rather than on read; see [Downgrade Strategy](#downgrade-strategy).
 
 ## Operational Aspects of API Extensions
 
@@ -256,6 +584,14 @@ This enhancement modifies the operator API but does not add new API extensions. 
 - Application of the setting to kube-apiserver deployment
 - No impact on API availability or performance
 
+For hosted control planes:
+
+- No webhook, aggregated API server, or new CRD is added; the change is one optional field with CRD schema range validation on an existing CRD, so there is no added admission latency and no new failure mode for the management cluster's API server.
+- The field has an operational effect on the management cluster rather than the hosted cluster: lowering it reduces the hosted etcd's event storage, memory, and defragmentation work, which in a dense management cluster is the main benefit.
+  Raising a previously lowered value, for example from 60 to 120 minutes, is a valid change within the accepted range and increases event retention and the corresponding etcd usage again.
+  What is not possible is retaining events for longer than today: 180 minutes is both the maximum accepted value and the value the platform applies when the field is unset, so a request above 180 is rejected and there is no configuration that increases etcd event usage beyond the current behavior.
+- Setting the field causes a kube-apiserver rollout in the hosted control plane. The SLO impact is the same as any other kube-apiserver configuration change: none for `HighlyAvailable` topologies beyond transient connection resets, and a short API outage for `SingleReplica` topologies.
+
 ## Support Procedures
 
 ### Detection
@@ -264,12 +600,27 @@ This enhancement modifies the operator API but does not add new API extensions. 
 - kube-apiserver logs will show the configured event-ttl value
 - etcd metrics can be monitored for compaction frequency
 
+For hosted control planes:
+
+- The intended value is on the `HostedCluster`: `oc get hostedcluster -n <ns> <name> -o jsonpath='{.spec.operatorConfiguration.kubeAPIServer.eventTTLMinutes}'`
+- The mirrored value is on the `HostedControlPlane` in the hosted control plane namespace, which tells you whether the HyperShift operator has propagated it
+- The effective value is the `--event-ttl` argument in the kube-apiserver config `ConfigMap` in the hosted control plane namespace, and on the running kube-apiserver pods
+- HyperShift must-gather collects the `HostedCluster`, the `HostedControlPlane`, and the hosted control plane namespace's ConfigMaps and pod specs, so all three are available from an existing must-gather
+
 ### Troubleshooting
 
 - If events are not being deleted as expected, check the event-ttl configuration
 - Monitor etcd compaction metrics for unusual patterns
 
+For hosted control planes:
+
+- If the value on the `HostedCluster` is not reflected on the `HostedControlPlane`, the HyperShift operator is not reconciling; check whether the `HostedCluster` is paused (`spec.pausedUntil`) and check the HyperShift operator logs
+- If the value is on the `HostedControlPlane` but not in the kube-apiserver config, the control-plane-operator is older than the field or is not reconciling; check the CPO version and logs
+- If the value is in the config but the running pods still show the old flag, the kube-apiserver rollout has not completed; check the `Deployment` rollout status and the hosted cluster's `Progressing` condition
+- If etcd usage has not dropped after lowering the value, this is expected until the previously created events expire under their original TTL (up to 3 hours) and etcd compacts and defragments
+
 ## Implementation History
 
 - 2025-10-08: Initial enhancement proposal
+- 2026-10-09: Extended to cover hosted control planes (HyperShift), replacing the previously proposed annotation-based approach with a `HostedCluster` API field
 
