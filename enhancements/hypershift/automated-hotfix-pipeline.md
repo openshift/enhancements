@@ -56,6 +56,10 @@ As a HyperShift engineer responding to a CPO bug affecting OCP 4.20, 4.21, and 4
 
 As a HyperShift maintainer reviewing a hotfix request, I want CI to validate the request (correct SHA format, commits exist, cherry-picks apply cleanly) so that I can approve with confidence that the automation will succeed.
 
+#### Story 4: Observing hotfix automation health
+
+As a HyperShift maintainer operating the hotfix pipeline, I want the automation to surface the status of in-flight hotfixes (which CPO builds are pending, which have completed, and whether any workflow run failed) and to alert on failures (authentication errors, missing `repository_dispatch` events, cherry-pick conflicts) so that a stalled hotfix is noticed and recovered quickly during an incident rather than silently hanging.
+
 ### Goals
 
 1. Make hotfix requests declarative: a YAML change in a PR on `main` triggers all downstream actions.
@@ -71,12 +75,13 @@ As a HyperShift maintainer reviewing a hotfix request, I want CI to validate the
 3. Replacing the existing `contrib/konflux/README.md` manual process immediately. The automation will coexist with the manual process during the rollout.
 4. Managing hotfix branch cleanup or Konflux resource teardown. These are separate operational concerns.
 5. Automating the Konflux `ReleasePlanAdmission` or releng-tenant coordination for new hotfix applications.
+6. ChatOps integration (e.g., chai bot). Triggering hotfixes or surfacing their status through chai bot is out of scope for the pilot. The PR-driven flow is the v1 interface; a chat-based interface may be revisited later (see [Open Questions](#open-questions)).
 
 ## Proposal
 
 ### Workflow Description
 
-**hotfix requester** is a HyperShift engineer responding to a production incident.
+**hotfix requester** is a HyperShift or SRE engineer responding to a production incident.
 
 **hotfix reviewer** is a HyperShift maintainer who reviews and approves the hotfix PR.
 
@@ -94,14 +99,14 @@ As a HyperShift maintainer reviewing a hotfix request, I want CI to validate the
 6. **Merge Tekton PR.** Konflux generates a PR on the hotfix branch adding `.tekton/` pipeline definitions. The workflow verifies it references the common build pipeline, fixes it if needed, and merges it.
 7. **Build.** Konflux builds `Containerfile.operator` from the hotfix branch. The existing `hypershift-operator-main-hotfix` ReleasePlan (with `auto-release: true`) promotes the image to `quay.io/acm-d/rhtap-hypershift-operator`.
 
-```
-PR merged on main
-  → create branch ho-hotfix-<ticket>
-  → cherry-pick commits
-  → oc apply ProjectDevelopmentStream (HO hotfix template)
-  → merge Konflux Tekton PR
-  → Konflux builds HO image
-  → auto-release to quay.io/acm-d
+```mermaid
+flowchart TD
+    A[PR merged on main] --> B[Create ho-hotfix branch]
+    B --> C[Cherry-pick commits]
+    C --> D["oc apply ProjectDevelopmentStream (HO hotfix template)"]
+    D --> E[Merge Konflux Tekton PR]
+    E --> F[Konflux builds HO image]
+    F --> G[Auto-release to quay.io/acm-d]
 ```
 
 #### CPO hotfix flow
@@ -125,7 +130,7 @@ The flow is:
    - Applies `ProjectDevelopmentStream` resources for all CPO branches.
    - Merges all Konflux-generated Tekton PRs.
    - Exits. The workflow does **not** poll for build results.
-5. **CPO builds complete (event-driven).** Each CPO hotfix application includes an `IntegrationTestScenario` that runs a notification pipeline after a successful build. This pipeline extracts the image digest from the Konflux Snapshot and fires a GitHub `repository_dispatch` event of type `cpo-hotfix-build-complete` to the HyperShift repository, including the image reference and component name in the payload.
+5. **CPO builds complete (event-driven).** Each CPO hotfix application includes an `IntegrationTestScenario` that runs a notification pipeline after a successful build. This pipeline extracts the image digest from the Konflux Snapshot and fires a GitHub `repository_dispatch` event of type `cpo-hotfix-build-complete` to the HyperShift repository, including the image reference, component name, and the Snapshot source revision (the CPO hotfix branch head commit) in the payload. The revision lets the HO workflow discard digests from stale/superseded builds.
 6. **HO overrides update (`process-hotfix-ho` workflow).** A separate GitHub Actions workflow triggers on `repository_dispatch` events of type `cpo-hotfix-build-complete`. For each event:
    - Checks out the `ho-hotfix-<ticket>` branch.
    - Records the CPO image digest in `.hotfix-tracking.json`.
@@ -134,39 +139,24 @@ The flow is:
    - If all builds are complete: generates the `overrides.yaml` update, removes `.hotfix-tracking.json`, commits, pushes, and applies the HO `ProjectDevelopmentStream`.
 7. **Release.** The HO hotfix image auto-releases via `hypershift-operator-main-hotfix` ReleasePlan.
 
-```
-PR merged on main
-  → process-hotfix workflow:
-      → FOR EACH cpo[] entry:
-          → create branch cpo-hotfix-<ticket>-<branch>
-          → cherry-pick commits
-          → oc apply ProjectDevelopmentStream (CPO hotfix template with ITS)
-          → merge Konflux Tekton PR
-      → create branch ho-hotfix-<ticket> with .hotfix-tracking.json
-      → workflow exits
-
-[async] Konflux builds CPO images in parallel...
-
-[event] CPO build for release-4.20 completes
-  → ITS notification pipeline fires repository_dispatch
-  → process-hotfix-ho workflow:
-      → records digest in .hotfix-tracking.json (1/3 remaining)
-      → exits
-
-[event] CPO build for release-4.22 completes
-  → process-hotfix-ho workflow:
-      → records digest in .hotfix-tracking.json (1/3 remaining still — 4.21 pending)
-      → exits
-
-[event] CPO build for release-4.21 completes
-  → process-hotfix-ho workflow:
-      → records digest (0/3 remaining — all done!)
-      → updates overrides.yaml with all CPO digests
-      → removes .hotfix-tracking.json
-      → oc apply ProjectDevelopmentStream (HO hotfix template)
-      → merge Konflux Tekton PR
-      → Konflux builds HO image with embedded overrides
-      → auto-release to quay.io/acm-d
+```mermaid
+flowchart TD
+    subgraph PH [process-hotfix workflow]
+      P0[PR merged on main] --> P1["For each cpo[] entry: create cpo-hotfix branch + cherry-pick"]
+      P1 --> P2["oc apply PDS (CPO template + ITS)"]
+      P2 --> P3[Merge Konflux Tekton PR]
+      P3 --> P4["Create ho-hotfix branch with .hotfix-tracking.json"]
+      P4 --> P5[Workflow exits]
+    end
+    P5 -.-> K[Konflux builds CPO images in parallel]
+    K -->|build complete| ITS["ITS notification pipeline fires repository_dispatch (component, image, revision)"]
+    ITS --> HO{"process-hotfix-ho: revision matches and all digests recorded?"}
+    HO -->|No, still pending| REC[Record digest, commit tracking file, exit]
+    REC -.-> K
+    HO -->|Yes, all complete| GEN["Generate overrides.yaml, remove tracking file"]
+    GEN --> APPLY["oc apply PDS (HO template) + merge Tekton PR"]
+    APPLY --> BUILD[Konflux builds HO image with embedded overrides]
+    BUILD --> REL[Auto-release to quay.io/acm-d]
 ```
 
 ### API Extensions
@@ -206,10 +196,13 @@ hotfixes:
   - ticket: CNTRLPLANE-3632
     type: ho
     baseCommit: fbaf59ae8f1234567890abcdef1234567890abcd
+    # cherryPicks are applied in the order listed, on top of baseCommit.
     cherryPicks:
       - 866091eb451234567890abcdef1234567890abcd
+      - 7f2a1c9d3e1234567890abcdef1234567890abcd
     description: >-
-      Revert predictable rollout merge to fix HO upgrade regression.
+      Revert predictable rollout merge to fix HO upgrade regression
+      (two commits: the revert plus a follow-up test fix).
 
   # --- CPO hotfix example (multiple release branches) ---
   - ticket: OCPBUGS-94518
@@ -270,7 +263,7 @@ hotfixes:
 | `cpo[].branch` | Yes | Source release branch name (e.g., `release-4.20`) |
 | `cpo[].baseCommit` | Yes | 40-char hex SHA: tip of the release branch when CPO was built |
 | `cpo[].cherryPicks` | Yes | Ordered list of 40-char SHAs to cherry-pick |
-| `cpo[].platforms` | Yes | Platforms needing the override (`aws`, `azure`) |
+| `cpo[].platforms` | Yes | HyperShift provider platform(s) whose `overrides.yaml` entries need the hotfix CPO image. Values are the platform keys used in `overrides.yaml` (`aws`, `azure`) — i.e., cloud provider platforms, not managed-service product names. |
 | `cpo[].affectedVersions` | Yes | Z-stream versions to override (e.g., `["4.20.0", "4.20.1"]`) |
 | `ho` | Yes (CPO type) | HO branch configuration |
 | `ho.baseCommit` | Yes | 40-char hex SHA of HO production commit |
@@ -281,7 +274,7 @@ hotfixes:
 
 CPO hotfixes that span multiple release branches require coordinating N independent Konflux builds before the HO can be rebuilt with the correct `overrides.yaml`. The coordination uses three mechanisms:
 
-1. **A tracking file (`.hotfix-tracking.json`) on the HO hotfix branch.** Created by the `process-hotfix` workflow at branch creation time. Lists all expected CPO components with their metadata (`branch`, `platforms`, `affectedVersions`) and an `image` field initially set to `null`.
+1. **A tracking file (`.hotfix-tracking.json`) on the HO hotfix branch.** Created by the `process-hotfix` workflow at branch creation time. Lists all expected CPO components with their metadata (`branch`, `expectedRevision`, `platforms`, `affectedVersions`) and an `image` field initially set to `null`. The `expectedRevision` records the head commit of each CPO hotfix branch after cherry-picks, so the HO workflow can reject digests from superseded builds (see [Step 6](#process-hotfix-workflow) and Risk 6).
 
 2. **An `IntegrationTestScenario` in the CPO hotfix template.** Triggers a notification pipeline after each successful CPO push build. The pipeline sends a `repository_dispatch` event to GitHub with the image digest.
 
@@ -295,7 +288,7 @@ This event-driven architecture means no GitHub Actions runner is kept idle waiti
 
 **Trigger:** PR modifying `releases/hotfixes.yaml` targeting `main`.
 
-Checks performed:
+All checks below run as jobs in this GitHub Actions workflow (no external CI system is involved):
 - YAML is well-formed and matches the schema.
 - `ticket` matches `^(CNTRLPLANE|OCPBUGS)-\d+$` (case-insensitive).
 - All `baseCommit` and `cherryPicks` entries are valid 40-char hex SHAs that exist in the repository.
@@ -373,6 +366,7 @@ When a CPO hotfix spans multiple release branches (e.g., `release-4.20`, `releas
 | `release-4.20` | `hypershift-cpo-hotfix-ocpbugs-94518-release-4-20` | `hypershift-cpo-hotfix-ocpbugs-94518-release-4-20` |
 | `release-4.21` | `hypershift-cpo-hotfix-ocpbugs-94518-release-4-21` | `hypershift-cpo-hotfix-ocpbugs-94518-release-4-21` |
 | `release-4.22` | `hypershift-cpo-hotfix-ocpbugs-94518-release-4-22` | `hypershift-cpo-hotfix-ocpbugs-94518-release-4-22` |
+| `main` (HO) | `hypershift-operator-hotfix-ocpbugs-94518` | `hypershift-operator-hotfix-ocpbugs-94518` |
 
 Each CPO branch is a **separate Application** rather than multiple Components within a single Application. This is the correct design because:
 
@@ -437,12 +431,14 @@ cat > .hotfix-tracking.json <<'EOF'
   "pending": {
     "hypershift-cpo-hotfix-<ticket>-<branch1>": {
       "branch": "release-4.20",
+      "expectedRevision": "<head SHA of cpo-hotfix-<ticket>-release-4-20 after cherry-picks>",
       "platforms": ["aws", "azure"],
       "affectedVersions": ["4.20.0", "4.20.1", "4.20.2"],
       "image": null
     },
     "hypershift-cpo-hotfix-<ticket>-<branch2>": {
       "branch": "release-4.21",
+      "expectedRevision": "<head SHA of cpo-hotfix-<ticket>-release-4-21 after cherry-picks>",
       "platforms": ["azure"],
       "affectedVersions": ["4.21.0", "4.21.1"],
       "image": null
@@ -462,7 +458,7 @@ The `process-hotfix` workflow then exits. No runner is kept waiting for builds.
 
 Each CPO hotfix application includes an `IntegrationTestScenario` (added to the CPO hotfix template) that triggers a notification pipeline after a successful push-event Snapshot. This pipeline:
 
-1. Extracts the image reference (including `@sha256:` digest) and component name from the Snapshot.
+1. Extracts the image reference (including `@sha256:` digest), component name, and the Snapshot source revision from the Snapshot.
 2. Sends a GitHub `repository_dispatch` event to the HyperShift repository:
 
 ```bash
@@ -474,7 +470,8 @@ curl -fsSL -X POST \
     "event_type": "cpo-hotfix-build-complete",
     "client_payload": {
       "component": "hypershift-cpo-hotfix-<ticket>-<branch>",
-      "image": "quay.io/...@sha256:<digest>"
+      "image": "quay.io/...@sha256:<digest>",
+      "revision": "<cpo hotfix branch head commit>"
     }
   }'
 ```
@@ -494,16 +491,30 @@ on:
 The workflow:
 
 1. Derives the ticket from the component name and checks out the `ho-hotfix-<ticket>` branch.
-2. Reads `.hotfix-tracking.json`, records the image digest for the completed component.
-3. Counts remaining builds where `image` is `null`.
-4. If builds remain pending: commits the updated tracking file and pushes.
+2. **Validates the revision.** Compares the event's `revision` against
+   `pending[component].expectedRevision` in `.hotfix-tracking.json`. If they differ,
+   the event is from a **superseded build** (an earlier build that finished after a
+   newer cherry-pick was pushed to the CPO hotfix branch); the workflow logs this and
+   exits without recording the digest, leaving that entry `null` so it keeps waiting
+   for the build matching the expected revision. If a maintainer intentionally pushes
+   additional cherry-picks to a CPO hotfix branch after creation, they must also update
+   `expectedRevision` in the tracking file (by re-running `process-hotfix` or via a
+   dedicated step) so the new build's digest is accepted.
+3. Reads `.hotfix-tracking.json`, records the image digest for the completed component (only when the revision matched).
+4. Counts remaining builds where `image` is `null`.
+5. If builds remain pending: commits the updated tracking file and pushes.
    ```bash
    git commit -m "hotfix(tracking): <ticket> — <component> complete (N remaining)"
    git push origin ho-hotfix-<ticket>
    ```
-5. If all builds are complete (`0` remaining): generates the `overrides.yaml` update.
+6. If all builds are complete (`0` remaining): generates the `overrides.yaml` update.
 
-**Race condition handling:** If two `repository_dispatch` events arrive simultaneously, both workflow runs try to push to the same branch. The second push fails with a non-fast-forward error. The workflow handles this by retrying:
+**Race condition handling:** The workflow declares a GitHub Actions `concurrency`
+group keyed on the HO branch (e.g., `group: process-hotfix-ho-${HO_BRANCH}`) so that
+same-branch dispatches are serialized rather than run in parallel. As a further
+safeguard, if two `repository_dispatch` events are still processed close enough to
+race on the push, both workflow runs try to push to the same branch and the second
+push fails with a non-fast-forward error. The workflow handles this by retrying:
 ```bash
 git pull --rebase origin "${HO_BRANCH}"
 # Re-read .hotfix-tracking.json after rebase — the other run may have
@@ -664,6 +675,7 @@ spec:
             SNAPSHOT='$(params.SNAPSHOT)'
             IMAGE=$(echo "$SNAPSHOT" | jq -r '.components[0].containerImage')
             COMPONENT=$(echo "$SNAPSHOT" | jq -r '.components[0].name')
+            REVISION=$(echo "$SNAPSHOT" | jq -r '.components[0].source.git.revision')
 
             curl -fsSL -X POST \
               -H "Authorization: token ${GITHUB_APP_TOKEN}" \
@@ -673,7 +685,8 @@ spec:
                 \"event_type\": \"cpo-hotfix-build-complete\",
                 \"client_payload\": {
                   \"component\": \"${COMPONENT}\",
-                  \"image\": \"${IMAGE}\"
+                  \"image\": \"${IMAGE}\",
+                  \"revision\": \"${REVISION}\"
                 }
               }"
 
@@ -766,6 +779,8 @@ oc login --token="${KONFLUX_SA_TOKEN}" "${KONFLUX_API_URL}"
 oc project crt-redhat-acm-tenant
 ```
 
+The token is minted with a quarterly TTL (~90 days) and rotated on that cadence (see [Authorization Model](#authorization-model)).
+
 **Konflux secret for GitHub notification (new):**
 
 The CPO hotfix notification pipeline (`.tekton/pipelines/cpo-hotfix-notify.yaml`) needs a GitHub token to call `repository_dispatch`. This is stored as a Konflux secret in the `crt-redhat-acm-tenant` namespace:
@@ -778,7 +793,49 @@ The token needs `contents: write` scope on `openshift/hypershift` (the minimum p
 
 **Why a ServiceAccount over OIDC federation:**
 
-While OIDC federation between GitHub Actions and the Konflux cluster would eliminate long-lived tokens entirely, the Konflux cluster does not currently support GitHub Actions as an OIDC identity provider. If this changes in the future, migrating from a SA token to OIDC would be straightforward — only the login step in the workflow would change.
+While OIDC federation between GitHub Actions and the Konflux cluster would eliminate
+long-lived tokens entirely, the Konflux cluster does not currently support GitHub
+Actions as an OIDC identity provider. OIDC federation remains the preferred long-term
+end state; for now the SA token is rotated quarterly (see
+[Authorization Model](#authorization-model)). If Konflux adds GitHub Actions as an
+OIDC provider in the future, migrating from a SA token to OIDC would be
+straightforward — only the login step in the workflow would change.
+
+#### Authorization Model
+
+Two independent gates govern who can *request* a hotfix and who can *authorize* the resulting cluster mutation.
+
+**Request & merge authorization (pilot).** Permission to merge a change to `releases/hotfixes.yaml` is governed by a Prow `OWNERS` file scoped to the `releases/` directory in `openshift/hypershift`. A dedicated alias in the repository's `OWNER_ALIASES` (e.g., `hotfix-approvers`) lists the trusted approvers, so the set can be widened over time without editing every `OWNERS` file:
+
+```yaml
+# OWNER_ALIASES
+aliases:
+  hotfix-approvers:
+    - celebdor
+    # - <additional HyperShift maintainers / SRE representatives>
+```
+```yaml
+# releases/OWNERS
+approvers:
+  - hotfix-approvers
+reviewers:
+  - hotfix-approvers
+```
+
+Any engineer (including SRE and managed-services) may *open* a hotfix PR; merging requires `/approve` from a member of the alias. Because the `process-hotfix` workflow is triggered by the merge to `main`, this Prow approval is the effective authorization gate for the pilot.
+
+**Mutation authorization (optional, phase 2).** For defense in depth, the
+`process-hotfix` and `process-hotfix-ho` jobs that run `oc apply` against the Konflux
+cluster can additionally be bound to a GitHub **Environment** (e.g., `konflux-prod`)
+with a **required-reviewer** protection rule, with `KONFLUX_SA_TOKEN` scoped to that
+environment. A job that declares `environment: konflux-prod` pauses before its first
+step until a required reviewer approves it in the Actions UI. This separates "approve
+the code change" (the merge gate) from "authorize the privileged cluster mutation"
+(the mutation gate), allowing the requester/approver pool to be widened — per the
+managed-services ask — while the privileged `oc apply` step stays behind a small
+on-call group. This gate is deferred past the pilot.
+
+**Token rotation.** The `KONFLUX_SA_TOKEN` is minted with a quarterly TTL (~90 days) and rotated on that cadence; monitoring (Story 4) alerts on authentication failures as a backstop between rotations.
 
 ### Risks and Mitigations
 
@@ -792,25 +849,36 @@ While OIDC federation between GitHub Actions and the Konflux cluster would elimi
 - Likelihood: Low — the Tekton PR format has been stable.
 - Mitigation: Configurable timeout with clear failure messages. The workflow is idempotent, so re-running after manual intervention is safe.
 
-**Risk 5: ITS notification pipeline fails to send `repository_dispatch`.**
-- Impact: Medium — one CPO build's digest is not recorded; the HO build is never triggered.
-- Likelihood: Low — the pipeline is a simple `curl` to a well-defined API.
-- Mitigation: The `hotfix-github-notify-token` Konflux secret must be kept valid. If the notification fails, the Tekton PipelineRun logs in the ITS will show the error. The operator can manually send the `repository_dispatch` event or fall back to recording the digest on the HO branch by hand.
-
-**Risk 6: `repository_dispatch` race condition corrupts tracking state.**
-- Impact: Low — a digest update could be lost temporarily.
-- Likelihood: Low — CPO builds rarely complete within seconds of each other.
-- Mitigation: The workflow uses `git pull --rebase` retry logic (or the GitHub Contents API's compare-and-swap via file SHA). Lost updates are retried, and the tracking file is the source of truth.
-
 **Risk 3: ServiceAccount token expiry or revocation.**
 - Impact: High — all hotfix automation stops.
-- Likelihood: Low — tokens can be created with long TTLs.
-- Mitigation: Monitoring for workflow failures that indicate authentication errors. Document the token rotation procedure.
+- Likelihood: Low — the token is minted with a quarterly TTL (~90 days).
+- Mitigation: The `KONFLUX_SA_TOKEN` is rotated on a quarterly cadence (see [Authorization Model](#authorization-model) and [Support Procedures](#workflow-fails-at-konflux-authentication)). Monitoring (Story 4) alerts on workflow failures that indicate authentication errors as a backstop between rotations.
 
 **Risk 4: Overrides.yaml auto-generation produces incorrect entries.**
 - Impact: High — wrong CPO image used for specific Z-stream versions.
 - Likelihood: Low — the generation logic is deterministic and based on explicit inputs.
 - Mitigation: The generated `overrides.yaml` diff is logged in the workflow output for manual review. The override format follows the exact same pattern used in all existing manual overrides.
+
+**Risk 5: ITS notification pipeline fails to send `repository_dispatch`.**
+- Impact: Medium — one CPO build's digest is not recorded; the HO build is never triggered.
+- Likelihood: Low — the pipeline is a simple `curl` to a well-defined API.
+- Mitigation: The `hotfix-github-notify-token` Konflux secret must be kept valid. If
+  the notification fails, the Tekton PipelineRun logs in the ITS will show the error.
+  The operator can manually send the `repository_dispatch` event or fall back to
+  recording the digest on the HO branch by hand. Monitoring (Story 4) should flag HO
+  branches that still carry a `.hotfix-tracking.json` long after their CPO builds
+  completed.
+
+**Risk 6: Stale or racing `repository_dispatch` events corrupt tracking state.**
+- Impact: High — a superseded CPO build's digest could be embedded in `overrides.yaml` and auto-released, or a concurrent digest update could be lost.
+- Likelihood: Low — multiple builds of the same CPO branch, or two builds completing within seconds of each other, are uncommon.
+- Mitigation: **Stale builds** are rejected via the `expectedRevision` guard — the HO
+  workflow accepts a digest only when the event `revision` matches the tracking file's
+  recorded branch head (see [Step 6](#process-hotfix-workflow)). **Concurrent updates**
+  are handled with `git pull --rebase` retry logic (or the GitHub Contents API's
+  compare-and-swap via file SHA) and a GitHub Actions `concurrency` group keyed on the
+  HO branch so same-branch dispatches serialize. The tracking file remains the source
+  of truth.
 
 ### Drawbacks
 
@@ -849,13 +917,23 @@ This is simpler to implement but keeps a GitHub Actions runner occupied for 30+ 
 
 ## Open Questions
 
-1. **CPO hotfix ReleasePlan.** The HO has a dedicated `hypershift-operator-main-hotfix` ReleasePlan with `auto-release: true`. CPO hotfixes create a new Application per hotfix via the template, but there is no corresponding auto-release ReleasePlan for CPO hotfix applications. Is the CPO hotfix image consumed directly from `quay.io/redhat-user-workloads` without a formal release, or does a ReleasePlan need to be created per hotfix? This needs clarification from celebdor and the current manual process.
+1. **CPO hotfix ReleasePlan (resolved for v1).** The HO has a dedicated
+   `hypershift-operator-main-hotfix` ReleasePlan with `auto-release: true` that
+   promotes to `quay.io/acm-d`. For the pilot/v1, the HO hotfix auto-releases to
+   `quay.io/acm-d` (unchanged), and CPO hotfix images are consumed directly from
+   `quay.io/redhat-user-workloads/crt-redhat-acm-tenant/...` by digest (as referenced
+   in the HO's embedded `overrides.yaml`) — no per-hotfix CPO ReleasePlan is created. A
+   future iteration may add a CPO hotfix ReleasePlan and move consumption to
+   `redhat-services-prod` once ROSA consumes images from there; that is explicitly out
+   of scope for v1.
 
 2. **Affected versions enumeration.** Listing every Z-stream version individually (e.g., `4.20.0` through `4.20.25`) is tedious and error-prone. Should we support range syntax (e.g., `"4.20.0-4.20.25"`) or an open-ended range (e.g., `"4.20.0+"` meaning "from 4.20.0 until the fix lands in the release branch")? This would simplify the hotfix request but adds complexity to the workflow.
 
 3. **Hotfix branch cleanup.** Should the automation clean up hotfix branches and Konflux resources (Application, Component, ImageRepository) after the hotfix is superseded by a regular release that includes the fix? If so, what triggers the cleanup?
 
-4. **Approval gates.** Is the PR review on `main` sufficient authorization, or should the `process-hotfix` workflow require an additional manual approval step (e.g., GitHub Environments with required reviewers) before applying changes to the Konflux cluster?
+4. **Approval gates (resolved).** For the pilot, PR review on `main` — gated by a `releases/OWNERS` file referencing a `hotfix-approvers` alias in `OWNER_ALIASES` — is the authorization gate. A second, optional mutation gate (GitHub Environment with required reviewers guarding the `oc apply` jobs) is designed but deferred to phase 2. See [Authorization Model](#authorization-model).
+
+5. **ChatOps / chai bot.** Should a future iteration let a hotfix be initiated and its status reported through chai bot (for incident response when a PR round-trip is too slow)? Deferred past the pilot; the PR-driven flow is the v1 interface.
 
 ## Test Plan
 
@@ -924,7 +1002,7 @@ Not applicable — no API extensions are introduced.
 ```bash
 oc login --web https://api.stone-prd-rh01.pg1f.p1.openshiftapps.com:6443
 oc project crt-redhat-acm-tenant
-oc create token hotfix-automation --duration=8760h
+oc create token hotfix-automation --duration=2160h   # ~90 days; rotate quarterly
 # Update KONFLUX_SA_TOKEN in GitHub repo settings
 ```
 
