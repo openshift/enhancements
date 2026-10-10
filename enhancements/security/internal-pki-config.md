@@ -1051,12 +1051,12 @@ During a signer rotation, in addition to the forward cross-signing certificate, 
   - `hypershift.openshift.io/control-plane.admin-kubeconfig-signer` (`system-admin-signer`) maps to `openshift.io/installer.admin-kubeconfig-signer`
   - `hypershift.openshift.io/control-plane.sa-signing-key` (`sa-signing-key`) maps to the bound service-account token signing key, configured via `keyManagement` (a key, not a certificate)
 
-  Some hosted control-plane certificates are HyperShift-specific and have no standalone equivalent. The `control-plane-pki-operator` manages break-glass admin credentials through library-go `certrotation`, and these already carry a `control-plane-pki.<role>` certificate name, so the override names mirror that segment:
+  Some hosted control-plane certificates are HyperShift-specific and have no standalone equivalent. The `control-plane-pki-operator` manages break-glass admin credentials through library-go `certrotation` (today under a `control-plane-pki.<role>` library-go certificate name), normalized here under the common `control-plane.` component segment:
 
-  - `hypershift.openshift.io/control-plane-pki.customer-admin-signer` (root signer for customer break-glass credentials)
-  - `hypershift.openshift.io/control-plane-pki.customer-admin-client` (client certificate for customer break-glass credentials)
-  - `hypershift.openshift.io/control-plane-pki.sre-admin-signer` (root signer for SRE break-glass credentials)
-  - `hypershift.openshift.io/control-plane-pki.sre-admin-client` (client certificate for SRE break-glass credentials)
+  - `hypershift.openshift.io/control-plane.customer-admin-signer` (root signer for customer break-glass credentials)
+  - `hypershift.openshift.io/control-plane.customer-admin-client` (client certificate for customer break-glass credentials)
+  - `hypershift.openshift.io/control-plane.sre-admin-signer` (root signer for SRE break-glass credentials)
+  - `hypershift.openshift.io/control-plane.sre-admin-client` (client certificate for SRE break-glass credentials)
 - **How HyperShift adopts the configurable-PKI model.** CPO today hardcodes RSA 2048 (no ECDSA) and generates control-plane certificates with its own code (`hypershift/support/certs`, not library-go), rather than consuming the cluster PKI configuration. Making hosted control planes configurable (and adopting append-only trust with forward cross-signing) is therefore a separate, substantial effort in the CPO cert stack, not a reuse of the library-go work. Scope and sequencing to be worked out with HyperShift SMEs.
 
 ## Test Plan
@@ -1500,8 +1500,8 @@ Certificate names use the `openshift.io/component.certname` form: the `openshift
 | `openshift.io/installer.admin-kubeconfig-signer`                | Signs admin kubeconfig client certificates (10yr, Day-1 only)      | installer                        |
 | `openshift.io/installer.kubelet-csr-signer`                     | Signs kubelet CSR certificates (Day-1 only)                        | installer                        |
 | `openshift.io/installer.kubelet-bootstrap-kubeconfig-signer`    | Signs kubelet bootstrap kubeconfig certificates (10yr, Day-1 only) | installer                        |
-| `openshift.io/control-plane-pki.customer-admin-signer`          | Signs customer break-glass admin client certificates (HyperShift)  | control-plane-pki-operator       |
-| `openshift.io/control-plane-pki.sre-admin-signer`               | Signs SRE break-glass admin client certificates (HyperShift)       | control-plane-pki-operator       |
+| `openshift.io/control-plane.customer-admin-signer`          | Signs customer break-glass admin client certificates (HyperShift)  | control-plane-pki-operator       |
+| `openshift.io/control-plane.sre-admin-signer`               | Signs SRE break-glass admin client certificates (HyperShift)       | control-plane-pki-operator       |
 
 #### Serving Certificates (Category: Serving)
 
@@ -1536,8 +1536,8 @@ Client certificates authenticate clients to servers.
 | `openshift.io/kube-apiserver.node-system-admin-client`        | Node system admin client certificate                       | kube-apiserver-operator     |
 | `openshift.io/monitoring.grpc-tls-client`                     | Thanos querier GRPC client certificate                     | cluster-monitoring-operator |
 | `openshift.io/installer.kubelet-client`                       | Kubelet bootstrap client certificate (Day-1 only)          | installer                   |
-| `openshift.io/control-plane-pki.customer-admin-client`        | Customer break-glass admin client certificate (HyperShift) | control-plane-pki-operator  |
-| `openshift.io/control-plane-pki.sre-admin-client`             | SRE break-glass admin client certificate (HyperShift)      | control-plane-pki-operator  |
+| `openshift.io/control-plane.customer-admin-client`        | Customer break-glass admin client certificate (HyperShift) | control-plane-pki-operator  |
+| `openshift.io/control-plane.sre-admin-client`             | SRE break-glass admin client certificate (HyperShift)      | control-plane-pki-operator  |
 
 #### Peer Certificates (Category: Peer)
 
