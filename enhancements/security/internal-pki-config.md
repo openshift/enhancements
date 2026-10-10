@@ -1038,6 +1038,9 @@ During a signer rotation, in addition to the forward cross-signing certificate, 
 
   Note: service-account token signing is in scope for this EP via the `keyManagement` section (see [Key Management](#key-management-service-account-token-signing)). The OAuth server access-token keys remain out of scope, since they are symmetric secrets rather than configurable signing algorithms.
 
+- **Named overrides for hosted (HyperShift) control-plane certificates: reuse standalone names or HyperShift-specific?** The HyperShift control-plane operator (CPO) generates control-plane certificates with its own code (`hypershift/support/certs`, not library-go) and a cert inventory that is a superset/reshape of standalone (sharded etcd, konnectivity signers, per-cloud webhooks, add-on serving certs), with HyperShift-internal names and no 1:1 correspondence. This leans toward HyperShift-specific override names as the primary key, with a documented mapping to the standalone roles for semantically-equivalent certs (aggregator/front-proxy client, the service-account signing key, the admin-kubeconfig signer), so a cluster-wide policy can still target the same role across topologies. Guest data-plane certificates (managed by the in-cluster operators) follow the standalone names. To be confirmed with HyperShift SMEs.
+- **How HyperShift adopts the configurable-PKI model.** CPO today hardcodes RSA 2048 (no ECDSA) and generates control-plane certificates with its own code (`hypershift/support/certs`, not library-go), rather than consuming the cluster PKI configuration. Making hosted control planes configurable (and adopting append-only trust with forward cross-signing) is therefore a separate, substantial effort in the CPO cert stack, not a reuse of the library-go work. Scope and sequencing to be worked out with HyperShift SMEs.
+
 ## Test Plan
 
 **Unit Tests:**
