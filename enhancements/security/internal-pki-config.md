@@ -1044,13 +1044,19 @@ During a signer rotation, in addition to the forward cross-signing certificate, 
 
   - `hypershift.openshift.io/control-plane.kube-apiserver-serving` (HyperShift `kas-server-crt`) maps to the kube-apiserver serving role (`openshift.io/kube-apiserver.external-loadbalancer-serving` and the other `kube-apiserver.*-serving` certs)
   - `hypershift.openshift.io/control-plane.kube-apiserver-kubelet-client` (`kas-kubelet-client-crt`) maps to `openshift.io/kube-apiserver.kubelet-client`
-  - `hypershift.openshift.io/control-plane.aggregator-front-proxy-client` (`kas-aggregator-crt`) maps to `openshift.io/kube-apiserver.aggregator-front-proxy-client`
-  - `hypershift.openshift.io/control-plane.aggregator-front-proxy-signer` (`kas-aggregator-client-signer`) maps to `openshift.io/kube-apiserver.aggregator-front-proxy-signer`
-  - `hypershift.openshift.io/control-plane.kube-control-plane-signer` (`kube-control-plane-signer`) maps to `openshift.io/kube-apiserver.control-plane-client-signer`
+  - `hypershift.openshift.io/control-plane.kube-apiserver-aggregator-front-proxy-client` (`kas-aggregator-crt`) maps to `openshift.io/kube-apiserver.aggregator-front-proxy-client`
+  - `hypershift.openshift.io/control-plane.kube-apiserver-aggregator-front-proxy-signer` (`kas-aggregator-client-signer`) maps to `openshift.io/kube-apiserver.aggregator-front-proxy-signer`
   - `hypershift.openshift.io/control-plane.etcd-serving` (`etcd-server-tls`) maps to `openshift.io/etcd.serving`
   - `hypershift.openshift.io/control-plane.etcd-peer` (`etcd-peer-tls`) maps to `openshift.io/etcd.peer-serving`
   - `hypershift.openshift.io/control-plane.admin-kubeconfig-signer` (`system-admin-signer`) maps to `openshift.io/installer.admin-kubeconfig-signer`
   - `hypershift.openshift.io/control-plane.sa-signing-key` (`sa-signing-key`) maps to the bound service-account token signing key, configured via `keyManagement` (a key, not a certificate)
+
+  Some hosted control-plane certificates are HyperShift-specific and have no standalone equivalent. The `control-plane-pki-operator` manages break-glass admin credentials through library-go `certrotation`, and these already carry a `control-plane-pki.<role>` certificate name, so the override names mirror that segment:
+
+  - `hypershift.openshift.io/control-plane-pki.customer-admin-signer` (root signer for customer break-glass credentials)
+  - `hypershift.openshift.io/control-plane-pki.customer-admin-client` (client certificate for customer break-glass credentials)
+  - `hypershift.openshift.io/control-plane-pki.sre-admin-signer` (root signer for SRE break-glass credentials)
+  - `hypershift.openshift.io/control-plane-pki.sre-admin-client` (client certificate for SRE break-glass credentials)
 - **How HyperShift adopts the configurable-PKI model.** CPO today hardcodes RSA 2048 (no ECDSA) and generates control-plane certificates with its own code (`hypershift/support/certs`, not library-go), rather than consuming the cluster PKI configuration. Making hosted control planes configurable (and adopting append-only trust with forward cross-signing) is therefore a separate, substantial effort in the CPO cert stack, not a reuse of the library-go work. Scope and sequencing to be worked out with HyperShift SMEs.
 
 ## Test Plan
