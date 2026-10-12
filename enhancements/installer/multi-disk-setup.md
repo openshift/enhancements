@@ -11,7 +11,7 @@ approvers:
 api-approvers:
   - None
 creation-date: 2025-05-16
-last-updated: 2026-09-28
+last-updated: 2026-10-12
 tracking-link:
   - https://issues.redhat.com/browse/OCPSTRAT-2046
 see-also:
@@ -232,7 +232,8 @@ type MachinePool struct {
 The following validation rules are enforced:
 
 1. **Type Field**:
-   - Must be one of: `etcd`, `swap`, `user-defined`
+   - Must be one of: `etcd`, `swap`, `user-defined`. Any other value, including an empty one, is
+     rejected.
 
 2. **Type-specific Configuration**:
    - When `type: etcd`, the `etcd` field is required
@@ -246,15 +247,27 @@ The following validation rules are enforced:
 4. **Relationship with Platform DataDisks**:
    - **Azure**: `diskSetup[i]` is matched to `dataDisks[i]` **positionally**, and that entry's
      `platformDiskID` must equal the `nameSuffix` of the disk at the same index. The number of
-     `diskSetup` entries must not exceed the number of `dataDisks`. Both checks only run when
-     `dataDisks` and `diskSetup` are each non-empty.
-   - **vSphere**: `platformDiskID` is resolved **by name** against `dataDisks[].name`.
+     `diskSetup` entries must not exceed the number of `dataDisks`, so a pool that sets
+     `diskSetup` without any `dataDisks` is rejected. Both checks run whenever `diskSetup` is
+     non-empty.
+   - **vSphere**: `platformDiskID` is resolved **by name** against `dataDisks[].name`. Every
+     entry must name a data disk that exists on the pool, and data disk names must be unique
+     within the pool, since two disks sharing a name cannot be told apart by a lookup by name.
    - Azure Stack Cloud does not support data disks or disk setup
 
 5. **Uniqueness Constraints**:
    - Only one `etcd` type disk per machine pool
    - Only one `swap` type disk per machine pool
    - Multiple `user-defined` disks are allowed
+   - `platformDiskID` must be unique across all the entries of a pool, whatever their type. Two
+     entries naming the same ID would resolve to the same underlying disk.
+   - The partition label an entry resolves to must be unique within the pool, compared
+     case-insensitively. `etcd` and `swap` entries are labelled after their type, and a
+     `user-defined` entry after its `platformDiskID` with every non-alphanumeric character
+     stripped. So `et-cd` collides with an `etcd` entry in the same pool, `data-1` with `data1`,
+     and `Data` with `data`. The label names the generated MachineConfig and the file it is
+     written to, so a collision would make the second config overwrite the first and leave one
+     disk never partitioned, formatted or mounted.
 
 6. **Role Restrictions**:
    - `type: etcd` is only permitted on the `master` pool (`cannot specify etcd on worker machine pools`)
@@ -263,9 +276,18 @@ The following validation rules are enforced:
 7. **MountPath** (user-defined only):
    - Should be an absolute path that does not collide with an existing system mount point.
 
-8. **PlatformDiskID length** (user-defined only):
+8. **PlatformDiskID format** (user-defined only):
    - At most 12 characters, because the value becomes the GPT partition label and is reused to
      build the MachineConfig name.
+   - At least one alphanumeric character. The label is the ID with every other character
+     stripped, so an ID with none would resolve to an empty label: a MachineConfig named after
+     nothing and a mount unit pointing at `/dev/disk/by-partlabel/` with no disk behind it.
+
+The ID and label comparisons use the same code as generation rather than a copy of it.
+`types.SanitizeDiskLabel` is the one definition of the label stripping, called both here and by
+`ForDiskSetup`, and `Disk.MachineConfigLabel()` mirrors how `NodeDiskSetup` derives a label from
+an entry. The labels validation compares are therefore the ones generation produces, and the two
+cannot drift apart.
 
 
 ### MachineConfig Generation
@@ -303,7 +325,8 @@ func NodeDiskSetup(installConfig *installconfig.InstallConfig, role string,
             device := fmt.Sprintf("/dev/disk/azure/scsi1/lun%d", *azureDataDisk.Lun)
             return machineconfig.ForDiskSetup(role, device, label, path, diskSetup.Type)
         }
-        // Gate disabled: no MachineConfig is generated.
+        // Gate disabled: no MachineConfig is generated. master.go and worker.go do not call this
+        // function when the gate is off, so this branch is only a guard.
         return nil, nil
 
     case vspheretypes.Name:
@@ -334,8 +357,9 @@ func ForDiskSetup(role, device, label, path string,
     }
 
     // The label becomes a GPT partition label and part of the MachineConfig name, so any
-    // non-alphanumeric characters are stripped out of it.
-    label = regexp.MustCompile(`[^a-zA-Z0-9]+`).ReplaceAllString(label, "")
+    // non-alphanumeric characters are stripped out of it. Install-config validation calls the
+    // same function to predict the labels it checks for collisions.
+    label = types.SanitizeDiskLabel(label)
 
     // Render the systemd unit from one of the two templates, then build the ignition
     // config around it.
@@ -496,7 +520,9 @@ return machineconfig.ForDiskSetup(role, device, label, path, diskSetup.Type)
 
 The `platformDiskID` is resolved **by name** against `dataDisks[].name`, and the disk's index in
 that list gives the SCSI unit number. If no disk matches, `dataDisk` stays nil and the entry is
-skipped without an error.
+skipped without an error. That cannot happen with a validated install-config: validation rejects
+a `platformDiskID` that names no data disk, and data disk names that are not unique, so the
+lookup always finds the one disk the user meant.
 
 ```go
 // pkg/asset/machines/master.go -- selection is by name
@@ -536,15 +562,41 @@ This feature applies to OpenShift Kubernetes Engine.
 **Modified Files:**
 
 The implementation spans several installer components:
-- `pkg/types/machinepools.go` - Adds the `DiskSetup` field and the disk setup types to MachinePool
+- `pkg/types/machinepools.go` - Adds the `DiskSetup` field and the disk setup types to
+  MachinePool, and the helpers validation and generation share (`SanitizeDiskLabel`,
+  `Disk.PlatformDiskID`, `Disk.MachineConfigLabel`)
+- `pkg/types/utils.go` - `InstallConfig.DiskSetupFeatureGate` and `InstallConfig.DiskSetupEnabled`,
+  which resolve the feature gate protecting `diskSetup` for the cluster's platform
 - `pkg/types/validation/machinepools.go` - Platform-agnostic disk setup validation
-- `pkg/types/validation/featuregates.go` - Gates `diskSetup` behind `MultiDiskSetup`
+- `pkg/types/validation/featuregates.go` - Gates `diskSetup` behind the gate that
+  `DiskSetupFeatureGate` returns for the platform: its own gate where it has one,
+  `MultiDiskSetup` otherwise
 - `pkg/types/azure/validation/machinepool.go` - Azure-specific validation
+- `pkg/types/vsphere/validation/machinepool.go` - vSphere-specific validation
 - `pkg/asset/machines/master.go`, `pkg/asset/machines/worker.go` - Select the platform disk for
-  each `diskSetup` entry and add the resulting MachineConfig to the role's manifests
+  each `diskSetup` entry and add the resulting MachineConfig to the role's manifests, when
+  `DiskSetupEnabled` is true
 - `pkg/asset/machines/util.go` - Per-platform device path resolution (`NodeDiskSetup`)
 - `pkg/asset/machines/machineconfig/disks.go` - MachineConfig and ignition generation
 - `data/data/install.openshift.io_installconfigs.yaml` - CRD schema updates
+
+**Feature Gates:**
+
+`diskSetup` is platform-generic, but the platforms that implement it do not have to roll it out
+together. By default the field is protected by the platform-agnostic `MultiDiskSetup` feature
+gate, which today covers vSphere. A platform can instead gate its `diskSetup` logic behind a gate
+of its own, typically one that already protects that platform's disk provisioning, so that
+provisioning a disk and setting it up graduate as a single unit and independently of the other
+platforms. Which gate a platform uses is documented in that platform's own enhancement.
+
+`InstallConfig.DiskSetupFeatureGate` returns the gate for the cluster's platform and
+`DiskSetupEnabled` reports whether it is enabled. Install-config validation uses the gate name,
+so that the error cites the gate that applies, and `master.go` and `worker.go` use the enabled
+check to decide whether to generate the disk setup MachineConfigs. Enabling a platform's own gate
+is enough for that platform and has no effect on the others, where `diskSetup` stays rejected
+until `MultiDiskSetup` is enabled. Moving a platform onto its own gate changes no behaviour as
+long as both gates are enabled in the same feature sets, so only a `CustomNoUpgrade` set that
+enables exactly one of them sees a difference.
 
 **Platform Support:**
 
@@ -563,7 +615,8 @@ Planned for future implementation:
   - **Azure**: Must match the `nameSuffix` of the `dataDisks` entry at the same index
   - **vSphere**: Must match the `name` of one of the `dataDisks` entries
   - **Other platforms**: TBD based on platform disk naming conventions
-- On Azure the installer validates that the reference exists; on vSphere it does not
+- On both platforms the installer validates that the reference exists, and that no two entries
+  reference the same disk
 - Device paths are resolved at MachineConfig generation time
 
 **Partitioning:**
@@ -589,8 +642,8 @@ Planned for future implementation:
 
 **Error Handling:**
 
-- On Azure, a `platformDiskID` that does not match the data disk at the same index fails
-  install-config validation.
+- A `platformDiskID` that does not match a data disk fails install-config validation. On Azure
+  that means the data disk at the same index, on vSphere any data disk by name.
 - If the platform disk is not attached at boot time, the mount will fail
 - Failed mounts for critical disks (etcd) will prevent the node from becoming Ready
 - Failed mounts for non-critical disks (user-defined, swap) may allow the node to become Ready but with degraded functionality
@@ -613,6 +666,7 @@ Planned for future implementation:
 
 - Disk setup requires corresponding platform disks to be configured (e.g., Azure DataDisks)
 - Number of disk setups cannot exceed number of platform disks
+- No two disk setups in a pool can share a `platformDiskID` or resolve to the same partition label
 - Only one etcd disk and one swap disk per machine pool
 - Azure Stack Cloud does not support disk setup
 - Disks must be available at first boot (cannot be added post-installation via this mechanism)
@@ -634,10 +688,23 @@ Planned for future implementation:
 User provides an incorrect `platformDiskID` that doesn't match any configured platform disk.
 
 *Mitigation:*
-- On Azure the installer compares each `platformDiskID` against the `nameSuffix` of the data disk
-  at the same index and fails install-config validation on a mismatch
+- The installer compares each `platformDiskID` against the platform's data disks and fails
+  install-config validation when none matches: on Azure against the `nameSuffix` of the data disk
+  at the same index, on vSphere against the `name` of every data disk
 - Clear error messages guide users to correct configuration
 - Documentation provides platform-specific examples
+
+**Risk: Colliding Disk Setup Entries**
+
+Two entries in a pool claim the same disk, or resolve to the same partition label and so to the
+same MachineConfig name. The second MachineConfig would overwrite the first and one disk would
+never be configured, without any error.
+
+*Mitigation:*
+- Install-config validation rejects a duplicate `platformDiskID` and a duplicate resolved label
+  within a pool
+- Validation derives labels with the code generation uses, so it checks the labels that would
+  actually be produced
 
 **Risk: Disk Not Available at Boot**
 
@@ -758,11 +825,22 @@ None. The implementation has been completed and deployed.
 **Unit Tests:**
 
 - Validation logic for disk setup configuration:
-  - Test type validation (etcd, swap, user-defined)
+  - Test type validation (etcd, swap, user-defined), including an unrecognized and an empty type
   - Test platformDiskID presence and matching
+  - Test platformDiskID format for user-defined disks: too long, empty, no alphanumeric
+    characters
   - Test uniqueness constraints (only one etcd, one swap)
+  - Test duplicate platformDiskID across entry types
+  - Test label collisions: a user-defined label normalizing onto the etcd label, and two labels
+    differing only in case
   - Test mountPath validation for user-defined disks
-  - Test platform-specific validation (Azure DataDisk matching)
+  - Test platform-specific validation (Azure DataDisk matching):
+    - more `diskSetup` entries than `dataDisks`, including `diskSetup` with no `dataDisks`
+    - vSphere: a `diskSetup` entry naming a data disk that does not exist, `diskSetup` with no
+      data disks, and duplicate data disk names
+  - Test the feature gate that protects `diskSetup`: a platform with its own gate reports that
+    gate and accepts `diskSetup` with it enabled alone, while a platform without one still reports
+    `MultiDiskSetup` when only another platform's gate is enabled
 
 - MachineConfig generation:
   - Test ignition config generation for etcd disks
@@ -864,20 +942,22 @@ The error cases are covered by unit tests.
 
 ### Tech Preview -> GA
 
-- [x] Sufficient time for feedback from Tech Preview users. The gate has been in
+Graduation is tracked per feature gate (see **Feature Gates** above). A platform with a gate of
+its own graduates `diskSetup` together with that gate, as its own enhancement describes, and does
+not wait on `MultiDiskSetup`.
+
+- [x] Sufficient time for feedback from Tech Preview users. `MultiDiskSetup` has been in
       `TechPreviewNoUpgrade` since 4.20.
 - [x] E2E coverage on Azure for both control plane and compute
       (`e2e-azure-ovn-multidisk-techpreview`)
-- [x] E2E coverage on vSphere (`e2e-vsphere-ovn-disk-setup-techpreview`)
 - [x] Upgrade coverage (`e2e-azure-ovn-multidisk-techpreview-upgrade`)
-- [ ] Available by default, which requires moving `FeatureGateMultiDiskSetup` to
+- [ ] E2E coverage on the other platforms that implement `diskSetup`, which today is vSphere. The
+      `e2e-vsphere-ovn-disk-setup-techpreview` job exists, but vSphere has no e2e tests for
+      `diskSetup` yet.
+- [ ] `MultiDiskSetup` available by default, which requires moving `FeatureGateMultiDiskSetup` to
       `enable(inDefault(), inOKD(), inTechPreviewNoUpgrade(), inDevPreviewNoUpgrade())` in
-      `openshift/api`. On Azure this must land together with the same change to
-      `FeatureGateAzureMultiDisk`: the two gates cover disjoint fields -- `MultiDiskSetup` gates
-      `diskSetup`, `AzureMultiDisk` gates the Azure `dataDisks` -- and `NodeDiskSetup` skips Azure
-      disk setup entirely unless `AzureMultiDisk` is enabled. Graduating either gate on its own
-      therefore leaves the feature unusable on Azure. vSphere `dataDisks` are not behind a gate,
-      so vSphere needs only `MultiDiskSetup`.
+      `openshift/api`. It stays in Tech Preview until the platforms it covers have that coverage.
+      vSphere `dataDisks` are not behind a gate, so vSphere needs only this gate.
 - [ ] User-facing documentation in the OCP installation docs, including the `WipeTable` warning and
       the mount-path guidance
 
@@ -956,14 +1036,32 @@ validation. The messages emitted today are:
 - `etcd configuration must be created`, `swap configuration must be created` and
   `userDefined configuration must be created` - the `type` was set but the matching block is absent
 - `cannot be longer than 12 characters` - `userDefined.platformDiskID` over the limit
+- `must contain at least one alphanumeric character` - `userDefined.platformDiskID` has none, so
+  the partition label would be empty
+- `Unsupported value: "<type>": supported values: "etcd", "swap", "user-defined"` - `type` is
+  unrecognized or empty
 - `cannot specify etcd on worker machine pools` - `type: etcd` outside the control plane pool
 - `swap is unsupported on control plane nodes` - `type: swap` on the control plane pool
 - `Too many: 2: must have at most 1 item` - more than one `etcd` or more than one `swap` entry
+- `Duplicate value: "<id>"` - two entries in the pool share a `platformDiskID`. The path names the
+  `etcd`, `swap` or `userDefined` field of the later entry.
+- `resolves to disk label "<label>", which is already used by an earlier diskSetup entry in this
+  pool` - two entries resolve to the same partition label, for example a user-defined
+  `platformDiskID` of `et-cd` next to an `etcd` entry
 - `does not match etcd PlatformDiskID "<id>"`, and the equivalent `swap` and `user defined`
   variants - Azure, the `platformDiskID` is not the `nameSuffix` of the data disk at the same index
-- `Too long: may not be more than <n> bytes` - Azure, more `diskSetup` entries than `dataDisks`.
-  The "bytes" wording comes from the generic `field.TooLong` helper; the number is a disk count.
+- `each diskSetup entry configures the dataDisk at the same index; diskSetup length is <n> but
+  dataDisks length is <m>, ...` - Azure, more `diskSetup` entries than `dataDisks`, including a
+  pool with no `dataDisks` at all
+- `no data disk is named "<id>" as declared in diskSetup[<n>]` - vSphere, the `platformDiskID`
+  matches no data disk
+- `Duplicate value: "<name>"` on `dataDisks[<n>].name` - vSphere, two data disks share a name
 - `data disks are not supported on AzureStackCloud` - Azure Stack Cloud limitation
+
+If the feature gate that protects `diskSetup` is not enabled, validation fails with a `Forbidden`
+error on the `diskSetup` field, of the form `this field is protected by the <gate> feature gate
+which must be enabled through either the TechPreviewNoUpgrade or CustomNoUpgrade feature set`.
+`<gate>` is the platform's own gate where it has one, and `MultiDiskSetup` otherwise.
 
 **At Runtime:**
 
@@ -1022,6 +1120,7 @@ oc get mcp
 
 *Resolution:*
 - For Azure: Ensure platformDiskID matches DataDisk nameSuffix
+- For vSphere: Ensure platformDiskID matches a DataDisk name
 - Correct the install-config.yaml
 - Re-run installer validation
 
