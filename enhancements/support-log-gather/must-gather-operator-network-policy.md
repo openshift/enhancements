@@ -107,7 +107,7 @@ No special considerations. NetworkPolicy is a standard Kubernetes API and does n
 
 #### Layer 1: Operator Pod NetworkPolicy (Static Manifest)
 
-A single static NetworkPolicy is deployed in `deploy/10_must-gather-operator.NetworkPolicy.yaml`:
+A single static NetworkPolicy manifest is maintained in the repository at `deploy/10_must-gather-operator.NetworkPolicy.yaml`. This manifest is a placeholder kept in the repo for reference — it is not included in the OLM bundle or the operator image, and is not deployed automatically.
 
 ```yaml
 apiVersion: networking.k8s.io/v1
@@ -229,8 +229,8 @@ spec:
 
 **Egress destination scoping strategy:** Each egress rule is scoped as tightly as practical:
 
-- **DNS (ports 53, 5353)** -- scoped to the `openshift-dns` namespace using `namespaceSelector` (`kubernetes.io/metadata.name: openshift-dns`) and `podSelector` (`dns.operator.openshift.io/daemonset-dns: default`). This follows the HPSTRAT-104 pattern and ensures DNS traffic is restricted to the cluster DNS pods.
-- **API server (port 6443)** -- port-only, no `to:` destination. The API server runs with `hostNetwork: true`, which means `podSelector` / `namespaceSelector` cannot reliably match it. The API server IP varies per cluster and topology, so static `ipBlock` rules are not portable. This is a documented limitation shared by all HPSTRAT-104 operators (console-operator, cluster-samples-operator, controller-manager-operator).
+- **DNS (ports 53, 5353)** -- scoped to the `openshift-dns` namespace using `namespaceSelector` (`kubernetes.io/metadata.name: openshift-dns`) and `podSelector` (`dns.operator.openshift.io/daemonset-dns: default`).
+- **API server (port 6443)** -- port-only, no `to:` destination. The API server runs with `hostNetwork: true`, which means `podSelector` / `namespaceSelector` cannot reliably match it. The API server IP varies per cluster and topology, so static `ipBlock` rules are not portable.
 - **SFTP (port 22)** -- port-only, no `to:` destination. The SFTP host is user-specified via the MustGather CR and varies per invocation. Resolving the hostname to an IP at policy-creation time is fragile (DNS records can change). The port restriction limits the attack surface while remaining compatible with any SFTP endpoint.
 - **Proxy (Tier 2 only)** -- port-only, no `to:` destination. Proxy endpoints are configured via environment variables (`HTTP_PROXY` / `HTTPS_PROXY`) and vary per cluster configuration.
 
