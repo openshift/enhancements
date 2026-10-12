@@ -1370,14 +1370,30 @@ components:
   1. Watch for `FailedScheduling` events on pods in
      the HCP namespace (using a field selector to
      filter to `reason=FailedScheduling`).
+     **Event-to-pod correlation**: each event is
+     correlated to its involved pod by UID. Before
+     contributing to the condition, the HO looks up
+     the pod by UID and checks its current
+     `PodScheduled` condition. If the pod no longer
+     exists or has `PodScheduled=True` (i.e., it
+     recovered), the event is ignored. This prevents
+     a stale `FailedScheduling` event (which can
+     persist up to the 1-hour default TTL) from
+     keeping the condition `True` after the pod has
+     been successfully scheduled.
   2. Directly inspect pods in `Pending` state with
      `PodScheduled=False, reason=Unschedulable` as a
      supplementary check (this handles the case where
      events have expired due to the 1-hour default
      TTL but pods are still unschedulable).
-  When either signal is detected, set the condition to
-  `True` with the scheduling failure reason. When
-  neither signal exists, set to `False`.
+  The condition is `True` when at least one pod has
+  an active scheduling failure — either a
+  `FailedScheduling` event whose involved pod is
+  still unschedulable (confirmed by UID lookup), or
+  a pod in `Pending` with
+  `PodScheduled=False, reason=Unschedulable`. When
+  neither signal exists, the condition is set to
+  `False`.
   **Pod status retrieval failure**: If the pod or
   event informer fails to sync (e.g., API server
   unreachable, network partition, or unexpected
@@ -1393,9 +1409,33 @@ components:
   `Unknown` status clears automatically on the
   next successful reconciliation when pod status
   becomes available again — consistent with
-  level-driven semantics. Controller-runtime's
-  informer cache exposes `HasSynced()` which the
+  level-driven semantics.
+  **Freshness guarantee scope**: Controller-runtime's
+  informer cache exposes `HasSynced()`, which the
   HO checks before reading from the cache.
+  `HasSynced()` is an **initial-list completion
+  check** — it returns `true` once the informer has
+  completed its first full list and begun watching.
+  It does **not** detect subsequent watch
+  interruptions or network partitions. After the
+  initial sync, if the watch connection breaks, the
+  informer cache contains stale data and
+  `HasSynced()` remains `true`. The HO therefore
+  sets `Unknown` in two cases: (1) `HasSynced()`
+  returns `false` (initial sync incomplete), and
+  (2) an explicit error is returned when reading
+  from the cache (e.g., context canceled, lister
+  failure). Post-sync staleness — where the cache
+  serves outdated pod state because the watch
+  re-establishment is in progress — is a
+  platform-wide informer property shared by all
+  controller-runtime controllers, not specific to
+  this feature. Controller-runtime re-establishes
+  the watch with exponential backoff; during the
+  gap, the condition reflects the last observed
+  state. The 60-second `requeueAfter` timer
+  ensures periodic reevaluation even when no watch
+  events arrive.
 - **RBAC**: The HO needs `get/list/watch` on Events
   and Pods in HCP namespaces. **No RBAC changes are
   needed** — the HO's existing ClusterRole already
@@ -1514,17 +1554,37 @@ components:
   `hypershift_hostedclusters_installation_failure_reason_total`:
   Counter of installation failures by failure reason.
   Labels: `namespace`, `name`, `reason`.
+  **Structured input**: The `reason` label is derived
+  from the structured `Reason` field on CPC
+  `Available` conditions (e.g.,
+  `ReasonPodCrashLoop` → `CrashLoopBackOff`,
+  `ReasonPodSchedulingFailed` → `PodSchedulingFailed`).
+  The HO reads CPC conditions directly via its
+  existing CPC informers — it does **not** parse
+  the free-text `Message` field on HCP `Available`
+  (which carries `ComponentsNotAvailable` with the
+  first CPC detail as a human-readable string).
+  `ManagementClusterResourcePressure` provides its
+  own structured reason. Any reason that does not
+  map to the enumerated set is recorded as `Unknown`.
   **Increment semantics**: The counter increments
   **once per failure episode**, not on every
-  reconciliation. A failure episode begins when an
-  diagnostic condition transitions to a failure state
-  (e.g., CPC `Available` transitions from `True` to
-  `False` with a pod-level reason). The counter
-  increments at the point of transition. Subsequent
-  reconciliations that observe the same ongoing
-  failure do **not** increment the counter again.
-  If the failure resolves and then recurs, that is
-  a new episode and the counter increments again.
+  reconciliation. A failure episode is defined by a
+  condition `Status` transition — specifically, when
+  a CPC `Available` transitions from `True` (or
+  absent) to `False`. Subsequent reconciliations
+  that observe the same ongoing failure do **not**
+  increment the counter again. A `Reason` change
+  within an ongoing `Status=False` (e.g.,
+  `CrashLoopBackOff` → `ImagePullBackOff` while the
+  CPC remains `Available=False`) is a refinement of
+  the same episode, not a new one — the counter
+  does not re-increment. If the failure resolves
+  (`Status` returns to `True`) and then recurs,
+  that is a new episode and the counter increments
+  again. Simultaneous CPC failures are tracked
+  independently — if 3 CPCs transition to
+  `Available=False`, that is 3 episodes.
   This prevents the counter from inflating during
   sustained failures and ensures `rate()` queries
   reflect actual failure frequency rather than
@@ -1537,7 +1597,24 @@ components:
   event messages, node names). This complements the
   existing `hypershift_hostedclusters_failure_conditions`
   which counts *which* condition failed — the new
-  metric counts *why*. **Cardinality note**: the
+  metric counts *why*.
+  **Restart / leader change**: The HO tracks "last
+  seen CPC status" in memory. On restart or leader
+  change, this state is lost. The HO reads current
+  CPC conditions and treats the current state as the
+  baseline — it does **not** increment counters for
+  CPCs already in `Available=False` at startup. This
+  means a failure that started before restart and
+  continues after restart may be under-counted (zero
+  or one increment total), never double-counted.
+  **Best-effort acknowledgment**: This counter is a
+  best-effort count of observed failure episodes,
+  suitable for `rate()`-based alerting and trend
+  analysis. It is not an exact audit trail.
+  Deduplication policy: one increment per `Status`
+  transition per CPC, with restart boundaries
+  causing potential under-count.
+  **Cardinality note**: the
   `namespace` × `name` × `reason` label combination
   produces at most 6 time series per cluster (one per
   reason value). At 500 HCPs, this is ~3000 time
@@ -1686,15 +1763,64 @@ details.** Detailed error messages might expose
 management cluster topology or internal service
 details.
 
-*Mitigation*: Messages include pod names and scheduling
-failure reasons only. **Management cluster node names
-are NOT included** in diagnostic condition messages.
-Pod names in HyperShift follow a deterministic pattern
-(`<component>-<hash>`) that does not reveal sensitive
-infrastructure details. No secrets, credentials, or
-internal service endpoints are included in condition
-messages. ROSA/ARO security teams must confirm this
-before GA (tracked as a graduation criterion).
+*Mitigation*: Each diagnostic message path uses an
+allowlist of structured fields that may appear in
+HC condition messages:
+
+- **CPC `Available` / HCP `Available`** (pod-level
+  diagnostics): The message is constructed from an
+  allowlist of structured Kubernetes API fields:
+  pod name (follows `<component>-<hash>` pattern),
+  container name, and `containerStatus.State.Waiting
+  .Reason` (constrained to kubelet-defined values:
+  `CrashLoopBackOff`, `ImagePullBackOff`,
+  `ErrImagePull`, etc.). The free-text
+  `containerStatus.State.Waiting.Message` field is
+  **not** passed through — it can contain image
+  registry URLs, pull errors with registry hostnames,
+  or OOM details. If a recognized structured reason
+  is present, only that reason is included (e.g.,
+  `CrashLoopBackOff: OOMKilled`). If no recognized
+  reason is found, the fallback is the structured
+  reason code alone without any free-text message.
+
+- **`ManagementClusterResourcePressure`** (scheduling
+  diagnostics): The message is constructed from
+  resource-type summaries extracted from scheduler
+  event reasons (e.g., `Insufficient cpu`,
+  `Insufficient memory`), not from raw scheduler
+  event messages. **Management cluster node names
+  are NOT included** — the message aggregates by
+  resource type, not by node (e.g., `"3 pods with
+  FailedScheduling: 2 Insufficient cpu,
+  1 Insufficient memory"`).
+
+- **`ClusterVersionSucceeding`** (CVO diagnostics):
+  The CVO `Failing` condition message is passed
+  through verbatim. This is **existing behavior**,
+  not newly introduced by this enhancement — the
+  HCCO already mirrors the CVO `Failing` condition's
+  `Reason` and `Message` unchanged
+  (`hcpstatus.go:212-223`), and the HO inverts the
+  status but preserves reason/message. This
+  enhancement only changes the `Reason` field to
+  `ClusterVersionFailing`; the `Message` passthrough
+  path is unchanged. CVO messages describe guest
+  cluster operator state (not management cluster
+  topology) and are already visible on the HC today.
+
+**Implementation acceptance criterion**: Unit tests
+must include synthetic messages containing management
+cluster node names, internal IP addresses, registry
+hostnames, and credential-like strings in source
+fields (`containerStatus.State.Waiting.Message`,
+scheduler event `message`). Tests assert that these
+values do not appear in the resulting HC condition
+messages. This is a required acceptance criterion for
+merging the implementation, not a deferred pre-GA
+review item. ROSA/ARO security teams must additionally
+confirm the sanitization is sufficient before GA
+(tracked as a graduation criterion).
 
 **Risk: Event TTL dependency.** The
 `ManagementClusterResourcePressure` condition relies
@@ -2001,14 +2127,50 @@ Testing strategy:
    - `ManagementClusterResourcePressure` detection from
      both `FailedScheduling` events and pod
      `PodScheduled=False` condition
+   - `ManagementClusterResourcePressure` event-to-pod
+     UID correlation: a `FailedScheduling` event whose
+     involved pod has since been scheduled
+     (`PodScheduled=True`) does not contribute to the
+     condition — verifies recovery clears the condition
+     without waiting for event TTL expiry
+   - `ManagementClusterResourcePressure` pod
+     deletion/recreation: a stale `FailedScheduling`
+     event from a deleted pod (old UID) does not
+     trigger the condition when a new pod (new UID)
+     with the same name is running and scheduled
    - `ManagementClusterResourcePressure` set to
      `Unknown` with
      `Reason=ControlPlanePodStatusUnavailable` when
-     pod/event informer has not synced
+     pod/event informer has not synced (initial
+     `HasSynced()` returns `false`) or when an
+     explicit cache read error occurs
+   - `ManagementClusterResourcePressure` post-sync
+     staleness: informer syncs successfully, then
+     pod state changes while the watch is not
+     delivering events — verify the condition
+     reflects the last observed state (not a false
+     `Unknown`), consistent with standard informer
+     cache behavior
    - `installationStage` monotonic forward-only
      transitions (verify stage cannot regress)
    - 5-second timeout on pod inspection falls back to
      default message
+   - Failure counter episode semantics: CPC
+     `Available` transitions `True` → `False`
+     increments counter once; subsequent
+     reconciliations with same `Status=False` do not
+     re-increment; `Reason` change within ongoing
+     `Status=False` does not re-increment; resolution
+     and recurrence is a new episode; counter state
+     after simulated restart does not double-count
+     pre-existing failures
+   - Security sanitization: synthetic messages
+     containing management cluster node names,
+     internal IP addresses, registry hostnames, and
+     credential-like strings in
+     `containerStatus.State.Waiting.Message` and
+     scheduler event `message` do not appear in the
+     resulting HC condition messages
 
 2. **Integration tests** verifying that diagnostic
    conditions are correctly mirrored from
