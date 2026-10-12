@@ -582,6 +582,24 @@ by the HyperShift project. It does not modify resources
 owned by other teams, add webhooks, aggregated API servers,
 or finalizers.
 
+**Summary of new API objects:**
+
+| Category | Name | Resource | Set By | Description |
+|----------|------|----------|--------|-------------|
+| Status field | `installationStage` | HC, HCP | CPO → HO mirrors to HC | Enum: `Initializing`, `ControlPlaneProvisioning`, `WaitingForKubeconfig`, `WaitingForOperators`, `InstallationComplete`. Forward-only monotonic. |
+| Status field | `installationStageTransitionTime` | HC, HCP | CPO → HO mirrors to HC | Timestamp of most recent stage transition. Non-pointer `metav1.Time` with `omitzero`. |
+| Condition type | `ManagementClusterResourcePressure` | HC | HO (directly, no mirroring) | Scheduling pressure on management cluster. `True`/`False`/`Unknown`. |
+| Reason constant | `PodSchedulingFailed` | CPC `Available` | CPO | Pod cannot be scheduled on management cluster. |
+| Reason constant | `CrashLoopBackOff` | CPC `Available` | CPO | Pod is in CrashLoopBackOff. |
+| Reason constant | `ImagePullBackOff` | CPC `Available` | CPO | Pod cannot pull container image. |
+| Reason constant | `RouteNotAdmitted` | `InfrastructureReady` | CPO | API server route not admitted by any IngressController. |
+| Reason constant | `ClusterVersionFailing` | `ClusterVersionSucceeding` | CPO | CVO reports a failure. |
+| Reason constant | `FailedScheduling` | `ManagementClusterResourcePressure` | HO | Scheduling pressure detected (`Status=True`). |
+| Reason constant | `NoPressure` | `ManagementClusterResourcePressure` | HO | No scheduling pressure (`Status=False`). |
+| Reason constant | `ControlPlanePodStatusUnavailable` | `ManagementClusterResourcePressure` | HO | Pod status unavailable (`Status=Unknown`). |
+| Metric | `hypershift_hostedclusters_installation_stage` | — | HO | Gauge, labels: `namespace`, `name`, `stage`. State-set pattern (1 for current, 0 for others). |
+| Metric | `hypershift_hostedclusters_installation_failure_reason_total` | — | HO | Counter, labels: `namespace`, `name`, `reason`. Best-effort episode count. |
+
 **New status fields:**
 
 ```go
