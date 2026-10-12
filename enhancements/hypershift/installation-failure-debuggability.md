@@ -3,14 +3,14 @@ title: installation-failure-debuggability
 authors:
   - "@sdminonne"
 reviewers:
-  - "@georgelipceanu"
-  - "@jparril"
+  - "@georgelipceanu" # HyperShift core — control plane operator, condition pipeline
+  - "@jparril" # HyperShift core — hosted cluster controller, metrics
 approvers:
   - "@csrwng"
 api-approvers:
   - "@JoelSpeed"
 creation-date: 2026-10-05
-last-updated: 2026-10-06
+last-updated: 2026-10-12
 tracking-link:
   - https://issues.redhat.com/browse/OCPSTRAT-1598
 status: provisional
@@ -204,14 +204,16 @@ HyperShift already has a substantial condition and metrics
 surface. This enhancement builds on — rather than
 duplicates — what exists today.
 
-**Existing conditions (54 total: 51 typed + 3 untyped):**
+**Existing conditions (51 typed + 3 untyped at time of writing):**
 
-The HyperShift API defines 54 condition type constants in
-`api/hypershift/v1beta1/hostedcluster_conditions.go`
-(51 typed `ConditionType` constants plus 3 untyped string
-constants: `ClusterSizeComputed`,
-`ClusterSizeTransitionPending`,
-`ClusterSizeTransitionRequired`).
+The HyperShift API defines condition type constants in
+`api/hypershift/v1beta1/hostedcluster_conditions.go`.
+At the time of writing, this included 51 typed
+`ConditionType` constants plus 3 untyped string constants
+(`ClusterSizeComputed`, `ClusterSizeTransitionPending`,
+`ClusterSizeTransitionRequired`); the exact count should
+be verified at implementation time as conditions are added
+across releases.
 Key existing conditions relevant to installation include:
 
 | Existing Condition | What It Surfaces Today | Gap This EP Fills |
@@ -709,7 +711,7 @@ constraint above):
 | → `Initializing` | HCP reconciliation starts | The CPO's `Reconcile()` is invoked for this `HostedControlPlane`. Set unconditionally on first reconciliation if `installationStage` is empty. |
 | `Initializing` → `ControlPlaneProvisioning` | At least one control-plane component deployment has been created | The CPO has called `CreateOrUpdate` for any CPC deployment (kube-apiserver, etcd, etc.) in the HCP namespace. |
 | `ControlPlaneProvisioning` → `WaitingForKubeconfig` | All required control-plane component deployments have `AvailableReplicas > 0` | `controlPlaneComponentsAvailable()` returns true — every CPC's `Available` condition is `True`. |
-| `WaitingForKubeconfig` → `WaitingForOperators` | The hosted cluster kubeconfig secret exists | The CPO confirms the kubeconfig secret (named `<infraID>-admin-kubeconfig`) is present in the HCP namespace. This is the same check that drives the existing `Available=False, Reason=KubeconfigWaitingForCreate` condition. |
+| `WaitingForKubeconfig` → `WaitingForOperators` | The hosted cluster admin kubeconfig secret exists | The CPO resolves the kubeconfig secret name via `KASAdminKubeconfigSecret(hcp.Namespace, hcp.Spec.KubeConfig)`, which defaults to `admin-kubeconfig` and honors an explicit `spec.kubeConfig.name` override. The CPO confirms this secret is present in the HCP namespace. This is the same check that drives the existing `Available=False, Reason=KubeconfigWaitingForCreate` condition. |
 | `WaitingForOperators` → `InstallationComplete` | The CVO reports the cluster version is available | The `ClusterVersionAvailable` condition on the `HostedControlPlane` is `True`. This indicates the CVO in the guest cluster has successfully rolled out all required cluster operators for the target version. |
 
 Note: the CPO evaluates all trigger conditions on
@@ -740,6 +742,47 @@ signal because a cluster that has been `Available`
 has, by definition, completed installation. Once
 `InstallationComplete` is set, the forward-only
 constraint prevents any subsequent regression.
+
+**Known transient artifact — intermediate stage on
+pre-existing clusters:** If a pre-existing cluster
+has `Available=False` at the moment of the first
+post-upgrade CPO reconciliation (e.g., because a
+guest cluster OCP upgrade is in progress), the
+backfill rule does not fire. Instead, the CPO falls
+through to normal trigger evaluation and assigns an
+intermediate stage based on current conditions (e.g.,
+`WaitingForOperators` if `ClusterVersionAvailable` is
+`False`). This is a transient artifact, not a real
+installation — the cluster completed installation
+long before this feature was deployed.
+
+This artifact is **temporary and self-correcting**:
+once the concurrent operation completes and
+`Available` returns to `True`, the normal stage
+triggers advance `installationStage` to
+`InstallationComplete` on the next reconciliation.
+The forward-only constraint ensures no regression
+after that point.
+
+**How to detect the artifact:** A cluster showing an
+intermediate `installationStage` (e.g.,
+`WaitingForOperators`) whose
+`metadata.creationTimestamp` is significantly older
+than `installationStageTransitionTime` (e.g., created
+days or weeks ago but stage was set within the
+upgrade window) is a backfill artifact, not a genuine
+stuck installation. Consumers can compare the two
+timestamps: if `creationTimestamp` predates the HO
+upgrade by more than a few hours, the intermediate
+stage is transient and will resolve without
+intervention. If the concurrent operation is itself
+stuck (e.g., a stalled OCP upgrade leaving
+`Available=False` for hours), the `installationStage`
+remains at the intermediate value until that
+operation completes — but the root cause is the
+stalled upgrade, not a stuck installation. The
+`Available` condition and its reason/message identify
+the actual problem.
 
 **Diagnostic detail in existing conditions — reason code analysis:**
 
@@ -1680,8 +1723,18 @@ the event TTL dependency for the core signal.
 
 ## Open Questions
 
-None at this time. Previous open questions have been
-resolved:
+The following items are pending external team input and
+gate `implementable`:
+
+- **V1: ROSA SRE downstream audit** — Audit fleet
+  automation, alert rules, and runbooks for
+  `Reason`-based logic on `ClusterVersionSucceeding`
+  and `InfrastructureReady`. Must confirm no breakage
+  from new reason codes before `implementable`.
+- **V2: ARO SRE downstream audit** — Same audit for
+  ARO fleet automation.
+
+Previous open questions have been resolved:
 
 - **Condition flapping (resolved)**: The 60-second
   reconciliation interval provides sufficient natural
@@ -1843,10 +1896,9 @@ Bare metal, vSphere, and Agent provider failure cases
 need to be collected from self-managed HyperShift
 deployments.
 
-See the source document
-(`installation-failure-debuggability.md` in the
-[OCPSTRAT-1598 Jira ticket](https://issues.redhat.com/browse/OCPSTRAT-1598))
-for full details on each failure case.
+Bare metal, vSphere, and Agent provider failure cases
+will be collected and documented in the Phase 2
+follow-up enhancement.
 
 ### Error Categorization Framework
 
@@ -1971,9 +2023,23 @@ Testing strategy:
    and verify that the correct diagnostic conditions are
    surfaced:
    - Insufficient management cluster capacity
-     (pod scheduling failures) — verifies
+     (pod scheduling failures) — injects a scheduling
+     failure using a `ResourceQuota` on the HCP
+     namespace (capping pod count below the required
+     control-plane replicas) or a `NoSchedule` taint
+     on management cluster nodes (with no matching
+     toleration on CP pods). Verifies
      `ManagementClusterResourcePressure=True` and CPC
      `Available` diagnostic with `PodSchedulingFailed`
+     on the `HostedCluster`. After removing the
+     constraint, verifies the condition self-clears
+     to `False`. This follows the existing HyperShift
+     e2e failure injection patterns (etcd chaos tests
+     in `chaos_test.go`, taint-based scheduling in
+     `karpenter_control_plane_upgrade_test.go`,
+     resource exhaustion in `autoscaling_test.go`).
+     The test is marked `[Serial]` because it
+     modifies management cluster scheduling state.
    - Control-plane component crash loop — verifies CPC
      `Available` diagnostic with `CrashLoopBackOff`
    - Route not admitted — verifies
@@ -2011,6 +2077,41 @@ etc.) per `dev-guide/test-conventions.md`. Tests will
 integrate into existing HyperShift e2e test suites —
 no new periodic CI lanes are needed.
 
+**Failure scenario testing strategy:**
+
+Failure injection scenarios are tested at two levels:
+
+- **Unit tests** inject synthetic pod status, events,
+  and conditions into the controller reconciliation
+  logic and assert that the correct diagnostic reason
+  codes and messages are produced. All failure
+  categories (pod scheduling failures,
+  `CrashLoopBackOff`, `ImagePullBackOff`, management
+  cluster capacity exhaustion) are covered at this
+  level.
+
+- **E2e tests** include at least one failure injection
+  test that induces a real scheduling failure on the
+  management cluster — using a `ResourceQuota` on the
+  HCP namespace (capping pod count below the required
+  control-plane replicas) or a `NoSchedule` taint on
+  management cluster nodes — and verifies that
+  `ManagementClusterResourcePressure=True` and the
+  CPC `Available` condition with
+  `Reason=PodSchedulingFailed` appear on the
+  `HostedCluster`. After removing the constraint, the
+  test verifies both conditions self-clear. This
+  follows existing HyperShift e2e failure injection
+  patterns: etcd chaos tests (`chaos_test.go`),
+  taint-based scheduling tests
+  (`karpenter_control_plane_upgrade_test.go`), and
+  resource exhaustion tests (`autoscaling_test.go`).
+  E2e tests also cover the happy path: verifying
+  that `installationStage` progresses to
+  `InstallationComplete` and that diagnostic
+  conditions are present and well-formed on a
+  successful installation.
+
 ## Graduation Criteria
 
 This enhancement does not use a feature gate (see
@@ -2035,15 +2136,20 @@ follows the standard HyperShift release process.
 - Minimum 5 unique e2e tests covering condition
   diagnostics and stage transitions.
 - Tests running on all supported HyperShift management
-  cluster platforms: AWS, Azure, and any additional
-  platforms supported at GA time (GCP, bare metal
-  management clusters for Agent provider). Minimum
-  7 runs per week, 14 runs per supported platform,
-  and 95% pass rate. Note: vSphere and bare metal
-  guest clusters are not supported by HyperShift in
-  all configurations — test coverage should match
+  cluster platforms per the following matrix:
+
+  | Management Platform | Guest Platform | Required |
+  |---|---|---|
+  | AWS | AWS (ROSA HCP) | Yes |
+  | Azure | Azure (ARO HCP) | Yes |
+  | Bare metal | Agent | Yes (if supported at GA) |
+  | GCP | GCP | Yes (if supported at GA) |
+
+  Minimum 7 runs per week, 14 runs per supported
+  platform, and 95% pass rate. Test coverage matches
   the HyperShift support matrix, not the full OCP
-  platform list.
+  platform list — vSphere and bare metal guest clusters
+  are not supported by HyperShift in all configurations.
 - Condition flapping validated with production data:
   fewer than 5% of condition transitions reversed
   within 2 minutes (relying on 60-second reconciliation
@@ -2200,33 +2306,51 @@ not preserved. This is acceptable because:
 ## Version Skew Strategy
 
 This enhancement involves the HyperShift Operator (HO)
-and Control Plane Operator (CPO), which are upgraded
-together as part of the HyperShift release. Version
-skew between HO and CPO is not expected in normal
-operation.
+and Control Plane Operator (CPO). While they are
+released together, they are **not upgraded
+simultaneously**. The HO is upgraded first; each
+hosted cluster's CPO is resolved independently from
+the cluster's release payload via
+`GetControlPlaneOperatorImage()`, which looks up the
+`hypershift` component image in the release payload
+(with annotation and override fallbacks). Upgrading
+the HO alone does not update CPO instances for
+existing hosted clusters — each HCP continues running
+the CPO version from its own release image until that
+hosted cluster is itself upgraded or the CPO image is
+explicitly overridden.
 
-During an upgrade where the HO is updated before
-individual CPO instances:
+This means a **version skew window is expected** in
+normal operation: new HO, older CPO. The enhancement
+handles this as follows:
+
 - The HO will attempt to mirror the `installationStage`
   field and diagnostic conditions from
   `HostedControlPlane` to `HostedCluster`. If the CPO
   has not been updated yet, it will not produce the
   new fields or diagnostic messages, and the HO will
   simply mirror the existing (default) values.
-  This is safe.
+  This is safe — empty/absent values are not
+  misinterpreted.
 - The HO will set `ManagementClusterResourcePressure`
   independently of the CPO version, since this
   condition is based on the HO's own event watching
   and pod status inspection.
-- Once the CPO is updated for a given hosted cluster,
+- Once the CPO is updated for a given hosted cluster
+  (via a hosted cluster upgrade or CPO image override),
   the diagnostic conditions and `installationStage`
   will begin appearing.
 - **Consumer guidance for empty `installationStage`**:
-  During the HO→CPO upgrade window, a cluster that is
-  actively installing may have an empty
-  `installationStage` on the `HostedCluster`. Consumers
-  should treat an empty value as "stage tracking not yet
-  available" rather than "installation not started."
+  An empty `installationStage` on the `HostedCluster`
+  means the CPO for that cluster has not yet been
+  updated to a version that supports stage tracking.
+  This can persist beyond the HO rollout — it is not
+  limited to a single reconciliation interval.
+  Consumers (dashboards, alerts, CLI tooling) must
+  treat an empty value as "stage tracking not yet
+  available" rather than "installation not started" or
+  an active installation stage. Empty must never be
+  counted as a failure or a stuck installation.
   The `Available` condition remains the authoritative
   signal for installation completeness regardless of
   whether `installationStage` is populated.
@@ -2477,6 +2601,22 @@ oc patch hostedcluster <name> --type=json \
 This is only needed after a downgrade. On re-upgrade,
 the condition resumes being actively managed by the HO.
 
+**Fleet-wide query — listing all clusters affected by
+`ManagementClusterResourcePressure`:**
+
+```bash
+# List all HostedClusters with ManagementClusterResourcePressure=True
+oc get hostedclusters -A -o json \
+  | jq -r '.items[]
+    | select(.status.conditions[]?
+      | select(.type == "ManagementClusterResourcePressure"
+        and .status == "True"))
+    | "\(.metadata.namespace)/\(.metadata.name)
+      reason=\(.status.conditions[]
+        | select(.type == "ManagementClusterResourcePressure")
+        | .reason)"'
+```
+
 **Prometheus queries for fleet monitoring:**
 
 ```promql
@@ -2503,14 +2643,23 @@ topk(5,
 )
 
 # Management cluster pressure — number of HCs affected.
-# A count > 1 strongly indicates a management-cluster-level
-# issue (resource exhaustion) rather than a per-cluster
-# problem. Use this to distinguish "management cluster is
-# out of capacity" from "one cluster has a bad pod spec."
-count(
+# The existing hypershift_hostedclusters_failure_conditions
+# metric is an aggregate gauge labelled {platform, condition}
+# whose value is the count of HCs in that failure state.
+# It is NOT a per-cluster series — it has no namespace/name
+# labels. A value > 1 on any platform series indicates
+# multiple HCs affected, strongly suggesting a
+# management-cluster-level issue (resource exhaustion)
+# rather than a per-cluster problem.
+#
+# NOTE: ManagementClusterResourcePressure must be added to
+# ExpectedHCConditions (with expected status False) for the
+# existing failure-condition collector to track it. This is
+# a required implementation step.
+sum(
   hypershift_hostedclusters_failure_conditions{
     condition="ManagementClusterResourcePressure"
-  } > 0
+  }
 )
 ```
 
@@ -2524,14 +2673,23 @@ environment:
 # Alert: management cluster resource pressure affecting
 # multiple hosted clusters — indicates a
 # management-cluster-level issue (not per-cluster).
-# Use this alert instead of (or in addition to) the
-# per-cluster alert to avoid N alerts for 1 root cause.
+#
+# hypershift_hostedclusters_failure_conditions is an
+# aggregate metric labelled {platform, condition} whose
+# value is the count of HCs in that failure state. It
+# has no per-cluster labels (namespace, name). The sum
+# across platforms gives the total number of affected
+# HCs. ManagementClusterResourcePressure must be added
+# to ExpectedHCConditions (expected status False) for
+# the existing collector to track it. Unknown status is
+# counted as a failure by the collector (any status
+# that differs from the expected status is counted).
 - alert: ManagementClusterWidePressure
   expr: |
-    count(
+    sum(
       hypershift_hostedclusters_failure_conditions{
         condition="ManagementClusterResourcePressure"
-      } > 0
+      }
     ) > 1
   for: 15m
   labels:
@@ -2542,24 +2700,36 @@ environment:
       pressure — management cluster resource
       exhaustion likely
 
-# Alert: management cluster resource pressure
-# sustained for more than 15 minutes on a single
-# hosted cluster. In fleet environments, prefer the
-# aggregate ManagementClusterWidePressure alert above
-# to avoid alert storms when the management cluster
-# is broadly under pressure.
+# Alert: any management cluster resource pressure
+# sustained for more than 15 minutes.
+# This fires when at least one HC is affected. In fleet
+# environments, prefer the aggregate
+# ManagementClusterWidePressure alert above to avoid
+# alert storms when the management cluster is broadly
+# under pressure.
+#
+# Note: this alert cannot identify *which* hosted
+# cluster is affected because the metric is aggregated
+# by platform, not per-cluster. For per-cluster
+# alerting, use the per-cluster
+# ManagementClusterResourcePressure condition directly
+# (e.g., via kube_hostedcluster_status_condition or a
+# dedicated per-cluster metric if one is introduced).
 - alert: ManagementClusterResourcePressure
   expr: |
-    hypershift_hostedclusters_failure_conditions{
-      condition="ManagementClusterResourcePressure"
-    } > 0
+    sum(
+      hypershift_hostedclusters_failure_conditions{
+        condition="ManagementClusterResourcePressure"
+      }
+    ) > 0
   for: 15m
   labels:
     severity: warning
   annotations:
     summary: >-
       Management cluster scheduling pressure
-      detected for {{ $labels.name }}
+      detected — {{ $value }} hosted cluster(s)
+      affected
 
 # Alert: installation stuck at intermediate stage
 # for more than 45 minutes.
