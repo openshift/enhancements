@@ -2,16 +2,16 @@
 title: azure-data-disk
 authors:
 - "@jcpowermac"
+- "@mfbonfigli"
 reviewers:
 - "@patrickdillon"
 - "@vr4manta"
-- "@mfbonfigli"
 approvers:
 - "@patrickdillon"
 api-approvers:
 - None
 creation-date: 2025-04-22
-last-updated: 2026-09-28
+last-updated: 2026-10-12
 tracking-link:
 - https://issues.redhat.com/browse/SPLAT-2133
 - https://issues.redhat.com/browse/OCPSTRAT-2046
@@ -38,8 +38,9 @@ additional disks beyond the primary OS disk.
 
 This feature allows users to define data disks in the install-config.yaml for the control plane and
 compute machine pools, with each disk being created and attached during the initial cluster
-installation. Formatting and mounting those disks is out of scope here and is covered by the
-companion enhancement [multi-disk-setup](./multi-disk-setup.md).
+installation. Partitioning, formatting and mounting those disks is the other half of the same
+feature. It is specified in the companion enhancement [multi-disk-setup](./multi-disk-setup.md),
+and both halves share one feature gate.
 
 ## Motivation
 
@@ -64,11 +65,13 @@ storage and container runtime.
 - Provide the ability on the control plane and compute machine pools to attach additional Azure
   managed disks at install time, which can then be used for etcd or user-defined storage such as
   container images.
+- Allow those disks to be partitioned, formatted and mounted at install time. On Azure this is a
+  required part of the same feature. It is specified in the companion enhancement
+  [multi-disk-setup](./multi-disk-setup.md), while this enhancement specifies the provisioning of
+  the disks it acts on.
 
 ### Non-Goals
 
-- Setup of the disk. Partitioning, formatting and mounting are defined in the companion enhancement
-  [multi-disk-setup](./multi-disk-setup.md).
 - Adding, removing or resizing data disks on existing machines (day 2).
 - Data disks in `platform.azure.defaultMachinePlatform`. See
   [Alternatives](#alternatives-not-implemented).
@@ -102,9 +105,11 @@ storage and container runtime.
    - Creates `AzureMachine` (CAPI) resources for the control plane and `Machine`/`MachineSet` (MAPI)
      resources for compute, each carrying the specified data disks
    - Azure provisions the VMs with all data disks attached
-6. The data disks are available in the VM but not partitioned, formatted or mounted. That is handled
-   separately, either by the `diskSetup` API described in
-   [multi-disk-setup](./multi-disk-setup.md) or by a user-supplied MachineConfig.
+6. The data disks are available in the VM but raw: not partitioned, formatted or mounted. Setting
+   them up is the second half of the feature, specified in
+   [multi-disk-setup](./multi-disk-setup.md): the administrator adds `diskSetup` entries and the
+   installer generates the MachineConfigs that do it. A disk with no `diskSetup` entry stays raw,
+   and can still be set up with a user-supplied MachineConfig.
 
 #### Example Configuration
 
@@ -176,6 +181,7 @@ The upstream `capz.DataDisk` type is reused as-is.
 type DataDisk struct {
     // NameSuffix is the suffix to be appended to the machine name to generate
     // the disk name. Each disk name will be in format <machineName>_<nameSuffix>.
+    // The installer requires it to be unique within a pool.
     NameSuffix string `json:"nameSuffix"`
 
     // DiskSizeGB is the size in GB to assign to the data disk.
@@ -186,21 +192,21 @@ type DataDisk struct {
     ManagedDisk *ManagedDiskParameters `json:"managedDisk,omitempty"`
 
     // Lun specifies the logical unit number of the data disk. The value must be
-    // between 0 and 63 and unique for each data disk attached to a VM. The installer requires it, but only when diskSetup is
-    // also set.
+    // between 0 and 63 and unique for each data disk attached to a VM. The installer requires it.
     // +optional
     Lun *int32 `json:"lun,omitempty"`
 
     // CachingType specifies the caching requirements.
-    // Possible values include: None, ReadOnly, ReadWrite.
+    // Possible values include: None, ReadOnly, ReadWrite. The installer rejects any other
+    // value, and anything but None for an UltraSSD_LRS disk.
     // +optional
     CachingType string `json:"cachingType,omitempty"`
 }
 
 type ManagedDiskParameters struct {
     // StorageAccountType is the storage account type to use.
-    // Examples: Standard_LRS, Premium_LRS, StandardSSD_LRS, UltraSSD_LRS. The installer requires it to be non-empty whenever
-    // managedDisk is specified.
+    // Examples: Standard_LRS, Premium_LRS, StandardSSD_LRS, UltraSSD_LRS. The installer requires it
+    // whenever managedDisk is specified, and to be a managed disk SKU the Azure SDK defines.
     // +optional
     StorageAccountType string `json:"storageAccountType,omitempty"`
 
@@ -228,6 +234,8 @@ so it is spelled out explicitly.
 2. **ManagedDisk.StorageAccountType**:
    - Required whenever `managedDisk` is specified, on both control plane and compute pools
    - Cannot be the empty string
+   - Must be a managed disk SKU defined by the Azure compute SDK. See **Storage Account Types**
+     below.
 
 3. **ManagedDisk.SecurityProfile**:
    - Rejected on both control plane and compute pools. `capz.ManagedDiskParameters` carries the
@@ -237,21 +245,39 @@ so it is spelled out explicitly.
 4. **Feature Gate**:
    - `FeatureGateAzureMultiDisk` must be enabled when `dataDisks` are configured
    - Applies to `defaultMachinePlatform`, `controlPlane` and `compute`
+   - The same gate protects `diskSetup` on Azure, see [multi-disk-setup](./multi-disk-setup.md)
 
-**Enforced only when both `dataDisks` and `diskSetup` are non-empty:**
+5. **NameSuffix**:
+   - Must be unique within the `dataDisks` array for that pool. It is appended to the machine name
+     to form the managed disk name, and it is what `diskSetup` is matched against. Two disks
+     sharing one would otherwise only be rejected during provisioning, by the CAPZ and Machine
+     API webhooks.
 
-5. **Lun (Logical Unit Number)**:
+6. **Lun (Logical Unit Number)**:
    - Must not be nil
    - Must be in the range 0-63
    - Must be unique within the `dataDisks` array for that pool
 
-6. **DiskSizeGB**:
+7. **DiskSizeGB**:
    - Must be greater than 0
 
-7. **Correspondence with `diskSetup`**:
-   - `len(diskSetup)` must not exceed `len(dataDisks)`
-   - `diskSetup[i]`'s `platformDiskID` must equal `dataDisks[i]`'s `nameSuffix`. The match is
-     **positional**, not by name -- see [multi-disk-setup](./multi-disk-setup.md).
+8. **CachingType**:
+   - When set, must be one of `None`, `ReadOnly` or `ReadWrite`. Left unset, Azure picks the
+     default for the SKU.
+
+9. **UltraSSD_LRS**:
+   - `ultraSSDCapability` must be `Enabled`. The effective value is read from the pool, falling
+     back to `platform.azure.defaultMachinePlatform` when the pool leaves it unset, so a value set
+     on the pool wins over the default.
+   - `cachingType` must be `None` or unset, since Azure cannot cache an `UltraSSD_LRS` disk.
+
+**Enforced whenever `diskSetup` is non-empty:**
+
+10. **Correspondence with `diskSetup`**:
+    - `len(diskSetup)` must not exceed `len(dataDisks)`, so `diskSetup` on a pool with no
+      `dataDisks` is rejected
+    - `diskSetup[i]`'s `platformDiskID` must equal `dataDisks[i]`'s `nameSuffix`. The match is
+      **positional**, not by name -- see [multi-disk-setup](./multi-disk-setup.md).
 
 #### Implementation Details
 
@@ -354,6 +380,13 @@ The implementation spans several key installer components:
 
 The `FeatureGateAzureMultiDisk` feature gate controls access to this functionality. The installer will validate that this feature gate is enabled when dataDisks are configured in the install-config.yaml.
 
+On Azure the same gate also protects the `diskSetup` field described in
+[multi-disk-setup](./multi-disk-setup.md). Promoting it therefore delivers data disks together
+with their setup, without depending on the `MultiDiskSetup` gate that protects `diskSetup` on the
+other platforms. The reason is that on Azure, partitioning, formatting and mounting a data disk is
+treated as a required part of the same feature, so provisioning the disk and setting it up are
+wrapped in the same feature gate.
+
 **Disk Provisioning:**
 
 - Data disks are created and attached during VM provisioning by Azure
@@ -362,28 +395,34 @@ The `FeatureGateAzureMultiDisk` feature gate controls access to this functionali
   `Machine` is deleted. `capz.DataDisk` has no equivalent field; the CAPI path only provisions the
   control plane during bootstrap, and those machines are represented by MAPI `Machine` objects and
   a `ControlPlaneMachineSet` from then on
-- Disks are not formatted or mounted automatically - this must be handled separately (e.g., via MachineConfig)
+- Provisioning only attaches raw disks. Partitioning, formatting and mounting them is done by
+  `diskSetup`, see [multi-disk-setup](./multi-disk-setup.md), and a disk with no `diskSetup` entry
+  is left raw
 
 **Storage Account Types:**
 
-`managedDisk.storageAccountType` is passed through to Azure unchanged. The installer only checks
-that it is non-empty, so the accepted values are whatever Azure accepts for the region and
-instance type, and a typo is not caught at install-config validation time. The commonly used
-values are:
+`managedDisk.storageAccountType` is checked against the managed disk SKUs defined by the Azure
+compute SDK, so a typo is caught at install-config validation time rather than when Azure creates
+the machine. The list comes from the SDK and not from the Machine API enum, which is not enforced
+because `providerSpec` is preserved as unstructured, and which omits `StandardSSD_LRS`, already in
+use. A recognized value is still not guaranteed to be usable: Azure decides whether the SKU is
+offered for the region and instance type. At the time of writing the accepted values are:
 
 - `Standard_LRS` - Standard locally redundant storage
 - `Premium_LRS` - Premium locally redundant storage (SSD)
 - `StandardSSD_LRS` - Standard SSD locally redundant storage
 - `UltraSSD_LRS` - Ultra SSD locally redundant storage
+- `Premium_ZRS` - Premium zone redundant storage
+- `StandardSSD_ZRS` - Standard SSD zone redundant storage
+- `PremiumV2_LRS` - Premium SSD v2 locally redundant storage
 
-`UltraSSD_LRS` additionally requires `ultraSSDCapability: Enabled` on the same machine pool, which
-is what enables the capability on the VM itself. That field is independent of `dataDisks` and
-defaults to `Disabled`.
+`UltraSSD_LRS` additionally requires `ultraSSDCapability: Enabled`, which is what enables the
+capability on the VM itself. That field is independent of `dataDisks` and defaults to `Disabled`.
 
 **Constraints:**
 
-- LUN values must be unique within each machine's `dataDisks` configuration. Uniqueness is only
-  enforced when `diskSetup` is also present.
+- LUN values and `nameSuffix` values must each be unique within a pool's `dataDisks`
+  configuration. Both are enforced whenever `dataDisks` is set.
 - Maximum of 64 data disks per VM (LUN 0-63). The practical limit is lower and depends on the VM
   size; Azure rejects the VM creation if the instance type does not support the requested count.
 - `managedDisk.securityProfile` is rejected on every pool, not just compute. Supporting it is
@@ -396,7 +435,7 @@ defaults to `Disabled`.
 
 ### Risks and Mitigations
 
-This feature of allowing administrators to add new disks does not really introduce any risks.  The disks will be created and added to the VMs during the provisioning.  Once the VM is configured, the administrator can configure these disks to be used however they wish.  The assignment of these disks is out of scope for this feature.
+This feature of allowing administrators to add new disks does not really introduce any risks.  The disks will be created and added to the VMs during the provisioning.  The disks are left raw unless `diskSetup` is configured, and the risks of setting them up are covered in [multi-disk-setup](./multi-disk-setup.md).
 
 ### Drawbacks
 
@@ -404,9 +443,9 @@ This feature of allowing administrators to add new disks does not really introdu
 
 Data disks can only be configured during cluster installation. Existing machines cannot have data disks added post-installation. Users who later need additional storage must create new MachineSets with the desired disk configuration and migrate workloads, or use alternative storage solutions like PersistentVolumes.
 
-**Requires Separate Disk Setup:**
+**Disk Setup Is Specified Separately:**
 
-This enhancement only provisions raw, unformatted disks. Users must use additional mechanisms (MachineConfig, DaemonSets, etc.) to format, partition, and mount the disks. This adds complexity to the overall setup process, though it provides maximum flexibility for different use cases.
+This enhancement only provisions raw, unformatted disks. Partitioning, formatting and mounting them is done through `diskSetup`, specified in [multi-disk-setup](./multi-disk-setup.md), so users have to understand and configure the two together. A disk with no `diskSetup` entry stays raw and needs a MachineConfig or another mechanism to be used.
 
 **Feature Gate Requirement:**
 
@@ -421,13 +460,22 @@ None.
 **Unit Tests** (`pkg/types/azure/validation/machinepool_test.go`), implemented:
 
 - `managedDisk` with an empty `storageAccountType` is rejected
+- A `storageAccountType` that is not a known managed disk SKU is rejected, and a known one accepted
 - `managedDisk.securityProfile` is rejected
 - `dataDisks` in `defaultMachinePlatform` is rejected
 - `dataDisks` on `AzureStackCloud` is rejected
-- With `diskSetup` present: nil LUN, LUN outside 0-63, duplicate LUNs, and `diskSizeGB <= 0` are
-  each rejected
-- With `diskSetup` present: `len(diskSetup) > len(dataDisks)` is rejected, and a `platformDiskID`
-  that does not match the `nameSuffix` at the same index is rejected
+- Nil LUN, LUN outside 0-63, duplicate LUNs, and `diskSizeGB <= 0` are each rejected, with or
+  without `diskSetup`
+- A duplicate `nameSuffix` is rejected
+- An unsupported `cachingType` is rejected, and caching is allowed on a non-`UltraSSD_LRS` disk
+- An `UltraSSD_LRS` disk is rejected without `ultraSSDCapability` set, or with it `Disabled`, and
+  accepted with it `Enabled` on the pool or only on `defaultMachinePlatform`. A pool that sets
+  `Disabled` overrides an `Enabled` default.
+- An `UltraSSD_LRS` disk with a `cachingType` other than `None` is rejected, and accepted with
+  `None` or with it left unset
+- With `diskSetup` present: `len(diskSetup) > len(dataDisks)` is rejected, including when there are
+  no `dataDisks` at all, and a `platformDiskID` that does not match the `nameSuffix` at the same
+  index is rejected
 - Valid configurations pass
 - `dataDisks` set on `defaultMachinePlatform`, `controlPlane` or `compute` without
   `FeatureGateAzureMultiDisk` is rejected
@@ -475,10 +523,13 @@ optional and do not run by default.
 
 - [x] E2E tests covering control plane **and** compute nodes with data disks
       (job `e2e-azure-ovn-multidisk-techpreview`)
+- [x] E2E tests covering the data disks end to end: disk provisioning, and the partitioning and
+      formatting of the disks, for both an `etcd` and a `user-defined` data disk
 - [x] Sufficient time for feedback. The gate has been in TechPreview since 4.20.
 - [ ] Available by default -- requires moving `FeatureGateAzureMultiDisk` to
       `enable(inDefault(), inOKD(), inTechPreviewNoUpgrade(), inDevPreviewNoUpgrade())` in
-      `openshift/api`
+      `openshift/api`. The gate also protects `diskSetup` on Azure, so promoting it on its own
+      delivers Azure multi-disk end to end. `MultiDiskSetup` does not need to move with it.
 - [ ] User-facing documentation in the OCP installation docs
 
 **For non-optional features moving to GA, the graduation criteria must include
@@ -516,12 +567,17 @@ validation. The messages emitted today are:
 - `"not allowed on default machine pool, use dataDisks compute and controlPlane only"`
 - `"data disks are not supported on AzureStackCloud"`
 - `"storageAccountType is required when managedDisk is specified"`
+- `Unsupported value: "<value>": supported values: "Premium_LRS", ...` on `storageAccountType` -
+  not a managed disk SKU the Azure SDK defines
+- `Unsupported value: "<value>": supported values: "None", "ReadOnly", "ReadWrite"` on
+  `cachingType`
 - `"data disk security profiles are not yet supported by the Machine API and would be silently
   ignored"`
-- `"<nameSuffix>" must have lun id` - LUN omitted, **only reported when `diskSetup` is also set**
-- `"<nameSuffix>" must have lun id between 0 and 63` - LUN out of range, same condition
-- `"dataDisk must have a unique lun number"` - duplicate LUN, same condition
-- `"diskSizeGB must be greater than zero"` - same condition
+- `Duplicate value: "<nameSuffix>"` - two disks in the pool share a `nameSuffix`
+- `"<nameSuffix>" must have lun id` - LUN omitted
+- `"<nameSuffix>" must have lun id between 0 and 63` - LUN out of range
+- `"dataDisk must have a unique lun number"` - duplicate LUN
+- `"diskSizeGB must be greater than zero"`
 
 If `FeatureGateAzureMultiDisk` is not enabled, validation fails with a feature gate error naming the
 `dataDisks` field.
@@ -562,9 +618,9 @@ Instead of requiring data disks to be configured at install time, allow adding d
 
 **Alternative 2: Automatic Disk Formatting and Mounting**
 
-Automatically format and mount data disks during VM provisioning. This was not implemented because:
+Automatically format and mount data disks during VM provisioning, without the user specifying a layout. This was not implemented because:
 - Different use cases require different filesystem types and mount options
-- This is better handled by MachineConfig which provides more flexibility
+- This is better handled by MachineConfig which provides more flexibility. The installer generates it from explicit `diskSetup` entries, see [multi-disk-setup](./multi-disk-setup.md)
 - Separation of concerns: installer provisions infrastructure, MachineConfig configures OS
 
 **Alternative 3: Support in defaultMachinePlatform**
