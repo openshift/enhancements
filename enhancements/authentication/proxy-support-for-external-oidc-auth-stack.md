@@ -29,9 +29,9 @@ superseded-by:
 
 This enhancement extends the component-scoped proxy support introduced by
 [Proxy Support for Integrated Auth Stack](proxy-support-for-integrated-auth-stack.md)
-to External OIDC authentication. It enables the Cluster Authentication Operator
-(CAO), the OAuth API server's External OIDC webhook authenticator, and OpenShift
-Console to reach external identity providers, OIDC distributed claim endpoints,
+to External OIDC authentication. It enables the OAuth API server's External OIDC
+webhook authenticator and OpenShift Console to reach external identity providers,
+OIDC distributed claim endpoints,
 and configured external claim sources through a proxy, without requiring a
 cluster-wide egress proxy. The feature targets standalone OpenShift and HyperShift.
 
@@ -46,7 +46,8 @@ describes this problem and the operational cost of workarounds such as an intern
 identity broker or manually patching operator-managed Deployments.
 
 That enhancement adds `Authentication.spec.proxy` (`operator.openshift.io/v1`) for
-the integrated OAuth server and CAO, deferring External OIDC and HyperShift support.
+the integrated OAuth server and Cluster Authentication Operator (CAO), deferring
+External OIDC and HyperShift support.
 This enhancement extends that work to External OIDC on standalone and hosted
 control planes.
 
@@ -87,7 +88,6 @@ validation. Their outbound dependencies are:
 
 | Component | Outbound communication |
 | --- | --- |
-| CAO | Fetches the issuer's discovery document while validating External OIDC configuration. |
 | Console | Fetches OIDC discovery metadata and JWKS, exchanges authorization codes for tokens, and refreshes tokens to maintain login sessions. |
 | OAuth API server | Fetches OIDC discovery metadata and retrieves or refreshes the issuer's JWKS signing keys for JWT verification. |
 | OAuth API server, when a token references supported [OIDC distributed claims](https://openid.net/specs/openid-connect-core-1_0.html#AggregatedDistributedClaims) | Resolves distributed claims from token-referenced endpoints, including discovery and JWKS retrieval to verify returned JWTs. This does not require configured external claim sources. |
@@ -116,8 +116,8 @@ clients is outside this enhancement's scope.
 
 ### Goals
 
-- Extend component-scoped proxy support to External OIDC issuer validation,
-  discovery, JWKS retrieval, distributed claim resolution, and external claim
+- Extend component-scoped proxy support to the webhook's External OIDC discovery,
+  JWKS retrieval, distributed claim resolution, and external claim
   sourcing.
 - Support Console's server-side External OIDC login and token refresh using the
   same authentication proxy configuration without changing unrelated Console
@@ -149,10 +149,11 @@ administrator continues to configure providers on
 `authentication.config.openshift.io/cluster` and configures the component proxy
 on the distinct `authentication.operator.openshift.io/cluster` resource.
 
-CAO uses the effective proxy when validating issuer discovery, renders proxy
-environment variables into the External OIDC OAuth API server Deployment, and
-synchronizes and mounts the optional proxy CA bundle. The webhook uses this
-configuration for its outbound requests. The TokenReview connection from
+CAO renders proxy environment variables
+into the External OIDC OAuth API server Deployment, synchronizes and mounts the
+optional CA bundle, and passes its path through `trustedCAFilePath` in the
+generated OAuth API server configuration. The webhook uses this configuration
+for its outbound requests. The TokenReview connection from
 kube-apiserver to the webhook remains within the cluster.
 
 Console configures its login proxy on its own operator API, so each operator owns
@@ -170,10 +171,10 @@ feeds both operators, so it is configured once; see
 
 ### Workflow Description
 
-Apply the proxy before the OIDC provider that needs it: otherwise the first issuer
-validation fails transiently until the proxy is in place. This is a sequencing
-nicety, not a hard dependency — reconciliation converges to the same result in either
-order.
+Apply the proxy before the OIDC provider that needs it so the webhook and Console
+can reach the provider when they first perform discovery. If the provider is
+configured first, runtime discovery or login can fail transiently until the proxy
+configuration is reconciled.
 
 #### Standalone OpenShift
 
@@ -226,11 +227,11 @@ proxy that can reach the required external endpoints.
 4. The administrator configures OIDC providers on
    `authentication.config.openshift.io/cluster`, including issuer trust and
    external claim sources as needed, and the Console OIDC client for Console login.
-5. CAO validates issuer discovery using the effective proxy and applicable CA
-   certificates, and reconciles the webhook Deployment with the proxy environment
-   variables and optional CA mount. Console Operator reconciles the corresponding
-   `auth.proxy` section in the Console configuration file and CA mount for Console's OIDC
-   clients from its own operator resource.
+5. CAO reconciles the webhook Deployment with the proxy environment variables and
+   optional CA mount, and sets `trustedCAFilePath` in the generated OAuth API server
+   configuration to the mounted bundle's path. Console Operator reconciles the
+   corresponding `auth.proxy` section in the Console configuration file and CA
+   mount for Console's OIDC clients from its own operator resource.
 6. For Console login, the browser follows the authorization redirect to the
    provider and returns to Console's callback. Console uses the effective proxy
    for its server-side OIDC requests, including subsequent token refresh.
@@ -285,9 +286,9 @@ in its namespace on the management cluster.
 4. The HyperShift operator copies the component configuration into the
    HostedControlPlane and, when configured, synchronizes the referenced CA into
    the HCP namespace.
-5. The Control Plane Operator (CPO) validates issuer discovery using the effective
-   proxy and applicable trust, and configures the HCP-side OAuth API server
-   Deployment so its egress applies the component proxy. Because this egress is
+5. The Control Plane Operator (CPO) configures the HCP-side OAuth API server
+   Deployment so its egress applies the component proxy and passes the optional
+   mounted CA bundle's path through `trustedCAFilePath`. Because this egress is
    tunneled through konnectivity into the guest network, the proxy is applied via the
    webhook pod's `konnectivity-https-proxy` sidecar, not as raw proxy environment on
    the webhook container. The optional proxy CA is mounted in both containers. See
@@ -575,16 +576,14 @@ exactly as HyperShift already reconciles the guest `Network` and `IngressControl
 resources from `operatorConfiguration`. Console Operator does not access
 HostedCluster or HostedControlPlane resources or the management cluster.
 
-On HyperShift, CPO performs the issuer validation that CAO performs on standalone:
-CAO's reconciliation controller does not run in the hosted control plane (it only
-contributes a bootstrap render step there, which does not validate issuers), so that
-responsibility falls to CPO. CPO resolves the proxy from
+On HyperShift, CPO reconciles the webhook Deployment and its generated
+configuration. CPO resolves the proxy from
 `HostedControlPlane.spec.operatorConfiguration.authentication.proxy`, falling back to
 the hosted cluster's cluster-wide proxy when that field is absent, and never to the
 management cluster's own proxy.
 
-Both CPO's validation client and the running webhook egress to the IdP **through
-konnectivity into the guest network**, not directly from the management cluster. That
+The running webhook egresses to the IdP **through konnectivity into the guest
+network**. That
 connection path, and the sidecar that applies the proxy, are detailed under
 [Webhook Egress and Connection Paths](#webhook-egress-and-connection-paths) below.
 
@@ -598,7 +597,6 @@ Management cluster: namespace containing the HostedCluster resource (HostedClust
     v
 Management cluster: namespace running this hosted cluster's control plane (HostedControlPlane.metadata.namespace)
   Proxy CA ConfigMap
-    |-- Read by CPO for issuer validation
     |-- Mounted on the konnectivity-https-proxy sidecar (HTTPS proxy certificate trust)
     |-- Mounted on the webhook container (certificate trust for TLS interception)
     |
@@ -657,7 +655,7 @@ component proxy lives. A `konnectivity-https-proxy` sidecar in the webhook pod a
 the component proxy:
 
 ```text
-HyperShift                                         (two HCP-side mechanisms, one egress path)
+HyperShift
 
   management cluster: HCP namespace                     guest / worker-node network
   +-------------------------------------------+
@@ -671,12 +669,10 @@ HyperShift                                         (two HCP-side mechanisms, one
   |     (CA mounted in both containers)       |  |
   +-------------------------------------------+  |
                                                  +== konnectivity tunnel ==> konnectivity agent (worker node)
-  +-------------------------------------------+  |                               |
-  | CPO (issuer validation)                   |  |     in --no-proxy / internal: |--> in-guest endpoint (direct)
-  |   in-process konnectivity dialer ---------+--+     otherwise:                |--> component proxy --> external IdP
-  |   transport.Proxy = <component proxy>     |                                       (resolved + reached in guest net)
-  |   (no sidecar; certs read via Kube API)   |
-  +-------------------------------------------+
+                                                                                  |
+                                                       in --no-proxy / internal: |--> in-guest endpoint (direct)
+                                                       otherwise:                |--> component proxy --> external IdP
+                                                                                      (resolved + reached in guest net)
 
   Console (guest worker node)  --auth.proxy transport--------------------------------> component proxy --> external IdP
 ```
@@ -686,11 +682,6 @@ chooses whether to insert the proxy hop; Layer 2 (the konnectivity dialer) tunne
 every resulting TCP dial into the guest network by default. So both the webhook (via
 the tunnel) and Console (natively) egress from the **same guest network**, and one
 guest-reachable proxy serves both.
-
-CPO's issuer-validation client takes the same path but by a different mechanism: being
-the operator, it embeds the konnectivity dialer in-process rather than using a sidecar
-(see [Operator Reconciliation and Issuer Validation](#operator-reconciliation-and-issuer-validation)).
-Validating over the runtime path keeps validation and runtime from diverging.
 
 Consequences:
 
@@ -705,8 +696,8 @@ Consequences:
   cluster.
 - The component proxy takes precedence over the hosted cluster's
   `spec.configuration.proxy` for the webhook pod when set.
-- Verify each plane independently: successful CPO issuer validation does not prove guest
-  Console connectivity, and vice versa. See the
+- Verify the webhook and guest Console independently: successful webhook
+  authentication does not prove Console connectivity, and vice versa. See the
   [`NO_PROXY` rules](#no_proxy-and-internal-endpoint-urls).
 
 ##### Component Inventory
@@ -726,9 +717,9 @@ Existing components whose behavior changes:
 
 | Affected | Change |
 | --- | --- |
-| CAO | Resolves the component proxy; injects env + mounts CA on the webhook Deployment and validates the issuer through it (standalone). |
+| CAO | Resolves the component proxy; injects env + mounts CA on the webhook Deployment and sets `trustedCAFilePath` in its configuration (standalone). |
 | oauth-apiserver (webhook) | Reads the generic outbound CA bundle through `trustedCAFilePath` for HTTPS endpoint and proxy trust; outbound clients honor the proxy; on HyperShift egress flows through the new sidecar. |
-| CPO | Builds the webhook Deployment including the konnectivity sidecar flags and CA mount; validates the issuer via konnectivity + the component proxy (HyperShift). |
+| CPO | Builds the webhook Deployment including the konnectivity sidecar flags and CA mount; sets `trustedCAFilePath` in the webhook configuration (HyperShift). |
 | Console Operator | Reads the Console operator proxy field; renders `auth.proxy` and mounts the CA. |
 | Console | Applies `auth.proxy` to its OIDC clients only. |
 | HyperShift operator | Copies `operatorConfiguration` HC→HCP; synchronizes the referenced CA HC→HCP. |
@@ -789,9 +780,9 @@ forms of the existing hostname defaults. The resulting defaults are
 and `127.0.0.1`, plus the caller's Kubernetes service IP when available through
 `KUBERNETES_SERVICE_HOST`.
 
-Use these defaults consistently in CAO/CPO issuer-validation clients, the
-webhook's `NO_PROXY`, and Console's `auth.proxy.noProxy`. Updating CAO's shared
-resolver also expands the integrated authentication path's component-proxy
+Use these defaults consistently in the webhook's effective bypass rules and
+Console's `auth.proxy.noProxy`. Updating CAO's shared resolver also expands the
+integrated authentication path's component-proxy
 defaults; no other change to that flow is intended. Do not add these entries to
 the cluster-wide fallback: preserve its supplied `NO_PROXY` values and Console's
 global proxy environment unchanged.
@@ -818,20 +809,20 @@ requires `oidc.oidc-namespace` in `spec.proxy.noProxy`. Entries are hosts or IPs
 connectivity: the hostname must still resolve from the caller's namespace and
 match the endpoint's TLS certificate.
 
-#### Operator Reconciliation and Issuer Validation
+#### Operator Reconciliation and Configuration Generation
 
-CAO reconciles the webhook configuration and revalidates issuer discovery when
-the provider configuration, effective proxy settings, or relevant CA bundles
-change. Its issuer-validation HTTP client uses the effective proxy settings and
-combined issuer and proxy trust, leaving its process environment and unrelated
-clients unchanged.
+CAO reconciles the webhook Deployment and generated configuration when provider
+configuration, effective proxy settings, or CA references change. For the CA
+bundle, it synchronizes and mounts the referenced ConfigMap and sets
+`trustedCAFilePath` to the mounted file's path. CAO does not contact issuer or
+claim-source endpoints before generating the OAuth API server configuration.
+The OAuth API server loads the bundle and performs outbound discovery, JWKS, and
+claim-source requests using the configured proxy and trust.
 
-CPO provides equivalent issuer validation for hosted control planes, using the
-same effective proxy settings, bypass rules, and trust as the webhook. Validation
-requests must follow the webhook's runtime path through konnectivity into the
-guest network so that validation reflects runtime connectivity. CPO must not use
-direct management-cluster egress or its process-wide proxy environment for these
-requests. See [Webhook Egress and Connection Paths](#webhook-egress-and-connection-paths).
+CPO performs the corresponding configuration and mount reconciliation for hosted
+control planes, including the konnectivity sidecar settings. Endpoint connectivity
+is exercised by the running webhook through the guest network, as described under
+[Webhook Egress and Connection Paths](#webhook-egress-and-connection-paths).
 
 #### OAuth API Server Deployment and Trust
 
@@ -948,8 +939,8 @@ Proxy settings and CA changes follow this update contract:
 
 CAO and Console Operator synchronize source CA changes to the mounted copies;
 the [hosted distribution path](#hypershift--hosted-control-planes) adds HyperShift
-operator and HCCO synchronization. CAO/CPO also refresh the trust used for issuer
-validation.
+operator and HCCO synchronization. CAO/CPO maintain the CA mount and
+`trustedCAFilePath` in the generated webhook configuration.
 
 Console watches its mounted proxy CA file; the standalone webhook watches the
 generic outbound CA bundle referenced by `trustedCAFilePath`. They apply valid
@@ -976,8 +967,8 @@ to External OIDC token validation and Console login.
 
 **Cluster lockout from invalid proxy configuration.**
 A wrong proxy URL, missing or invalid CA bundle, or incorrect `noProxy` entries
-can break token validation, Console login, or refresh. Successful issuer discovery
-does not prove that every runtime endpoint is reachable. Administrators must
+can break token validation, Console login, or refresh. Successful runtime issuer
+discovery does not prove that every endpoint is reachable. Administrators must
 retain and test independent client-certificate access with appropriate RBAC;
 [Support Procedures](#support-procedures) describes recovery, following the
 [External OIDC disruption guidance](direct-external-oidc-provider.md#authentication-disruptions).
@@ -998,9 +989,8 @@ Proxy latency or outages can impair authentication even when the provider is
 healthy. Existing caches may delay failures but are not a recovery mechanism.
 Administrators own proxy availability and capacity. Failures must be observable,
 and requests must not silently bypass a configured proxy on failure.
-On HyperShift, issuer validation and webhook requests also depend on konnectivity,
-guest DNS, and worker-network availability; webhook egress additionally depends
-on its sidecar. OIDC authentication can fail while the management-side API remains
+On HyperShift, webhook requests also depend on konnectivity, guest DNS,
+worker-network availability, and the webhook's sidecar. OIDC authentication can fail while the management-side API remains
 reachable. Diagnostics must distinguish these dependencies from proxy failures.
 Do not fall back to direct management-cluster egress when the guest-network path
 fails.
@@ -1172,8 +1162,9 @@ or remove `spec.proxy`, then verify recovery through a reachable fallback.
 Run webhook tests with `ExternalOIDCAsWebhook` enabled. Cover authentication with
 `ExternalOIDCExternalClaimsSourcing` disabled and no external claim sources, then
 enable that gate to test configured sources using anonymous, request-token, and
-client-credentials authentication. Test CAO's discovery validation independently
-from runtime discovery, JWKS refresh, and claim retrieval.
+client-credentials authentication. Verify CAO generates the webhook configuration
+and CA mount without contacting external endpoints, then test runtime discovery,
+JWKS refresh, and claim retrieval through the configured proxy.
 
 Conditions must recover after correction and distinguish proxy failures from
 endpoint TLS/connectivity errors. Successful authentication, not Pod readiness
@@ -1220,7 +1211,7 @@ on the konnectivity tunnel via `--no-proxy` rather than the forward proxy, and t
 component proxy takes precedence over `spec.configuration.proxy`. Confirm the proxy
 needs reachability only from the guest network: a proxy reachable from the guest but
 not from the management cluster must still work for the webhook. Include a case where
-the proxy is unreachable from the guest network; successful CPO discovery validation
+the proxy is unreachable from the guest network; successful webhook authentication
 must not substitute for a successful Console login and refresh, and vice versa.
 
 Exercise the [version-skew guarantees](#version-skew-strategy) in both directions
@@ -1333,9 +1324,10 @@ admission/conversion webhook, aggregated API server, or finalizer. The TokenRevi
 webhook belongs to the prerequisite External OIDC enhancement.
 
 API admission validates the shape of proxy settings, not network reachability or
-the contents of referenced ConfigMaps. Operators validate and reconcile these
-runtime inputs and report configuration/synchronization failures through their
-existing status mechanisms. Proxy outages or invalid trust can impair OIDC
+the contents of referenced ConfigMaps. Operators check referenced configuration
+and reconcile it into operand configuration and CA mounts, reporting
+configuration/synchronization failures through their existing status mechanisms.
+Endpoint requests are performed by the operands. Proxy outages or invalid trust can impair OIDC
 authentication and Console login without making the Kubernetes API unavailable
 to client-certificate or service-account authentication.
 
