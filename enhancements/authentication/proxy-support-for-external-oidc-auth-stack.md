@@ -1011,7 +1011,7 @@ or affect management-cluster traffic. Scope configuration, CA distribution, and
 reconciliation permissions to the intended hosted cluster. Tenant settings must
 not change management-wide proxy configuration or trust, or unrelated clients.
 Verify isolation between hosted clusters sharing a management cluster, as covered
-in the [hosted test plan](#hosted-control-planes-and-upgrades).
+in the [hosted test plan](#hosted-clusters).
 
 **Proxy credential leakage.**
 Credentials embedded in proxy URLs are stored in operator resources and, on
@@ -1069,159 +1069,151 @@ without requiring the hosted administrator to enter it twice.
 
 ## Open Questions [optional]
 
-- Confirm the proposed `Console.spec.authProxy` name, schema, and validation with
-  the assigned Console API approver.
 - Identify an API approver for the HyperShift additions and confirm the shared
   `operatorConfiguration.authentication.proxy` placement on HostedCluster and
   HostedControlPlane, its validation, and the management-side feature gate.
-- Confirm Console's proposed `auth.proxy` configuration format, OIDC-only scope,
-  and proxy CA hot-reload contract with Console maintainers.
 - Confirm the [webhook egress integration](#webhook-egress-and-connection-paths)
   with HyperShift maintainers, including compatibility with existing SOCKS5
   egress and the [CA-triggered webhook rollouts](#configuration-updates-and-ca-reload).
 
 ## Test Plan
 
-Testing follows the integrated-authentication proposal's input validation,
-authentication flow, operator health, and proxy resolution coverage, extended to
-the External OIDC webhook, Console, and HyperShift.
+Tests are grouped by authentication path. Each section starts with the
+end-to-end flows, which span an operator and its operand and are the primary
+coverage, and then lists the component-scoped tests underneath so each owning
+party sees its own scope in one place. Unit tests cover pure functions with
+easily asserted inputs and outputs; integration tests run the operator sync loops
+against a test API server and assert the resulting cluster state. The operands
+may add additional unit or integration tests of their own, but the operator tests
+cover configuration generation and the end-to-end flows cover observable behavior.
 
-### Input Validation and Unit Tests
+### Test Infrastructure
 
-Reuse the authentication proxy CRD validation tests in `openshift/api` for URL
-schemes, hostnames, paths, query strings, fragments, CA reference names, list
-constraints, and the requirement to supply at least one proxy URL. Apply the same
-validation to the new Console operator proxy field, and add equivalent HyperShift
-API tests, including feature-gated admission and serialization compatibility for
-the optional HostedCluster and HostedControlPlane fields.
+End-to-end coverage builds on the two existing Origin suites in
+`test/extended/authentication`. The integrated-authentication component proxy
+tests supply a forward proxy with HTTP and HTTPS listeners and a self-signed CA,
+the `trustedCA` ConfigMap helpers, and the save/restore of cluster authentication
+state. The External OIDC suite supplies Keycloak, the helpers that switch the
+cluster to `Type: OIDC`, the break-glass certificate kubeconfig, and an external
+claims endpoint. Tests run serial and disruptive, like their sources.
 
-Unit and controller tests in CAO, OAuth API server, Console, Console Operator, and
-HyperShift cover:
+### Token Validation Through the External OIDC Webhook
 
-- Full component replacement, cluster-wide fallback, and direct connectivity,
-  including partially populated proxy configurations with no field inheritance.
-- The [feature-gate matrix](#feature-gates), including webhook proxy support with
-  `ExternalOIDCAsWebhook` enabled and `ExternalOIDCExternalClaimsSourcing` disabled,
-  Console gated by `AuthenticationComponentProxyExternalOIDC` alone (independent of
-  the webhook gates and of `AuthenticationComponentProxy`), fallback when the proxy
-  gate is disabled, and exclusion of direct kube-apiserver OIDC. Integrated OAuth
-  behavior remains unchanged apart from the shared component-proxy bypass defaults.
-- Console config generation and parsing preserve the distinction between absent
-  `auth.proxy` and a present block with omitted fields. Explicit OIDC settings
-  must not inherit global proxy fields, even without custom issuer or proxy CAs.
-  Applying, updating, and removing the block must leave the global proxy
-  environment and non-OIDC clients' transports and trust unchanged.
-- Proxy injection with and without `trustedCA`, informer-triggered reconciliation,
-  CA reference changes, missing or invalid ConfigMaps, and removal of managed
-  configuration, including HCCO reconciling the guest Console operator resource and
-  its CA copy from the HCP block while co-managing only the proxy field.
-- Issuer/source trust combined with proxy trust, with and without custom endpoint
-  CAs, for every outbound client including client-credentials token acquisition.
-- The [update contract](#configuration-updates-and-ca-reload), including which
-  changes alter Pod templates, projected-volume file replacement, cached OIDC/JWKS
-  clients, stale transport retirement, and last-valid-trust handling on errors.
-- Hostname-based `NO_PROXY` matching, including Service FQDNs, short names, aliases,
-  trailing-dot names, IPs, and endpoints advertised by discovery or distributed
-  claims. Verify automatic bypass for dotted and undotted default hostname forms
-  across all component-proxy consumers, including integrated authentication.
-  External hosts and lookalikes such as `idp.ns.svc.cluster.local.example.com`
-  must remain proxied unless explicitly bypassed. Cluster-wide fallback values
-  and Console's unrelated clients must remain unchanged.
+**End-to-end flows** spanning CAO and the webhook container in the oauth-apiserver
+Pod:
 
-### End-to-End Authentication and Operator Health
+- Setting `spec.proxy` on `authentication.operator.openshift.io/cluster` makes
+  token validation succeed with the webhook's provider requests observed on the
+  proxy. Run this with an HTTPS proxy and `trustedCA`, and with a plain HTTP
+  proxy without one.
+- `noProxy` containing the issuer host bypasses the proxy, and authentication
+  still succeeds once the proxy is no longer reachable.
+- A missing `trustedCA` ConfigMap takes the authentication cluster operator
+  Degraded with an actionable message; creating the ConfigMap clears the condition
+  and authentication works.
+- Removing `spec.proxy` restores the previous behavior, with the component proxy
+  confirmed to be out of the path.
+- Rotating the proxy's serving certificate and the contents of the referenced
+  `trustedCA` ConfigMap lets token validation succeed again over the rotated
+  proxy, with the operator resettling promptly.
+- With `ExternalOIDCExternalClaimsSourcing` enabled, claim retrieval from the
+  suite's external claims endpoint also goes through the proxy.
 
-Reuse the integrated-authentication test infrastructure: an OIDC provider such as
-Keycloak and a forward proxy, with direct operand access to external test endpoints
-blocked so successful requests prove proxy use. Run tests with component proxy
-only, both proxy sources configured, cluster-wide fallback only, and no proxy.
+**Cluster Authentication Operator — unit tests.**
 
-Verify the complete Console flow from login through authenticated API requests,
-token refresh, and logout. Check discovery, code exchange, JWKS retrieval, and
-webhook authentication before and after refresh, with both system-trusted and
-custom proxy CAs. Verify that logout clears the session and follows the configured
-redirect using the browser's network, independently of the server-side proxy.
+- Proxy resolution: the component proxy used in full when configured and gated,
+  cluster-wide fallback otherwise, and no per-field inheritance.
+- Generated webhook configuration and container environment: `trustedCAFilePath`
+  set only when `trustedCA` is configured, the resolved `HTTP_PROXY`,
+  `HTTPS_PROXY`, and `NO_PROXY` values including the implicit `noProxy` defaults
+  and their trailing-dot forms, and removal of all of it when the component proxy
+  is removed.
 
-Verify Console traffic isolation using proxy request logs: Kubernetes API,
-monitoring, and trailing-dot plugin-service requests retain direct access without
-authentication bypass entries. With two proxies, OIDC requests use the component
-proxy and unrelated external requests retain the cluster-wide proxy. Repeat
-without a cluster-wide proxy and across component updates/removal; unrelated
-clients must not gain component CA trust.
+**Cluster Authentication Operator — integration tests.**
 
-Include a token whose configured groups claim is supplied through OIDC distributed
-claims, with `ExternalOIDCExternalClaimsSourcing` disabled and no external claim
-sources configured. Verify proxy routing and `NO_PROXY` bypass for the claim
-endpoint and for discovery and JWKS retrieval of the returned JWT's issuer,
-including when these use hosts different from the original issuer.
+- Synchronizing the referenced `trustedCA` ConfigMap from `openshift-config` into
+  `openshift-oauth-apiserver`, mounting it, and cleaning up when the proxy is
+  removed.
+- The [update contract](#configuration-updates-and-ca-reload): proxy and CA
+  reference changes alter the Deployment Pod template; CA content changes only
+  replace the mounted file.
 
-Exercise unreachable proxies, latency/timeouts, invalid or missing CA bundles,
-and incorrect `NO_PROXY` entries. Verify diagnostic conditions/logs, no silent
-proxy bypass, and retained client-certificate access. Use that access to correct
-or remove `spec.proxy`, then verify recovery through a reachable fallback.
+### Console Login
 
-Run webhook tests with `ExternalOIDCAsWebhook` enabled. Cover authentication with
-`ExternalOIDCExternalClaimsSourcing` disabled and no external claim sources, then
-enable that gate to test configured sources using anonymous, request-token, and
-client-credentials authentication. Verify CAO generates the webhook configuration
-and CA mount without contacting external endpoints, then test runtime discovery,
-JWKS refresh, and claim retrieval through the configured proxy.
+**End-to-end flows** spanning Console Operator and Console:
 
-Conditions must recover after correction and distinguish proxy failures from
-endpoint TLS/connectivity errors. Successful authentication, not Pod readiness
-alone, is the acceptance criterion. Retain regression coverage for integrated
-OAuth and clusters not using the feature.
+- Setting `spec.authProxy` with a `trustedCA` bundle on
+  `console.operator.openshift.io/cluster` sends Console's OIDC requests
+  (discovery, JWKS, token endpoint) through the proxy, with login succeeding and
+  the console cluster operator and the Console entry in `status.oidcClients`
+  staying healthy.
+- A missing `trustedCA` ConfigMap takes the console cluster operator Degraded, in
+  the same way as the existing OIDC issuer CA lookup; creating the ConfigMap
+  clears the condition and login works.
+- Rotating the proxy's serving certificate and the referenced `trustedCA`
+  ConfigMap contents lets Console's OIDC requests succeed again over the rotated
+  proxy.
+- Removing the field restores the previous behavior, with the component proxy
+  confirmed to be out of the path.
 
-### CA Rotation
+**Console Operator — unit tests.**
 
-On standalone clusters, rotate the proxy CA bundle and proxy certificate without
-replacing webhook or Console Pods or changing their Pod templates. Repeat the
-no-rollout check for Console on hosted clusters; the hosted webhook rollout is
-covered below. Exercise all outbound paths in
-the [architecture table](#authentication-architecture), including Console providers
-initialized before rotation, distributed claims, and external-source credentials.
-Use fresh JWKS retrieval and new TLS connections, and test both adding and
-removing CAs so caches or connections cannot mask stale trust. Confirm invalid
-updates are reported, last-valid trust remains effective, and a subsequent valid
-update loads without a restart.
+- Resolution: the field applies only to `Type: OIDC`, and integrated OAuth
+  clusters are unaffected.
+- `console-config.yaml` generation: the `auth.proxy` block with resolved
+  `noProxy` and `trustedCAFile`, and removal when the proxy is removed.
 
-### Hosted Control Planes and Upgrades
+**Console Operator — integration tests.**
 
-Run the authentication and recovery scenarios on hosted clusters. Verify the
-HostedCluster-to-HCP configuration copy, CA synchronization into the HCP and guest
-`openshift-config` and `openshift-console` namespaces, HCCO writing the guest
-`console.operator.openshift.io/cluster` proxy field (and its referenced CA
-ConfigMap) from the single `operatorConfiguration.authentication.proxy` block, and
-Console reconciliation from its own resource. Verify HCCO co-manages only the proxy
-field on the CVO-seeded Console resource. Run the CA rotation scenarios through the
-full distribution chain, checking destination-local references. Test updates,
-removal, missing references, and isolation between two hosted clusters. Assert
-that the guest cluster-wide Proxy and NodePool rollout hashes remain unchanged.
+- Synchronizing the referenced `trustedCA` ConfigMap into `openshift-console`,
+  mounting it separately from issuer trust, and cleaning up on removal.
+- The [update contract](#configuration-updates-and-ca-reload): proxy and CA
+  reference changes alter the Console Deployment; CA content changes do not.
 
-Cover the [TLS validation matrix](#tls-connections-and-certificate-validation),
-including different CAs for the HTTPS proxy's own certificate and its intercepted
-endpoint certificates. Verify CA rotation reaches both the sidecar's proxy
-connection and the webhook's endpoint connection through an OAuth API server
-Deployment rollout, replacing both containers. Guest Console must reload the
-updated CA without a rollout.
+### Hosted Clusters
 
-Verify the webhook egress specifically: the proxy is applied via the oauth-apiserver
-pod's `konnectivity-https-proxy` sidecar, the webhook reaches the IdP from the guest
-network through konnectivity, in-cluster endpoints (KAS, `token-review`, `.svc`) stay
-on the konnectivity tunnel via `--no-proxy` rather than the forward proxy, and the
-component proxy takes precedence over `spec.configuration.proxy`. Confirm the proxy
-needs reachability only from the guest network: a proxy reachable from the guest but
-not from the management cluster must still work for the webhook. Include a case where
-the proxy is unreachable from the guest network; successful webhook authentication
-must not substitute for a successful Console login and refresh, and vice versa.
+Hosted coverage lands with the hosted implementation.
 
-Exercise the [version-skew guarantees](#version-skew-strategy) in both directions
-with separate `spec.controlPlaneRelease` and `spec.release` selections. Verify
-unchanged authentication when the feature is unavailable and reporting
-of unsupported proxy use without partial application. Test rolling updates with
-proxy configuration and CA trust retained, including single-replica disruption.
-Standard upgrade jobs cover the disabled feature; feature-enabled upgrade and
-rollback scenarios use development jobs under `TechPreviewNoUpgrade`, not a
-promise of supported Tech Preview upgrades. Add release upgrade coverage before GA.
+**End-to-end flows** spanning the HyperShift operator, CPO, HCCO, and both
+operands. Rerun both sets of flows above on a hosted cluster, and additionally
+verify:
+
+- Configuration and CA propagation through the full chain into the HCP and guest
+  `openshift-config` and `openshift-console` namespaces.
+- Webhook egress through the sidecar: the webhook reaches the provider from the
+  guest network, in-cluster endpoints stay on the konnectivity tunnel, and a proxy
+  reachable only from the guest network works.
+- A proxy CA content change rolls out the OAuth API server Deployment while guest
+  Console reloads without a rollout.
+- Isolation between two hosted clusters, with the guest cluster-wide Proxy and
+  NodePool rollout hashes unchanged.
+- The [version-skew guarantees](#version-skew-strategy) with separate
+  `spec.controlPlaneRelease` and `spec.release` selections.
+
+**HyperShift operator — unit tests.**
+
+- Validation of the optional HostedCluster and HostedControlPlane fields,
+  including feature-gated admission and serialization compatibility.
+- Propagation of the HostedCluster block to the HostedControlPlane.
+
+**CPO and HCCO — unit and integration tests.**
+
+- The `konnectivity-https-proxy` sidecar arguments derived from the HCP block.
+- CPO reconciles the webhook configuration and the CA mounts in both the sidecar
+  and the webhook container; removal cleans all of it up.
+- HCCO writes only the proxy field on the CVO-seeded guest
+  `console.operator.openshift.io/cluster` resource, plus its CA copy, using
+  destination-local references.
+- A CA bundle content change triggers an OAuth API server Deployment rollout,
+  because the sidecar does not hot-reload trust.
+
+### Regression and Upgrade Coverage
+
+Keep coverage for integrated OAuth clusters and for External OIDC clusters that
+do not configure a component proxy. Standard upgrade jobs cover the feature
+disabled. Feature-enabled upgrade and rollback scenarios run in development jobs
+under `TechPreviewNoUpgrade`, which is not a promise of supported Tech Preview
+upgrades; release upgrade coverage is added before GA.
 
 ## Graduation Criteria
 
