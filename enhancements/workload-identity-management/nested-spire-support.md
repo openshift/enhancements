@@ -21,9 +21,9 @@ tracking-link:
 
 ## Summary
 
-This enhancement adds [nested SPIRE](https://spiffe.io/docs/latest/planning/scaling_spire/#nested-spire) support to the Zero Trust Workload Identity Manager (ZTWIM) operator. A SPIRE server in one OpenShift cluster obtains its signing CA from a SPIRE server in another cluster instead of self-signing.
+This enhancement introduces new configuration fields to the Zero Trust Workload Identity Manager (ZTWIM) operator to support [nested SPIRE](https://spiffe.io/docs/latest/planning/scaling_spire/#nested-spire) topologies. With this enabled, a downstream SPIRE server in one OpenShift cluster obtains its intermediate signing CA from an upstream SPIRE server in another cluster, rather than generating its own CA.
 
-Both servers share a single trust domain and form a certificate hierarchy: the upstream server holds the top-level signing CA (self-signed or itself chained to an external PKI), each downstream server holds an intermediate signed by it, and X.509 workload SVIDs chain back to a common root of trust. JWT-SVIDs are verified using signing keys propagated across the topology.
+All servers in the topology share a single trust domain and form a certificate hierarchy: the upstream server holds the top-level signing CA (self-signed or chained to an external PKI), each downstream server holds an intermediate CA signed by the upstream server, and X.509 workload SVIDs chain back to a common root of trust. JWT-SVIDs are verified using signing keys propagated across the topology.
 
 On a downstream cluster the operator adds `spire` to `SpireServer.spec.upstreamAuthority` and manages the upstream agent and SPIFFE CSI driver the plugin needs. On an upstream cluster it adds `spec.grpcEndpoint` (Route to the server gRPC API) and `spec.nestedSpire` (downstream cluster registration). `grpcEndpoint` is separate from `nestedSpire` so the administrator can choose operator-managed Route creation (`managedRoute: "true"`) or supply their own Route (`managedRoute: "false"`).
 
@@ -43,15 +43,7 @@ The word "upstream" is overloaded in SPIRE. This document uses these terms consi
 
 Organizations running multiple OpenShift clusters need workload identities that chain to a single root of trust so that cross-cluster mTLS works transparently: peers verify each other's SVIDs against one CA hierarchy without federation configuration or hand-distributed workload certificates.
 
-ZTWIM deploys one independent SPIRE server per cluster. Each server self-signs its CA unless configured with the `certManager` or `vault` UpstreamAuthority plugin. Nested SPIRE is the SPIFFE-native way to unify the hierarchy across clusters while SPIRE itself owns issuance and rotation on the nested portion of the chain.
-
-Today, achieving nested SPIRE on OpenShift requires manual work outside the operator: enabling `CREATE_ONLY_MODE`, patching generated ConfigMaps, deploying upstream agents and CSI drivers by hand, and creating `ClusterStaticEntry` objects manually. That setup has no reconciliation, no self-healing, and blocks normal OLM upgrades.
-
-This enhancement replaces that with declarative `SpireServer` fields, full operator lifecycle management, and compatibility with standard OLM upgrades (no `CREATE_ONLY_MODE` required).
-
-In a fleet sharing a single trust domain, a workload's SPIFFE ID means the same thing and validates against the same root wherever it runs.
-
-With nested SPIRE, an upstream cluster outage does not immediately stop downstream clusters: they keep issuing SVIDs from their already-signed intermediate CA.
+Support for nested SPIRE topologies enables scalable, highly available workload identity management across multi-cluster environments without a shared global datastore. It allows downstream servers to issue identities under a single trust domain, improving resilience and segmenting failure domains across distinct infrastructure boundaries.
 
 ### User Stories
 
