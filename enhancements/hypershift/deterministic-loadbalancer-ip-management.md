@@ -47,20 +47,11 @@ The `spec.services` immutability CEL rule is migrated from deep-equality to
 per-field granular rules, enabling `serviceAnnotations` to be mutable while
 keeping all existing fields immutable.
 
-For Day 2 IP migration, two complementary mechanisms:
-
-1. **Ignition Endpoint + HAProxy Sidecar** (zero-rollout path): A new
-   unauthenticated `/kas-ip` endpoint on the existing ignition server exposes the
-   current KAS IP. A sidecar container in the HAProxy static pod polls this
-   endpoint and hot-reloads HAProxy when the IP changes. No worker rollout needed.
-   Requires the `DeterministicLBIP` feature gate and a prerequisite change routing
-   kubelet through HAProxy.
-
-2. **Transition Service** (rollout-based fallback): For clusters on older versions
-   without the sidecar, or when the feature gate is disabled, a temporary
-   `kube-apiserver-transition` Service maintains the old IP while the main Service
-   moves to the new IP, with progressive worker rollout managed by existing NodePool
-   machinery.
+For Day 2 IP changes, a new unauthenticated `/kas-ip` endpoint on the existing
+ignition server exposes the current KAS IP. A sidecar container in the HAProxy
+static pod polls this endpoint and hot-reloads HAProxy when the IP changes. No
+worker rollout, no extra Services, no migration state. Requires all NodePools at
+5.1+ (enforced by `ValidLoadBalancerIPConfiguration` condition).
 
 ## Motivation
 
@@ -102,7 +93,7 @@ cluster failure due to worker nodes losing API server connectivity.
 - Allow Day 1 deterministic IP/pool assignment for kube-apiserver LB across all
   LB providers.
 - Support controller selection for management clusters with multiple LB controllers.
-- Support Day 2 IP migration with zero worker connectivity loss.
+- Support Day 2 IP changes via sidecar hot-reload (no worker rollout).
 - Enforce an allowlist: only known, tested providers are accepted by default.
 - Maintain backward compatibility: clusters without the new fields behave identically.
 
@@ -195,7 +186,7 @@ estimator uses worst-case list size (~30K elements), which would exceed the budg
 - **HostedCluster controller:** Mirrors HC spec to HCP, copies kubeconfig Secrets,
   mirrors HCP conditions to HC status, relays annotations HC→HCP.
 - **CPO (Control Plane Operator):** Reconciles control plane components including
-  KAS Service, TLS certificates, and the new Transition Service.
+  KAS Service and TLS certificates.
 - **NodePool controller:** Renders HAProxy ignition config, computes rollout hash,
   manages progressive rollouts.
 - **LB Provider:** External controller (MetalLB, F5 CIS, AWS LB Controller, etc.)
@@ -430,154 +421,37 @@ If the ignition server Route is unreachable:
   ignition server availability issues.
 - No new condition needed for this case.
 
-#### Day 2: Any serviceAnnotations Change (Transition Service Always)
+#### Day 2: serviceAnnotations Change (Sidecar Handles It)
 
-The Transition Service is created **on every `serviceAnnotations` change**,
-regardless of whether the change affects the LB IP. Because annotations are
-opaque (CPO does not know which annotations control IP assignment), the safe
-default is to always create the safety net.
+Day 2 IP changes are handled entirely by the sidecar — no extra Services, no
+migration state machine, no rollout:
 
-**Rationale**: The cost of an unnecessary Transition Service is one extra
-Service object that gets cleaned up after the rollout. The cost of a missing
-Transition Service is worker connectivity loss. Always-on is the correct
-tradeoff for an opaque annotation map.
+1. Administrator changes `serviceAnnotations` on the HostedCluster.
+2. HO mirrors to HCP.
+3. CPO applies new annotations to the KAS Service (per-key write).
+4. LB provider assigns new IP.
+5. CPO updates `HCP.Status.ControlPlaneEndpoint.Host` with new IP.
+6. On each worker, sidecar polls `/kas-ip` → detects change → writes new IP →
+   `SIGUSR2` → HAProxy reloads seamlessly.
+7. Done. No rollout, no extra Service. The ignition content hash is stable
+   because the HAProxy template uses a fixed placeholder for
+   `ExternalAPIAddress` when the sidecar is enabled (see "Hash stability"
+   in "HAProxy and Worker Rollouts" below).
 
-**Detection**: CPO iterates over each key in the HCP spec's `serviceAnnotations`
-and compares its value with the same key on the KAS Service. Annotations owned
-by other controllers (e.g., MetalLB's `ip-allocated-from-pool`) are ignored —
-only user-managed keys from the spec are evaluated. If `serviceAnnotations` did
-not previously exist on the spec (first-time assignment), any non-empty map is
-treated as a change. If any spec key differs from the Service value → trigger
-the Transition Service flow.
+**Brief connectivity window**: Between the LB assigning the new IP (step 4) and
+the sidecar picking it up (step 6), HAProxy still points to the old IP. This
+window is bounded by the sidecar poll interval (default 30s). Kubelet has
+built-in retry logic — API requests fail and retry within seconds. This is an
+accepted tradeoff for the massive simplification of not needing a Transition
+Service.
 
-##### Flow
+**Prerequisite**: All NodePools must be at 5.1+ (have the sidecar). The
+`ValidLoadBalancerIPConfiguration` condition blocks Day 2 changes when any
+NodePool lacks sidecar support — the user must upgrade those NodePools first.
 
-1. Administrator changes any annotation in `serviceAnnotations`.
-2. CEL validation checks `LBMigrationInProgress` condition — rejects if already
-   in progress.
-3. CPO reads the current KAS Service and snapshots it (annotations + status IP).
-4. CPO sets `LBMigrationInProgress=True` condition on HCP.
-5. CPO creates `kube-apiserver-transition` Service:
-   - Copies the **old annotations** (snapshot from step 3) and the same
-     `loadBalancerClass`.
-   - Same label selector as main Service (both route to KAS pods).
-   - The LB controller assigns the old IP to the transition Service (because it
-     has the same annotations that produced that IP).
-6. CPO applies the **new annotations** to the main KAS Service.
-7. LB provider reconciles: main gets new IP (or same IP if annotations were
-   non-IP-related), transition keeps old IP. Both Services active.
-8. CPO waits for main Service to receive new IP in
-   `Service.status.loadBalancer.ingress[0]`.
-9. CPO adds the new IP to KAS TLS cert SANs, keeping the old IP. Redeploys KAS.
-   Kubeconfig is NOT updated until KAS serves the new certificate.
-10. `ReconcileServiceStatus()` reads main Service → updates kubeconfig Secret →
-    HC controller copies to HC namespace → NodePool controller renders HAProxy →
-    hash changes → rollout triggered.
-11. Progressive rollout (paced by MaxUnavailable):
-    - Old workers: HAProxy → old IP → transition Service → KAS (connected)
-    - New workers: HAProxy → new IP → main Service → KAS (connected)
-12. All NodePools reach `UpdatingConfig=False` + `AllMachinesReady=True`.
-13. HC controller writes `lb-migration-rollout-complete` annotation on HCP.
-14. CPO deletes transition Service (old IP released). Optionally regenerates cert
-    without old IP SAN. Clears `LBMigrationInProgress`.
-
-##### When the IP didn't actually change
-
-If the annotation change was non-IP-related (e.g., monitoring annotation), then:
-- The transition Service gets the same IP as the main Service (same annotations
-  that produce the same IP).
-- The rollout hash does NOT change (kubeconfig unchanged) → no rollout triggered.
-- CPO detects no rollout is needed (NodePools already at target config) → skips
-  directly to cleanup → deletes transition Service → clears condition.
-- **Net effect**: a transition Service existed for one reconcile cycle. No harm.
-
-##### Edge case: Dynamic IP → Deterministic IP (first-time assignment)
-
-When a cluster transitions from no `serviceAnnotations` (dynamic IP assigned by
-LB controller) to deterministic annotations (specific IP), the Transition Service
-cannot preserve the old dynamic IP — the old annotations are empty and do not pin
-to any IP.
-
-**This path does NOT provide zero-loss migration.** Workers on the old dynamic IP
-lose API connectivity and are replaced via the normal rollout mechanism (drain +
-delete + create). This is identical to the initial cluster creation flow — it is
-a first-time assignment, not a migration.
-
-**Mitigation**: users are advised to set `serviceAnnotations` at cluster creation
-time (Day 1). Setting annotations on an existing cluster that never had them is
-treated as an initial configuration, not a protected migration. The zero-loss
-guarantee only applies to changes between two deterministic IP configurations
-(both old and new annotations exist).
-
-```mermaid
-sequenceDiagram
-    actor User
-    participant HC as HostedCluster
-    participant HCCtrl as HC Controller
-    participant HCP as HostedControlPlane
-    participant CPO as CPO
-    participant KAS as Main Service<br/>kube-apiserver
-    participant TransSvc as Transition Service<br/>kube-apiserver-transition
-    participant LB as LB Provider
-    participant NPCtrl as NodePool Controller
-    participant Workers as Worker Nodes
-
-    Note over User,Workers: Phase 1 — Preparation (CPO)
-    User->>HC: Update serviceAnnotations
-    HC->>HC: CEL validates: no LBMigrationInProgress
-    HCCtrl->>HCP: Mirror spec changes
-    CPO->>CPO: Snapshot current KAS Service<br/>(old annotations + status IP)
-    CPO->>HCP: Set LBMigrationInProgress=True
-    CPO->>TransSvc: Create with OLD annotations snapshot<br/>same label selector as main
-    CPO->>KAS: Apply NEW annotations
-    LB->>LB: Transition keeps old IP<br/>Main gets new IP
-
-    Note over User,Workers: Both IPs active — zero connectivity loss
-
-    Note over User,Workers: Phase 2 — Cert update + rollout trigger
-    CPO->>CPO: Wait for main Service<br/>Ingress[0] = IP Y
-    CPO->>CPO: Add IP Y to KAS TLS cert SANs (keep old IP X)
-    CPO->>KAS: Redeploy KAS with updated cert
-    CPO->>CPO: ReconcileServiceStatus reads main Service
-    CPO->>HCP: Update kubeconfig Secret with IP Y
-    HCCtrl->>HC: Copy kubeconfig Secret to HC namespace
-    NPCtrl->>NPCtrl: Read kubeconfig → render HAProxy template<br/>ExternalAPIAddress = IP Y
-    NPCtrl->>NPCtrl: Hash changed → trigger rollout
-
-    Note over Workers: Progressive rollout (MaxUnavailable)
-
-    par Old workers (not yet rolled)
-        Workers->>TransSvc: HAProxy → IP X → KAS pods ✓
-    and New workers (already rolled)
-        Workers->>KAS: HAProxy → IP Y → KAS pods ✓
-    end
-
-    NPCtrl->>HC: All NodePools: UpdatingConfig=False<br/>AllMachinesReady=True
-
-    Note over User,Workers: Phase 3 — Cleanup (CPO)
-    HCCtrl->>HCP: Write annotation: lb-migration-rollout-complete
-    CPO->>TransSvc: Delete (IP X released)
-    CPO->>CPO: Optional: regen cert without IP X SAN
-    CPO->>HCP: Clear LBMigrationInProgress<br/>remove rollout-complete annotation
-
-    Note over User,Workers: Migration complete — zero blind window
-```
-
-#### Day 2: Concurrent Change Protection
-
-CEL validation prevents `serviceAnnotations` changes while a migration is in
-progress. The rule is attached at the **HostedCluster resource root** (not
-`HostedClusterSpec`) because it needs access to both `spec.services` and
-`status.conditions`:
-
-```
-// +kubebuilder:validation:XValidation on HostedCluster (resource root):
-rule: "!has(oldSelf.status.conditions) ||
-       !oldSelf.status.conditions.exists(c,
-         c.type == 'LBMigrationInProgress' && c.status == 'True') ||
-       self.spec.services == oldSelf.spec.services"
-message: "cannot change services while LB migration is in progress"
-```
+**TLS cert update**: CPO adds the new IP to KAS cert SANs before the sidecar
+picks up the change. The cert is updated when `ControlPlaneEndpoint` changes,
+which happens before the sidecar polls on the next cycle.
 
 ### API Extensions
 
@@ -706,11 +580,6 @@ Annotations not matching any prefix produce a CEL validation error. Adding a
 new provider requires adding its prefix to the CEL rule — a conscious decision
 that includes E2E testing.
 
-#### New condition: LBMigrationInProgress
-
-A new HCP/HC status condition `LBMigrationInProgress` gates concurrent
-`serviceAnnotations` changes during Day 2 IP migration.
-
 #### New condition: ValidLoadBalancerIPConfiguration
 
 **Problem**: When `DeterministicLBIP` is enabled and `serviceAnnotations` are
@@ -753,8 +622,8 @@ operator (management cluster) and CPO (HCP namespace). No guest cluster componen
 are modified.
 
 - **Management cluster**: Modified API types on HostedCluster/HostedControlPlane.
-  CPO reconciler changes for KAS Service annotation passthrough, Transition Service
-  lifecycle, cert SAN management.
+  CPO reconciler changes for KAS Service annotation passthrough and cert SAN
+  management. Ignition server `/kas-ip` endpoint.
 - **Guest cluster**: No changes. Worker HAProxy configuration is managed via
   MachineConfig/Ignition from the management cluster.
 - **Split components**: The kubeconfig Secret is generated by CPO in the HCP
@@ -805,10 +674,10 @@ The annotation map covers all known LB providers without any HyperShift code cha
 
 New providers work immediately — the user adds annotations, HyperShift passes them through.
 
-#### IP Plumbing Chain (Day 2)
+#### IP Plumbing Chain (Day 2, without sidecar)
 
-When `serviceAnnotations` change causes the LB controller to assign a new IP,
-the new IP propagates through the existing chain without any new code:
+Without the sidecar, when `serviceAnnotations` change causes the LB controller
+to assign a new IP, the existing chain triggers a full worker rollout:
 
 ```
 LB controller assigns new IP
@@ -818,33 +687,42 @@ LB controller assigns new IP
   → HC controller copies kubeconfig to HC namespace
   → NodePool controller reads kubeconfig → renders HAProxy template
   → ExternalAPIAddress = new IP in haproxy.cfg
-  → ignition content hash changes (config.go:166)
+  → ignition content hash changes (config.go:277-278)
   → new MachineSet → worker rollout
 ```
 
-The rollout is automatic: the config hash includes `haproxyRawConfig`
-(`config.go:277-278`), so any IP change in the kubeconfig produces a new hash.
-No new hash logic or rollout trigger is needed.
+The config hash includes `haproxyRawConfig` (`config.go:324-325`), so any IP
+change in the kubeconfig produces a new hash → rolling replacement of all
+workers. This is the problem the sidecar solves.
 
-#### HAProxy and Worker Rollouts
+#### HAProxy and Worker Rollouts (with sidecar — zero rollout)
 
 HAProxy kube-apiserver-proxy is deployed as a static pod via MachineConfig/Ignition
 on each worker node. The external API address is baked into `haproxy.cfg`
 (`assets/haproxy.cfg:29`). HAProxy resolves DNS once at startup and caches forever
 — there is no `resolvers` section.
 
-**With sidecar (feature gate enabled)**: Day 2 IP changes are handled by the
-sidecar without worker rollout. The sidecar polls the ignition server `/kas-ip`
-endpoint and hot-reloads HAProxy via `SIGUSR2` (master-worker mode). The ignition
-hash does NOT change because the sidecar is always present in the manifest —
-only the runtime IP served by the endpoint changes.
+Day 2 IP changes are handled by the sidecar without worker rollout. The sidecar
+polls the ignition server `/kas-ip` endpoint and hot-reloads HAProxy via
+`SIGUSR2` (master-worker mode).
 
-**Without sidecar (feature gate disabled or pre-5.1 NodePools)**: Any change to
-the rendered ignition config changes the rollout hash (`config.go:166`) and
-triggers full node replacement (drain + delete + create, paced by
-MaxUnavailable). The Transition Service ensures zero connectivity loss during
-this rollout by maintaining the old IP active until all workers have been
-replaced with the new configuration.
+**Hash stability**: when the `DeterministicLBIP` feature gate is enabled and the
+sidecar is present, the NodePool controller must NOT read `ExternalAPIAddress`
+from the kubeconfig for the HAProxy template. Instead, it uses a fixed
+placeholder value (e.g., `0.0.0.0`). The init container always writes the real
+IP from `/kas-ip` before HAProxy starts, and the HAProxy startup script applies
+the override via `sed` before calling `exec haproxy`. Since the template value
+never changes, `haproxyRawConfig` is stable → the ignition content hash does not
+change → no rollout is triggered.
+
+This requires a change in `reconcileHAProxyIgnitionConfig()` (`haproxy.go:81`):
+when the feature gate is enabled, skip reading `apiServerExternalAddress` from
+the kubeconfig Secret (lines 90-113) and use the fixed placeholder instead.
+
+Day 2 IP changes require all NodePools at 5.1+ (with the sidecar). The
+`ValidLoadBalancerIPConfiguration` condition on the HostedCluster blocks the
+feature when any NodePool lacks sidecar support. Users must upgrade pre-5.1
+NodePools before changing `serviceAnnotations`.
 
 #### Controller Coordination
 
@@ -852,13 +730,12 @@ Existing communication channels are reused:
 - **CPO → HO**: HCP status conditions mirrored to HC (`hostedcluster_controller.go:783-893`)
 - **HO → CPO**: HC spec mirrored to HCP via the standard spec mirror in the
   HostedCluster controller. `spec.services` flows directly — no annotation relay
-  needed for the main configuration.
+  needed.
 
-New annotation to register in the relay:
-- `hypershift.openshift.io/lb-migration-rollout-complete` — cleanup signal from HO to CPO
-
-Precedent: `AWSLoadBalancerSubnetsAnnotation` (`hostedcluster_controller.go:2873`)
-follows the exact same annotation relay pattern.
+No new annotations or relay entries needed. The sidecar-based Day 2 flow is
+entirely controller-internal: CPO updates the Service, the LB provider assigns
+the new IP, CPO updates `ControlPlaneEndpoint`, and the sidecar on each worker
+picks it up independently.
 
 #### Platform Independence
 
@@ -877,15 +754,39 @@ whatever LB controller runs on the management cluster itself.
 #### listType Migration Safety
 
 Changing `spec.services` from atomic to `+listType=map` with `+listMapKey=service`
-is documented as a backward-compatible schema change in Kubernetes API conventions.
-It changes how server-side apply handles field ownership (from whole-list to
-per-element), which is transparent for standard `kubectl apply` and client-go
-operations. Since `spec.services` is currently immutable and written once at
-creation, the risk of field ownership conflicts during upgrade is minimal.
+is required for per-element CEL transition rules — without map-key correlation,
+CEL cannot determine which old element corresponds to which new element, making
+per-field immutability rules on nested structs (e.g., `hostname`,
+`loadBalancerClass` on `LoadBalancerPublishingStrategy`) impossible.
 
-The `+kubebuilder:validation:MaxItems=6` constraint is backward-compatible —
-the `ServiceType` enum has exactly 6 values (APIServer, OAuthServer, OIDC,
-Konnectivity, Ignition, OVNSbDb), so no existing cluster can exceed this limit.
+**Risks of the migration**:
+1. **Duplicate `service` keys**: An atomic list does not enforce uniqueness.
+   Changing to `listType=map` introduces a uniqueness constraint on the
+   `service` key. If any existing HostedCluster has duplicate entries, that
+   object becomes invalid under the new CRD. In practice, HyperShift generates
+   `spec.services` programmatically (one entry per `ServiceType` enum value) and
+   the list is immutable after creation, making duplicates extremely unlikely —
+   but "unlikely" is not "proven."
+2. **Validation ratcheting**: Kubernetes explicitly excludes `x-kubernetes-list-type`
+   changes from validation ratcheting. An existing object that violates the new
+   topology is rejected on any update, even if the `services` field itself is
+   unchanged.
+3. **SSA field ownership**: The topology change alters server-side apply
+   ownership from whole-list to per-element. Since `spec.services` is immutable
+   and written once, ownership conflicts during upgrade are minimal.
+
+**Mitigation**:
+1. **Pre-upgrade validation**: The upgrade procedure must verify that all
+   existing HostedCluster objects have unique `service` keys in `spec.services`.
+   If any duplicates are found, the upgrade is blocked until they are resolved
+   (manual patch to remove the duplicate entry).
+2. **E2E upgrade test**: An E2E test creates an HC under the old CRD (atomic
+   list), upgrades to the new CRD (map list), and verifies: the object is valid,
+   unrelated updates succeed, and reconciliation continues normally.
+
+The `+kubebuilder:validation:MaxItems=6` constraint is safe — the `ServiceType`
+enum has exactly 6 values (APIServer, OAuthServer, OIDC, Konnectivity, Ignition,
+OVNSbDb), so no existing cluster can exceed this limit.
 
 ### Risks and Mitigations
 
@@ -894,31 +795,26 @@ Konnectivity, Ignition, OVNSbDb), so no existing cluster can exceed this limit.
 | **User provides invalid annotations** | LB provider ignores unknown annotations. Service stays Pending. Existing conditions surface the failure. Documented. |
 | **Reconciliation stripping user annotations** | Confirmed per-key writes at `service.go:67-68`. Unit tests will verify annotation preservation. |
 | **Unknown provider needed** | Adding a provider prefix to the allowlist is a one-line CEL change with E2E test. Turnaround is one release cycle. |
-| **Transition Service on non-IP changes** | By design: always create Transition Service on any `serviceAnnotations` change. Cost is one extra Service object cleaned up after rollout. No harm when IP doesn't actually change. |
-| **Transition Service IP race** | CPO snapshots current Service before applying changes. Creates transition with old annotations first, then applies new annotations. LB controller processes sequentially. |
-| **Dynamic→deterministic first-time assignment** | Transition Service cannot pin old dynamic IP (no old annotations). Documented as first-time assignment — rollout without safety net, same as initial provisioning. |
-| **Rollout failure leaves dangling transition Service** | Safe degraded state — both Services active. Manual cleanup documented. |
+| **Brief connectivity window on Day 2** | Between LB assigning new IP and sidecar detecting it (up to poll interval, default 30s), HAProxy points to old IP. Kubelet retries. Accepted tradeoff for eliminating Transition Service complexity. |
 | **No type safety on annotations** | Deliberate tradeoff. Allowlist constrains which providers are accepted; annotation value correctness is the user's responsibility — same as setting annotations directly on any K8s Service. |
-| **listType migration** | Backward-compatible per K8s conventions. `spec.services` is write-once today. `maxItems=6` matches the enum. Validated with api-approver. |
+| **listType migration** | Required for per-element CEL transition rules. Pre-upgrade validation verifies no existing HCs have duplicate `service` keys. `maxItems=6` matches the enum. |
 | **Per-field immutability drift** | New fields in `ServicePublishingStrategy` are mutable by default. If a field must be immutable, the developer adds one CEL line. CI test verifies all existing fields retain immutability. |
 | **Ignition server endpoint unreachable** | Sidecar retries indefinitely. HAProxy continues with last known IP. Existing `IgnitionEndpointAvailable` condition surfaces the issue. No data plane impact until the next IP change. |
 | **HAProxy as SPOF for kubelet** | Kubelet → HAProxy (172.20.0.1) makes HAProxy a dependency for kubelet connectivity. Mitigated: HAProxy is a static pod started from local manifests — runs as long as kubelet runs. Tech lead accepted tradeoff. |
-| **Mixed NodePool versions** | `ValidLoadBalancerIPConfiguration` condition warns when NodePools don't support the sidecar. Transition Service provides fallback for pre-5.1 NodePools. |
+| **Mixed NodePool versions** | `ValidLoadBalancerIPConfiguration` condition blocks Day 2 when any NodePool lacks sidecar support. User must upgrade pre-5.1 NodePools first. |
 
 ### Drawbacks
 
 - No type safety or `oc explain` discoverability for provider-specific fields.
   Users must know their LB provider's annotation schema. The allowlist ensures
   only known providers are accepted by default.
-- The Transition Service pattern adds reconciler complexity. However, it reuses
-  existing patterns (`createOrUpdate`, condition mirroring) and the alternative
-  (worker connectivity loss) is unacceptable.
-- Day 2 IP changes trigger worker rollouts. This is a pre-existing constraint
-  (HAProxy config is part of ignition), not introduced by this enhancement.
-  The Transition Service mitigates connectivity loss during rollouts.
+- Day 2 IP changes have a brief connectivity window (up to sidecar poll interval)
+  between the LB assigning the new IP and the sidecar detecting it. Kubelet
+  retry logic handles this. This is the accepted tradeoff for eliminating the
+  Transition Service complexity.
+- Day 2 requires all NodePools at 5.1+. Mixed-version clusters cannot use Day 2.
 - The `listType` migration and CEL rule rewrite add upgrade complexity. Mitigated
-  by the fact that `spec.services` is write-once and the changes are
-  backward-compatible.
+  by pre-upgrade validation and the fact that `spec.services` is write-once.
 
 ## Alternatives (Not Implemented)
 
@@ -1006,15 +902,16 @@ passthrough approach. See `OCPSTRAT-2653/research-mgmt-cluster-discovery.md`.
 - CEL immutability: existing fields (service, type, hostname, loadBalancerClass,
   nodePort, route) remain immutable after migration.
 - CEL mutability: `serviceAnnotations` can be changed on update.
-- CEL migration guard: rejects changes during `LBMigrationInProgress`.
 - Annotation preservation: external annotations survive reconciliation loops.
-- Transition Service lifecycle: create, serve during rollout, cleanup after.
 - `listType=map` behavior: adding/removing services entries is blocked by
   list-level CEL rules (`oldSelf.all(...)` / `self.all(...)`).
 - Ignition server `/kas-ip` endpoint: returns correct IP from HCP status,
   responds without auth, handles missing HCP.
 - HAProxy manifest generation: when feature gate enabled, manifest includes
   init container, sidecar, `shareProcessNamespace`, and shared `emptyDir` volume.
+- HAProxy hash stability: when feature gate enabled, `haproxyRawConfig` does not
+  change when the kubeconfig IP changes — `ExternalAPIAddress` uses a fixed
+  placeholder, not the live kubeconfig value.
 - `ValidLoadBalancerIPConfiguration` condition: set to `False` when any NodePool
   lacks `ValidLoadBalancerIPSupport`, `True` when all support it, removed when
   feature is not configured.
@@ -1027,8 +924,8 @@ passthrough approach. See `OCPSTRAT-2653/research-mgmt-cluster-discovery.md`.
 - Day 2 (sidecar): Change IP annotations, verify sidecar detects new IP from
   `/kas-ip` endpoint, HAProxy reloads without worker rollout, kubelet maintains
   connectivity via 172.20.0.1.
-- Day 2 (Transition Service): Change IP annotations on pre-5.1 NodePool, verify
-  Transition Service keeps old workers connected during rollout, cleanup after.
+- Day 2 blocked on pre-5.1: Verify `ValidLoadBalancerIPConfiguration=False`
+  prevents Day 2 IP changes when pre-5.1 NodePools exist.
 - Scale-up after IP change: Add node to cluster where IP has changed since
   creation. Verify init container gets current IP from `/kas-ip`, node joins
   successfully without chicken-and-egg.
@@ -1061,7 +958,7 @@ passthrough approach. See `OCPSTRAT-2653/research-mgmt-cluster-discovery.md`.
 - Ignition server `/kas-ip` endpoint implemented.
 - HAProxy sidecar + init container in static pod manifest.
 - Day 2 zero-rollout via sidecar verified in E2E.
-- Day 2 Transition Service flow implemented and tested (fallback path).
+- Day 2 blocked on pre-5.1 NPs verified (ValidLoadBalancerIPConfiguration).
 - `ValidLoadBalancerIPConfiguration` cross-resource condition implemented.
 - CEL allowlist validation.
 - Load testing with multiple concurrent HostedClusters.
@@ -1093,17 +990,27 @@ changes would require manual annotation management.
 
 ## Version Skew Strategy
 
-During upgrade, the HostedCluster controller and CPO may run different versions:
+The feature requires **both HO and CPO at the minimum version** (the release
+that introduces `serviceAnnotations` and `loadBalancerClass`). During upgrade,
+the components may temporarily run different versions:
 
-- **Old HO + New CPO**: CPO reads `serviceAnnotations` from HCP's
-  `LoadBalancerPublishingStrategy` (mirrored by HO). If HO doesn't know about
-  the field, it's passed through as unstructured data in the spec.
-- **New HO + Old CPO**: CPO ignores unknown fields. No annotations are set.
-  Cluster behaves as before. No harm.
+- **Old HO + New CPO**: Old HO deserializes the HostedCluster into typed Go
+  structs that lack the new fields (`loadBalancerClass`, `serviceAnnotations`).
+  The struct assignment `hcp.Spec.Services = hcluster.Spec.Services`
+  (`hostedcluster_controller.go:3005`) silently drops the unknown fields — this
+  is **not** an unstructured passthrough, it is data loss. CPO sees no
+  `serviceAnnotations` on HCP → feature is inactive. Day 1 provisioning works
+  (no annotations = dynamic IP, same as today). Day 2 is impossible: even if the
+  user sets annotations on HC, they never reach HCP. This is a safe degraded
+  state — the feature is simply unavailable during version skew.
+- **New HO + Old CPO**: HO mirrors new fields to HCP correctly. Old CPO ignores
+  unknown fields. No annotations are set on the Service. Feature inactive. Safe.
+- **Both at new version**: Feature fully functional.
 
-The Transition Service is managed entirely by CPO — no cross-version coordination
-needed. The cleanup annotation relay uses existing HC controller annotation
-mirroring, which is version-independent.
+**Day 2 gating**: CPO must verify that the new fields are present on HCP before
+applying annotations to the KAS Service. If `serviceAnnotations` is set on HC
+but absent on HCP (indicating old HO is dropping them), CPO does not act. The
+`ValidLoadBalancerIPConfiguration` condition on HC reflects this state.
 
 ## Operational Aspects of API Extensions
 
@@ -1111,7 +1018,7 @@ mirroring, which is version-independent.
   `HostedControlPlane` types.
 - **Webhooks**: No new webhooks. All validation via CEL on CRD.
 - **SLIs**: IP assignment success can be monitored via `Service.Status.LoadBalancer.Ingress`
-  population time. Migration progress via `LBMigrationInProgress` condition.
+  population time.
 - **Failure mode**: If LB provider fails to assign requested IP (e.g., IP already
   in use, pool exhausted, invalid annotation), the Service stays in Pending state.
   Existing `ExternalDNSReady` and `Available` conditions on HC surface this. No
@@ -1126,10 +1033,10 @@ mirroring, which is version-independent.
   assignment errors.
 - **Diagnose**: `oc get svc kube-apiserver -n <hcp-namespace> -o yaml` — verify
   annotations are correct and match the LB provider's expected format. Check HC
-  status conditions for `LBMigrationInProgress` (stuck migration).
-- **Remediate stuck migration**: If `LBMigrationInProgress` is stuck True, check
-  NodePool conditions for rollout progress. If rollout is stuck, address the
-  underlying NodePool issue. The transition Service keeps old workers connected.
+  status conditions for `ValidLoadBalancerIPConfiguration`.
+- **Day 2 not working**: Verify all NodePools are 5.1+ (have sidecar). Check
+  `ValidLoadBalancerIPConfiguration` condition. Verify ignition server Route is
+  reachable from workers (`IgnitionEndpointAvailable` condition).
 - **Disable**: Remove `serviceAnnotations` and `loadBalancerClass` from the
   APIServer service entry. CPO stops setting LB-related annotations. LB provider
   falls back to default behavior (dynamic IP).
