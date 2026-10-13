@@ -11,7 +11,7 @@ approvers:
 api-approvers:
   - "@everettraven" # For the Console Operator changes.
 creation-date: 2026-09-10
-last-updated: 2026-10-08
+last-updated: 2026-10-13
 status: provisional
 tracking-link:
   - "https://redhat.atlassian.net/browse/OCPSTRAT-3721"
@@ -496,8 +496,10 @@ administrators; they are listed here only to distinguish them from the API
 additions:
 
 - The webhook's generated `AuthenticationConfiguration` file gains a
-  `proxyTrustedCA` path pointing at the mounted proxy CA bundle (the proxy URLs
-  themselves are passed as environment variables). See
+  `trustedCAFilePath` pointing at a mounted generic CA bundle trusted for outbound
+  HTTPS requests and connections to HTTPS proxies. This enhancement supplies the
+  component proxy CA through that field; proxy URLs themselves are passed as
+  environment variables. See
   [OAuth API Server Deployment and Trust](#oauth-api-server-deployment-and-trust).
 - Console Operator renders `Console.spec.authProxy` into an `auth.proxy` block in
   Console's generated `console-config.yaml`, holding the proxy URLs, resolved
@@ -510,7 +512,7 @@ match the operator-managed CA mount:
 ```yaml
 apiVersion: authentication.openshift.io/v1alpha1
 kind: AuthenticationConfiguration
-proxyTrustedCA: /var/auth-proxy-ca/ca-bundle.crt
+trustedCAFilePath: /var/auth-proxy-ca/ca-bundle.crt
 ```
 
 For the Console operator resource shown above, Console Operator generates the
@@ -725,7 +727,7 @@ Existing components whose behavior changes:
 | Affected | Change |
 | --- | --- |
 | CAO | Resolves the component proxy; injects env + mounts CA on the webhook Deployment and validates the issuer through it (standalone). |
-| oauth-apiserver (webhook) | Reads `proxyTrustedCA`; outbound clients honor the proxy and trust; on HyperShift egress flows through the new sidecar. |
+| oauth-apiserver (webhook) | Reads the generic outbound CA bundle through `trustedCAFilePath` for HTTPS endpoint and proxy trust; outbound clients honor the proxy; on HyperShift egress flows through the new sidecar. |
 | CPO | Builds the webhook Deployment including the konnectivity sidecar flags and CA mount; validates the issuer via konnectivity + the component proxy (HyperShift). |
 | Console Operator | Reads the Console operator proxy field; renders `auth.proxy` and mounts the CA. |
 | Console | Applies `auth.proxy` to its OIDC clients only. |
@@ -842,21 +844,24 @@ management cluster and must egress through konnectivity (see
   `trustedCA` is omitted or the cluster-wide fallback applies). When `trustedCA` is
   set, CAO synchronizes the referenced ConfigMap from `openshift-config` into
   `openshift-oauth-apiserver` and mounts it read-only; the generated webhook
-  configuration references the mounted bundle through `proxyTrustedCA`.
+  configuration references the mounted bundle through `trustedCAFilePath`.
 - **HyperShift.** CPO does not set the external proxy as container env — that env
   already points at the konnectivity sidecar. Instead it configures the webhook pod's
   `konnectivity-https-proxy` sidecar with the component proxy (`--https-proxy`,
   `--http-proxy`, `--no-proxy`). When `trustedCA` is configured, CPO mounts the bundle
-  in both the sidecar and webhook container, referencing it through `proxyTrustedCA`
+  in both the sidecar and webhook container, referencing it through `trustedCAFilePath`
   in the webhook configuration. They validate different certificates as described
   below.
 
 The webhook's existing HTTP clients already honor proxy environment variables,
 so proxy URLs do not require new fields in its generated configuration file.
 
-Issuer and external-source CA configuration continue to describe trust for those
-endpoints. The component proxy CA supplies additional trust for an HTTPS proxy or
-a TLS-intercepting proxy; it does not replace endpoint configuration.
+`trustedCAFilePath` is a generic outbound trust input: its CA bundle is trusted
+for outbound HTTPS endpoint requests, whether direct or proxied, and connections
+to HTTPS proxies. It can contain endpoint CAs, proxy server CAs, and interception
+CAs. This enhancement populates it with the component proxy CA bundle. Issuer and
+external-source CA configuration continue to describe trust for those endpoints;
+the generic bundle supplies additional trust alongside that configuration.
 
 ##### TLS Connections and Certificate Validation
 
@@ -891,7 +896,7 @@ HTTP versus HTTPS here refers to the proxy URL scheme, not the endpoint scheme o
 the `httpsProxy` field name. If the required CAs are not already trusted, the
 `trustedCA` bundle must contain their public certificates.
 Mounting the bundle only on the sidecar is insufficient for TLS interception:
-the webhook must also load it through `proxyTrustedCA`.
+the webhook must also load it through `trustedCAFilePath`.
 
 #### Console Login and Token Refresh
 
@@ -946,11 +951,12 @@ the [hosted distribution path](#hypershift--hosted-control-planes) adds HyperShi
 operator and HCCO synchronization. CAO/CPO also refresh the trust used for issuer
 validation.
 
-Console and the standalone webhook watch the mounted proxy CA file and apply
-valid trust updates atomically to all affected authentication clients, without
-restarting or changing unrelated clients. New TLS connections must use the updated
-trust. Invalid updates are reported while retaining the last successfully loaded
-trust bundle; certificate verification must not be disabled.
+Console watches its mounted proxy CA file; the standalone webhook watches the
+generic outbound CA bundle referenced by `trustedCAFilePath`. They apply valid
+trust updates atomically to the clients using those bundles without restarting.
+New TLS connections must use the updated trust. Invalid updates are reported
+while retaining the last successfully loaded trust bundle; certificate
+verification must not be disabled.
 
 On HyperShift, `konnectivity-https-proxy` does not hot-reload its proxy CA trust.
 CPO must therefore roll out the OAuth API server Deployment when the referenced
@@ -1288,8 +1294,8 @@ described in [Support Procedures](#support-procedures).
 ## Version Skew Strategy
 
 Unlike the preceding proposal, this change spans multiple operators and operands.
-CAO and CPO must generate the optional proxy CA configuration only for webhook
-images that understand it. Console Operator must likewise pair its generated CA
+CAO and CPO must generate `trustedCAFilePath` only for webhook images that
+understand it. Console Operator must likewise pair its generated CA
 and `auth.proxy` configuration with a compatible Console image. New operands must
 continue to accept configuration that omits the new inputs, retaining Console's
 existing environment-based fallback when `auth.proxy` is absent. Mixed old and new
