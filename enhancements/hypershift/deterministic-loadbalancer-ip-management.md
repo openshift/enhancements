@@ -586,10 +586,17 @@ message: "cannot change services while LB migration is in progress"
 ```go
 // LoadBalancerPublishingStrategy specifies settings used to expose a service
 // as a LoadBalancer.
+//
+// Immutability rules for optional fields are placed HERE (on the parent struct)
+// rather than on the fields themselves. CEL transition rules on optional/pointer
+// fields are skipped when the field is absent in the new object, which allows a
+// bypass: set → unset → set-different. Rules on the parent are always evaluated.
+//
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.hostname) || (has(self.hostname) && self.hostname == oldSelf.hostname)",message="hostname is immutable once set"
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.loadBalancerClass) || (has(self.loadBalancerClass) && self.loadBalancerClass == oldSelf.loadBalancerClass)",message="loadBalancerClass is immutable once set"
 type LoadBalancerPublishingStrategy struct {
     // hostname is the name of the DNS record that will be created pointing
     // to the LoadBalancer.
-    // +kubebuilder:validation:XValidation:rule="!has(oldSelf) || self == oldSelf",message="hostname is immutable once set"
     // +optional
     Hostname string `json:"hostname,omitempty"`
 
@@ -600,7 +607,6 @@ type LoadBalancerPublishingStrategy struct {
     // Immutable after creation — matches Kubernetes semantics.
     //
     // +optional
-    // +kubebuilder:validation:XValidation:rule="!has(oldSelf) || self == oldSelf",message="loadBalancerClass is immutable once set"
     LoadBalancerClass *string `json:"loadBalancerClass,omitempty"`
 
     // serviceAnnotations is a map of annotations passed through to the
