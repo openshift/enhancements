@@ -1053,6 +1053,16 @@ The cert-manager controller watches the `ApproverPolicyManager` CR. On each reco
   (`ctrl.Result{Requeue: true}`). The `Watches()` trigger fires again when the ApproverPolicyManager CR status
   is updated.
 
+**Conflicting controller overrides:** While disable intent is recorded or handoff completion is latched,
+`spec.unsupportedConfigOverrides.controller.args` must not re-enable `certificaterequests-approver`.
+If the final controller selection would enable it (for example, `--controllers=*`), the operator blocks
+the conflicting Deployment update, retains disable intent and keeps the default approver RBAC absent.
+It reports a conflict in CertManager status and retries after the administrator removes the override or
+changes it to exclude the built-in approver. Initial `autoApproverDisabled` remains false or absent;
+a previously completed true value stays latched while the manager exists, with the conflict reported
+through conditions. Compatible controller selections and unrelated overrides, including TLS overrides,
+retain their existing behavior. The operator does not silently rewrite the conflicting user override.
+
 #### Webhook TLS Management
 
 approver-policy manages its own webhook TLS certificates using cert-manager's
@@ -1665,6 +1675,12 @@ None
   - After completion, verify a request disallowed by an applicable policy cannot be default-approved.
   - Verify no-policy installation leaves requests pending after disablement until a policy and RBAC exist
     (assuming no other approver); document the existing-policy transition limitation.
+
+- **Conflicting controller override tests:**
+  - Verify an unsupported override that enables `certificaterequests-approver` blocks the Deployment
+    update, reports the conflict, retains intent/removed RBAC and withholds initial completion.
+  - Verify correcting/removing the override resumes handoff; compatible controller selections and
+    unrelated overrides remain effective. A conflict after completion must not clear the true latch.
 
 - **Latch persistence test:**
   - Verify that after the latch is engaged (auto-approver disabled), a transient `Ready=False` on the
