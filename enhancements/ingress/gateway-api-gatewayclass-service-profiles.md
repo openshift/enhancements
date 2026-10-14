@@ -99,12 +99,7 @@ internal IngressControllers.
 
 As a cluster administrator, I want to create a Gateway with a
 ClusterIP service, so that I can use Gateway API for
-cluster-internal traffic or expose the Gateway through an existing
-OpenShift Route without provisioning another load balancer.
-
-This supports patterns such as the ClusterIP Gateway behind an
-OpenShift Route documented by
-[Models-as-a-Service](https://opendatahub-io.github.io/models-as-a-service/v2.0.1/configuration-and-management/gateway-patterns/).
+cluster-internal traffic without provisioning a load balancer.
 
 #### Story 4: Operations at Scale
 
@@ -143,9 +138,6 @@ monitor the provisioned Gateways through existing telemetry.
   provisioning) for building the GatewayClass defaults, rather
   than creating new logic from scratch.
 - Support backporting to previous OCP versions.
-- Support the Models-as-a-Service pattern of exposing a ClusterIP
-  Gateway through an OpenShift Route, using existing ingress
-  infrastructure without provisioning an additional load balancer.
 - Establish a foundation for a future OpenShift API that lets
   administrators combine supported GatewayClass customization settings.
 
@@ -163,6 +155,8 @@ monitor the provisioned Gateways through existing telemetry.
   service).
 - Support or block users directly referencing Istio patch ConfigMaps through
   `Gateway.spec.infrastructure.parametersRef`.
+- Support the Models-as-a-Service use case of exposing a ClusterIP Gateway
+  through an OpenShift Route.
 
 ## Proposal
 
@@ -806,9 +800,7 @@ Testing will cover the following scenarios:
 13. On AWS, verify that the Gateway Deployment pod template
     includes the `proxy.istio.io/config` annotation with PROXY
     protocol configuration.
-14. Verify that an `openshift-clusterip` Gateway can be exposed
-    through an OpenShift Route (Models-as-a-Service pattern).
-15. Verify that deleting `openshift-default` with no other user-created,
+14. Verify that deleting `openshift-default` with no other user-created,
     non-managed GatewayClasses deletes the managed profiles and their defaults
     ConfigMaps and uninstalls Istio/OSSM.
 
