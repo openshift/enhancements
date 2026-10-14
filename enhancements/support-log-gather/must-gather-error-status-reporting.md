@@ -764,6 +764,59 @@ A report with an unsupported major `schemaVersion` must be treated as unavailabl
 
 Custom images passed through `oc adm must-gather --image` and `--all-images` are **recommended but not required** to produce `status.json`. Custom images without a report continue to use Job-only fallback in Phase 2.
 
+#### Effect on Custom Images
+
+Custom must-gather images — those provided by component teams, ISVs, or customers and invoked via `oc adm must-gather --image=<image>` — are not modified by this enhancement. This section describes the effect of Phase 1 and Phase 2 changes on custom images across all usage scenarios.
+
+##### No breakage to existing custom images
+
+Phase 1 changes are scoped entirely to the default must-gather image's `gather` entrypoint, collector scripts, and the new `status_reporting.sh` helper. Custom images that ship their own `gather` script and collectors are completely unaffected:
+
+* Their runtime behavior, exit codes, and archive layout are unchanged.
+* They do not source `status_reporting.sh` and are not expected to.
+* No new environment variable, volume mount, or entrypoint contract is imposed on custom images.
+
+##### Absence of `status.json` is safe
+
+A custom image that does not produce `status.json` continues to work exactly as it does today. Consumers of the archive and the operator must not interpret a missing report as proof that collection failed. This principle is stated in Non-Goals and Resolved Decision #8. The absence of a report means only that the image has not adopted the reporting contract.
+
+##### Operator behavior with custom images (Phase 2)
+
+When the operator manages a gather Job that runs a custom image without `status.json`:
+
+* **Job lifecycle conditions work normally.** The operator syncs Pending, Running, Completed, and Failed conditions from the Job and Pod status regardless of whether `status.json` exists.
+* **CR status sets `reportAvailable: false`.** The `collectionReport` section indicates that no archive-level report was found.
+* **No per-collector visibility is available.** Support engineers must inspect the archive manually to determine collection completeness, as they do today.
+* **The archive is preserved.** A missing report never blocks archive delivery, upload, or cleanup.
+
+This matches the mapping rule defined in the Operator status section: "Job Succeeded, no report → Completed + `reportAvailable: false`."
+
+##### Multi-image scenarios
+
+`oc adm must-gather` supports multiple images through `--image` (one custom image) and the default image (no `--image` flag). When multiple images are used together:
+
+* Each image runs in its own Pod and produces its own archive directory.
+* The default must-gather image produces `status.json` covering only the collectors in its own `gather` workflow (the 28 top-level work units listed above).
+* Custom images produce their own archive directories without `status.json` unless they opt in.
+* There is no cross-image aggregation of `status.json` in v1. Each archive directory is self-contained.
+* The operator (Phase 2) reads `status.json` from the default image's output. Custom image archives are delivered as-is.
+
+##### Adoption path for custom image authors
+
+Custom image authors who want to produce `status.json` for their own collectors can adopt the reporting contract voluntarily. The recommended approach is:
+
+1. **Copy or vendor `status_reporting.sh`** from the default must-gather image into the custom image.
+2. **Source the helper** in the custom image's `gather` entrypoint: `source /path/to/status_reporting.sh`.
+3. **Initialize the report** at the start of collection with `status_init`.
+4. **Use `report_skip` and `report_error`** in collectors to report non-applicability and failures with stable error codes.
+5. **Finalize the report** after all collectors complete with `status_finalize`. This writes `status.json` atomically.
+6. **Use the same `schemaVersion: 1` format** so that the operator (Phase 2) can consume the report uniformly regardless of which image produced it.
+7. **Validate the output** against the schema to ensure the report is well-formed.
+
+The default `gather` script's per-PID wrapper pattern serves as a reference implementation. Custom images with simpler workflows (fewer collectors, no parallel execution) can use a subset of the reporting helpers.
+
+Custom images that adopt the contract gain the same benefits as the default image: per-collector visibility in the archive, operator-level collection quality reporting (Phase 2), and structured error information for support engineers. Custom images that do not adopt the contract continue to work without any degradation.
+
 #### Operator transport and lifecycle (Phase 2)
 
 The operator must obtain the report from the gather output before the output is removed or made inaccessible. The implementation should use the existing gather output path and archive/upload lifecycle rather than introducing a separate network service. The exact read point, cleanup ordering, and fallback behavior must be covered by operator tests.
