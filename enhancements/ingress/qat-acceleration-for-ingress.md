@@ -12,7 +12,7 @@ approvers:
 api-approvers:
   - "None"
 creation-date: 2026-10-07
-last-updated: 2026-10-09
+last-updated: 2026-10-14
 status: provisional
 tracking-link:
   - https://redhat.atlassian.net/browse/NE-2877
@@ -130,7 +130,11 @@ real-world feedback to inform the eventual supported interface.
   node pool to cover this is a capacity-planning and documentation concern
   for the administrator, not a guarantee this enhancement's implementation
   provides; a VF shortage during rollout surfaces as ordinary `Pending`
-  pods (see Support Procedures).
+  pods (see Support Procedures). As a rule of thumb for documentation: the
+  number of VFs needed across the matching QAT-capable node pool is at
+  least `replicas + maxSurge` - for example, 2 replicas with `maxSurge: 1`
+  needs at least 3 VFs available, since a rollout can briefly run both the
+  old and new pod for a given replica at once.
 
 ## Proposal
 
@@ -153,14 +157,17 @@ logic, and the cluster-ingress-operator:
   unconditionally. The package is small and inert on hardware without a QAT
   device, so no separate "QAT image" variant is needed.
 - The cluster-ingress-operator computes a single eligibility decision per
-  router deployment - the target node capability (a node matching the
-  IngressController's `spec.nodePlacement` actually advertises
-  `qat.intel.com/cy`, i.e., the Intel Device Plugin Operator has provisioned
-  virtual functions there) combined with RHCOS10/kernel compatibility
-  resolved from `MachineConfigPool` status (see Implementation Details) -
-  and, when eligible, sets both the `qat.intel.com/cy` resource request
-  *and* a `ROUTER_QAT=true` environment variable on the router container.
-  When not eligible (no matching QAT-capable node, or the admin has set the
+  router deployment, gated on three predicates: the target node capability
+  (a node matching the IngressController's `spec.nodePlacement` actually
+  advertises `qat.intel.com/cy`, i.e., the Intel Device Plugin Operator has
+  provisioned virtual functions there), a resolved kernel-compatibility
+  signal confirming RHCOS10/kernel compatibility (see Implementation
+  Details for how this signal is sourced), and the cluster not being in
+  FIPS mode (via `detectFIPS()`, see Implementation Details). Only when all
+  three hold does the operator set both the
+  `qat.intel.com/cy` resource request *and* a `ROUTER_QAT=true` environment
+  variable on the router container. When not eligible (no matching
+  QAT-capable node, incompatible kernel, FIPS mode, or the admin has set the
   unsupported opt-out), the operator sets neither, and the router does not
   attempt any QAT-related logic at all. The operator does not alter
   placement itself.
@@ -220,15 +227,17 @@ load-balances ingress traffic.
 4. Unless the administrator has set the unsupported opt-out described
    below, the cluster-ingress-operator checks whether a node matching the
    IngressController's `spec.nodePlacement` advertises the
-   `qat.intel.com/cy` resource in its allocatable capacity and is running a
-   kernel compatible with QAT (resolved from `MachineConfigPool` status; see
-   Implementation Details), and if so, automatically adds a matching
-   resource request and a `ROUTER_QAT=true` environment variable to the
-   router container. Neither is added otherwise. The operator continues to
-   watch `Node` objects afterward, so the resource request and environment
-   variable are added or removed as matching nodes' QAT advertisement
-   appears or disappears (for example, as the Intel Device Plugin Operator
-   finishes provisioning virtual functions).
+   `qat.intel.com/cy` resource in its allocatable capacity, is running a
+   kernel compatible with QAT (per the resolved kernel-compatibility signal;
+   see Implementation Details), and that the cluster is not in FIPS mode (via
+   `detectFIPS()`; see Implementation Details). Only if all three hold does
+   it automatically add a matching resource request and a `ROUTER_QAT=true`
+   environment variable to the router container. Neither is added
+   otherwise. The operator continues to watch `Node` objects afterward, so
+   the resource request and environment variable are added or removed as
+   matching nodes' QAT advertisement appears or disappears (for example, as
+   the Intel Device Plugin Operator finishes provisioning virtual
+   functions).
 5. The scheduler places router pods according to the administrator's
    `spec.nodePlacement` and the injected resource request, following
    standard Kubernetes scheduling semantics.
@@ -269,7 +278,7 @@ sequenceDiagram
 
     Admin->>IC: Set spec.nodePlacement for QAT-capable nodes
     Operator->>IC: Watch IngressController
-    alt Eligible node found and no unsupported override
+    alt Eligible node found, cluster not in FIPS mode, no unsupported override
         Operator->>Router: Inject qat.intel.com/cy request + ROUTER_QAT=true
         Sched->>Router: Schedule pod per nodePlacement + resource request
         Router->>Router: ROUTER_QAT=true: run preflight (device, provider, local FIPS check, config)
@@ -279,7 +288,7 @@ sequenceDiagram
             Router->>Router: Omit ssl-provider, start HAProxy (software TLS)
         end
         Router-->>Operator: Expose metrics (offload state, fallbacks, errors)
-    else Not eligible, or unsupported override set
+    else Not eligible, FIPS mode, or unsupported override set
         Operator->>Router: Do not inject resource request or ROUTER_QAT
         Router->>Router: ROUTER_QAT unset: skip QAT entirely, start HAProxy (software TLS)
     end
@@ -317,7 +326,12 @@ QAT hardware is a worker-node (data-plane) resource, so this enhancement
 primarily affects guest-cluster node pools where router pods actually run.
 The cluster-ingress-operator itself runs in the management cluster, but the
 behavior it manages (resource injection, and the router's own preflight and
-config rendering) executes against guest-cluster router pods.
+config rendering) executes against guest-cluster router pods. The
+kernel-compatibility resolution described in Implementation Details also
+does not carry over as-is: guest-cluster worker nodes are managed through
+`NodePool` status rather than `MachineConfigPool`, so whichever option is
+chosen there (new RBAC vs. a Node-level signal) needs a Hypershift-specific
+equivalent (see Open Questions).
 
 <!-- TODO: This needs validation with the Hypershift team: confirm whether
      any additional handling is required for management-cluster vs.
@@ -385,10 +399,18 @@ independently checks whether FIPS is enabled on the node by reading
 `/proc/sys/crypto/fips_enabled` directly (a kernel-wide value visible to any
 container on the node regardless of the container's own base image) rather
 than trusting `ROUTER_QAT` for that determination - see Risks and Mitigations
-for why this stays independent of the operator's own FIPS
-check. The preflight sequence must run, and must gate config rendering, on
-every router start/reload, since a previously-usable device can become
-unusable (driver reset, VF revoked) between reloads.
+for why this stays independent of the operator's own FIPS check. This local
+check must be fail-safe, not fail-open: if the file cannot be read or
+parsed, the preflight must treat that as FIPS-enabled and disable QAT,
+rather than defaulting to "not FIPS." This is a deliberate departure from
+the existing `detectFIPS()` helper used elsewhere in the operator, which
+defaults to "not FIPS" on a procfs read failure (see Implementation Details
+below) - that fail-open default is acceptable for its existing uses, but
+must not be inherited by this QAT-specific check, where defaulting the
+wrong way means activating a non-FIPS-validated crypto path. The preflight
+sequence must run, and must gate config rendering, on every router
+start/reload, since a previously-usable device can become unusable (driver
+reset, VF revoked) between reloads.
 
 Gating only at start/reload is not sufficient on its own: reloads are driven
 by route/config changes, so a cluster with a stable set of routes can run
@@ -413,14 +435,14 @@ present, the router re-renders the configuration without them and restarts
 HAProxy with software-only TLS, rather than retrying indefinitely with the
 same failing configuration.
 
-**cluster-ingress-operator**: Adds logic to read `Node` and
-`MachineConfigPool` objects and compute a single eligibility decision per
+**cluster-ingress-operator**: Adds logic to read `Node` objects (and,
+depending on how the next paragraph's open point is resolved,
+`MachineConfigPool` objects) and compute a single eligibility decision per
 router deployment: a node matching the IngressController's
 `spec.nodePlacement` must advertise `qat.intel.com/cy` in its allocatable
-capacity, and that node's resolved RHCOS stream/kernel (from
-`MachineConfigPool` status, using the RBAC the operator already has for
-this) must meet QAT's minimum kernel-driver requirement (see Proposal).
-When eligible, the operator sets both the `qat.intel.com/cy` resource
+capacity, and that node's resolved RHCOS stream/kernel must meet QAT's
+minimum kernel-driver requirement (see Proposal). When eligible, the
+operator sets both the `qat.intel.com/cy` resource
 request/limit and a `ROUTER_QAT=true` environment variable on the router
 deployment's container; when not eligible, or when the administrator has
 set the unsupported opt-out key described in API Extensions, it sets
@@ -428,17 +450,50 @@ neither. Collapsing node-capability and kernel-compatibility into a single
 flag is deliberate: unlike FIPS (see below), getting this one wrong is
 low-stakes, since the router's own device/provider-loadability checks would
 still catch a node that was incorrectly deemed compatible. FIPS is handled
-as a separate, independent check: the operator also reuses its existing
-`detectFIPS()` logic (including its Hypershift-aware handling of a FIPS
-management cluster with a non-FIPS guest cluster, via the `FIPS_ENABLED`
-environment variable) to skip setting `ROUTER_QAT` and the resource request
-entirely on a FIPS-enabled cluster, rather than scheduling a pod onto a QAT
-node and consuming a VF only for the router to disable QAT locally - see
-Risks and Mitigations for why the router still independently re-verifies
-FIPS state itself rather than trusting this operator-level check alone.
-Reconciling on `Node` and `MachineConfigPool` changes (not just on
-IngressController changes) ensures the resource request and environment
-variable are added once the Intel Device Plugin Operator finishes
+as a separate, independent check: the operator reuses the existing
+`detectFIPS()` helper's Hypershift-aware handling of a FIPS management
+cluster with a non-FIPS guest cluster (via the `FIPS_ENABLED` environment
+variable), to skip setting `ROUTER_QAT` and the resource request entirely
+on a FIPS-enabled cluster, rather than scheduling a pod onto a QAT node and
+consuming a VF only for the router to disable QAT locally. However, the QAT
+eligibility gate cannot reuse `detectFIPS()`'s existing fail-open default
+as-is: `detectFIPS()` returns a plain `bool` and defaults to "not FIPS" when
+`/proc/sys/crypto/fips_enabled` cannot be read or parsed, which is
+appropriate for its existing callers but not acceptable here, where
+defaulting the wrong way means activating a non-FIPS-validated crypto path
+on what may actually be a FIPS cluster. `detectFIPS()` should therefore be
+changed to return `(bool, error)` instead of a plain `bool`, surfacing an
+inconclusive read as a non-nil error rather than silently collapsing it into
+`false`. Existing callers that are fine with today's practical behavior can
+keep it by ignoring the error; the QAT eligibility gate is the one caller
+that must treat a non-nil error as FIPS-enabled and skip setting
+`ROUTER_QAT`/the resource request. See Risks and Mitigations for why the
+router also independently re-verifies FIPS state itself rather than
+trusting this operator-level check alone.
+
+How the operator sources the kernel-compatibility signal is an open choice
+between two options (see Open Questions), not a settled
+`MachineConfigPool`-based design: (a) read `MachineConfigPool` status
+directly, which is the more direct approach but requires adding a new,
+currently-missing RBAC scope -
+the cluster-ingress-operator's `ClusterRole` on `release-5.1` grants only
+`nodes: list/watch` today, with no `machineconfiguration.openshift.io`
+permissions, so this option means adding a least-privilege
+`machineconfigpools: list/watch` rule and getting it reviewed; or (b)
+resolve the signal from a `Node`-level label or annotation the MCO already
+sets, which the operator can already read under its existing RBAC, avoiding
+the new scope at the cost of depending on a specific `Node` label/annotation
+remaining stable. Only option (a) involves reading `MachineConfigPool`
+objects at all; option (b) never touches them. For Hypershift, neither
+option applies as-is: guest-cluster worker nodes are managed through
+`NodePool` status rather than `MachineConfigPool`, so that topology needs
+its own resolution regardless of which option is chosen for standalone
+clusters.
+
+Reconciling on changes to `Node` objects (and `MachineConfigPool` objects,
+if option (a) above is chosen) - not just on IngressController changes -
+ensures the resource request and environment variable are added once the
+Intel Device Plugin Operator finishes
 provisioning virtual functions on a targeted node, without requiring an
 unrelated IngressController edit to trigger it. The operator does not
 compute or alter node placement; that remains entirely driven by the
@@ -572,20 +627,29 @@ single `ROUTER_QAT` flag, since getting them wrong is low-stakes), FIPS is
 not something the router should take on the operator's word alone: a stale
 reconcile or a bug in the operator's eligibility computation could otherwise
 silently activate a non-FIPS-validated crypto path on a FIPS cluster.
+Compounding this, the existing `detectFIPS()` helper used elsewhere in the
+operator is fail-open by design (it defaults to "not FIPS" when
+`/proc/sys/crypto/fips_enabled` cannot be read or parsed), which is the
+wrong default to inherit unmodified for a QAT-activation gate.
 
 **Mitigation**: This is enforced at two genuinely independent layers rather
-than one flag checked twice. The cluster-ingress-operator skips setting
-`ROUTER_QAT` and the `qat.intel.com/cy` resource request in the first place
-when the cluster is in FIPS mode (using the existing `detectFIPS()` logic,
-including its Hypershift-aware handling), so a FIPS pod is not scheduled
-onto a QAT node and does not consume a VF. Independently of that, and
-regardless of what `ROUTER_QAT` says, the router's own preflight sequence
-reads `/proc/sys/crypto/fips_enabled` directly - a kernel-wide value visible
-to the container without any special privilege or operator involvement - and
-refuses to activate QAT if it reports FIPS is enabled. Because this check
-does not depend on the operator's computation at all, it remains a true
-backstop even if the operator-level check is bypassed or stale. This
-enhancement's scope is limited to non-FIPS clusters (see Non-Goals).
+than one flag checked twice, and both layers are fail-safe rather than
+fail-open. `detectFIPS()` is updated to return `(bool, error)` instead of a
+plain `bool`, so an inconclusive read surfaces as a non-nil error instead of
+silently collapsing into `false` (see Implementation Details); the QAT
+eligibility gate is written to treat that error as FIPS-enabled, so it skips
+setting `ROUTER_QAT` and the `qat.intel.com/cy` resource request both when
+the cluster is in FIPS mode and when FIPS state cannot be conclusively
+determined, meaning a FIPS pod is not scheduled onto a QAT node and does not
+consume a VF. Independently of that,
+and regardless of what `ROUTER_QAT` says, the router's own preflight
+sequence reads `/proc/sys/crypto/fips_enabled` directly - a kernel-wide
+value visible to the container without any special privilege or operator
+involvement - and refuses to activate QAT both when it reports FIPS is
+enabled and when it cannot be read or parsed at all. Because this check does
+not depend on the operator's computation at all, it remains a true backstop
+even if the operator-level check is bypassed or stale. This enhancement's
+scope is limited to non-FIPS clusters (see Non-Goals).
 
 ### Drawbacks
 
@@ -660,6 +724,21 @@ without asking them to learn a new, soon-to-be-replaced API field.
     this one is a hard pre-implementation gate, not something that can be
     deferred to early-adopter feedback: someone must determine the package
     source and pin the exact NVRs before implementation starts.
+11. The cluster-ingress-operator's `ClusterRole` on `release-5.1` currently
+    grants only `nodes: list/watch` - there is no
+    `machineconfiguration.openshift.io`/`MachineConfigPool` permission
+    today (verified against `manifests/00-cluster-role.yaml`). Resolving the
+    kernel-compatibility check in Implementation Details requires picking
+    one of: (a) add a least-privilege `machineconfigpools: list/watch` rule
+    to the operator's `ClusterRole`, accepting the new RBAC scope, or (b)
+    use an already-authorized, Node-level signal instead (for example, a
+    label or annotation the MCO already sets on `Node` objects reflecting
+    OS stream), avoiding new RBAC but depending on a specific Node
+    label/annotation existing and being documented as stable enough to rely
+    on. Separately, this RBAC/signal question does not carry over to
+    Hypershift as-is: guest-cluster nodes are managed through `NodePool`
+    status, not `MachineConfigPool`, so that path needs its own answer
+    regardless of which option is chosen here.
 
 ## Test Plan
 
@@ -696,10 +775,12 @@ The following do not require real QAT hardware:
   without the `ssl-provider` directives instead of crash-looping.
 - Unit tests for the operator's eligibility computation: only setting
   `qat.intel.com/cy` and `ROUTER_QAT=true` together when a matching node
-  advertises the resource and its resolved kernel (from `MachineConfigPool`
-  status) meets QAT's minimum, never setting either when the cluster is in
-  FIPS mode (the FIPS guard), reaction to `Node`/`MachineConfigPool`
-  add/update events, and handling of the unsupported opt-out key.
+  advertises the resource and its resolved kernel-compatibility signal meets
+  QAT's minimum, never setting either when the cluster is in FIPS mode or
+  FIPS state cannot be determined (the fail-safe FIPS guard), reaction to
+  `Node` add/update events (and `MachineConfigPool` add/update events, if
+  that option is chosen; see Open Questions), and handling of the
+  unsupported opt-out key.
 - Unit tests confirming the router runs no QAT-related logic whatsoever when
   `ROUTER_QAT` is unset (no device probing, no config branching), and runs
   the full preflight when it is `true`.
@@ -707,6 +788,11 @@ The following do not require real QAT hardware:
   (`/proc/sys/crypto/fips_enabled`), confirming it blocks QAT activation
   regardless of `ROUTER_QAT`'s value, including the case where `ROUTER_QAT`
   is (incorrectly) `true` on a FIPS-enabled node.
+- Unit tests for the fail-safe (not fail-open) requirement on both the
+  operator's eligibility gate and the router's local check: a missing or
+  invalid `FIPS_ENABLED` environment variable combined with an unreadable
+  `/proc/sys/crypto/fips_enabled` must result in QAT staying disabled, not
+  in a default-to-non-FIPS outcome.
 
 The following require real QAT hardware, since no credible software
 emulator exists for the QAT PCI accelerator:
