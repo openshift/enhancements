@@ -135,6 +135,8 @@ monitor the provisioned Gateways through existing telemetry.
 - Provisioning any of these GatewayClasses with the OpenShift
   controller name kicks the provisioning of Istio/OSSM (same as
   today with `openshift-default`).
+- Label GatewayClasses created by CIO as managed profiles so they
+  can be distinguished from user-created GatewayClasses.
 - Existing telemetry already covers these new GatewayClasses
   since we collect `controllerName` to determine OCP Gateway API
   usage.
@@ -180,7 +182,9 @@ openshift.io/gateway-controller/v1`, CIO will:
    defaults ConfigMap following the Istio mechanism documented at
    https://istio.io/latest/docs/tasks/traffic-management/ingress/gateway-api/#gatewayclass-defaults.
 3. Create the GatewayClass resources (if they do not already
-   exist) with the correct `controllerName`.
+   exist) with the correct `controllerName` and the
+   `ingress.operator.openshift.io/managed-gatewayclass-profile: "true"`
+   ownership label.
 
 This approach is consistent with how CIO already provisions
 automatic HPA for Gateways managed by CIO.
@@ -197,17 +201,17 @@ compatibility require a separate profile or an explicit migration strategy.
 
 Phase 1 adds predefined Service configurations and the proxy configuration
 required to support them through class-default ConfigMaps; it does not
-introduce a customization CRD or generate
-`Telemetry` or `EnvoyFilter` resources. GatewayClass selection hides the
+introduce a customization CRD. GatewayClass selection hides the
 configuration mechanism, allowing a future customization API to use
 other implementation resources without exposing them to users.
 
-CIO automatically creates the three new GatewayClasses when
-`openshift-default` is created (or during upgrade). This keeps
-the Gateway API enablement workflow unchanged: the cluster
-administrator creates `openshift-default`, and CIO provisions
-the additional classes as part of the enablement process. On bare-metal
-clusters, CIO omits `openshift-loadbalancer-internal` as described below.
+CIO automatically creates the supported new GatewayClasses when a
+user-created GatewayClass selects the OpenShift controller (or during
+upgrade). This keeps the Gateway API enablement workflow unchanged: the
+cluster administrator creates `openshift-default`, and CIO provisions the
+additional classes as part of the enablement process. CIO omits
+`openshift-loadbalancer-internal` on platforms where it cannot request internal
+load-balancer scope, as described below.
 
 "External" and "Internal" follow the same semantics as the
 IngressController API's
@@ -219,8 +223,10 @@ exposed only on the cluster's private network; CIO implements
 internal scope through provider-specific service annotations,
 the same annotations it already uses for IngressControllers.
 
-While Gateway API remains enabled, CIO recreates deleted profile
-GatewayClasses and restores any missing defaults ConfigMaps.
+While at least one user-created GatewayClass selects the OpenShift controller
+and management mode is managed, CIO recreates deleted managed profiles and
+restores any missing defaults ConfigMaps. Managed profiles do not independently
+trigger or retain the Istio installation.
 
 ### Workflow Description
 
@@ -230,14 +236,14 @@ the cluster and Gateway infrastructure.
 **application developer** is a human user responsible for
 deploying applications and creating routes.
 
+#### Installation Workflow
+
 1. The cluster administrator creates the `openshift-default`
    GatewayClass with `spec.controllerName:
    openshift.io/gateway-controller/v1` (existing enablement
    workflow, unchanged).
-2. CIO detects `openshift-default` and provisions Istio/OSSM
-   (same as today).
-3. The sail-operator library (or Sail Operator, depending on the
-   approach) creates the GatewayClass defaults ConfigMap for
+2. CIO detects the GatewayClass and provisions Istio/OSSM (same as today).
+3. The sail-operator library creates the GatewayClass defaults ConfigMap for
    each new class, with the appropriate service type and
    platform-specific annotations. CIO passes the required
    configuration as `json.RawMessage`, the same way it does for
@@ -245,10 +251,12 @@ deploying applications and creating routes.
 4. CIO verifies each ConfigMap and its class-selection label before
    creating the class, helping prevent unintended exposure or
    misconfiguration.
-5. After verification, CIO creates the `openshift-loadbalancer-external`, `openshift-loadbalancer-internal`,
-   and `openshift-clusterip` GatewayClasses (if they do not
-   already exist) with the same `controllerName`, omitting
-   `openshift-loadbalancer-internal` on bare-metal clusters.
+5. After verification, CIO creates any missing
+   `openshift-loadbalancer-external`, `openshift-loadbalancer-internal`, and
+   `openshift-clusterip` GatewayClasses with the same `controllerName` and the
+   CIO ownership label, omitting `openshift-loadbalancer-internal` on platforms
+   where CIO cannot request internal load-balancer scope. A pre-existing
+   user-created profile remains unlabeled.
 6. The cluster administrator creates a Gateway referencing one
    of the available GatewayClasses (e.g.,
    `gatewayClassName: openshift-loadbalancer-external`).
@@ -259,9 +267,9 @@ deploying applications and creating routes.
 9. The application developer creates an HTTPRoute (or other
    supported route type) attached to the Gateway.
 
-The same workflow applies for `openshift-loadbalancer-internal` (internal
-LoadBalancer) and `openshift-clusterip` (ClusterIP, no
-LoadBalancer, no DNS).
+The cluster administrator can initiate the same workflow by replacing
+`openshift-default` in step 1 with `openshift-loadbalancer-external`,
+`openshift-loadbalancer-internal`, or `openshift-clusterip`.
 
 ```mermaid
 sequenceDiagram
@@ -278,7 +286,7 @@ sequenceDiagram
     Sail->>Sail: Create ConfigMap per GatewayClass
     Note over Sail: external: LB + platform annotations<br/>internal: LB + internal annotations<br/>clusterip: ClusterIP, no LB
     CIO->>CIO: Create openshift-loadbalancer-external,<br/>openshift-loadbalancer-internal, openshift-clusterip
-    Note over CIO: Omit openshift-loadbalancer-internal on bare metal
+    Note over CIO: Omit internal profile where CIO cannot control LB scope
 
     Admin->>Istio: Create Gateway (class: openshift-loadbalancer-external)
     Istio->>Envoy: Deploy Envoy proxy
@@ -287,6 +295,17 @@ sequenceDiagram
 
     Note over Admin,Cloud: No DNS for openshift-clusterip
 ```
+
+#### Uninstallation Workflow
+
+1. The cluster administrator deletes all user-created, non-managed
+   GatewayClasses that select the OpenShift controller. CIO-managed profile
+   GatewayClasses cannot be removed while any user-created, non-managed
+   OpenShift GatewayClass remains because CIO recreates them.
+2. CIO stops reconciling and deletes profile GatewayClasses labeled
+   `ingress.operator.openshift.io/managed-gatewayclass-profile: "true"` and
+   their defaults ConfigMaps.
+3. CIO uninstalls Istio after the managed profiles are removed.
 
 ### API Extensions
 
@@ -449,23 +468,20 @@ ConfigMap will be derived from the cluster's infrastructure
 platform, the same way CIO derives annotations for
 IngressController services.
 
-#### Bare-metal Clusters
+#### Platforms Without CIO-Controlled Load-Balancer Scope
 
 `openshift-clusterip` requires no load balancer integration.
-`openshift-loadbalancer-external` requires a configured LoadBalancer
-implementation, such as MetalLB; address allocation and network
-reachability depend on that implementation's configuration. On
-bare-metal clusters, `openshift-loadbalancer-external` does not
-set scope annotations; actual external reachability depends on
-the LoadBalancer implementation's network configuration. This
-matches IngressController behavior, where `scope: External` on
-bare metal is also a no-op.
+`openshift-loadbalancer-external` creates a LoadBalancer Service, but address
+allocation and network reachability depend on the platform's LoadBalancer
+implementation. Platforms without native LoadBalancer provisioning, including
+BareMetal and vSphere, require a separately configured implementation such as
+MetalLB.
 
-CIO does not create `openshift-loadbalancer-internal` on bare-metal clusters.
-Unlike supported cloud platforms, CIO has no mechanism to select
-internal-only exposure on bare metal. Providing this profile requires
-a defined integration with the load balancer's address pools and
-network configuration.
+CIO creates `openshift-loadbalancer-internal` only on AWS, Azure, GCP, IBM
+Cloud, Power VS, and OpenStack, where provider-specific Service annotations can
+request internal exposure. CIO omits the profile on other platforms because it
+cannot distinguish internal from external exposure. Supporting it would require
+a defined integration with the platform's load-balancer configuration.
 
 #### Single-node Deployments or MicroShift
 
@@ -600,7 +616,8 @@ These may be considered in the follow-on customization API.
    gatewayclass-controller to recognize the three new GatewayClass
    names in addition to `openshift-default`. All four classes use
    the same `controllerName:
-   openshift.io/gateway-controller/v1`.
+   openshift.io/gateway-controller/v1`. GatewayClasses created by CIO are
+   labeled `ingress.operator.openshift.io/managed-gatewayclass-profile: "true"`.
 
 2. **ConfigMap provisioning**: The sail-operator library (or Sail
    Operator) provisions the GatewayClass defaults ConfigMap,
@@ -627,6 +644,13 @@ These may be considered in the follow-on customization API.
    and reconciles `Customized` on each new GatewayClass based
    on ConfigMap presence and its class-selection label, preserving
    conditions owned by other controllers.
+
+6. **Lifecycle management**: User-created GatewayClasses retain the existing
+   install and uninstall semantics. CIO does not count GatewayClasses labeled
+   `ingress.operator.openshift.io/managed-gatewayclass-profile: "true"` when
+   determining whether to install or uninstall Istio. When the final
+   user-created GatewayClass is deleted, CIO deletes the managed profiles and
+   then uninstalls Istio.
 
 This enhancement does not require a new feature gate. It is a CIO
 behavioral change that extends existing Gateway API support.
@@ -767,25 +791,24 @@ customization.
 Testing will cover the following scenarios:
 
 1. Create `openshift-default` and verify CIO automatically
-   creates `openshift-loadbalancer-external`,
-   `openshift-loadbalancer-internal`, and `openshift-clusterip`
-   GatewayClasses with the correct ConfigMap for each. Verify
-   that bare-metal clusters omit
-   `openshift-loadbalancer-internal`.
+   creates `openshift-loadbalancer-external` and `openshift-clusterip` with the
+   CIO ownership label and the correct ConfigMap. Verify that AWS, Azure, GCP,
+   IBM Cloud, Power VS, and OpenStack also include
+   `openshift-loadbalancer-internal`, and that other platforms omit it.
 2. Create a Gateway with each new GatewayClass and verify the
    provisioned service has the correct type (LoadBalancer
    external, LoadBalancer internal, ClusterIP), annotations, and
    platform-specific `externalTrafficPolicy`. Verify that
    deleting the Service results in recreation with the correct
    configuration. Run on multiple platforms (AWS, Azure, GCP,
-   vSphere) to verify platform-specific annotations.
+   vSphere) to verify platform-specific behavior.
 3. Verify that `openshift-default` behavior is unchanged
    (regression test), including `externalTrafficPolicy: Cluster`.
 4. Verify that DNS records are created for
    `openshift-loadbalancer-external` and
    `openshift-loadbalancer-internal` but not for
    `openshift-clusterip`.
-5. Verify that deleting a profile GatewayClass results in its
+5. Verify that deleting a CIO-managed profile GatewayClass results in its
    recreation, with the associated defaults ConfigMap present
    before the class is recreated.
 6. Verify that upgrading a cluster where `openshift-default`
@@ -819,10 +842,11 @@ Testing will cover the following scenarios:
     through an OpenShift Route (Models-as-a-Service pattern).
 15. Verify that creating a profile GatewayClass (e.g.,
     `openshift-loadbalancer-external`) without `openshift-default`
-    provisions Istio/OSSM.
-16. Verify that Istio/OSSM is not uninstalled while profile
-    GatewayClasses still exist, even if `openshift-default` is
-    deleted.
+    provisions Istio/OSSM, remains unlabeled, and causes CIO to create the
+    other profiles with the ownership label.
+16. Verify that deleting the final user-created GatewayClass stops profile
+    reconciliation, deletes the CIO-managed profiles and their defaults
+    ConfigMaps, and then uninstalls Istio/OSSM.
 
 ## Graduation Criteria
 
@@ -850,9 +874,9 @@ N/A.
 ### Upgrade
 
 Clusters upgrading to OCP 5.1 where `openshift-default` already
-exists will have the three new GatewayClasses automatically
-created by CIO during the upgrade, except that bare-metal clusters omit
-`openshift-loadbalancer-internal`. The `openshift-default`
+exists will have the supported new GatewayClasses automatically created by CIO
+during the upgrade. Platforms where CIO cannot request internal load-balancer
+scope omit `openshift-loadbalancer-internal`. The `openshift-default`
 GatewayClass continues to work as before.
 
 This enhancement does not schedule deprecation or removal of the static
