@@ -15,7 +15,7 @@ approvers:
 api-approvers:
   - TBD
 creation-date: 2026-04-28
-last-updated: 2026-10-13
+last-updated: 2026-10-14
 status: provisional
 tracking-link:
   - https://redhat.atlassian.net/browse/NE-2698
@@ -40,7 +40,8 @@ ClusterIP. The Cluster Ingress Operator (CIO) passes the service
 configuration to the sail-operator library, which provisions a
 GatewayClass defaults ConfigMap following the Istio GatewayClass
 defaults mechanism. CIO then creates the GatewayClasses
-automatically when `openshift-default` is created. This mirrors
+automatically when `openshift-default` is created and Gateway API management
+mode is `Managed`. This mirrors
 the service customization that CIO already provides for
 IngressControllers, but applied to Gateway API.
 
@@ -132,9 +133,6 @@ monitor the provisioned Gateways through existing telemetry.
 - Reserve the `openshift-*` naming prefix for OpenShift
   GatewayClasses (requires `controllerName:
   openshift.io/gateway-controller/v1`).
-- Provisioning any of these GatewayClasses with the OpenShift
-  controller name kicks the provisioning of Istio/OSSM (same as
-  today with `openshift-default`).
 - Label GatewayClasses created by CIO as managed profiles so they
   can be distinguished from user-created GatewayClasses.
 - Existing telemetry already covers these new GatewayClasses
@@ -168,23 +166,13 @@ monitor the provisioned Gateways through existing telemetry.
 
 ## Proposal
 
-The Cluster Ingress Operator will be extended to recognize three
-new GatewayClass names (`openshift-loadbalancer-external`,
-`openshift-loadbalancer-internal`, `openshift-clusterip`) in addition to the
-existing `openshift-default`. When a user creates one of these
-GatewayClasses with `controllerName:
-openshift.io/gateway-controller/v1`, CIO will:
-
-1. Provision Istio/OSSM the same way it does for
-   `openshift-default`.
-2. Pass the service configuration as `json.RawMessage` to the
-   sail-operator library, which provisions a GatewayClass
-   defaults ConfigMap following the Istio mechanism documented at
-   https://istio.io/latest/docs/tasks/traffic-management/ingress/gateway-api/#gatewayclass-defaults.
-3. Create the GatewayClass resources (if they do not already
-   exist) with the correct `controllerName` and the
-   `ingress.operator.openshift.io/managed-gatewayclass-profile: "true"`
-   ownership label.
+When the OpenShift Gateway controller is enabled and Gateway API management
+mode is `Managed`, CIO provisions Istio/OSSM and creates the supported managed
+profiles: `openshift-loadbalancer-external`,
+`openshift-loadbalancer-internal`, and `openshift-clusterip`. CIO passes each
+profile's service configuration to the sail-operator library, which creates the
+corresponding
+[Istio GatewayClass defaults ConfigMap](https://istio.io/latest/docs/tasks/traffic-management/ingress/gateway-api/#gatewayclass-defaults).
 
 This approach is consistent with how CIO already provisions
 automatic HPA for Gateways managed by CIO.
@@ -205,13 +193,9 @@ introduce a customization CRD. GatewayClass selection hides the
 configuration mechanism, allowing a future customization API to use
 other implementation resources without exposing them to users.
 
-CIO automatically creates the supported new GatewayClasses when a
-user-created GatewayClass selects the OpenShift controller (or during
-upgrade). This keeps the Gateway API enablement workflow unchanged: the
-cluster administrator creates `openshift-default`, and CIO provisions the
-additional classes as part of the enablement process. CIO omits
-`openshift-loadbalancer-internal` on platforms where it cannot request internal
-load-balancer scope, as described below.
+CIO omits `openshift-loadbalancer-internal` on platforms where it cannot
+request internal load-balancer scope, as described in
+[Platforms Without CIO-Controlled Load-Balancer Scope](#platforms-without-cio-controlled-load-balancer-scope).
 
 "External" and "Internal" follow the same semantics as the
 IngressController API's
@@ -223,10 +207,8 @@ exposed only on the cluster's private network; CIO implements
 internal scope through provider-specific service annotations,
 the same annotations it already uses for IngressControllers.
 
-While at least one user-created GatewayClass selects the OpenShift controller
-and management mode is managed, CIO recreates deleted managed profiles and
-restores any missing defaults ConfigMaps. Managed profiles do not independently
-trigger or retain the Istio installation.
+CIO excludes managed profiles when determining whether to install or uninstall
+Istio.
 
 ### Workflow Description
 
@@ -251,12 +233,11 @@ deploying applications and creating routes.
 4. CIO verifies each ConfigMap and its class-selection label before
    creating the class, helping prevent unintended exposure or
    misconfiguration.
-5. After verification, CIO creates any missing
+5. After verification, CIO creates or updates
    `openshift-loadbalancer-external`, `openshift-loadbalancer-internal`, and
    `openshift-clusterip` GatewayClasses with the same `controllerName` and the
    CIO ownership label, omitting `openshift-loadbalancer-internal` on platforms
-   where CIO cannot request internal load-balancer scope. A pre-existing
-   user-created profile remains unlabeled.
+   where CIO cannot request internal load-balancer scope.
 6. The cluster administrator creates a Gateway referencing one
    of the available GatewayClasses (e.g.,
    `gatewayClassName: openshift-loadbalancer-external`).
@@ -266,10 +247,6 @@ deploying applications and creating routes.
    except for `openshift-clusterip` which gets no DNS).
 9. The application developer creates an HTTPRoute (or other
    supported route type) attached to the Gateway.
-
-The cluster administrator can initiate the same workflow by replacing
-`openshift-default` in step 1 with `openshift-loadbalancer-external`,
-`openshift-loadbalancer-internal`, or `openshift-clusterip`.
 
 ```mermaid
 sequenceDiagram
@@ -299,61 +276,43 @@ sequenceDiagram
 #### Uninstallation Workflow
 
 1. The cluster administrator deletes all user-created, non-managed
-   GatewayClasses that select the OpenShift controller. CIO-managed profile
-   GatewayClasses cannot be removed while any user-created, non-managed
-   OpenShift GatewayClass remains because CIO recreates them.
-2. CIO stops reconciling and deletes profile GatewayClasses labeled
+   GatewayClasses that select the OpenShift controller (usually just
+   `openshift-default`). The managed profiles cannot be deleted by users
+   because the VAP reserves them for CIO.
+2. CIO stops reconciling and deletes GatewayClasses labeled
    `ingress.operator.openshift.io/managed-gatewayclass-profile: "true"` and
    their defaults ConfigMaps.
 3. CIO uninstalls Istio after the managed profiles are removed.
 
 ### API Extensions
 
-This enhancement introduces a ValidatingAdmissionPolicy (VAP)
-that enforces naming and ownership rules for GatewayClasses using
-the OpenShift controller name.
+This enhancement introduces a ValidatingAdmissionPolicy (VAP) that reserves
+managed OpenShift GatewayClasses for CIO.
 
-#### ValidatingAdmissionPolicy for GatewayClass Naming
+#### ValidatingAdmissionPolicy for Managed GatewayClasses
 
-A ValidatingAdmissionPolicy will be created to enforce the
-following rules:
+A ValidatingAdmissionPolicy will enforce these rules:
 
-1. **OpenShift controller name requires `openshift-` prefix**: If
-   a GatewayClass specifies `controllerName:
-   openshift.io/gateway-controller/v1`, its name must be prefixed
-   with `openshift-`. A GatewayClass with the OpenShift controller
-   name but without the `openshift-` prefix will be rejected.
-
-2. **`openshift-` prefix is reserved**: The `openshift-` prefix
-   for GatewayClass names is reserved for OpenShift-managed
-   classes. A GatewayClass with the `openshift-` prefix but a
-   different `controllerName` will be rejected.
-
-3. **Allowlisted names only**: Only the following GatewayClass
-   names are allowed when using the OpenShift controller name:
-   - `openshift-default`
-   - `openshift-loadbalancer-external`
-   - `openshift-loadbalancer-internal`
-   - `openshift-clusterip`
-
-   Any other `openshift-*` name will be rejected.
+1. GatewayClasses named `openshift-*` must use `controllerName:
+   openshift.io/gateway-controller/v1`.
+2. Only CIO may create, update, or delete `openshift-*` GatewayClasses other
+   than `openshift-default`.
+3. CIO must use its pod-bound service account token.
 
 The ValidatingAdmissionPolicyBinding must set
-`validationActions: [Deny]` (hard error, blocks creation) to
-prevent misconfiguration. Warnings are not sufficient because
-a misconfigured GatewayClass with the `openshift-*` prefix
-would be silently ignored by CIO, leading to user confusion.
+`validationActions: [Deny]`.
 
-Example VAP (simplified):
+Example VAP:
 
 ```yaml
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
-  name: gatewayclass-openshift-naming
+  name: openshift-ingress-operator-gatewayclasses
 spec:
   failurePolicy: Fail
   matchConstraints:
+    matchPolicy: Equivalent
     resourceRules:
     - apiGroups:
       - gateway.networking.k8s.io
@@ -361,61 +320,71 @@ spec:
       - v1
       operations:
       - CREATE
+      - UPDATE
+      - DELETE
       resources:
       - gatewayclasses
+      scope: Cluster
+  variables:
+  - name: gatewayClass
+    expression: request.operation == 'DELETE' ? oldObject : object
+  - name: isOpenShiftName
+    expression: variables.gatewayClass.metadata.name.startsWith('openshift-')
+  - name: isManagedOpenShiftGatewayClass
+    expression: >-
+      variables.isOpenShiftName &&
+      variables.gatewayClass.metadata.name != 'openshift-default'
   validations:
   - expression: >-
-      !(object.spec.controllerName ==
-        'openshift.io/gateway-controller/v1' &&
-        !object.metadata.name.startsWith('openshift-'))
-    message: >-
-      GatewayClasses with controllerName
-      'openshift.io/gateway-controller/v1' must have a name
-      prefixed with 'openshift-'.
+      !variables.isOpenShiftName ||
+      variables.gatewayClass.spec.controllerName ==
+      'openshift.io/gateway-controller/v1'
+    message: OpenShift GatewayClasses must use openshift.io/gateway-controller/v1
+    reason: Invalid
   - expression: >-
-      !(object.metadata.name.startsWith('openshift-') &&
-        object.spec.controllerName !=
-        'openshift.io/gateway-controller/v1')
+      !variables.isManagedOpenShiftGatewayClass ||
+      (has(request.userInfo.username) &&
+      request.userInfo.username ==
+      'system:serviceaccount:openshift-ingress-operator:ingress-operator')
     message: >-
-      The 'openshift-' prefix is reserved for OpenShift-managed
-      GatewayClasses and requires controllerName
-      'openshift.io/gateway-controller/v1'.
+      Only openshift-default may be created, modified, or deleted; all other
+      OpenShift GatewayClasses are managed by the Ingress Operator
+    reason: Forbidden
   - expression: >-
-      !(object.spec.controllerName ==
-        'openshift.io/gateway-controller/v1' &&
-        !(object.metadata.name in ['openshift-default',
-          'openshift-loadbalancer-external', 'openshift-loadbalancer-internal',
-          'openshift-clusterip']))
-    message: >-
-      Only the following GatewayClass names are allowed with
-      the OpenShift controller: openshift-default,
-      openshift-loadbalancer-external, openshift-loadbalancer-internal,
-      openshift-clusterip.
+      !variables.isManagedOpenShiftGatewayClass ||
+      (has(request.userInfo.extra) &&
+      'authentication.kubernetes.io/node-name' in request.userInfo.extra &&
+      'authentication.kubernetes.io/pod-name' in request.userInfo.extra)
+    message: The Ingress Operator must use a pod-bound service account token
+    reason: Forbidden
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
 metadata:
-  name: gatewayclass-openshift-naming
+  name: openshift-ingress-operator-gatewayclasses
 spec:
-  policyName: gatewayclass-openshift-naming
+  policyName: openshift-ingress-operator-gatewayclasses
   validationActions: [Deny]
 ```
 
 The VAP and its corresponding ValidatingAdmissionPolicyBinding
 will be deployed as CVO static manifests so they are present
-on every cluster. Deploying the VAP unconditionally prevents
-users from creating conflicting `openshift-*` GatewayClasses,
+on every cluster. Deploying the VAP unconditionally prevents users from
+creating, updating, or deleting managed `openshift-*` GatewayClasses,
 eliminating special handling when transitioning from
 unmanaged to managed
 [management mode](gateway-api-crd-management-mode.md).
 
-The new GatewayClasses are instances of the existing
-`gateway.networking.k8s.io/v1` GatewayClass resource. The
-ConfigMaps created by CIO are standard Kubernetes ConfigMaps.
+CIO applies the existing
+`openshift.io/ingress-operator-sail-finalizer` only to user-created,
+non-managed GatewayClasses. Managed profiles do not receive the finalizer. When
+the final user-created, non-managed GatewayClass is deleted, the finalizer holds
+its deletion until CIO removes the managed profiles and their defaults
+ConfigMaps and uninstalls Istio.
 
 #### GatewayClass Customization Status
 
-CIO reports a `Customized` condition on each new GatewayClass.
+CIO reports a `Customized` condition on each managed profile.
 It checks that the expected class-default ConfigMap exists in
 `openshift-ingress` and has the
 `gateway.istio.io/defaults-for-class: <gatewayclass-name>` label.
@@ -613,14 +582,14 @@ These may be considered in the follow-on customization API.
 #### Code Changes Required
 
 1. **GatewayClass recognition**: Extend the
-   gatewayclass-controller to recognize the three new GatewayClass
-   names in addition to `openshift-default`. All four classes use
+   gatewayclass-controller to manage the three new GatewayClass
+   profiles. The managed profiles and `openshift-default` use
    the same `controllerName:
    openshift.io/gateway-controller/v1`. GatewayClasses created by CIO are
    labeled `ingress.operator.openshift.io/managed-gatewayclass-profile: "true"`.
 
-2. **ConfigMap provisioning**: The sail-operator library (or Sail
-   Operator) provisions the GatewayClass defaults ConfigMap,
+2. **ConfigMap provisioning**: The sail-operator library provisions the
+   GatewayClass defaults ConfigMap,
    following the mechanism defined at
    https://istio.io/latest/docs/tasks/traffic-management/ingress/gateway-api/#gatewayclass-defaults.
    CIO passes the required service configuration as
@@ -641,28 +610,31 @@ These may be considered in the follow-on customization API.
    are created since there is no external endpoint.
 
 5. **Customization status**: CIO watches the class-default ConfigMaps
-   and reconciles `Customized` on each new GatewayClass based
+   and reconciles `Customized` on each managed profile based
    on ConfigMap presence and its class-selection label, preserving
    conditions owned by other controllers.
 
-6. **Lifecycle management**: User-created GatewayClasses retain the existing
-   install and uninstall semantics. CIO does not count GatewayClasses labeled
+6. **Lifecycle management**: User-created, non-managed GatewayClasses retain
+   the existing install and uninstall semantics and receive the Sail lifecycle
+   finalizer. Managed profiles do not receive the finalizer, and CIO does not
+   count GatewayClasses labeled
    `ingress.operator.openshift.io/managed-gatewayclass-profile: "true"` when
-   determining whether to install or uninstall Istio. When the final
-   user-created GatewayClass is deleted, CIO deletes the managed profiles and
-   then uninstalls Istio.
+   determining whether to install or uninstall Istio. The final user-created,
+   non-managed GatewayClass remains terminating while CIO deletes the managed
+   profiles and their defaults ConfigMaps, uninstalls Istio, and removes the
+   finalizer.
 
 This enhancement does not require a new feature gate. It is a CIO
 behavioral change that extends existing Gateway API support.
 
 #### Management Mode Implications
 
-In unmanaged [management mode](gateway-api-crd-management-mode.md),
-CIO stops reconciling the profile GatewayClasses and their defaults
-ConfigMaps. Users may modify or delete these resources while
-unmanaged. When transitioning back to managed mode, CIO resumes
-reconciliation and overwrites any modifications to restore the
-expected configuration.
+In `Unmanaged` [management mode](gateway-api-crd-management-mode.md),
+CIO leaves the managed profiles and their defaults ConfigMaps in place but
+abandons their management. Because CVO deploys and manages the VAP, it remains
+active and continues to protect the managed profiles.
+Transitioning to `Unmanaged` mode uninstalls the CIO-managed Istio instance.
+When transitioning back to `Managed` mode, CIO resumes reconciliation.
 
 #### Path to Phase 2
 
@@ -742,10 +714,6 @@ supported by Istio. Monitor upstream changes and adapt if needed.
    (OSSM 3.5+)? EDGE requires Istio 1.31+; if the profiles are
    backported without it, adding EDGE later is a behavioral change.
 
-3. Should a ValidatingAdmissionPolicy protect operator-managed
-   GatewayClass defaults ConfigMaps from user modification and deletion,
-   while allowing operator reconciliation and cleanup?
-
 ## Alternatives (Not Implemented)
 
 ### Alternative 1: Modify openshift-default Behavior
@@ -772,7 +740,7 @@ will be provisioned.
 
 ### Alternative 3: Direct Istio Patch ConfigMap Generation
 
-CIO could generate curated Istio patch ConfigMaps that users reference
+CIO could generate managed Istio patch ConfigMaps that users reference
 through `Gateway.spec.infrastructure.parametersRef`. This provides
 explicit, per-Gateway customization.
 The referenced ConfigMap must be in the Gateway's namespace, requiring
@@ -808,11 +776,10 @@ Testing will cover the following scenarios:
    `openshift-loadbalancer-external` and
    `openshift-loadbalancer-internal` but not for
    `openshift-clusterip`.
-5. Verify that deleting a CIO-managed profile GatewayClass results in its
-   recreation, with the associated defaults ConfigMap present
-   before the class is recreated.
+5. Verify that CIO restores a missing defaults ConfigMap while reconciling its
+   managed profile.
 6. Verify that upgrading a cluster where `openshift-default`
-   already exists results in the profile GatewayClasses and
+   already exists results in the managed profiles and
    their defaults ConfigMaps being created automatically.
 7. Verify the GatewayClass `Customized` status condition reflects
    ConfigMap presence and the class-selection label, identifies
@@ -821,9 +788,9 @@ Testing will cover the following scenarios:
 8. Verify end-to-end connectivity through a Gateway and HTTPRoute
    for each profile, using an external client, a private-network
    client, or an in-cluster client as appropriate.
-9. Verify that the VAP rejects GatewayClasses with the
-   `openshift-` prefix and an incorrect `controllerName`, and
-   rejects unrecognized `openshift-*` names.
+9. Verify that the VAP rejects an `openshift-*` GatewayClass with an incorrect
+   `controllerName`; rejects user creation, update, and deletion of managed
+   profiles; and permits a non-`openshift-*` name with the OpenShift controller.
 10. On AWS, verify that cluster resource tags from
     `Infrastructure.status.platformStatus.aws.resourceTags` are
     propagated to the provisioned Service annotations, and that
@@ -832,21 +799,18 @@ Testing will cover the following scenarios:
     (`ipFamilyPolicy`, `ipFamilies`) on profile Services. Requires
     [OCPBUGS-100314](https://redhat.atlassian.net/browse/OCPBUGS-100314)
     to be resolved first.
-12. Verify that transitioning from unmanaged to managed
-    management mode restores the profile GatewayClasses and
-    their defaults ConfigMaps.
+12. Verify that transitioning to `Unmanaged` mode leaves the managed profiles and
+    their defaults ConfigMaps in place, keeps the profiles protected, and
+    uninstalls CIO-managed Istio. Verify that transitioning back to `Managed` mode
+    resumes reconciliation.
 13. On AWS, verify that the Gateway Deployment pod template
     includes the `proxy.istio.io/config` annotation with PROXY
     protocol configuration.
 14. Verify that an `openshift-clusterip` Gateway can be exposed
     through an OpenShift Route (Models-as-a-Service pattern).
-15. Verify that creating a profile GatewayClass (e.g.,
-    `openshift-loadbalancer-external`) without `openshift-default`
-    provisions Istio/OSSM, remains unlabeled, and causes CIO to create the
-    other profiles with the ownership label.
-16. Verify that deleting the final user-created GatewayClass stops profile
-    reconciliation, deletes the CIO-managed profiles and their defaults
-    ConfigMaps, and then uninstalls Istio/OSSM.
+15. Verify that deleting `openshift-default` with no other user-created,
+    non-managed GatewayClasses deletes the managed profiles and their defaults
+    ConfigMaps and uninstalls Istio/OSSM.
 
 ## Graduation Criteria
 
@@ -874,10 +838,11 @@ N/A.
 ### Upgrade
 
 Clusters upgrading to OCP 5.1 where `openshift-default` already
-exists will have the supported new GatewayClasses automatically created by CIO
-during the upgrade. Platforms where CIO cannot request internal load-balancer
-scope omit `openshift-loadbalancer-internal`. The `openshift-default`
-GatewayClass continues to work as before.
+exists and Gateway API management mode is `Managed` will have the supported
+managed profiles automatically created by CIO during the upgrade. Platforms
+where CIO cannot request internal load-balancer scope omit
+`openshift-loadbalancer-internal`. The `openshift-default` GatewayClass
+continues to work as before.
 
 This enhancement does not schedule deprecation or removal of the static
 profiles or their ConfigMaps. Any transition to the Phase 2 API must
@@ -909,23 +874,23 @@ needs to be defined. Considerations include:
 No new version skew concerns. CIO and Istio versions remain
 synchronized through the OCP release. The ConfigMap-based
 GatewayClass defaults mechanism is handled entirely by Istio,
-and CIO only creates the ConfigMap.
+and CIO supplies the defaults through the sail-operator library.
 
 ## Operational Aspects of API Extensions
 
-This enhancement introduces a ValidatingAdmissionPolicy (VAP)
-for GatewayClass naming enforcement.
+This enhancement introduces a ValidatingAdmissionPolicy (VAP) for managed
+OpenShift GatewayClass ownership and controller-name enforcement and limits the
+existing Sail lifecycle finalizer to user-created, non-managed GatewayClasses.
 
-- The VAP only applies to GatewayClass CREATE operations.
-  GatewayClass `name` and `controllerName` are immutable after
-  creation, so UPDATE validation is not needed.
+- The VAP applies to GatewayClass CREATE, UPDATE, and DELETE operations. It does
+  not match the status subresource.
 - The VAP uses CEL expressions evaluated in-process by the API
   server. There is no external webhook, no network dependency,
   and no additional latency beyond the CEL evaluation itself.
-- If the VAP is removed or misconfigured, GatewayClasses with
-  non-standard names could be created. CIO would ignore them
-  (it only acts on recognized names), but the naming convention
-  would not be enforced.
+- Managed profiles do not receive the Sail lifecycle finalizer and cannot block
+  the decision to uninstall Istio.
+- If the VAP is removed or misconfigured, users could modify managed profiles
+  or create an `openshift-*` GatewayClass with another controller.
 - The Gateway API team is responsible for the VAP and should be
   contacted for escalation.
 
@@ -937,10 +902,10 @@ for GatewayClass naming enforcement.
   annotations). CIO should set a condition on the GatewayClass
   to indicate the failure.
 - If the ConfigMap is deleted manually, CIO should recreate it
-  on the next reconciliation.
-- If the ValidatingAdmissionPolicy is deleted, naming
-  enforcement is lost but Gateway provisioning continues to
-  work. CVO will restore the VAP as a static manifest.
+  on the next reconciliation in `Managed` mode.
+- If the ValidatingAdmissionPolicy is deleted, managed-profile protection is
+  lost but Gateway provisioning continues to work. CVO will restore the VAP as
+  a static manifest.
 
 ## Support Procedures
 
@@ -953,7 +918,7 @@ oc -n openshift-ingress get configmap \
 Check the ValidatingAdmissionPolicy is in place:
 ```bash
 oc get validatingadmissionpolicy \
-  gatewayclass-openshift-naming
+  openshift-ingress-operator-gatewayclasses
 ```
 
 Check CIO logs for GatewayClass reconciliation:
