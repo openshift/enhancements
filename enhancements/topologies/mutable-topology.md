@@ -124,6 +124,9 @@ See [Alternatives](#alternatives-not-implemented) for the full analysis of contr
 
 ### Topology Considerations
 
+> Note: This EP defines the workflows and requirements for transition SNO to HAC cluster topologies. Additional transitions will
+> require their own specialized requirements and workflows.
+
 #### Hypershift / Hosted Control Planes
 
 Mutable topology is not compatible with HyperShift clusters. HyperShift uses `External` as its `controlPlaneTopology`, and topology transitions are not applicable to hosted control planes where the control plane lifecycle is managed externally.
@@ -185,8 +188,9 @@ Administrators should reduce non-critical workload risk accordingly. Administrat
    - No dedicated worker nodes are present (the initial implementation targets compact clusters only; clusters with dedicated workers require a different `infrastructureTopology` mapping that is not yet supported)
    - etcd already reports quorum, is not mid-scaling, and already has 3 voting members — i.e., step 2's node-driven scaling has already finished
    If any precondition fails — including an etcd that has not yet finished scaling — the controller does not admit the transition; it records the reason and re-evaluates on the next sync (see [Failure Handling](#failure-handling)).
-8. Once preconditions pass, the controller verifies an upgrade has not been triggered by CVO and then sets `Upgradeable=False` and updates the `TopologyTransitionCompleted` condition (which is always present in `topologyTransitionStatus.conditions`) to `status: False`, signaling that a transition is in progress and preventing CVO from initiating an upgrade.
-9. The controller updates the infrastructure status fields:
+8. Once preconditions pass, the controller verifies an upgrade has not been triggered by CVO and then sets `Upgradeable=False`, signaling that a transition is in progress and preventing CVO from initiating an upgrade.
+9. The CCO updates the `TopologyTransitionCompleted` condition (which is always present in `topologyTransitionStatus.conditions`) from `status: Unknown` to `status: False`.
+10. The controller updates the infrastructure status fields:
    - `controlPlaneTopology` transitions from `SingleReplica` to `HighlyAvailable`
    - `infrastructureTopology` transitions from `SingleReplica` to `HighlyAvailable` (no dedicated workers, so it matches control plane topology)
    - `topologyTransitionStatus.conditions` array contains both required conditions:
@@ -203,7 +207,7 @@ Administrators should reduce non-critical workload risk accordingly. Administrat
        - `message: "Applying topology transition to HighlyAvailable"`
        - `lastTransitionTime: <current time>`
 
-10. **Topology-driven operator reactions** — operators that watch the infrastructure status topology fields reconcile against the new values and adjust their deployment strategies, replica counts, and placement policies.
+11. **Topology-driven operator reactions** — operators that watch the infrastructure status topology fields reconcile against the new values and adjust their deployment strategies, replica counts, and placement policies.
     This is a distinct phase from step 2: step 2 covers operators reacting to node presence before the transition is even admitted, step 10 covers operators reacting to the topology status change after admission.
     The set of operators with topology-dependent behavior has not been fully enumerated — building the per-operator topology dependency matrix is a prerequisite for entering dev preview (see [Graduation Criteria](#entering-dev-preview) and [Open Questions](#open-questions)).
 
@@ -211,8 +215,8 @@ Administrators should reduce non-critical workload risk accordingly. Administrat
 
 ##### Post-Transition
 
-11. After a soak period (5 minutes) following the `TopologyTransitionCompleted` condition transitioning to `status: False`, the controller checks that control-plane/worker node readiness, etcd health, MachineConfig rollout, ingress router replicas, and API server operator replica counts have reconciled to the target values
-12. Once all checks pass, the controller updates the `TopologyTransitionCompleted` condition to `status: True`, clears the CCO `Progressing` condition, and sets `Upgradeable=True`:
+12. After a soak period (5 minutes) following the `TopologyTransitionCompleted` condition transitioning to `status: False`, the controller checks that control-plane/worker node readiness, etcd health, MachineConfig rollout, ingress router replicas, and API server operator replica counts have reconciled to the target values
+13. Once all checks pass, the controller updates the `TopologyTransitionCompleted` condition to `status: True`, clears the CCO `Progressing` condition, and sets `Upgradeable=True`:
     - `type: TopologyTransitionCompleted`
     - `status: True` (indicates transition completed)
     - `reason: PostTransitionChecksPassed`
@@ -283,14 +287,14 @@ For the initial SNO → HA compact transition: `controlPlaneTopology` and `infra
 The existing fields in `InfrastructureStatus` that the controller updates upon successful transition:
 
 ```go
-// controlPlaneTopology expresses the expectations for operands that normally run on control nodes.
-// The default is 'HighlyAvailable', which represents the behavior operators have in a "normal" cluster.
+// controlPlaneTopology expresses the expectations for operands that normally run on the control-plane.
+// The default is 'HighlyAvailable' for clusters deployed with 3 or more control-plane nodes.
 // The 'SingleReplica' mode will be used in single-node deployments
-// and the operators should not configure the operand for highly-available operation
-// The 'External' mode indicates that the control plane is hosted externally to the cluster and that
-// its components are not visible within the cluster.
+// and the operators should not configure the operands for highly-available operation
+// The 'External' mode indicates that the control plane pods are hosted externally on a management cluster, external the
+// managed cluster's deployment.
 // The 'HighlyAvailableArbiter' mode indicates that the control plane will consist of 2 control-plane nodes
-// that run conventional services and 1 smaller sized arbiter node that runs a bare minimum of services to maintain quorum.
+// that run conventional services (i.e., ectd) and 1 smaller sized arbiter node that runs a bare minimum of services to maintain quorum.
 // +kubebuilder:default=HighlyAvailable
 // +openshift:validation:FeatureGateAwareEnum:featureGate="",enum=HighlyAvailable;HighlyAvailableArbiter;SingleReplica;External
 // +openshift:validation:FeatureGateAwareEnum:featureGate=DualReplica,enum=HighlyAvailable;HighlyAvailableArbiter;SingleReplica;DualReplica;External
@@ -300,9 +304,9 @@ ControlPlaneTopology TopologyMode `json:"controlPlaneTopology"`
 // infrastructureTopology expresses the expectations for infrastructure services that do not run on control
 // plane nodes, usually indicated by a node selector for a `role` value
 // other than `master`.
-// The default is 'HighlyAvailable', which represents the behavior operators have in a "normal" cluster.
+// The default is 'HighlyAvailable', which represents the behavior operators have in clusters with 2 or more compute nodes (or schedulable control-plane nodes).
 // The 'SingleReplica' mode will be used in single-node deployments
-// and the operators should not configure the operand for highly-available operation
+// and the operators should not configure the operands for highly-available operation
 // NOTE: External topology mode is not applicable for this field.
 // +kubebuilder:default=HighlyAvailable
 // +kubebuilder:validation:Enum=HighlyAvailable;SingleReplica
@@ -373,7 +377,7 @@ type TopologyState struct {
 	// SingleReplica means a single instance of control-plane services is expected
 	// to meet cluster needs. HighlyAvailable means multiple instances are expected
 	// to provide redundancy. HighlyAvailableArbiter means two control-plane nodes
-	// and a smaller arbiter node maintain quorum.
+	// and a smaller arbiter node maintain etcd quorum.
 	// See https://pkg.go.dev/github.com/openshift/api/config/v1#TopologyMode for
 	// topology definitions.
 	// controlPlaneTopology is required.
@@ -964,6 +968,7 @@ The enum validation constraint on `spec.controlPlaneTopology` provides API-serve
 - Resolution: If quorum is lost, follow standard etcd disaster recovery procedures (`quorum-restore.sh`), independent of the topology transition controller. Automated rollback is not possible without quorum. Restoring to pre-transition snapshot could operate as a fallback recovery procedure pending verification of that procedure.
 
 ### Recovery Procedures
+> Reverting / undoing a topology transition is not a supported operation. Once the new topology is deployed, there is no going back.
 
 | Failure Mode | Impact | Recovery |
 | ------------ | ------ | -------- |
