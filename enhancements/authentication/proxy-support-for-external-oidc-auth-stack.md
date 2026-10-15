@@ -718,8 +718,8 @@ Existing components whose behavior changes:
 | Affected | Change |
 | --- | --- |
 | CAO | Resolves the component proxy; injects env + mounts CA on the webhook Deployment and sets `trustedCAFilePath` in its configuration (standalone). |
-| oauth-apiserver (webhook) | Reads the generic outbound CA bundle through `trustedCAFilePath` for HTTPS endpoint and proxy trust; outbound clients honor the proxy; on HyperShift egress flows through the new sidecar. |
-| CPO | Builds the webhook Deployment including the konnectivity sidecar flags and CA mount; sets `trustedCAFilePath` in the webhook configuration (HyperShift). |
+| oauth-apiserver (webhook) | Reads the generic outbound CA bundle through `trustedCAFilePath` for HTTPS endpoint trust, plus the proxy's own certificate on standalone only; outbound clients honor the proxy; on HyperShift egress flows through the new sidecar, which holds that proxy trust instead. |
+| CPO | Builds the webhook Deployment including the konnectivity sidecar flags and both CA mounts; sets `trustedCAFilePath` in the webhook configuration (HyperShift). |
 | Console Operator | Reads the Console operator proxy field; renders `auth.proxy` and mounts the CA. |
 | Console | Applies `auth.proxy` to its OIDC clients only. |
 | HyperShift operator | Copies `operatorConfiguration` HC→HCP; synchronizes the referenced CA HC→HCP. |
@@ -841,8 +841,14 @@ management cluster and must egress through konnectivity (see
   `konnectivity-https-proxy` sidecar with the component proxy (`--https-proxy`,
   `--http-proxy`, `--no-proxy`). When `trustedCA` is configured, CPO mounts the bundle
   in both the sidecar and webhook container, referencing it through `trustedCAFilePath`
-  in the webhook configuration. They validate different certificates as described
-  below.
+  in the webhook configuration. The webhook never validates the component proxy's own
+  certificate on this topology: it reaches the sidecar over plaintext loopback, and the
+  sidecar is what connects to the proxy. Its copy of the bundle covers only TLS
+  interception, where the proxy presents a replacement endpoint certificate
+  end-to-end through the CONNECT tunnel. The bundle is opaque, so CPO cannot tell
+  which role a given certificate serves and mounts the same bundle in both places;
+  against a non-intercepting proxy the webhook's copy simply goes unused. The two
+  containers validate different certificates as described below.
 
 The webhook's existing HTTP clients already honor proxy environment variables,
 so proxy URLs do not require new fields in its generated configuration file.
@@ -866,8 +872,8 @@ the endpoint.
 The term "proxy CA" covers two distinct roles:
 
 - A **proxy server CA** signs the proxy's own certificate, for example for
-  `proxy.example.com`. The sidecar uses this trust when connecting to an HTTPS
-  proxy.
+  `proxy.example.com`. Whichever component opens the connection to an HTTPS proxy
+  needs this trust: the webhook itself on standalone, the sidecar on HyperShift.
 - An **interception CA** signs replacement endpoint certificates, for example for
   `idp.example.com`. The webhook accepts these only if their certificate chain
   leads to a CA it trusts. The proxy must independently validate the real
@@ -886,8 +892,12 @@ interception CA even though its own connection has no TLS server certificate.
 HTTP versus HTTPS here refers to the proxy URL scheme, not the endpoint scheme or
 the `httpsProxy` field name. If the required CAs are not already trusted, the
 `trustedCA` bundle must contain their public certificates.
-Mounting the bundle only on the sidecar is insufficient for TLS interception:
-the webhook must also load it through `trustedCAFilePath`.
+On HyperShift this splits cleanly across the two containers, which is why both
+mounts exist: the sidecar's copy covers an HTTPS proxy's own certificate, which
+the webhook never sees, and the webhook's copy covers interception, which the
+sidecar never sees because it forwards the tunnel without decrypting it.
+Mounting the bundle only on the sidecar is therefore insufficient for TLS
+interception: the webhook must also load it through `trustedCAFilePath`.
 
 #### Console Login and Token Refresh
 
