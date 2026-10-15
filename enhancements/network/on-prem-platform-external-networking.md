@@ -10,7 +10,7 @@ approvers:
 api-approvers:
   - "@TBD"
 creation-date: 2026-09-25
-last-updated: 2026-10-05
+last-updated: 2026-10-15
 status: provisional
 tracking-link:
   - https://issues.redhat.com/browse/OPNET-771
@@ -101,7 +101,39 @@ feature gate:
 3. For user-managed networking, the deployer sets `loadBalancer.type:
    UserManaged` and optionally `dnsRecordsType: External`, configures their own
    load balancer and DNS. OpenShift does not deploy the on-prem
-   static pods.
+   static pods. When `dnsRecordsType: External` is used, the deployer must
+   pre-create the cluster DNS records (see below) before the cluster is brought up.
+
+### DNS Records
+
+Which DNS records the deployer must provide depends on `dnsRecordsType`, and
+mirrors the behavior of the other on-prem platforms (BareMetal, vSphere,
+OpenStack):
+
+- `dnsRecordsType: Internal` (the default): the OpenShift-managed CoreDNS static
+  pod serves the `api`, `api-int`, and `*.apps` records internally, pointing at
+  the configured VIPs (`apiServerInternalIPs` / `ingressIPs`). The deployer's
+  external/upstream DNS only needs the records required by clients outside the
+  cluster — `api.<base_domain>` and `*.apps.<base_domain>`. The `api-int` record
+  is internal-only and is served by CoreDNS. The deployer doesn't need to
+  create it externally.
+- `dnsRecordsType: External` (only valid with `loadBalancer.type: UserManaged`):
+  CoreDNS does not serve any of these records. The deployer must pre-create all
+  of them in their own DNS, pointing at their user-managed load balancer:
+  `api.<base_domain>`, `api-int.<base_domain>`, and `*.apps.<base_domain>`.
+
+#### DualStack
+
+DualStack `External` clusters are supported: `apiServerInternalIPs` and
+`ingressIPs` each accept at most one IPv4 and one IPv6 address, and the CoreDNS
+Corefile already renders both IP families (it emits an `A`/`AAAA` record for the
+primary family and a second record for the secondary family when a second
+address is present). No additional mechanism is required.
+
+For a DualStack cluster with `dnsRecordsType: External`, the deployer must create
+both an `A` and an `AAAA` record for each of `api`, `api-int`, and `*.apps`.
+With `dnsRecordsType: Internal`, CoreDNS emits the per-family records
+automatically from the configured VIPs.
 
 ### API Extensions
 
@@ -148,6 +180,29 @@ The fields intentionally mirror the shapes already used by `BareMetalPlatformSta
 and `VSpherePlatformStatus` so the consuming components (MCO on-prem static pods,
 CoreDNS) can treat `External` like other on-prem platforms with minimal change.
 
+DualStack is supported with no extra mechanism: the VIP fields accept one IPv4
+and one IPv6 address each, and the existing on-prem rendering (VIP getters and the
+CoreDNS Corefile) already handles both families, emitting secondary-family records
+when a second address is present.
+
+#### Affected Components
+
+The components that must learn about the `External` platform for these fields
+to take effect end to end:
+
+- cluster-network-operator (CNO): 
+  CNO does not render the on-prem static pods but its `infrastructureconfig`
+  controller keeps the Infrastructure CR's VIP and `machineNetworks`
+  fields consistent between spec and status and validates them. Today `External` is
+  excluded from the controller's on-prem platform predicate and from the
+  spec/status sync logic so VIPs and machine networks set on `External` would not be
+  propagated or validated. CNO needs `External` added to its on-prem platform
+  predicate and its spec/status sync (mirroring the BareMetal/vSphere/OpenStack
+  cases). Because `External` is also used for pure cloud-provider-external
+  clusters with no self-hosted load balancer, CNO should treat `External` as
+  on-prem only when the on-prem fields are actually set, rather than
+  unconditionally.
+
 ### Risks and Mitigations
 
 The main risk is behavior divergence from other on-prem platforms. Reusing the
@@ -166,8 +221,7 @@ a supported path instead of forcing them to misuse other platform types.
 
 ## Open Questions [optional]
 
-- Which components beyond the MCO on-prem static pods need to learn about the
-  `External` platform for these fields to take effect end to end?
+- None outstanding.
 
 ## Test Plan
 
