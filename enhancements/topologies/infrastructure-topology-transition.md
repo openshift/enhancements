@@ -102,31 +102,35 @@ This proposal does not depend on features excluded from OKE. See [Mutable Topolo
    - No incompatible upgrade is in progress
    - The cluster is not un-upgradeable (CVO `Upgradeable=False`) — avoids compounding risk on an already degraded cluster
 
-   If any precondition fails, the controller does not admit the transition; it records the reason on the `Progressing`/`Upgradeable` conditions (e.g. `PreflightCheckFailed`, `UpgradeInProgress`, `ClusterNotUpgradeable`) and re-evaluates on the next sync.
-6. Once preconditions pass, the controller verifies an upgrade has not been triggered by CVO and then sets `Upgradeable=False` and a `Progressing` condition (`reason: InfrastructureTopologyTransitionInProgress`) on the CCO `ClusterOperator` in the same update
-7. The controller re-reads the Infrastructure CR (fresh API read) to confirm `spec.infrastructureTopology` has not changed since preconditions were checked
-8. **Infrastructure operator reactions** — operators that watch `status.infrastructureTopology` reconcile against the new values and adjust replica counts to HA levels
+   If any precondition fails, the controller records the reason in the per-transition `TopologyTransitionAvailable` evaluations on the Infrastructure CR's `status.topologyTransitionStatus` and re-evaluates on the next sync.
+6. Once preconditions pass, the controller establishes upgrade gating: sets `TopologyTransitionCompleted=False` and `TopologyTransitionControllerUpgradeable=False` on the CCO `ClusterOperator` in the same update
+7. The controller re-reads the Infrastructure CR (fresh API read) to confirm `spec.infrastructureTopology` has not changed since preconditions were checked. If spec has changed, the controller aborts (cancellation before commit — see [Cancellation and Recovery](#cancellation-and-recovery))
+8. **Commit topology status**: the controller updates `status.infrastructureTopology` from `SingleReplica` to `HighlyAvailable`. This is the point of no return — after this write, operators begin reacting to the new topology.
+9. **Operator reconciliation**: infrastructure operators that watch `status.infrastructureTopology` detect the change and adjust replica counts to HA levels
 
 #### Post-Transition
 
-9. After a soak period (5 minutes) following the `Progressing` condition, the controller checks that infrastructure operators have converged:
-   - Ingress Operator: default IngressController replicas scaled to 2+
-   - Monitoring: Prometheus, Alertmanager at HA replicas
-   - Image Registry: registry replicas scaled
-   - Console: console replicas scaled
-   - OAuth: OAuth server replicas scaled
-   - Worker nodes remain `Ready` and schedulable
-10. Once all checks pass, the controller updates the infrastructure status:
-    - `status.infrastructureTopology` transitions from `SingleReplica` to `HighlyAvailable`
+10. After a soak period (5 minutes) following the status commit, the controller validates that infrastructure operators have converged:
+    - Ingress Operator: default IngressController replicas scaled to 2+
+    - Monitoring: Prometheus, Alertmanager at HA replicas
+    - Image Registry: registry replicas scaled
+    - Console: console replicas scaled
+    - OAuth: OAuth server replicas scaled
+    - Worker nodes remain `Ready` and schedulable
+11. Once all checks pass, the controller reports completion: sets `TopologyTransitionCompleted=True` and clears `TopologyTransitionControllerUpgradeable=False` on the CCO `ClusterOperator`.
 
-    The controller clears the `Progressing` condition (`reason: InfrastructureTopologyTransitionComplete`) and sets `Upgradeable=True` on the CCO `ClusterOperator`. The infrastructure status reflects the completed transition — `spec.infrastructureTopology` matches `status.infrastructureTopology`, so no further action is taken.
-
-The CLI returns immediately after patching `spec.infrastructureTopology` (step 3). Administrators can monitor transition progress by watching CCO ClusterOperator status conditions (e.g., `oc get clusteroperator cluster-config-operator -o yaml`).
+The CLI returns immediately after patching `spec.infrastructureTopology` (step 3). Administrators can monitor transition progress via `status.topologyTransitionStatus` on the Infrastructure CR (e.g., `oc get infrastructure cluster -o yaml`).
 
 #### Failure Handling
 
-- **Before admission**: if a precondition fails (e.g., insufficient workers, incompatible upgrade in progress, cluster un-upgradeable), the `Progressing`/`Upgradeable` conditions carry a diagnostic reason (e.g. `PreflightCheckFailed`, `UpgradeInProgress`, `ClusterNotUpgradeable`). The controller re-evaluates on every sync — if the prerequisite is later satisfied (e.g., workers become Ready), the transition proceeds automatically.
-- **After admission**: if a post-transition validation criterion never passes (e.g., an operator fails to reconcile to HA replicas), the `Progressing` condition remains `True` and `Upgradeable` remains `False` indefinitely. The administrator inspects CCO and the relevant operator's logs and ClusterOperator status conditions for details.
+- **Before admission**: if a precondition fails (e.g., insufficient workers, incompatible upgrade in progress, cluster un-upgradeable), the per-transition `TopologyTransitionAvailable` evaluations report the failure reason. The controller re-evaluates on every sync — if the prerequisite is later satisfied (e.g., workers become Ready), the transition proceeds automatically.
+- **After status commit**: if a post-commit validation criterion never passes (e.g., an operator fails to reconcile to HA replicas), `TopologyTransitionCompleted` remains `False` and `TopologyTransitionControllerUpgradeable` remains `False` indefinitely. The administrator inspects the Infrastructure CR's `status.topologyTransitionStatus` and the relevant operator's logs for details.
+
+#### Cancellation and Recovery
+
+- **Cancellation before status commit** (steps 5–7): the administrator can revise or clear `spec.infrastructureTopology` at any time before the controller commits `status.infrastructureTopology`. On the next sync, the controller detects the spec change and aborts the transition without modifying status.
+- **No cancellation after status commit** (step 8 onward): once `status.infrastructureTopology = HighlyAvailable` is written, the transition is committed. Operators have already begun reacting to the new topology. Reverse transitions (HA → SingleReplica) are not supported.
+- **Crash recovery after status commit**: if CCO crashes after committing status but before completing the soak, spec equals status on restart. The controller MUST NOT treat spec/status equality as "transition complete" — it checks `TopologyTransitionCompleted`. If `TopologyTransitionCompleted=False`, the controller resumes the soak validation regardless of spec/status equality. `TopologyTransitionCompleted=True` is the authoritative signal that the transition is fully complete.
 
 #### Invariants
 
@@ -157,7 +161,7 @@ The `spec.infrastructureTopology` field and shared API concepts (field definitio
 
 **No cross-field API validation**: Transition eligibility is enforced by CCO through the available transitions list, not by API-level x-validation rules. See [Mutable Topology](mutable-topology.md#infrastructure-api-changes) for rationale.
 
-**Transition progress** is reported via conditions on the CCO `ClusterOperator` status.
+**Transition progress** is reported via `status.topologyTransitionStatus` on the Infrastructure CR (defined in [openshift/api#3029](https://github.com/openshift/api/pull/3029)): `TopologyTransitionsEvaluated` indicates whether transitions have been evaluated, `TopologyTransitionAvailable` reports per-transition preflight check results, and `TopologyTransitionCompleted` tracks lifecycle progress. `TopologyTransitionControllerUpgradeable` on the CCO `ClusterOperator` gates CVO upgrades during active transitions.
 
 ### Implementation Details/Notes/Constraints
 
@@ -167,9 +171,10 @@ The controller reconciles `spec.infrastructureTopology` against `status.infrastr
 
 Implementation-specific notes:
 
-- Condition reason strings use the `InfrastructureTopologyTransition` prefix (e.g., `InfrastructureTopologyTransitionInProgress`, `InfrastructureTopologyTransitionComplete`)
-- The soak period is 5 minutes, anchored on the `Progressing` condition's `LastTransitionTime`
-- The controller re-reads the Infrastructure CR (fresh API read) before updating status to guard against spec changes between precondition check and status write
+- Transition status is reported via the conditions defined in [openshift/api#3029](https://github.com/openshift/api/pull/3029): `TopologyTransitionsEvaluated`, `TopologyTransitionCompleted`, and per-transition `TopologyTransitionAvailable` evaluations on the Infrastructure CR; `TopologyTransitionControllerUpgradeable` on the CCO `ClusterOperator` for CVO upgrade gating
+- The soak period is 5 minutes, anchored on the status commit timestamp
+- The controller re-reads the Infrastructure CR (fresh API read) before committing status to guard against spec changes between precondition check and status write
+- On restart, `TopologyTransitionCompleted=False` is the signal to resume soak validation — spec/status equality alone does not indicate completion (see [Cancellation and Recovery](#cancellation-and-recovery))
 
 #### Worker Node Prerequisites
 
@@ -297,7 +302,7 @@ An alternative for the standalone infrastructure transition was to represent it 
 | Test | Description |
 | ---- | ----------- |
 | Infra precondition validation | Verify the controller withholds admission when workers are insufficient/not-ready, incompatible upgrade in progress, or cluster is un-upgradeable |
-| Spec mutability during transition | Verify that spec topology fields are always mutable at the API level — no CEL or webhook rejection. Verify that changing spec before status moves effectively cancels the transition. Verify that CCO's available transitions list prevents invalid states after status changes. |
+| Spec mutability during transition | Verify that spec topology fields are always mutable at the API level — no CEL or webhook rejection. Verify that changing spec before the status commit effectively cancels the transition. Verify that CCO's available transitions list prevents invalid states after the status commit. |
 | CLI interaction | Verify `oc adm transition topology --infrastructure=HighlyAvailable` correctly patches `spec.infrastructureTopology` and monitors progress |
 
 #### Transition Tests
@@ -307,17 +312,19 @@ An alternative for the standalone infrastructure transition was to represent it 
 | Infra SingleReplica → HA | Full infrastructure transition: controller validates workers, admits transition, infrastructure operators converge to HA replicas |
 | Infra failure and recovery | Verify the controller withholds admission when workers are insufficient, and that admission proceeds automatically when workers become Ready |
 | Post-transition infra operator health | Verify infrastructure operators (Ingress, Monitoring, Image Registry, Console, OAuth) converge to HA replicas after `status.infrastructureTopology` changes |
-| Crash recovery | Kill CCO during infrastructure transition, verify controller resumes from spec/status divergence |
+| Crash recovery before status commit | Kill CCO before status commit, verify controller resumes from spec/status divergence |
+| Crash recovery after status commit | Kill CCO after status commit but before soak completes, verify controller resumes soak validation despite spec/status equality — `TopologyTransitionCompleted=False` drives resumption |
 | Idempotent behavior | Verify that spec matching status (no-op) and repeated spec writes do not trigger re-transitions |
-| Spec change during transition | Verify that changing `spec.infrastructureTopology` before status moves cancels the in-progress transition. Verify that after status moves, CCO's available transitions list prevents invalid spec values. |
+| Cancellation before status commit | Verify that changing `spec.infrastructureTopology` before the controller commits status cancels the in-progress transition. Verify that after status is committed, reverse transitions are rejected. |
 
 ### QE Testing
 
 - Full infrastructure transition with dedicated workers and with dual-role nodes
 - Transition failure and recovery scenarios
 - Post-transition cluster stability over 24 hours
-- Concurrent operation testing: transition + upgrade attempt (verify `Upgradeable=False` blocks upgrades)
-- Spec mutability testing: verify spec topology fields are always mutable at the API level; verify cancellation window (spec change before status moves); verify CCO prevents invalid states after status changes
+- Concurrent operation testing: transition + upgrade attempt (verify `TopologyTransitionControllerUpgradeable=False` blocks upgrades)
+- Spec mutability testing: verify spec topology fields are always mutable at the API level; verify cancellation before status commit; verify CCO prevents invalid states after status commit
+- Crash recovery testing: kill CCO after status commit but before soak completes; verify controller resumes soak despite spec/status equality
 - Worker node loss after completed infrastructure transition (verify status stays HA, degradation reported)
 - Upgrade gating: CVO cannot start an upgrade while infrastructure transition is in progress
 - Post-transition upgrade: cluster upgraded after successful infrastructure transition preserves topology status
@@ -332,7 +339,7 @@ An alternative for the standalone infrastructure transition was to represent it 
 - `oc adm transition topology --infrastructure` CLI support implemented
 - Infrastructure transition CI lane operational
 - Per-operator topology dependency matrix completed for infrastructure operators: document what each operator uses `infrastructureTopology` for and whether it watches the infrastructure CR for changes or reads at startup
-- CCO sets `Upgradeable=False` on its ClusterOperator while an infrastructure transition is in progress
+- CCO sets `TopologyTransitionControllerUpgradeable=False` on its ClusterOperator while an infrastructure transition is in progress
 
 ### Dev Preview -> Tech Preview
 
@@ -364,7 +371,7 @@ See [Mutable Topology: Upgrade / Downgrade Strategy](mutable-topology.md#upgrade
 
 ## Version Skew Strategy
 
-The infrastructure transition controller is gated by the `MutableTopology` feature gate and only active when enabled. Version skew during transitions is not a concern because the controller manages the entire sequence within a single cluster version. CCO sets `Upgradeable=False` during active transitions, preventing CVO from initiating an upgrade.
+The infrastructure transition controller is gated by the `MutableTopology` feature gate and only active when enabled. Version skew during transitions is not a concern because the controller manages the entire sequence within a single cluster version. CCO sets `TopologyTransitionControllerUpgradeable=False` during active transitions, preventing CVO from initiating an upgrade.
 
 See [Mutable Topology: Version Skew Strategy](mutable-topology.md#version-skew-strategy) for details.
 
@@ -379,8 +386,8 @@ See [Mutable Topology: Operational Aspects](mutable-topology.md#operational-aspe
 ### Detecting Issues
 
 **Infrastructure Transition Stuck or Failed:**
-- Symptom: CCO ClusterOperator status conditions show `InfrastructureTopologyTransition*` reason in progress or failed for an extended period
-- Check: `oc get clusteroperator cluster-config-operator -o yaml` for status conditions with `InfrastructureTopologyTransition*` reasons
+- Symptom: `TopologyTransitionCompleted=False` on the Infrastructure CR for an extended period
+- Check: `oc get infrastructure cluster -o yaml` for `status.topologyTransitionStatus` conditions and per-transition evaluations
 - Check: cluster-config-operator logs for transition controller errors
 - Check: relevant infrastructure operator logs (Ingress, Monitoring, Image Registry, Console, OAuth)
 - Resolution: Address the reported issue (e.g., add more workers, fix operator issues) and retry, or contact support
@@ -390,8 +397,9 @@ See [Mutable Topology: Operational Aspects](mutable-topology.md#operational-aspe
 | Failure Mode | Impact | Recovery |
 | ------------ | ------ | -------- |
 | Controller fails during precondition check | No impact — transition not admitted | Address the precondition and retry |
-| Operator fails to reconcile post-infra-transition | Infrastructure operator not at HA replicas | Investigate operator logs; verify worker node health; file bug against the operator component |
-| CCO crash during transition | Transition paused | CCO restarts via deployment controller and the transition controller resumes reconciliation from spec/status divergence |
+| Operator fails to reconcile after status commit | Infrastructure operator not at HA replicas | Investigate operator logs; verify worker node health; file bug against the operator component |
+| CCO crash before status commit | Transition paused, no status change | CCO restarts and resumes from spec/status divergence |
+| CCO crash after status commit | Status committed, soak incomplete | CCO restarts, sees `TopologyTransitionCompleted=False`, resumes soak validation despite spec/status equality |
 | Worker node lost after completed infra transition | Infrastructure operators report degradation (cannot schedule HA replicas) | Add replacement workers; status stays HA — degradation is an error to fix, not a topology change |
 
 ### Team Ownership
