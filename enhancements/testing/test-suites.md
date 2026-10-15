@@ -477,8 +477,8 @@ selecting its members by metadata tag:
 |-------|---------|-------------|
 | `openshift/conformance/parallel` | (existing, unchanged) | The existing aggregate parallel conformance suite. Left exactly as-is during bring-up; later becomes the graft target the matured new suites join via `Parents` (see [Exclusive Membership and Rollout](#exclusive-membership-and-rollout)) |
 | `openshift/conformance/serial` | (existing, unchanged) | The existing aggregate serial conformance suite; same role |
-| `openshift/conformance/parallel/minimal` | `Criticality: Core` | Core smoke tests only, parallel execution. Existing suite, defined in openshift/kubernetes; its selection is changed **in-place** from the upstream `[Conformance]` label to `Criticality: Core` (see naming note below) |
-| `openshift/conformance/serial/minimal` | `Criticality: Core` | Core smoke tests only, serial execution; same in-place change |
+| `openshift/conformance/parallel/minimal` | `Criticality: Core` | Core smoke tests only, parallel execution. Newly defined as a static suite in origin selecting downstream `Criticality: Core`; upstream `[Conformance]` tests join via openshift/kubernetes's existing `Parents` graft (see naming note below) |
+| `openshift/conformance/serial/minimal` | `Criticality: Core` | Core smoke tests only, serial execution; same static-suite definition |
 | `openshift/conformance/parallel/active-01` | `Lifecycle: Informing`/`Blocking` | Recent features, parallel, shard 1 |
 | `openshift/conformance/serial/active-01` | `Lifecycle: Informing`/`Blocking` | Recent features, serial, shard 1 |
 | `openshift/conformance/parallel/stable-01` | `Lifecycle: Stable` | Stable tests, parallel, shard 1 |
@@ -492,23 +492,49 @@ suite's qualifier combines the `Lifecycle` selection, the shard tag, and a
 `!has(test.tags.Suite)` guard (see
 [Shard Membership Qualifiers](#shard-membership-qualifiers)).
 
-Two situations are handled differently, depending on whether the suite
-already has a definition that can be edited in place.
+Two situations are handled differently, depending on whether a cross-source
+parent suite already exists or must be newly defined.
 
-**The `minimal` suites are edited in place.** `openshift/conformance/
-parallel/minimal` and `.../serial/minimal` are defined in
-openshift/kubernetes, so there is no second registration
-and no name collision to worry about. The single authoritative
-definition is changed directly: its selection moves from the upstream `[Conformance]`
-label to `Criticality: Core`. Upstream `[Conformance]` tests continue to
-qualify because the centralized import walk stamps `Criticality: Core`
-onto every `[Conformance]` test (see
-[Minimal-Suite Membership](#minimal-suite-membership) and
-[Upstream and Externally-Sourced Tests](#upstream-and-externally-sourced-tests)),
-and downstream tests qualify by carrying `Criticality: Core` directly.
-Because this edits the one definition rather than registering a same-named
-suite a second time, OTE's additive-union behavior does not come into play
-for `minimal`.
+**The `minimal` suites are newly defined once, in origin, as static
+suites.** `openshift/conformance/parallel/minimal` and `.../serial/minimal`
+are **not** currently defined in origin's static suite table — the name
+exists today only as a `Parents` target declared by openshift/kubernetes's
+`kubernetes/conformance/*/minimal` extension suites (which select upstream
+`[Conformance]` tests). We add the two `openshift/conformance/*/minimal`
+suites to origin's static suite table, with a qualifier that selects
+`Criticality: Core`. Because a static suite's qualifier is not scoped to a
+single extension, it selects matching tests across **all** sources; this is
+the same cross-source behavior the `active`/`stable` static suites rely on.
+
+Two sources then feed each `minimal` suite, unioned automatically:
+
+- **Downstream (OpenShift-authored) tests** qualify through the new static
+  suite's own `Criticality: Core` qualifier.
+- **Upstream Kubernetes tests** are pulled in with **no new wiring**:
+  openshift/kubernetes's `kubernetes/conformance/*/minimal` suites already
+  declare `Parents: ["openshift/conformance/*/minimal"]` and select on the
+  upstream `[Conformance]` label. The moment the parent exists in origin's
+  table, origin's parent-qualifier merge unions that child's `[Conformance]`
+  selection into the new parent. The upstream `[Conformance]` selection is
+  left exactly as it is in openshift/kubernetes — we do not convert it to a
+  tag (see [Minimal-Suite Membership](#minimal-suite-membership) and
+  [Upstream and Externally-Sourced Tests](#upstream-and-externally-sourced-tests)).
+
+So `[Conformance]` (upstream) and `Criticality: Core` (downstream) coexist
+as two parallel entry keys into the same `minimal` suite; defining the
+parent once in origin is all that is required to include both.
+
+> **Warning — the `Parents`-into-`minimal` graft is reserved to
+> openshift/kubernetes.** The `[Conformance]`-based `Parents` graft exists
+> only to carry the large, vendored upstream Kubernetes conformance set,
+> whose source we do not edit. No other repository should define a suite
+> that declares `Parents: ["openshift/conformance/*/minimal"]` (or
+> otherwise feeds `minimal` through a label its own extension selects on).
+> Every non-upstream test — including OpenShift-authored tests in any
+> component repository — must enter `minimal` through the reviewable
+> `Criticality: Core` tag, so that `minimal` membership stays a deliberate,
+> per-test decision rather than a bulk label inherited from a convention.
+> This is a convention for now, not a code-enforced check.
 
 **The new `active`/`stable` shard suites are brought up under new names.**
 These have no existing equivalent, and they must not reuse a suite name
@@ -543,18 +569,20 @@ The precise rule for what belongs in `conformance/*/minimal` is **not
 yet fully defined** and remains an open question (see
 [Open Questions](#open-questions-optional)). Two cases differ:
 
-- **Upstream Kubernetes tests**: minimal membership is selected
-  mechanically by the upstream `[Conformance]` label. A dedicated
-  function walks the imported specs and adds `Criticality: Core` to
-  every test carrying `[Conformance]`; the `conformance/*/minimal`
-  suites then select on `Criticality: Core`. The mapping is applied
-  centrally rather than judged test-by-test (see
+- **Upstream Kubernetes tests**: minimal membership is selected by the
+  upstream `[Conformance]` label, exactly as openshift/kubernetes already
+  does it. Its `kubernetes/conformance/*/minimal` extension suites select
+  `[Conformance]` tests and declare the `openshift/conformance/*/minimal`
+  suites as `Parents`, so those tests flow into our static `minimal` parent
+  automatically. We rely on the upstream `[Conformance]` label as a stable
+  signal and do not rewrite it into a tag (see
   [Upstream and Externally-Sourced Tests](#upstream-and-externally-sourced-tests)).
 - **Downstream (OpenShift-authored) tests**: there is no equivalent
-  established signal. Deciding which downstream tests deserve
-  `Criticality: Core` still requires evaluation, likely a manual review
-  per component to begin with. Defining an objective, repeatable rule
-  for this is tracked as an open question.
+  established signal. Downstream minimal membership is expressed with the
+  `Criticality: Core` tag, and deciding which downstream tests deserve it
+  still requires evaluation, likely a manual review per component to begin
+  with. Defining an objective, repeatable rule for this is tracked as an
+  open question.
 
 Note that a test is not confined to a single membership: a
 `Criticality: Core` test also carries a `Lifecycle` value and so
@@ -812,11 +840,14 @@ the execution-mode predicate and an explicit non-`Draft` guard so a
 `Draft` core test (which belongs in no suite) cannot leak in:
 
 ```go
-// These are the existing openshift/kubernetes minimal-suite definitions,
-// edited in place: the selection changes from the upstream [Conformance]
-// label to Criticality=="Core". Because we edit the one definition rather
-// than registering a second same-named suite, OTE's additive union does
-// not apply here.
+// New static suites defined once in origin's static suite table. A static
+// suite's qualifier is not scoped to a single extension, so it selects
+// matching tests across all sources (the same cross-source behavior the
+// active/stable static suites use). The qualifier here matches downstream
+// Criticality=="Core" tests; upstream [Conformance] tests are unioned in
+// automatically because openshift/kubernetes's kubernetes/*/minimal suites
+// already declare these as Parents (so their [Conformance] selection is
+// merged into this parent — no change in openshift/kubernetes).
 //
 // Note the has(...) guards: in CEL, indexing test.tags with an absent
 // key is an error, not false. Criticality is present on only a small
@@ -825,7 +856,7 @@ the execution-mode predicate and an explicit non-`Draft` guard so a
 // guarded too for uniformity and to stay correct against any not-yet-
 // normalized spec. The !has(test.tags.Suite) guard keeps a Core test that
 // has opted out into a dedicated Suite from also running in minimal.
-ext.AddSuite(e.Suite{
+staticSuites = append(staticSuites, ginkgo.TestSuite{
     Name: "openshift/conformance/parallel/minimal",
     Qualifiers: []string{
         `has(test.tags.Criticality) && test.tags.Criticality=="Core" && ` +
@@ -834,7 +865,7 @@ ext.AddSuite(e.Suite{
             `!has(test.tags.Suite)`,
     },
 })
-ext.AddSuite(e.Suite{
+staticSuites = append(staticSuites, ginkgo.TestSuite{
     Name: "openshift/conformance/serial/minimal",
     Qualifiers: []string{
         `has(test.tags.Criticality) && test.tags.Criticality=="Core" && ` +
@@ -891,18 +922,13 @@ test:
 // Runs over all specs and assigns metadata tags from a rules table,
 // instead of editing each test inline.
 allSpecs.Walk(func(spec *et.ExtensionTestSpec) {
-    // Upstream [Conformance] tests are core smoke tests: mark them so
-    // they also land in conformance/*/minimal. The upstream marker is a
-    // bracketed token in the test *name* ("[Conformance]"), not
-    // necessarily a ginkgo Label, so match the name to avoid depending on
-    // whether the importer surfaced it as a bracket-stripped label. Use a
-    // word-bounded match ("[Conformance]"), never a bare substring, so
-    // "[Conformance]" is matched but unrelated names are not.
-    if strings.Contains(spec.Name, "[Conformance]") {
-        spec.AddTag(map[string]string{"Criticality": "Core"})
-    }
-    // Every imported test still gets a lifecycle stage and a shard so it
-    // participates in active/stable in addition to minimal.
+    // Every imported test gets a lifecycle stage and a shard so it
+    // participates in active/stable. Minimal membership for upstream
+    // tests is NOT set here: it is driven by the upstream [Conformance]
+    // label through openshift/kubernetes's own kubernetes/*/minimal
+    // suites (which declare openshift/conformance/*/minimal as Parents),
+    // so we neither read [Conformance] here nor stamp Criticality: Core
+    // onto upstream tests. Criticality: Core is a downstream-only tag.
     spec.AddTag(map[string]string{
         "Lifecycle": lifecycleFor(spec), // Informing / Blocking / Stable
         "Shard":     shardFor(spec),     // e.g. 01, always assigned
@@ -945,11 +971,6 @@ test carries no native annotation and therefore stays `blocking` by
 default — exactly the intended gating in both cases. Because the agent only
 ever writes `informing` and never `blocking`, a test that gates today can
 never be silently de-gated.
-
-The dedicated `Criticality: Core` step above is the function referenced
-in [Upstream and Externally-Sourced Tests](#upstream-and-externally-sourced-tests):
-it is the single place that maps the upstream `[Conformance]` label onto
-the new metadata vocabulary.
 
 `lifecycleFor` and `shardFor` are deterministic so the initial placement
 of a bulk-imported set is repeatable rather than ad hoc:
@@ -1384,46 +1405,48 @@ tests) and a set of OpenShift-authored component `*-tests-ext` binaries
 release and platform, so these are illustrative rather than fixed.
 
 Of the upstream tests, only those carrying the upstream `[Conformance]`
-label are mapped to `Criticality: Core` and so placed in the
-`.../minimal` suites (on the order of a few hundred in parallel-minimal
-and a couple dozen in serial-minimal); the remaining, non-`[Conformance]`
-upstream tests are not `Core` and land in the broader
+label are placed in the `.../minimal` suites (on the order of a few
+hundred in parallel-minimal and a couple dozen in serial-minimal); the
+remaining, non-`[Conformance]` upstream tests land in the broader
 `openshift/conformance/parallel` (or `openshift/conformance/serial`)
-suites rather than `.../minimal`.
+suites rather than `.../minimal`. Upstream minimal membership is driven by
+the `[Conformance]` label through openshift/kubernetes's own
+`kubernetes/conformance/*/minimal` suites — not by any `Criticality: Core`
+tag we apply. We do not tag upstream tests with `Criticality: Core`.
 
-The metadata mapping applied to upstream tests is, effectively:
+The mapping for upstream tests is, effectively:
 
-| Test attributes | Metadata | Suite |
-|-----------------|----------|-------|
-| `[Serial]` + `[Conformance]` | `Criticality: Core` (serial) | `openshift/conformance/serial/minimal` (edited in place) |
-| `[Serial]` (non-Conformance) | (no `Core`) | `openshift/conformance/serial` |
-| `[Conformance]` (parallel) | `Criticality: Core` (parallel) | `openshift/conformance/parallel/minimal` (edited in place) |
-| parallel, non-Conformance | (no `Core`) | `openshift/conformance/parallel` |
+| Test attributes | How it reaches minimal | Suite |
+|-----------------|------------------------|-------|
+| `[Serial]` + `[Conformance]` | o/k's `kubernetes/conformance/serial/minimal` (selects `[Conformance]`) grafts via `Parents` | `openshift/conformance/serial/minimal` |
+| `[Serial]` (non-Conformance) | not minimal | `openshift/conformance/serial` |
+| `[Conformance]` (parallel) | o/k's `kubernetes/conformance/parallel/minimal` grafts via `Parents` | `openshift/conformance/parallel/minimal` |
+| parallel, non-Conformance | not minimal | `openshift/conformance/parallel` |
 
-The Core-smoke rows land in the `.../minimal` suites immediately: those
-are edited in place (selection changed to `Criticality: Core`), so a
-stamped `[Conformance]` test qualifies as soon as the mapping runs. The
-non-`Core` rows show the *existing* `openshift/conformance/parallel` /
-`.../serial` aggregates; new-hierarchy membership (`active`/`stable`)
-reaches those aggregates only at the maturity graft (see
+The `[Conformance]` rows reach the new static `.../minimal` parents through
+openshift/kubernetes's pre-existing `Parents` graft — no upstream edit and
+no `Criticality` stamp is required. The non-minimal rows show the *existing*
+`openshift/conformance/parallel` / `.../serial` aggregates; new-hierarchy
+membership (`active`/`stable`) reaches those aggregates only at the maturity
+graft (see
 [Exclusive Membership and Rollout](#exclusive-membership-and-rollout)),
 and the existing aggregate definitions are never edited to get there.
 
 Plan for these under the new hierarchy:
 
 - **Upstream tests are added to `active`/`stable` in addition to
-  `minimal`**, not instead of it. `Criticality: Core` (mapped from the
-  `[Conformance]` label) is an additional, faster smoke layer; the same
-  test also carries a `Lifecycle` value and so participates in a
-  lifecycle shard. A test is therefore a member of both `minimal` and
-  one of the `active`/`stable` shards at the same time.
-- **Tagging is done centrally, not inline.** Because we do not want to
-  edit vendored upstream test source, the `Criticality`/`Lifecycle`
-  /`Shard` tags are assigned by a dedicated function that walks the
-  imported specs and applies tags from a rules table (see the example in
-  [Mandatory Metadata](#mandatory-metadata)). In particular, a single
-  function adds `Criticality: Core` for every test carrying the upstream
-  `[Conformance]` label. This mirrors how openshift/kubernetes already
+  `minimal`**, not instead of it. Minimal membership comes from the
+  `[Conformance]` label (via o/k's graft) and is a faster smoke layer; the
+  same test also carries a `Lifecycle` value and so participates in a
+  lifecycle shard. A test is therefore a member of both `minimal` and one
+  of the `active`/`stable` shards at the same time.
+- **Lifecycle/Shard tagging is done centrally, not inline.** Because we do
+  not want to edit vendored upstream test source, the `Lifecycle`/`Shard`
+  tags are assigned by a dedicated function that walks the imported specs
+  and applies tags from a rules table (see the example in
+  [Mandatory Metadata](#mandatory-metadata)). That function does **not**
+  touch `Criticality`: minimal membership for upstream tests stays driven by
+  the `[Conformance]` label, mirroring how openshift/kubernetes already
   classifies these tests today — on `master` via the `k8s-tests-ext` OTE
   extension binary's centralized label and qualifier tables, and on
   release branches via the legacy `annotate.go`/`rules.go` mechanism.
@@ -1574,13 +1597,13 @@ deferring automation to a later phase.
 
 Remaining open questions:
 
-1. **Downstream `Criticality: Core` rule.** For upstream Kubernetes
-   tests, `Criticality: Core` (and thus `minimal` membership) is mapped
-   mechanically from the `[Conformance]` label. For downstream,
-   OpenShift-authored tests there is no equivalent established signal, so
-   which tests should carry `Criticality: Core` is not yet objectively
-   defined and likely requires manual, per-component evaluation to start.
-   Defining a repeatable rule is an open question (see
+1. **Downstream `Criticality: Core` rule.** Upstream Kubernetes tests
+   reach `minimal` through the `[Conformance]` label (via
+   openshift/kubernetes's own suites), so no downstream rule is needed for
+   them. For downstream, OpenShift-authored tests there is no equivalent
+   established signal, so which tests should carry `Criticality: Core` is
+   not yet objectively defined and likely requires manual, per-component
+   evaluation to start. Defining a repeatable rule is an open question (see
    [Minimal-Suite Membership](#minimal-suite-membership)).
 
    As a starting point for that discussion, the following candidate
