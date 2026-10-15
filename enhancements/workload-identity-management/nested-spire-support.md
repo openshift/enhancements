@@ -386,6 +386,20 @@ Upstream:
 5. **Day-0 enablement is recommended.** Nested SPIRE is best enabled before the downstream server issues any workload SVIDs (day 0). A server that already holds a valid self-signed CA (day 2) continues using it until the next CA rotation. This is SPIRE's standard behavior and applies equally to the `certManager` and `vault` plugins. While the stale self-signed CA is active, workloads receive SVIDs that do not chain to the shared root. To force immediate use of the upstream-signed CA on a day-2 cluster, re-initialize the datastore: scale the StatefulSet to zero, delete its PVC, and scale back to one. The operator does not perform this destructive step automatically.
 6. The plugin propagates X.509 CA chain and JWT signing keys only, not federated trust bundles ([spiffe/spire#4128](https://github.com/spiffe/spire/issues/4128)). Downstream clusters needing federation must configure their own `ClusterFederatedTrustDomain`.
 
+#### Network policies for nested SPIRE
+
+**Upstream agent** (`spire-agent-upstream`, downstream cluster): default-deny baseline plus egress to the upstream server gRPC port (`serverPort`, default 443/TCP), Kubernetes API server (6443/TCP), kubelet (10250/TCP for workload attestation), and DNS (5353 TCP+UDP). Ingress for metrics (9402/TCP from openshift-monitoring). No other ingress needed; the downstream server accesses the upstream agent via Unix socket (CSI mount).
+
+**Upstream CSI driver**: no NetworkPolicy required (Unix domain sockets only).
+
+**SpireServer - new capability gates:**
+
+| Capability | Gate | Effect | Ports |
+|------------|------|--------|-------|
+| Upstream authority (downstream) | `spec.upstreamAuthority.spire != nil` | Feature-egress | `serverPort` (default 443/TCP) |
+| gRPC endpoint (upstream) | `spec.grpcEndpoint != nil` | Ingress from `openshift-ingress` | 8081/TCP |
+| Downstream attestation (upstream) | `spec.nestedSpire.downstreamClusters` non-empty | Feature-egress | Downstream API server ports (typically 6443/TCP) |
+
 ### Risks and Mitigations
 | Risk                                                                                                                                                         | Impact                                        | Mitigation                                                                                                                                                           |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -395,7 +409,7 @@ Upstream:
 | SPIRE server rescheduled while upstream agent stays behind                                                                                                   | Medium: CA rotation stalls                    | Operator detects node mismatch during reconcile and deletes upstream agent pod                                                                                       |
 | Upstream agent cannot schedule on SPIRE server's node                                                                                                        | Medium: CA rotation blocked                   | `UpstreamAgentAvailable` reports status                                                                                                                              |
 | Kubeconfig Secret targets wrong cluster's API server                                                                                                         | Medium: `invalid bearer token` at TokenReview | Document that kubeconfig must match `downstreamClusters[].name`; error is diagnosable via server logs                                                                |
-| No enforced limit on nesting depth. Each tier adds an intermediate CA to the chain, increasing TLS handshake size and blast radius of a mid-tier compromise. | Medium                                        | SPIRE imposes no depth limit. With external PKI, the root certificate's path length constraint caps the maximum depth. Document that deeper topologies are untested. |
+| No enforced limit on nesting depth. Each tier adds an intermediate CA to the chain, increasing TLS handshake size and blast radius of a mid-tier compromise. | Medium                                        | SPIRE imposes no depth limit. With external PKI, the root certificate's path length constraint caps the maximum depth; set it to at least the number of nesting levels required by the topology. Tested up to 2 levels of nesting depth. Deeper topologies are untested. |
 | Each `downstreamClusters` change rolls the upstream server                                                                                                   | Low: brief unavailability                     | Batch onboarding during maintenance windows                                                                                                                          |
 | Impersonation of downstream server via `pods/create`                                                                                                         | High: intermediate CA minting                 | `k8s:pod-name:spire-server-0` blocks duplicates while real pod exists; restrict `pods/create` in operator namespace                                                  |
 
