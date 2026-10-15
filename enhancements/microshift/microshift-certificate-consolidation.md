@@ -270,13 +270,26 @@ stable. Edge devices have sufficient disk capacity for one backup.
 
 ### CA Bundle Changes
 
-| Bundle file | Current contents | New contents |
-|-------------|-----------------|--------------|
-| `ca-bundle/client-ca.crt` | 5 CA certs concatenated | single client-ca cert |
-| `ca-bundle/kubelet-ca.crt` | kubelet-csr-signer CA | client-ca cert |
-| `ca-bundle/kubelet-serving-ca.crt` | kubelet-csr-signer CA | serving-ca cert |
-| `ca-bundle/service-account-token-ca.crt` | 3 KAS serving CAs | serving-ca cert |
-| `ca-bundle/ca-bundle.crt` | all serving CAs | serving-ca + peer-ca certs |
+| Bundle file | Consumer | Old contents | New contents |
+|-------------|----------|--------------|--------------|
+| `ca-bundle/client-ca.crt` | kube-apiserver `--client-ca-file`; route-controller-manager `ClientCA` | 5 client CA certs concatenated | single client-ca cert |
+| `ca-bundle/kubelet-ca.crt` | kubelet `--client-ca-file` (kube-apiserver → kubelet client cert verification) | kubelet-csr-signer CA | client-ca cert |
+| `ca-bundle/kubelet-serving-ca.crt` | kube-apiserver `--kubelet-certificate-authority`; metrics-server `kubelet-serving-ca-bundle` ConfigMap | kubelet-csr-signer CA | serving-ca cert |
+| `ca-bundle/service-account-token-ca.crt` | kube-controller-manager CA bundle; pods (projected volume) for KAS TLS verification | 3 KAS serving CAs | serving-ca cert |
+
+**Per-signer `ca-bundle.crt` Secrets** (distinct from the `ca-bundle/` directory above):
+The certchains framework writes a `ca-bundle.crt` inside each signer's own directory
+(`serving-ca/ca-bundle.crt`, `peer-ca/ca-bundle.crt`, etc.). These are read by the CA
+controller (`pkg/components/certificateauthority.go`) and published as Kubernetes Secrets
+in `kube-system` under the signer's name. The `add-node` command reads these Secrets to
+bootstrap etcd membership on new nodes — no Kubernetes control-plane component uses them
+for general TLS serving verification.
+
+**service-ca and ingress-ca trust is not affected:** Neither CA appeared in any
+`ca-bundle/` bundle file in the old layout, and they do not appear in the new layout
+either. service-ca publishes its trust bundle via the `signing-cabundle` ConfigMap
+managed by the service-ca operator. ingress-ca is independently consumed by the router.
+Both continue to operate through their existing mechanisms.
 
 The consolidated CAs are published as Kubernetes Secrets in the `kube-system`
 namespace under their new names: `client-ca`, `serving-ca`, `peer-ca`.
