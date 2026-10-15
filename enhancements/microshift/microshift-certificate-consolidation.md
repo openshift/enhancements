@@ -84,12 +84,16 @@ changes to the CLI code.
 * Consolidate the 3 KAS serving certificates into 1 SAN-based certificate.
 * Preserve all leaf certificate identities (CN/O fields) so that Kubernetes
   RBAC authorization is unaffected.
-* Provide a zero-downtime upgrade path from the old to the new layout.
+* Provide an automatic upgrade path that requires a single service restart/interruption.
 * Support atomic rollback via greenboot/ostree.
 
 ### Non-Goals
 
-* Changing the service-ca or ingress-ca in any way.
+* Changing the service-ca operator or its behavior in any way.
+* Preserving a customer-replaced ingress CA across the 5.1 upgrade: ingress-ca
+  is regenerated during migration. Customers who have replaced the default
+  ingress CA with a custom certificate must re-provision it after upgrading
+  to 5.1. See Alternatives for rationale.
 * Implementing the `microshift certs` CLI subcommands, PKI inventory abstraction,
   or configurable certificate validity — those are covered by OCPSTRAT-2899,
   which co-ships with this enhancement.
@@ -110,7 +114,7 @@ MicroShift maintains 12 CAs organized into three categories:
 | kube-apiserver-to-kubelet-signer | kube-apiserver-to-kubelet-client, metrics-server-kubelet-client |
 | admin-kubeconfig-signer | admin-kubeconfig-client, openshift-observability-client |
 | kubelet-csr-signer-signer → kube-csr-signer (sub-CA) | kubelet-client, kubelet-server |
-| aggregator-signer | aggregator-client |
+| aggregator-signer | aggregator-client *(listed here for completeness; retained as a standalone CA in the target state — see below)* |
 
 **Serving certificate signers (3 CAs):**
 | CA | Leaf certificates signed |
@@ -224,27 +228,34 @@ matches the same certificate.
 3. The entire `certs/` directory is renamed to
    `certs.backup.<version>.<timestamp>/`. This `os.Rename` is atomic on the
    same filesystem — no partial rename state is observable. No dedicated
-   migration marker file is needed: the absence of `certs/` combined with
-   the presence of `certs.backup.*/` is itself the migration record, and
-   `certSetup()` failure after the rename is handled by the fresh-start
-   fallback (see Failure Modes).
-4. `certSetup()` finds no certs directory, generates everything fresh with
-   the new hierarchy.
-5. Kubeconfigs are regenerated with the new serving-ca as the trust anchor.
-6. On ostree/bootc deployments, all pods restart as part of the upgrade
+   migration marker file is needed: the absence of `certs/kube-control-plane-signer/`
+   on the next startup is the migration detection signal.
+4. The migration recreates the `certs/` directory and copies `service-ca`
+   back into it from the backup, so that existing in-cluster service-serving
+   Secrets remain trusted until the service-ca controller reissues them.
+   `ingress-ca` is **not** restored; it is regenerated fresh (see Non-Goals).
+5. `certSetup()` finds the new `certs/` directory (with `service-ca` already
+   restored) and generates all remaining CAs and leaf certificates under the
+   new 6-CA hierarchy.
+6. Kubeconfigs are regenerated with the new serving-ca as the trust anchor.
+7. On ostree/bootc deployments, all pods restart as part of the upgrade
    and pick up the updated CA bundle via their projected volumes. This is
    existing MicroShift upgrade behavior, not new to this enhancement.
 
 **Rollback (greenboot/ostree):**
 1. If greenboot detects an unhealthy system after upgrade, it triggers an
    atomic rollback to the previous OS commit.
-2. The old MicroShift binary starts, finds no `certs/` directory (the backup
-   has a different name).
-3. Existing behavior: whenever MicroShift finds no `certs/` directory on
-   startup, it regenerates all certs and kubeconfigs from scratch. This path
-   applies equally to rollback.
+2. The old MicroShift binary starts and finds the new-layout `certs/`
+   directory (containing `client-ca/`, `serving-ca/`, `peer-ca/`, etc.)
+   left behind by the upgrade. It does not recognize the new directory names.
+3. The old binary detects that its expected signer directories (e.g.
+   `kube-control-plane-signer/`) are absent and falls back to its normal
+   cert-regeneration path, recreating the old layout from scratch.
 4. Services start normally with the regenerated old-layout PKI.
-5. No manual intervention required.
+5. No manual intervention required. Note: certificate-state rollback is
+   recovery through regeneration — it is not atomic. Greenboot atomically
+   rolls back the OS deployment, but cert material is rebuilt on first
+   startup of the old binary.
 
 **Backup cleanup:**
 The `certs.backup.<version>.<timestamp>/` directory is left on disk and not
@@ -264,8 +275,14 @@ stable. Edge devices have sufficient disk capacity for one backup.
 | `ca-bundle/service-account-token-ca.crt` | 3 KAS serving CAs | serving-ca cert |
 | `ca-bundle/ca-bundle.crt` | all serving CAs | serving-ca + peer-ca certs |
 
-ConfigMaps and Secrets exposed to Kubernetes maintain the same names and
-namespaces. Consumer-side configuration does not change.
+The consolidated CAs are published as Kubernetes Secrets in the `kube-system`
+namespace under their new names: `client-ca`, `serving-ca`, `peer-ca`.
+The retained CAs (`aggregator-signer`, `service-ca`, `ingress-ca`) and the
+`service-account-key` Secret keep their existing names. The old per-signer
+Secrets (`kube-control-plane-signer`, `kube-apiserver-external-signer`,
+`etcd-signer`, etc.) are removed. The `add-node` command is updated to
+consume the new Secret names via the same `CertificateAuthorityResources`
+list used by the CA controller.
 
 ### API Extensions
 
@@ -414,14 +431,14 @@ same `NewCertificateSigner`, `WithClientCertificates`,
   deployment. The `dynamiccertificates` SNI selection logic continues to
   function unchanged; it simply always matches the same SAN-based certificate.
 
-* **Risk: Migration failure leaves no certs directory.**
+* **Risk: Migration failure leaves a partial certs directory.**
   Mitigation: The `os.Rename` operation is atomic on the same filesystem.
   If it fails, the old `certs/` directory remains intact and MicroShift
-  continues with the old layout. If it succeeds but `certSetup()` fails,
-  MicroShift falls back to fresh-start behavior: it removes any partially-
-  written `certs/` directory and retries cert generation with the new
-  hierarchy. If the retry also fails, MicroShift does not start; on
-  ostree/bootc deployments greenboot triggers a rollback.
+  continues with the old layout. If it succeeds but `certSetup()` fails
+  mid-way, the partial `certs/` directory is left in place. `certchains`
+  writes each signer atomically and idempotently; greenboot restarts the
+  service and the retry fills in the missing signers without clearing the
+  partial state. If repeated restarts fail, greenboot triggers a rollback.
 
 ### Drawbacks
 
@@ -431,10 +448,11 @@ same `NewCertificateSigner`, `WithClientCertificates`,
   Future multi-node MicroShift deployments may need to re-introduce
   separate trust domains, but that would be a separate enhancement.
 
-* **One-time upgrade disruption:** All certificates are regenerated, which
-  means a brief period during startup where services are restarting with
-  new certs. On a single-node device with MicroShift managing all
-  components, this is functionally equivalent to a fresh start.
+* **One-time service restart on upgrade:** All certificates are regenerated
+  during the 5.0 → 5.1 migration. MicroShift components restart with the
+  new cert material. This is an intentional interruption, not a zero-downtime
+  migration. On a single-node device with MicroShift managing all components,
+  the disruption is equivalent to a service restart.
 
 ## Design Details
 
@@ -489,22 +507,28 @@ The old CA layout is removed in the same release. No deprecation period is
 needed because:
 1. The CA directories are internal implementation details, not a public API.
 2. The backup-and-regenerate migration handles the transition automatically.
-3. Kubernetes Secret names and namespaces are preserved.
+3. The old per-signer CA Secrets are internal implementation details consumed
+   only by MicroShift itself and the `add-node` command, which is updated
+   in the same release.
 
 ## Upgrade / Downgrade Strategy
 
 **Upgrade (5.0 → 5.1):**
 1. New binary detects old cert layout on first startup.
 2. Old `certs/` directory is atomically renamed to `certs.backup.<version>.<timestamp>/`.
-3. Fresh cert generation creates the new layout.
-4. All services restart with new certificates.
+3. `certs/` is recreated; `service-ca` is restored from the backup.
+   `ingress-ca` is not restored — it is regenerated fresh.
+4. `certSetup()` generates all remaining CAs and certs under the new hierarchy.
+5. All MicroShift components restart with the new certificates.
 
 **Downgrade (5.1 → 5.0 via greenboot rollback):**
-1. Old binary starts, finds no `certs/` directory.
-2. Existing cert regeneration logic creates the old layout from scratch.
+1. Old binary starts and finds the new-layout `certs/` directory.
+2. It does not recognize the new signer directories and falls back to its
+   normal cert-regeneration path, creating the old layout from scratch.
 3. Services start normally.
 
-No manual intervention is required in either direction.
+No manual intervention is required in either direction. Certificate-state
+rollback is recovery through regeneration, not an atomic restore.
 
 ## Version Skew Strategy
 
@@ -521,12 +545,13 @@ N/A — no API extensions are introduced.
   an error, MicroShift does not start. The old `certs/` directory is
   unchanged. Operator fixes the disk issue and restarts.
 
-* **Fresh cert generation fails after migration:** `certs/` directory does
-  not exist (was renamed), `certSetup()` fails. MicroShift falls back to
-  fresh-start behavior: it removes any partially-written `certs/` directory
-  and retries cert generation. If the retry succeeds, MicroShift starts
-  normally. If the retry also fails, MicroShift does not start; on
-  ostree/bootc deployments greenboot triggers a rollback and the old binary
+* **Fresh cert generation fails after migration:** `certSetup()` fails
+  mid-way, leaving a partial `certs/` directory. `certchains` writes each
+  signer atomically and idempotently — on the next startup it skips
+  already-written signers and generates only the missing ones. MicroShift
+  exits and greenboot restarts the service; the retry completes the
+  remaining signers without clearing the partial directory. If repeated
+  restarts fail, greenboot triggers a rollback and the old binary
   regenerates the old-layout certs from scratch.
 
 ## Support Procedures
@@ -565,12 +590,14 @@ N/A — no API extensions are introduced.
   that dynamically generates TLS certificates for workload Services annotated
   with `service.beta.openshift.io/serving-cert-secret-name`. It has its own
   lifecycle and renewal mechanism managed by the pod itself — merging it into
-  serving-ca would confuse two distinct responsibilities. ingress-ca signs the
-  default wildcard certificate (`*.apps.<domain>`) used by the router;
-  customers can and do replace this with their own custom certificate for
-  ingress routes, so it must remain independently configurable with its own
-  lifecycle. Folding it into serving-ca would prevent customers from managing
-  their own ingress TLS independently.
+  serving-ca would confuse two distinct responsibilities. ingress-ca is
+  regenerated during the 5.1 migration (the backup-and-regenerate approach
+  does not restore it). Customers who have replaced the default ingress CA
+  with a custom certificate must re-provision it after upgrading. Preserving
+  ingress-ca across migration was evaluated but deferred: the migration
+  restores service-ca because in-cluster service-serving Secrets would
+  otherwise be immediately invalidated; ingress-ca does not have the same
+  in-cluster dependency and its loss is recoverable by the operator.
 
 * **Merge aggregator-signer into client-ca.**
   Rejected for security reasons. The kube-apiserver uses the aggregator-client
