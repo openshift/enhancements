@@ -97,7 +97,10 @@ changes to the CLI code.
 * Implementing the `microshift certs` CLI subcommands, PKI inventory abstraction,
   or configurable certificate validity — those are covered by OCPSTRAT-2899,
   which co-ships with this enhancement.
-* Changing certificate validity periods or renewal thresholds.
+* Changing **leaf** certificate validity periods or renewal thresholds.
+  CA validity is discussed in Implementation Details; three 1-year client CAs
+  are consolidated into a 10-year `client-ca` as an explicit scope change
+  (see "CA validity change" below).
 * Modifying the `certchains` builder framework API itself.
 * Changing the service account signing key mechanism.
 
@@ -386,7 +389,34 @@ Current validity assignments (unchanged by this enhancement except where noted):
 
 After consolidation, the 3 KAS serving CAs and 5 client CAs are replaced by
 `serving-ca` and `client-ca` respectively, both using `LongLivedCertificateValidity`
-(10 years). Leaf certificate validity is unchanged.
+(10 years). Leaf certificate validity is unchanged. The CA validity change is
+an explicit scope expansion — see "CA validity change" below.
+
+**CA validity change (scope expansion):**
+
+Three of the old client CAs used 1-year validity (`kube-control-plane-signer`,
+`kube-apiserver-to-kubelet-signer`, `kubelet-csr-signer-signer`); the fourth
+(`admin-kubeconfig-signer`) was already 10 years. The consolidated `client-ca`
+uses 10-year validity for all of them.
+
+Security trade-off of the longer CA lifetime:
+
+* **Increased blast radius:** A compromised `client-ca` private key can be
+  used to sign client certificates trusted by all Kubernetes components for
+  up to 10 years. Under the old model, three of those CAs were rotated
+  annually, bounding key exposure to 1 year.
+
+* **Mitigations specific to MicroShift's single-node edge model:**
+  * The CA private key never leaves the device. There is no network-accessible
+    path to exfiltrate it; an attacker needs physical or root access to the
+    node — the same access required to steal any other credential on the device.
+  * On-demand forced rotation is available via `microshift certs renew --ca`
+    (OCPSTRAT-2899). This regenerates `client-ca` and all leaf certificates
+    it signed immediately, without waiting for expiry.
+  * Short-lived separate CAs provide no additional containment on a single
+    node: all consumers of those CAs run on the same host, so an attacker
+    with node-level access can steal any of them regardless of key lifetime.
+  * ProdSec reviewed and approved this single-node CA hierarchy in March 2026
 
 Rotation thresholds (from `certsToRegenerate`, `pkg/cmd/init.go`):
 
@@ -499,7 +529,8 @@ It ships as GA in 5.1.
 * All unit and integration tests passing.
 * Upgrade testing from 5.0 to 5.1 validated.
 * Rollback testing validated with greenboot.
-* ProdSec sign-off on the new layout.
+* ProdSec sign-off on the new layout, including the CA validity change from
+  1-year to 10-year for `client-ca`.
 
 ### Removing a deprecated feature
 
