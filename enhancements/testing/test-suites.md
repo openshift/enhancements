@@ -3,15 +3,17 @@ title: test-suites
 authors:
   - "@kenzhang"
 reviewers:
-  - TBD
+  - "@dgoodwin"
+  - "@jogeo"
+  - "@miyadav"
 approvers:
-  - TBD
+  - "@dgoodwin"
 api-approvers:
   - None
 creation-date: 2026-07-31
-last-updated: 2026-07-31
+last-updated: 2026-10-15
 tracking-link:
-  - TBD
+  - https://redhat.atlassian.net/browse/OCPQUAL-1
 status: provisional
 ---
 
@@ -35,6 +37,53 @@ agent rather than manual toil, so tests do not languish in the
 manageability, enable predictable test graduation, and reduce
 conformance suite footprint while increasing overall coverage through
 better suite organization.
+
+### Glossary
+
+The terms below are load-bearing throughout this document; each links to
+the section that defines it fully.
+
+- **OTE (OpenShift Tests Extension)** — the framework that discovers tests
+  and their metadata and registers suites. Suites select members by
+  querying metadata in CEL. See
+  [Suite Composition with OTE APIs](#suite-composition-with-ote-apis).
+- **Tag** — a key/value metadata pair on a test (`AddTag({"key":"value"})`,
+  queried as `test.tags.<key>=="<value>"`). The lifecycle model selects on
+  tags. See [Test Metadata](#test-metadata).
+- **Label** — a legacy opaque string marker (queried as
+  `test.labels.has("...")`); not key/value, and not what the new suites
+  select on. See [Test Metadata](#test-metadata).
+- **`Lifecycle`** — the single ordered maturity/gating axis
+  (`Draft → Informing → Blocking → Stable`) that determines which lifecycle
+  suite a test lands in. See [Test Metadata](#test-metadata).
+- **`Criticality`** — an overlay tag; `Criticality: Core` marks a
+  downstream test as a core smoke test for the `minimal` suite. See
+  [Minimal-Suite Membership](#minimal-suite-membership).
+- **`Shard`** — a tag naming the shard (`"01"`, `"02"`, …) a test is placed
+  in for parallel scheduling within a lifecycle suite. See
+  [Shard Balancing](#shard-balancing).
+- **`Suite` (tag)** — an opt-out marker: a test carrying a `Suite` tag is
+  excluded from the agent-managed lifecycle suites and runs in its own
+  dedicated job instead. See [Dedicated Suites](#dedicated-suites).
+- **Lifecycle suites** — the agent-managed hierarchy: `minimal` (core smoke
+  tests), `active` (recent `Informing`/`Blocking` tests), and `stable`
+  (matured tests), each possibly sharded. See
+  [Suite Hierarchy](#suite-hierarchy).
+- **Dedicated suite** — a suite run in its own job for tests that must leave
+  the lifecycle hierarchy (e.g. setup mutates the cluster, or an uncommon
+  configuration). See [Dedicated Suites](#dedicated-suites).
+- **Spot-check** — a frequency-driven trait of a *job* (not a suite):
+  a job that runs rarely (≈1×/week–month) and so gets Component Readiness's
+  special low-frequency handling. Recorded in the Sippy variant registry.
+  See [Dedicated Suite Details](#dedicated-suite-details).
+- **Lifecycle agent** — the scheduled automation that opens PRs to promote
+  tests along the `Lifecycle` axis and rebalance shards. See
+  [The Lifecycle Agent](#the-lifecycle-agent).
+- **`Parents` / graft** — an OTE composition mechanism by which a suite
+  advertises its tests into another suite without editing that suite's
+  definition. Used here only to graft matured suites into the existing
+  conformance suite. See
+  [Exclusive Membership and Rollout](#exclusive-membership-and-rollout).
 
 ## Motivation
 
@@ -318,11 +367,16 @@ Notes:
    `has(test.tags.Suite) && test.tags.Suite=="<name>"`; the lifecycle
    suites exclude it with a single `!has(test.tags.Suite)` guard. There is
    no per-suite special-casing beyond that one guard.
-3. **Dedicated suites must have a registered suite and job.** Every `Suite`
-   value must correspond to a suite registered via `AddSuite` with a backing
-   CI job; the metadata-validation check **fails** a `Suite` value that has
-   no registered suite (the same spirit as the `Shard`-registry check), so a
-   `Suite` tag can never silently drop a test into nothing.
+3. **No registered-suite check on the `Suite` tag.** `Suite` is a
+   deliberate opt-out that any author can apply, so there is intentionally
+   **no** validation that a `Suite` value corresponds to a registered suite
+   (unlike the `Shard`-registry check). Such a check would also be awkward
+   to enforce, because the test and the suite that selects it can live in
+   different extension binaries/repositories. A `Suite` value with no
+   backing suite and job simply means the test runs in no suite — the same
+   outcome as `Draft` — which is a safe (under-running) direction. Wiring a
+   `Suite` tag to its dedicated suite and job is handled through the normal
+   config review when the suite is added, not by a metadata check.
 4. **Health monitoring.** A dedicated suite's health is monitored by
    Component Readiness like any other job. The lifecycle agent does not
    manage dedicated suites or their jobs.
@@ -536,11 +590,13 @@ parent once in origin is all that is required to include both.
 > per-test decision rather than a bulk label inherited from a convention.
 > This is a convention for now, not a code-enforced check.
 
-**The new `active`/`stable` shard suites are brought up under new names.**
-These have no existing equivalent, and they must not reuse a suite name
-that already exists, because OTE combines all registrations of the same
-suite name additively — it unions their qualifiers rather than replacing
-them (see [openshift-tests-extension](openshift-tests-extension.md)). The
+**The new `active`/`stable` shard suites are defined once in origin's
+static suite table, under new names.** Like `minimal`, they are static
+suites (not `ext.AddSuite` registrations), so their qualifiers select
+across all sources. They must not reuse a suite name that already exists:
+origin aggregates internal (static) and extension suites and enforces a
+single canonical source per suite name, so a duplicate name is a hard error
+(see [openshift-tests-extension](openshift-tests-extension.md)). The
 `active-NN`/`stable-NN` names are new, so they run in parallel with the
 existing `openshift/conformance/parallel` / `.../serial` suites — whose
 definitions are left exactly as they are — without interfering. Once the
@@ -763,8 +819,16 @@ maturity (see
 // dedicated Suite, so they run only in their own job and never leak into
 // the lifecycle shards (see Dedicated Suites).
 //
+// The lifecycle shard suites are defined once in origin's static suite
+// table (ginkgo.TestSuite entries), not via ext.AddSuite. A static suite's
+// qualifier is not scoped to a single extension, so it selects matching
+// tests across all sources (upstream k8s-tests and downstream alike) — the
+// cross-source behavior these suites require. ext.AddSuite, by contrast,
+// scopes a suite to its own extension's tests and is reserved for dedicated
+// Suite-tagged suites (see Dedicated Suites).
+//
 // Parallel stable shards: Stable, NOT serial, one per shard value.
-ext.AddSuite(e.Suite{
+staticSuites = append(staticSuites, ginkgo.TestSuite{
     Name: "openshift/conformance/parallel/stable-01",
     Qualifiers: []string{
         `has(test.tags.Lifecycle) && test.tags.Lifecycle=="Stable" && ` +
@@ -773,7 +837,7 @@ ext.AddSuite(e.Suite{
             `!has(test.tags.Suite)`,
     },
 })
-ext.AddSuite(e.Suite{
+staticSuites = append(staticSuites, ginkgo.TestSuite{
     Name: "openshift/conformance/parallel/stable-02",
     Qualifiers: []string{
         `has(test.tags.Lifecycle) && test.tags.Lifecycle=="Stable" && ` +
@@ -785,7 +849,7 @@ ext.AddSuite(e.Suite{
 // Serial stable shard: same Lifecycle/Shard space, but [Serial] tests.
 // A Stable/01 test therefore lands here or in parallel/stable-01, never
 // both, because the mode predicate is mutually exclusive.
-ext.AddSuite(e.Suite{
+staticSuites = append(staticSuites, ginkgo.TestSuite{
     Name: "openshift/conformance/serial/stable-01",
     Qualifiers: []string{
         `has(test.tags.Lifecycle) && test.tags.Lifecycle=="Stable" && ` +
@@ -795,7 +859,7 @@ ext.AddSuite(e.Suite{
     },
 })
 // The active shards accept both Informing and Blocking tests.
-ext.AddSuite(e.Suite{
+staticSuites = append(staticSuites, ginkgo.TestSuite{
     Name: "openshift/conformance/parallel/active-01",
     Qualifiers: []string{
         `has(test.tags.Lifecycle) && ` +
@@ -812,10 +876,11 @@ ext.AddSuite(e.Suite{
 aggregate with `Parents`, leaving that suite's definition untouched:
 
 ```go
-// Promotion step (later): the matured new stable shards advertise
-// themselves into the existing conformance suite. No edit to
-// openshift/conformance/parallel's own definition is required.
-ext.AddSuite(e.Suite{
+// Promotion step (later): the matured stable shard's own static-suite
+// entry gains a Parents reference so its tests flow into the existing
+// conformance suite. No edit to openshift/conformance/parallel's own
+// definition is required.
+staticSuites = append(staticSuites, ginkgo.TestSuite{
     Name:    "openshift/conformance/parallel/stable-01",
     Parents: []string{"openshift/conformance/parallel"}, // graft in
     Qualifiers: []string{
@@ -1008,8 +1073,8 @@ rebalancing as any other test.
 
 `Shard`'s vocabulary (`01`–`NN`) is not open-ended: the set of shards
 that actually exist is defined by an **authoritative registry** — the set
-of `active`/`stable` shard suites that are registered via `AddSuite` and
-that have a corresponding CI job.
+of `active`/`stable` shard suites that are defined in origin's static suite
+table and that have a corresponding CI job.
 
 The registry is keyed by **`(suite class, mode)`**, where the suite class
 is `active` or `stable` — *not* by the raw `Lifecycle` value. This
@@ -1038,15 +1103,16 @@ The registry is what makes shard assignment safe:
   match no suite, so the metadata-enforcement check treats an
   out-of-registry `Shard` as invalid (the same way it treats an
   out-of-vocabulary `Lifecycle`).
-- A new shard becomes assignable **only after** its suite (`AddSuite`)
-  and its CI job are registered. The balancing workflow therefore
-  registers the suite/job first and assigns tests into the shard second,
-  never the reverse. This keeps "a `Shard` value exists" and "a suite +
-  job exist to run it" in lockstep. The suite lives in an extension
-  binary while the CI job lives in `openshift/release`, so these two
-  registrations are separate PRs and cannot land atomically. The ordering
-  is a strict happens-before, not a transaction: the balancer must not
-  assign any test to shard `NN` until *both* the `AddSuite` and the
+- A new shard becomes assignable **only after** its suite (a new static
+  suite entry in origin) and its CI job are registered. The balancing
+  workflow therefore registers the suite/job first and assigns tests into
+  the shard second, never the reverse. This keeps "a `Shard` value exists"
+  and "a suite + job exist to run it" in lockstep. The suite is defined in
+  origin's static suite table while the CI job lives in `openshift/release`,
+  so these two registrations are separate PRs and cannot land atomically.
+  The ordering is a strict happens-before, not a transaction: the balancer
+  must not assign any test to shard `NN` until *both* the static-suite entry
+  and the
   `openshift/release` job for `NN` have merged. Until then shard `NN` is
   simply not in the registry the balancer reads, so it cannot be chosen —
   a half-registered shard (suite merged, job not yet, or vice versa) is
@@ -1290,8 +1356,9 @@ source rather than at build time.
   3. Create new shards when existing ones cannot be rebalanced below
      runtime thresholds, up to a configurable per-suite maximum shard
      count. Creating a shard means **first** registering its suite
-     (`AddSuite`) and its CI job — adding the shard to the registry — and
-     **only then** assigning tests into it, so a `Shard` value never
+     (a new static suite entry in origin) and its CI job — adding the shard
+     to the registry — and **only then** assigning tests into it, so a
+     `Shard` value never
      exists without a suite and job to run it. This ceiling bounds the
      number of shards (and therefore the number of prow jobs) a suite can
      spawn so that an unexpected influx of tests, or a bug in the
@@ -1574,9 +1641,10 @@ while preserving a human approval step.
 since they run too rarely for Component Readiness's normal daily-cadence
 regression analysis.
 **Mitigation**: Such jobs are marked as spot-check in the Sippy variant
-registry and handled by Component Readiness's existing special handling
-for spot-check (low-frequency) jobs rather than by the lifecycle agent;
-Component Readiness surfaces jobs that stop reporting results.
+registry by developers through a reviewed registry change — not
+automatically by the lifecycle agent — and are handled by Component
+Readiness's existing special handling for spot-check (low-frequency)
+jobs; Component Readiness surfaces jobs that stop reporting results.
 
 ### Drawbacks
 
