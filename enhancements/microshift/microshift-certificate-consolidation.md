@@ -82,8 +82,10 @@ changes to the CLI code.
 
 * Reduce the number of managed CAs from 12 to 6.
 * Consolidate the 3 KAS serving certificates into 1 SAN-based certificate.
-* Preserve all leaf certificate identities (CN/O fields) so that Kubernetes
-  RBAC authorization is unaffected.
+* Preserve all **client** leaf certificate identities (CN/O fields) so that
+  Kubernetes RBAC authorization is unaffected. KAS serving certificates are
+  an exception: three certs with distinct CNs become one; see
+  [KAS Serving Certificate Consolidation](#kas-serving-certificate-consolidation).
 * Provide an automatic upgrade path that requires a single service restart/interruption.
 * Support atomic rollback via greenboot/ostree.
 
@@ -198,10 +200,19 @@ conflating Kubernetes RBAC trust with etcd's internal trust domain:
 
 ### Certificate Identity Preservation
 
-All leaf certificate Common Name (CN) and Organization (O) fields remain
-identical to their current values. Kubernetes RBAC determines identity from
-these fields, not from which CA signed the certificate. Changing the parent
-CA has zero impact on authorization.
+**Client certificates:** All client leaf certificate CN and O fields remain
+identical to their current values. Kubernetes RBAC determines authorization
+from these fields — CN maps to username, O maps to group membership. Changing
+the parent CA has zero impact on authorization.
+
+**Serving certificates:** The three KAS serving certificates
+(`kube-external-serving`, `kube-apiserver-localhost-serving`,
+`kube-apiserver-service-network-serving`) are replaced by a single
+`kube-apiserver-serving` certificate with a different CN. Because Kubernetes
+RBAC is not used for serving certificate identity (serving certs establish
+TLS, not API identity), this CN change has no authorization impact. See
+[KAS Serving Certificate Consolidation](#kas-serving-certificate-consolidation)
+for the CN/SAN specification and compatibility analysis.
 
 ### KAS Serving Certificate Consolidation
 
@@ -215,6 +226,47 @@ With consolidation, a single serving certificate contains all SANs from the
 certificate regardless of the destination IP or hostname used, the
 `dynamiccertificates` selection logic continues to work — it simply always
 matches the same certificate.
+
+**CN and O:**
+
+`library-go`'s `MakeServerCert` sets CN to the lexicographically first
+hostname in the SAN set (`sets.List(hostnames)[0]`). O is empty for all
+serving certificates in both old and new layouts (no `UserInfo` field).
+
+In a typical MicroShift deployment (service CIDR `10.43.0.0/16`), the API
+service cluster IP (e.g., `10.43.0.1`) sorts before all other entries, making
+it the CN. Deployments with a different service CIDR will have a different CN.
+The CN is informational only — see Compatibility below.
+
+For reference, the three old serving cert CNs were:
+- `kube-external-serving`: first sorted of node hostname + `api.<basedomain>` + SubjectAltNames
+- `kube-apiserver-localhost-serving`: `localhost` (only SAN)
+- `kube-apiserver-service-network-serving`: first sorted of the service-network SAN set
+
+**SAN sources for `kube-apiserver-serving`:**
+
+| SAN value | Source |
+|-----------|--------|
+| `kubernetes[.default[.svc[.cluster.local]]]` | Kubernetes API service DNS names (static) |
+| `openshift[.default[.svc[.cluster.local]]]` | OpenShift API service DNS names (static) |
+| `api.<basedomain>` | `dns.baseDomain` config field |
+| `api-int.<basedomain>` | `dns.baseDomain` config field |
+| `<advertise-address>` | `apiServer.advertiseAddress` config field |
+| `<service-ip>` | First IP of `network.serviceNetwork` |
+| `localhost`, `127.0.0.1`, `::1` | Loopback addresses (static) |
+| `<hostname>` | `node.hostnameOverride` config field |
+| `<node-ip>` | `node.nodeIP` config field (always included; old external cert excluded it conditionally) |
+| `<subject-alt-names>` | `apiServer.subjectAltNames` operator-supplied list |
+
+**Compatibility:**
+
+TLS clients validate the server against the `subjectAltName` extension when
+SANs are present; the CN is ignored (RFC 6125 §6.4.4). Go's
+`x509.VerifyHostname` (used by `client-go` and all in-cluster clients)
+follows this rule exclusively. The new cert's SAN set is a strict superset
+of the union of the three old certs' SAN sets — every hostname and IP that
+clients previously connected to remains covered. The CN change is therefore
+transparent to all TLS clients.
 
 ### Workflow Description
 
@@ -562,7 +614,9 @@ None.
 **Unit tests:**
 * Verify the new chain builder produces the correct 6-CA hierarchy.
 * Verify the consolidated KAS serving cert contains all expected SANs.
-* Verify leaf cert CN/O fields match their original values.
+* Verify client cert CN/O fields are unchanged from their pre-consolidation values.
+* Verify `kube-apiserver-serving` CN is the lexicographically first hostname in its SAN set.
+* Verify `kube-apiserver-serving` SAN set is a superset of the three old KAS serving cert SAN sets combined.
 * Verify migration detection correctly identifies old vs. new layouts.
 * Verify migration creates a backup directory and removes the old certs dir.
 
