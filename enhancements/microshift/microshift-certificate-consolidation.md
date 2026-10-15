@@ -420,9 +420,15 @@ Security trade-off of the longer CA lifetime:
   annually, bounding key exposure to 1 year.
 
 * **Mitigations specific to MicroShift's single-node edge model:**
-  * The CA private key never leaves the device. There is no network-accessible
-    path to exfiltrate it; an attacker needs physical or root access to the
-    node — the same access required to steal any other credential on the device.
+  * The CA private key is accessible in exactly two places: on disk at
+    `<datadir>/certs/client-ca/ca.key` (mode 0600, owner root; MicroShift
+    runs as `User=root`) and as the `ca.key` field of the `client-ca` Secret
+    in `kube-system`. The Secret is protected by the `microshift-ca-admin`
+    RBAC Role, which is bound to `system:masters` only and scoped via
+    `resourceNames` to the specific CA Secret names. Regular workloads and
+    external API clients without cluster-admin equivalence cannot read it.
+    See the "Consolidated client CA blast radius" risk below for the full
+    threat model.
   * On-demand forced rotation is available via `microshift certs renew --ca`
     (OCPSTRAT-2899). This regenerates `client-ca` and all leaf certificates
     it signed immediately, without waiting for expiry.
@@ -482,6 +488,54 @@ same `NewCertificateSigner`, `WithClientCertificates`,
   writes each signer atomically and idempotently; greenboot restarts the
   service and the retry fills in the missing signers without clearing the
   partial state. If repeated restarts fail, greenboot triggers a rollback.
+
+* **Risk: Consolidated client CA expands per-key blast radius.**
+
+  The old layout used five separate CA keys for client signers
+  (`admin-kubeconfig-signer`, `kube-control-plane-signer`,
+  `kube-apiserver-to-kubelet-signer`, `kubelet-csr-signer-signer`,
+  `kube-csr-signer`). Compromise of any single old key could only forge
+  certificates within that CA's scope. With consolidation, a single
+  `client-ca` key can mint identities across all those roles —
+  including `system:admin` (system:masters), `system:node:*` (kubelet),
+  and control-plane components.
+
+  **Where the key is readable:**
+  * **On disk:** `<datadir>/certs/client-ca/ca.key`, mode 0600, owned by
+    root (MicroShift runs as `User=root`). The certs root directory itself
+    is mode 0700, preventing even directory traversal by non-root processes.
+    Reading the key requires root access: physical, privileged container
+    escape, or OS-level exploit.
+  * **In Kubernetes:** `kube-system/client-ca` Secret (`ca.key` field).
+    Protected by RBAC Role `microshift-ca-admin` bound exclusively to the
+    `system:masters` group, with `resourceNames` scoped to the exact CA
+    Secret names. Regular pods and external API clients without
+    cluster-admin equivalence have no API path to this Secret.
+
+  **Compromise boundaries:**
+  * A regular workload pod has no RBAC path to the CA Secrets — default
+    service accounts in user namespaces have no `secrets` access in
+    `kube-system`.
+  * An external API client can reach the CA Secret only if it already holds
+    `system:masters` membership (i.e., cluster-admin equivalence). At that
+    point the CA key is redundant: the attacker already controls the cluster.
+  * Root-level OS access reaches the 0600 key file directly. At this access
+    level, all old CA keys and the new `client-ca` key are equally exposed
+    regardless of CA count — the old layout provided no containment here.
+
+  **Why consolidation is acceptable:**
+  In the old layout the `microshift-ca-admin` Role also granted `system:masters`
+  access to ALL CA Secrets — including `admin-kubeconfig-signer`, which could
+  forge `system:admin` certs. Any `system:masters`-level compromise already
+  implied full CA compromise. Consolidating to one CA key does not widen the
+  attack surface for the existing principal model.
+
+  The lost boundary is per-Secret containment: a hypothetical principal with
+  access only to `kube-control-plane-signer` (but not `admin-kubeconfig-signer`)
+  could previously not forge admin certs. MicroShift's RBAC design does not
+  expose individual CA Secrets to separate principals — the single
+  `microshift-ca-admin` Role covers all CA Secrets. This containment did not
+  exist in practice, and its absence after consolidation is not a regression.
 
 ### Drawbacks
 
