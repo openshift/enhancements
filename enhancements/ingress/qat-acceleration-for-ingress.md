@@ -12,7 +12,7 @@ approvers:
 api-approvers:
   - "None"
 creation-date: 2026-10-07
-last-updated: 2026-10-14
+last-updated: 2026-10-16
 status: provisional
 tracking-link:
   - https://redhat.atlassian.net/browse/NE-2877
@@ -32,13 +32,17 @@ usable on a worker node, for ingress router pods running on OpenShift's
 haproxy34 image (RHEL10-based). HAProxy has no QAT-specific code; offload is
 achieved through OpenSSL 3.x's generic Provider interface and Intel's
 `qatengine` package, which is installed unconditionally in the router image
-and activated only when a working device is confirmed. For its initial
-delivery, this capability ships without a new, versioned IngressController
-API field and without an OpenShift feature gate: it is enabled automatically
-by default, with an unsupported, undocumented-by-default opt-out exposed
-through `spec.unsupportedConfigOverrides`, so that early adopters with QAT
-hardware can validate the feature and provide feedback ahead of a committed,
-supported API (tentatively targeted for a later release).
+and activated only when a working device is confirmed. Rather than
+introducing a QAT-specific API field, this enhancement builds on the
+generic `spec.resources` field being added to IngressController by
+[NE-727](https://redhat.atlassian.net/browse/NE-727): an administrator who
+explicitly requests the `qat.intel.com/cy` extended resource is signaling
+intent to use QAT, and the cluster-ingress-operator mirrors that request
+into the router container as a simple `ROUTER_QAT` flag. No new CRD field
+or feature gate is introduced by this enhancement itself; documentation and
+release notes set expectations that this is a new capability without a
+dedicated preflight or periodic health check yet (see Risks and
+Mitigations), rather than relying on a technical gate.
 
 ## Motivation
 
@@ -56,24 +60,29 @@ OpenShift's router does not currently take advantage of QAT hardware even
 when it is present on a cluster's worker nodes, leaving TLS handshake
 capacity on the table for customers who have already invested in QAT-capable
 servers (Intel 4th/5th Gen Xeon Scalable with QAT 4xxx). This enhancement
-lets those customers realize that investment for ingress traffic without
-requiring a new, fully-designed API up front, while providing Red Hat with
-real-world feedback to inform the eventual supported interface.
+lets those customers realize that investment for ingress traffic by reusing
+an existing, generic mechanism
+([NE-727](https://redhat.atlassian.net/browse/NE-727)'s `spec.resources`
+field) rather than requiring a new, QAT-specific API, while still gathering
+real-world feedback to inform whether a dedicated, higher-level API (for
+example, a QAT profile field) is worth building later.
 
 ### User Stories
 
 * As a cluster administrator running TLS-heavy ingress workloads (short-lived
   connections, mTLS, frequent renegotiation) on Intel QAT-capable worker
-  nodes, I want HAProxy to automatically offload TLS handshake crypto
-  operations to the QAT accelerator, so that I can sustain a higher
-  handshake rate without over-provisioning CPU.
-* As an early-adopter customer validating QAT hardware with OpenShift, I
-  want to try QAT acceleration without OpenShift having committed to a new,
-  stable API, so that I can give feedback that shapes the eventual supported
-  interface.
-* As a cluster administrator who does not want this automatic, unsupported
-  behavior on my cluster, I want a documented way to disable QAT activation,
-  so that I can opt out if it causes problems on my QAT-capable nodes.
+  nodes, I want to explicitly request QAT acceleration for my
+  IngressController, so that HAProxy offloads TLS handshake crypto
+  operations to the QAT accelerator and I can sustain a higher handshake
+  rate without over-provisioning CPU.
+* As a cluster administrator, I want to enable QAT acceleration using the
+  same generic resource-request mechanism I already use for CPU and memory,
+  so that I don't have to learn a new, QAT-specific API field just to try
+  this out.
+* As a cluster administrator who shares QAT-capable nodes with other
+  workloads, I want to additionally constrain router pod placement, so that
+  QAT-capable nodes aren't monopolized by router pods, or router pods don't
+  compete with unrelated workloads for the same nodes.
 * As a platform operations engineer running router fleets at scale, I want
   QAT offload activity, software-fallback counts, and device errors exposed
   through the router's standard Prometheus metrics, so that I can monitor
@@ -84,9 +93,12 @@ real-world feedback to inform the eventual supported interface.
 ### Goals
 
 - Automatically activate Intel QAT TLS crypto offload, through the OpenSSL
-  3.x Provider interface, for HAProxy on haproxy34/RHEL10 router pods
-  whenever a usable QAT device is confirmed, with no required administrator
-  configuration.
+  3.x Provider interface, for HAProxy on haproxy34/RHEL10 router pods,
+  triggered by the administrator explicitly requesting the
+  `qat.intel.com/cy` extended resource via IngressController's
+  `spec.resources` field
+  ([NE-727](https://redhat.atlassian.net/browse/NE-727)), with no
+  QAT-specific API field of this enhancement's own.
 - Keep a single router image and configuration path that works unmodified on
   both QAT-capable and commodity hardware; there is no separate "QAT image."
 - Keep a QAT failure isolated to the specific router replica it affects:
@@ -95,19 +107,24 @@ real-world feedback to inform the eventual supported interface.
   Mitigations), rather than silently degrading or affecting other
   replicas. Other router replicas, unaffected by the same node-local
   issue, continue serving traffic normally.
-- Provide a documented, unsupported escape hatch
-  (`spec.unsupportedConfigOverrides`) that lets early adopters disable the
-  automatic behavior while Red Hat gathers feedback ahead of a stable API.
 - Never activate QAT acceleration in a way that would compromise a cluster's
   FIPS posture.
+- Make node placement complementary rather than necessary: requesting the
+  resource alone is sufficient for correct scheduling onto a node with an
+  available VF; `spec.nodePlacement` remains available for administrators
+  who want additional control.
 
 ### Non-Goals
 
-- Introducing a stable, versioned IngressController API field for
-  configuring QAT acceleration; this is deferred to a future enhancement
-  update (tentatively targeted for OCP 5.2).
-- Introducing an OpenShift feature gate for this capability in its initial,
-  unsupported, opt-out-only delivery (see Risks and Mitigations).
+- Introducing a QAT-specific IngressController API field; this enhancement
+  relies entirely on the generic `spec.resources` field from
+  [NE-727](https://redhat.atlassian.net/browse/NE-727) rather than defining
+  its own.
+- Introducing an OpenShift feature gate for this capability; the
+  administrator's explicit resource request is itself treated as the
+  opt-in, with documentation and release notes - rather than a technical
+  gate - setting expectations during initial adoption (see Risks and
+  Mitigations).
 - Supporting a FIPS-validated QAT acceleration path; FIPS-enabled clusters
   will not activate QAT acceleration at all in this enhancement's scope.
 - Supporting the RHEL9/haproxy32 OpenSSL ENGINE-based offload track; only
@@ -116,13 +133,20 @@ real-world feedback to inform the eventual supported interface.
   compression (`qatzip`); this enhancement is scoped to `qat_hw`-backed TLS
   crypto offload only. `qat_sw` and `qatzip` use different libraries and
   build paths than the `qatengine` TLS offload path proposed here.
-- Provisioning or managing node-level QAT infrastructure: RHCOS10 worker
-  pools, BIOS/kernel configuration, Node Feature Discovery labeling, or
-  installing/configuring the Intel Device Plugin Operator. These are
-  prerequisites owned by other components and teams.
-- Automatically selecting or scheduling router pods onto QAT-capable nodes;
-  placement remains the administrator's responsibility via the existing
-  `spec.nodePlacement` field.
+- Provisioning, managing, or validating node-level QAT infrastructure:
+  RHCOS10 worker pools (including the kernel-compatibility requirement
+  described in Proposal), BIOS/kernel configuration, Node Feature Discovery
+  labeling, or installing/configuring the Intel Device Plugin Operator.
+  These are prerequisites owned by other components and teams, or
+  documented administrator responsibilities with no software check behind
+  them.
+- Requiring node placement for correct scheduling: requesting
+  `qat.intel.com/cy` via `spec.resources` is sufficient for the scheduler to
+  place pods on nodes with an available VF, the same as any other
+  extended-resource request. `spec.nodePlacement` remains available and
+  useful for finer-grained control - for example, isolating QAT-capable
+  nodes from unrelated workloads, or pinning to a specific QAT hardware
+  generation - but is complementary, not necessary.
 - Guaranteeing sufficient VF capacity for rolling update headroom (for
   example, `maxSurge`, where old and new router pods may both request a VF
   simultaneously), node drain, or device-plugin restarts. Sizing the QAT
@@ -137,17 +161,19 @@ real-world feedback to inform the eventual supported interface.
 
 ## Proposal
 
-QAT-capable worker nodes are required to run the RHCOS10 stream for this
-enhancement's initial profile. Intel's QATlib documentation lists a minimum
-upstream kernel driver version of 5.15.3 for QAT 4xxx crypto offload. OCP
-5.1 ships two RHCOS streams: RHCOS9 (kernel 5.14.0.x) and RHCOS10 (kernel
-6.12.0.x). RHCOS9's kernel version string is below that minimum, but RHEL
-kernels can carry backported drivers, so a 5.14.0.x version string alone
-does not prove QAT is unsupportable on RHCOS9 - it is unsupported for this
-enhancement's initial profile until someone does the functional validation
-to say otherwise. RHCOS10's kernel does meet the documented minimum, so this
-enhancement scopes its initial profile to RHCOS10 and leaves RHCOS9 support
-as a possible future validation effort rather than a closed question.
+QAT-capable worker nodes are expected to run the RHCOS10 stream. Intel's
+QATlib documentation lists a minimum upstream kernel driver version of
+5.15.3 for QAT 4xxx crypto offload. OCP 5.1 ships two RHCOS streams: RHCOS9
+(kernel 5.14.0.x) and RHCOS10 (kernel 6.12.0.x). RHCOS9's kernel version
+string is below that minimum, but RHEL kernels can carry backported
+drivers, so a 5.14.0.x version string alone does not prove QAT is
+unsupportable on RHCOS9 - it is unsupported for this enhancement's initial
+profile until someone does the functional validation to say otherwise.
+RHCOS10's kernel does meet the documented minimum. This is a documented
+administrator prerequisite, not something this enhancement validates in
+software: getting it wrong surfaces the same way as any other device
+problem - the haproxy container fails to start (see below) - rather than
+through a dedicated check.
 
 This enhancement spans the router image/binary, the router's control-plane
 logic, and the cluster-ingress-operator:
@@ -155,35 +181,32 @@ logic, and the cluster-ingress-operator:
 - The haproxy34 (RHEL10) router image installs the `qatengine` RPM
   unconditionally. The package is small and inert on hardware without a QAT
   device, so no separate "QAT image" variant is needed.
-- The cluster-ingress-operator computes a single eligibility decision per
-  router deployment, gated on three predicates: the target node capability
-  (a node matching the IngressController's `spec.nodePlacement` actually
-  advertises `qat.intel.com/cy`, i.e., the Intel Device Plugin Operator has
-  provisioned virtual functions there), a resolved kernel-compatibility
-  signal confirming RHCOS10/kernel compatibility (see Implementation
-  Details for how this signal is sourced), and the cluster not being in
-  FIPS mode (via `detectFIPS()`, see Implementation Details). Only when all
-  three hold does the operator set a `ROUTER_QAT=true` environment variable
-  on the router container and the `qat.intel.com/cy` resource request/limit
-  on the haproxy container - the resource goes on the haproxy container
-  because that is the process that actually runs HAProxy and would touch
-  the VF, while `ROUTER_QAT` goes on the router container because that is
-  what decides whether to render the `ssl-provider` directives at all. When
-  not eligible (no matching QAT-capable node, incompatible kernel, FIPS
-  mode, or the admin has set the unsupported opt-out), the operator sets
-  neither, and no QAT-related config is ever rendered. The operator does
-  not alter placement itself.
+- An administrator who wants QAT acceleration explicitly requests the
+  `qat.intel.com/cy` extended resource via IngressController's
+  `spec.resources` field, introduced by
+  [NE-727](https://redhat.atlassian.net/browse/NE-727) (a separate
+  enhancement; see Open Questions for how that field maps to this pod's
+  containers). This explicit request is the administrator's opt-in - there
+  is no automatic activation based merely on detecting QAT-capable
+  hardware, and no QAT-specific field for this enhancement to define.
+- The cluster-ingress-operator watches the resolved resource configuration
+  for the haproxy container and mirrors the presence of `qat.intel.com/cy`
+  into a `ROUTER_QAT=true` environment variable on the router container;
+  when absent, it unsets `ROUTER_QAT`. This is a simple mirroring
+  operation, not an eligibility computation: the operator does not
+  independently verify node capability, kernel compatibility, or FIPS state
+  before doing this.
 - The router container renders `ssl-provider default` followed by
   `ssl-provider qatprovider` whenever `ROUTER_QAT=true` and its own
   independent local check does not detect FIPS (see Implementation Details
   - this is checked locally by the router itself, not inferred from
-  `ROUTER_QAT`). There is deliberately no separate preflight that probes
-  the device or the OpenSSL provider beforehand: the first time this
-  configuration is actually applied to the haproxy container is the
-  validation. Loading `qatprovider` explicitly disables OpenSSL's automatic
-  loading of the `default` provider, so `default` must also be loaded
-  explicitly, or any TLS algorithm not implemented by `qatprovider` would
-  fail silently or error out.
+  `ROUTER_QAT` or anything the operator computes). There is deliberately no
+  separate preflight that probes the device or the OpenSSL provider
+  beforehand: the first time this configuration is actually applied to the
+  haproxy container is the validation. Loading `qatprovider` explicitly
+  disables OpenSSL's automatic loading of the `default` provider, so
+  `default` must also be loaded explicitly, or any TLS algorithm not
+  implemented by `qatprovider` would fail silently or error out.
 - If the device or provider do not actually work, HAProxy's own startup
   fails when it tries to load `qatprovider` - a failed provider load is
   fatal to HAProxy startup - and the haproxy container fails to start. On a
@@ -191,13 +214,20 @@ logic, and the cluster-ingress-operator:
   container; see Risks and Mitigations for why this is an accepted failure
   mode in this initial version rather than something the implementation
   tries to prevent.
-- Administrators who do not want this behavior can set a documented, but
-  explicitly unsupported, override under `spec.unsupportedConfigOverrides`
-  to disable detection, activation, and the associated resource request.
-- No new CRD field, CRD validation, or OpenShift feature gate is introduced
-  for this initial delivery. A future enhancement will propose the stable,
-  gated `v1` API surface once there has been time to gather feedback from
-  early adopters (tentatively OCP 5.2).
+- Node placement (`spec.nodePlacement`) is not required: the
+  `qat.intel.com/cy` resource request alone is sufficient for the
+  Kubernetes scheduler to place the pod on a node with an available VF, the
+  same as any other extended-resource request. `spec.nodePlacement` remains
+  available and continues to be useful for finer-grained control beyond
+  what the resource request alone provides - for example, isolating
+  QAT-capable nodes from unrelated workloads, or pinning to a specific QAT
+  hardware generation - but it is complementary, not necessary.
+- This enhancement introduces no new CRD field and no OpenShift feature
+  gate of its own; it depends on
+  [NE-727](https://redhat.atlassian.net/browse/NE-727)'s `spec.resources`
+  field, and relies on documentation and release notes rather than a
+  technical gate to set expectations during initial adoption (see Risks and
+  Mitigations).
 
 ### Workflow Description
 
@@ -221,68 +251,68 @@ process against that configuration.
    kernel requirement (see Proposal); BIOS/kernel configuration; Node
    Feature Discovery; and the Intel Device Plugin Operator with a
    `QatDevicePlugin` CR.
-2. The cluster administrator configures an IngressController's existing
-   `spec.nodePlacement` field to target those QAT-capable nodes. No new API
-   is required for this step.
+2. (Optional) The cluster administrator may configure an IngressController's
+   existing `spec.nodePlacement` field for additional control over where
+   router pods land - for example, isolating QAT-capable nodes from
+   unrelated workloads, or pinning to a specific QAT hardware generation.
+   This is not required for correct scheduling; see step 4.
 3. As a prerequisite, the cluster administrator sets the IngressController's
    existing `haproxyVersion` field to select haproxy34 (HAProxy 3.4), since
    HAProxy 3.2 remains the OCP 5.1 default and this capability only applies
    to haproxy34 or newer (see `select-haproxy-version.md` and
    [NE-2912](https://redhat.atlassian.net/browse/NE-2912), which tracks
    haproxy34 being selectable but non-default in OCP 5.1). None of the
-   automatic behavior described below applies until this explicit,
-   non-default version selection is made.
-4. Unless the administrator has set the unsupported opt-out described
-   below, the cluster-ingress-operator checks whether a node matching the
-   IngressController's `spec.nodePlacement` advertises the
-   `qat.intel.com/cy` resource in its allocatable capacity, is running a
-   kernel compatible with QAT (per the resolved kernel-compatibility signal;
-   see Implementation Details), and that the cluster is not in FIPS mode (via
-   `detectFIPS()`; see Implementation Details). Only if all three hold does
-   it automatically add a `ROUTER_QAT=true` environment variable to the
-   router container and a matching `qat.intel.com/cy` resource request to
-   the haproxy container. Neither is added otherwise. The operator continues
-   to watch `Node` objects afterward, so the environment variable and
-   resource request are added or removed as matching nodes' QAT
-   advertisement appears or disappears (for example, as the Intel Device
-   Plugin Operator finishes provisioning virtual functions).
-5. The scheduler places router pods according to the administrator's
-   `spec.nodePlacement` and the injected resource request, following
-   standard Kubernetes scheduling semantics.
-6. If `ROUTER_QAT=true` is not set, the router container renders a
-   configuration with no `ssl-provider` directives and does no further QAT-
-   related work. If `ROUTER_QAT=true` is set, the router container runs its
-   own independent local check that FIPS is not enabled on the node (see
-   Implementation Details - checked directly by the router, not inferred
-   from `ROUTER_QAT`).
-7. If `ROUTER_QAT=true` and the local FIPS check does not detect FIPS, the
+   behavior described below applies until this explicit, non-default
+   version selection is made.
+4. The cluster administrator explicitly requests the `qat.intel.com/cy`
+   extended resource via the IngressController's `spec.resources` field
+   ([NE-727](https://redhat.atlassian.net/browse/NE-727)). This is the
+   administrator's deliberate opt-in; there is no automatic activation
+   based on node capability alone.
+5. The cluster-ingress-operator observes that `qat.intel.com/cy` is present
+   in the resolved resource configuration for the haproxy container and
+   sets a `ROUTER_QAT=true` environment variable on the router container
+   accordingly. It continues to watch for changes, so `ROUTER_QAT` is added
+   or removed as the administrator's `spec.resources` configuration
+   changes.
+6. The scheduler places the router pod according to `spec.nodePlacement`
+   (if set) and the resource request, following standard Kubernetes
+   scheduling semantics; the resource request alone ensures the pod lands
+   on a node with an available VF.
+7. If `ROUTER_QAT=true` is not set, the router container renders a
+   configuration with no `ssl-provider` directives and does no further
+   QAT-related work. If `ROUTER_QAT=true` is set, the router container
+   runs its own independent local check that FIPS is not enabled on the
+   node (see Implementation Details - checked directly by the router, not
+   inferred from `ROUTER_QAT`).
+8. If `ROUTER_QAT=true` and the local FIPS check does not detect FIPS, the
    router container renders `ssl-provider default` and `ssl-provider
    qatprovider` into the HAProxy configuration. Both directives are
    required together: loading `qatprovider` disables OpenSSL's automatic
    loading of `default`, and without `default` any TLS algorithm not
    implemented by `qatprovider` would fail silently or error out.
-8. The haproxy container starts (or reloads) HAProxy against that
+9. The haproxy container starts (or reloads) HAProxy against that
    configuration using the existing, unmodified reload mechanism - there is
    no separate preflight step. If the device and provider actually work,
    HAProxy starts normally with QAT offload active. If they do not, loading
    `qatprovider` fails, which is fatal to HAProxy startup, and the haproxy
    container fails to start.
-9. On a genuinely broken or absent device, step 8 fails every time it is
-   attempted, so the haproxy container crash-loops. This is treated as the
-   validation for "is the device available and healthy on this node" -
-   there is no separate check beforehand. See Risks and Mitigations for why
-   this is an accepted outcome in this initial version, how it is expected
-   to surface (alerting on the crash-looping container), and why other
-   router replicas are expected to continue serving traffic in the
-   meantime.
-10. The router exposes Prometheus metrics for offload-active state and
+10. On a genuinely broken or absent device, step 9 fails every time it is
+    attempted, so the haproxy container crash-loops. This is treated as the
+    validation for "is the device available and healthy on this node" -
+    there is no separate check beforehand. See Risks and Mitigations for
+    why this is an accepted outcome in this initial version, how it is
+    expected to surface (alerting on the crash-looping container), and why
+    other router replicas are expected to continue serving traffic in the
+    meantime.
+11. The router exposes Prometheus metrics for offload-active state and
     software-fallback count so operators can confirm whether acceleration
     is engaged.
-11. An administrator who wants to disable this behavior entirely sets the
-    documented unsupported override in `spec.unsupportedConfigOverrides`;
-    on the next rollout, the operator stops setting `ROUTER_QAT` on the
-    router container and the resource request on the haproxy container, and
-    the router container stops rendering the `ssl-provider` directives.
+12. An administrator who wants to disable this behavior removes
+    `qat.intel.com/cy` from the IngressController's `spec.resources`; on
+    the next reconcile, the operator stops setting `ROUTER_QAT` on the
+    router container, and the router container stops rendering the
+    `ssl-provider` directives.
 
 ```mermaid
 sequenceDiagram
@@ -293,12 +323,11 @@ sequenceDiagram
     participant Router as Router Container
     participant Haproxy as Haproxy Container
 
-    Admin->>IC: Set spec.nodePlacement for QAT-capable nodes
+    Admin->>IC: Set spec.resources requesting qat.intel.com/cy (NE-727)
     Operator->>IC: Watch IngressController
-    alt Eligible node found, cluster not in FIPS mode, no unsupported override
+    alt qat.intel.com/cy requested
         Operator->>Router: Set ROUTER_QAT=true
-        Operator->>Haproxy: Inject qat.intel.com/cy resource request
-        Sched->>Haproxy: Schedule pod per nodePlacement + resource request
+        Sched->>Haproxy: Schedule pod per (optional) nodePlacement + resource request
         Router->>Router: ROUTER_QAT=true and local FIPS check clear
         Router->>Haproxy: Render config with ssl-provider default + qatprovider
         alt Device and provider actually work
@@ -306,9 +335,8 @@ sequenceDiagram
         else Device or provider do not work
             Haproxy->>Haproxy: Fail to start (fatal provider load failure), crash-loop
         end
-    else Not eligible, FIPS mode, or unsupported override set
+    else qat.intel.com/cy not requested
         Operator->>Router: Do not set ROUTER_QAT
-        Operator->>Haproxy: Do not inject resource request
         Router->>Haproxy: Render config without ssl-provider
         Haproxy->>Haproxy: Start HAProxy (software TLS)
     end
@@ -320,23 +348,22 @@ This enhancement does not add or modify any CRD, admission or conversion
 webhook, ValidatingAdmissionPolicy, MutatingAdmissionPolicy, aggregated API
 server, or finalizer.
 
-The only existing API surface touched is IngressController's pre-existing,
-intentionally schema-unvalidated `spec.unsupportedConfigOverrides` field.
-The cluster-ingress-operator will recognize a documented (but explicitly
-unsupported) key under this field to let administrators opt out of the
-automatic behavior described in this enhancement. Because
-`unsupportedConfigOverrides` carries no schema or support guarantee today,
-this does not constitute an API Extension as defined above, and no API
-approver review is required for this delivery.
+The API surface this enhancement depends on - the generic `spec.resources`
+field (`corev1.ResourceRequirements`) on `IngressControllerSpec` - is
+introduced by [NE-727](https://redhat.atlassian.net/browse/NE-727), a
+separate enhancement that owns its own API Extensions review. This
+enhancement does not add that field; it only defines a semantic on top of
+it (presence of `qat.intel.com/cy` in the resolved resource configuration
+triggers `ROUTER_QAT=true`).
 
-<!-- TODO: The exact key name and shape under unsupportedConfigOverrides
-     (e.g. a single boolean flag vs. a nested struct) is still open and
-     should be finalized during implementation; see Open Questions. -->
+<!-- TODO: It is not yet confirmed how `spec.resources` maps to this pod's
+     multiple containers (router, haproxy, init-router) - see Open
+     Questions. This enhancement's design assumes the field can target (or
+     at minimum reach) the haproxy container specifically, where the
+     `qat.intel.com/cy` resource must actually land. -->
 
-A future enhancement will introduce a stable, versioned IngressController
-API field for this capability (tentatively OCP 5.2). That future change will
-go through the normal API Extensions review process, including a dedicated
-API approver.
+Because this enhancement introduces no new API of its own, api-approvers is
+"None"; NE-727 is responsible for its own API review.
 
 ### Topology Considerations
 
@@ -345,24 +372,20 @@ API approver.
 QAT hardware is a worker-node (data-plane) resource, so this enhancement
 primarily affects guest-cluster node pools where router pods actually run.
 The cluster-ingress-operator itself runs in the management cluster, but the
-behavior it manages (resource injection and config rendering) executes
-against guest-cluster router pods. The
-kernel-compatibility resolution described in Implementation Details also
-does not carry over as-is: guest-cluster worker nodes are managed through
-`NodePool` status rather than `MachineConfigPool`, so whichever option is
-chosen there (new RBAC vs. a Node-level signal) needs a Hypershift-specific
-equivalent (see Open Questions).
+behavior it manages (mirroring `spec.resources` into `ROUTER_QAT`, and
+config rendering) executes against guest-cluster router pods.
 
 <!-- TODO: This needs validation with the Hypershift team: confirm whether
      any additional handling is required for management-cluster vs.
-     guest-cluster router placement, and whether the unsupported override
-     needs special handling when hosted control planes are used. -->
+     guest-cluster router placement, and whether NE-727's `spec.resources`
+     field behaves the same way for Hypershift-managed IngressControllers. -->
 
 #### Standalone Clusters
 
 This is the primary target for this enhancement. Administrators provision
-QAT-capable worker nodes and use the existing `spec.nodePlacement` field to
-place router pods on them.
+QAT-capable worker nodes and request `qat.intel.com/cy` via
+`spec.resources`; `spec.nodePlacement` remains available for additional
+control but is not required.
 
 #### Single-node Deployments or MicroShift
 
@@ -384,9 +407,9 @@ not apply to MicroShift in its current form.
 This enhancement relies on standard IngressController resources and worker
 node infrastructure, which are available in OKE.
 
-<!-- TODO: Confirm with the OKE team whether shipping an automatic,
-     explicitly-unsupported behavior (rather than a fully-supported, gated
-     feature) raises any concerns specific to the OKE product offering. -->
+<!-- TODO: Confirm with the OKE team whether this capability (built on
+     NE-727's generic resources field, without a QAT-specific feature gate)
+     raises any concerns specific to the OKE product offering. -->
 
 ### Implementation Details/Notes/Constraints
 
@@ -403,26 +426,23 @@ by `ssl-provider qatprovider` whenever `ROUTER_QAT=true` (set by the
 cluster-ingress-operator, see below) and the router's own independent local
 FIPS check does not detect FIPS. When `ROUTER_QAT` is not `true`, the router
 does not do any QAT-related work at all, which keeps the cost of this
-enhancement at zero for the vast majority of router pods that never run on
-QAT-capable nodes. The router does not itself probe for the device or check
-whether OpenSSL can load the `qatprovider.so` Provider: there is no separate
-preflight for this in the initial version. The eligibility decision (node
-capability, kernel compatibility) belongs to the operator (see below, and
-Proposal); if that decision turns out to be wrong for a given node, or the
-device is otherwise not actually usable, the result surfaces as the haproxy
+enhancement at zero for the vast majority of router pods that never request
+QAT. The router does not itself probe for the device or check whether
+OpenSSL can load the `qatprovider.so` Provider, and does not independently
+verify node capability or kernel compatibility: there is no separate
+preflight for any of this in the initial version. Whether `ROUTER_QAT`
+turns out to be a correct signal depends entirely on whether the
+administrator's `qat.intel.com/cy` request actually corresponds to a
+working device; if it does not, the result surfaces as the haproxy
 container failing to start (see below), not as something the router
 detects or works around. FIPS is the one exception the router checks
 locally: it reads `/proc/sys/crypto/fips_enabled` directly (a kernel-wide
 value visible to any container on the node regardless of the container's
-own base image) rather than trusting `ROUTER_QAT` for that determination -
-see Risks and Mitigations for why this stays independent of the operator's
-own FIPS check. This local check must be fail-safe, not fail-open: if the
+own base image). This local check must be fail-safe, not fail-open: if the
 file cannot be read or parsed, the router must treat that as FIPS-enabled
-and disable QAT, rather than defaulting to "not FIPS." This is a deliberate
-departure from the existing `detectFIPS()` helper used elsewhere in the
-operator, which defaults to "not FIPS" on a procfs read failure (see
-Implementation Details below) - that fail-open default is acceptable for
-its existing uses, but must not be inherited by this QAT-specific check.
+and disable QAT, rather than defaulting to "not FIPS." This is the only
+FIPS check in this design - see Risks and Mitigations for why relying on
+this single layer is an accepted trade-off.
 
 **Haproxy container startup**: The haproxy container - the one granted the
 `qat.intel.com/cy` resource, and therefore the only one with the VF device
@@ -443,102 +463,36 @@ detected or reacted to by this enhancement either; whatever behavior
 happens, up to and including the existing liveness probe eventually
 restarting the container, which then hits the same startup-failure path.
 
-**cluster-ingress-operator**: Adds logic to read `Node` objects (and,
-depending on how the next paragraph's open point is resolved,
-`MachineConfigPool` objects) and compute a single eligibility decision per
-router deployment: a node matching the IngressController's
-`spec.nodePlacement` must advertise `qat.intel.com/cy` in its allocatable
-capacity, and that node's resolved RHCOS stream/kernel must meet QAT's
-minimum kernel-driver requirement (see Proposal). When eligible, the
-operator sets a `ROUTER_QAT=true` environment variable on the router
-container and the `qat.intel.com/cy` resource request/limit on the haproxy
-container; when not eligible, or when the administrator has set the
-unsupported opt-out key described in API Extensions, it sets neither.
-Collapsing node-capability and kernel-compatibility into a single flag is
-deliberate: unlike FIPS (see below), getting this one wrong is low-stakes
-in terms of correctness - it surfaces as the haproxy container failing to
-start and crash-looping (see Risks and Mitigations), which is a visible,
-diagnosable failure rather than a silent one, not a security or compliance
-concern the way an incorrect FIPS determination would be. FIPS is handled
-as a separate, independent check: the operator reuses the existing
-`detectFIPS()` helper's Hypershift-aware handling of a FIPS management
-cluster with a non-FIPS guest cluster (via the `FIPS_ENABLED` environment
-variable), to skip setting `ROUTER_QAT` and the resource request entirely
-on a FIPS-enabled cluster, rather than scheduling a pod onto a QAT node and
-consuming a VF only for the router container to never render the directives
-that would have used it. However, the QAT
-eligibility gate cannot reuse `detectFIPS()`'s existing fail-open default
-as-is: `detectFIPS()` returns a plain `bool` and defaults to "not FIPS" when
-`/proc/sys/crypto/fips_enabled` cannot be read or parsed, which is
-appropriate for its existing callers but not acceptable here, where
-defaulting the wrong way means activating a non-FIPS-validated crypto path
-on what may actually be a FIPS cluster. `detectFIPS()` should therefore be
-changed to return `(bool, error)` instead of a plain `bool`, surfacing an
-inconclusive read as a non-nil error rather than silently collapsing it into
-`false`. Existing callers that are fine with today's practical behavior can
-keep it by ignoring the error; the QAT eligibility gate is the one caller
-that must treat a non-nil error as FIPS-enabled and skip setting
-`ROUTER_QAT`/the resource request. See Risks and Mitigations for why the
-router also independently re-verifies FIPS state itself rather than
-trusting this operator-level check alone.
+**cluster-ingress-operator**: Adds logic to watch the IngressController's
+`spec.resources` field (introduced by
+[NE-727](https://redhat.atlassian.net/browse/NE-727)) and mirror the
+presence of `qat.intel.com/cy` in the resolved resource configuration for
+the haproxy container into a `ROUTER_QAT=true` environment variable on the
+router container; when absent, it unsets `ROUTER_QAT`. This is a simple
+mirroring operation, not an eligibility computation: the operator does not
+independently check node capability, kernel compatibility, or FIPS state
+before doing this - those are, respectively, a documented administrator
+prerequisite (see Proposal) and the router container's own local check (see
+above). This also means the operator needs no new RBAC beyond what it
+already has to read `IngressController` resources and manage `Deployment`
+objects: it does not read `Node` or `MachineConfigPool` objects for this
+purpose.
 
-How the operator sources the kernel-compatibility signal is an open choice
-between two options (see Open Questions), not a settled
-`MachineConfigPool`-based design: (a) read `MachineConfigPool` status
-directly, which is the more direct approach but requires adding a new,
-currently-missing RBAC scope -
-the cluster-ingress-operator's `ClusterRole` on `release-5.1` grants only
-`nodes: list/watch` today, with no `machineconfiguration.openshift.io`
-permissions, so this option means adding a least-privilege
-`machineconfigpools: list/watch` rule and getting it reviewed; or (b)
-resolve the signal from a `Node`-level label or annotation the MCO already
-sets, which the operator can already read under its existing RBAC, avoiding
-the new scope at the cost of depending on a specific `Node` label/annotation
-remaining stable. Only option (a) involves reading `MachineConfigPool`
-objects at all; option (b) never touches them. For Hypershift, neither
-option applies as-is: guest-cluster worker nodes are managed through
-`NodePool` status rather than `MachineConfigPool`, so that topology needs
-its own resolution regardless of which option is chosen for standalone
-clusters.
+<!-- TODO: It is not yet confirmed whether `spec.resources` (NE-727) can
+     target the haproxy container specifically, applies uniformly to all
+     containers, or needs explicit per-container addressing; see Open
+     Questions. The mirroring logic above assumes the operator can observe
+     the resolved resource configuration for the haproxy container
+     specifically. -->
 
-Reconciling on changes to `Node` objects (and `MachineConfigPool` objects,
-if option (a) above is chosen) - not just on IngressController changes -
-ensures the resource request and environment variable are added once the
-Intel Device Plugin Operator finishes
-provisioning virtual functions on a targeted node, without requiring an
-unrelated IngressController edit to trigger it. The operator does not
-compute or alter node placement; that remains entirely driven by the
-administrator's existing `spec.nodePlacement` configuration.
-
-**No feature gate for this delivery**: OpenShift's standard process requires
-all new features to ship behind a feature gate, disabled by default. This
-enhancement deliberately deviates from that process for its initial
-delivery: because there is no new API surface being committed to, gating the
-behavior behind a `FeatureGate` would imply a commitment this enhancement
-explicitly wants to avoid making yet. Instead, the behavior ships as an
-automatic, default-on capability with an unsupported, documented opt-out.
-This is called out explicitly in Risks and Mitigations for reviewer
-scrutiny. When the stable `v1` API field is introduced in a future
-enhancement, that field (and the behavior it controls) will be registered as
-a proper feature gate in
-https://github.com/openshift/api/blob/master/features/features.go, starting
-in an appropriate feature set (`DevPreviewNoUpgrade` or
-`TechPreviewNoUpgrade`), per the guidance in
-`dev-guide/feature-zero-to-hero.md`.
-
-The absence of a dedicated feature gate is further mitigated by this
-capability's dependency on HAProxy version selection (see
-`select-haproxy-version.md` and
-[NE-2912](https://redhat.atlassian.net/browse/NE-2912)): HAProxy 3.4
-(haproxy34) is not available at all until it is introduced, as a
-non-default, explicitly-selectable version via the existing
-`haproxyVersion` field, alongside this enhancement. It
-cannot be pinned today because it does not exist in OCP 5.0. QAT activation
-is conditioned on the IngressController running haproxy34 or newer, so an
-administrator must already have explicitly set `haproxyVersion` to this new,
-non-default version before this enhancement's automatic behavior can ever
-apply. This naturally limits exposure to clusters that have deliberately
-opted in to the new HAProxy version, even without a feature gate of its own.
+**No feature gate for this delivery**: This enhancement does not register a
+new OpenShift feature gate. The administrator's explicit `qat.intel.com/cy`
+request is itself a deliberate, informed opt-in - a materially different
+situation from automatically activating a capability whenever matching
+hardware is merely present, which is what the standard feature-gate process
+is primarily meant to protect against. Early-adoption caution is instead
+communicated through documentation and release notes (see Risks and
+Mitigations and Non-Goals), not a technical gate.
 
 ### Risks and Mitigations
 
@@ -558,10 +512,10 @@ new alerting mechanism is required. Other router replicas, scheduled on
 nodes not affected by the same node-local issue, continue serving traffic
 normally, so the IngressController as a whole keeps working while a single
 affected replica does not. An administrator resolves the underlying problem
-(fix the device/VF provisioning) or disables QAT acceleration via the
-unsupported override (see Support Procedures) to stop the affected replica
-from crash-looping. A future iteration may add a real preflight check ahead
-of this if early-adopter feedback shows it is needed.
+(fix the device/VF provisioning) or removes `qat.intel.com/cy` from
+`spec.resources` (see Support Procedures) to stop the affected replica from
+crash-looping. A future iteration may add a real preflight check ahead of
+this if early-adopter feedback shows it is needed.
 
 **Risk**: Loading the `qatprovider` OpenSSL provider disables OpenSSL's
 automatic loading of the `default` provider. Without `default` also loaded
@@ -575,18 +529,17 @@ Description and Proposal). This is covered by a dedicated test exercising a
 TLS path that requires a non-QAT algorithm, to catch any regression in this
 ordering (see Test Plan).
 
-**Risk**: Shipping an automatic, default-on behavior without a feature gate
-deviates from OpenShift's standard feature-development process, and could
-set an unwanted precedent.
+**Risk**: This enhancement does not register a feature gate, which deviates
+from OpenShift's standard process for new features.
 
-**Mitigation**: The behavior is strictly scoped to hardware that does not
-exist in commodity clusters (QAT-capable nodes), fails in a contained and
-visible way when it does not work (a crash-looping replica rather than a
-cluster-wide or silent failure, see the preflight risk above), carries an
-explicit, documented "unsupported" designation, and is intentionally
-time-boxed to a single release cycle ahead of a properly gated, supported
-API. This EP calls the deviation out explicitly so reviewers and API
-approvers can weigh in before it merges.
+**Mitigation**: The administrator's explicit `qat.intel.com/cy` request is
+treated as the opt-in a feature gate would otherwise provide - a
+deliberate, auditable action already visible in the IngressController's own
+spec, not a hidden or automatic default triggered merely by hardware
+presence. Documentation and release notes set expectations that this is a
+new capability, without a dedicated preflight or periodic health check yet,
+during initial adoption. This EP calls the deviation out explicitly so
+reviewers and API approvers can weigh in before it merges.
 
 **Risk**: Whether `ssl-mode-async` actually drives OpenSSL's
 `OSSL_ASYNC_FD`/`ASYNC_WAIT_CTX` machinery for a Provider (as opposed to an
@@ -623,100 +576,102 @@ testing is limited to the hardware-independent cases listed in the Test
 Plan, and this is tracked explicitly in Infrastructure Needed and Open
 Questions.
 
-**Risk**: Automatic, default-on resource injection onto the haproxy
-container could surprise administrators who did not explicitly request QAT
-acceleration, for example on shared or multi-tenant QAT-capable node pools.
+**Risk**: Node placement is optional, so an administrator could request
+`qat.intel.com/cy` without configuring `spec.nodePlacement`. On a shared
+node pool, router pods could then land alongside unrelated workloads
+competing for the same QAT-capable nodes, or unrelated workloads could
+consume VFs intended for routers.
 
-**Mitigation**: The behavior is documented, is visible through router
-metrics, and can be disabled cluster-wide (per IngressController) through
-the unsupported override.
+**Mitigation**: `spec.nodePlacement` remains fully available precisely for
+this case; using it on shared node pools is documented as a recommended
+practice, not something the implementation enforces. The underlying
+resource request still guarantees a router pod never lands on a node
+without an available VF, regardless of whether `nodePlacement` is set.
 
-**Risk**: Collapsing node-capability, kernel-compatibility, and the
-unsupported opt-out into a single `ROUTER_QAT` flag means the router
-container itself cannot tell *why* the flag is unset (no matching node,
-incompatible kernel, or explicit opt-out), which could make support harder.
+**Risk**: It is not yet confirmed how NE-727's `spec.resources` field maps
+to this pod's multiple containers (router, haproxy, init-router). This
+enhancement's entire design assumes an administrator can get
+`qat.intel.com/cy` onto the haproxy container specifically; if the field
+cannot target a specific container, the design needs to be revisited.
 
-**Mitigation**: The pod does not need to know why, only what to do; the
-"why" is diagnosable from the cluster-ingress-operator's own logs and
-events, which record the specific reason (resource unavailability, kernel
-incompatibility, FIPS, or opt-out) for each IngressController it reconciles
-(see Support Procedures).
+**Mitigation**: Tracked as a pre-implementation open question (see Open
+Questions); this must be resolved, in coordination with the NE-727
+enhancement, before implementation of this enhancement begins.
 
 **Risk**: FIPS-enabled clusters must never activate a non-FIPS-validated
-crypto path, and a FIPS pod should not needlessly consume a QAT VF that the
-router container was never going to use anyway. Unlike the node-capability
-and kernel-compatibility checks (which are deliberately collapsed into the
-single `ROUTER_QAT` flag, since getting them wrong is low-stakes), FIPS is
-not something the router should take on the operator's word alone: a stale
-reconcile or a bug in the operator's eligibility computation could otherwise
-silently activate a non-FIPS-validated crypto path on a FIPS cluster.
-Compounding this, the existing `detectFIPS()` helper used elsewhere in the
-operator is fail-open by design (it defaults to "not FIPS" when
-`/proc/sys/crypto/fips_enabled` cannot be read or parsed), which is the
-wrong default to inherit unmodified for a QAT-activation gate.
+crypto path. Since the operator does not compute any eligibility - including
+FIPS - before mirroring the administrator's resource request into
+`ROUTER_QAT`, the router container's own local check is the only
+enforcement point; there is no second, independent layer the way there
+would be if the operator also gated on FIPS.
 
-**Mitigation**: This is enforced at two genuinely independent layers rather
-than one flag checked twice, and both layers are fail-safe rather than
-fail-open. `detectFIPS()` is updated to return `(bool, error)` instead of a
-plain `bool`, so an inconclusive read surfaces as a non-nil error instead of
-silently collapsing into `false` (see Implementation Details); the QAT
-eligibility gate is written to treat that error as FIPS-enabled, so it skips
-setting `ROUTER_QAT` and the `qat.intel.com/cy` resource request both when
-the cluster is in FIPS mode and when FIPS state cannot be conclusively
-determined, meaning a FIPS pod is not scheduled onto a QAT node and does not
-consume a VF. Independently of that,
-and regardless of what `ROUTER_QAT` says, the router container's own local
-check reads `/proc/sys/crypto/fips_enabled` directly - a kernel-wide
-value visible to the container without any special privilege or operator
-involvement - and refuses to activate QAT both when it reports FIPS is
-enabled and when it cannot be read or parsed at all. Because this check does
-not depend on the operator's computation at all, it remains a true backstop
-even if the operator-level check is bypassed or stale. This enhancement's
-scope is limited to non-FIPS clusters (see Non-Goals).
+**Mitigation**: This is accepted as a single, well-defined enforcement point
+rather than two redundant layers, in exchange for keeping the operator's
+logic a simple mirror rather than an eligibility computation. The router
+container's local check is fail-safe, not fail-open: it reads
+`/proc/sys/crypto/fips_enabled` directly - a kernel-wide value visible to
+the container without any special privilege - and refuses to activate QAT
+both when it reports FIPS is enabled and when it cannot be read or parsed
+at all. This enhancement's scope is limited to non-FIPS clusters (see
+Non-Goals). A future iteration may add an operator-side check as well if a
+single enforcement point proves insufficient.
 
 ### Drawbacks
 
-This enhancement introduces an automatic behavior change (new resource
-requests, conditional config rendering) without the usual feature-gate
-safety net, which increases the burden on the router and ingress operator
-teams to get the default-on behavior right the first time. It also accepts
-that a genuinely broken or absent device results in a crash-looping haproxy
-container rather than a guaranteed graceful fallback, relying on other
-router replicas and existing crash-loop monitoring instead of a dedicated
-preflight (see Risks and Mitigations). Troubleshooting relies on logs,
-metrics, and standard pod-health signals rather than a dedicated
-IngressController status condition in this initial delivery (status
-reporting is an open question). These trade-offs are accepted in exchange
-for a smaller initial implementation and faster, real-world feedback ahead
-of committing to a stable API, but reviewers may reasonably push back on
-shipping default-on behavior without a feature gate, or on accepting
-crash-looping as a valid failure mode instead of a preflight check.
+This enhancement introduces a new automatic behavior (an operator mirroring
+a resource request into an environment variable, conditional config
+rendering) without a feature gate, relying on an explicit administrator
+action as the opt-in instead. It also accepts that a genuinely broken or
+absent device results in a crash-looping haproxy container rather than a
+guaranteed graceful fallback, relying on other router replicas and existing
+crash-loop monitoring instead of a dedicated preflight (see Risks and
+Mitigations). FIPS enforcement relies on a single layer (the router
+container's own local check) rather than two independent layers, since the
+operator no longer computes any eligibility of its own. Troubleshooting
+relies on logs, metrics, and standard pod-health signals rather than a
+dedicated IngressController status condition in this initial delivery
+(status reporting is an open question). These trade-offs are accepted in
+exchange for a smaller implementation that reuses an existing, generic API
+rather than inventing a QAT-specific one, but reviewers may reasonably push
+back on the single-layer FIPS enforcement, or on accepting crash-looping as
+a valid failure mode instead of a preflight check.
 
 ## Alternatives (Not Implemented)
 
-**Ship a fully-gated Tech Preview feature with a stable v1 API now**: This
-was not selected for this release because the API shape (opt-in field vs.
-automatic detection, resource/placement model, status reporting) has open
-questions that are better informed by early-adopter feedback than by
-up-front design alone. A future enhancement will revisit this once that
-feedback is available.
+**Automatic, default-on activation with an unsupported opt-out**: An
+earlier iteration of this proposal activated QAT automatically whenever the
+cluster-ingress-operator detected a capable node (matching node capability,
+kernel compatibility, and FIPS state), with a
+`spec.unsupportedConfigOverrides` escape hatch for administrators who
+wanted to opt out. This was not selected for this version: it provided no
+explicit administrator consent, could unexpectedly consume VFs on shared
+node pools, and relied on an unsupported field rather than a real API.
+Standardizing on [NE-727](https://redhat.atlassian.net/browse/NE-727)'s
+generic `spec.resources` field instead gives administrators the same
+explicit, deliberate opt-in a dedicated QAT field would have provided,
+without this enhancement needing to define and own its own API surface.
 
-**Require an explicit opt-in field instead of automatic, default-on
-behavior**: Considered, but an opt-out-by-exception model was chosen to
-maximize early feedback from customers who already have QAT hardware,
-without asking them to learn a new, soon-to-be-replaced API field.
+**Define a QAT-specific IngressController API field**: Rather than reusing
+NE-727's generic `spec.resources` field, this enhancement could define its
+own field (for example, a `qat` or `quickAssist` profile) for
+administrators to opt in. Not selected because reusing the generic
+mechanism avoids introducing a new, QAT-specific CRD surface this
+enhancement would have to define and own API review for, and because the
+same mechanism is more broadly useful (it works for any extended resource,
+not just QAT). A dedicated, higher-level API (for example, exposing a
+simpler `enabled: true` toggle instead of requiring administrators to know
+the exact extended-resource name) remains a possible future enhancement if
+early feedback shows the generic mechanism is too low-level for comfortable
+day-to-day use.
 
 ## Open Questions [optional]
 
-1. What is the exact key name and shape for the unsupported opt-out under
-   `spec.unsupportedConfigOverrides`?
-2. What IngressController status/condition reporting, if any, should exist
+1. What IngressController status/condition reporting, if any, should exist
    for QAT state in this initial delivery? This is currently left
-   unresolved (TBD) and may remain logs/metrics-only until the stable API
-   lands.
-3. How does this enhancement interact with Hypershift/Hosted Control Planes
+   unresolved (TBD) and may remain logs/metrics-only.
+2. How does this enhancement interact with Hypershift/Hosted Control Planes
    specifically (see Topology Considerations)?
-4. Is there a known race where the Intel Device Plugin Operator advertises
+3. Is there a known race where the Intel Device Plugin Operator advertises
    `qat.intel.com/cy` as allocatable, and the scheduler places a pod
    accordingly, before the VF is actually fully usable (for example,
    firmware/driver initialization still in progress)? Since this
@@ -725,54 +680,43 @@ without asking them to learn a new, soon-to-be-replaced API field.
    from a genuinely broken device: both fail HAProxy's first real startup
    attempt and crash-loop the haproxy container the same way, even though
    one would resolve itself on retry and the other needs an admin.
-5. Does shipping an automatic, unsupported-only behavior (rather than a
-   fully supported, gated feature) raise concerns for OKE (see Topology
-   Considerations)?
-6. When will `ssl-mode-async` be empirically confirmed to drive real async
+4. Does this capability (built on NE-727's generic resources field, without
+   a QAT-specific feature gate) raise concerns specific to the OKE product
+   offering (see Topology Considerations)?
+5. When will `ssl-mode-async` be empirically confirmed to drive real async
    offload for the Provider path on haproxy34/RHEL10, and what is the plan
    if it does not?
-7. What is the concrete timeline for confirming real QAT hardware access
+6. What is the concrete timeline for confirming real QAT hardware access
    for CI/QE?
-8. What is the migration path from the unsupported override to the future
-   supported `v1` API field, for administrators who adopted the unsupported
-   behavior early?
-9. Does `qatengine` provide its own transparent, per-request fallback to
+7. Does `qatengine` provide its own transparent, per-request fallback to
    software crypto when the QAT hardware fails mid-operation, or does a
    runtime hardware failure error the TLS handshake outright, or eventually
    fail HAProxy's liveness check and get restarted into the same
    startup-failure path described in Implementation Details? This
    determines what a mid-life hardware failure actually looks like in
    practice, since no proactive detection exists in this initial version.
-10. **Pre-implementation blocker**: the RHCOS10 kernel requirement itself is
-    settled (see Proposal), but the exact supported tuple built on top of
-    it (`crun` version, OpenSSL 3.x, `qatprovider`, QAT 4xxx firmware/
-    driver) is not yet pinned, and neither is the package source for
-    `qatengine` on RHEL10. At the time of writing, Brew shows
-    `haproxy34-3.4.5-1.rhaos5.1.el10` (build 4122540) and
-    `qatengine-2.1.0-1.el10` (build 4048100) in `rhel-10.3-candidate`, the
-    latest RHCOS10 candidate kernel is `6.12.0-211.64.1.el10_2` (build
-    4127236), but `qatengine` is not yet present in
-    `rhaos-5.1-rhel-10-candidate`. It is not yet decided whether `qatengine`
-    will be consumed directly from RHEL AppStream or needs its own
-    `rhaos`-candidate build. Unlike the other open questions in this list,
-    this one is a hard pre-implementation gate, not something that can be
-    deferred to early-adopter feedback: someone must determine the package
-    source and pin the exact NVRs before implementation starts.
-11. The cluster-ingress-operator's `ClusterRole` on `release-5.1` currently
-    grants only `nodes: list/watch` - there is no
-    `machineconfiguration.openshift.io`/`MachineConfigPool` permission
-    today (verified against `manifests/00-cluster-role.yaml`). Resolving the
-    kernel-compatibility check in Implementation Details requires picking
-    one of: (a) add a least-privilege `machineconfigpools: list/watch` rule
-    to the operator's `ClusterRole`, accepting the new RBAC scope, or (b)
-    use an already-authorized, Node-level signal instead (for example, a
-    label or annotation the MCO already sets on `Node` objects reflecting
-    OS stream), avoiding new RBAC but depending on a specific Node
-    label/annotation existing and being documented as stable enough to rely
-    on. Separately, this RBAC/signal question does not carry over to
-    Hypershift as-is: guest-cluster nodes are managed through `NodePool`
-    status, not `MachineConfigPool`, so that path needs its own answer
-    regardless of which option is chosen here.
+8. **Pre-implementation blocker**: the RHCOS10 kernel requirement itself is
+   settled (see Proposal), but the exact supported tuple built on top of
+   it (`crun` version, OpenSSL 3.x, `qatprovider`, QAT 4xxx firmware/
+   driver) is not yet pinned, and neither is the package source for
+   `qatengine` on RHEL10. At the time of writing, Brew shows
+   `haproxy34-3.4.5-1.rhaos5.1.el10` (build 4122540) and
+   `qatengine-2.1.0-1.el10` (build 4048100) in `rhel-10.3-candidate`, the
+   latest RHCOS10 candidate kernel is `6.12.0-211.64.1.el10_2` (build
+   4127236), but `qatengine` is not yet present in
+   `rhaos-5.1-rhel-10-candidate`. It is not yet decided whether `qatengine`
+   will be consumed directly from RHEL AppStream or needs its own
+   `rhaos`-candidate build. This is a hard pre-implementation gate, not
+   something that can be deferred to early-adopter feedback: someone must
+   determine the package source and pin the exact NVRs before
+   implementation starts.
+9. **Pre-implementation blocker**: How does NE-727's `spec.resources` field
+   (`corev1.ResourceRequirements` on `IngressControllerSpec`) map to this
+   pod's multiple containers (router, haproxy, init-router)? This
+   enhancement's design requires `qat.intel.com/cy` to be able to reach the
+   haproxy container specifically. This must be resolved, in coordination
+   with the NE-727 enhancement/implementation, before this enhancement's
+   implementation begins.
 
 ## Test Plan
 
@@ -783,12 +727,11 @@ exact, pinned tuple (see Open Questions) for the HAProxy +
 `qatengine`/OpenSSL integration specifically - this enhancement does not
 attempt to re-validate the matrix RHEL/Intel already own.
 
-Since no feature gate exists for this initial delivery, tests cannot use an
-`[OCPFeatureGate:...]` label yet; one will be added once the future
-enhancement introduces the gated v1 API. Until then, all tests should
-include a `[Jira:"Network Edge"]` (or appropriate component) label, and
-suite/type labels such as `[Suite:...]`, `[Serial]`, `[Slow]`, or
-`[Disruptive]` as needed. See `dev-guide/test-conventions.md` for details.
+Since no feature gate exists for this capability, tests cannot use an
+`[OCPFeatureGate:...]` label; all tests should include a
+`[Jira:"Network Edge"]` (or appropriate component) label, and suite/type
+labels such as `[Suite:...]`, `[Serial]`, `[Slow]`, or `[Disruptive]` as
+needed. See `dev-guide/test-conventions.md` for details.
 
 The following do not require real QAT hardware:
 
@@ -800,25 +743,20 @@ The following do not require real QAT hardware:
 - A test exercising a TLS handshake path that requires an algorithm not
   implemented by `qatprovider`, with QAT active, to catch any regression
   where `default` is not loaded alongside `qatprovider`.
-- Unit tests for the operator's eligibility computation: only setting
-  `ROUTER_QAT=true` on the router container and `qat.intel.com/cy` on the
-  haproxy container together when a matching node advertises the resource
-  and its resolved kernel-compatibility signal meets QAT's minimum, never
-  setting either when the cluster is in FIPS mode or FIPS state cannot be
-  determined (the fail-safe FIPS guard), reaction to `Node` add/update
-  events (and `MachineConfigPool` add/update events, if that option is
-  chosen; see Open Questions), and handling of the unsupported opt-out key.
+- Unit tests for the operator's mirroring logic: setting `ROUTER_QAT=true`
+  on the router container only when `qat.intel.com/cy` is present in the
+  haproxy container's resolved resource configuration, unsetting it when
+  removed, and reacting to `IngressController` spec changes.
 - Unit tests confirming the router container does no QAT-related work when
   `ROUTER_QAT` is unset.
 - Unit tests for the router container's independent local FIPS check
   (`/proc/sys/crypto/fips_enabled`), confirming it blocks QAT activation
   regardless of `ROUTER_QAT`'s value, including the case where `ROUTER_QAT`
   is (incorrectly) `true` on a FIPS-enabled node.
-- Unit tests for the fail-safe (not fail-open) requirement on both the
-  operator's eligibility gate and the router container's local check: a
-  missing or invalid `FIPS_ENABLED` environment variable combined with an
-  unreadable `/proc/sys/crypto/fips_enabled` must result in QAT staying
-  disabled, not in a default-to-non-FIPS outcome.
+- Unit tests for the fail-safe (not fail-open) requirement on the router
+  container's local FIPS check: an unreadable or unparsable
+  `/proc/sys/crypto/fips_enabled` must result in QAT staying disabled, not
+  in a default-to-non-FIPS outcome.
 
 The following require real QAT hardware, since no credible software
 emulator exists for the QAT PCI accelerator:
@@ -830,19 +768,22 @@ emulator exists for the QAT PCI accelerator:
   haproxy container to fail to start and crash-loop (rather than, say,
   hanging or partially starting), and that other router replicas continue
   serving traffic in the meantime.
-- Validation of the full deployment runbook end to end (RHCOS10 worker
-  pool, NFD labeling, Intel Device Plugin Operator, resource advertisement,
-  scheduling, and router activation).
+- Validation of the full deployment runbook end to end: administrator
+  explicitly requests `qat.intel.com/cy` via `spec.resources` (RHCOS10
+  worker pool, NFD labeling, and Intel Device Plugin Operator already in
+  place), with and without `spec.nodePlacement` set, confirming the pod
+  schedules correctly and the router activates QAT either way.
 
 ## Graduation Criteria
 
-Because this initial delivery has no feature gate, the standard graduation
-framework (minimum 5 tests, 7 runs/week, 14 runs per supported platform, 95%
-pass rate, coverage across AWS, Azure, GCP, vSphere, and Baremetal
-network-stack variants) will be defined once the future enhancement
-introduces the gated, supported v1 API. Until then, "graduation" for this
-delivery means gathering enough early-adopter feedback and empirical
-validation (see Open Questions) to inform that future API design.
+Because this capability does not have a dedicated feature gate (see
+Non-Goals and Risks and Mitigations), the standard graduation framework
+(minimum 5 tests, 7 runs/week, 14 runs per supported platform, 95% pass
+rate, coverage across AWS, Azure, GCP, vSphere, and Baremetal network-stack
+variants) does not directly apply. "Graduation" here instead means
+gathering enough early-adopter feedback and empirical validation (see Open
+Questions) to confirm whether a dedicated, higher-level API or a formal
+feature gate is warranted for this capability.
 
 <!-- TODO: Numeric performance targets (handshake-rate uplift, throughput,
      CPU savings vs. software-only baseline) are not yet defined. These
@@ -852,17 +793,18 @@ validation (see Open Questions) to inform that future API design.
 
 ### Dev Preview -> Tech Preview
 
-<!-- TODO: To be defined alongside the future enhancement that introduces
-     the feature-gated v1 API. -->
+<!-- TODO: To be defined if/when a dedicated, higher-level API or a formal
+     feature gate is introduced for this capability (see Alternatives). -->
 
 ### Tech Preview -> GA
 
 Confirmation of a real async offload benefit (see Risks and Mitigations,
 `ssl-mode-async`) and perf-team-defined numeric performance targets are
-treated as hard gates for GA; neither is satisfied yet.
+treated as hard gates for any future promotion; neither is satisfied yet.
 
-<!-- TODO: The rest of this criteria is to be defined alongside the future
-     enhancement that introduces the feature-gated v1 API. -->
+<!-- TODO: The rest of this criteria is to be defined if/when a dedicated,
+     higher-level API or a formal feature gate is introduced for this
+     capability. -->
 
 ### Removing a deprecated feature
 
@@ -871,17 +813,20 @@ N/A - this is a new capability, not a replacement for an existing one.
 ## Upgrade / Downgrade Strategy
 
 Because this enhancement does not add a new CRD field, upgrades and
-downgrades are governed by normal `unsupportedConfigOverrides` semantics:
-clusters running an older cluster-ingress-operator version simply do not
-recognize the opt-out key and are unaffected by this enhancement. Clusters
-running a newer operator version will begin automatically injecting the
-`qat.intel.com/cy` resource request on applicable router deployments after
-upgrade, unless the administrator has already set the opt-out.
+downgrades are governed by NE-727's `spec.resources` field semantics (owned
+by that enhancement) plus this operator's mirroring logic. Clusters running
+an older cluster-ingress-operator version simply do not recognize or mirror
+`qat.intel.com/cy` into `ROUTER_QAT`, even if `spec.resources` already
+requests it - no activation occurs until the operator is upgraded. Clusters
+running a newer operator version will begin mirroring `qat.intel.com/cy`
+presence into `ROUTER_QAT` on the next reconcile after upgrade, for any
+IngressController that already requests it.
 
-Downgrading to an operator version that predates this enhancement removes
-the automatic resource injection and `ROUTER_QAT` behavior; router pods
-return to software-only TLS with no QAT-related resource requests. No manual
-cleanup is required, since no new persisted API field is introduced.
+Downgrading to an operator version that predates this enhancement stops the
+`ROUTER_QAT` mirroring; router pods revert to software-only TLS. The
+administrator's `spec.resources` configuration itself is unaffected (it is
+owned by NE-727, not this enhancement) and persists across the downgrade;
+no manual cleanup is required.
 
 ## Version Skew Strategy
 
@@ -898,7 +843,8 @@ and Mitigations), not something version skew makes worse.
 ## Operational Aspects of API Extensions
 
 N/A - this enhancement does not add or modify any CRD, webhook, aggregated
-API server, or finalizer.
+API server, or finalizer. Operational aspects of the `spec.resources` field
+itself are owned by NE-727.
 
 ## Support Procedures
 
@@ -910,10 +856,11 @@ API server, or finalizer.
   * **Detection**: Router container logs record the FIPS check result.
   * **Teams**: Networking team (ingress maintainers) handles escalations.
 
-* **Failure Mode 2**: `ROUTER_QAT=true` was set, but the device or
-  provider do not actually work (misconfigured eligibility, a VF that was
-  provisioned but is not functional, or hardware that failed after the
-  operator last checked).
+* **Failure Mode 2**: `ROUTER_QAT=true` was set because `qat.intel.com/cy`
+  was requested, but the device or provider do not actually work (the
+  request was made on a node where QAT isn't properly provisioned, a VF
+  that was provisioned but is not functional, or hardware that failed after
+  the request was made).
   * **Impact**: The haproxy container fails to start and crash-loops on
     that specific replica; it does not serve traffic. Other router
     replicas, unaffected by the same node-local issue, continue serving
@@ -928,8 +875,8 @@ API server, or finalizer.
     provisioning or node hardware looks like the root cause.
 
 * **Failure Mode 3**: The `qat.intel.com/cy` resource request on the
-  haproxy container cannot be satisfied (misconfigured `spec.nodePlacement`,
-  insufficient VFs, or Intel Device Plugin Operator not installed/healthy).
+  haproxy container cannot be satisfied (no matching node, insufficient
+  VFs, or Intel Device Plugin Operator not installed/healthy).
   * **Impact**: Affected router pods remain `Pending` and do not serve
     traffic; other router replicas that can be scheduled continue serving
     traffic normally.
@@ -965,12 +912,12 @@ API server, or finalizer.
   software-fallback count despite QAT hardware being expected to be in use.
 
 * **Symptom 5**: `ROUTER_QAT` is unexpectedly unset on a router pod expected
-  to have QAT acceleration. Since the flag itself does not carry a reason,
-  check the cluster-ingress-operator's logs and events for the
-  IngressController, which record why eligibility was not met (no matching
-  node resource, incompatible kernel, FIPS mode, or the unsupported
-  opt-out).
+  to have QAT acceleration. Since `ROUTER_QAT` is a direct mirror of the
+  IngressController's own `spec.resources`, check that field first; if
+  `qat.intel.com/cy` is requested there but `ROUTER_QAT` is still unset on
+  the pod, check the operator's logs for a reconcile error.
   ```bash
+  oc get ingresscontroller -n openshift-ingress-operator <name> -o jsonpath='{.spec.resources}'
   oc get pod -n openshift-ingress <router-pod-name> -o jsonpath='{.spec.containers[?(@.name=="router")].env}'
   oc logs -n openshift-ingress-operator deployment/ingress-operator
   ```
@@ -984,11 +931,11 @@ software-only TLS (see Risks and Mitigations). Degradation happens at the
 fleet level instead - other router replicas, unaffected by the same
 node-local issue, continue serving traffic - and recovery requires either
 fixing the underlying device/VF problem or an administrator disabling the
-behavior. An administrator can disable the behavior entirely at any time
-via the unsupported override in `spec.unsupportedConfigOverrides`; on the
-next rollout, the operator stops setting both the resource request and
-`ROUTER_QAT`, and the router - seeing `ROUTER_QAT` unset - does not attempt
-QAT detection at all, which stops the affected replica from crash-looping.
+behavior. An administrator can disable the behavior entirely at any time by
+removing `qat.intel.com/cy` from the IngressController's `spec.resources`;
+on the next reconcile, the operator stops setting `ROUTER_QAT`, and the
+router - seeing `ROUTER_QAT` unset - does not attempt QAT detection at all,
+which stops the affected replica from crash-looping.
 
 ## Infrastructure Needed [optional]
 
