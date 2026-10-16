@@ -1,0 +1,1047 @@
+---
+title: deterministic-loadbalancer-ip-management
+authors:
+  - "@jparrill"
+reviewers:
+  - "@csrwng"
+  - "@sdminonne"
+  - "@danmace"
+  - "@muraee"
+  - "@JoelSpeed"
+approvers:
+  - "@csrwng"
+api-approvers:
+  - "@JoelSpeed"
+creation-date: 2026-09-29
+last-updated: 2026-10-13
+status: provisional
+tracking-link:
+  - https://issues.redhat.com/browse/OCPSTRAT-2653
+see-also:
+  - https://issues.redhat.com/browse/RFE-7201
+  - https://issues.redhat.com/browse/RFE-8602
+  - https://issues.redhat.com/browse/RFE-5029
+replaces: []
+superseded-by: []
+---
+
+# Deterministic LoadBalancer IP Management for Hosted Control Planes
+
+## Summary
+
+This enhancement extends `LoadBalancerPublishingStrategy` inside `spec.services`
+with two provider-agnostic fields for deterministic control of LoadBalancer IP
+assignment on the kube-apiserver Service. Scope is **IP-only** — hostname/DNS
+indirection is deferred as future work:
+
+- `loadBalancerClass` — standard Kubernetes `Service.spec.loadBalancerClass`
+  (GA since K8s 1.24) to select which LB controller provisions the Service.
+- `serviceAnnotations` (`map[string]string`) — opaque annotation passthrough to the
+  KAS Service. The user provides the exact annotations their LB provider expects.
+  HyperShift never learns vendor-specific semantics.
+
+A CEL-based allowlist restricts annotations to known, tested LB provider
+prefixes. Adding support for a new provider is a conscious decision that
+includes testing — not an implicit side effect.
+The `spec.services` immutability CEL rule is migrated from deep-equality to
+per-field granular rules, enabling `serviceAnnotations` to be mutable while
+keeping all existing fields immutable.
+
+For Day 2 IP changes, a new unauthenticated `/kas-ip` endpoint on the existing
+ignition server exposes the current KAS IP. A sidecar container in the HAProxy
+static pod polls this endpoint and hot-reloads HAProxy when the IP changes. No
+worker rollout, no extra Services, no migration state. Requires all NodePools at
+5.1+ (enforced by `ValidLoadBalancerIPConfiguration` condition).
+
+## Motivation
+
+Multiple enterprise accounts require deterministic LoadBalancer IP assignment for
+Hosted Control Planes. The primary use case is Telco/RAN environments where
+firewall rules and DNS records must be pre-configured before cluster creation.
+
+Currently, `LoadBalancerPublishingStrategy` only exposes `Hostname` — there is no
+mechanism to control IP address pool selection (MetalLB IPAddressPool,
+CiliumLoadBalancerIPPool, F5 IPAM labels), specify well-known IP addresses, or
+configure provider-specific LoadBalancer settings.
+Day 2 IP migration is entirely unsupported and manual attempts risk catastrophic
+cluster failure due to worker nodes losing API server connectivity.
+
+### User Stories
+
+- As a Telco platform engineer, I want to specify MetalLB annotations on my
+  HostedCluster's kube-apiserver LoadBalancer Service at creation time, so that I
+  can pre-configure firewall rules and DNS records before the cluster is provisioned.
+
+- As an AWS HCP administrator, I want to pass EIP allocation annotations to my
+  cluster's NLB, so that the API endpoint has a stable, predictable public IP
+  address that can be whitelisted in corporate firewalls.
+
+- As a platform operator using F5 BIG-IP, I want to pass F5 CIS annotations to
+  my cluster's LoadBalancer, so that the IP assignment integrates with my existing
+  F5 infrastructure.
+
+- As an HCP administrator, I want to safely migrate the kube-apiserver LoadBalancer
+  IP on a running cluster without worker node connectivity loss, so that I can
+  respond to network topology changes without cluster downtime.
+
+- As an HCP administrator using any LB provider, I want a single API field to
+  pass annotations without waiting for HyperShift to add typed support for my
+  specific provider.
+
+### Goals
+
+- Allow Day 1 deterministic IP/pool assignment for kube-apiserver LB across all
+  LB providers.
+- Support controller selection for management clusters with multiple LB controllers.
+- Support Day 2 IP changes via sidecar hot-reload (no worker rollout).
+- Enforce an allowlist: only known, tested providers are accepted by default.
+- Maintain backward compatibility: clusters without the new fields behave identically.
+
+### Non-Goals
+
+- **Per-provider typed API structs.** The provider-agnostic approach delegates
+  provider semantics to the user via annotations. HyperShift does not validate
+  provider-specific annotation values.
+- **Hostname/DNS indirection for Day 2.** The initial scope is IP-only. The
+  existing `LoadBalancerPublishingStrategy.Hostname` field is preserved as-is (it
+  overrides the kubeconfig server URL) but Day 2 hostname changes are deferred as
+  future work.
+- **None platform support.** HyperShift has no "None" platform. Bare-metal
+  self-managed deploys use Agent platform.
+- **PowerVS / IBMCloud support.** No RFE, no standard annotation pattern. To be
+  evaluated with team input.
+- **OAuth or Konnectivity LB configuration.** v1 targets APIServer (public) only.
+  OAuth (Azure self-managed) and Konnectivity are stretch goals, but the API
+  design supports them without changes.
+- **Automatic DNS management for self-managed platforms.** Self-managed platforms
+  without ExternalDNS require manual DNS updates; this is documented, not automated.
+
+## Proposal
+
+### Overview
+
+Two new fields under the existing
+`spec.services[*].servicePublishingStrategy.loadBalancer` object:
+
+1. **`loadBalancerClass`** (string, optional) — Maps directly to
+   `Service.spec.loadBalancerClass`. Selects which LB controller provisions the
+   KAS Service. Essential for management clusters with multiple LB providers
+   (e.g., F5 for management + MetalLB for tenant Services). Immutable after
+   creation (matches Kubernetes semantics — `loadBalancerClass` is immutable on
+   Services).
+
+2. **`serviceAnnotations`** (`map[string]string`, optional, mutable) — Passed
+   through to the KAS Service as annotations. The user provides exactly the
+   annotations their LB provider expects. HyperShift applies them per-key
+   (never full-map overwrite) and enforces a CEL allowlist of known provider
+   annotation prefixes.
+
+This approach is provider-agnostic by design:
+- HyperShift never needs to learn vendor annotation schemas.
+- New LB providers work immediately — no API changes, no CRD bumps.
+- The LB implementation is a management-cluster property, orthogonal to the
+  guest cluster platform. An Agent-platform HC on an AWS management cluster
+  has its KAS Service processed by the AWS LB controller, not MetalLB.
+
+Because the fields live inside `LoadBalancerPublishingStrategy`, they
+automatically apply per-service. If other services (OAuthServer, Konnectivity)
+need deterministic LB IPs in the future, they reuse the same struct with zero
+API changes.
+
+#### spec.services Immutability Migration
+
+`spec.services` is currently immutable via a single deep-equality CEL rule:
+
+```go
+// +kubebuilder:validation:XValidation:rule=`self.services == oldSelf.services`
+```
+
+This blocks any change to any field in the array. To allow `serviceAnnotations`
+to be mutable while keeping existing fields immutable, this enhancement:
+
+1. Adds `+kubebuilder:validation:MaxItems=6` to the `services` field (6 service
+   types exist in the `ServiceType` enum). This is backward-compatible and
+   required for CEL cost budget compliance.
+
+2. Changes the `services` list type from atomic to map with `+listType=map` and
+   `+listMapKey=service`, enabling per-element transition rules.
+
+3. Replaces the single deep-equality rule with granular per-field immutability
+   rules on each field that must remain immutable.
+
+4. New mutable fields (`serviceAnnotations`) simply omit the immutability marker.
+
+**CEL cost analysis**: The deep-equality rule (`==`) is O(n). The granular
+per-field rules use `oldSelf == self` on individual fields within each list
+element, correlated by the map key — this is O(1) per field per element, applied
+per-element. With `maxItems=6` and ~5 field rules, the estimated cost is
+~6 × 5 × 1 = 30, well under the 10M budget. Without `maxItems`, the cost
+estimator uses worst-case list size (~30K elements), which would exceed the budget.
+
+### Workflow Description
+
+#### Actors
+
+- **Cluster administrator:** Creates or manages `HostedCluster` resources.
+- **HostedCluster controller:** Mirrors HC spec to HCP, copies kubeconfig Secrets,
+  mirrors HCP conditions to HC status, relays annotations HC→HCP.
+- **CPO (Control Plane Operator):** Reconciles control plane components including
+  KAS Service and TLS certificates.
+- **NodePool controller:** Renders HAProxy ignition config, computes rollout hash,
+  manages progressive rollouts.
+- **LB Provider:** External controller (MetalLB, F5 CIS, AWS LB Controller, etc.)
+  that processes Service annotations and assigns IPs.
+
+#### Day 1: MetalLB Example
+
+```yaml
+apiVersion: hypershift.openshift.io/v1beta1
+kind: HostedCluster
+spec:
+  services:
+    - service: APIServer
+      servicePublishingStrategy:
+        type: LoadBalancer
+        loadBalancer:
+          loadBalancerClass: "metallb.io/metallb"
+          serviceAnnotations:
+            metallb.io/loadBalancerIPs: "10.1.1.100"
+            metallb.io/address-pool: "production-pool"
+    - service: OAuthServer
+      servicePublishingStrategy:
+        type: Route
+    - service: Konnectivity
+      servicePublishingStrategy:
+        type: Route
+    - service: Ignition
+      servicePublishingStrategy:
+        type: Route
+```
+
+1. The HostedCluster controller creates the HostedControlPlane, mirroring
+   `spec.services` to HCP.
+2. CPO reconciles the KAS Service:
+   - Sets `Service.spec.loadBalancerClass` to `metallb.io/metallb`.
+   - Applies each entry in `serviceAnnotations` as per-key annotation writes
+     on the Service object.
+3. MetalLB processes the annotations and assigns IP `10.1.1.100`.
+4. `ReconcileServiceStatus()` reads `Service.Status.LoadBalancer.Ingress[0]`,
+   propagates to kubeconfig, worker HAProxy config, etc. Standard existing flow.
+
+#### Day 1: AWS NLB with Elastic IPs
+
+```yaml
+spec:
+  services:
+    - service: APIServer
+      servicePublishingStrategy:
+        type: LoadBalancer
+        loadBalancer:
+          serviceAnnotations:
+            service.beta.kubernetes.io/aws-load-balancer-eip-allocations: "eipalloc-abc123,eipalloc-def456"
+```
+
+No `loadBalancerClass` needed — AWS management clusters typically have a single
+LB controller (aws-cloud-controller-manager).
+
+#### Day 1: F5 BIG-IP
+
+```yaml
+spec:
+  services:
+    - service: APIServer
+      servicePublishingStrategy:
+        type: LoadBalancer
+        loadBalancer:
+          loadBalancerClass: "f5.com/f5-bigip"
+          serviceAnnotations:
+            cis.f5.com/ip: "10.2.2.50"
+            cis.f5.com/ipamLabel: "production"
+```
+
+#### Day 1: Azure Static IP
+
+```yaml
+spec:
+  services:
+    - service: APIServer
+      servicePublishingStrategy:
+        type: LoadBalancer
+        loadBalancer:
+          serviceAnnotations:
+            service.beta.kubernetes.io/azure-load-balancer-ipv4: "20.0.0.100"
+```
+
+#### Future: Per-Service LB Configuration
+
+Because the fields live inside `LoadBalancerPublishingStrategy`, extending to
+other services requires zero API changes:
+
+```yaml
+spec:
+  services:
+    - service: APIServer
+      servicePublishingStrategy:
+        type: LoadBalancer
+        loadBalancer:
+          loadBalancerClass: "metallb.io/metallb"
+          serviceAnnotations:
+            metallb.io/loadBalancerIPs: "10.1.1.100"
+    - service: OAuthServer
+      servicePublishingStrategy:
+        type: LoadBalancer
+        loadBalancer:
+          serviceAnnotations:
+            metallb.io/loadBalancerIPs: "10.1.1.101"
+    - service: Konnectivity
+      servicePublishingStrategy:
+        type: LoadBalancer
+        loadBalancer:
+          loadBalancerClass: "metallb.io/metallb"
+          serviceAnnotations:
+            metallb.io/loadBalancerIPs: "10.1.1.102"
+```
+
+#### Prerequisite: Kubelet → HAProxy (Independent of Feature Gate)
+
+Today on bare-metal public clusters (Agent platform, `Public` endpoint access),
+kubelet connects directly to the KAS LoadBalancer IP — not through HAProxy.
+The bootstrap kubeconfig is generated with the external LB IP
+(`kubeconfig.go:170-186`, `externalURL(infraStatus)`).
+
+This must change **independently of the `DeterministicLBIP` feature gate**:
+kubelet must connect to the KAS through HAProxy (`172.20.0.1:6443`) on all
+topologies. This is an infrastructural improvement, not gated behind a feature.
+
+**Rationale**: Without this, the sidecar can update HAProxy's backend IP, but
+kubelet still has the old IP hardcoded in its kubeconfig. Kubelet connects
+directly to the dead IP and the node becomes unresponsive.
+
+**What changes**:
+- `adaptBootstrapKubeconfigSecret()` (`kubeconfig.go:170-186`): for public HCs
+  on Agent/None/KubeVirt platforms, use `172.20.0.1` instead of `externalURL()`.
+- This IP (`NodeInternalAPIServerIP`) is already in the KAS cert SANs
+  (`support/pki/kas.go:38`).
+- Private clusters already go through HAProxy — no change needed.
+
+**Impact**: kubelet traffic flows through HAProxy. This makes HAProxy a
+dependency for both pod egress AND kubelet connectivity. The tech lead has
+accepted this tradeoff: HAProxy is a static pod managed by kubelet from local
+manifests — it starts without KAS connectivity and runs as long as kubelet runs.
+
+#### Day 2: Zero-Rollout via Ignition Endpoint + HAProxy Sidecar
+
+When the `DeterministicLBIP` feature gate is enabled, Day 2 IP changes are
+handled without worker rollout via a polling sidecar in the HAProxy static pod.
+
+##### Ignition Server Endpoint
+
+The HyperShift ignition server (`ignition-server/cmd/start.go`) runs as a
+Deployment in the HCP namespace with a Route accessible from worker nodes (they
+used it to boot). A new unauthenticated endpoint `/kas-ip` returns the current
+KAS IP by reading `HostedControlPlane.Status.ControlPlaneEndpoint.Host`.
+
+**Verified empirically**:
+- Auth is inline in the `/ignition` handler, NOT middleware. `/healthz` already
+  exists without auth (`start.go:313`).
+- The ignition server has a `client.Client` from controller-runtime with
+  namespace-scoped cache. It already reads the HCP
+  (`local_ignitionprovider.go:837-845`).
+- The KAS IP is not sensitive data — discoverable via DNS lookup.
+
+Implementation: ~10 lines (one `mux.HandleFunc`).
+
+##### HAProxy Static Pod Modification
+
+The HAProxy static pod manifest (generated by `haproxy.go:147`,
+`MachineConfigAPIServerHAProxy()`) is extended with:
+
+1. **`shareProcessNamespace: true`** — enables the sidecar to signal HAProxy.
+2. **Init container (`kas-ip-init`)** — polls `/kas-ip` at boot, writes the
+   current IP to a shared `emptyDir` volume. Ensures new nodes (scale-up) get
+   the correct IP before HAProxy starts, even if the ignition-baked IP is stale.
+3. **Sidecar container (`kas-ip-poller`)** — polls `/kas-ip` every N seconds.
+   If the IP changed, writes the new IP and sends `SIGUSR2` to the HAProxy
+   master process for seamless config reload (HAProxy `-W` master-worker mode).
+4. **HAProxy container** — on startup, reads the override IP from the shared
+   volume (if present) and patches the backend server line in `haproxy.cfg`.
+
+The ignition endpoint URL is passed as an environment variable in the static pod
+manifest. The NodePool controller already knows the URL from
+`HostedCluster.Status.IgnitionEndpoint`.
+
+##### Day 2 Flow (Zero-Rollout)
+
+```
+1. Administrator changes serviceAnnotations (new IP)
+2. LB provider assigns new IP to KAS Service
+3. CPO updates HCP.Status.ControlPlaneEndpoint with new IP
+4. GET /kas-ip returns new IP
+5. On each node, sidecar detects change:
+   a. Writes new IP to shared volume
+   b. SIGUSR2 → HAProxy master reloads config seamlessly
+   c. HAProxy reconnects backend to new IP
+6. Kubelet (via 172.20.0.1) → HAProxy → new IP
+7. Zero downtime, zero rollout
+```
+
+##### Scale-Up (New Node After IP Changed)
+
+```
+1. Node boots with ignition → haproxy.cfg has ORIGINAL IP
+2. Kubelet starts → starts static pods (no KAS needed for this)
+3. Init container polls /kas-ip → gets CURRENT IP → writes to shared volume
+4. HAProxy starts with current IP (override applied)
+5. Kubelet connects via 172.20.0.1 → HAProxy → current IP → join succeeds
+```
+
+Static pods are started by kubelet from local manifests (`/etc/kubernetes/manifests/`),
+not from the API server. The init container and sidecar start regardless of KAS
+connectivity. The ignition endpoint Route is reachable via the external network
+(management cluster ingress), not via KAS.
+
+##### InPlace Upgrade
+
+```
+1. MCD re-applies ignition → writes haproxy.cfg with ignition-baked IP
+2. MCD restarts HAProxy static pod
+3. Init container polls /kas-ip → gets current IP → writes override
+4. HAProxy starts with current IP
+```
+
+The override volume is an `emptyDir` — not part of any MachineConfig. MCD never
+touches it (verified: files not in MC are invisible to MCD write, delete,
+validation, and drift monitor — see `research-mcs-path-exclusion.md`).
+
+##### Degraded Mode
+
+If the ignition server Route is unreachable:
+- Sidecar retries indefinitely. HAProxy continues serving with the last known IP.
+- The existing `IgnitionEndpointAvailable` condition on the HostedCluster surfaces
+  ignition server availability issues.
+- No new condition needed for this case.
+
+#### Day 2: serviceAnnotations Change (Sidecar Handles It)
+
+Day 2 IP changes are handled entirely by the sidecar — no extra Services, no
+migration state machine, no rollout:
+
+1. Administrator changes `serviceAnnotations` on the HostedCluster.
+2. HO mirrors to HCP.
+3. CPO applies new annotations to the KAS Service (per-key write).
+4. LB provider assigns new IP.
+5. CPO updates `HCP.Status.ControlPlaneEndpoint.Host` with new IP.
+6. On each worker, sidecar polls `/kas-ip` → detects change → writes new IP →
+   `SIGUSR2` → HAProxy reloads seamlessly.
+7. Done. No rollout, no extra Service. The ignition content hash is stable
+   because the HAProxy template uses a fixed placeholder for
+   `ExternalAPIAddress` when the sidecar is enabled (see "Hash stability"
+   in "HAProxy and Worker Rollouts" below).
+
+**Brief connectivity window**: Between the LB assigning the new IP (step 4) and
+the sidecar picking it up (step 6), HAProxy still points to the old IP. This
+window is bounded by the sidecar poll interval (default 30s). Kubelet has
+built-in retry logic — API requests fail and retry within seconds. This is an
+accepted tradeoff for the massive simplification of not needing a Transition
+Service.
+
+**Prerequisite**: All NodePools must be at 5.1+ (have the sidecar). The
+`ValidLoadBalancerIPConfiguration` condition blocks Day 2 changes when any
+NodePool lacks sidecar support — the user must upgrade those NodePools first.
+
+**TLS cert update**: CPO adds the new IP to KAS cert SANs before the sidecar
+picks up the change. The cert is updated when `ControlPlaneEndpoint` changes,
+which happens before the sidecar polls on the next cycle.
+
+### API Extensions
+
+#### Modified type: LoadBalancerPublishingStrategy
+
+```go
+// LoadBalancerPublishingStrategy specifies settings used to expose a service
+// as a LoadBalancer.
+//
+// Immutability rules for optional fields are placed HERE (on the parent struct)
+// rather than on the fields themselves. CEL transition rules on optional/pointer
+// fields are skipped when the field is absent in the new object, which allows a
+// bypass: set → unset → set-different. Rules on the parent are always evaluated.
+//
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.hostname) || (has(self.hostname) && self.hostname == oldSelf.hostname)",message="hostname is immutable once set"
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.loadBalancerClass) || (has(self.loadBalancerClass) && self.loadBalancerClass == oldSelf.loadBalancerClass)",message="loadBalancerClass is immutable once set"
+type LoadBalancerPublishingStrategy struct {
+    // hostname is the name of the DNS record that will be created pointing
+    // to the LoadBalancer.
+    // +optional
+    Hostname string `json:"hostname,omitempty"`
+
+    // loadBalancerClass sets Service.spec.loadBalancerClass to select which
+    // LB controller provisions the Service. Required when the management
+    // cluster runs multiple LB controllers (e.g., F5 for management + MetalLB
+    // for tenant workloads). Maps to the Kubernetes Service field directly.
+    // Immutable after creation — matches Kubernetes semantics.
+    //
+    // +optional
+    LoadBalancerClass *string `json:"loadBalancerClass,omitempty"`
+
+    // serviceAnnotations is a map of annotations passed through to the
+    // LoadBalancer Service. The user provides the exact annotations their LB
+    // provider expects (e.g., metallb.io/loadBalancerIPs,
+    // service.beta.kubernetes.io/aws-load-balancer-eip-allocations).
+    //
+    // Annotations are applied per-key — existing annotations set by other
+    // controllers (e.g., MetalLB status annotations) are preserved.
+    //
+    // Only annotation keys matching known, tested LB provider prefixes are
+    // accepted (see allowlist below). Adding a new provider requires adding
+    // its prefix to the CEL rule — a conscious decision that includes testing.
+    //
+    // +optional
+    // +kubebuilder:validation:XValidation:rule (see allowlist table for full rule)
+    ServiceAnnotations map[string]string `json:"serviceAnnotations,omitempty"`
+}
+```
+
+#### Modified list type: services
+
+```go
+type HostedClusterSpec struct {
+    // services defines how control plane services are published.
+    //
+    // +kubebuilder:validation:MaxItems=6
+    // +listType=map
+    // +listMapKey=service
+    // +kubebuilder:validation:XValidation:rule="oldSelf.all(e, self.exists(s, s.service == e.service))",message="services entries cannot be removed"
+    // +kubebuilder:validation:XValidation:rule="self.all(e, oldSelf.exists(o, o.service == e.service))",message="new services entries cannot be added"
+    Services []ServicePublishingStrategyMapping `json:"services"`
+}
+```
+
+#### Immutability CEL migration
+
+The existing deep-equality rule on `HostedClusterSpec`:
+
+```go
+// REMOVED:
+// +kubebuilder:validation:XValidation:rule=`self.services == oldSelf.services`
+
+// REPLACED BY per-field rules on ServicePublishingStrategyMapping:
+```
+
+```go
+type ServicePublishingStrategyMapping struct {
+    // +kubebuilder:validation:XValidation:rule="self == oldSelf",message="service type is immutable"
+    Service ServiceType `json:"service"`
+
+    ServicePublishingStrategy `json:"servicePublishingStrategy"`
+}
+
+type ServicePublishingStrategy struct {
+    // +kubebuilder:validation:XValidation:rule="self == oldSelf",message="publishing strategy type is immutable"
+    Type PublishingStrategyType `json:"type"`
+
+    // +kubebuilder:validation:XValidation:rule="self == oldSelf",message="nodePort config is immutable"
+    NodePort *NodePortPublishingStrategy `json:"nodePort,omitempty"`
+
+    // loadBalancer — individual field immutability inside the struct.
+    // hostname and loadBalancerClass are immutable; serviceAnnotations is mutable.
+    LoadBalancer *LoadBalancerPublishingStrategy `json:"loadBalancer,omitempty"`
+
+    // +kubebuilder:validation:XValidation:rule="self == oldSelf",message="route config is immutable"
+    Route *RoutePublishingStrategy `json:"route,omitempty"`
+}
+```
+
+**Result**: all existing fields remain immutable via their own `self == oldSelf`
+rules. `serviceAnnotations` is mutable because it has no immutability rule.
+`loadBalancerClass` is immutable via its own rule inside
+`LoadBalancerPublishingStrategy`. Future mutable fields simply omit the marker.
+
+#### Annotation allowlist
+
+Only annotation keys matching known, tested LB provider prefixes are accepted
+via CEL on `serviceAnnotations`. Adding a new provider is a conscious decision
+that includes E2E testing.
+
+| Prefix | Provider | Example annotations |
+|--------|----------|-------------------|
+| `metallb.io/` | MetalLB (v0.13+) | `loadBalancerIPs`, `address-pool` |
+| `metallb.universe.tf/` | MetalLB (legacy) | `loadBalancerIPs`, `address-pool` |
+| `service.beta.kubernetes.io/aws-load-balancer-eip*` | AWS NLB (EIP) | `eip-allocations` |
+| `service.beta.kubernetes.io/aws-load-balancer-subnet*` | AWS NLB (subnet) | `subnets` |
+| `service.beta.kubernetes.io/aws-load-balancer-target-group*` | AWS NLB (TG) | `target-group-attributes` |
+| `service.beta.kubernetes.io/azure-load-balancer-ipv*` | Azure LB | `ipv4`, `ipv6` |
+| `service.beta.kubernetes.io/azure-load-balancer-resource-group*` | Azure LB (RG) | `resource-group` |
+| `networking.gke.io/` | GCP | `load-balancer-ip-addresses` |
+| `cis.f5.com/` | F5 BIG-IP CIS | `ip`, `ipamLabel` |
+| `lbipam.cilium.io/` | Cilium LB IPAM | `ips`, `sharing-key` |
+| `loadbalancer.openstack.org/` | OpenStack Octavia | `floating-network-id`, `floating-subnet-id` |
+
+Annotations not matching any prefix produce a CEL validation error. Adding a
+new provider requires adding its prefix to the CEL rule — a conscious decision
+that includes E2E testing.
+
+#### New condition: ValidLoadBalancerIPConfiguration
+
+**Problem**: When `DeterministicLBIP` is enabled and `serviceAnnotations` are
+configured, the Day 2 zero-rollout mechanism depends on the HAProxy sidecar
+being present on every node. If any NodePool runs a version that predates the
+sidecar (pre-5.1), those nodes cannot detect IP changes — they remain pointed
+at the stale IP and lose API server connectivity on Day 2.
+
+This condition gives the administrator explicit visibility into the problem
+before it causes an outage.
+
+A cross-resource condition on HostedCluster that validates all NodePools support
+the sidecar-based Day 2 mechanism. When the `DeterministicLBIP` feature gate is
+enabled and `serviceAnnotations` are set, but one or more NodePools are running
+versions that do not include the HAProxy sidecar (pre-5.1), the condition is
+set to `False`.
+
+This follows the existing cross-resource pattern used by
+`KubeVirtNodesLiveMigratable` (`hostedcluster_controller.go:5430-5467`):
+
+1. HC controller lists all NodePools via `listNodePools()`.
+2. For each NodePool, checks `ValidLoadBalancerIPSupport` condition via
+   `FindNodePoolStatusCondition()`.
+3. Collects NodePools that fail into a slice.
+4. Sets HC condition:
+   - `True`: all NodePools support the sidecar.
+   - `False` with `Reason: UnsupportedNodePoolVersion` and `Message` listing
+     the non-compliant NodePool names.
+
+The NodePool controller sets `ValidLoadBalancerIPSupport` based on the release
+image version — versions that include the sidecar in the HAProxy manifest
+report `True`.
+
+### Topology Considerations
+
+#### Hypershift / Hosted Control Planes
+
+This enhancement is exclusively for HyperShift. All changes are in the HyperShift
+operator (management cluster) and CPO (HCP namespace). No guest cluster components
+are modified.
+
+- **Management cluster**: Modified API types on HostedCluster/HostedControlPlane.
+  CPO reconciler changes for KAS Service annotation passthrough and cert SAN
+  management. Ignition server `/kas-ip` endpoint.
+- **Guest cluster**: No changes. Worker HAProxy configuration is managed via
+  MachineConfig/Ignition from the management cluster.
+- **Split components**: The kubeconfig Secret is generated by CPO in the HCP
+  namespace and copied to the HC namespace by the HC controller. The NodePool
+  controller reads from HC namespace. This existing chain is leveraged for the
+  natural rollout trigger — no new cross-namespace communication needed.
+
+#### Standalone Clusters
+
+Not applicable. Standalone clusters manage LB Services directly.
+
+#### Single-node Deployments or MicroShift
+
+Not applicable. SNO and MicroShift do not use HyperShift.
+
+#### OpenShift Kubernetes Engine
+
+This enhancement adds optional API fields that do not affect OKE functionality.
+OKE clusters using HyperShift would benefit from deterministic LB IP assignment
+identically to OCP.
+
+### Implementation Details/Notes/Constraints
+
+#### Annotation Passthrough
+
+CPO's `ReconcileService()` uses per-key annotation writes (`svc.Annotations[key] = value`),
+never full map overwrite (confirmed at `service.go:67-68`). This means annotations
+set by external controllers (MetalLB `ip-allocated-from-pool`, cloud-controller-manager
+status annotations) survive every reconciliation loop.
+
+For this feature, `serviceAnnotations` entries from the APIServer's
+`LoadBalancerPublishingStrategy` are applied directly as per-key writes.
+No translation layer, no vendor-specific logic in CPO.
+
+#### Provider examples
+
+The annotation map covers all known LB providers without any HyperShift code changes:
+
+| Provider | `loadBalancerClass` | `serviceAnnotations` |
+|----------|-------------------|---------------------|
+| MetalLB | `metallb.io/metallb` | `metallb.io/loadBalancerIPs: "10.1.1.100"`, `metallb.io/address-pool: "prod"` |
+| AWS NLB | (not needed — single provider) | `service.beta.kubernetes.io/aws-load-balancer-eip-allocations: "eipalloc-abc"` |
+| Azure LB | (not needed) | `service.beta.kubernetes.io/azure-load-balancer-ipv4: "20.0.0.100"` |
+| GCP | (not needed) | `networking.gke.io/load-balancer-ip-addresses: "my-ip"` |
+| F5 CIS | `f5.com/f5-bigip` | `cis.f5.com/ip: "10.2.2.50"`, `cis.f5.com/ipamLabel: "prod"` |
+| Cilium LB IPAM | `io.cilium/bgp-control-plane` | `lbipam.cilium.io/ips: "10.3.3.50"` |
+| OpenStack | (not needed) | `loadbalancer.openstack.org/floating-network-id: "<uuid>"` |
+
+New providers work immediately — the user adds annotations, HyperShift passes them through.
+
+#### IP Plumbing Chain (Day 2, without sidecar)
+
+Without the sidecar, when `serviceAnnotations` change causes the LB controller
+to assign a new IP, the existing chain triggers a full worker rollout:
+
+```
+LB controller assigns new IP
+  → Service.status.loadBalancer.ingress[0].ip
+  → CPO ReconcileServiceStatus() (kas/service.go:161-167)
+  → kubeconfig Secret (server URL = new IP)
+  → HC controller copies kubeconfig to HC namespace
+  → NodePool controller reads kubeconfig → renders HAProxy template
+  → ExternalAPIAddress = new IP in haproxy.cfg
+  → ignition content hash changes (config.go:277-278)
+  → new MachineSet → worker rollout
+```
+
+The config hash includes `haproxyRawConfig` (`config.go:324-325`), so any IP
+change in the kubeconfig produces a new hash → rolling replacement of all
+workers. This is the problem the sidecar solves.
+
+#### HAProxy and Worker Rollouts (with sidecar — zero rollout)
+
+HAProxy kube-apiserver-proxy is deployed as a static pod via MachineConfig/Ignition
+on each worker node. The external API address is baked into `haproxy.cfg`
+(`assets/haproxy.cfg:29`). HAProxy resolves DNS once at startup and caches forever
+— there is no `resolvers` section.
+
+Day 2 IP changes are handled by the sidecar without worker rollout. The sidecar
+polls the ignition server `/kas-ip` endpoint and hot-reloads HAProxy via
+`SIGUSR2` (master-worker mode).
+
+**Hash stability**: when the `DeterministicLBIP` feature gate is enabled and the
+sidecar is present, the NodePool controller must NOT read `ExternalAPIAddress`
+from the kubeconfig for the HAProxy template. Instead, it uses a fixed
+placeholder value (e.g., `0.0.0.0`). The init container always writes the real
+IP from `/kas-ip` before HAProxy starts, and the HAProxy startup script applies
+the override via `sed` before calling `exec haproxy`. Since the template value
+never changes, `haproxyRawConfig` is stable → the ignition content hash does not
+change → no rollout is triggered.
+
+This requires a change in `reconcileHAProxyIgnitionConfig()` (`haproxy.go:81`):
+when the feature gate is enabled, skip reading `apiServerExternalAddress` from
+the kubeconfig Secret (lines 90-113) and use the fixed placeholder instead.
+
+Day 2 IP changes require all NodePools at 5.1+ (with the sidecar). The
+`ValidLoadBalancerIPConfiguration` condition on the HostedCluster blocks the
+feature when any NodePool lacks sidecar support. Users must upgrade pre-5.1
+NodePools before changing `serviceAnnotations`.
+
+#### Controller Coordination
+
+Existing communication channels are reused:
+- **CPO → HO**: HCP status conditions mirrored to HC (`hostedcluster_controller.go:783-893`)
+- **HO → CPO**: HC spec mirrored to HCP via the standard spec mirror in the
+  HostedCluster controller. `spec.services` flows directly — no annotation relay
+  needed.
+
+No new annotations or relay entries needed. The sidecar-based Day 2 flow is
+entirely controller-internal: CPO updates the Service, the LB provider assigns
+the new IP, CPO updates `ControlPlaneEndpoint`, and the sidecar on each worker
+picks it up independently.
+
+#### Platform Independence
+
+The LB configuration is inside `spec.services`, not inside platform substructs.
+This reflects the reality that the LB provider is a management-cluster property,
+orthogonal to the guest cluster platform:
+
+- Agent platform on AWS management cluster → AWS NLB processes the KAS Service
+- Agent platform on bare-metal with MetalLB → MetalLB processes the KAS Service
+- AWS platform on AWS management cluster → AWS NLB (same provider, different reason)
+
+The CCMs in the HCP namespace are **guest cluster CCMs** — they manage guest
+resources. The KAS Service lives in the HCP namespace and is processed by
+whatever LB controller runs on the management cluster itself.
+
+#### listType Migration Safety
+
+Changing `spec.services` from atomic to `+listType=map` with `+listMapKey=service`
+is required for per-element CEL transition rules — without map-key correlation,
+CEL cannot determine which old element corresponds to which new element, making
+per-field immutability rules on nested structs (e.g., `hostname`,
+`loadBalancerClass` on `LoadBalancerPublishingStrategy`) impossible.
+
+**Risks of the migration**:
+1. **Duplicate `service` keys**: An atomic list does not enforce uniqueness.
+   Changing to `listType=map` introduces a uniqueness constraint on the
+   `service` key. If any existing HostedCluster has duplicate entries, that
+   object becomes invalid under the new CRD. In practice, HyperShift generates
+   `spec.services` programmatically (one entry per `ServiceType` enum value) and
+   the list is immutable after creation, making duplicates extremely unlikely —
+   but "unlikely" is not "proven."
+2. **Validation ratcheting**: Kubernetes explicitly excludes `x-kubernetes-list-type`
+   changes from validation ratcheting. An existing object that violates the new
+   topology is rejected on any update, even if the `services` field itself is
+   unchanged.
+3. **SSA field ownership**: The topology change alters server-side apply
+   ownership from whole-list to per-element. Since `spec.services` is immutable
+   and written once, ownership conflicts during upgrade are minimal.
+
+**Mitigation**:
+1. **Pre-upgrade validation**: The upgrade procedure must verify that all
+   existing HostedCluster objects have unique `service` keys in `spec.services`.
+   If any duplicates are found, the upgrade is blocked until they are resolved
+   (manual patch to remove the duplicate entry).
+2. **E2E upgrade test**: An E2E test creates an HC under the old CRD (atomic
+   list), upgrades to the new CRD (map list), and verifies: the object is valid,
+   unrelated updates succeed, and reconciliation continues normally.
+
+The `+kubebuilder:validation:MaxItems=6` constraint is safe — the `ServiceType`
+enum has exactly 6 values (APIServer, OAuthServer, OIDC, Konnectivity, Ignition,
+OVNSbDb), so no existing cluster can exceed this limit.
+
+### Risks and Mitigations
+
+| Risk | Mitigation |
+|------|-----------|
+| **User provides invalid annotations** | LB provider ignores unknown annotations. Service stays Pending. Existing conditions surface the failure. Documented. |
+| **Reconciliation stripping user annotations** | Confirmed per-key writes at `service.go:67-68`. Unit tests will verify annotation preservation. |
+| **Unknown provider needed** | Adding a provider prefix to the allowlist is a one-line CEL change with E2E test. Turnaround is one release cycle. |
+| **Brief connectivity window on Day 2** | Between LB assigning new IP and sidecar detecting it (up to poll interval, default 30s), HAProxy points to old IP. Kubelet retries. Accepted tradeoff for eliminating Transition Service complexity. |
+| **No type safety on annotations** | Deliberate tradeoff. Allowlist constrains which providers are accepted; annotation value correctness is the user's responsibility — same as setting annotations directly on any K8s Service. |
+| **listType migration** | Required for per-element CEL transition rules. Pre-upgrade validation verifies no existing HCs have duplicate `service` keys. `maxItems=6` matches the enum. |
+| **Per-field immutability drift** | New fields in `ServicePublishingStrategy` are mutable by default. If a field must be immutable, the developer adds one CEL line. CI test verifies all existing fields retain immutability. |
+| **Ignition server endpoint unreachable** | Sidecar retries indefinitely. HAProxy continues with last known IP. Existing `IgnitionEndpointAvailable` condition surfaces the issue. No data plane impact until the next IP change. |
+| **HAProxy as SPOF for kubelet** | Kubelet → HAProxy (172.20.0.1) makes HAProxy a dependency for kubelet connectivity. Mitigated: HAProxy is a static pod started from local manifests — runs as long as kubelet runs. Tech lead accepted tradeoff. |
+| **Mixed NodePool versions** | `ValidLoadBalancerIPConfiguration` condition blocks Day 2 when any NodePool lacks sidecar support. User must upgrade pre-5.1 NodePools first. |
+
+### Drawbacks
+
+- No type safety or `oc explain` discoverability for provider-specific fields.
+  Users must know their LB provider's annotation schema. The allowlist ensures
+  only known providers are accepted by default.
+- Day 2 IP changes have a brief connectivity window (up to sidecar poll interval)
+  between the LB assigning the new IP and the sidecar detecting it. Kubelet
+  retry logic handles this. This is the accepted tradeoff for eliminating the
+  Transition Service complexity.
+- Day 2 requires all NodePools at 5.1+. Mixed-version clusters cannot use Day 2.
+- The `listType` migration and CEL rule rewrite add upgrade complexity. Mitigated
+  by pre-upgrade validation and the fact that `spec.services` is write-once.
+
+## Alternatives (Not Implemented)
+
+### 1. Per-Provider Typed Structs
+
+Provider-specific typed fields inside platform substructs (e.g.,
+`AWSLoadBalancerConfig.EIPAllocations`). Discarded:
+- Makes HyperShift maintainer of every vendor annotation schema.
+- Every new LB provider requires an API change + CRD bump + release cycle.
+- Conflates LB provider with guest platform — an Agent HC on AWS uses AWS NLB,
+  not MetalLB.
+- Internally contradictory when combined with an "unsupported annotation" escape
+  hatch (typed structs for safety + untyped blob for everything else).
+
+### 2. Pure HC Annotation (no API field)
+
+Use only HC annotations for Day 1 and Day 2. No API type changes. Discarded: no
+OpenAPI validation, no `oc explain` discoverability, fragile JSON strings, no
+structured diff. RFE-7201 explicitly proposes API fields.
+
+### 3. Root-Level spec.loadBalancerConfig
+
+A new root-level struct on `HostedClusterSpec`. Discarded:
+- Avoids the `spec.services` CEL rewrite but creates API debt if LB config is
+  needed per-service in the future.
+- Forces a `map[ServiceType]LoadBalancerConfig` or multiple root-level fields
+  to support per-service configuration.
+- `spec.services` is the natural home for service publishing configuration.
+
+### 4. Automatic MGMT Cluster LB Discovery
+
+HO uses `DetectManagementClusterCapabilities()` to auto-detect the LB provider
+and select defaults. Investigated but deferred: the detection mechanism exists
+(`support/capabilities/management_cluster_capabilities.go`) and adding CRD checks
+is a 1-file change, but auto-detection introduces complexity around multi-provider
+clusters and default selection. Can be added as an enhancement on top of this
+proposal.
+
+## Future Work
+
+### DNS Indirection (HAProxy Resolvers)
+
+Superseded by the ignition endpoint + sidecar approach for zero-rollout Day 2.
+The sidecar directly polls the KAS IP from the management cluster — no DNS
+dependency, no resolvers configuration, no CoreDNS chicken-and-egg. Research
+preserved in `OCPSTRAT-2653/research-dns-indirection.md` for reference.
+
+### Automatic MGMT Cluster LB Discovery
+
+HO's `DetectManagementClusterCapabilities()` can be extended to auto-detect MetalLB,
+F5 CIS, Cilium, etc. via CRD checks. This would provide UX improvements (default
+`loadBalancerClass`, validation hints) but is not required for the annotation
+passthrough approach. See `OCPSTRAT-2653/research-mgmt-cluster-discovery.md`.
+
+## Open Questions
+
+1. Should `loadBalancerClass` immutability be enforced at the HC level (CEL) or
+   inherited from the Kubernetes Service semantics (fail at Service creation)?
+   Recommendation: enforce at HC level via CEL for clearer UX.
+
+2. Should we add an annotation key length or count limit on `serviceAnnotations`?
+   Kubernetes already limits total annotation size to 256KB. Probably sufficient.
+
+3. Sidecar poll interval: 30s or 60s? Day 2 IP changes are infrequent operations.
+   Configurable via template variable. Not critical.
+
+4. Sidecar container image: reuse release image (has curl/shell, heavier) or
+   minimal image (lighter, requires building/maintaining). Recommendation: reuse
+   release image to avoid managing a new image.
+
+5. IPv6 validation in sidecar: the init/sidecar scripts validate IP format via
+   regex. Must support both IPv4 and IPv6 formats.
+
+6. Private clusters: the ignition server Route is internal for private HCPs
+   (`ReconcileInternalRoute`). Worker nodes should reach it — they used it to
+   boot — but needs explicit E2E validation.
+
+## Test Plan
+
+### Unit Tests
+
+- `ReconcileService()` passes `serviceAnnotations` per-key to KAS Service.
+- `ReconcileService()` sets `loadBalancerClass` on KAS Service.
+- CEL allowlist rejects annotations from unknown providers.
+- CEL immutability: existing fields (service, type, hostname, loadBalancerClass,
+  nodePort, route) remain immutable after migration.
+- CEL mutability: `serviceAnnotations` can be changed on update.
+- Annotation preservation: external annotations survive reconciliation loops.
+- `listType=map` behavior: adding/removing services entries is blocked by
+  list-level CEL rules (`oldSelf.all(...)` / `self.all(...)`).
+- Ignition server `/kas-ip` endpoint: returns correct IP from HCP status,
+  responds without auth, handles missing HCP.
+- HAProxy manifest generation: when feature gate enabled, manifest includes
+  init container, sidecar, `shareProcessNamespace`, and shared `emptyDir` volume.
+- HAProxy hash stability: when feature gate enabled, `haproxyRawConfig` does not
+  change when the kubeconfig IP changes — `ExternalAPIAddress` uses a fixed
+  placeholder, not the live kubeconfig value.
+- `ValidLoadBalancerIPConfiguration` condition: set to `False` when any NodePool
+  lacks `ValidLoadBalancerIPSupport`, `True` when all support it, removed when
+  feature is not configured.
+
+### E2E Tests
+
+- Day 1: Create HC with MetalLB annotations in `serviceAnnotations`, verify
+  annotations on KAS Service, verify MetalLB assigns expected IP (requires
+  MetalLB in CI).
+- Day 2 (sidecar): Change IP annotations, verify sidecar detects new IP from
+  `/kas-ip` endpoint, HAProxy reloads without worker rollout, kubelet maintains
+  connectivity via 172.20.0.1.
+- Day 2 blocked on pre-5.1: Verify `ValidLoadBalancerIPConfiguration=False`
+  prevents Day 2 IP changes when pre-5.1 NodePools exist.
+- Scale-up after IP change: Add node to cluster where IP has changed since
+  creation. Verify init container gets current IP from `/kas-ip`, node joins
+  successfully without chicken-and-egg.
+- `ValidLoadBalancerIPConfiguration` condition: Create HC with
+  `serviceAnnotations` + mixed NodePool versions (5.1 and pre-5.1). Verify
+  condition is `False` listing non-compliant NodePools. Upgrade NodePool → verify
+  condition transitions to `True`.
+- `loadBalancerClass`: Create HC with `loadBalancerClass`, verify it's set on
+  KAS Service and the correct LB controller processes it.
+- Immutability regression: verify existing fields cannot be changed after upgrade.
+
+### Provider Validation (One-Time, Not CI)
+
+- F5 BIG-IP VE Trial VM for end-to-end proof with F5 CIS annotations.
+- Cilium LB IPAM with `lbipam.cilium.io/ips` annotation.
+
+## Graduation Criteria
+
+### Dev Preview -> Tech Preview
+
+- Day 1 annotation passthrough functional.
+- `loadBalancerClass` support functional.
+- Prerequisite: kubelet → HAProxy routing for bare-metal public clusters.
+- Unit test coverage for annotation passthrough and CEL validation.
+- CEL immutability migration validated.
+- Basic E2E test with MetalLB (if available in CI).
+
+### Tech Preview -> GA
+
+- Ignition server `/kas-ip` endpoint implemented.
+- HAProxy sidecar + init container in static pod manifest.
+- Day 2 zero-rollout via sidecar verified in E2E.
+- Day 2 blocked on pre-5.1 NPs verified (ValidLoadBalancerIPConfiguration).
+- `ValidLoadBalancerIPConfiguration` cross-resource condition implemented.
+- CEL allowlist validation.
+- Load testing with multiple concurrent HostedClusters.
+- User-facing documentation in openshift-docs with per-provider examples.
+- F5 one-time validation completed.
+
+### GA
+
+- Backhaul SLI telemetry for IP assignment success/failure.
+- All E2E tests passing in CI.
+
+### Removing a deprecated feature
+
+Not applicable — this is a new feature.
+
+## Upgrade / Downgrade Strategy
+
+**Upgrade**: Existing clusters without `serviceAnnotations` or `loadBalancerClass`
+continue to work identically. The new fields are optional and have no default
+behavior when unset. The `listType` migration and CEL rule replacement are
+transparent — the same values that were immutable before remain immutable via
+per-field rules. No data migration needed.
+
+**Downgrade**: If a cluster was created with `serviceAnnotations`, downgrading the
+operator removes the reconciler that applies them. The annotations already set on
+the Service persist (Kubernetes does not remove annotations when the controller
+that set them is gone). LB provider continues to serve the configured IP. Day 2
+changes would require manual annotation management.
+
+## Version Skew Strategy
+
+The feature requires **both HO and CPO at the minimum version** (the release
+that introduces `serviceAnnotations` and `loadBalancerClass`). During upgrade,
+the components may temporarily run different versions:
+
+- **Old HO + New CPO**: Old HO deserializes the HostedCluster into typed Go
+  structs that lack the new fields (`loadBalancerClass`, `serviceAnnotations`).
+  The struct assignment `hcp.Spec.Services = hcluster.Spec.Services`
+  (`hostedcluster_controller.go:3005`) silently drops the unknown fields — this
+  is **not** an unstructured passthrough, it is data loss. CPO sees no
+  `serviceAnnotations` on HCP → feature is inactive. Day 1 provisioning works
+  (no annotations = dynamic IP, same as today). Day 2 is impossible: even if the
+  user sets annotations on HC, they never reach HCP. This is a safe degraded
+  state — the feature is simply unavailable during version skew.
+- **New HO + Old CPO**: HO mirrors new fields to HCP correctly. Old CPO ignores
+  unknown fields. No annotations are set on the Service. Feature inactive. Safe.
+- **Both at new version**: Feature fully functional.
+
+**Day 2 gating**: CPO must verify that the new fields are present on HCP before
+applying annotations to the KAS Service. If `serviceAnnotations` is set on HC
+but absent on HCP (indicating old HO is dropping them), CPO does not act. The
+`ValidLoadBalancerIPConfiguration` condition on HC reflects this state.
+
+## Operational Aspects of API Extensions
+
+- **New CRDs**: None. This modifies fields on existing `HostedCluster` and
+  `HostedControlPlane` types.
+- **Webhooks**: No new webhooks. All validation via CEL on CRD.
+- **SLIs**: IP assignment success can be monitored via `Service.Status.LoadBalancer.Ingress`
+  population time.
+- **Failure mode**: If LB provider fails to assign requested IP (e.g., IP already
+  in use, pool exhausted, invalid annotation), the Service stays in Pending state.
+  Existing `ExternalDNSReady` and `Available` conditions on HC surface this. No
+  new failure mode introduced.
+- **Escalation**: HyperShift team (HCP) for reconciler issues. LB provider team
+  for provider-specific IP assignment failures.
+
+## Support Procedures
+
+- **Detect**: If `Service.Status.LoadBalancer.Ingress` is empty after expected time,
+  check Service annotations match provider expectations. Check LB provider logs for
+  assignment errors.
+- **Diagnose**: `oc get svc kube-apiserver -n <hcp-namespace> -o yaml` — verify
+  annotations are correct and match the LB provider's expected format. Check HC
+  status conditions for `ValidLoadBalancerIPConfiguration`.
+- **Day 2 not working**: Verify all NodePools are 5.1+ (have sidecar). Check
+  `ValidLoadBalancerIPConfiguration` condition. Verify ignition server Route is
+  reachable from workers (`IgnitionEndpointAvailable` condition).
+- **Disable**: Remove `serviceAnnotations` and `loadBalancerClass` from the
+  APIServer service entry. CPO stops setting LB-related annotations. LB provider
+  falls back to default behavior (dynamic IP).
+
+## Infrastructure Needed
+
+- MetalLB availability in CI for E2E testing (TBD — may require CI team coordination).
+- F5 BIG-IP VE Trial license for one-time validation (free, time-limited).
