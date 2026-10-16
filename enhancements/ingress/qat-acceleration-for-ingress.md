@@ -89,13 +89,12 @@ real-world feedback to inform the eventual supported interface.
   configuration.
 - Keep a single router image and configuration path that works unmodified on
   both QAT-capable and commodity hardware; there is no separate "QAT image."
-- Guarantee router pods never crash-loop because of QAT after a successful
-  initialization: the HAProxy configuration must omit the
-  `ssl-provider qatprovider` directive entirely unless a preflight sequence
-  has confirmed the device and provider actually work, and a bounded
-  startup retry (see Implementation Details) protects against a device that
-  fails the narrow race between preflight and HAProxy's own provider
-  initialization.
+- Keep a QAT failure isolated to the specific router replica it affects:
+  when a device or provider genuinely does not work, that replica's
+  haproxy container fails to start and is visibly unhealthy (see Risks and
+  Mitigations), rather than silently degrading or affecting other
+  replicas. Other router replicas, unaffected by the same node-local
+  issue, continue serving traffic normally.
 - Provide a documented, unsupported escape hatch
   (`spec.unsupportedConfigOverrides`) that lets early adopters disable the
   automatic behavior while Red Hat gathers feedback ahead of a stable API.
@@ -164,28 +163,34 @@ logic, and the cluster-ingress-operator:
   signal confirming RHCOS10/kernel compatibility (see Implementation
   Details for how this signal is sourced), and the cluster not being in
   FIPS mode (via `detectFIPS()`, see Implementation Details). Only when all
-  three hold does the operator set both the
-  `qat.intel.com/cy` resource request *and* a `ROUTER_QAT=true` environment
-  variable on the router container. When not eligible (no matching
-  QAT-capable node, incompatible kernel, FIPS mode, or the admin has set the
-  unsupported opt-out), the operator sets neither, and the router does not
-  attempt any QAT-related logic at all. The operator does not alter
-  placement itself.
-- The router's control plane only runs its preflight sequence when
-  `ROUTER_QAT=true` is set: it checks that a QAT virtual function device is
-  visible in the container, that OpenSSL can load the `qatprovider.so`
-  Provider, that FIPS is not independently detected as enabled on the node
-  (see Implementation Details - this is checked locally by the router
-  itself, not inferred from `ROUTER_QAT`), and that the fully-rendered
-  HAProxy configuration validates. Only if every check passes does the
-  router render `ssl-provider default` followed by `ssl-provider
-  qatprovider`; otherwise both directives are omitted and HAProxy starts
-  with software-only TLS. Loading `qatprovider` explicitly disables
-  OpenSSL's automatic loading of the `default` provider, so `default` must
-  also be loaded explicitly, or any TLS algorithm not implemented by
-  `qatprovider` would fail silently or error out. This check-then-render
-  ordering is required because a failed provider load is fatal to HAProxy
-  startup.
+  three hold does the operator set a `ROUTER_QAT=true` environment variable
+  on the router container and the `qat.intel.com/cy` resource request/limit
+  on the haproxy container - the resource goes on the haproxy container
+  because that is the process that actually runs HAProxy and would touch
+  the VF, while `ROUTER_QAT` goes on the router container because that is
+  what decides whether to render the `ssl-provider` directives at all. When
+  not eligible (no matching QAT-capable node, incompatible kernel, FIPS
+  mode, or the admin has set the unsupported opt-out), the operator sets
+  neither, and no QAT-related config is ever rendered. The operator does
+  not alter placement itself.
+- The router container renders `ssl-provider default` followed by
+  `ssl-provider qatprovider` whenever `ROUTER_QAT=true` and its own
+  independent local check does not detect FIPS (see Implementation Details
+  - this is checked locally by the router itself, not inferred from
+  `ROUTER_QAT`). There is deliberately no separate preflight that probes
+  the device or the OpenSSL provider beforehand: the first time this
+  configuration is actually applied to the haproxy container is the
+  validation. Loading `qatprovider` explicitly disables OpenSSL's automatic
+  loading of the `default` provider, so `default` must also be loaded
+  explicitly, or any TLS algorithm not implemented by `qatprovider` would
+  fail silently or error out.
+- If the device or provider do not actually work, HAProxy's own startup
+  fails when it tries to load `qatprovider` - a failed provider load is
+  fatal to HAProxy startup - and the haproxy container fails to start. On a
+  genuinely broken or absent device, this is expected to crash-loop that
+  container; see Risks and Mitigations for why this is an accepted failure
+  mode in this initial version rather than something the implementation
+  tries to prevent.
 - Administrators who do not want this behavior can set a documented, but
   explicitly unsupported, override under `spec.unsupportedConfigOverrides`
   to disable detection, activation, and the associated resource request.
@@ -202,8 +207,11 @@ IngressControllers and the worker nodes that back them.
 **cluster-ingress-operator** is the control-plane component that manages
 IngressController resources and their router deployments.
 
-**router pod** is the data-plane pod (router + HAProxy) that terminates and
-load-balances ingress traffic.
+**router pod** is the data-plane pod that terminates and load-balances
+ingress traffic, made up of (at least) two containers relevant to this
+enhancement: the **router container**, which generates HAProxy's
+configuration, and the **haproxy container**, which runs the HAProxy
+process against that configuration.
 
 1. Infrastructure outside this enhancement's scope provisions QAT-capable
    worker nodes that advertise the `qat.intel.com/cy` extended resource:
@@ -231,42 +239,50 @@ load-balances ingress traffic.
    kernel compatible with QAT (per the resolved kernel-compatibility signal;
    see Implementation Details), and that the cluster is not in FIPS mode (via
    `detectFIPS()`; see Implementation Details). Only if all three hold does
-   it automatically add a matching resource request and a `ROUTER_QAT=true`
-   environment variable to the router container. Neither is added
-   otherwise. The operator continues to watch `Node` objects afterward, so
-   the resource request and environment variable are added or removed as
-   matching nodes' QAT advertisement appears or disappears (for example, as
-   the Intel Device Plugin Operator finishes provisioning virtual
-   functions).
+   it automatically add a `ROUTER_QAT=true` environment variable to the
+   router container and a matching `qat.intel.com/cy` resource request to
+   the haproxy container. Neither is added otherwise. The operator continues
+   to watch `Node` objects afterward, so the environment variable and
+   resource request are added or removed as matching nodes' QAT
+   advertisement appears or disappears (for example, as the Intel Device
+   Plugin Operator finishes provisioning virtual functions).
 5. The scheduler places router pods according to the administrator's
    `spec.nodePlacement` and the injected resource request, following
    standard Kubernetes scheduling semantics.
-6. On startup, if `ROUTER_QAT=true` is not set, the router skips QAT
-   detection entirely and starts HAProxy with software-only TLS, with no
-   preflight overhead. If `ROUTER_QAT=true` is set, the router runs its
-   preflight sequence before HAProxy launches: QAT device visibility,
-   OpenSSL Provider loadability, an independent local check that FIPS is
-   not enabled on the node (see Implementation Details - checked directly
-   by the router, not inferred from `ROUTER_QAT`), and HAProxy configuration
-   validation.
-7. If every preflight check passes, the router renders `ssl-provider
-   default` and `ssl-provider qatprovider` into the HAProxy configuration
-   and starts HAProxy with QAT offload active. Both directives are required
-   together: loading `qatprovider` disables OpenSSL's automatic loading of
-   `default`, and without `default` any TLS algorithm not implemented by
-   `qatprovider` would fail silently or error out.
-8. If any preflight check fails, the router omits both `ssl-provider`
-   directives and starts HAProxy with software-only TLS. If HAProxy still
-   fails to start despite a passing preflight (the narrow race described in
-   Implementation Details), the router falls back to a bounded retry without
-   the `ssl-provider` directives rather than crash-looping.
-9. The router exposes Prometheus metrics for offload-active state,
-   software-fallback count, device resets, and queue depth so operators can
-   confirm whether acceleration is engaged and healthy.
-10. An administrator who wants to disable this behavior entirely sets the
+6. If `ROUTER_QAT=true` is not set, the router container renders a
+   configuration with no `ssl-provider` directives and does no further QAT-
+   related work. If `ROUTER_QAT=true` is set, the router container runs its
+   own independent local check that FIPS is not enabled on the node (see
+   Implementation Details - checked directly by the router, not inferred
+   from `ROUTER_QAT`).
+7. If `ROUTER_QAT=true` and the local FIPS check does not detect FIPS, the
+   router container renders `ssl-provider default` and `ssl-provider
+   qatprovider` into the HAProxy configuration. Both directives are
+   required together: loading `qatprovider` disables OpenSSL's automatic
+   loading of `default`, and without `default` any TLS algorithm not
+   implemented by `qatprovider` would fail silently or error out.
+8. The haproxy container starts (or reloads) HAProxy against that
+   configuration using the existing, unmodified reload mechanism - there is
+   no separate preflight step. If the device and provider actually work,
+   HAProxy starts normally with QAT offload active. If they do not, loading
+   `qatprovider` fails, which is fatal to HAProxy startup, and the haproxy
+   container fails to start.
+9. On a genuinely broken or absent device, step 8 fails every time it is
+   attempted, so the haproxy container crash-loops. This is treated as the
+   validation for "is the device available and healthy on this node" -
+   there is no separate check beforehand. See Risks and Mitigations for why
+   this is an accepted outcome in this initial version, how it is expected
+   to surface (alerting on the crash-looping container), and why other
+   router replicas are expected to continue serving traffic in the
+   meantime.
+10. The router exposes Prometheus metrics for offload-active state and
+    software-fallback count so operators can confirm whether acceleration
+    is engaged.
+11. An administrator who wants to disable this behavior entirely sets the
     documented unsupported override in `spec.unsupportedConfigOverrides`;
-    on the next rollout, the operator stops injecting the resource request
-    and the router skips QAT detection and activation.
+    on the next rollout, the operator stops setting `ROUTER_QAT` on the
+    router container and the resource request on the haproxy container, and
+    the router container stops rendering the `ssl-provider` directives.
 
 ```mermaid
 sequenceDiagram
@@ -274,23 +290,27 @@ sequenceDiagram
     participant IC as IngressController
     participant Operator as Ingress Operator
     participant Sched as Scheduler
-    participant Router as Router Pod (preflight + HAProxy)
+    participant Router as Router Container
+    participant Haproxy as Haproxy Container
 
     Admin->>IC: Set spec.nodePlacement for QAT-capable nodes
     Operator->>IC: Watch IngressController
     alt Eligible node found, cluster not in FIPS mode, no unsupported override
-        Operator->>Router: Inject qat.intel.com/cy request + ROUTER_QAT=true
-        Sched->>Router: Schedule pod per nodePlacement + resource request
-        Router->>Router: ROUTER_QAT=true: run preflight (device, provider, local FIPS check, config)
-        alt Preflight passes
-            Router->>Router: Render ssl-provider default + qatprovider, start HAProxy
-        else Preflight fails
-            Router->>Router: Omit ssl-provider, start HAProxy (software TLS)
+        Operator->>Router: Set ROUTER_QAT=true
+        Operator->>Haproxy: Inject qat.intel.com/cy resource request
+        Sched->>Haproxy: Schedule pod per nodePlacement + resource request
+        Router->>Router: ROUTER_QAT=true and local FIPS check clear
+        Router->>Haproxy: Render config with ssl-provider default + qatprovider
+        alt Device and provider actually work
+            Haproxy->>Haproxy: Start HAProxy with QAT offload active
+        else Device or provider do not work
+            Haproxy->>Haproxy: Fail to start (fatal provider load failure), crash-loop
         end
-        Router-->>Operator: Expose metrics (offload state, fallbacks, errors)
     else Not eligible, FIPS mode, or unsupported override set
-        Operator->>Router: Do not inject resource request or ROUTER_QAT
-        Router->>Router: ROUTER_QAT unset: skip QAT entirely, start HAProxy (software TLS)
+        Operator->>Router: Do not set ROUTER_QAT
+        Operator->>Haproxy: Do not inject resource request
+        Router->>Haproxy: Render config without ssl-provider
+        Haproxy->>Haproxy: Start HAProxy (software TLS)
     end
 ```
 
@@ -325,8 +345,8 @@ API approver.
 QAT hardware is a worker-node (data-plane) resource, so this enhancement
 primarily affects guest-cluster node pools where router pods actually run.
 The cluster-ingress-operator itself runs in the management cluster, but the
-behavior it manages (resource injection, and the router's own preflight and
-config rendering) executes against guest-cluster router pods. The
+behavior it manages (resource injection and config rendering) executes
+against guest-cluster router pods. The
 kernel-compatibility resolution described in Implementation Details also
 does not carry over as-is: guest-cluster worker nodes are managed through
 `NodePool` status rather than `MachineConfigPool`, so whichever option is
@@ -377,63 +397,51 @@ works on both QAT and commodity hardware. No HAProxy build-flag change is
 required for Provider loading (`ssl-provider`/`ssl-provider-path` only
 require `USE_OPENSSL=1` and OpenSSL >= 3.0, already satisfied).
 
-**Router preflight and config-generation**: New Go-side logic (likely in the
-router's config-templating package) implements the preflight sequence
-described in the Proposal and Workflow Description, gated entirely by the
-`ROUTER_QAT` environment variable the cluster-ingress-operator sets (see
-below). When `ROUTER_QAT` is not `true`, the router does not run any
-QAT-related logic at all - no device probing, no config branching - which
-keeps the cost of this enhancement at zero for the vast majority of router
-pods that never run on QAT-capable nodes. When `ROUTER_QAT=true`, the
-preflight checks device visibility and provider loadability, keying
-detection off the presence of the `qatprovider.so` artifact rather than
-assuming a fixed relationship between OS/image version and interface, since
-that relationship is not guaranteed to stay stable across RHEL major
-versions. The preflight does not itself re-verify RHCOS stream or kernel
-version: that eligibility decision belongs to the operator (see below,
-and Proposal), and a node that was wrongly deemed kernel-compatible would
-still be caught by the device/provider-loadability checks failing naturally
-- there is no separate correctness-critical path that depends on the router
-re-deriving that decision. FIPS is the one exception: the preflight
-independently checks whether FIPS is enabled on the node by reading
-`/proc/sys/crypto/fips_enabled` directly (a kernel-wide value visible to any
-container on the node regardless of the container's own base image) rather
-than trusting `ROUTER_QAT` for that determination - see Risks and Mitigations
-for why this stays independent of the operator's own FIPS check. This local
-check must be fail-safe, not fail-open: if the file cannot be read or
-parsed, the preflight must treat that as FIPS-enabled and disable QAT,
-rather than defaulting to "not FIPS." This is a deliberate departure from
-the existing `detectFIPS()` helper used elsewhere in the operator, which
-defaults to "not FIPS" on a procfs read failure (see Implementation Details
-below) - that fail-open default is acceptable for its existing uses, but
-must not be inherited by this QAT-specific check, where defaulting the
-wrong way means activating a non-FIPS-validated crypto path. The preflight
-sequence must run, and must gate config rendering, on every router
-start/reload, since a previously-usable device can become unusable (driver
-reset, VF revoked) between reloads.
+**Router container config-generation**: New Go-side logic (likely in the
+router's config-templating package) renders `ssl-provider default` followed
+by `ssl-provider qatprovider` whenever `ROUTER_QAT=true` (set by the
+cluster-ingress-operator, see below) and the router's own independent local
+FIPS check does not detect FIPS. When `ROUTER_QAT` is not `true`, the router
+does not do any QAT-related work at all, which keeps the cost of this
+enhancement at zero for the vast majority of router pods that never run on
+QAT-capable nodes. The router does not itself probe for the device or check
+whether OpenSSL can load the `qatprovider.so` Provider: there is no separate
+preflight for this in the initial version. The eligibility decision (node
+capability, kernel compatibility) belongs to the operator (see below, and
+Proposal); if that decision turns out to be wrong for a given node, or the
+device is otherwise not actually usable, the result surfaces as the haproxy
+container failing to start (see below), not as something the router
+detects or works around. FIPS is the one exception the router checks
+locally: it reads `/proc/sys/crypto/fips_enabled` directly (a kernel-wide
+value visible to any container on the node regardless of the container's
+own base image) rather than trusting `ROUTER_QAT` for that determination -
+see Risks and Mitigations for why this stays independent of the operator's
+own FIPS check. This local check must be fail-safe, not fail-open: if the
+file cannot be read or parsed, the router must treat that as FIPS-enabled
+and disable QAT, rather than defaulting to "not FIPS." This is a deliberate
+departure from the existing `detectFIPS()` helper used elsewhere in the
+operator, which defaults to "not FIPS" on a procfs read failure (see
+Implementation Details below) - that fail-open default is acceptable for
+its existing uses, but must not be inherited by this QAT-specific check.
 
-Gating only at start/reload is not sufficient on its own: reloads are driven
-by route/config changes, so a cluster with a stable set of routes can run
-for a long time between reloads, and a device that fails mid-flight (driver
-reset, VF revoked) would not be re-evaluated until the next unrelated
-change. The router must therefore also run the device/provider portion of
-the preflight checks on an independent timer, decoupled from route-driven
-reloads, and trigger a reload to fall back to software-only TLS as soon as
-the device is found unusable, rather than waiting on the next incidental
-reload. Whether `qatengine` itself already provides transparent, per-request
-fallback to software crypto when the hardware fails mid-operation (as
-opposed to failing the handshake outright) is not established by current
-research and needs empirical confirmation; see Open Questions.
-
-A passing preflight does not, by itself, guarantee HAProxy's own internal
-provider initialization will succeed: the device or provider could fail in
-the narrow window between the preflight check and HAProxy actually loading
-the provider at process start (for example, a VF revoked a moment later).
-To keep the no-crash-loop guarantee honest, the router performs a bounded
-startup retry: if HAProxy fails to start with the `ssl-provider` directives
-present, the router re-renders the configuration without them and restarts
-HAProxy with software-only TLS, rather than retrying indefinitely with the
-same failing configuration.
+**Haproxy container startup**: The haproxy container - the one granted the
+`qat.intel.com/cy` resource, and therefore the only one with the VF device
+visible to it - starts (or reloads) HAProxy against the router-generated
+configuration using the existing, unmodified reload mechanism; this
+enhancement does not add a wrapper, preflight step, or health-monitoring
+loop around it. Whether the device and provider actually work is validated
+implicitly, by the real startup attempt itself: if they do not, loading
+`qatprovider` fails, which is fatal to HAProxy startup (whether that is the
+container's first-ever start, or a later start triggered by the kubelet
+restarting it after a liveness probe failure), and the haproxy container
+exits. On a genuinely broken or absent device, every such attempt fails the
+same way, so the container crash-loops. This is accepted, not prevented, in
+this initial version - see Risks and Mitigations. A device that fails
+mid-flight while HAProxy is already running successfully is not proactively
+detected or reacted to by this enhancement either; whatever behavior
+`qatengine`/HAProxy exhibit on their own (see Open Questions) is what
+happens, up to and including the existing liveness probe eventually
+restarting the container, which then hits the same startup-failure path.
 
 **cluster-ingress-operator**: Adds logic to read `Node` objects (and,
 depending on how the next paragraph's open point is resolved,
@@ -442,20 +450,23 @@ router deployment: a node matching the IngressController's
 `spec.nodePlacement` must advertise `qat.intel.com/cy` in its allocatable
 capacity, and that node's resolved RHCOS stream/kernel must meet QAT's
 minimum kernel-driver requirement (see Proposal). When eligible, the
-operator sets both the `qat.intel.com/cy` resource
-request/limit and a `ROUTER_QAT=true` environment variable on the router
-deployment's container; when not eligible, or when the administrator has
-set the unsupported opt-out key described in API Extensions, it sets
-neither. Collapsing node-capability and kernel-compatibility into a single
-flag is deliberate: unlike FIPS (see below), getting this one wrong is
-low-stakes, since the router's own device/provider-loadability checks would
-still catch a node that was incorrectly deemed compatible. FIPS is handled
+operator sets a `ROUTER_QAT=true` environment variable on the router
+container and the `qat.intel.com/cy` resource request/limit on the haproxy
+container; when not eligible, or when the administrator has set the
+unsupported opt-out key described in API Extensions, it sets neither.
+Collapsing node-capability and kernel-compatibility into a single flag is
+deliberate: unlike FIPS (see below), getting this one wrong is low-stakes
+in terms of correctness - it surfaces as the haproxy container failing to
+start and crash-looping (see Risks and Mitigations), which is a visible,
+diagnosable failure rather than a silent one, not a security or compliance
+concern the way an incorrect FIPS determination would be. FIPS is handled
 as a separate, independent check: the operator reuses the existing
 `detectFIPS()` helper's Hypershift-aware handling of a FIPS management
 cluster with a non-FIPS guest cluster (via the `FIPS_ENABLED` environment
 variable), to skip setting `ROUTER_QAT` and the resource request entirely
 on a FIPS-enabled cluster, rather than scheduling a pod onto a QAT node and
-consuming a VF only for the router to disable QAT locally. However, the QAT
+consuming a VF only for the router container to never render the directives
+that would have used it. However, the QAT
 eligibility gate cannot reuse `detectFIPS()`'s existing fail-open default
 as-is: `detectFIPS()` returns a plain `bool` and defaults to "not FIPS" when
 `/proc/sys/crypto/fips_enabled` cannot be read or parsed, which is
@@ -531,18 +542,26 @@ opted in to the new HAProxy version, even without a feature gate of its own.
 
 ### Risks and Mitigations
 
-**Risk**: A passing preflight does not guarantee HAProxy's own provider
-initialization will succeed at startup; the device or provider could fail
-in the narrow window between the preflight check and HAProxy actually
-loading the provider, which would otherwise crash-loop the pod.
+**Risk**: There is no preflight check before HAProxy actually tries to use
+the device: a device or provider that does not work causes the haproxy
+container to fail to start, and it will keep failing the same way on every
+subsequent start attempt (initial rollout, reschedule, or a kubelet restart
+after a liveness probe failure), so the container crash-loops. This is a
+deliberate simplification for this initial version rather than an oversight
+(see Implementation Details).
 
-**Mitigation**: The router performs a bounded startup retry: on an
-HAProxy startup failure with the `ssl-provider` directives present, it
-re-renders the configuration without them and restarts with software-only
-TLS, instead of retrying indefinitely against the same failing
-configuration. The no-crash-loop guarantee in Goals is scoped accordingly to
-"no crash-loop after a successful initialization," not to every conceivable
-startup race.
+**Mitigation**: This is treated as an acceptable, visible failure mode
+rather than something the implementation tries to prevent. A crash-looping
+container is a standard Kubernetes signal that existing cluster monitoring
+already surfaces (restart counts, `CrashLoopBackOff` status/events), so no
+new alerting mechanism is required. Other router replicas, scheduled on
+nodes not affected by the same node-local issue, continue serving traffic
+normally, so the IngressController as a whole keeps working while a single
+affected replica does not. An administrator resolves the underlying problem
+(fix the device/VF provisioning) or disables QAT acceleration via the
+unsupported override (see Support Procedures) to stop the affected replica
+from crash-looping. A future iteration may add a real preflight check ahead
+of this if early-adopter feedback shows it is needed.
 
 **Risk**: Loading the `qatprovider` OpenSSL provider disables OpenSSL's
 automatic loading of the `default` provider. Without `default` also loaded
@@ -561,9 +580,10 @@ deviates from OpenShift's standard feature-development process, and could
 set an unwanted precedent.
 
 **Mitigation**: The behavior is strictly scoped to hardware that does not
-exist in commodity clusters (QAT-capable nodes), is engineered to never
-cause a crash-loop (mandatory preflight before any config change), carries
-an explicit, documented "unsupported" designation, and is intentionally
+exist in commodity clusters (QAT-capable nodes), fails in a contained and
+visible way when it does not work (a crash-looping replica rather than a
+cluster-wide or silent failure, see the preflight risk above), carries an
+explicit, documented "unsupported" designation, and is intentionally
 time-boxed to a single release cycle ahead of a properly gated, supported
 API. This EP calls the deviation out explicitly so reviewers and API
 approvers can weigh in before it merges.
@@ -578,19 +598,22 @@ early-access delivery: the project will not claim a performance benefit, nor
 graduate this capability, until async offload is empirically confirmed on
 real haproxy34/RHEL10 hardware.
 
-**Risk**: A QAT device that was usable at HAProxy start/reload time can
-become unusable afterward (driver reset, VF revoked, firmware issue), and
-reloads are driven by route/config changes rather than device health, so a
-stable cluster could run for an extended period without re-evaluating
-device state.
+**Risk**: A QAT device that was usable at HAProxy start time can become
+unusable afterward (driver reset, VF revoked, firmware issue) while HAProxy
+is already running successfully. This enhancement does not proactively
+detect or react to that in this initial version.
 
-**Mitigation**: In addition to gating at start/reload, the router runs the
-device/provider portion of the preflight checks on an independent timer and
-proactively triggers a reload to fall back to software-only TLS as soon as
-the device is found unusable, rather than waiting for the next
-route-triggered reload. Whether `qatengine` also provides its own
-transparent, per-request software fallback when the hardware fails
-mid-operation still needs empirical confirmation (see Open Questions).
+**Mitigation**: No new monitoring is added for this case; it is explicitly
+out of scope for the initial version (see Implementation Details). Whatever
+`qatengine`/HAProxy do on their own when the hardware fails mid-operation
+(transparent per-request software fallback vs. erroring handshakes vs.
+eventually becoming unhealthy enough to fail the existing liveness probe)
+is what happens; the last of those would restart the container, which then
+hits the same startup-failure path as a device that was never usable (see
+the preflight risk above). Whether `qatengine` provides transparent,
+per-request fallback still needs empirical confirmation (see Open
+Questions); a future iteration may add proactive detection if real-world
+feedback shows it is needed.
 
 **Risk**: Real QAT hardware for CI/QE is not yet confirmed, which limits how
 much of this feature can be validated before shipping.
@@ -600,18 +623,18 @@ testing is limited to the hardware-independent cases listed in the Test
 Plan, and this is tracked explicitly in Infrastructure Needed and Open
 Questions.
 
-**Risk**: Automatic, default-on resource injection could surprise
-administrators who did not explicitly request QAT acceleration, for example
-on shared or multi-tenant QAT-capable node pools.
+**Risk**: Automatic, default-on resource injection onto the haproxy
+container could surprise administrators who did not explicitly request QAT
+acceleration, for example on shared or multi-tenant QAT-capable node pools.
 
 **Mitigation**: The behavior is documented, is visible through router
 metrics, and can be disabled cluster-wide (per IngressController) through
 the unsupported override.
 
 **Risk**: Collapsing node-capability, kernel-compatibility, and the
-unsupported opt-out into a single `ROUTER_QAT` flag means the router pod
-itself cannot tell *why* the flag is unset (no matching node, incompatible
-kernel, or explicit opt-out), which could make support harder.
+unsupported opt-out into a single `ROUTER_QAT` flag means the router
+container itself cannot tell *why* the flag is unset (no matching node,
+incompatible kernel, or explicit opt-out), which could make support harder.
 
 **Mitigation**: The pod does not need to know why, only what to do; the
 "why" is diagnosable from the cluster-ingress-operator's own logs and
@@ -620,9 +643,9 @@ incompatibility, FIPS, or opt-out) for each IngressController it reconciles
 (see Support Procedures).
 
 **Risk**: FIPS-enabled clusters must never activate a non-FIPS-validated
-crypto path, and a FIPS pod should not needlessly consume a QAT VF just to
-have the router disable QAT in the preflight. Unlike the node-capability and
-kernel-compatibility checks (which are deliberately collapsed into the
+crypto path, and a FIPS pod should not needlessly consume a QAT VF that the
+router container was never going to use anyway. Unlike the node-capability
+and kernel-compatibility checks (which are deliberately collapsed into the
 single `ROUTER_QAT` flag, since getting them wrong is low-stakes), FIPS is
 not something the router should take on the operator's word alone: a stale
 reconcile or a bug in the operator's eligibility computation could otherwise
@@ -642,8 +665,8 @@ setting `ROUTER_QAT` and the `qat.intel.com/cy` resource request both when
 the cluster is in FIPS mode and when FIPS state cannot be conclusively
 determined, meaning a FIPS pod is not scheduled onto a QAT node and does not
 consume a VF. Independently of that,
-and regardless of what `ROUTER_QAT` says, the router's own preflight
-sequence reads `/proc/sys/crypto/fips_enabled` directly - a kernel-wide
+and regardless of what `ROUTER_QAT` says, the router container's own local
+check reads `/proc/sys/crypto/fips_enabled` directly - a kernel-wide
 value visible to the container without any special privilege or operator
 involvement - and refuses to activate QAT both when it reports FIPS is
 enabled and when it cannot be read or parsed at all. Because this check does
@@ -654,15 +677,20 @@ scope is limited to non-FIPS clusters (see Non-Goals).
 ### Drawbacks
 
 This enhancement introduces an automatic behavior change (new resource
-requests, a new preflight sequence, conditional config rendering) without
-the usual feature-gate safety net, which increases the burden on the router
-and ingress operator teams to get the default-on behavior right the first
-time. It also means troubleshooting relies on logs and metrics rather than a
-dedicated IngressController status condition in this initial delivery
-(status reporting is an open question). These trade-offs are accepted in
-exchange for faster, real-world feedback ahead of committing to a stable
-API, but reviewers may reasonably push back on shipping default-on behavior
-without a feature gate.
+requests, conditional config rendering) without the usual feature-gate
+safety net, which increases the burden on the router and ingress operator
+teams to get the default-on behavior right the first time. It also accepts
+that a genuinely broken or absent device results in a crash-looping haproxy
+container rather than a guaranteed graceful fallback, relying on other
+router replicas and existing crash-loop monitoring instead of a dedicated
+preflight (see Risks and Mitigations). Troubleshooting relies on logs,
+metrics, and standard pod-health signals rather than a dedicated
+IngressController status condition in this initial delivery (status
+reporting is an open question). These trade-offs are accepted in exchange
+for a smaller initial implementation and faster, real-world feedback ahead
+of committing to a stable API, but reviewers may reasonably push back on
+shipping default-on behavior without a feature gate, or on accepting
+crash-looping as a valid failure mode instead of a preflight check.
 
 ## Alternatives (Not Implemented)
 
@@ -688,10 +716,15 @@ without asking them to learn a new, soon-to-be-replaced API field.
    lands.
 3. How does this enhancement interact with Hypershift/Hosted Control Planes
    specifically (see Topology Considerations)?
-4. Does the Intel Device Plugin Operator's `QatDevicePlugin` CR, NFD
-   labeling, and RHCOS10 kernel/BIOS prerequisites impose any additional
-   constraints on what the router's preflight sequence can assume is true
-   by the time it runs?
+4. Is there a known race where the Intel Device Plugin Operator advertises
+   `qat.intel.com/cy` as allocatable, and the scheduler places a pod
+   accordingly, before the VF is actually fully usable (for example,
+   firmware/driver initialization still in progress)? Since this
+   enhancement has no preflight to absorb that kind of transient timing
+   issue (see Implementation Details), such a race would be indistinguishable
+   from a genuinely broken device: both fail HAProxy's first real startup
+   attempt and crash-loop the haproxy container the same way, even though
+   one would resolve itself on retry and the other needs an admin.
 5. Does shipping an automatic, unsupported-only behavior (rather than a
    fully supported, gated feature) raise concerns for OKE (see Topology
    Considerations)?
@@ -705,10 +738,11 @@ without asking them to learn a new, soon-to-be-replaced API field.
    behavior early?
 9. Does `qatengine` provide its own transparent, per-request fallback to
    software crypto when the QAT hardware fails mid-operation, or does a
-   runtime hardware failure fail the TLS handshake outright until the
-   router's independent health-check timer forces a reload? This determines
-   how fast a runtime device failure is actually reflected in router
-   behavior.
+   runtime hardware failure error the TLS handshake outright, or eventually
+   fail HAProxy's liveness check and get restarted into the same
+   startup-failure path described in Implementation Details? This
+   determines what a mid-life hardware failure actually looks like in
+   practice, since no proactive detection exists in this initial version.
 10. **Pre-implementation blocker**: the RHCOS10 kernel requirement itself is
     settled (see Proposal), but the exact supported tuple built on top of
     it (`crun` version, OpenSSL 3.x, `qatprovider`, QAT 4xxx firmware/
@@ -758,41 +792,33 @@ suite/type labels such as `[Suite:...]`, `[Serial]`, `[Slow]`, or
 
 The following do not require real QAT hardware:
 
-- Unit tests for the preflight sequence (device visibility, provider load,
-  FIPS compatibility, config validation) against faked signals, including
-  the "must never emit `ssl-provider` without confirmation" rule, and the
-  "`ssl-provider default` must always precede `ssl-provider qatprovider`"
-  rule.
+- Unit tests for the router container's rendering logic against faked
+  `ROUTER_QAT` and local FIPS check inputs, including the "must never emit
+  `ssl-provider` unless `ROUTER_QAT=true` and the local FIPS check is clear"
+  rule, and the "`ssl-provider default` must always precede `ssl-provider
+  qatprovider`" rule.
 - A test exercising a TLS handshake path that requires an algorithm not
   implemented by `qatprovider`, with QAT active, to catch any regression
   where `default` is not loaded alongside `qatprovider`.
-- Unit tests for the independent, timer-driven re-check of device/provider
-  health described in Risks and Mitigations, confirming it triggers a
-  reload to software-only TLS when a previously-usable device is found
-  unusable between route-driven reloads.
-- Unit tests for the bounded startup retry (simulating an HAProxy startup
-  failure despite a passing preflight), confirming the router retries
-  without the `ssl-provider` directives instead of crash-looping.
 - Unit tests for the operator's eligibility computation: only setting
-  `qat.intel.com/cy` and `ROUTER_QAT=true` together when a matching node
-  advertises the resource and its resolved kernel-compatibility signal meets
-  QAT's minimum, never setting either when the cluster is in FIPS mode or
-  FIPS state cannot be determined (the fail-safe FIPS guard), reaction to
-  `Node` add/update events (and `MachineConfigPool` add/update events, if
-  that option is chosen; see Open Questions), and handling of the
-  unsupported opt-out key.
-- Unit tests confirming the router runs no QAT-related logic whatsoever when
-  `ROUTER_QAT` is unset (no device probing, no config branching), and runs
-  the full preflight when it is `true`.
-- Unit tests for the router's independent local FIPS check
+  `ROUTER_QAT=true` on the router container and `qat.intel.com/cy` on the
+  haproxy container together when a matching node advertises the resource
+  and its resolved kernel-compatibility signal meets QAT's minimum, never
+  setting either when the cluster is in FIPS mode or FIPS state cannot be
+  determined (the fail-safe FIPS guard), reaction to `Node` add/update
+  events (and `MachineConfigPool` add/update events, if that option is
+  chosen; see Open Questions), and handling of the unsupported opt-out key.
+- Unit tests confirming the router container does no QAT-related work when
+  `ROUTER_QAT` is unset.
+- Unit tests for the router container's independent local FIPS check
   (`/proc/sys/crypto/fips_enabled`), confirming it blocks QAT activation
   regardless of `ROUTER_QAT`'s value, including the case where `ROUTER_QAT`
   is (incorrectly) `true` on a FIPS-enabled node.
 - Unit tests for the fail-safe (not fail-open) requirement on both the
-  operator's eligibility gate and the router's local check: a missing or
-  invalid `FIPS_ENABLED` environment variable combined with an unreadable
-  `/proc/sys/crypto/fips_enabled` must result in QAT staying disabled, not
-  in a default-to-non-FIPS outcome.
+  operator's eligibility gate and the router container's local check: a
+  missing or invalid `FIPS_ENABLED` environment variable combined with an
+  unreadable `/proc/sys/crypto/fips_enabled` must result in QAT staying
+  disabled, not in a default-to-non-FIPS outcome.
 
 The following require real QAT hardware, since no credible software
 emulator exists for the QAT PCI accelerator:
@@ -800,10 +826,10 @@ emulator exists for the QAT PCI accelerator:
 - End-to-end validation that `ssl-provider qatprovider` actually offloads
   TLS handshakes, including the `ssl-mode-async` question from Risks and
   Mitigations.
-- End-to-end validation of the runtime failure path: inducing a device
-  failure (or simulating VF revocation) after HAProxy has started with QAT
-  active, and confirming the router falls back to software-only TLS within
-  the expected bound, without manual intervention.
+- End-to-end validation that a missing or unusable device causes the
+  haproxy container to fail to start and crash-loop (rather than, say,
+  hanging or partially starting), and that other router replicas continue
+  serving traffic in the meantime.
 - Validation of the full deployment runbook end to end (RHCOS10 worker
   pool, NFD labeling, Intel Device Plugin Operator, resource advertisement,
   scheduling, and router activation).
@@ -853,7 +879,7 @@ running a newer operator version will begin automatically injecting the
 upgrade, unless the administrator has already set the opt-out.
 
 Downgrading to an operator version that predates this enhancement removes
-the automatic resource injection and preflight/QAT behavior; router pods
+the automatic resource injection and `ROUTER_QAT` behavior; router pods
 return to software-only TLS with no QAT-related resource requests. No manual
 cleanup is required, since no new persisted API field is introduced.
 
@@ -864,8 +890,10 @@ not require control-plane/data-plane coordination beyond the
 cluster-ingress-operator rolling out router deployments as it already does
 today. During a rolling upgrade, some router pods may run with QAT
 acceleration active and others without it (for example, mid-rollout), which
-is acceptable since both states are already supported, crash-safe
-configurations.
+is acceptable since both are supported, already-handled configurations - a
+pod without QAT simply serves software-only TLS, and a pod with QAT either
+works or crash-loops in a way that is isolated to that replica (see Risks
+and Mitigations), not something version skew makes worse.
 
 ## Operational Aspects of API Extensions
 
@@ -874,19 +902,34 @@ API server, or finalizer.
 
 ## Support Procedures
 
-* **Failure Mode 1**: QAT preflight check fails (device not visible,
-  provider fails to load, FIPS incompatibility, or config validation
-  failure).
+* **Failure Mode 1**: The router container's local FIPS check detects FIPS
+  (or cannot determine FIPS state).
   * **Impact**: None to availability - the router omits `ssl-provider` and
-    starts HAProxy with software-only TLS, as it would without this
-    enhancement.
-  * **Detection**: Router logs record which preflight check failed. Router
-    Prometheus metrics show QAT offload as inactive/fallback.
+    the haproxy container starts HAProxy with software-only TLS, as it
+    would without this enhancement.
+  * **Detection**: Router container logs record the FIPS check result.
   * **Teams**: Networking team (ingress maintainers) handles escalations.
 
-* **Failure Mode 2**: The `qat.intel.com/cy` resource request cannot be
-  satisfied (misconfigured `spec.nodePlacement`, insufficient VFs, or Intel
-  Device Plugin Operator not installed/healthy).
+* **Failure Mode 2**: `ROUTER_QAT=true` was set, but the device or
+  provider do not actually work (misconfigured eligibility, a VF that was
+  provisioned but is not functional, or hardware that failed after the
+  operator last checked).
+  * **Impact**: The haproxy container fails to start and crash-loops on
+    that specific replica; it does not serve traffic. Other router
+    replicas, unaffected by the same node-local issue, continue serving
+    traffic normally. This is an accepted failure mode in this initial
+    version rather than something prevented by a preflight check (see
+    Risks and Mitigations).
+  * **Detection**: Standard Kubernetes container restart/`CrashLoopBackOff`
+    signals on the haproxy container; its logs show the HAProxy startup
+    error (for example, a failed `qatprovider` load).
+  * **Teams**: Networking team (ingress maintainers) handles escalations;
+    escalate to the Intel Device Plugin Operator/NFD owners if VF
+    provisioning or node hardware looks like the root cause.
+
+* **Failure Mode 3**: The `qat.intel.com/cy` resource request on the
+  haproxy container cannot be satisfied (misconfigured `spec.nodePlacement`,
+  insufficient VFs, or Intel Device Plugin Operator not installed/healthy).
   * **Impact**: Affected router pods remain `Pending` and do not serve
     traffic; other router replicas that can be scheduled continue serving
     traffic normally.
@@ -898,23 +941,30 @@ API server, or finalizer.
 
 ### Detecting Failures
 
-* **Symptom 1**: Router pod logs show a preflight check failure message
-  (device, provider load, FIPS, or config validation). Target the `router`
-  container explicitly, since the preflight sequence run there.
+* **Symptom 1**: Router container logs show the local FIPS check blocked
+  QAT activation.
   ```bash
   oc logs -n openshift-ingress <router-pod-name> -c router
   ```
 
-* **Symptom 2**: Router pods stuck `Pending` due to an unsatisfiable
-  `qat.intel.com/cy` resource request.
+* **Symptom 2**: Haproxy container is restarting/crash-looping; its logs
+  (including from the previous, crashed instance) show an HAProxy startup
+  error such as a failed `qatprovider` load.
+  ```bash
+  oc get pod -n openshift-ingress <router-pod-name>
+  oc logs -n openshift-ingress <router-pod-name> -c haproxy --previous
+  ```
+
+* **Symptom 3**: Router pods stuck `Pending` due to an unsatisfiable
+  `qat.intel.com/cy` resource request on the haproxy container.
   ```bash
   oc describe pod -n openshift-ingress <router-pod-name>
   ```
 
-* **Symptom 3**: Router metrics show QAT offload inactive or a rising
+* **Symptom 4**: Router metrics show QAT offload inactive or a rising
   software-fallback count despite QAT hardware being expected to be in use.
 
-* **Symptom 4**: `ROUTER_QAT` is unexpectedly unset on a router pod expected
+* **Symptom 5**: `ROUTER_QAT` is unexpectedly unset on a router pod expected
   to have QAT acceleration. Since the flag itself does not carry a reason,
   check the cluster-ingress-operator's logs and events for the
   IngressController, which record why eligibility was not met (no matching
@@ -927,13 +977,18 @@ API server, or finalizer.
 
 ### Graceful Degradation
 
-The feature fails gracefully by design: any preflight failure results in a
-router that starts and serves traffic using software-only TLS, never a
-crash-loop. An administrator can disable the behavior entirely at any time
+This enhancement does not guarantee every pod degrades gracefully on its
+own: a genuinely broken or absent device causes the haproxy container on
+that specific replica to crash-loop rather than silently falling back to
+software-only TLS (see Risks and Mitigations). Degradation happens at the
+fleet level instead - other router replicas, unaffected by the same
+node-local issue, continue serving traffic - and recovery requires either
+fixing the underlying device/VF problem or an administrator disabling the
+behavior. An administrator can disable the behavior entirely at any time
 via the unsupported override in `spec.unsupportedConfigOverrides`; on the
 next rollout, the operator stops setting both the resource request and
 `ROUTER_QAT`, and the router - seeing `ROUTER_QAT` unset - does not attempt
-QAT detection at all.
+QAT detection at all, which stops the affected replica from crash-looping.
 
 ## Infrastructure Needed [optional]
 
