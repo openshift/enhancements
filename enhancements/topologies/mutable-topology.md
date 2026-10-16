@@ -4,6 +4,7 @@ authors:
   - "@jeff-roche"
   - "@jaypoulz"
   - "@eggfoobar"
+  - "@copejon"
 reviewers:
   - "@tjungblu, for cluster-etcd-operator"
   - "@dusk125, for cluster-etcd-operator"
@@ -20,10 +21,11 @@ approvers:
 api-approvers:
   - "@joelspeed, for API and infrastructure config"
 creation-date: 2026-05-11
-last-updated: 2026-08-12
+last-updated: 2026-09-23
 tracking-link:
   - https://issues.redhat.com/browse/OCPEDGE-2280
   - https://issues.redhat.com/browse/OCPEDGE-2640
+  - https://issues.redhat.com/browse/OCPEDGE-2992
 replaces:
   - https://github.com/openshift/enhancements/pull/1905
 superseded-by: []
@@ -103,7 +105,7 @@ Operators continue to react to the same fixed topology values they already under
 
 ## Proposal
 
-This enhancement introduces a new infrastructure API field and a topology transition controller in cluster-config-operator (CCO; not to be confused with cloud-credential-operator) to enable topology transitions as Day 2 operations.
+This enhancement introduces new infrastructure API fields and a topology transition controller in cluster-config-operator (CCO; not to be confused with cloud-credential-operator) to enable topology transitions as Day 2 operations.
 
 The approach follows the standard OpenShift spec/status contract and mirrors the pattern used by `oc adm upgrade`:
 
@@ -113,12 +115,17 @@ The approach follows the standard OpenShift spec/status contract and mirrors the
 
 3. **`oc adm transition topology` CLI command** — A command that validates preconditions, patches `spec.controlPlaneTopology` on the infrastructure CR, and returns immediately.
 
+4. **`topologyTransitionStatus` field in InfrastructureStatus** — the authoritative state of a transition. See [Infrastructure API Changes](#infrastructure-api-changes) for field values and definitions.
+
 The transition controller is proposed to live in cluster-config-operator because CCO is the canonical owner of the `config.openshift.io` API group and the Infrastructure CR.
 The controller is feature-gated using the standard library-go FeatureGateAccess pattern: when the gate is disabled the controller is not registered with the manager and incurs negligible runtime overhead; a gate change triggers an operator restart via ForceExit so the new state is picked up cleanly.
 
 See [Alternatives](#alternatives-not-implemented) for the full analysis of controller placement options.
 
 ### Topology Considerations
+
+> Note: This EP defines the workflows and requirements for transition SNO to HAC cluster topologies. Additional transitions will
+> require their own specialized requirements and workflows.
 
 #### Hypershift / Hosted Control Planes
 
@@ -171,7 +178,7 @@ Administrators should reduce non-critical workload risk accordingly. Administrat
 3. The cluster administrator runs `oc adm transition topology HighlyAvailable`
 4. The CLI validates preconditions before patching (e.g., feature gate enabled, no transition already in progress)
 5. The CLI patches the infrastructure CR: `spec.controlPlaneTopology: HighlyAvailable`
-6. The API server validates `controlPlaneTopology` against the `DesiredControlPlaneTopologyMode` enum, rejecting unsupported topology modes before accepting the write
+6. The API server validates `controlPlaneTopology` against the `TopologyMode` enum constraint (`+kubebuilder:validation:Enum=HighlyAvailable;SingleReplica`), rejecting unsupported topology modes before accepting the write
 
 ##### During Transition
 
@@ -181,11 +188,26 @@ Administrators should reduce non-critical workload risk accordingly. Administrat
    - No dedicated worker nodes are present (the initial implementation targets compact clusters only; clusters with dedicated workers require a different `infrastructureTopology` mapping that is not yet supported)
    - etcd already reports quorum, is not mid-scaling, and already has 3 voting members — i.e., step 2's node-driven scaling has already finished
    If any precondition fails — including an etcd that has not yet finished scaling — the controller does not admit the transition; it records the reason and re-evaluates on the next sync (see [Failure Handling](#failure-handling)).
-8. Once preconditions pass, the controller verifies an upgrade has not been triggered by CVO and then sets `Upgradeable=False` and a `Progressing` condition on the CCO `ClusterOperator` in the same update, signaling that a transition is in progress and preventing CVO from initiating an upgrade
-9. The controller updates the infrastructure status fields:
+8. Once preconditions pass, the controller verifies an upgrade has not been triggered by CVO and then sets `Upgradeable=False`, signaling that a transition is in progress and preventing CVO from initiating an upgrade.
+9. The CCO updates the `TopologyTransitionCompleted` condition (which is always present in `topologyTransitionStatus.conditions`) from `status: Unknown` to `status: False`.
+10. The controller updates the infrastructure status fields:
    - `controlPlaneTopology` transitions from `SingleReplica` to `HighlyAvailable`
    - `infrastructureTopology` transitions from `SingleReplica` to `HighlyAvailable` (no dedicated workers, so it matches control plane topology)
-10. **Topology-driven operator reactions** — operators that watch the infrastructure status topology fields reconcile against the new values and adjust their deployment strategies, replica counts, and placement policies.
+   - `topologyTransitionStatus.conditions` array contains both required conditions:
+     - `TopologyTransitionsEvaluated`:
+       - `type: TopologyTransitionsEvaluated`
+       - `status: True`
+       - `reason: EvaluationComplete`
+       - `message: "Transition evaluation completed"`
+       - `lastTransitionTime: <time of last evaluation>`
+     - `TopologyTransitionCompleted`:
+       - `type: TopologyTransitionCompleted`
+       - `status: False` (indicates transition in progress)
+       - `reason: TransitionInProgress`
+       - `message: "Applying topology transition to HighlyAvailable"`
+       - `lastTransitionTime: <current time>`
+
+11. **Topology-driven operator reactions** — operators that watch the infrastructure status topology fields reconcile against the new values and adjust their deployment strategies, replica counts, and placement policies.
     This is a distinct phase from step 2: step 2 covers operators reacting to node presence before the transition is even admitted, step 10 covers operators reacting to the topology status change after admission.
     The set of operators with topology-dependent behavior has not been fully enumerated — building the per-operator topology dependency matrix is a prerequisite for entering dev preview (see [Graduation Criteria](#entering-dev-preview) and [Open Questions](#open-questions)).
 
@@ -193,23 +215,36 @@ Administrators should reduce non-critical workload risk accordingly. Administrat
 
 ##### Post-Transition
 
-11. After a soak period (5 minutes) following the `Progressing` condition, the controller checks that control-plane/worker node readiness, etcd health, MachineConfig rollout, ingress router replicas, and API server operator replica counts have reconciled to the target values
-12. Once all checks pass, the controller clears the `Progressing` condition and sets `Upgradeable=True`. The infrastructure status reflects the completed transition — `spec.controlPlaneTopology` matches `status.controlPlaneTopology`, so no further action is taken.
+12. After a soak period (5 minutes) following the `TopologyTransitionCompleted` condition transitioning to `status: False`, the controller checks that control-plane/worker node readiness, etcd health, MachineConfig rollout, ingress router replicas, and API server operator replica counts have reconciled to the target values
+13. Once all checks pass, the controller updates the `TopologyTransitionCompleted` condition to `status: True`, clears the CCO `Progressing` condition, and sets `Upgradeable=True`:
+    - `type: TopologyTransitionCompleted`
+    - `status: True` (indicates transition completed)
+    - `reason: PostTransitionChecksPassed`
+    - `message: "Topology transition completed successfully"`
+    - `lastTransitionTime: <current time>`
 
-The CLI returns immediately after patching `spec.controlPlaneTopology` (step 5). Administrators can monitor transition progress by watching CCO ClusterOperator status conditions (e.g., `oc get clusteroperator cluster-config-operator -o yaml`).
+    The infrastructure status reflects the completed transition — `spec.controlPlaneTopology` matches `status.controlPlaneTopology`, so no further action is taken.
+
+The CLI returns immediately after patching `spec.controlPlaneTopology` (step 5). Administrators can monitor transition progress through:
+- Check available transitions: `oc get infrastructure cluster -o jsonpath='{.status.topologyTransitionStatus.transitions}'`
+- Check transition completion status: `oc get infrastructure cluster -o jsonpath='{.status.topologyTransitionStatus.conditions[?(@.type=="TopologyTransitionCompleted")]}'`
+- Check evaluation status: `oc get infrastructure cluster -o jsonpath='{.status.topologyTransitionStatus.conditions[?(@.type=="TopologyTransitionsEvaluated")]}'`
+- Full status: `oc get infrastructure cluster -o yaml | yq .status.topologyTransitionStatus`
+- CCO ClusterOperator conditions: `oc get clusteroperator cluster-config-operator -o yaml`
 
 ##### Failure Handling
 
 The controller recognizes two distinct failure windows, and makes no guarantees about the node-driven etcd scaling itself:
 
-- **Before admission**: if a precondition never becomes true — for example etcd never finishes scaling to 3 voting members, or a control-plane node never becomes `Ready` — the controller simply never admits the transition.
-  `spec.controlPlaneTopology` remains diverged from `status.controlPlaneTopology` indefinitely, and the `Progressing`/`Upgradeable` conditions carry a diagnostic reason (e.g. `PreflightCheckFailed`) that the administrator can inspect.
+- **Before admission**: if a precondition never becomes true — for example etcd never finishes scaling to 3 voting members, or a control-plane node never becomes `Ready` — the controller does not update the `TopologyTransitionCompleted` condition to `status: False`. The `transitions` array will either be empty or contain the requested transition with individual check conditions in the transition's `evaluations` array explaining why preconditions failed. The administrator inspects the `TopologyTransitionsEvaluated` condition status and examines individual transition evaluations to understand what failed.
   Failures in the node-driven etcd scaling itself — including quorum loss in the 2-member window, which requires manual recovery via `quorum-restore.sh` — are cluster-etcd-operator's existing failure domain; the topology transition controller neither triggers nor is able to recover from them, since they occur before it admits the transition.
-- **After admission**: if a post-transition validation criterion never passes (e.g., an operator fails to reconcile), the `Progressing` condition remains `True` and `Upgradeable` remains `False` indefinitely. The administrator inspects CCO and the relevant operator's logs and ClusterOperator status conditions for details.
-  `spec.controlPlaneTopology` remains unchanged — the controller re-evaluates reconciliation on every sync. To cancel a transition that has not yet reached the status update (step 9), the administrator resets `spec.controlPlaneTopology` to match the current `status.controlPlaneTopology` (e.g., `oc adm transition topology SingleReplica`).
-  After the status fields have been updated, the transition is effectively complete and cannot be cancelled — the cluster is in the new topology. This follows the standard Kubernetes pattern where controllers continuously reconcile toward the desired state until the user changes intent
+
+- **After admission**: if post-transition validation never passes (e.g., an operator fails to reconcile), the `TopologyTransitionCompleted` condition remains at `status: False` indefinitely. The administrator inspects the `TopologyTransitionCompleted` condition's `reason` and `message` fields, CCO logs, and the relevant operator's logs for details.
+  `spec.controlPlaneTopology` remains unchanged — the controller re-evaluates reconciliation on every sync. After the status fields have been updated, the transition is effectively complete and cannot be cancelled — the cluster is in the new topology. This follows the standard Kubernetes pattern where controllers continuously reconcile toward the desired state until the user changes intent
 
 ### API Extensions
+
+The full API implementation is available at openshift/api#3029. The below
 
 #### Infrastructure API Changes
 
@@ -220,36 +255,19 @@ This enhancement modifies the existing infrastructure CR (`infrastructures.confi
 A new `controlPlaneTopology` field is added to `InfrastructureSpec` to express the administrator's intent to transition:
 
 ```go
-// DesiredControlPlaneTopologyMode restricts the set of topology modes that can be
-// requested as a transition target.
-// +kubebuilder:validation:Enum=SingleReplica;HighlyAvailable
-type DesiredControlPlaneTopologyMode string
-
-const (
-	DesiredSingleReplica   DesiredControlPlaneTopologyMode = "SingleReplica"
-	DesiredHighlyAvailable DesiredControlPlaneTopologyMode = "HighlyAvailable"
-)
-
 type InfrastructureSpec struct {
 	CloudConfig  ConfigMapFileReference `json:"cloudConfig"`
 	PlatformSpec PlatformSpec           `json:"platformSpec,omitempty"`
-	// ControlPlaneTopology expresses the administrator's intent
-	// for the cluster's control plane topology. Empty by default — the
-	// field is unset until an administrator explicitly initiates a
-	// transition. When set and the value differs from
-	// status.controlPlaneTopology, the topology transition controller
-	// in cluster-config-operator initiates a transition. An empty value
-	// means no transition has been requested.
-	// +optional
-	// +openshift:enable:FeatureGate=MutableTopology
-	ControlPlaneTopology DesiredControlPlaneTopologyMode `json:"controlPlaneTopology,omitempty"`
+
+	// controlPlaneTopology expresses the desired topology configuration for control nodes.
+	ControlPlaneTopology TopologyMode `json:"controlPlaneTopology,omitempty"`
 }
 ```
 
 The field is empty by default — the installer does not populate it. An empty `spec.controlPlaneTopology` on an existing or upgraded cluster indicates that no transition has ever been requested. After a successful transition, the field remains set (e.g., `HighlyAvailable`) and matches `status.controlPlaneTopology` — the controller is idle.
 This makes it straightforward to distinguish clusters that have undergone a transition (field set, matches status) from those that have not (field empty). A transition is initiated when the administrator sets `spec.controlPlaneTopology` to a value that differs from `status.controlPlaneTopology`.
 
-The `DesiredControlPlaneTopologyMode` named type restricts accepted values to topology modes that have defined transitions. For the initial implementation, only `SingleReplica` and `HighlyAvailable` are valid. Additional values can be added as new transitions are supported.
+The field uses the existing `TopologyMode` type with an enum validation constraint that restricts accepted values to topology modes that have defined transitions. For the initial implementation, only `SingleReplica` and `HighlyAvailable` are valid enum values. Additional values can be added as new transitions are supported.
 
 **Mapping to status fields**: `spec.controlPlaneTopology` expresses intent for the control plane topology only. The controller derives the corresponding `infrastructureTopology` and `mastersSchedulable` values based on the transition definition.
 For the initial SNO → HA compact transition: `controlPlaneTopology` and `infrastructureTopology` both transition to `HighlyAvailable` (no dedicated workers), and `mastersSchedulable` remains `true` (it is already `true` on SNO clusters since the single node runs all workloads; it stays `true` for compact clusters).
@@ -259,41 +277,129 @@ For the initial SNO → HA compact transition: `controlPlaneTopology` and `infra
 The existing fields in `InfrastructureStatus` that the controller updates upon successful transition:
 
 ```go
-// controlPlaneTopology expresses the expectations for operands that normally
-// run on control nodes. Currently documented as "set once by the installer
-// and not expected to change." This enhancement changes that contract when
-// the MutableTopology feature gate is enabled.
-// +kubebuilder:default=HighlyAvailable
+// controlPlaneTopology defines control-plane operand availability.
 ControlPlaneTopology TopologyMode `json:"controlPlaneTopology"`
 
-// infrastructureTopology expresses the expectations for infrastructure
-// services that do not run on control plane nodes. When there are no
-// dedicated worker nodes, this is set to match controlPlaneTopology.
-// +kubebuilder:default=HighlyAvailable
+// infrastructureTopology defines infrastructure-service availability.
 InfrastructureTopology TopologyMode `json:"infrastructureTopology,omitempty"`
+
+// topologyTransitionStatus reports transition availability and progress.
+TopologyTransitionStatus TopologyTransitionStatus `json:"topologyTransitionStatus,omitzero"`
+```
+
+The `TopologyTransitionStatus` structure reports which transitions are supported and tracks progress of any initiated transition:
+
+```go
+// TopologyTransitionStatus reports transition availability and progress.
+type TopologyTransitionStatus struct {
+	// conditions reports evaluation and transition progress. Both types always present.
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// transitions lists supported transitions and availability. Cleared when evaluation stale.
+	Transitions []TopologyTransition `json:"transitions,omitempty"`
+}
+
+// TopologyState identifies one transition endpoint.
+type TopologyState struct {
+	// controlPlaneTopology is the endpoint's control-plane topology. External invalid.
+	ControlPlaneTopology TopologyMode `json:"controlPlaneTopology,omitempty"`
+
+	// infrastructureTopology is the endpoint's infrastructure topology.
+	InfrastructureTopology TopologyMode `json:"infrastructureTopology,omitempty"`
+}
+
+type TopologyTransition struct {
+	// source is the evaluated starting topology. May be stale during refresh.
+	Source TopologyState `json:"source,omitempty,omitzero"`
+
+	// target is the resulting topology.
+	Target TopologyState `json:"target,omitempty,omitzero"`
+
+	// evaluations reports aggregate availability and individual checks.
+	Evaluations []metav1.Condition `json:"evaluations,omitempty"`
+}
+```
+
+**Condition Types:**
+
+```go
+const (
+	// TopologyTransitionsEvaluatedConditionType: True iff results current.
+	TopologyTransitionsEvaluatedConditionType = "TopologyTransitionsEvaluated"
+
+	// TopologyTransitionCompletedConditionType: True after target reached and checks pass.
+	TopologyTransitionCompletedConditionType = "TopologyTransitionCompleted"
+
+	// TopologyTransitionAvailableConditionType: True iff all availability checks pass.
+	TopologyTransitionAvailableConditionType = "TopologyTransitionAvailable"
+)
 ```
 
 No new enum values are added to `TopologyMode`. The existing values (`SingleReplica`, `HighlyAvailable`, `DualReplica`, `HighlyAvailableArbiter`) are sufficient.
 
-**Transition progress** will be reported via the following condition types on the CCO `ClusterOperator` status:
+#### Design Rationale: Proactive Transition Availability
 
-| Condition Type | Meaning |
-| -------------- | ------- |
-| `TopologyTransitionControllerProgressing` | A transition has been admitted and post-transition validation has not yet passed. `status: True` while awaiting downstream reconciliation, `status: False` when idle, rejected, or complete. |
-| `TopologyTransitionControllerUpgradeable` | Whether CVO may start an upgrade. `status: False` while a transition is requested, pending, or in progress; `status: True` when idle or complete. |
+The `TopologyTransitionStatus` structure enables administrators to discover available transitions before requesting one:
 
-These are existing operator conditions on the CCO `ClusterOperator`, not dedicated transition condition types — the `Reason`/`Message` fields distinguish states (e.g. `UnsupportedTransition`, `PreflightCheckFailed`, `TopologyTransitionInProgress`, `TopologyTransitionComplete`, `AsExpected`).
-There is no separate condition for etcd scaling — that scaling is a precondition the controller checks, not a state it tracks or reports on directly (see [Failure Handling](#failure-handling)). Reason values will be refined during dev preview implementation.
+**Proactive Evaluation:**
+1. Controller continuously evaluates which transitions are supported based on current cluster state
+2. `transitions` array publishes available options with their source and target topologies
+3. When preconditions fail, the transition's `evaluations` array contains individual check conditions with `reason` and `message` explaining why it's unavailable
+4. `TopologyTransitionsEvaluated` condition indicates whether the array reflects current state
+
+**Separation of Concerns:**
+- **Availability**: `transitions` array shows what transitions are possible, with per-transition `evaluations` providing granular check results
+- **Progress**: `TopologyTransitionCompleted` condition tracks the state of an initiated transition
+- **Evaluation Status**: `TopologyTransitionsEvaluated` condition indicates staleness
+
+**Benefits:**
+- CLI can query available transitions without duplicating precondition checks
+- Administrators see why a transition is unavailable before requesting it via individual check conditions in `evaluations`
+- Transition failures provide structured reason/message fields in the `TopologyTransitionCompleted` condition for troubleshooting
+- Controller supports up to 8 transition options simultaneously (`maxItems: 8`)
+
+**Transition Status Reporting**
+
+The controller reports transition status through two required conditions and an optional transitions array:
+
+**1. TopologyTransitionsEvaluated Condition** (in `status.topologyTransitionStatus.conditions`):
+- **Unknown**: Before evaluation or while refreshing checks
+- **True**: Evaluation finished successfully (even if no transitions are supported)
+- **False**: Evaluation failed
+- **Purpose**: Indicates whether `transitions` array reflects current state
+
+**2. TopologyTransitionCompleted Condition** (in `status.topologyTransitionStatus.conditions`):
+- **Unknown**: Before a transition is requested
+- **False**: Transition in progress or blocked (check `reason` and `message` for details)
+- **True**: Transition successfully completed, post-transition checks passed
+- **Purpose**: Tracks the status of the current or most recent transition
+
+**3. transitions Array** (in `status.topologyTransitionStatus`):
+- Contains transitions valid for current cluster state
+- Empty or omitted when TopologyTransitionsEvaluated is not True
+- Controller populates this proactively (before a transition is requested)
+- Each transition contains an `evaluations` array with individual check conditions
+- Administrators/CLI can inspect this to determine available options and detailed precondition status
+
+**ClusterOperator-level Conditions** (on CCO `ClusterOperator`):
+
+| Condition | Relationship to TopologyTransitionStatus |
+|-----------|------------------------------------------|
+| `Progressing` | Set to `True` while `TopologyTransitionCompleted` condition has `status: False` |
+| `Upgradeable` | Set to `False` while a transition is in progress (when `TopologyTransitionCompleted` has `status: False`) |
+
+These are existing operator conditions on the CCO `ClusterOperator`, not dedicated transition condition types.
+There is no separate status for etcd scaling — that scaling is a precondition the controller checks, not a state it tracks or reports on directly (see [Failure Handling](#failure-handling)). Reason values will be refined during dev preview implementation.
 
 #### Admission Control
 
-**Spec validation**: The `DesiredControlPlaneTopologyMode` named type restricts `spec.controlPlaneTopology` to the set of topology modes that have defined transitions (`SingleReplica`, `HighlyAvailable`).
-The API server rejects unsupported values at admission time via the kubebuilder enum validation on the type. No additional validation rules are required.
+**Spec validation**: The `spec.controlPlaneTopology` field uses the existing `TopologyMode` type with an enum validation constraint (`+kubebuilder:validation:Enum=HighlyAvailable;SingleReplica`) that restricts accepted values to topology modes that have defined transitions.
+The API server rejects unsupported values at admission time via the kubebuilder enum validation tag. No additional validation rules are required.
 
 Access to `spec.controlPlaneTopology` is governed by the existing RBAC for the infrastructure CR (`infrastructures.config.openshift.io`). By default, only users with `cluster-admin` or equivalent roles can modify infrastructure spec fields.
 No additional RBAC restrictions are proposed for the initial implementation; a dedicated role for topology transitions may be considered in future iterations if finer-grained access control is needed.
 
-**Status fields**: The existing topology status fields (`controlPlaneTopology`, `infrastructureTopology`, `mastersSchedulable`) are not protected by admission policies. This is consistent with other infrastructure status fields — no special protection exists for them today. An administrator who deliberately modifies these values outside the transition controller does so at their own risk.
+**Status fields**: The existing topology status fields (`controlPlaneTopology`, `infrastructureTopology`, and `topologyTransitionStatus`) are not protected by admission policies. This is consistent with other infrastructure status fields — no special protection exists for them today. An administrator who deliberately modifies these values outside the transition controller does so at their own risk.
 
 #### Feature Gate
 
@@ -314,7 +420,7 @@ A new topology transition controller is added to cluster-config-operator with th
 - Maintains the set of supported transitions (initially only SingleReplica → HighlyAvailable on `platform: none`)
 - Validates preconditions before starting a transition
 - Updates `controlPlaneTopology` and `infrastructureTopology` in status once preconditions pass
-- Reports transition progress via CCO ClusterOperator status conditions
+- Reports transition progress via the `TopologyTransitionStatus` field on the `infrastructures.config.openshift.io` "cluster" API object.
 
 ##### Supported Transitions
 
@@ -336,6 +442,7 @@ The controller reconciles `spec.controlPlaneTopology` against `status.controlPla
 
 **Preconditions** (all must hold before a transition is accepted):
 
+- No cluster upgrade is in progress — the `ClusterVersion` object's `Progressing` condition is `False`
 - Every ClusterOperator other than cluster-config-operator itself reports `Available=True`, `Progressing=False`, `Degraded=False`
 - Exactly 3 control-plane-labeled nodes exist, all schedulable and `Ready`, and no dedicated worker nodes are present
 - etcd has quorum and is not mid-scaling, and 3 voting members are already recorded for it
@@ -346,20 +453,24 @@ These preconditions mean the administrator's node join and CEO's existing node-d
 
 1. Set `Upgradeable=False` and a `Progressing` condition on the CCO `ClusterOperator` in the same update, so CVO cannot start an upgrade while the transition is applied
 2. Re-read the Infrastructure CR and confirm the requested spec has not changed since preconditions were checked
-3. Update `status.controlPlaneTopology` and `status.infrastructureTopology` to the target value
-4. On later syncs, wait a soak period (5 minutes) after the `Progressing` condition was set, then begin checking post-transition validation criteria
+3. Update status fields together in a single Infrastructure status update:
+   - `status.controlPlaneTopology` → `HighlyAvailable`
+   - `status.infrastructureTopology` → `HighlyAvailable`
+   - `status.topologyTransitionStatus.conditions[TopologyTransitionCompleted]` updated to status: False, reason: TransitionInProgress, message, lastTransitionTime
+4. On later syncs, wait a soak period (5 minutes) anchored on the `TopologyTransitionCompleted` condition's `lastTransitionTime` — then begin checking post-transition validation criteria
 
-If no supported transition matches, or a precondition fails, the controller records the reason on the `Progressing`/`Upgradeable` conditions rather than erroring, so the administrator can revert `spec.controlPlaneTopology` to resolve it.
+If preconditions fail, the controller updates the `transitions` array to either be empty (if no transitions are possible) or contain the transition with individual check conditions in the transition's `evaluations` array explaining the failure. The controller does not update `TopologyTransitionCompleted` condition to `status: False` until preconditions pass.
 
 **Validation criteria** (checked once the soak period has elapsed; all must pass to consider the transition complete):
 
 - 3 control-plane nodes remain schedulable and `Ready`, and a minimum of 2 worker-labeled nodes, including dual-role compact nodes, are `Ready`.
 - etcd retains quorum, is not mid-scaling, and reports 3 voting members
-- The SNO-only master MachineConfig has been removed and a new rendered master/worker MachineConfigs exist, with the master MachineConfigPool reporting 3 ready machines
+- The SNO-only master MachineConfig has been removed and a new rendered master/worker
+  MachineConfigs exist, with the master MachineConfigPool reporting 3 ready machines
 - The default IngressController reports a minimum of 2 available router replicas
 - kube-apiserver reports status for 3 nodes and openshift-apiserver reports 3 ready replicas
 
-Once all criteria pass, the controller clears `Progressing` and sets `Upgradeable=True`.
+Once all criteria pass, the controller updates the `TopologyTransitionCompleted` condition to status: True with appropriate reason and message, and sets `Progressing=False` and `Upgradeable=True` on the ClusterOperator.
 
 #### `oc adm transition topology` CLI Command
 
@@ -399,7 +510,7 @@ The blast radius of a failure during the 2-member window is higher than during i
 | Component | Changes Required |
 | --------- | ---------------- |
 | cluster-config-operator | New topology transition controller; watches `spec.controlPlaneTopology`, coordinates transitions, updates status topology fields |
-| Infrastructure API (`openshift/api`) | Add `controlPlaneTopology` to `InfrastructureSpec` with `DesiredControlPlaneTopologyMode` named type; update immutability documentation on status topology fields |
+| Infrastructure API (`openshift/api`) | Add `controlPlaneTopology` to `InfrastructureSpec` using `TopologyMode` type with enum validation; update immutability documentation on status topology fields |
 | `oc` CLI | New `oc adm transition topology` command |
 | cluster-etcd-operator | No code changes — its existing node-driven (unsafe) etcd scaling behavior is depended on as a precondition the transition controller checks for, rather than something it triggers or orchestrates |
 | ingress, networking, monitoring operators | Reconcile on infrastructure status topology field changes |
@@ -435,7 +546,7 @@ The topology transition controller checks for Node objects in the API regardless
 - The controller only admits a transition once its preconditions — including etcd already having quorum and 3 voting members — are satisfied; it does not itself trigger or sequence etcd scaling
 - Operators do not see a topology change until the controller updates the infrastructure status
 - Etcd scaling failures (including quorum loss) are cluster-etcd-operator's existing failure domain; the transition controller withholds admission but provides no additional recovery guarantees for them. Quorum loss requires manual recovery via `quorum-restore.sh`
-- CCO ClusterOperator status conditions provide detailed state for troubleshooting precondition and post-admission failures
+- `status.topologyTransitionStatus` on the Infrastructure object, together with Events and the `Progressing`/`Upgradeable` conditions on the CCO `ClusterOperator`, provide detailed state for troubleshooting precondition and post-admission failures
 
 #### Risk: Platform Bare Metal May Not Support Single-Node Clusters (Future Scope)
 
@@ -609,7 +720,7 @@ Standard QE testing scenarios will include:
 - `controlPlaneTopology` field added to `InfrastructureSpec`
 - `oc adm transition topology` CLI command implemented
 - `MutableTopology` feature gate added to `DevPreviewNoUpgrade` feature set
-- `DesiredControlPlaneTopologyMode` named type validated in API integration tests
+- `spec.controlPlaneTopology` enum validation tested in API integration tests
 - Per-operator topology dependency matrix completed: for each in-payload operator that reads `controlPlaneTopology` or `infrastructureTopology`, document what the operator uses the value for (replica count, scheduling, feature enablement) and whether it watches the infrastructure CR for changes or reads the value only at startup
 - Operators that read topology only at startup are identified and a restart strategy is documented for post-transition reconciliation
 - CCO sets `Upgradeable=False` on its ClusterOperator while a topology transition is in progress
@@ -672,7 +783,7 @@ This enhancement adds a `controlPlaneTopology` field to `InfrastructureSpec`. Th
 - Has no impact when it matches the current `status.controlPlaneTopology` or is empty
 - During transitions, the CCO topology transition controller makes API calls to coordinate operator transition. These calls are low-frequency and bounded by the transition sequence.
 
-The `DesiredControlPlaneTopologyMode` named type provides API-server-level validation with no additional services required. Topology status fields are not protected by admission policies — this is consistent with other infrastructure status fields.
+The enum validation constraint on `spec.controlPlaneTopology` provides API-server-level validation with no additional services required. Topology status fields are not protected by admission policies — this is consistent with other infrastructure status fields.
 
 ## Support Procedures
 
@@ -682,7 +793,7 @@ The `DesiredControlPlaneTopologyMode` named type provides API-server-level valid
 - Topology transition controller in cluster-config-operator
 - CLI (`oc adm transition topology` command)
 - Supported transition definitions and validation logic
-- Infrastructure CR API changes (`DesiredControlPlaneTopologyMode` type, `controlPlaneTopology` field)
+- Infrastructure CR API changes (`controlPlaneTopology` field in spec with enum validation)
 
 **Control Plane Team:**
 - cluster-etcd-operator (CEO) node-driven etcd scaling — existing, unmodified behavior that the transition controller relies on as a precondition
@@ -696,23 +807,28 @@ The `DesiredControlPlaneTopologyMode` named type provides API-server-level valid
 ### Detecting Issues
 
 **Transition Stuck or Failed:**
-- Symptom: CCO ClusterOperator status conditions show transition in progress or failed for an extended period
-- Check: `oc get clusteroperator cluster-config-operator -o yaml` for status conditions
+- Symptom: the `TopologyTransitionCompleted` condition shows `status: False` for an extended period, or `transitions` array is empty when a transition should be available
+- Check transition completion status: `oc get infrastructure cluster -o jsonpath='{.status.topologyTransitionStatus.conditions[?(@.type=="TopologyTransitionCompleted")]}'`
+- Check available transitions: `oc get infrastructure cluster -o jsonpath='{.status.topologyTransitionStatus.transitions}'`
+- Check evaluation status: `oc get infrastructure cluster -o jsonpath='{.status.topologyTransitionStatus.conditions[?(@.type=="TopologyTransitionsEvaluated")]}'`
+- Check ClusterOperator conditions: `oc get clusteroperator cluster-config-operator -o yaml`
 - Check: cluster-config-operator logs for transition controller errors
 - Check: CEO logs for etcd scaling operations
-- Resolution: Address the reported issue and retry, or contact support
+- Resolution: If transition is unavailable, inspect individual check conditions in the transition's `evaluations` array to understand what failed. Address the reported precondition and allow cluster-object changes to trigger reevaluation. Contact support if the condition persists.
 
 **etcd Scaling Failures:**
 - Symptom: etcd cluster unhealthy during the node-driven prerequisite scaling — the transition controller will not admit the transition until this resolves
 - Check: CEO logs for etcd scaling operations
 - Check: etcd member list: `oc -n openshift-etcd exec <etcd-pod> -- etcdctl member list`
-- Resolution: If quorum is lost, follow standard etcd disaster recovery procedures (`quorum-restore.sh`), independent of the topology transition controller. Automated rollback is not possible without quorum. Restoring to pre-transition snapshot could operate as a fallback recovery procedure pending verification of that procedure. 
+- Resolution: If quorum is lost, follow standard etcd disaster recovery procedures (`quorum-restore.sh`), independent of the topology transition controller. Automated rollback is not possible without quorum. Restoring to pre-transition snapshot could operate as a fallback recovery procedure pending verification of that procedure.
 
 ### Recovery Procedures
+> Reverting / undoing a topology transition is not a supported operation. Once the new topology is deployed, there is no going back.
 
 | Failure Mode | Impact | Recovery |
 | ------------ | ------ | -------- |
-| Controller fails during precondition check | No impact — transition not admitted | Address the precondition and retry |
+| Admission precondition is false | No impact — transition not admitted; `TopologyTransitionCompleted` remains at `status: Unknown`; `transitions` array either empty or contains transition with individual check failures in `evaluations` | Address the precondition; controller re-evaluates and updates `transitions` array and `evaluations` |
+| Sync/API error during reconciliation | Transition progress is interrupted; the controller reports the error | Inspect the error; standard rate-limited workqueue backoff retries the sync |
 | etcd quorum loss during prerequisite scaling (2-member window, pre-admission) | API unavailable — no automated recovery possible; transition controller cannot help since the transition was never admitted | Manual intervention required: administrator runs `quorum-restore.sh` per standard etcd disaster recovery procedures, independent of the transition controller |
 | Operator fails to reconcile post-transition | Operator-specific impact | Investigate operator logs; file bug against the operator component |
 | CCO crash during transition | Transition paused | CCO restarts via deployment controller and the transition controller resumes reconciliation |
