@@ -11,7 +11,7 @@ approvers:
 api-approvers:
   - "@Prashanth684"
 creation-date: 2026-09-17
-last-updated: 2026-09-30
+last-updated: 2026-10-16
 status: provisional
 tracking-link:
   - https://redhat.atlassian.net/browse/MG-376
@@ -39,8 +39,8 @@ An audit of every collector script reveals that the vast majority do not produce
 
 The parent `gather` script has two fundamental problems:
 
-1. **Group wait loses exit codes.** `wait "${pids[@]}"` (line 185) returns only the exit status of the last PID in the list. If collectors 1-27 fail and collector 28 succeeds, the parent sees exit `0`.
-2. **No exit code capture.** The parent does not store or inspect any collector's exit code. After `wait`, it runs `gather_aro` synchronously (line 189) and ends with `sync` (line 198). The overall gather process effectively always exits `0`.
+1. **Group wait loses exit codes.** [`wait "${pids[@]}"`](https://github.com/openshift/must-gather/blob/e2487964fe989e4147fc02cede01ea0bc8a6be7c/collection-scripts/gather#L201) returns only the exit status of the last PID in the list. If collectors 1-27 fail and collector 28 succeeds, the parent sees exit `0`.
+2. **No exit code capture.** The parent does not store or inspect any collector's exit code. After `wait`, it runs [`gather_aro`](https://github.com/openshift/must-gather/blob/e2487964fe989e4147fc02cede01ea0bc8a6be7c/collection-scripts/gather#L205) synchronously and ends with [`sync`](https://github.com/openshift/must-gather/blob/e2487964fe989e4147fc02cede01ea0bc8a6be7c/collection-scripts/gather#L214). The overall gather process effectively always exits `0`.
 
 #### Collector error signal audit
 
@@ -191,7 +191,7 @@ One enhancement document covers the full design. Implementation is split into tw
 | Schema v1 | `status.json` with `schemaVersion`, collector outcomes, `framework` section, bounded messages |
 | Collector instrumentation | Priority set: `get_operator_ns` callers, `gather_monitoring`, `gather_etcd`, `gather_ppc`, `gather_metallb`, nested-wait collectors |
 | Exit semantics | `gather` exits `0` when archive finalizes; report `overallStatus` carries completeness truth |
-| Tests | BATS for helpers/wrapper; fake-collector tests; archive validation; gather exit-0 regression |
+| Tests | BATS for helpers/wrapper; fake-collector tests; archive validation; gather exit-0 regression; CI lint check that fails if `collection-scripts/` reintroduces group `wait "${array[@]}"` without per-PID handling |
 | Docs | Support procedures for reading `status.json` from archives |
 
 **Phase 1 incremental delivery (3 PRs):**
@@ -200,9 +200,11 @@ Phase 1 is delivered as three incremental pull requests. Each PR can be reviewed
 
 | PR | Scope | Contents | Risk |
 |----|-------|----------|------|
-| **PR 1: Infrastructure** | Framework and orchestration | Add `status_reporting.sh` (`report_error`, `report_skip`, `status_init`, `status_finalize`, atomic merge). Refactor `gather` to per-PID wait loop (replace group `wait`). Generate `status.json` with `schemaVersion: 1`. Add BATS unit tests for helpers. Clean up dead code (`resources+=()` on `gather` line 50). | Low — additive, no collector behavior changes. |
+| **PR 1: Infrastructure** | Framework and orchestration | Add `status_reporting.sh` (`report_error`, `report_skip`, `status_init`, `status_finalize`, atomic merge). Refactor `gather` to per-PID wait loop (replace group `wait`). Generate `status.json` with `schemaVersion: 1`. Add BATS unit tests for helpers. Clean up dead code. | Low — additive, no collector behavior changes. |
 | **PR 2: Skip instrumentation** | Silent-skip visibility | Fix `get_operator_ns` to call `report_skip` (affects metallb, nmstate, nfd, sriov). Add `report_skip` to all silent-skip collectors (vsphere, aro, osus, windows, frrk8s, olm\_v1, priority\_and\_fairness, metallb CR-absent case as `report_error`). Add BATS tests for skip detection. | Low — one-line additions per collector, exit codes unchanged. |
 | **PR 3: Error instrumentation** | Error-swallowing and nested-wait fixes | Fix `gather_monitoring` (remove unconditional-success suppression, add `report_error`). Fix `gather_etcd`, `gather_ppc`, `gather_network_logs_basics`, `gather_sriov`, `gather_olm_v1` error handling. Fix all nested-wait collectors (per-PID child wait). Add `gather_insights` basic error handling. Add BATS tests for error/degraded detection. | Medium — behavioral changes inside collectors, needs careful per-collector review. |
+
+PR 1 modifies only the parent `gather` script and adds `status_reporting.sh`; individual collector scripts are not changed until PR 2 (skip instrumentation) and PR 3 (error instrumentation).
 
 A fourth parallel effort (support documentation, error code registry, archive inspection guide) can proceed alongside PRs 2 and 3.
 
@@ -295,9 +297,12 @@ The report has an overall status separate from individual collector outcomes:
 |----------|-----------------|---------------------|
 | All work units success or skipped | `success` | `0` |
 | Archive finalized, any work unit `degraded` or `error` | `degraded` | `0` (report is the completeness signal) |
-| Framework failure, archive not finalized, timeout before trustworthy report | `error` | non-zero |
+| Timeout or cancellation interrupted collection (`interrupted: true`) | `error` | non-zero |
+| Framework failure, archive not finalized | `error` | non-zero |
 
 There is no v1 concept of "required collectors" that flip overall status to `error`. Collector failures on a finalized archive are always `degraded`. This preserves the upstream must-gather best-effort contract and the existing e2e expectation that gather exits successfully when the archive is produced.
+
+**Exception — interrupted reports:** When `interrupted: true`, the overall status is always `error` regardless of whether a partial report or archive was written. This is an explicit exception to the "finalized archive ⇒ `degraded`" rule because a timeout or cancellation means the gather workflow did not complete and the report may not reflect the full intended collection scope. Phase 2 maps `interrupted: true` reports to the `CollectionFrameworkError` CR reason.
 
 On timeout or cancellation, write a partial report when possible. The partial report must still include an entry for **every scheduled work unit** (the "no `unknown` state" rule applies even under timeout). Finished units keep their normal outcomes. Work units that were launched but not yet completed when the timeout fires receive `status: error`, `exitCode: null`, and a message with code `INTERRUPTED` (for example `"Collection interrupted before completion"`). Set the report-level fields `overallStatus: error`, `completedAt`, and `interrupted: true`.
 
@@ -558,8 +563,8 @@ This enhancement must fix the broken error signals in existing collectors as par
 
 | Current code | Fix |
 |-------------|-----|
-| `wait "${pids[@]}"` (line 185) — group wait, only last exit code | Replace with per-PID loop: `for pid in "${pids[@]}"; do wait "$pid"; capture exit code and map to collector name; done` |
-| `gather_aro` (line 189) — synchronous, exit code not captured | Wrap in the same per-PID reporting path |
+| [`wait "${pids[@]}"`](https://github.com/openshift/must-gather/blob/e2487964fe989e4147fc02cede01ea0bc8a6be7c/collection-scripts/gather#L201) — group wait, only last exit code | Replace with per-PID loop: `for pid in "${pids[@]}"; do wait "$pid"; capture exit code and map to collector name; done` |
+| [`gather_aro`](https://github.com/openshift/must-gather/blob/e2487964fe989e4147fc02cede01ea0bc8a6be7c/collection-scripts/gather#L205) — synchronous, exit code not captured | Wrap in the same per-PID reporting path |
 | `compress_logs` (line 194) — return value not captured | Wrap in reporting path; report `skipped` when `COMPRESS_AFTER_GATHER` is not set |
 | No overall exit code logic | After all collectors: compute `overallStatus` from merged results. Exit `0` if archive finalized; exit non-zero only on framework failure. |
 
@@ -793,13 +798,15 @@ This matches the mapping rule defined in the Operator status section: "Job Succe
 
 ##### Multi-image scenarios
 
-`oc adm must-gather` supports multiple images through `--image` (one custom image) and the default image (no `--image` flag). When multiple images are used together:
+`oc adm must-gather` uses the default OpenShift must-gather image (`openshift/must-gather:latest`) when no `--image` or `--image-stream` flag is specified. Specifying `--image=<custom>` replaces the default; the implicit default is **not** added alongside a custom image. To gather default data together with a custom image, both must be requested explicitly (for example `--image=<custom> --image-stream=openshift/must-gather`). The `--all-images` flag collects from the default image plus all Operator-annotated images.
 
-* Each image runs in its own Pod and produces its own archive directory.
-* The default must-gather image produces `status.json` covering only the collectors in its own `gather` workflow (the 28 top-level work units listed above).
+When multiple images are used in a single invocation:
+
+* Each requested image runs in its own Pod and produces its own archive directory.
+* The default must-gather image (when included) produces `status.json` covering only the collectors in its own `gather` workflow (the 28 top-level work units listed above).
 * Custom images produce their own archive directories without `status.json` unless they opt in.
 * There is no cross-image aggregation of `status.json` in v1. Each archive directory is self-contained.
-* The operator (Phase 2) reads `status.json` from the default image's output. Custom image archives are delivered as-is.
+* The operator (Phase 2) reads `status.json` from the default image's output when present. Custom image archives are delivered as-is.
 
 ##### Adoption path for custom image authors
 
