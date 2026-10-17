@@ -79,7 +79,7 @@ handshake, whereas conventional groups like [X25519](https://datatracker.ietf.or
 are [weak against quantum computing](https://crypto.stackexchange.com/questions/59770/how-effective-is-quantum-computing-against-elliptic-curve-cryptography).
 
 The ability to set groups explicitly will also make it possible to align our
-OpenShift TLS profiles to match the groups present in the [Mozilla TLS Profiles](https://wiki.mozilla.org/Security/Server_Side_TLS).
+OpenShift TLS profiles to match the groups present in the [TLSRef profiles](https://docs.tlsref.org/server-side-tls.html).
 
 This change will require working with OpenShift component owners to use this new
 field. The scope of this feature includes ensuring that appropriate components
@@ -361,17 +361,23 @@ where needed.
 #### Default group configuration
 
 The named TLS profiles (Old, Intermediate, Modern) are updated as part of this
-implementation to include default groups based on Go's `crypto/tls` default
-group preferences: `X25519`, `SecP256r1`, `SecP384r1`, and `X25519MLKEM768`.
-Note that the [Mozilla TLS Profiles](https://wiki.mozilla.org/Security/Server_Side_TLS)
-(version 5.7) do not include `X25519MLKEM768`; Go's defaults are used here to
-align with the runtime behavior of Go-based OpenShift components and to enable
-post-quantum hybrid key exchange where supported.
+implementation to include default groups:
+* Old/Intermediate use Go 1.26's `crypto/tls` defaults: `SecP256r1`, `SecP384r1`,
+  `SecP521r1`, `X25519`, `X25519MLKEM768`, `SecP256r1MLKEM768`, `SecP384r1MLKEM1024`.
+  This enables wide compatibility, post-quantum hybrid key exchange, and aligns with
+  the runtime behavior of Go-based OpenShift components.
+* Modern uses the [TLSRef](https://docs.tlsref.org/server-side-tls.html) modern
+  server profile: `X25519MLKEM768`, `X25519`, `SecP256r1`, `SecP384r1MLKEM1024`.
+  This follows industry recomendations.
 
-**FIPS mode constraint:** `X25519` and `X25519MLKEM768` are not FIPS-approved.
-Components running in FIPS mode must omit these groups. The FIPS-approved
-post-quantum alternatives (`SecP256r1MLKEM768`, `SecP384r1MLKEM1024`) require
-Go 1.26+ and are not currently supported.
+Note that TLSRef (formerly Mozilla wiki) gets regular updates: version 6.0 removed
+the Old profile, and 5.8 added the `X25519MLKEM768` group. The OpenShift modern
+profile might want to follow TLSRef upsates.
+
+**FIPS mode constraint:** OpenShift's openssl-backed FIPS implementation approves
+neiher `X25519`, nor any of the `*MLKEM*` groups that are needed for post-quantum
+crypto. Go's native FIPS backend however does support PQC groups, so OpenShift
+needs to switch to Go's FIPS backend available in Go 1.26+.
 
 **Library-go update:** To support these defaults, the `TLSProfiles` mapping in
 [library-go](https://github.com/openshift/library-go) will be updated to include
