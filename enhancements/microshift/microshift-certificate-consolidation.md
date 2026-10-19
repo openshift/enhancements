@@ -62,8 +62,12 @@ certificates by role and tracks parent-child relationships between CAs and their
 issued certificates, decoupling the `microshift certs` CLI from the specific
 on-disk layout. This enhancement updates that inventory to reflect the new 6-CA
 hierarchy, so that `microshift certs status`, `microshift certs renew --serving`,
-and `microshift certs renew --ca` operate correctly without any layout-specific
-changes to the CLI code.
+and `microshift certs renew --ca` operate correctly without any changes to
+the CLI command interface or traversal logic. The underlying implementation
+— certinfo path helpers (`ClientCADir`, `ServingCADir`, `PeerCADir`), the
+`certificateChainsSetup` builder registrations, kubeconfig signer name
+mappings, and component cert-path references — is updated to reflect the
+new CA names, but those are internal changes invisible to CLI callers.
 
 ### User Stories
 
@@ -394,12 +398,31 @@ This enhancement updates that inventory from the current 12-CA layout to the new
 | Rotatable CAs (consolidated) | kube-control-plane-signer, kube-apiserver-to-kubelet-signer, admin-kubeconfig-signer, kubelet-csr-signer-signer, kube-csr-signer (sub-CA), kube-apiserver-external-signer, kube-apiserver-localhost-signer, kube-apiserver-service-network-signer | client-ca, serving-ca |
 | Rotatable CAs (renamed) | etcd-signer | peer-ca |
 | Rotatable CAs (retained) | aggregator-signer | aggregator-signer (unchanged) |
-| Fixed CAs | service-ca, ingress-ca | service-ca, ingress-ca (unchanged) |
+| Separately managed CAs | service-ca, ingress-ca | service-ca, ingress-ca (unchanged; renewable via `certs renew --ca`) |
 | Serving certs | kube-external-serving, kube-apiserver-localhost-serving, kube-apiserver-service-network-serving | kube-apiserver-serving (single SAN-based cert) |
 
 The inventory abstraction ensures that `microshift certs renew --ca` cascades
 renewal to all descendant certificates correctly under the new hierarchy without
 requiring changes to the CLI code.
+
+**`certs renew` integration (OCPEDGE-2998 / [PR #7502](https://github.com/openshift/microshift/pull/7502)):**
+The `microshift certs renew` command uses the PKI inventory to determine which
+certificates to regenerate. Under the consolidated hierarchy:
+
+- `certs renew --ca client-ca` regenerates `client-ca` and cascades to all
+  nine leaf certs it signs.
+- `certs renew --ca serving-ca` regenerates `serving-ca` and cascades to
+  `kube-apiserver-serving` and `kubelet-server`.
+- `certs renew --ca peer-ca` regenerates `peer-ca` and cascades to the three
+  etcd certs (`apiserver-etcd-client`, `etcd-peer`, `etcd-serving`).
+- `certs renew --serving` regenerates only serving leaf certs without touching
+  their CA.
+
+The renew command prepares new certificate material on disk and leaves it
+inactive until MicroShift restarts; the startup path then activates the
+prepared certs via the same `certSetup` → `certificateChainsSetup` flow.
+No layout-specific changes to the renew command itself are required — the
+new CA names are expressed purely through the inventory structure.
 
 **Service account CA bundle:** The `service-account-token-ca.crt` bundle
 contains the KAS serving CAs and is injected into pods as a projected volume
@@ -421,6 +444,11 @@ key is preserved across certificate migration so tokens remain valid.
 All expiration dates are aligned to the next calendar midnight so that certs
 with the same nominal validity expire on the same day (`alignValidity` in
 `pkg/cmd/init.go`).
+
+*Note: The validity assignments below reflect the current implementation and
+are subject to change by the certificate rotation EP (OCPSTRAT-2899). See
+[Certificate Lifetime Configuration](/enhancements/microshift/microshift-certificate-rotation.md#certificate-lifetime-configuration)
+for the planned configurable-validity work.*
 
 Current validity assignments (unchanged by this enhancement except where noted):
 
@@ -472,29 +500,27 @@ Security trade-off of the longer CA lifetime:
   annually, bounding key exposure to 1 year.
 
 * **Mitigations specific to MicroShift's single-node edge model:**
-  * The CA private key is accessible in exactly two places: on disk at
+  * On single-node, the CA private key is accessible only on disk at
     `<datadir>/certs/client-ca/ca.key` (mode 0600, owner root; MicroShift
-    runs as `User=root`) and as the `ca.key` field of the `client-ca` Secret
-    in `kube-system`. The Secret is protected by the `microshift-ca-admin`
-    RBAC Role, which is bound to `system:masters` only and scoped via
-    `resourceNames` to the specific CA Secret names. Regular workloads and
-    external API clients without cluster-admin equivalence cannot read it.
-    See the "Consolidated client CA blast radius" risk below for the full
-    threat model.
+    runs as `User=root`; the certs root directory is mode 0700). The
+    `startCertificateAuthorityController` that would publish the key as a
+    `kube-system/client-ca` Secret runs only under `cfg.MultiNode.Enabled`
+    and is therefore never active in the tested single-node topology — the
+    Secret and its `microshift-ca-admin` RBAC guard do not exist on
+    single-node. See the "Consolidated client CA blast radius" risk below.
   * On-demand forced rotation is available via `microshift certs renew --ca`
-    (OCPSTRAT-2899). This regenerates `client-ca` and all leaf certificates
-    it signed immediately, without waiting for expiry.
+    (OCPSTRAT-2899). This prepares a renewed `client-ca` and all leaf
+    certificates it signs in a pending state on disk; the new material is
+    activated on the next MicroShift restart, without waiting for expiry.
   * Short-lived separate CAs provide no additional containment on a single
     node: all consumers of those CAs run on the same host, so an attacker
     with node-level access can steal any of them regardless of key lifetime.
   * ProdSec reviewed and approved this single-node CA hierarchy in March 2026
 
-Rotation thresholds (from `certsToRegenerate`, `pkg/cmd/init.go`):
-
-| Cert lifetime class | Threshold to trigger renewal |
-|---------------------|------------------------------|
-| Short-lived (< 5 yr total) | < 7 months remaining |
-| Long-lived (≥ 5 yr total) | < 18 months remaining |
+Rotation thresholds are implementation details managed by `certsToRegenerate`
+in `pkg/cmd/init.go`; specific values are subject to change. See
+[microshift-certificate-rotation.md](/enhancements/microshift/microshift-certificate-rotation.md#certificate-lifetime-configuration)
+for the configurable threshold work tracked in OCPSTRAT-2899.
 
 The validity assignments above reflect the current implementation and are
 not changed by this enhancement. Configurable certificate validity periods
@@ -552,42 +578,37 @@ same `NewCertificateSigner`, `WithClientCertificates`,
   including `system:admin` (system:masters), `system:node:*` (kubelet),
   and control-plane components.
 
-  **Where the key is readable:**
-  * **On disk:** `<datadir>/certs/client-ca/ca.key`, mode 0600, owned by
-    root (MicroShift runs as `User=root`). The certs root directory itself
-    is mode 0700, preventing even directory traversal by non-root processes.
-    Reading the key requires root access: physical, privileged container
-    escape, or OS-level exploit.
-  * **In Kubernetes:** `kube-system/client-ca` Secret (`ca.key` field).
-    Protected by RBAC Role `microshift-ca-admin` bound exclusively to the
-    `system:masters` group, with `resourceNames` scoped to the exact CA
-    Secret names. Regular pods and external API clients without
-    cluster-admin equivalence have no API path to this Secret.
+  **Where the key is readable (single-node):**
+  * **On disk only:** `<datadir>/certs/client-ca/ca.key`, mode 0600, owned by
+    root (MicroShift runs as `User=root`). The certs root directory is mode
+    0700, preventing directory traversal by non-root processes. Reading the
+    key requires root access: physical access, privileged container escape,
+    or OS-level exploit.
+  * **Not in Kubernetes API:** On single-node the `startCertificateAuthorityController`
+    does not run (`cfg.MultiNode.Enabled` is false), so no `kube-system/client-ca`
+    Secret is created and the `microshift-ca-admin` RBAC Role does not exist.
+    There is no API-reachable copy of the key in the single-node topology.
 
-  **Compromise boundaries:**
-  * A regular workload pod has no RBAC path to the CA Secrets — default
-    service accounts in user namespaces have no `secrets` access in
-    `kube-system`.
-  * An external API client can reach the CA Secret only if it already holds
-    `system:masters` membership (i.e., cluster-admin equivalence). At that
-    point the CA key is redundant: the attacker already controls the cluster.
+  **Compromise boundaries (single-node):**
+  * A regular workload pod has no path to the CA key — it is not exposed via
+    the Kubernetes API in this topology.
   * Root-level OS access reaches the 0600 key file directly. At this access
     level, all old CA keys and the new `client-ca` key are equally exposed
     regardless of CA count — the old layout provided no containment here.
 
   **Why consolidation is acceptable:**
-  In the old layout the `microshift-ca-admin` Role also granted `system:masters`
-  access to ALL CA Secrets — including `admin-kubeconfig-signer`, which could
-  forge `system:admin` certs. Any `system:masters`-level compromise already
-  implied full CA compromise. Consolidating to one CA key does not widen the
-  attack surface for the existing principal model.
+  The lost boundary is per-key containment: in the old layout, compromise of
+  `kube-control-plane-signer` could not forge `system:admin` certs (only
+  `admin-kubeconfig-signer` could). After consolidation, the single `client-ca`
+  key covers all roles. However, MicroShift's single-node threat model already
+  treats node-level root access as a full compromise regardless of CA count —
+  an attacker with root can read any of the old CA keys equally. The additional
+  scope of the consolidated key does not introduce a new attack class.
 
-  The lost boundary is per-Secret containment: a hypothetical principal with
-  access only to `kube-control-plane-signer` (but not `admin-kubeconfig-signer`)
-  could previously not forge admin certs. MicroShift's RBAC design does not
-  expose individual CA Secrets to separate principals — the single
-  `microshift-ca-admin` Role covers all CA Secrets. This containment did not
-  exist in practice, and its absence after consolidation is not a regression.
+  *On future multi-node deployments:* the CA controller would publish
+  `client-ca` as a `kube-system` Secret guarded by the `microshift-ca-admin`
+  RBAC Role (bound to `system:masters`, scoped by `resourceNames`). That path
+  is a separate work item.
 
 ### Drawbacks
 
@@ -681,6 +702,13 @@ needed because:
 
 No manual intervention is required in either direction. Certificate-state
 rollback is recovery through regeneration, not an atomic restore.
+
+Kubeconfig regeneration on rollback is **existing behavior**, not new to this
+enhancement: the fresh-start path has always regenerated all credentials
+(including the admin kubeconfig) when no recognized `certs/` layout is found.
+On rollback the old binary finds the new-layout `certs/` directory, does not
+recognize the signer directories, and falls back to full regeneration from
+scratch — which includes rebuilding the admin kubeconfig.
 
 ## Version Skew Strategy
 
