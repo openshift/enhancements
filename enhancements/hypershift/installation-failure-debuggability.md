@@ -8,7 +8,7 @@ reviewers:
 approvers:
   - "@csrwng"
 api-approvers:
-  - "@JoelSpeed"
+  - "@everettraven"
 creation-date: 2026-10-05
 last-updated: 2026-10-12
 tracking-link:
@@ -278,13 +278,13 @@ sequenceDiagram
     Note over CPO,HCP: Management cluster
     Note over HCCO,CVO: Guest cluster
 
-    CPO->>HCP: Set diagnostic conditions<br/>(Available, InfrastructureReady,<br/>installationStage)
+    CPO->>HCP: Set diagnostic conditions<br/>(Available, InfrastructureReady,<br/>installation.stage)
     HCCO->>CVO: Read CVO conditions<br/>(Failing, Progressing, etc.)
     HCCO->>HCP: Mirror CVO conditions<br/>(ClusterVersionFailing, etc.)
     HO->>HCP: Read HCP status.conditions
     HO->>HC: Mirror 12 HCP conditions +<br/>6 CVO conditions (invert Failing→Succeeding)
     HO->>HC: Set ManagementClusterResourcePressure<br/>(directly, no mirroring delay)
-    HO->>HC: Mirror installationStage<br/>from HCP to HC
+    HO->>HC: Mirror installation status<br/>from HCP to HC
 ```
 
 Conditions flow: CPO -> HCP -> HO -> HC. The HO mirrors
@@ -396,7 +396,7 @@ these principles:
   when `ControlPlaneVersionStatus.History` shows an
   active rollout.
 
-- **`installationStage`**: Persists as `InstallationComplete`
+- **`installation.stage`**: Persists as `InstallationComplete`
   after installation finishes. On day-2, it serves as a
   record of when installation completed. This does not
   contradict Non-Goal 2 because it is a simple enum, not
@@ -434,7 +434,7 @@ HyperShift deployments (ARO HCP, ROSA HCP, self-managed):
 | 1.2 | Hosted control-plane kubeconfig never created | Already surfaced via `Available=False, Reason=KubeconfigWaitingForCreate`. No change needed. |
 | 1.3 | Control-plane deployment has unavailable replicas | Add diagnostic detail to CPC `Available` condition message with pod-level failure reasons (scheduling, crash loop, image pull) |
 | 1.4 | Required operators not yet available or degraded | Set `Reason=ClusterVersionFailing` on `ClusterVersionSucceeding`; pass through the CVO message verbatim (no parsing) |
-| 1.5 | HostedCluster has no installed version or stops progressing | New `installationStage` status field |
+| 1.5 | HostedCluster has no installed version or stops progressing | New `installation.stage` status field |
 | 1.6 | Management cluster capacity exhaustion — pod scheduling failures | New `ManagementClusterResourcePressure` condition |
 | 1.7 | Opaque timeout masking root cause | Addressed by all of the above — diagnostic conditions replace the opaque timeout with specifics |
 
@@ -466,7 +466,7 @@ cluster and the guest cluster is broken, the HCCO
 cannot mirror CVO conditions, so
 `ClusterVersionSucceeding` remains at
 `Status=Unknown, Reason=StatusUnknown`. The user
-sees `installationStage=WaitingForOperators` with
+sees `installation.stage=WaitingForOperators` with
 no indication that the root cause is connectivity.
 However, this gap is partially covered by existing
 conditions: `KubeAPIServerAvailable` tracks KAS
@@ -505,9 +505,9 @@ deferred to future work.
    cluster and begins reconciliation.
 3. The CPO deploys control-plane components
    (kube-apiserver, etcd, etc.) and updates the
-   `installationStage` field on `HostedControlPlane`
+   `installation.stage` field on `HostedControlPlane`
    with the current stage.
-4. The HO mirrors the `installationStage` and diagnostic
+4. The HO mirrors the `installation` status and diagnostic
    conditions from `HostedControlPlane` to `HostedCluster`
    status.
 5. The cluster service provider or monitoring system
@@ -561,7 +561,7 @@ sequenceDiagram
     loop Reconcile loop
         CPO->>Pods: Check deployment + pod status
         alt All healthy
-            CPO->>HCP: Update installationStage
+            CPO->>HCP: Update installation.stage
             CPO->>HCP: Add diagnostic detail to Available condition
             HO->>HC: Mirror stage + conditions
         else Deployment failure detected
@@ -586,8 +586,8 @@ or finalizers.
 
 | Category | Name | Resource | Set By | Description |
 |----------|------|----------|--------|-------------|
-| Status field | `installationStage` | HC, HCP | CPO → HO mirrors to HC | Enum: `Initializing`, `ControlPlaneProvisioning`, `WaitingForKubeconfig`, `WaitingForOperators`, `InstallationComplete`. Forward-only monotonic. |
-| Status field | `installationStageTransitionTime` | HC, HCP | CPO → HO mirrors to HC | Timestamp of most recent stage transition. Non-pointer `metav1.Time` with `omitzero`. |
+| Status field | `installation.stage` | HC, HCP | CPO → HO mirrors to HC | Enum: `Initializing`, `ControlPlaneProvisioning`, `WaitingForKubeconfig`, `WaitingForOperators`, `InstallationComplete`. Forward-only monotonic. |
+| Status field | `installation.lastTransitionTime` | HC, HCP | CPO → HO mirrors to HC | Timestamp of most recent stage transition. Non-pointer `metav1.Time` with `omitzero`. |
 | Condition type | `ManagementClusterResourcePressure` | HC | HO (directly, no mirroring) | Scheduling pressure on management cluster. `True`/`False`/`Unknown`. |
 | Reason constant | `PodSchedulingFailed` | CPC `Available` | CPO | Pod cannot be scheduled on management cluster. |
 | Reason constant | `CrashLoopBackOff` | CPC `Available` | CPO | Pod is in CrashLoopBackOff. |
@@ -607,36 +607,47 @@ or finalizers.
 type HostedClusterStatus struct {
     // ... existing fields ...
 
-    // installationStage indicates the current phase of
-    // the initial cluster installation. The value is
-    // updated by the control plane operator as
-    // installation progresses through its stages.
-    // Stage transitions are forward-only (monotonic):
-    // a stage is never set to a value earlier in the
-    // progression than the current value. If a
-    // precondition for a later stage is lost (e.g.,
-    // kubeconfig becomes unavailable), the stage does
-    // NOT regress — only the relevant condition
-    // (e.g., Available) reflects the problem.
+    // installation tracks the progress of the initial
+    // cluster installation. The fields within are updated
+    // by the control plane operator and mirrored to the
+    // HostedCluster by the HyperShift operator.
+    // +optional
+    Installation *InstallationStatus `json:"installation,omitempty"`
+}
+
+// InstallationStatus contains installation progress
+// information for a hosted cluster.
+type InstallationStatus struct {
+    // stage indicates the current phase of the initial
+    // cluster installation. The value is updated by
+    // the control plane operator as installation
+    // progresses through its stages. Stage transitions
+    // are forward-only (monotonic): a stage is never
+    // set to a value earlier in the progression than
+    // the current value. If a precondition for a later
+    // stage is lost (e.g., kubeconfig becomes
+    // unavailable), the stage does NOT regress — only
+    // the relevant condition (e.g., Available) reflects
+    // the problem.
     // Valid values are: "Initializing",
     // "ControlPlaneProvisioning",
     // "WaitingForKubeconfig",
     // "WaitingForOperators", "InstallationComplete".
     // +optional
-    InstallationStage InstallationStage `json:"installationStage,omitempty"`
+    Stage InstallationStage `json:"stage,omitempty"`
 
-    // installationStageTransitionTime is the timestamp
-    // of the most recent installationStage transition.
-    // This field is only meaningful for clusters created
-    // after this feature was deployed. For clusters that
-    // were already installed before this field was
-    // introduced, it reflects when the field was first
-    // populated on upgrade, not the original installation
-    // time. Consumers should not use this field for
-    // installation-duration calculations on pre-existing
-    // clusters.
+    // lastTransitionTime is the timestamp of the most
+    // recent stage transition. This field is only
+    // meaningful for clusters created after this feature
+    // was deployed. For clusters that were already
+    // installed before this field was introduced, it
+    // reflects when the field was first populated on
+    // upgrade, not the original installation time.
+    // Consumers should not use this field for
+    // installation-duration calculations on
+    // pre-existing clusters.
     // +optional
-    InstallationStageTransitionTime metav1.Time `json:"installationStageTransitionTime,omitempty,omitzero"`
+    LastTransitionTime metav1.Time `json:"lastTransitionTime,omitempty,omitzero"`
 }
 
 // InstallationStage describes the current phase of the
@@ -677,10 +688,10 @@ const (
 )
 ```
 
-The `InstallationStageTransitionTime` field uses
-non-pointer `metav1.Time` with the `omitzero` struct
-tag. This follows the newer HyperShift convention
-established by `ControlPlaneUpdateHistory`
+The `LastTransitionTime` field uses non-pointer
+`metav1.Time` with the `omitzero` struct tag. This
+follows the newer HyperShift convention established by
+`ControlPlaneUpdateHistory`
 (`StartedTime metav1.Time
 \`json:"startedTime,omitempty,omitzero"\``,
 `CompletionTime metav1.Time
@@ -695,7 +706,7 @@ fields should not replicate the older pattern.
 
 Stage transitions are enforced as forward-only via ordinal
 comparison in controller logic only — not via API
-validation. This is acceptable because `installationStage`
+validation. This is acceptable because `installation.stage`
 is a status field authored exclusively by the CPO; no
 external actor writes to it. The CPO compares the proposed
 new stage against the current stage's ordinal position
@@ -726,7 +737,7 @@ constraint above):
 
 | Transition | Trigger Condition | What the CPO checks |
 |---|---|---|
-| → `Initializing` | HCP reconciliation starts | The CPO's `Reconcile()` is invoked for this `HostedControlPlane`. Set unconditionally on first reconciliation if `installationStage` is empty. |
+| → `Initializing` | HCP reconciliation starts | The CPO's `Reconcile()` is invoked for this `HostedControlPlane`. Set unconditionally on first reconciliation if `installation.stage` is empty. |
 | `Initializing` → `ControlPlaneProvisioning` | At least one control-plane component deployment has been created | The CPO has called `CreateOrUpdate` for any CPC deployment (kube-apiserver, etcd, etc.) in the HCP namespace. |
 | `ControlPlaneProvisioning` → `WaitingForKubeconfig` | All required control-plane component deployments have `AvailableReplicas > 0` | `controlPlaneComponentsAvailable()` returns true — every CPC's `Available` condition is `True`. |
 | `WaitingForKubeconfig` → `WaitingForOperators` | The hosted cluster admin kubeconfig secret exists | The CPO resolves the kubeconfig secret name via `KASAdminKubeconfigSecret(hcp.Namespace, hcp.Spec.KubeConfig)`, which defaults to `admin-kubeconfig` and honors an explicit `spec.kubeConfig.name` override. The CPO confirms this secret is present in the HCP namespace. This is the same check that drives the existing `Available=False, Reason=KubeconfigWaitingForCreate` condition. |
@@ -745,10 +756,10 @@ evaluation described above applies only to clusters
 whose installation is being tracked from the start.
 For clusters that were already installed before this
 feature was deployed, the CPO applies an explicit
-backfill rule: if `installationStage` is empty AND
+backfill rule: if `installation.stage` is empty AND
 the HCP `Available` condition is currently `True`,
 the CPO unconditionally sets
-`installationStage=InstallationComplete` — bypassing
+`installation.stage=InstallationComplete` — bypassing
 trigger evaluation entirely. This prevents a
 pre-existing cluster from being incorrectly assigned
 an intermediate stage (e.g., `WaitingForOperators`)
@@ -777,16 +788,16 @@ long before this feature was deployed.
 This artifact is **temporary and self-correcting**:
 once the concurrent operation completes and
 `Available` returns to `True`, the normal stage
-triggers advance `installationStage` to
+triggers advance `installation.stage` to
 `InstallationComplete` on the next reconciliation.
 The forward-only constraint ensures no regression
 after that point.
 
 **How to detect the artifact:** A cluster showing an
-intermediate `installationStage` (e.g.,
+intermediate `installation.stage` (e.g.,
 `WaitingForOperators`) whose
 `metadata.creationTimestamp` is significantly older
-than `installationStageTransitionTime` (e.g., created
+than `installation.lastTransitionTime` (e.g., created
 days or weeks ago but stage was set within the
 upgrade window) is a backfill artifact, not a genuine
 stuck installation. Consumers can compare the two
@@ -795,7 +806,7 @@ upgrade by more than a few hours, the intermediate
 stage is transient and will resolve without
 intervention. If the concurrent operation is itself
 stuck (e.g., a stalled OCP upgrade leaving
-`Available=False` for hours), the `installationStage`
+`Available=False` for hours), the `installation.stage`
 remains at the intermediate value until that
 operation completes — but the root cause is the
 stalled upgrade, not a stuck installation. The
@@ -1360,7 +1371,7 @@ components:
   when the LB Service is ready but the route is not
   admitted, inspect the actual Route resource status
   and include the admission failure reason.
-- Populate the `installationStage` field with stage
+- Populate the `installation.stage` field with stage
   transitions based on reconciliation state.
   Stage transitions are forward-only (monotonic) —
   the CPO compares the proposed stage ordinal against
@@ -1369,9 +1380,9 @@ components:
 
 **2. HyperShift Operator (HO):**
 
-- Mirror `installationStage` and
-  `installationStageTransitionTime` from HCP to HC
-  status. The HO copies the HCP value unconditionally
+- Mirror `installation` status (stage and
+  lastTransitionTime) from HCP to HC. The HO copies
+  the HCP value unconditionally
   — it does **not** enforce the monotonic constraint
   independently. Monotonicity is the CPO's
   responsibility (the single writer of this field on
@@ -1380,7 +1391,7 @@ components:
   an older value until the next reconciliation
   refreshes the cache. This is self-correcting within
   one reconciliation interval (60 seconds) and
-  acceptable because `installationStage` is
+  acceptable because `installation.stage` is
   informational — no controller or automation uses it
   for control-flow decisions.
 - Add `ManagementClusterResourcePressure` condition:
@@ -1674,15 +1685,15 @@ implementation. Note: in disconnected environments,
 Prometheus metrics remain available locally but remote
 telemetry collection may be unavailable.
 
-### `installationStage` vs `controlPlaneVersion` Interaction
+### `installation.stage` vs `controlPlaneVersion` Interaction
 
-The `installationStage` field tracks a coarse-grained
+The `installation.stage` field tracks a coarse-grained
 installation phase (5 stages). The existing
 `ControlPlaneVersionStatus.History` tracks version-level
 rollout progress with fine-grained timestamps. These are
 complementary:
 
-- `installationStage` answers: "What phase is the
+- `installation.stage` answers: "What phase is the
   initial installation in?"
 - `ControlPlaneVersionStatus.History` answers: "What
   versions have been deployed and when?"
@@ -1723,7 +1734,7 @@ in controller code via a Go constant (e.g.,
 validation, since condition messages are part of
 upstream `metav1.Condition` which does not define a
 max length. No arrays of per-pod or per-node details.
-The `installationStage` field is a single enum string.
+The `installation.stage` field is a single enum string.
 
 **Truncation behavior**: When the assembled message
 exceeds 256 characters, the controller truncates by
@@ -1950,7 +1961,68 @@ problems. `StartedAt` duplicates
 `metadata.creationTimestamp`. `CompletedStages` overlaps
 with `ControlPlaneVersionStatus.History`.
 
-**Alternative 3: Log-based diagnostics only.**
+**Alternative 3: `InstallationCompleted` condition instead
+of `installation.stage` field.**
+
+Encode the installation stage as the `Reason` on a
+standard condition:
+```yaml
+status:
+  conditions:
+    - type: InstallationCompleted
+      status: "False"
+      reason: WaitingForKubeconfig
+      lastTransitionTime: ...
+```
+
+*Rejected because*: `installation.stage` is a forward-only
+(monotonic) watermark — it records "how far did we get,"
+and never regresses even if a precondition is transiently
+lost. This conflicts with the condition contract, where
+conditions are level-driven and re-evaluated from scratch
+each reconciliation.
+
+Placing the stage in a condition's `Reason` forces a
+choice between two unsatisfying behaviors:
+
+- **Level-driven `Reason`** (standard condition behavior):
+  If the cluster reaches `WaitingForOperators` and then
+  kube-apiserver transiently enters `CrashLoopBackOff`,
+  `controlPlaneComponentsAvailable()` returns `false`.
+  The next reconciliation re-evaluates triggers and
+  regresses the `Reason` to `ControlPlaneProvisioning`.
+  Progress information is lost, and the `Reason` flaps
+  on transient failures — duplicating what the
+  `Available` condition already reports.
+
+- **Forward-only `Reason`** (ordinal enforcement): The
+  condition holds `Reason: WaitingForOperators` even
+  though the actual state is "CPC components are
+  unavailable." The condition no longer reflects current
+  reality — it is a stateful watermark dressed as a
+  condition, breaking the contract that every other
+  condition in the system follows.
+
+Additional practical issues with the condition approach:
+`meta.SetStatusCondition` only updates
+`lastTransitionTime` when `Status` changes, not when
+`Reason` changes; since all intermediate stages have
+`Status=False`, per-stage timestamps are lost. The
+dedicated `installation.lastTransitionTime` field tracks
+each stage change. The dedicated field also maps cleanly
+to a state-set gauge for Prometheus
+(`hypershift_hostedclusters_installation_stage{stage="X"}
+== 1`), whereas a condition-based approach would require
+reason-based metric queries that conditions do not
+natively expose. Finally, `InstallationCompleted: False`
+largely duplicates `Available: False` during
+installation.
+
+Progress tracking (monotonic watermark) and current-state
+reporting (level-driven conditions) serve different
+purposes and belong in different fields.
+
+**Alternative 4: Log-based diagnostics only.**
 Improve log messages and structured logging without
 adding API-level conditions.
 
@@ -1960,7 +2032,7 @@ by automation tools, Kubernetes controllers, or simple
 `oc get` commands. The goal is to make diagnostics
 available on the API objects themselves.
 
-**Alternative 4: Dedicated diagnostic CRD.**
+**Alternative 5: Dedicated diagnostic CRD.**
 Create a separate `InstallationDiagnostic` CRD per
 `HostedCluster` that contains all diagnostic
 information.
@@ -2097,8 +2169,8 @@ exemption because:
    new CRD is created. Existing conditions already have
    messages — this enhancement makes them more
    informative.
-2. The `installationStage` field is a new `+optional`
-   status field that defaults to empty. There is no
+2. The `installation` struct is a new `+optional`
+   status field that defaults to nil. There is no
    code path that can be broken by the presence of
    these changes.
 3. The HyperShift API is `v1beta1`, lives in a
@@ -2169,7 +2241,7 @@ Testing strategy:
      reflects the last observed state (not a false
      `Unknown`), consistent with standard informer
      cache behavior
-   - `installationStage` monotonic forward-only
+   - `installation.stage` monotonic forward-only
      transitions (verify stage cannot regress)
    - 5-second timeout on pod inspection falls back to
      default message
@@ -2195,7 +2267,7 @@ Testing strategy:
    `HostedControlPlane` to `HostedCluster`, including:
    - Diagnostic `Available` condition with pod-level
      reasons mirrors correctly
-   - `installationStage` mirrors correctly
+   - `installation` status mirrors correctly
    - `ManagementClusterResourcePressure` is set
      directly on HC (no mirroring)
 
@@ -2287,7 +2359,7 @@ Failure injection scenarios are tested at two levels:
   (`karpenter_control_plane_upgrade_test.go`), and
   resource exhaustion tests (`autoscaling_test.go`).
   E2e tests also cover the happy path: verifying
-  that `installationStage` progresses to
+  that `installation.stage` progresses to
   `InstallationComplete` and that diagnostic
   conditions are present and well-formed on a
   successful installation.
@@ -2302,7 +2374,7 @@ follows the standard HyperShift release process.
 
 - All platform-agnostic condition diagnostics (cases
   1.1, 1.3, 1.4) implemented and unit-tested.
-- `installationStage` field implemented with monotonic
+- `installation.stage` field implemented with monotonic
   forward-only stage transitions.
 - `ManagementClusterResourcePressure` condition
   implemented (FailedScheduling detection and pod
@@ -2354,7 +2426,7 @@ follows the standard HyperShift release process.
   validated: verify that the condition continues to
   accurately reflect scheduling pressure on clusters
   that have completed installation
-  (`installationStage=InstallationComplete`). This
+  (`installation.stage=InstallationComplete`). This
   includes: (a) condition transitions to `True` when
   scheduling pressure appears on a running cluster,
   (b) condition transitions back to `False` when
@@ -2378,8 +2450,8 @@ any existing feature.
 
 ## Upgrade / Downgrade Strategy
 
-This enhancement adds two new status fields
-(`installationStage`, `installationStageTransitionTime`)
+This enhancement adds a new `installation` status struct
+(containing `stage` and `lastTransitionTime`)
 and one new condition type
 (`ManagementClusterResourcePressure`) to the
 `HostedCluster` and `HostedControlPlane` CRDs. All
@@ -2415,10 +2487,10 @@ yet, the fields simply remain empty.
 CPO), the new fields and diagnostic conditions will be
 populated for new and in-progress installations.
 Existing, already-installed clusters will show
-`installationStage=InstallationComplete` (set on first
+`installation.stage=InstallationComplete` (set on first
 reconciliation) and
 `ManagementClusterResourcePressure=False`
-(no pressure). The `installationStageTransitionTime`
+(no pressure). The `installation.lastTransitionTime`
 for pre-existing clusters reflects when the field was
 first populated on upgrade, not the original
 installation time. No action is required from operators.
@@ -2430,7 +2502,7 @@ a spike in the
 `hypershift_hostedclusters_installation_stage` gauge.
 Consumers building installation-duration SLO dashboards
 should filter out clusters where
-`installationStageTransitionTime` is within the HO
+`installation.lastTransitionTime` is within the HO
 upgrade window (i.e., where the stage was retroactively
 set rather than tracked from the start). The
 `hypershift_hostedclusters_installation_failure_reason_total`
@@ -2441,7 +2513,7 @@ failure reason is detected, not on backfill.
 generated from kubebuilder-annotated Go types. With
 structural schemas, **unknown fields are pruned during
 writes**. If a downgraded CPO writes to HCP status, the
-`installationStage` field is silently removed — it is
+`installation` struct is silently removed — it is
 not preserved. This is acceptable because:
 - The fields are informational and not consumed by any
   controller logic
@@ -2451,7 +2523,7 @@ not preserved. This is acceptable because:
   default form (the condition type and existing
   reason codes are unchanged)
 - `ManagementClusterResourcePressure` condition: unlike
-  `installationStage` (which is a typed field pruned by
+  `installation` (which is a typed struct pruned by
   the structural schema), conditions live in a generic
   `[]metav1.Condition` array. The old HO's condition
   mirroring logic uses `meta.SetStatusCondition`, which
@@ -2504,13 +2576,13 @@ This means a **version skew window is expected** in
 normal operation: new HO, older CPO. The enhancement
 handles this as follows:
 
-- The HO will attempt to mirror the `installationStage`
-  field and diagnostic conditions from
+- The HO will attempt to mirror the `installation`
+  status and diagnostic conditions from
   `HostedControlPlane` to `HostedCluster`. If the CPO
   has not been updated yet, it will not produce the
   new fields or diagnostic messages, and the HO will
   simply mirror the existing (default) values.
-  This is safe — empty/absent values are not
+  This is safe — nil/absent values are not
   misinterpreted.
 - The HO will set `ManagementClusterResourcePressure`
   independently of the CPO version, since this
@@ -2518,22 +2590,22 @@ handles this as follows:
   and pod status inspection.
 - Once the CPO is updated for a given hosted cluster
   (via a hosted cluster upgrade or CPO image override),
-  the diagnostic conditions and `installationStage`
+  the diagnostic conditions and `installation` status
   will begin appearing.
-- **Consumer guidance for empty `installationStage`**:
-  An empty `installationStage` on the `HostedCluster`
+- **Consumer guidance for nil `installation`**:
+  A nil `installation` field on the `HostedCluster`
   means the CPO for that cluster has not yet been
   updated to a version that supports stage tracking.
   This can persist beyond the HO rollout — it is not
   limited to a single reconciliation interval.
   Consumers (dashboards, alerts, CLI tooling) must
-  treat an empty value as "stage tracking not yet
+  treat a nil value as "stage tracking not yet
   available" rather than "installation not started" or
-  an active installation stage. Empty must never be
+  an active installation stage. Nil must never be
   counted as a failure or a stuck installation.
   The `Available` condition remains the authoritative
   signal for installation completeness regardless of
-  whether `installationStage` is populated.
+  whether `installation` is populated.
 - On CPO upgrade: CPO reads the CRD schema from the
   management cluster. If the CRD has the new fields,
   CPO writes them. If not (version skew), CPO
@@ -2544,7 +2616,7 @@ to a failed HO Deployment rollout) — is not covered
 because the HO is responsible for rolling out CPO
 updates. If the HO fails to start, no CPO gets updated.
 This scenario would require manual intervention and has
-only cosmetic impact: `installationStage` would not
+only cosmetic impact: `installation` status would not
 appear on the HC, and `ManagementClusterResourcePressure`
 would not be set. No control-flow is affected.
 
@@ -2596,9 +2668,9 @@ finalizers.
 **Triage: HostedCluster has `Available=False` for 45+
 minutes:**
 
-1. Check `installationStage`:
-   `oc get hostedcluster <name> -o jsonpath='{.status.installationStage}'`
-   - Empty → CPO has not been upgraded yet (see Version
+1. Check `installation.stage`:
+   `oc get hostedcluster <name> -o jsonpath='{.status.installation.stage}'`
+   - Empty/absent → CPO has not been upgraded yet (see Version
      Skew). Check HCP directly.
    - `ControlPlaneProvisioning` → check CPC `Available`
      conditions for pod-level failure reasons.
@@ -2634,7 +2706,7 @@ minutes:**
      `oc logs -n hypershift deploy/operator`
   4. Check that the CRD schema has been updated (new
      fields present):
-     `oc explain hostedcluster.status.installationStage`
+     `oc explain hostedcluster.status.installation.stage`
 
 - If conditions have inaccurate or misleading messages:
   1. The diagnostic messages are informational and do not
@@ -2649,10 +2721,10 @@ minutes:**
      can be deployed within days.
 
 **Emergency status correction for a stuck
-`installationStage`:**
+`installation.stage`:**
 
 > **Warning:** A persistently intermediate
-> `installationStage` on a cluster where
+> `installation.stage` on a cluster where
 > `Available=True` is a symptom of a CPO
 > reconciliation bug or an unhandled edge case —
 > the CPO should have advanced the stage
@@ -2669,7 +2741,7 @@ minutes:**
 > states, and the CPO logs covering the installation
 > window.
 
-The CPO writes `installationStage` on the
+The CPO writes `installation.stage` on the
 `HostedControlPlane`, and the HO mirrors it to the
 `HostedCluster`. To correct a stuck stage, patch the
 **`HostedControlPlane`** (the source of truth):
@@ -2679,7 +2751,7 @@ The CPO writes `installationStage` on the
 # (source of truth; the CPO writes here)
 oc patch hostedcontrolplane <name> -n <hcp-namespace> \
   --subresource=status --type=merge \
-  -p '{"status":{"installationStage":"InstallationComplete"}}'
+  -p '{"status":{"installation":{"stage":"InstallationComplete"}}}'
 ```
 
 The HO will mirror the corrected stage to the
@@ -2691,7 +2763,7 @@ overwritten on the next HO mirror sync.
 The CPO enforces forward-only transitions during
 initial installation, so it will not regress a
 manually corrected stage on the next reconciliation.
-Note that `installationStage` tracks only the initial
+Note that `installation.stage` tracks only the initial
 installation phase — it is not continuously
 reconciled after reaching `InstallationComplete` and
 has no role during upgrades. Upgrades are tracked
@@ -2701,7 +2773,7 @@ separately by `ControlPlaneVersionStatus.History`.
 conditions:**
 
 ```
-$ oc get hostedcluster my-cluster -o jsonpath='{.status.installationStage}'
+$ oc get hostedcluster my-cluster -o jsonpath='{.status.installation.stage}'
 WaitingForOperators
 
 $ oc get hostedcluster my-cluster -o jsonpath='{.status.conditions}' | jq '.[] | select(.type=="ClusterVersionSucceeding")'
@@ -2915,7 +2987,7 @@ environment:
 # for more than 45 minutes.
 # Note: excludes paused clusters — when
 # spec.pausedUntil is set, the HO stops reconciling
-# and installationStage freezes. The
+# and installation.stage freezes. The
 # hypershift_cluster_paused metric (gauge, 1 when
 # paused) is used to filter these out. Fleet
 # operators should verify this metric is available
