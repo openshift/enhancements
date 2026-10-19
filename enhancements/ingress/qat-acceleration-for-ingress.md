@@ -12,7 +12,7 @@ approvers:
 api-approvers:
   - "None"
 creation-date: 2026-10-07
-last-updated: 2026-10-16
+last-updated: 2026-10-19
 status: provisional
 tracking-link:
   - https://redhat.atlassian.net/browse/NE-2877
@@ -32,8 +32,11 @@ usable on a worker node, for ingress router pods running on OpenShift's
 haproxy34 image (RHEL10-based). HAProxy has no QAT-specific code; offload is
 achieved through OpenSSL 3.x's generic Provider interface and Intel's
 `qatengine` package, which is installed unconditionally in the router image
-and activated only when a working device is confirmed. Rather than
-introducing a QAT-specific API field, this enhancement builds on the
+and enabled whenever `ROUTER_QAT=true` and the router's own local check
+confirms FIPS is disabled. The router performs no device or provider
+preflight of its own; HAProxy's startup is the first real validation that
+the device and provider actually work. Rather than introducing a
+QAT-specific API field, this enhancement builds on the
 generic `spec.resources` field being added to IngressController by
 [NE-727](https://redhat.atlassian.net/browse/NE-727): an administrator who
 explicitly requests the `qat.intel.com/cy` extended resource is signaling
@@ -174,6 +177,13 @@ administrator prerequisite, not something this enhancement validates in
 software: getting it wrong surfaces the same way as any other device
 problem - the haproxy container fails to start (see below) - rather than
 through a dedicated check.
+
+This enhancement has a hard dependency on
+[NE-727](https://redhat.atlassian.net/browse/NE-727)'s `spec.resources`
+field landing in OCP 5.1: it is the only administrator-facing trigger this
+design has, and this enhancement has no QAT-specific API of its own to fall
+back on (see Open Questions for the contingency if NE-727 does not land in
+time).
 
 This enhancement spans the router image/binary, the router's control-plane
 logic, and the cluster-ingress-operator:
@@ -556,15 +566,14 @@ unusable afterward (driver reset, VF revoked, firmware issue) while HAProxy
 is already running successfully. This enhancement does not proactively
 detect or react to that in this initial version.
 
-**Mitigation**: No new monitoring is added for this case; it is explicitly
-out of scope for the initial version (see Implementation Details). Whatever
-`qatengine`/HAProxy do on their own when the hardware fails mid-operation
-(transparent per-request software fallback vs. erroring handshakes vs.
-eventually becoming unhealthy enough to fail the existing liveness probe)
-is what happens; the last of those would restart the container, which then
-hits the same startup-failure path as a device that was never usable (see
-the preflight risk above). Whether `qatengine` provides transparent,
-per-request fallback still needs empirical confirmation (see Open
+**Mitigation**: Mid-flight device loss behavior is not proactively detected
+in this initial version. Depending on the provider's runtime behavior,
+affected connections may see TLS errors, or HAProxy may eventually fail
+liveness and be restarted (at which point `CrashLoopBackOff` surfaces the
+issue, via the same startup-failure path as a device that was never usable
+- see the preflight risk above). Proactive mid-flight detection is deferred
+to a follow-on. Whether `qatengine` provides transparent, per-request
+fallback still needs empirical confirmation (see Open
 Questions); a future iteration may add proactive detection if real-world
 feedback shows it is needed.
 
@@ -717,6 +726,15 @@ day-to-day use.
    haproxy container specifically. This must be resolved, in coordination
    with the NE-727 enhancement/implementation, before this enhancement's
    implementation begins.
+10. This enhancement depends entirely on
+    [NE-727](https://redhat.atlassian.net/browse/NE-727)'s `spec.resources`
+    field landing in OCP 5.1 (see Infrastructure Needed); without it, there
+    is no way for an administrator to trigger `ROUTER_QAT`. If NE-727 slips
+    past OCP 5.1, would it be valid to fall back to the
+    `spec.unsupportedConfigOverrides`-based opt-in from the earlier
+    iteration of this proposal (see Alternatives) as an interim mechanism,
+    or should this enhancement itself slip to the release where NE-727
+    ships?
 
 ## Test Plan
 
@@ -773,6 +791,12 @@ emulator exists for the QAT PCI accelerator:
   worker pool, NFD labeling, and Intel Device Plugin Operator already in
   place), with and without `spec.nodePlacement` set, confirming the pod
   schedules correctly and the router activates QAT either way.
+- QAT-specific lifecycle tests: a router reload while QAT offload is active
+  (triggered by an unrelated route change), a rolling upgrade of an
+  IngressController with QAT-enabled router pods, certificate rotation on a
+  route served by a QAT-enabled router pod, and node drain of a QAT-capable
+  node hosting a router pod - confirming each of these ordinary lifecycle
+  events behaves the same with QAT active as without it.
 
 ## Graduation Criteria
 
@@ -785,22 +809,26 @@ gathering enough early-adopter feedback and empirical validation (see Open
 Questions) to confirm whether a dedicated, higher-level API or a formal
 feature gate is warranted for this capability.
 
-<!-- TODO: Numeric performance targets (handshake-rate uplift, throughput,
-     CPU savings vs. software-only baseline) are not yet defined. These
-     should be set by the perf team once real QAT hardware is available for
-     benchmarking (see Infrastructure Needed), rather than asserted here
-     without measurement. -->
+**Performance validation**: Performance validation uses the standard router
+performance test suite. Run with and without QAT on the same supported
+tuple. Pass criterion: absence of performance regression. Numeric
+improvement targets to be set after the first benchmark on real hardware
+(see Infrastructure Needed).
 
 ### Dev Preview -> Tech Preview
 
-<!-- TODO: To be defined if/when a dedicated, higher-level API or a formal
-     feature gate is introduced for this capability (see Alternatives). -->
+- Async offload confirmed on real hardware.
+- One-tuple E2E passing.
 
 ### Tech Preview -> GA
 
+- No-regression benchmark met (see Performance validation above).
+- CI lane stable.
+- Docs complete.
+
 Confirmation of a real async offload benefit (see Risks and Mitigations,
-`ssl-mode-async`) and perf-team-defined numeric performance targets are
-treated as hard gates for any future promotion; neither is satisfied yet.
+`ssl-mode-async`) and the no-regression benchmark are treated as hard gates
+for any future promotion; neither is satisfied yet.
 
 <!-- TODO: The rest of this criteria is to be defined if/when a dedicated,
      higher-level API or a formal feature gate is introduced for this
@@ -944,3 +972,9 @@ which stops the affected replica from crash-looping.
   tracked blocker for empirical validation (see Open Questions).
 - RHCOS10-based worker pool infrastructure, once haproxy34/RHEL10 images
   exist, to exercise the full deployment runbook end to end.
+- [NE-727](https://redhat.atlassian.net/browse/NE-727)'s `spec.resources`
+  field landing in OCP 5.1: this enhancement has no effect without it,
+  since the administrator's `qat.intel.com/cy` request is this
+  enhancement's only trigger (see Proposal). This is an external,
+  cross-enhancement dependency this EP does not control; see Open Questions
+  for the contingency if it does not land in time.
