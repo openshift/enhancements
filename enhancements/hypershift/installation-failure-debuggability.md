@@ -49,9 +49,9 @@ installation blockages.
 | **HCP** | `HostedControlPlane` — the management-cluster CRD representing the control plane |
 | **HO** | HyperShift Operator — reconciles `HostedCluster` resources, manages `HostedControlPlane` lifecycle |
 | **CPO** | Control Plane Operator — reconciles `HostedControlPlane`, manages control-plane component deployments in the HCP namespace |
-| **HCCO** | Hosted Cluster Config Operator — runs inside the guest cluster, mirrors CVO conditions back to HCP |
-| **CPC** | `ControlPlaneComponent` — per-component CRD with `Available` and `RolloutComplete` conditions |
-| **CVO** | ClusterVersion Operator — manages operator lifecycle in the guest cluster |
+| **HCCO** | Hosted Cluster Config Operator — runs in the HCP namespace on the management cluster, operates on the guest cluster API, mirrors CVO conditions back to HCP |
+| **CPC** | `ControlPlaneComponent` — per-component CRD on the management cluster with `Available` and `RolloutComplete` conditions |
+| **CVO** | ClusterVersion Operator — runs in the HCP namespace on the management cluster, manages operator lifecycle for the hosted cluster |
 
 ## Motivation
 
@@ -120,8 +120,8 @@ automation tools consume.
    a new status field that indicates the current stage of
    installation.
 
-3. Add one genuinely new condition
-   (`ManagementClusterResourcePressure`) for the
+3. Add a new condition
+   (`ManagementClusterResourcePressure` on HC) for the
    diagnostic gap not covered by the existing condition
    surface: management cluster scheduling pressure
    affecting hosted cluster pods. A second condition
@@ -153,10 +153,11 @@ automation tools consume.
    pressure affects running hosted clusters — not just
    new installations — so removing the signal after
    installation would create a monitoring blind spot;
-   (b) the HO already watches pods in HCP namespaces
-   for all clusters regardless of installation state, so
-   the runtime cost of maintaining this condition is
-   negligible; (c) the condition is level-driven and set
+   (b) the HO uses direct `List()` API calls (not
+   informers) so pod/event data is transient
+   per-reconciliation with no persistent memory
+   overhead (see Implementation Details for analysis);
+   (c) the condition is level-driven and set
    to `False` when no pressure exists, so it adds no
    noise to day-2 operations.
 
@@ -271,19 +272,18 @@ sequenceDiagram
     participant CPO as CPO (control-plane-operator)
     participant HCP as HostedControlPlane
     participant HCCO as HCCO (config-operator)
-    participant CVO as CVO (guest cluster)
+    participant CVO as CVO (HCP namespace)
     participant HO as HO (hypershift-operator)
     participant HC as HostedCluster
 
-    Note over CPO,HCP: Management cluster
-    Note over HCCO,CVO: Guest cluster
+    Note over CPO,CVO: HCP namespace (management cluster)
 
     CPO->>HCP: Set diagnostic conditions<br/>(Available, InfrastructureReady,<br/>installation.stage)
     HCCO->>CVO: Read CVO conditions<br/>(Failing, Progressing, etc.)
     HCCO->>HCP: Mirror CVO conditions<br/>(ClusterVersionFailing, etc.)
     HO->>HCP: Read HCP status.conditions
-    HO->>HC: Mirror 12 HCP conditions +<br/>6 CVO conditions (invert Failing→Succeeding)
-    HO->>HC: Set ManagementClusterResourcePressure<br/>(directly, no mirroring delay)
+    HO->>HC: Mirror HCP conditions +<br/>CVO conditions (invert Failing→Succeeding)
+    HO->>HC: Set ManagementClusterResourcePressure<br/>(direct pod/event inspection via List calls)
     HO->>HC: Mirror installation status<br/>from HCP to HC
 ```
 
@@ -302,13 +302,13 @@ to 25+ mirrored conditions. Adding a new condition to HCP
 requires explicitly adding it to the relevant mirroring
 code path.
 
-This enhancement does **not** add any new conditions to the
-HCP -> HC mirroring list. The diagnostic condition messages
-flow through the existing mirroring paths unchanged (they
-are on existing condition types). The only new condition,
-`ManagementClusterResourcePressure`, is set directly by
-the HO on the HC — it does not flow through the mirroring
-pipeline, so it has no mirroring delay. The deferred
+This enhancement does **not** add any new conditions to
+the HCP → HC mirroring list. The diagnostic condition
+messages flow through the existing mirroring paths
+unchanged (they are on existing condition types). The
+only new condition, `ManagementClusterResourcePressure`,
+is set directly by the HO on the HC — it does not flow
+through the mirroring pipeline. The deferred
 `PlatformInfrastructureReady` (Phase 2) will require
 addition to the mirroring list when implemented.
 
@@ -326,19 +326,11 @@ new `ManagementClusterResourcePressure` condition — follow
 these principles:
 
 1. **Level-driven**: Every condition is re-evaluated from
-   scratch on every reconciliation pass. No condition value
-   is carried forward from a previous reconciliation — the
-   controller recomputes the full state each time. This
-   ensures self-healing: if the CPO crashes after setting
-   `Available=False` and restarts after the deployment
-   recovers, the next reconciliation sets `Available=True`.
-   Note: `meta.SetStatusCondition` only updates
-   `lastTransitionTime` when the `Status` field changes,
-   not when `Message` or `Reason` changes. This means
-   diagnostic condition messages can be updated without
-   triggering `lastTransitionTime` changes, which avoids
-   false positives in flapping detection that relies on
-   `lastTransitionTime`.
+   scratch on every reconciliation pass, ensuring
+   self-healing. `meta.SetStatusCondition` only updates
+   `lastTransitionTime` when `Status` changes, not when
+   `Message` or `Reason` changes — so diagnostic message
+   updates do not trigger flapping detection.
 
 2. **Top-level only**: All conditions live in
    `status.conditions` on the relevant resource (HC, HCP).
@@ -360,41 +352,14 @@ these principles:
   automatically. When pods are healthy, the message returns
   to normal.
 
-- **`ManagementClusterResourcePressure`**: When no
-  `FailedScheduling` events exist and no pods are in
-  `Pending` state with `PodScheduled=False,
-  reason=Unschedulable` in the HCP namespace, the condition
-  is set to `False` (no pressure). The `False` state
-  confirms the controller is running and actively evaluating
-  pressure. If control-plane pod status cannot be retrieved
-  (e.g., API server unreachable), the condition is set to
-  `Unknown` with `Reason=ControlPlanePodStatusUnavailable`
-  — this clears automatically when the data becomes
-  available again. The condition persists into day-2 as a
-  continuous health signal (see Non-Goal 2 for the explicit
-  exception).
-  **Day-2 transient behavior during rolling updates:**
-  When the CPO orchestrates an OCP upgrade, pods may
-  transiently show `FailedScheduling` due to pod
-  disruption budgets or temporary resource contention
-  during pod churn. This can cause the condition to
-  briefly transition to `True` during an otherwise
-  healthy upgrade. This is expected and mitigated by
-  three factors: (1) the 60-second reconciliation
-  interval provides natural damping — pressure that
-  resolves between reconciliations is never surfaced;
-  (2) the recommended alerts use a 15-minute `for:`
-  duration, filtering out transient upgrade activity;
-  (3) the condition is level-driven and self-clears
-  as soon as scheduling pressure resolves, typically
-  within seconds of pod rescheduling. Note that
-  `CrashLoopBackOff` and `ImagePullBackOff` during
-  upgrades do NOT trigger this condition — it is
-  scoped to scheduling failures only. If false
-  positives during upgrades prove to be a problem in
-  practice, a follow-up can suppress the condition
-  when `ControlPlaneVersionStatus.History` shows an
-  active rollout.
+- **`ManagementClusterResourcePressure`**: Set to
+  `False` when no scheduling pressure exists,
+  `Unknown` when pod status is unavailable. Persists
+  into day-2 as a continuous health signal (see
+  Non-Goal 2). Day-2 transient `True` during rolling
+  updates is expected and mitigated by the 60-second
+  reconciliation interval and the 15-minute `for:`
+  duration on recommended alerts.
 
 - **`installation.stage`**: Persists as `InstallationComplete`
   after installation finishes. On day-2, it serves as a
@@ -435,7 +400,7 @@ HyperShift deployments (ARO HCP, ROSA HCP, self-managed):
 | 1.3 | Control-plane deployment has unavailable replicas | Add diagnostic detail to CPC `Available` condition message with pod-level failure reasons (scheduling, crash loop, image pull) |
 | 1.4 | Required operators not yet available or degraded | Set `Reason=ClusterVersionFailing` on `ClusterVersionSucceeding`; pass through the CVO message verbatim (no parsing) |
 | 1.5 | HostedCluster has no installed version or stops progressing | New `installation.stage` status field |
-| 1.6 | Management cluster capacity exhaustion — pod scheduling failures | New `ManagementClusterResourcePressure` condition |
+| 1.6 | Management cluster capacity exhaustion — pod scheduling failures | New `ManagementClusterResourcePressure` condition (set directly by HO on HC) |
 | 1.7 | Opaque timeout masking root cause | Addressed by all of the above — diagnostic conditions replace the opaque timeout with specifics |
 
 Note: IP/inode/FD exhaustion was removed from the
@@ -452,33 +417,33 @@ Because the CPO is the controller that writes
 diagnostic conditions on the `HostedControlPlane`,
 all diagnostic enrichment from this enhancement
 requires the CPO to be running. If the CPO is dead,
-diagnostics go dark. The HO detects CPO
-unavailability indirectly as a stale HCP (no
-condition updates), but cannot provide pod-level
-diagnostic detail for the CPO's own pods — that
-would require the HO to inspect CPO pod status
-directly, which is a separate concern. Enriching
-this case is deferred to future work.
+diagnostics go dark. However, the HO's
+`ManagementClusterResourcePressure` detection
+partially addresses this gap: it inspects all pods
+in the HCP namespace (including the CPO pod) via
+direct `List()` calls, so if the CPO itself is
+unschedulable, the condition will be
+`True, Reason=FailedScheduling` on the HC. Other CPO
+failure modes (CrashLoopBackOff, OOMKilled) are
+detected by the CPC `Available` condition's
+diagnostic detail.
 
-**Known gap — Konnectivity tunnel failures:** When
-the Konnectivity tunnel between the management
-cluster and the guest cluster is broken, the HCCO
+**Known gap — HCCO connectivity to guest cluster
+API:** The HCCO runs in the HCP namespace and
+connects to the guest cluster API server directly
+(via kubeconfig), not through Konnectivity. If the
+guest cluster API server is unreachable (e.g.,
+network partition, KAS not yet running), the HCCO
 cannot mirror CVO conditions, so
 `ClusterVersionSucceeding` remains at
 `Status=Unknown, Reason=StatusUnknown`. The user
 sees `installation.stage=WaitingForOperators` with
 no indication that the root cause is connectivity.
-However, this gap is partially covered by existing
+This gap is partially covered by existing
 conditions: `KubeAPIServerAvailable` tracks KAS
-readiness, `KASLoadBalancerNotReachable` (reason on
-HCP `Available`) signals LB-level failures, and
-`ControlPlaneConnectionAvailable` checks
-data-plane-to-control-plane connectivity via the
-kas-connection-checker. The remaining uncovered
-case is when KAS is reachable (forward path) but
-the Konnectivity reverse tunnel is broken —
-preventing the HCCO from mirroring CVO state.
-Dedicated Konnectivity health diagnostics are
+readiness and `KASLoadBalancerNotReachable` (reason
+on HCP `Available`) signals LB-level failures.
+Dedicated HCCO connectivity diagnostics are
 deferred to future work.
 
 ### Workflow Description
@@ -535,11 +500,10 @@ deferred to future work.
    - Message: `2 components unavailable. First failure:
      kube-apiserver — PodSchedulingFailed: Insufficient
      cpu`
-4. The HO detects `FailedScheduling` events and pods in
-   `Pending` state with `PodScheduled=False` in the HCP
-   namespace and sets
-   `ManagementClusterResourcePressure=True` directly
-   on the `HostedCluster`.
+4. The HO detects `FailedScheduling` events and
+   `Pending` pods in the HCP namespace (via direct
+   `List()` calls) and sets
+   `ManagementClusterResourcePressure=True` on the HC.
 5. The HO mirrors the diagnostic `Available` condition
    from HCP to HC.
 6. The cluster service provider sees both signals on
@@ -568,7 +532,7 @@ sequenceDiagram
             CPO->>Pods: Inspect pod conditions/events
             CPO->>HCP: Add root cause to condition
             HO->>HC: Mirror diagnostic condition
-            HO->>HC: Set ResourcePressure (if scheduling)
+            HO->>HC: Set ManagementClusterResourcePressure
             CSP->>HC: Read condition, take action
         end
     end
@@ -588,7 +552,7 @@ or finalizers.
 |----------|------|----------|--------|-------------|
 | Status field | `installation.stage` | HC, HCP | CPO → HO mirrors to HC | Enum: `Initializing`, `ControlPlaneProvisioning`, `WaitingForKubeconfig`, `WaitingForOperators`, `InstallationComplete`. Forward-only monotonic. |
 | Status field | `installation.lastTransitionTime` | HC, HCP | CPO → HO mirrors to HC | Timestamp of most recent stage transition. Non-pointer `metav1.Time` with `omitzero`. |
-| Condition type | `ManagementClusterResourcePressure` | HC | HO (directly, no mirroring) | Scheduling pressure on management cluster. `True`/`False`/`Unknown`. |
+| Condition type | `ManagementClusterResourcePressure` | HC | HO (direct pod/event inspection) | Scheduling pressure on management cluster affecting this HC's control-plane pods. `True`/`False`/`Unknown`. |
 | Reason constant | `PodSchedulingFailed` | CPC `Available` | CPO | Pod cannot be scheduled on management cluster. |
 | Reason constant | `CrashLoopBackOff` | CPC `Available` | CPO | Pod is in CrashLoopBackOff. |
 | Reason constant | `ImagePullBackOff` | CPC `Available` | CPO | Pod cannot pull container image. |
@@ -741,7 +705,7 @@ constraint above):
 | `Initializing` → `ControlPlaneProvisioning` | At least one control-plane component deployment has been created | The CPO has called `CreateOrUpdate` for any CPC deployment (kube-apiserver, etcd, etc.) in the HCP namespace. |
 | `ControlPlaneProvisioning` → `WaitingForKubeconfig` | All required control-plane component deployments have `AvailableReplicas > 0` | `controlPlaneComponentsAvailable()` returns true — every CPC's `Available` condition is `True`. |
 | `WaitingForKubeconfig` → `WaitingForOperators` | The hosted cluster admin kubeconfig secret exists | The CPO resolves the kubeconfig secret name via `KASAdminKubeconfigSecret(hcp.Namespace, hcp.Spec.KubeConfig)`, which defaults to `admin-kubeconfig` and honors an explicit `spec.kubeConfig.name` override. The CPO confirms this secret is present in the HCP namespace. This is the same check that drives the existing `Available=False, Reason=KubeconfigWaitingForCreate` condition. |
-| `WaitingForOperators` → `InstallationComplete` | The CVO reports the cluster version is available | The `ClusterVersionAvailable` condition on the `HostedControlPlane` is `True`. This indicates the CVO in the guest cluster has successfully rolled out all required cluster operators for the target version. |
+| `WaitingForOperators` → `InstallationComplete` | The CVO reports the cluster version is available | The `ClusterVersionAvailable` condition on the `HostedControlPlane` is `True`. This indicates the CVO has successfully rolled out all required cluster operators for the target version. |
 
 Note: the CPO evaluates all trigger conditions on
 every reconciliation loop, not only the "next" one.
@@ -750,6 +714,33 @@ triggers become true simultaneously (e.g., after a
 fast installation or an informer cache catch-up), the
 stage jumps directly to the latest satisfied stage
 without pausing at intermediate values.
+
+**Stage naming clarification — `WaitingForKubeconfig`:**
+The trigger for this stage transition is purely the
+**existence** of the admin kubeconfig secret in the
+HCP namespace — not the reachability or usability of
+the API server endpoint. The CPO does not attempt to
+connect to the hosted cluster API; it only checks
+whether the secret object exists. Endpoint
+reachability concerns (private clusters not reachable
+from the management cluster, management clusters
+without outside access) do not affect stage
+progression.
+
+In practice, the kubeconfig secret is created as part
+of the KAS deployment flow, typically before all CP
+components are available. In this case, the
+`WaitingForKubeconfig` stage is never observed — the
+CPO evaluates all triggers on every reconciliation
+and jumps directly from `ControlPlaneProvisioning` to
+`WaitingForOperators` (or even `InstallationComplete`)
+in a single pass. The stage name describes the
+*logical milestone* in the installation sequence, not
+a guaranteed wait state. The `WaitingForKubeconfig`
+stage is only observable when CP components become
+available before the kubeconfig secret is created
+(e.g., slow secret generation, custom kubeconfig
+configuration).
 
 **Backfill for pre-existing clusters:** The trigger
 evaluation described above applies only to clusters
@@ -775,43 +766,38 @@ constraint prevents any subsequent regression.
 **Known transient artifact — intermediate stage on
 pre-existing clusters:** If a pre-existing cluster
 has `Available=False` at the moment of the first
-post-upgrade CPO reconciliation (e.g., because a
-guest cluster OCP upgrade is in progress), the
-backfill rule does not fire. Instead, the CPO falls
-through to normal trigger evaluation and assigns an
-intermediate stage based on current conditions (e.g.,
-`WaitingForOperators` if `ClusterVersionAvailable` is
-`False`). This is a transient artifact, not a real
-installation — the cluster completed installation
-long before this feature was deployed.
+post-upgrade CPO reconciliation (e.g., during a
+concurrent OCP upgrade), the backfill rule does not
+fire and the CPO assigns an intermediate stage based
+on current conditions. This is **temporary and
+self-correcting**: once `Available` returns to `True`,
+the stage advances to `InstallationComplete`. A
+cluster whose `metadata.creationTimestamp` predates
+the HO upgrade by more than a few hours but shows an
+intermediate stage is a backfill artifact, not a
+genuine stuck installation.
 
-This artifact is **temporary and self-correcting**:
-once the concurrent operation completes and
-`Available` returns to `True`, the normal stage
-triggers advance `installation.stage` to
-`InstallationComplete` on the next reconciliation.
-The forward-only constraint ensures no regression
-after that point.
+**Control-plane vs full-cluster readiness:** The
+stage progression inherently distinguishes
+control-plane readiness from full cluster readiness:
 
-**How to detect the artifact:** A cluster showing an
-intermediate `installation.stage` (e.g.,
-`WaitingForOperators`) whose
-`metadata.creationTimestamp` is significantly older
-than `installation.lastTransitionTime` (e.g., created
-days or weeks ago but stage was set within the
-upgrade window) is a backfill artifact, not a genuine
-stuck installation. Consumers can compare the two
-timestamps: if `creationTimestamp` predates the HO
-upgrade by more than a few hours, the intermediate
-stage is transient and will resolve without
-intervention. If the concurrent operation is itself
-stuck (e.g., a stalled OCP upgrade leaving
-`Available=False` for hours), the `installation.stage`
-remains at the intermediate value until that
-operation completes — but the root cause is the
-stalled upgrade, not a stuck installation. The
-`Available` condition and its reason/message identify
-the actual problem.
+- **Control-plane provisioning complete**: Reaching
+  `WaitingForOperators` means all CP component
+  deployments have available replicas and the admin
+  kubeconfig exists — the CPO's work is done.
+- **Full installation complete**: Reaching
+  `InstallationComplete` means `ClusterVersionAvailable`
+  is `True` on the HCP — the CVO (which runs in the
+  HCP namespace, not the guest cluster) has
+  successfully rolled out all required cluster
+  operators for the target version.
+
+Consumers can use the stage value to determine which
+layer to investigate: stages before
+`WaitingForOperators` point to control-plane component
+issues on the management cluster, while a stuck
+`WaitingForOperators` points to CVO/operator issues
+in the hosted cluster.
 
 **Diagnostic detail in existing conditions — reason code analysis:**
 
@@ -834,56 +820,30 @@ enhancement's implementation:
 
 ```go
 // ManagementClusterResourcePressure is the condition
-// type indicating pod scheduling pressure on the
-// management cluster affecting this hosted cluster's
-// control plane pods.
+// type on the HostedCluster, set directly by the HO.
+// The HO inspects pods and events in the HCP namespace
+// via List() calls to detect scheduling pressure.
 const ManagementClusterResourcePressure ConditionType = "ManagementClusterResourcePressure"
 
 const (
-    // ReasonPodSchedulingFailed indicates a control-plane
-    // component is unavailable because its pods cannot be
-    // scheduled on the management cluster.
     ReasonPodSchedulingFailed = "PodSchedulingFailed"
-
-    // ReasonCrashLoopBackOff indicates a control-plane
-    // component is unavailable because one or more pods
-    // are in CrashLoopBackOff.
-    ReasonCrashLoopBackOff = "CrashLoopBackOff"
-
-    // ReasonImagePullBackOff indicates a control-plane
-    // component is unavailable because one or more pods
-    // cannot pull their container image.
-    ReasonImagePullBackOff = "ImagePullBackOff"
-
-    // ReasonRouteNotAdmitted indicates infrastructure is
-    // not ready because the API server route has not been
-    // admitted by any IngressController.
-    ReasonRouteNotAdmitted = "RouteNotAdmitted"
-
-    // ReasonClusterVersionFailing indicates the CVO
-    // reports a failure. This may be an operator
-    // degradation, an internal CVO error, a
-    // precondition failure, or a capability mismatch.
+    ReasonCrashLoopBackOff    = "CrashLoopBackOff"
+    ReasonImagePullBackOff    = "ImagePullBackOff"
+    ReasonRouteNotAdmitted    = "RouteNotAdmitted"
     ReasonClusterVersionFailing = "ClusterVersionFailing"
 
-    // ReasonControlPlanePodStatusUnavailable indicates
-    // control-plane pod status could not be retrieved
-    // (e.g., API server unreachable), so scheduling
-    // pressure cannot be determined. Used as the Reason
-    // for ManagementClusterResourcePressure when
-    // Status=Unknown.
+    // ReasonControlPlanePodStatusUnavailable — pod
+    // status unavailable, used for
+    // ManagementClusterResourcePressure Status=Unknown.
     ReasonControlPlanePodStatusUnavailable = "ControlPlanePodStatusUnavailable"
 
-    // ReasonNoPressure indicates no scheduling pressure
-    // is detected on the management cluster. Used as the
-    // Reason for ManagementClusterResourcePressure when
+    // ReasonNoPressure — no scheduling pressure,
+    // used for ManagementClusterResourcePressure
     // Status=False.
     ReasonNoPressure = "NoPressure"
 
-    // ReasonFailedScheduling indicates scheduling
-    // pressure is detected on the management cluster.
-    // Used as the Reason for
-    // ManagementClusterResourcePressure when
+    // ReasonFailedScheduling — scheduling pressure
+    // detected, used for ManagementClusterResourcePressure
     // Status=True.
     ReasonFailedScheduling = "FailedScheduling"
 )
@@ -982,10 +942,10 @@ to `Status=True` when the CVO reports success, so no
 manual intervention is needed for transient cases.
 
 **Triage location — control plane vs guest cluster:**
-`ClusterVersionSucceeding` always reflects guest
-cluster state — it mirrors the CVO, which runs
-inside the hosted cluster and reports on guest
-cluster operators. When `ClusterVersionFailing` is
+`ClusterVersionSucceeding` always reflects hosted
+cluster operator state — it mirrors the CVO, which
+runs in the HCP namespace on the management cluster
+and reports on hosted cluster operators. When `ClusterVersionFailing` is
 the reason, the SRE should investigate the guest
 cluster (CVO logs, cluster operator status).
 Control-plane component failures (running in the
@@ -1099,20 +1059,11 @@ condition (no existing consumers).
 | OCM console | Confirm UI renders new reason values gracefully | EP author | Before Tech Preview |
 | Third-party GitOps | Document new reasons in release notes | EP author | GA release notes |
 
-**Contingency if consumers break**: If any downstream
-consumer keys on `Reason` values and would break, the
-fallback is to keep the existing `Reason` values
-unchanged and move diagnostic detail to the `Message`
-field only. For example, instead of
-`Reason=ClusterVersionFailing, Message="Cluster operator
-ingress is degraded..."`, the condition would use
+**Contingency if consumers break**: Fallback is to
+keep existing `Reason` values unchanged and move
+diagnostic detail to `Message` only (e.g.,
 `Reason=FromClusterVersion, Message="ClusterVersionFailing:
-Cluster operator ingress is degraded..."`. This
-preserves backward compatibility while still surfacing
-diagnostic information. The diagnostic code paths are
-isolated (separate functions per condition type) and
-this fallback can be applied per-condition without
-affecting other diagnostic additions.
+..."`). Code paths are isolated per condition type.
 
 | Existing Condition | Diagnostic detail | Example |
 |---|---|---|
@@ -1129,41 +1080,32 @@ condition:
 
 | Condition Type | Set By | Scope | Purpose |
 |---|---|---|---|
-| `ManagementClusterResourcePressure` | HO | Phase 1 | Indicates pod scheduling pressure on the management cluster affecting this hosted cluster's control plane pods. Set to `True` when `FailedScheduling` events are detected on pods in the HCP namespace or when pods are in `Pending` state with `PodScheduled=False, reason=Unschedulable`. Set to `False` when no scheduling pressure exists. Scoped to pod scheduling failures only — does not detect inode, FD, or IP exhaustion. The condition message includes a summary of affected pods grouped by resource type (e.g., `"3 pods with FailedScheduling: 2 Insufficient cpu, 1 Insufficient memory"`). This prevents SREs from resolving one resource constraint only to discover another. |
+| `ManagementClusterResourcePressure` (on HC) | HO | Phase 1 | Indicates pod scheduling pressure on the management cluster affecting this hosted cluster's control-plane pods. The HO inspects pods and `FailedScheduling` events in the HCP namespace using direct `List()` API calls, correlating events to pods by UID. Set to `True` when scheduling failures are detected, `False` when none exist, `Unknown` when pod status cannot be retrieved. Scoped to pod scheduling failures only — does not detect inode, FD, or IP exhaustion. The condition message includes a summary of affected pods grouped by resource type (e.g., `"3 pods with FailedScheduling: 2 Insufficient cpu, 1 Insufficient memory"`). |
 
 The condition follows the Kubernetes convention for
 "pressure" conditions (matching `DiskPressure`,
 `MemoryPressure` on Node): `True` means pressure is
 detected, `False` means no pressure.
-`observedGeneration` is not applicable to this
-condition because it is event-driven (derived from
-pod status and scheduling events), not spec-driven.
 
-**Architectural note — why the HO, not MCE:** Management
-cluster resource pressure is a cross-cutting concern,
-and one could argue it belongs in the MCE
-(Multicluster Engine) layer or a dedicated management
-cluster health operator. The HO is chosen as the home
-for Phase 1 for pragmatic reasons: (1) the HO already
-watches pods in HCP namespaces — the data is local,
-requiring no new component dependency; (2) MCE is not
-present in all deployments — self-managed HyperShift
-does not require MCE, so an MCE-only signal would
-leave self-managed users without coverage; (3) the
-condition is not always identical across HCs —
-scheduling pressure can affect some HCs more than
-others depending on resource requests, node affinity,
-and priority classes, so a per-HC signal is more
-precise than a cluster-wide one; (4) a per-HC
-condition is directly visible on `oc get hostedcluster`
-without requiring knowledge of MCE resources. The
-`ManagementClusterWidePressure` alert (recommended
-above) aggregates the per-HC signals into a single
-fleet-level alert, addressing the "N identical
-conditions" concern at the alerting layer. If MCE
-gains management cluster health monitoring in the
-future, the condition's architectural home can be
-revisited.
+**Architectural note — HO-direct approach using
+`List()` calls:**
+The HO detects scheduling pressure directly using
+`List()` API calls (not informers/watches) on each
+reconciliation. Pod and event data is fetched,
+processed, and discarded — there is no persistent
+informer cache. This avoids fleet-scale memory growth
+that would occur with per-namespace informers (~50MB
+at 200 HCPs, ~240MB at 1000 HCPs). The trade-off is
+a small increase in API server load (2-3 List calls
+per HCP per reconciliation), which is acceptable at
+fleet scale given the 60-second reconciliation
+interval.
+
+The HO inspects all pods in the HCP namespace
+(including the CPO pod itself), so if the CPO is
+unschedulable, `ManagementClusterResourcePressure`
+is set to `True` — naturally covering the
+chicken-and-egg case without a separate check.
 
 **Security consideration for managed services**: In managed
 service environments (ROSA, ARO), the `HostedCluster`
@@ -1189,37 +1131,22 @@ enhancement.
 This enhancement does not include a per-cluster toggle
 to disable diagnostic detail. Rationale:
 
-- **All changes are purely informational.** Diagnostic detail
-  modifies condition `Message` content and adds `Reason`
-  values. It does not change cluster behavior. A wrong
-  message is cosmetic, not harmful.
-- **Conditions are level-driven.** Every reconciliation
-  recomputes the full state from scratch. A bug
-  self-corrects on the next reconciliation after a code
-  fix — there is no persistent corruption.
-- **HyperShift ships independently from OCP.** Unlike
-  core OCP operators that follow the OCP z-stream
-  cadence, HyperShift has its own release process
-  ([HyperShift release process](https://github.com/openshift/hypershift/blob/main/docs/content/reference/release-process.md))
-  and can ship a fix within days. The "must roll back
-  the entire version" concern that motivates escape
-  hatches in OCP components does not apply here.
-- **No precedent in HyperShift.** Existing HyperShift
-  features do not have per-feature disable toggles in
-  `spec`. Adding one here would set an unusual pattern
-  and add permanent API surface for a feature that,
-  once stable, nobody would want to disable.
-- **A spec field lives forever.** Adding a toggle for
-  a diagnostic feature creates permanent API maintenance
-  cost with diminishing returns after the feature
-  stabilizes.
+- Changes are purely informational (condition messages
+  and reasons) — a wrong message is cosmetic, not harmful.
+- Level-driven semantics ensure bugs self-correct on
+  the next reconciliation after a fix.
+- HyperShift ships independently and can deploy fixes
+  within days — the escape hatch concern that motivates
+  toggles in OCP components does not apply.
+- No precedent in HyperShift for per-feature toggles;
+  a spec field lives forever with diminishing returns.
 
 ### Kubernetes Events Strategy
 
 Kubernetes Events are not *emitted* by this enhancement
 in Phase 1. Note: existing Kubernetes Events (e.g.,
 `FailedScheduling`) are *consumed* as input signals —
-specifically by the `ManagementClusterResourcePressure`
+specifically by the HO's `ManagementClusterResourcePressure`
 detection logic. Rationale for not emitting new Events:
 Events are ephemeral (default TTL 1 hour), not queryable
 at fleet scale, and add implementation complexity.
@@ -1250,67 +1177,37 @@ is under load (exactly when scheduling failures are most
 likely), these calls fail fast and do not exacerbate the
 problem.
 
-The HO performs additional inspection of pod events for
-scheduling failure detection. This adds a small amount of
-CPU/memory overhead per hosted cluster during installation.
-The overhead is negligible for steady-state
-(already-installed) clusters.
+The HO performs scheduling pressure detection using
+direct `List()` API calls (not informers) — pod/event
+data is transient per-reconciliation with no persistent
+memory overhead. This avoids fleet-scale HO memory
+growth.
 
 **Guest cluster impact**: None. All diagnostic logic
 runs on the management cluster side. The guest cluster
 receives no new components or configuration.
 
-**Disconnected environments**: The diagnostic conditions
-for platform-agnostic failures (Phase 1) work identically
-in disconnected environments since they inspect only
-local Kubernetes resources (pods, deployments, events).
-Note: in disconnected environments, `ImagePullBackOff`
-is the most common failure mode and typically indicates
-mirror registry misconfiguration rather than a
-permissions issue. The diagnostic condition message will
-show the raw container status reason (e.g.,
-`"ImagePullBackOff: pull access denied"`) which is
-technically accurate but may mislead users unfamiliar
-with disconnected image mirroring. SREs in disconnected
-environments should check `ImageContentSourcePolicy`
-or `ImageDigestMirrorSet` configuration when
-`ImagePullBackOff` is reported.
-The deferred `PlatformInfrastructureReady` condition
-(Phase 2) depends on cloud API error responses; in
-disconnected or proxied environments, errors may manifest
-as generic connectivity failures (TCP timeout, TLS
-handshake failure) rather than semantic cloud errors.
-This will be addressed in the Phase 2 enhancement.
-In disconnected environments, Prometheus metrics and
-conditions remain available locally, but remote
-telemetry collection (OCM, Insights) may be
-unavailable, limiting fleet-wide visibility.
+**Disconnected environments**: Phase 1 diagnostics
+work identically since they inspect only local
+Kubernetes resources. `ImagePullBackOff` in
+disconnected environments typically indicates mirror
+registry misconfiguration. Phase 2 cloud-API
+diagnostics may surface generic connectivity failures
+instead of semantic errors.
 
 #### Standalone Clusters
 
-Not applicable. This enhancement is specific to the
-HyperShift topology. Standalone clusters do not use
-`HostedCluster` or `HostedControlPlane` resources.
-Standalone cluster installation debugging is handled
-by the installer and CVO, which are separate components.
+Not applicable — HyperShift-specific enhancement.
 
 #### Single-node Deployments or MicroShift
 
-Not applicable. HyperShift management clusters are
-multi-node by design. This enhancement does not add
-any components to guest clusters, so SNO guest clusters
-are unaffected. MicroShift is not deployable as a
-guest cluster type in HyperShift and does not run the
-HyperShift Operator.
+Not applicable — HyperShift management clusters are
+multi-node; this enhancement adds nothing to guest
+clusters.
 
 #### OpenShift Kubernetes Engine
 
-HyperShift is not part of the OKE entitlement. This
-enhancement is therefore not applicable to OKE
-deployments. If OKE entitlement changes in the future
-to include HyperShift, this enhancement works
-identically since it does not depend on any
-OCP-specific features excluded from OKE.
+Not applicable — HyperShift is not part of OKE.
 
 ### Implementation Details/Notes/Constraints
 
@@ -1377,7 +1274,6 @@ components:
   the CPO compares the proposed stage ordinal against
   the current stage ordinal and only updates if the
   new stage is strictly later.
-
 **2. HyperShift Operator (HO):**
 
 - Mirror `installation` status (stage and
@@ -1394,170 +1290,39 @@ components:
   acceptable because `installation.stage` is
   informational — no controller or automation uses it
   for control-flow decisions.
-- Add `ManagementClusterResourcePressure` condition:
-  detect scheduling pressure using two mechanisms:
-  1. Watch for `FailedScheduling` events on pods in
-     the HCP namespace (using a field selector to
-     filter to `reason=FailedScheduling`).
-     **Event-to-pod correlation**: each event is
-     correlated to its involved pod by UID. Before
-     contributing to the condition, the HO looks up
-     the pod by UID and checks its current
-     `PodScheduled` condition. If the pod no longer
-     exists or has `PodScheduled=True` (i.e., it
-     recovered), the event is ignored. This prevents
-     a stale `FailedScheduling` event (which can
-     persist up to the 1-hour default TTL) from
-     keeping the condition `True` after the pod has
-     been successfully scheduled.
+- Set `ManagementClusterResourcePressure` directly on
+  the HC. The HO detects scheduling pressure using
+  direct `List()` API calls (not informers) on pods
+  and events in the HCP namespace, using two
+  mechanisms:
+  1. List `FailedScheduling` events and correlate to
+     pods by UID. An event is only counted if its
+     involved pod still exists and has
+     `PodScheduled=False` (preventing stale events
+     from keeping the condition `True` after
+     recovery).
   2. Directly inspect pods in `Pending` state with
      `PodScheduled=False, reason=Unschedulable` as a
-     supplementary check (this handles the case where
-     events have expired due to the 1-hour default
-     TTL but pods are still unschedulable).
+     supplementary check (handles the case where
+     events have expired but pods are still
+     unschedulable).
   The condition is `True` when at least one pod has
-  an active scheduling failure — either a
-  `FailedScheduling` event whose involved pod is
-  still unschedulable (confirmed by UID lookup), or
-  a pod in `Pending` with
-  `PodScheduled=False, reason=Unschedulable`. When
-  neither signal exists, the condition is set to
-  `False`.
-  **Pod status retrieval failure**: If the pod or
-  event informer fails to sync (e.g., API server
-  unreachable, network partition, or unexpected
-  error during list/watch), the HO cannot determine
-  whether scheduling pressure exists. In this case,
-  the condition is set to `Status=Unknown,
-  Reason=ControlPlanePodStatusUnavailable` with a
-  message describing the error (e.g., `"Unable to
-  determine scheduling pressure: control-plane pod
-  status could not be retrieved"`). This avoids
-  both false positives (`True` without data) and
-  false negatives (`False` without data). The
-  `Unknown` status clears automatically on the
-  next successful reconciliation when pod status
-  becomes available again — consistent with
-  level-driven semantics.
-  **Freshness guarantee scope**: Controller-runtime's
-  informer cache exposes `HasSynced()`, which the
-  HO checks before reading from the cache.
-  `HasSynced()` is an **initial-list completion
-  check** — it returns `true` once the informer has
-  completed its first full list and begun watching.
-  It does **not** detect subsequent watch
-  interruptions or network partitions. After the
-  initial sync, if the watch connection breaks, the
-  informer cache contains stale data and
-  `HasSynced()` remains `true`. The HO therefore
-  sets `Unknown` in two cases: (1) `HasSynced()`
-  returns `false` (initial sync incomplete), and
-  (2) an explicit error is returned when reading
-  from the cache (e.g., context canceled, lister
-  failure). Post-sync staleness — where the cache
-  serves outdated pod state because the watch
-  re-establishment is in progress — is a
-  platform-wide informer property shared by all
-  controller-runtime controllers, not specific to
-  this feature. Controller-runtime re-establishes
-  the watch with exponential backoff; during the
-  gap, the condition reflects the last observed
-  state. The 60-second `requeueAfter` timer
-  ensures periodic reevaluation even when no watch
-  events arrive.
-- **RBAC**: The HO needs `get/list/watch` on Events
-  and Pods in HCP namespaces. **No RBAC changes are
-  needed** — the HO's existing ClusterRole already
-  grants `VerbAll` (all verbs) on both Pods and
-  Events across all namespaces
-  (`cmd/install/assets/hypershift_operator.go:1417-1433`).
-  This was established for existing HO functionality
-  (e.g., pod log collection, event inspection for
-  other reconciliation paths). The implementation
-  uses per-namespace informers scoped to each HCP
-  namespace, consistent with the HO's existing
-  pattern for other resources (e.g.,
-  `HostedControlPlane`, Deployments, Services).
-  Events use a field selector
-  (`reason=FailedScheduling`) to minimize cached
-  objects. Pods are filtered client-side to
-  `status.phase=Pending` with
-  `PodScheduled=False, reason=Unschedulable`.
-  **Memory overhead at fleet scale**: Each HCP
-  namespace has ~30 control-plane pods and a small
-  number of events matching the field selector. At
-  200 HCPs, the per-namespace informers add ~50MB
-  total to the HO (primarily pod metadata). At 500
-  HCPs, ~120MB. At 1000 HCPs, ~240MB (the
-  relationship is approximately linear because each
-  HCP namespace contributes a fixed number of cached
-  objects). This is acceptable given the HO already
-  caches `HostedControlPlane`, `HostedCluster`, and
-  other resources at similar scale. The pod informer
-  overhead is negligible for steady-state clusters
-  where no pods are Pending.
-  **Compact cluster behavior**: On compact
-  self-managed deployments (e.g., 3-node management
-  cluster co-located with workloads), transient
-  `FailedScheduling` events are more common during
-  normal operation due to tighter resource margins.
-  The condition may be frequently or perpetually
-  `True` on these clusters, which is accurate —
-  scheduling pressure genuinely exists — but may
-  create alert fatigue. The condition itself does
-  not use configurable thresholds; it reports
-  observed scheduling state as-is. Fleet operators
-  in compact deployments should tune the recommended
-  alerts: increase the `for:` duration beyond 15
-  minutes, raise the HC count threshold on
-  `ManagementClusterWidePressure`, or suppress the
-  alerts entirely if perpetual scheduling pressure
-  is an accepted operational baseline. This is an
-  alerting-layer concern, not a condition-layer one.
-- `ManagementClusterResourcePressure` is **set
-  directly on the `HostedCluster`** by the HO. It
-  is NOT added to the HCP -> HC condition mirroring
-  list, because the HO has the event/pod data locally
-  and mirroring would add unnecessary delay.
-  **Condition preservation during mirroring**: The
-  HO's existing condition sync logic uses a
-  read-modify-write pattern — it reads the current
-  HC `status.conditions`, merges in mirrored
-  conditions from HCP (using `meta.SetStatusCondition`
-  which keys on condition `Type`), then writes the
-  result. `ManagementClusterResourcePressure` is set
-  via the same `meta.SetStatusCondition` call within
-  the same reconciliation loop, so it is included in
-  the merged conditions array. There is no separate
-  write that could race with the mirroring pass. This
-  follows the same pattern used for `Degraded` and
-  other HO-set conditions today. The HO uses
-  controller-runtime's standard status update, which
-  applies resourceVersion-based optimistic concurrency.
-  A conflict triggers a full re-reconciliation,
-  recomputing all conditions from scratch (consistent
-  with level-driven semantics).
-  **Fleet-scale write behavior**: When the management
-  cluster is under genuine resource pressure, all HCs
-  on that cluster will transition
-  `ManagementClusterResourcePressure` from `False` to
-  `True` within the same reconciliation window. This
-  creates a burst of status subresource writes bounded
-  by the number of HCs. This burst is mitigated by
-  three factors: (1) controller-runtime's workqueue
-  staggers reconciliation starts across HCs — they do
-  not all fire at the same instant; (2) once the
-  condition is `True`, subsequent reconciliations do
-  not cause a status write unless the `Message` changes
-  (same `Status` = no `lastTransitionTime` update, and
-  `meta.SetStatusCondition` skips the write if the
-  condition is unchanged); (3) optimistic concurrency
-  conflicts cause retries with backoff, further
-  spreading writes over time. At 200 HCs, the initial
-  transition burst produces at most 200 status writes
-  spread over the 60-second reconciliation interval —
-  well within etcd write capacity. No additional
-  jitter is needed.
+  an active scheduling failure (including the CPO
+  pod itself — the chicken-and-egg case is covered
+  naturally). When neither signal exists, the
+  condition is set to `False`. If pod status cannot
+  be retrieved, the condition is set to `Unknown,
+  Reason=ControlPlanePodStatusUnavailable`.
+- **No persistent memory overhead.** Pod and event
+  data is fetched via `List()`, processed, and
+  discarded on each reconciliation. No per-namespace
+  informer caches are maintained, avoiding the
+  fleet-scale memory concern.
+- **Compact cluster behavior**: On compact self-managed
+  deployments, transient scheduling pressure is more
+  common. The condition reports observed state as-is.
+  Fleet operators should tune alert thresholds
+  accordingly.
 
 **3. Metrics:**
 
@@ -1584,17 +1349,14 @@ components:
   Counter of installation failures by failure reason.
   Labels: `namespace`, `name`, `reason`.
   **Structured input**: The `reason` label is derived
-  from the structured `Reason` field on CPC
-  `Available` conditions (e.g.,
-  `ReasonPodCrashLoop` → `CrashLoopBackOff`,
-  `ReasonPodSchedulingFailed` → `PodSchedulingFailed`).
-  The HO reads CPC conditions directly via its
-  existing CPC informers — it does **not** parse
-  the free-text `Message` field on HCP `Available`
-  (which carries `ComponentsNotAvailable` with the
-  first CPC detail as a human-readable string).
-  `ManagementClusterResourcePressure` provides its
-  own structured reason. Any reason that does not
+  from the HCP `Available` condition's structured
+  `Reason` field (e.g.,
+  `PodSchedulingFailed` → `PodSchedulingFailed`,
+  `ComponentsNotAvailable` →
+  `ComponentsNotAvailable`).
+  The HO does **not** parse the free-text `Message`
+  field. `ManagementClusterResourcePressure` provides
+  its own structured reason. Any reason that does not
   map to the enumerated set is recorded as `Unknown`.
   **Increment semantics**: The counter increments
   **once per failure episode**, not on every
@@ -1736,56 +1498,23 @@ upstream `metav1.Condition` which does not define a
 max length. No arrays of per-pod or per-node details.
 The `installation.stage` field is a single enum string.
 
-**Truncation behavior**: When the assembled message
-exceeds 256 characters, the controller truncates by
-dropping trailing content and appending a count of
-omitted items. The truncation strategy differs by
-message type:
+**Truncation behavior**: Messages exceeding 256
+characters are truncated. CPC/HCP `Available` uses a
+"first failure" pattern.
+`ManagementClusterResourcePressure` groups by resource
+type with trailing groups dropped.
+`ClusterVersionSucceeding` truncates CVO messages at
+a word boundary.
 
-- **CPC `Available` / HCP `Available`**: These use a
-  "first failure" pattern (e.g., `"2 components
-  unavailable. First failure: etcd — CrashLoopBackOff:
-  OOMKilled"`). Only the first failure is included;
-  additional failures are represented by the count.
-  Truncation is unlikely since only one failure detail
-  is included.
-- **`ManagementClusterResourcePressure`**: Groups
-  affected pods by resource type (e.g., `"3 pods with
-  FailedScheduling: 2 Insufficient cpu, 1 Insufficient
-  memory"`). If the grouped message exceeds 256 chars
-  (e.g., 10+ distinct failure reasons), trailing
-  resource groups are dropped and a summary is
-  appended: `"12 pods with FailedScheduling:
-  5 Insufficient cpu, 4 Insufficient memory...
-  (3 more reasons omitted)"`. The total pod count and
-  the first groups are always preserved.
-- **`ClusterVersionSucceeding`**: The CVO message is
-  passed through verbatim. If it exceeds 256 chars,
-  it is truncated at a word boundary with `...`.
-
-Worst-case example (multi-resource summary with long
-node/reason names): `"5 components unavailable. First
-failure: cluster-monitoring-operator —
-PodSchedulingFailed: 0/6 nodes are available:
-3 Insufficient cpu, 2 Insufficient memory, 1 node(s)
-had untolerated taint..."` (197 chars — within limit).
-
-**Risk: Condition flapping.** Transient errors (e.g.,
-brief scheduling pressure) could cause conditions to
-rapidly toggle.
+**Risk: Condition flapping.** Transient errors could
+cause conditions to toggle rapidly.
 
 *Mitigation*: The 60-second reconciliation interval
-provides natural damping — a transient error must
-persist across at least one full reconciliation cycle
-to remain visible. Since conditions are level-driven
-(recomputed from scratch each pass with no carried-
-forward state), a transient failure that resolves
-between reconciliations is never surfaced. No explicit
-debounce timer is used, as that would require stateful
-tracking that contradicts level-driven semantics.
-The validation criteria for GA is that fewer than 5%
-of condition transitions are reversed within 2 minutes
-under production workloads.
+provides natural damping. Level-driven semantics
+mean transient failures that resolve between
+reconciliations are never surfaced. GA validation:
+fewer than 5% of transitions reversed within 2
+minutes.
 
 **Risk: Security — exposing internal infrastructure
 details.** Detailed error messages might expose
@@ -1796,71 +1525,32 @@ details.
 allowlist of structured fields that may appear in
 HC condition messages:
 
-- **CPC `Available` / HCP `Available`** (pod-level
-  diagnostics): The message is constructed from an
-  allowlist of structured Kubernetes API fields:
-  pod name (follows `<component>-<hash>` pattern),
-  container name, and `containerStatus.State.Waiting
-  .Reason` (constrained to kubelet-defined values:
-  `CrashLoopBackOff`, `ImagePullBackOff`,
-  `ErrImagePull`, etc.). The free-text
-  `containerStatus.State.Waiting.Message` field is
-  **not** passed through — it can contain image
-  registry URLs, pull errors with registry hostnames,
-  or OOM details. If a recognized structured reason
-  is present, only that reason is included (e.g.,
-  `CrashLoopBackOff: OOMKilled`). If no recognized
-  reason is found, the fallback is the structured
-  reason code alone without any free-text message.
+- **CPC/HCP `Available`**: Allowlist of structured
+  fields only (pod name, container name, structured
+  `containerStatus.State.Waiting.Reason`). Free-text
+  `Waiting.Message` is **not** passed through.
+- **`ManagementClusterResourcePressure`**:
+  Resource-type summaries only (e.g., `Insufficient
+  cpu`). **Management cluster node names NOT
+  included.**
+- **`ClusterVersionSucceeding`**: CVO message passed
+  through verbatim (existing behavior, not new).
 
-- **`ManagementClusterResourcePressure`** (scheduling
-  diagnostics): The message is constructed from
-  resource-type summaries extracted from scheduler
-  event reasons (e.g., `Insufficient cpu`,
-  `Insufficient memory`), not from raw scheduler
-  event messages. **Management cluster node names
-  are NOT included** — the message aggregates by
-  resource type, not by node (e.g., `"3 pods with
-  FailedScheduling: 2 Insufficient cpu,
-  1 Insufficient memory"`).
+**Acceptance criterion**: Unit tests with synthetic
+management cluster node names, IPs, and credentials
+in source fields assert these do not appear in HC
+condition messages. ROSA/ARO security teams confirm
+before GA.
 
-- **`ClusterVersionSucceeding`** (CVO diagnostics):
-  The CVO `Failing` condition message is passed
-  through verbatim. This is **existing behavior**,
-  not newly introduced by this enhancement — the
-  HCCO already mirrors the CVO `Failing` condition's
-  `Reason` and `Message` unchanged
-  (`hcpstatus.go:212-223`), and the HO inverts the
-  status but preserves reason/message. This
-  enhancement only changes the `Reason` field to
-  `ClusterVersionFailing`; the `Message` passthrough
-  path is unchanged. CVO messages describe guest
-  cluster operator state (not management cluster
-  topology) and are already visible on the HC today.
+**Risk: Event TTL dependency.** The scheduling
+pressure detection relies on `FailedScheduling`
+events, which have a 1-hour default TTL. If events
+have expired, the condition could flip to `False` even
+if pods are still unschedulable.
 
-**Implementation acceptance criterion**: Unit tests
-must include synthetic messages containing management
-cluster node names, internal IP addresses, registry
-hostnames, and credential-like strings in source
-fields (`containerStatus.State.Waiting.Message`,
-scheduler event `message`). Tests assert that these
-values do not appear in the resulting HC condition
-messages. This is a required acceptance criterion for
-merging the implementation, not a deferred pre-GA
-review item. ROSA/ARO security teams must additionally
-confirm the sanitization is sufficient before GA
-(tracked as a graduation criterion).
-
-**Risk: Event TTL dependency.** The
-`ManagementClusterResourcePressure` condition relies
-on `FailedScheduling` events, which have a 1-hour
-default TTL. If the HO restarts and events have
-expired, the condition could flip to `False` even if
-pods are still unschedulable.
-
-*Mitigation*: The detection mechanism supplements
-event watching with direct pod status inspection
-(checking for pods in `Pending` state with
+*Mitigation*: The HO supplements event inspection with
+direct pod status inspection (checking for pods in
+`Pending` state with
 `PodScheduled=False, reason=Unschedulable`). Pod
 status persists as long as the pod exists, eliminating
 the event TTL dependency for the core signal.
@@ -1893,22 +1583,11 @@ Previous open questions have been resolved:
 
 - **Condition flapping (resolved)**: The 60-second
   reconciliation interval provides sufficient natural
-  damping — no explicit debounce logic will be added.
-  This will be validated during Tech Preview with the
-  following measurement plan: track
-  `lastTransitionTime` changes on diagnostic conditions
-  (`Available`, `InfrastructureReady`,
-  `ClusterVersionSucceeding`,
-  `ManagementClusterResourcePressure`) in the
-  ROSA/ARO staging fleet over a 14-day observation
-  window. Count transitions where the condition's
-  `Status` field reverses (e.g., `True` → `False` →
-  `True`) within a 2-minute window. Compute the
-  ratio: (reversed transitions) / (total transitions).
-  The 5% threshold applies per condition type across
-  all clusters in the staging fleet. If exceeded,
-  an explicit debounce using in-memory first-seen
-  timestamps will be added (with the understanding
+  damping. Validated during Tech Preview: track
+  reversed transitions within a 2-minute window across
+  the ROSA/ARO staging fleet over 14 days. If the
+  reversal ratio exceeds 5%, an explicit debounce will
+  be added (with the understanding
   that the timer resets on controller restart).
 
 ## Alternatives (Not Implemented)
@@ -2003,24 +1682,12 @@ choice between two unsatisfying behaviors:
   condition, breaking the contract that every other
   condition in the system follows.
 
-Additional practical issues with the condition approach:
-`meta.SetStatusCondition` only updates
-`lastTransitionTime` when `Status` changes, not when
-`Reason` changes; since all intermediate stages have
-`Status=False`, per-stage timestamps are lost. The
-dedicated `installation.lastTransitionTime` field tracks
-each stage change. The dedicated field also maps cleanly
-to a state-set gauge for Prometheus
-(`hypershift_hostedclusters_installation_stage{stage="X"}
-== 1`), whereas a condition-based approach would require
-reason-based metric queries that conditions do not
-natively expose. Finally, `InstallationCompleted: False`
-largely duplicates `Available: False` during
-installation.
-
-Progress tracking (monotonic watermark) and current-state
-reporting (level-driven conditions) serve different
-purposes and belong in different fields.
+Additionally, `meta.SetStatusCondition` only updates
+`lastTransitionTime` on `Status` changes, losing
+per-stage timestamps. A dedicated field maps cleanly
+to Prometheus state-set gauges. Progress tracking
+(monotonic watermark) and current-state reporting
+(level-driven conditions) serve different purposes.
 
 **Alternative 4: Log-based diagnostics only.**
 Improve log messages and structured logging without
@@ -2109,10 +1776,6 @@ this mirroring gap.
 **Self-Managed:**
 
 Bare metal, vSphere, and Agent provider failure cases
-need to be collected from self-managed HyperShift
-deployments.
-
-Bare metal, vSphere, and Agent provider failure cases
 will be collected and documented in the Phase 2
 follow-up enhancement.
 
@@ -2179,28 +1842,21 @@ exemption because:
    its own release cadence — not the OCP z-stream
    cadence. Standard OCP feature gates in
    `openshift/api/features/features.go` do not apply
-   to HyperShift CRDs. HyperShift can ship fixes
-   independently within days.
+   to HyperShift CRDs. HyperShift has its own feature
+   gate mechanism, but the purely additive,
+   informational nature of these changes does not
+   warrant gating — see the rationale in "No
+   Per-Cluster Disable Toggle." HyperShift can ship
+   fixes independently within days.
 4. Level-driven condition semantics mean bugs
    self-correct on the next reconciliation after a
    fix — there is no persistent corruption risk.
 
-**Initial rollout safety**: During the initial rollout,
-the diagnostic logic will be deployed to a ROSA/ARO
-staging fleet before production (per the contingency
-plan in the Risks section). If the staging rollout
-reveals issues, the HO and CPO can be rolled back
-within hours. No separate disable toggle (env var or
-feature gate) is provided — the arguments in the
-"No Per-Cluster Disable Toggle" section apply equally
-to a global toggle. An undocumented env var would add
-dead code paths that are never exercised in CI,
-creating a false sense of safety. The actual escape
-hatch is HyperShift's independent release process:
-a fix or rollback can be shipped within days, and
-level-driven condition semantics ensure that any bug
-self-corrects on the next reconciliation after a
-fix is deployed.
+**Initial rollout safety**: Deployed to ROSA/ARO
+staging fleet before production. Rollback is possible
+within hours via HyperShift's independent release
+process. No separate disable toggle is provided (see
+"No Per-Cluster Disable Toggle").
 
 Testing strategy:
 
@@ -2214,33 +1870,15 @@ Testing strategy:
    - CVO condition reason override to `ClusterVersionFailing`
      with message passthrough (no parsing)
    - Route admission status inspection
-   - `ManagementClusterResourcePressure` detection from
-     both `FailedScheduling` events and pod
+   - HO `ManagementClusterResourcePressure` detection
+     from both `FailedScheduling` events and pod
      `PodScheduled=False` condition
-   - `ManagementClusterResourcePressure` event-to-pod
-     UID correlation: a `FailedScheduling` event whose
-     involved pod has since been scheduled
-     (`PodScheduled=True`) does not contribute to the
-     condition — verifies recovery clears the condition
+   - HO `ManagementClusterResourcePressure` event-to-pod
+     UID correlation: recovery clears the condition
      without waiting for event TTL expiry
-   - `ManagementClusterResourcePressure` pod
-     deletion/recreation: a stale `FailedScheduling`
-     event from a deleted pod (old UID) does not
-     trigger the condition when a new pod (new UID)
-     with the same name is running and scheduled
-   - `ManagementClusterResourcePressure` set to
-     `Unknown` with
-     `Reason=ControlPlanePodStatusUnavailable` when
-     pod/event informer has not synced (initial
-     `HasSynced()` returns `false`) or when an
-     explicit cache read error occurs
-   - `ManagementClusterResourcePressure` post-sync
-     staleness: informer syncs successfully, then
-     pod state changes while the watch is not
-     delivering events — verify the condition
-     reflects the last observed state (not a false
-     `Unknown`), consistent with standard informer
-     cache behavior
+   - HO sets `ManagementClusterResourcePressure=
+     Unknown, Reason=ControlPlanePodStatusUnavailable`
+     when pod status cannot be retrieved
    - `installation.stage` monotonic forward-only
      transitions (verify stage cannot regress)
    - 5-second timeout on pod inspection falls back to
@@ -2329,40 +1967,13 @@ etc.) per `dev-guide/test-conventions.md`. Tests will
 integrate into existing HyperShift e2e test suites —
 no new periodic CI lanes are needed.
 
-**Failure scenario testing strategy:**
-
-Failure injection scenarios are tested at two levels:
-
-- **Unit tests** inject synthetic pod status, events,
-  and conditions into the controller reconciliation
-  logic and assert that the correct diagnostic reason
-  codes and messages are produced. All failure
-  categories (pod scheduling failures,
-  `CrashLoopBackOff`, `ImagePullBackOff`, management
-  cluster capacity exhaustion) are covered at this
-  level.
-
-- **E2e tests** include at least one failure injection
-  test that induces a real scheduling failure on the
-  management cluster — using a `ResourceQuota` on the
-  HCP namespace (capping pod count below the required
-  control-plane replicas) or a `NoSchedule` taint on
-  management cluster nodes — and verifies that
-  `ManagementClusterResourcePressure=True` and the
-  CPC `Available` condition with
-  `Reason=PodSchedulingFailed` appear on the
-  `HostedCluster`. After removing the constraint, the
-  test verifies both conditions self-clear. This
-  follows existing HyperShift e2e failure injection
-  patterns: etcd chaos tests (`chaos_test.go`),
-  taint-based scheduling tests
-  (`karpenter_control_plane_upgrade_test.go`), and
-  resource exhaustion tests (`autoscaling_test.go`).
-  E2e tests also cover the happy path: verifying
-  that `installation.stage` progresses to
-  `InstallationComplete` and that diagnostic
-  conditions are present and well-formed on a
-  successful installation.
+**Failure scenario testing strategy:** Unit tests
+cover all failure categories with synthetic data.
+E2e tests include at least one real scheduling failure
+injection (using `ResourceQuota` or `NoSchedule`
+taint), following existing HyperShift e2e patterns
+(`chaos_test.go`, `autoscaling_test.go`), plus happy
+path verification.
 
 ## Graduation Criteria
 
@@ -2453,7 +2064,7 @@ any existing feature.
 This enhancement adds a new `installation` status struct
 (containing `stage` and `lastTransitionTime`)
 and one new condition type
-(`ManagementClusterResourcePressure`) to the
+(`ManagementClusterResourcePressure` on HC) to the
 `HostedCluster` and `HostedControlPlane` CRDs. All
 changes are purely additive and status-only.
 
@@ -2472,16 +2083,10 @@ to `v1`, the new status fields will need storage
 version migration. This is deferred to the `v1`
 graduation EP.
 
-**CRD schema update ordering**: The HyperShift Operator
-updates the CRD schema as part of its own upgrade (it
-already does this for existing CRDs). The CRD schema
-must be updated before the new controller starts writing
-new fields. If the CRD update fails, the HO upgrade
-fails and the old controller continues running — no new
-fields are written. The new controller code tolerates
-missing fields (they are all `+optional`) — if the CRD
-update succeeds but the controller has not restarted
-yet, the fields simply remain empty.
+**CRD schema update ordering**: The HO updates CRD
+schemas as part of its upgrade. If the CRD update
+fails, the old controller continues. All new fields
+are `+optional` and tolerate absence.
 
 **Upgrade**: After upgrading HyperShift components (HO,
 CPO), the new fields and diagnostic conditions will be
@@ -2495,19 +2100,12 @@ for pre-existing clusters reflects when the field was
 first populated on upgrade, not the original
 installation time. No action is required from operators.
 
-**Metric impact of retroactive backfill**: On upgrade day,
-every existing cluster transitions to
-`InstallationComplete` on first reconciliation, creating
-a spike in the
-`hypershift_hostedclusters_installation_stage` gauge.
-Consumers building installation-duration SLO dashboards
-should filter out clusters where
-`installation.lastTransitionTime` is within the HO
-upgrade window (i.e., where the stage was retroactively
-set rather than tracked from the start). The
-`hypershift_hostedclusters_installation_failure_reason_total`
-counter is unaffected — it only increments when a
-failure reason is detected, not on backfill.
+**Metric impact of retroactive backfill**: On upgrade
+day, existing clusters transition to
+`InstallationComplete`, creating a metric spike.
+SLO dashboards should filter clusters where
+`installation.lastTransitionTime` is within the
+upgrade window.
 
 **Downgrade**: HyperShift CRDs use structural schemas
 generated from kubebuilder-annotated Go types. With
@@ -2522,59 +2120,21 @@ not preserved. This is acceptable because:
 - Diagnostic condition messages revert to their
   default form (the condition type and existing
   reason codes are unchanged)
-- `ManagementClusterResourcePressure` condition: unlike
-  `installation` (which is a typed struct pruned by
-  the structural schema), conditions live in a generic
-  `[]metav1.Condition` array. The old HO's condition
-  mirroring logic uses `meta.SetStatusCondition`, which
-  keys on `Type` — it only sets conditions it knows
-  about. It does not prune unknown condition types.
-  Therefore, a stale `ManagementClusterResourcePressure`
-  condition persists after downgrade indefinitely.
-  In practice, a stale `Status=True` (pressure
-  detected) is unlikely: pressure must have resolved
-  for the cluster to be healthy enough to justify a
-  downgrade, so the condition's last state before
-  downgrade is almost always `Status=False` (no
-  pressure). A stale `Status=False` condition is
-  harmless — it correctly reflects reality.
-  If an operator does encounter a stale `Status=True`
-  after downgrade, the Support Procedures section
-  documents a manual cleanup command.
-  **Alert suppression during downgrade**: If the
-  recommended `ManagementClusterResourcePressure` or
-  `ManagementClusterWidePressure` alerts are deployed,
-  fleet operators should silence them during the HO
-  downgrade window to avoid false positives from stale
-  conditions. The silence should cover the period
-  between HO downgrade and manual cleanup of stale
-  conditions (or re-upgrade). Example using
-  Alertmanager: create a silence matching
-  `alertname=~"ManagementCluster.*Pressure"` for the
-  duration of the downgrade maintenance window.
-  On re-upgrade, the condition resumes being actively
-  managed.
+- `ManagementClusterResourcePressure` condition:
+  conditions live in `[]metav1.Condition` and are not
+  pruned by the old HO. A stale condition persists
+  after downgrade but is almost always `Status=False`
+  (harmless). See Support Procedures for manual
+  cleanup if `Status=True` persists. Silence
+  `ManagementCluster.*Pressure` alerts during
+  downgrade.
 
 ## Version Skew Strategy
 
-This enhancement involves the HyperShift Operator (HO)
-and Control Plane Operator (CPO). While they are
-released together, they are **not upgraded
-simultaneously**. The HO is upgraded first; each
-hosted cluster's CPO is resolved independently from
-the cluster's release payload via
-`GetControlPlaneOperatorImage()`, which looks up the
-`hypershift` component image in the release payload
-(with annotation and override fallbacks). Upgrading
-the HO alone does not update CPO instances for
-existing hosted clusters — each HCP continues running
-the CPO version from its own release image until that
-hosted cluster is itself upgraded or the CPO image is
-explicitly overridden.
-
-This means a **version skew window is expected** in
-normal operation: new HO, older CPO. The enhancement
-handles this as follows:
+The HO is upgraded first; each CPO runs the version
+from its hosted cluster's release payload. A version
+skew window (new HO, older CPO) is expected. The
+enhancement handles this as follows:
 
 - The HO will attempt to mirror the `installation`
   status and diagnostic conditions from
@@ -2584,10 +2144,12 @@ handles this as follows:
   simply mirror the existing (default) values.
   This is safe — nil/absent values are not
   misinterpreted.
-- The HO will set `ManagementClusterResourcePressure`
-  independently of the CPO version, since this
-  condition is based on the HO's own event watching
-  and pod status inspection.
+- `ManagementClusterResourcePressure`: The HO sets
+  this condition directly using `List()` calls on
+  pods and events in the HCP namespace. This does
+  not depend on the CPO version — the HO inspects
+  pod status independently. The condition works
+  correctly regardless of CPO version skew.
 - Once the CPO is updated for a given hosted cluster
   (via a hosted cluster upgrade or CPO image override),
   the diagnostic conditions and `installation` status
@@ -2633,35 +2195,27 @@ finalizers.
 
 **Impact on existing SLIs:**
 - The additional reconciliation logic in CPO (pod
-  condition inspection with 5-second timeout) and HO
-  (event watching with field selector) adds a small
-  amount of CPU/memory overhead. Based on similar
-  status-diagnostic work (e.g.,
-  `controlPlaneVersion`), this is expected to be
-  negligible (<10MB additional memory per CPO instance,
-  <5ms additional reconciliation time per loop).
+  condition inspection with 5-second timeout,
+  scheduling pressure detection) and HO (direct
+  pod/event List calls for scheduling pressure) adds
+  a small amount of CPU/memory overhead. Expected to
+  be negligible (<10MB additional memory per CPO
+  instance, <5ms additional reconciliation time per
+  loop). The HO's scheduling pressure detection uses
+  transient List calls with no persistent memory
+  overhead.
 - No impact on API throughput — changes are to status
   subresources, which use separate etcd writes from
   spec updates.
 
 **Failure modes:**
-- If the condition diagnostic logic has a bug (e.g.,
-  incorrect pod condition parsing), it would produce
-  misleading messages on existing conditions. The
-  condition `Type` and pre-existing `Reason` values
-  remain correct — only the `Message` field could be
-  wrong. This is mitigated by thorough unit testing,
-  level-driven condition semantics (self-correcting
-  on the next reconciliation after a fix), and
-  HyperShift's independent release process which
-  allows shipping a fix within days.
-- If the pod inspection or event watching logic panics,
-  the CPO/HO reconciliation loop would restart. This
-  is standard controller-runtime behavior and does not
-  degrade the cluster.
-- All conditions are level-driven (re-evaluated from
-  scratch each reconciliation), so a transient bug
-  self-corrects on the next successful reconciliation.
+- A bug in diagnostic logic produces misleading
+  messages but `Type`/`Reason` remain correct.
+  Level-driven semantics self-correct on next
+  reconciliation. HyperShift can ship fixes within
+  days.
+- Panics in pod inspection restart the reconciliation
+  loop (standard controller-runtime behavior).
 
 ## Support Procedures
 
@@ -2708,17 +2262,10 @@ minutes:**
      fields present):
      `oc explain hostedcluster.status.installation.stage`
 
-- If conditions have inaccurate or misleading messages:
-  1. The diagnostic messages are informational and do not
-     affect cluster behavior. The cluster will continue
-     its normal installation process regardless of
-     message content.
-  2. The condition `Type` and `Reason` remain correct
-     even if the `Message` is wrong.
-  3. File a bug against the HyperShift component with
-     the specific condition type, reason, and message.
-     HyperShift ships independently from OCP and a fix
-     can be deployed within days.
+- If conditions have inaccurate messages: messages are
+  informational and do not affect cluster behavior.
+  `Type`/`Reason` remain correct. File a bug against
+  HyperShift.
 
 **Emergency status correction for a stuck
 `installation.stage`:**
