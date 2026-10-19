@@ -68,7 +68,7 @@ The design introduces NetworkPolicy at two layers:
 
 ### Workflow Description
 
-**Cluster administrator** deploys the operator, which includes the static operator NetworkPolicy.
+**Cluster administrator** deploys the operator. The operator pod NetworkPolicy is not deployed automatically (see Layer 1 below); it is deferred to a future phase.
 
 **User** creates a MustGather CR to trigger a must-gather collection.
 
@@ -247,6 +247,8 @@ Short-lived NetworkPolicies are created for:
 
 All Tier 2 policies are named using the MustGather CR name (e.g., `must-gather-<cr-name>-netpol`). Since the MustGather CR name is unique within a namespace and the spec is immutable, this guarantees each policy is unique per job. No hashing, random numbers, or shared-policy reference counting is needed.
 
+**CR name length constraint:** The CR name is used in both Kubernetes label values (max 63 characters) and derived NetworkPolicy names (prefixed with `must-gather-` and suffixed with `-sftp` or `-netpol`). MustGather CR names should not exceed 53 characters to stay within these limits. In practice, must-gather CR names are short (e.g., `must-gather-abc123`) and this is not expected to be an issue as long as user adheres to the limit.
+
 Each job pod carries two labels:
 - `must-gather.openshift.io/network-policy: default` -- for Tier 1 selection (shared, long-lived)
 - `must-gather.openshift.io/job: <cr-name>` -- for Tier 2 selection (unique per job)
@@ -414,7 +416,6 @@ Not applicable. See phased delivery below.
 
 #### Phase 1 (Current)
 
-- Operator pod static NetworkPolicy deployed
 - Tier 1 namespace-level default policy for job pods implemented and tested
 - Tier 2 SFTP/proxy per-CR policies implemented and tested
 - E2E test coverage for default image and SFTP upload scenarios
@@ -425,13 +426,18 @@ Not applicable. See phased delivery below.
 - Tier 2 per-image policies for custom images implemented and tested
 - E2E test coverage for custom image NetworkPolicy scenarios
 
+#### Phase 3 (Operator Pod NetworkPolicy)
+
+- Operator pod static NetworkPolicy included in the OLM bundle and deployed automatically
+- Layer 1 manifest (`deploy/10_must-gather-operator.NetworkPolicy.yaml`) is currently a placeholder kept in the repo for reference only
+
 ### Removing a deprecated feature
 
 Not applicable. This enhancement adds new functionality and does not deprecate any existing features.
 
 ## Upgrade / Downgrade Strategy
 
-- **Upgrade**: The operator deploys the static NetworkPolicy manifest on upgrade. Existing must-gather jobs are unaffected (NetworkPolicy is additive). New jobs will have NetworkPolicies created by the reconciler.
+- **Upgrade**: Existing must-gather jobs are unaffected (NetworkPolicy is additive). New jobs will have NetworkPolicies created by the reconciler. The operator pod NetworkPolicy is not deployed automatically; it is deferred to a future phase.
 - **Downgrade**: Removing the operator removes the static NetworkPolicy. Namespace-level default policies persist until the namespace is deleted or manually removed. Short-lived per-job policies are cleaned up with their MustGather CRs.
 
 ## Version Skew Strategy
