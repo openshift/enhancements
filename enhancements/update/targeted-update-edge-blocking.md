@@ -118,6 +118,64 @@ The `type: PromQL` condition entry is an [object][json-object] with the followin
     The query should return a 1 in the match case (risk matches, update should not be recommended) and a 0 in the does-not-match case (risk does not match, update should be recommended).
     Queries which return no time series, or which return values besides 0 or 1, are evaluation failures, as discussed in [the query coverage section](#query-coverage).
 
+#### Fleet
+
+The `type: Fleet` condition entry is an [object][json-object] with the following additional property:
+
+* `fleet` (required, [object][json-object]), with the following properties:
+  * `match` (optional, [array][json-array] of [strings][json-string]), with fleet-identifying strings for fleets that match (risk matches, update should not be recommended).
+  * `doesNotMatch` (optional, [array][json-array] of [strings][json-string]), with fleet-identifying strings for fleets that do not match (risk does not match, update should be recommended).
+    If the same fleet-identifying string appears in both `match` and `doesNotMatch`, evaluation must fail.
+  * `default` (optional, [string][json-string]), with the value that local clusters should return if they cannot determine their fleet membership, or if the fleet appears in neither the `match` nor `doesNotMatch` arrays.
+    Values:
+    * `DoesNotMatch`, to default to does not match (risk does not match, update should be recommended).
+    * Unset, in which case evaluation must fail.
+
+##### Example: ARO-HCP lacks PromQL access
+
+Local clusters have no mechanism to distinguish between Red-Hat-managed clusters and self-managed clusters, so they will fail to evaluate the `fleet` array, and local state will be driven by the `default` property.
+Meanwhile, ARO-HCP lacks [PromQL](#promql) access, so the cluster-version operator in those clusters will fail to evaluate its exposure to risks like [`MultiArchPayloadMissingOpenVSwitch`](https://github.com/openshift/cincinnati-graph-data/blob/20eaede350b092253c14ab992f562da4ef78aa6e/blocked-edges/4.22.17-MultiArchPayloadMissingOpenVSwitch.yaml#L5C7-L5C41).
+The `Fleet` type allows for declarations like:
+
+```yaml
+matchingRules:
+- type: PromQL
+  promql:
+    promql: |
+      0 * group by (_id, invoker) (cluster_installer{_id="",invoker="hypershift"})
+      or
+      group by (_id, invoker) (cluster_installer{_id=""})
+- type: Fleet
+  fleet:
+    doesNotMatch: [ARO-HCP]
+```
+
+Following [the `matchingRules` logic](#enhanced-graph-data-schema-for-blocking-edges) for a ROSA-HCP cluster, where [PromQL evaluation works][rosa-hcp-promql]:
+
+1. PromQL evaluation enabled.
+1. `cluster_installer`'s `invoker` label is `hypershift`, so [the PromQL returns 0](#promql), so the cluster is known to not match.
+1. The successful evaluation for the first `matchingRules` entry breaks processing, and the overall "cluster does not match" is returned, and the update is recommended.
+
+For an ARO-HCP cluster, at the level of the cluster-version operator:
+
+1. PromQL evaluation is not enabled, so the first `matchingRules` entry returns an evaluation failure, and the evaluation proceeds to the subsequent entry.
+1. The cluster cannot determine its fleet, so the second `matchingRules` entry returns an evaluation failure.
+1. No `matchingRules` condition could be successfully evaluated, so the update is not recommended.
+
+While up at the ARO-HCP controller layer (with future code expected around [here][aro-hcp-risk-evaluation]), the logic can be:
+
+1. PromQL evaluation is not enabled, so the first `matchingRules` entry returns an evaluation failure, and the evaluation proceeds to the subsequent entry.
+1. The ARO-HCP controller knows that all clusters it manages belong to the `ARO-HCP` fleet, so the second `matchingRules` entry means the cluster is known to not match.
+1. The successful evaluation for the second `matchingRules` entry breaks processing, and the overall "cluster does not match" is returned, so the update is recommended.
+
+That ARO-HCP-controller result can override the cluster-version-operator level result in ARO-HCP decision-making.
+
+For a standalone cluster with PromQL:
+
+1. PromQL evaluation enabled.
+1. `cluster_installer`'s `invoker` label is not `hypershift` (it [might be `user`][cluster_installer]), so [the PromQL returns 1](#promql), so the cluster is known to match.
+1. The successful evaluation for the first `matchingRules` entry breaks processing, and the overall "cluster matches" is returned.
+
 ### Enhanced Cincinnati JSON representation
 
 [The Cincinnati graph API][cincinnati-api] will be extended with a new top-level `conditionalEdges` property, with an array of conditional edge [objects][json-object] using the following schema:
@@ -265,13 +323,34 @@ type ClusterCondition struct {
 	// type represents the cluster-condition type. This defines
 	// the members and semantics of any additional properties.
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Enum={"Always","PromQL"}
+	// +kubebuilder:validation:Enum={"Always","Fleet","PromQL"}
 	// +required
 	Type string `json:"type"`
 
-	// promql represents a cluster condition based on PromQL.
+	// fleet represents a cluster condition based on a fleet identifier.
+	// +optional
+	Fleet *FleetClusterCondition `json:"fleet,omitempty"`
+
+        // promql represents a cluster condition based on PromQL.
 	// +optional
 	PromQL *PromQLClusterCondition `json:"promql,omitempty"`
+}
+
+// FleetClusterCondition represents a cluster condition based on a fleet identifier.
+type FleetClusterCondition struct {
+	// match is a set of fleet identifiers which match the condition.
+	// +optional
+	Match []string `json:"match,omitempty"`
+
+	// doesNotMatch is a set of fleet identifiers which do not match the condition.
+	// +optional
+	DoesNotMatch []string `json:"doesNotMatch,omitempty"`
+
+	// default is the default value when the fleet identifier cannot be determined,
+	// or can be determined but is absent from both the match and doesNotMatch sets.
+	// +kubebuilder:validation:Enum={"DoesNotMatch"}
+	// +optional
+	Default string `json:"default,omitempty"`
 }
 
 // PromQLClusterCondition represents a cluster condition based on PromQL.
@@ -911,7 +990,7 @@ As long as `matchingRules` contains at least one recognized, functioning type, t
 
 #### Implicit always condition
 
-[The `matchingRules` semantics](enhanced-graph-data-schema-for-blocking-edges) include:
+[The `matchingRules` semantics](#enhanced-graph-data-schema-for-blocking-edges) include:
 
 > If no condition can be successfully evaluated, the update should not be recommended.
 
@@ -1100,6 +1179,7 @@ We can revisit the structure (in an awkward, schema-migrating change) if analysi
 [api-message]: https://github.com/openshift/api/blob/67c28690af52a69e0b8fa565916fe1b9b7f52f10/config/v1/types_cluster_operator.go#L135-L139
 [api-reason]: https://github.com/openshift/api/blob/67c28690af52a69e0b8fa565916fe1b9b7f52f10/config/v1/types_cluster_operator.go#L131-L133
 [api-upstream]: https://github.com/openshift/api/blob/67c28690af52a69e0b8fa565916fe1b9b7f52f10/config/v1/types_cluster_version.go#L59-L63
+[aro-hcp-risk-evaluation]: https://github.com/Azure/ARO-HCP/blob/3a0433738023fdbfcf9895fec786860b336ca1d0/backend/pkg/controllers/controlplaneversion/recency_based_control_plane_version_selection.go#L35-L39
 [block-edges]: https://github.com/openshift/cincinnati-graph-data/tree/f7528c3120d818c3365361b281b6079b6a858397#block-edges
 [blocking-4.5.3]: https://github.com/openshift/cincinnati-graph-data/commit/8e965b65e2974d0628ea775c96694f797cd02b1e#diff-72977867226ea437c178e5a90d5d7ba8
 [c-search-entry]: https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/search.h.html#tag_13_39_03
@@ -1110,6 +1190,7 @@ We can revisit the structure (in an awkward, schema-migrating change) if analysi
 [cincinnati-graph-api]: https://github.com/openshift/cincinnati/blob/master/docs/design/cincinnati.md#graph-api
 [cincinnati-graph-api-versioning]: https://github.com/openshift/enhancements/pull/870
 [cincinnati-spec]: https://github.com/openshift/cincinnati/blob/master/docs/design/cincinnati.md
+[cluster_installer]: https://github.com/openshift/cluster-version-operator/blob/ef627b49dc6fb986260f78bb79bf8a4e547657af/pkg/cvo/metrics.go#L117-L120
 [enum-by-david]: https://github.com/openshift/api/pull/1011#discussion_r712428578
 [go-interface]: https://golang.org/ref/spec#Interface_types
 [go-json-RawMessage-Unmarshal]: https://pkg.go.dev/encoding/json#example-RawMessage-Unmarshal
@@ -1137,6 +1218,7 @@ We can revisit the structure (in an awkward, schema-migrating change) if analysi
 [rhbz-1858026-impact-statement-request]: https://bugzilla.redhat.com/show_bug.cgi?id=1858026#c26
 [rhbz-1941840-impact-statement]: https://bugzilla.redhat.com/show_bug.cgi?id=1941840#c33
 [rhbz-1957584-impact-statement]: https://bugzilla.redhat.com/show_bug.cgi?id=1957584#c19
+[rosa-hcp-promql]: https://github.com/openshift/hypershift/pull/7399
 [support-documentation]: https://docs.openshift.com/container-platform/4.7/updating/updating-cluster-between-minor.html#upgrade-version-paths
 [text-only-errata-example]: https://access.redhat.com/errata/RHBA-2021:3415
 [tombstone]: https://github.com/openshift/cincinnati-graph-data/tree/f7528c3120d818c3365361b281b6079b6a858397#tombstones
