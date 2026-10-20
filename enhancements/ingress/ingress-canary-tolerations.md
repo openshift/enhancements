@@ -21,7 +21,7 @@ api-approvers: # Placeholder; request assignment in #forum-api-review.
   # gateway-api-crd-management-mode.
   - "@JoelSpeed"
 creation-date: 2026-10-14
-last-updated: 2026-10-16
+last-updated: 2026-10-20
 status: provisional
 tracking-link:
   # Epic: "Tolerate custom taints on Ingress canary daemonset".
@@ -236,8 +236,9 @@ cluster's ingress infrastructure.
    desired tolerations under `spec.canary.nodePlacement.tolerations`.
 4. The API server validates the submitted tolerations against the
    feature-gated CRD schema; malformed tolerations (for example an
-   invalid `operator` or `effect`, or a `value` specified together with
-   `operator: Exists`) are rejected with an error.
+   invalid, omitted or empty `operator` or `effect`, or a `value`
+   specified together with `operator: Exists`) are rejected with an
+   error.
 5. The Ingress Operator observes the updated configuration and updates
    the canary DaemonSet pod template, merging the configured tolerations
    with the baseline tolerations.
@@ -272,8 +273,11 @@ If the administrator submits tolerations that match no existing taint,
 admission still succeeds, because the list is syntactically valid. The
 canary remains at least as schedulable as before: the baseline
 `node-role.kubernetes.io/infra` toleration is preserved and no node
-selector is introduced. The administrator can correct or clear the field
-at any time.
+selector is introduced. The administrator can correct the field at any
+time. Clearing it means removing the entire `spec.canary` object:
+`tolerations: []` is rejected by `MinItems=1`, empty `canary` and
+`nodePlacement` objects by `MinProperties=1`, and `spec` itself must
+retain at least one field such as `gatewayAPI`.
 
 #### Error handling: rolling the canary DaemonSet
 
@@ -300,7 +304,10 @@ CRD (group `operator.openshift.io`, version `v1`, kind `Ingress`):
 * Adds `spec.canary` (`IngressCanary`), containing
   `spec.canary.nodePlacement` (`CanaryNodePlacement`), containing
   `spec.canary.nodePlacement.tolerations`
-  (`[]corev1.Toleration`, `+listType=atomic`).
+  (`[]CanaryToleration`, `+listType=atomic`). `CanaryToleration` is a
+  dedicated toleration type rather than `corev1.Toleration`, so the
+  schema itself can require `operator` and `effect` and reject `Lt` and
+  `Gt`.
 * The new fields use
   `+openshift:enable:FeatureGate=IngressCanaryNodePlacement`; generated
   schema availability and runtime gate state are distinct, as described
@@ -351,8 +358,9 @@ Consequences that this enhancement must respect:
   `spec.canary` is present in the `TechPreviewNoUpgrade` variant and in
   the `CustomNoUpgrade` variant (which carries every gated field so an
   administrator can enable any gate), and is **absent** from the
-  `DevPreviewNoUpgrade` variant. These generated schemas must be verified
-  in the API PR before implementation; they are not runtime gate-state
+  `DevPreviewNoUpgrade` variant, which is what the former merged
+  manifest is renamed to. The implementation PR generates exactly these
+  three variants; generated schemas are still not runtime gate-state
   guarantees.
 * **Schema availability and runtime gate state are separate.** In the
   proposed `DevPreviewNoUpgrade` schema, `Ingress/cluster` is readable
@@ -379,13 +387,12 @@ graduates separately is Open Question 2. Until that is settled, the
 Tech Preview -> GA path below cannot name target releases.
 
 The API is modeled by the following Go types in
-`github.com/openshift/api/operator/v1`. Only the structural shape is
-reproduced here. The openshift/api PR link is still missing; supplying
-that link and reviewing its exact validation markers and generated
-schemas are outstanding prerequisites, not completed API approval.
-
-<!-- TODO: Add the openshift/api PR link here once it is opened, and keep
-this block limited to the shape so the two do not drift apart. -->
+`github.com/openshift/api/operator/v1`. The implementation is
+https://github.com/openshift/api/pull/3115 (open; not yet approved),
+and the types below reproduce its shape and validation markers with
+doc comments abbreviated: the PR is authoritative for the exact field
+documentation and generated schemas, and this section must be updated
+if review changes them.
 
 ```go
 // IngressSpec is the spec of the cluster-wide Ingress Operator
@@ -398,7 +405,8 @@ type IngressSpec struct {
 
 	// canary holds configuration for the ingress canary daemonset (the
 	// ingress-canary DaemonSet in the openshift-ingress-canary
-	// namespace).
+	// namespace). When specified, canary must set at least one of its
+	// fields; an empty object is rejected.
 	//
 	// +optional
 	// +openshift:enable:FeatureGate=IngressCanaryNodePlacement
@@ -409,11 +417,9 @@ type IngressSpec struct {
 // +kubebuilder:validation:MinProperties=1
 type IngressCanary struct {
 	// nodePlacement enables explicit control over the scheduling of the
-	// ingress canary daemonset pods.
-	//
-	// If unset, the canary daemonset keeps its default scheduling
-	// configuration, which tolerates the node-role.kubernetes.io/infra
-	// taint.
+	// ingress canary daemonset pods. Because canary requires at least
+	// one field, nodePlacement can only be absent when canary itself is
+	// absent; when specified, an empty object is rejected.
 	//
 	// +optional
 	NodePlacement CanaryNodePlacement `json:"nodePlacement,omitzero"`
@@ -426,51 +432,113 @@ type CanaryNodePlacement struct {
 	// tolerations is a list of tolerations applied to the canary
 	// daemonset pods in addition to the tolerations the canary daemonset
 	// has by default. The default toleration for the
-	// node-role.kubernetes.io/infra taint is always preserved.
+	// node-role.kubernetes.io/infra taint is always preserved. When
+	// specified, the list must contain at least 1 toleration; to remove
+	// all additional tolerations, omit the entire spec.canary field
+	// rather than setting an empty list or leaving empty parent objects.
 	//
-	// Per-entry constraints are enforced by CEL and are summarised in
-	// the table below.
+	// Per-entry constraints are enforced by the markers below and the
+	// CEL rules, which are summarised in the table after this block.
 	//
 	// +optional
 	// +listType=atomic
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=32
-	Tolerations []corev1.Toleration `json:"tolerations,omitempty"`
+	// +kubebuilder:validation:XValidation:rule=`self.all(t, has(t.operator) && t.operator in ['Exists', 'Equal'])`,message="tolerations operator must be 'Exists' or 'Equal'"
+	// +kubebuilder:validation:XValidation:rule=`self.all(t, has(t.effect) && t.effect in ['NoSchedule', 'PreferNoSchedule', 'NoExecute'])`,message="tolerations effect must be 'NoSchedule', 'PreferNoSchedule', or 'NoExecute'"
+	// +kubebuilder:validation:XValidation:rule=`self.all(t, !has(t.operator) || t.operator != 'Exists' || !has(t.value) || t.value == '')`,message="tolerations value must be empty when operator is 'Exists'"
+	// +kubebuilder:validation:XValidation:rule=`self.all(t, has(t.key) && t.key != '')`,message="tolerations key must be non-empty"
+	// +kubebuilder:validation:XValidation:rule=`self.all(t, !has(t.key) || !format.qualifiedName().validate(t.key).hasValue())`,message="tolerations key must be a qualified label key with a name of 1-63 characters and an optional DNS prefix of at most 253 characters"
+	// +kubebuilder:validation:XValidation:rule=`self.all(t, !has(t.operator) || t.operator != 'Equal' || !has(t.value) || !format.labelValue().validate(t.value).hasValue())`,message="tolerations Equal value must be a valid label value of at most 63 characters"
+	// +kubebuilder:validation:XValidation:rule=`self.all(t, !has(t.tolerationSeconds) || (has(t.effect) && t.effect == 'NoExecute'))`,message="tolerations effect must be 'NoExecute' when tolerationSeconds is set"
+	Tolerations []CanaryToleration `json:"tolerations,omitempty"`
 }
+
+// CanaryToleration describes a toleration added to the ingress canary
+// daemonset. Unlike corev1.Toleration, the fields the canary contract
+// requires are schema-required, and the operator enum admits only
+// Exists and Equal.
+type CanaryToleration struct {
+	// key is required and identifies the taint to tolerate; see the key
+	// syntax rules below.
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=317
+	Key string `json:"key,omitempty"`
+
+	// operator is required and specifies how the taint value is matched.
+	// +required
+	Operator CanaryTolerationOperator `json:"operator,omitempty"`
+
+	// value is optional and defaults to the empty string when omitted;
+	// it must be empty for Exists and a label value for Equal. Omitted
+	// and explicit empty values are both accepted and preserved.
+	// +optional
+	// +kubebuilder:validation:MinLength=0
+	// +kubebuilder:validation:MaxLength=63
+	Value *string `json:"value,omitempty"`
+
+	// effect is required and specifies the taint effect to match.
+	// +required
+	// +kubebuilder:validation:Enum=NoSchedule;PreferNoSchedule;NoExecute
+	Effect corev1.TaintEffect `json:"effect,omitempty"`
+
+	// tolerationSeconds is optional and may be set only for effect
+	// NoExecute; zero and negative values are preserved.
+	// +optional
+	TolerationSeconds *int64 `json:"tolerationSeconds,omitempty"`
+}
+
+// CanaryTolerationOperator describes how an ingress canary toleration
+// matches the value of the taint it tolerates.
+// +kubebuilder:validation:Enum=Exists;Equal
+// +enum
+type CanaryTolerationOperator string
 ```
 
 The shape choices are deliberate and follow the sibling `gatewayAPI`
 field on the same spec: `omitzero` rather than `omitempty`, because
 `omitempty` has no effect on a struct and would serialize `canary: {}`
-into every object; value types rather than pointers, because an absent
-`nodePlacement` and an empty one mean the same thing; and
-`MinProperties=1` on each struct so that an empty object cannot be
-written and silently satisfy the spec's own `MinProperties=1`.
+into every object; value types rather than pointers for `canary` and
+`nodePlacement`, because an absent `nodePlacement` and an empty one mean
+the same thing; and `MinProperties=1` on each struct so that an empty
+object cannot be written and silently satisfy the spec's own
+`MinProperties=1`. Inside `CanaryToleration`, `value` and
+`tolerationSeconds` are pointers so that an omitted field is
+distinguishable from an explicit zero value; the API applies no
+defaulting, so omitted and explicit empty `value` strings, and omitted,
+zero and negative `tolerationSeconds`, are all accepted and preserved.
 
-Reusing `corev1.Toleration` does not import Kubernetes Pod admission
-validation. Check the generated CRD schema rather than assuming upstream
-type comments supply validation or defaults. The API PR must enforce
-and verify these proposed constraints on the new field:
+The implementation defines a dedicated `CanaryToleration` type rather
+than reusing `corev1.Toleration`. A bare `corev1.Toleration` imports no
+Kubernetes Pod admission validation — upstream type comments supply
+neither validation nor defaults — and its schema cannot require
+`operator` and `effect` or reject `Lt` and `Gt`; the published OpenAPI
+enum would also advertise `Lt` and `Gt` through the corev1 const block.
+The dedicated type keeps the whole contract in the CRD schema itself.
+The implemented constraints on the new field are:
 
 | Constraint | Mechanism | Rationale |
 | --- | --- | --- |
-| `operator` is `Exists` or `Equal` | CEL | explicit operator contract |
-| `effect` is `NoSchedule`, `PreferNoSchedule` or `NoExecute` | CEL | explicit effect contract |
+| `operator` is `Exists` or `Equal` | required field; enum on `CanaryTolerationOperator`; CEL | explicit operator contract; rejects omitted, empty, `Lt` and `Gt` |
+| `effect` is `NoSchedule`, `PreferNoSchedule` or `NoExecute` | required field; schema enum; CEL | explicit effect contract; rejects omitted and empty |
 | `value` empty when `operator` is `Exists` | CEL | matches Kubernetes toleration semantics |
-| `key` is a non-empty Kubernetes qualified label key | explicit schema/CEL validation | rejects a keyless `Equal` and empty-key `Exists`, as well as malformed keys |
-| `value` for `Equal` is a Kubernetes label value | explicit schema/CEL validation | rejects values that Pod admission would reject |
+| `key` is a non-empty Kubernetes qualified label key | required field; `MinLength=1`/`MaxLength=317`; CEL `format.qualifiedName()` | rejects a keyless `Equal` and empty-key `Exists`, as well as malformed keys |
+| `value` for `Equal` is a Kubernetes label value | `MaxLength=63`; CEL `format.labelValue()` | rejects values that Pod admission would reject |
 | `tolerationSeconds` only with `NoExecute` | CEL | time-bounding is meaningless for other effects |
 | 1 to 32 entries | `MinItems`, `MaxItems` | bounded list; `[]` is not a second spelling of unset |
 | at least one property per struct | `MinProperties=1` | an empty object carries no meaning |
 
-The table proposes explicit operator and effect values. Upstream Pod
+The table requires explicit operator and effect values, and the
+implementation settles the previously open handling question: omitted
+and empty `operator` and `effect` are rejected, with no schema defaults.
+Upstream Pod
 [toleration semantics](https://github.com/kubernetes/api/blob/v0.34.0/core/v1/toleration.go)
 also accept an empty operator as `Equal` and an empty effect as matching
-all effects; those matching rules do not establish CRD schema defaults.
-The API PR must settle and test omitted/empty operator and effect
-handling, including any explicit schema defaults, before this contract
-is finalized. No defaulting or validation-marker implementation is
-claimed here.
+all effects, but those request-time matching rules do not translate
+into stored-object defaults, and requiring both fields keeps the
+persisted contract explicit. The API PR tests omitted and empty
+operator and effect on both create and update.
 
 Key validation must match Kubernetes qualified label-key syntax, not
 merely require a non-empty string: an optional lowercase DNS-subdomain
@@ -486,8 +554,9 @@ per-component limits. An `Equal` value may be empty; otherwise it
 has the same character and boundary rules as the name, with a maximum
 of 63 characters. These constraints follow Kubernetes
 [label validation](https://github.com/kubernetes/apimachinery/blob/v0.34.0/pkg/util/validation/validation.go).
-The API PR must implement both syntax and length checks explicitly;
-using `corev1.Toleration` alone does not supply them.
+They are implemented by the schema bounds and CEL format validators in
+the table above, which `corev1.Toleration` alone does not supply, and
+are tested at the length and character boundaries in the API PR.
 
 **The tolerate-everything form is rejected.** A toleration with an empty
 `key` and `operator: Exists` tolerates every taint. `CONVENTIONS.md`
@@ -498,9 +567,10 @@ exception. Permitting it would also bypass all custom taint isolation,
 beyond the standard tolerations already added to DaemonSet pods. The
 `key` rule is therefore tightened to
 require a non-empty key unconditionally, rather than exempting
-`operator: Exists`. This is deliberately decided before the API merges,
-because loosening the rule later is backward compatible while tightening
-it later would not be.
+`operator: Exists`, and the implementation enforces and tests it. This
+is deliberately decided before the API merges, because loosening the
+rule later is backward compatible while tightening it later would not
+be.
 
 The built-in `node.kubernetes.io/*` condition taints (`not-ready`,
 `unreachable`, `unschedulable`, and the pressure taints) are **not**
@@ -633,10 +703,12 @@ https://docs.redhat.com/en/documentation/openshift_container_platform/latest/htm
 
 ### Implementation Details/Notes/Constraints
 
-* In openshift/api, define `IngressCanary` and `CanaryNodePlacement` in
-  `operator/v1`, add `Canary` to `IngressSpec`, and regenerate the CRD
-  manifests, deepcopy functions, OpenAPI schemas and feature-gated CRD
-  variants with `make update`; `make verify` must pass.
+* In openshift/api, define `IngressCanary`, `CanaryNodePlacement`,
+  `CanaryToleration` and `CanaryTolerationOperator` in `operator/v1`,
+  add `Canary` to `IngressSpec`, and regenerate the CRD manifests,
+  deepcopy functions, OpenAPI schemas and feature-gated CRD variants
+  with `make update`; `make verify` must pass. Proposed in
+  https://github.com/openshift/api/pull/3115.
 * Register the `IngressCanaryNodePlacement` feature gate in
   https://github.com/openshift/api/blob/master/features/features.go
   with `enable(inTechPreviewNoUpgrade())`,
@@ -647,12 +719,13 @@ https://docs.redhat.com/en/documentation/openshift_container_platform/latest/htm
   the parent kind's `GatewayAPIManagementMode`, which also enables in
   `DevPreviewNoUpgrade`; see
   [Dependency on the parent kind](#dependency-on-the-parent-kind) for
-  what that asymmetry implies.
-* Validation. Enforce the proposed constraints under
-  [API Extensions](#api-extensions) and verify the generated schema in
-  the API PR. Require a non-empty qualified label key unconditionally,
-  including for `operator: Exists`; do not rely on Pod admission to
-  validate the configuration object.
+  what that asymmetry implies. The gate is registered this way in the
+  API PR.
+* Validation. The constraints under
+  [API Extensions](#api-extensions) are enforced by the schema markers
+  and CEL rules implemented in the API PR, including the unconditional
+  non-empty qualified label key; Pod admission is not involved in
+  validating the configuration object.
 * In the cluster-ingress-operator, the canary controller merges the
   configured tolerations into the canary DaemonSet pod template, always
   preserving the baseline `node-role.kubernetes.io/infra` toleration,
@@ -698,13 +771,16 @@ https://docs.redhat.com/en/documentation/openshift_container_platform/latest/htm
   tolerations. Existing default IngressController watches, reconciliation
   mapping and route probing remain in use; those relationships must not
   introduce placement inheritance.
-* Add openshift/api integration test suites (YAML suites under `tests/`)
-  covering valid, invalid and omitted toleration configurations with the
-  feature gate enabled and disabled. These suites assert admission
-  outcomes only. A duplicate list is one of the valid cases, because the
-  CEL rules deliberately accept duplicates; collapsing them is
-  controller behaviour and is covered by unit tests instead, as set out
-  in the [Test Plan](#test-plan).
+* Add openshift/api integration test suites (YAML suites under
+  `operator/v1/tests/ingresses.operator.openshift.io/`) covering valid,
+  invalid and omitted toleration configurations with the feature gate
+  enabled and disabled, as implemented in the API PR and described in
+  the [Test Plan](#test-plan). These suites assert admission outcomes
+  only. A duplicate list is one of the valid cases, because the CEL
+  rules deliberately accept duplicates; collapsing them is controller
+  behaviour and is covered by unit tests instead. The gate-disabled
+  suite required extending the shared test framework with per-test
+  `fieldValidation` directives and `expectedWarnings` assertions.
 
 ### Risks and Mitigations
 
@@ -712,8 +788,8 @@ https://docs.redhat.com/en/documentation/openshift_container_platform/latest/htm
   taints and the canary still does not run where they expect.
   Mitigation: the baseline toleration is preserved and no node selector
   is introduced, so the canary remains at least as schedulable as today,
-  and clearing the field always restores the default; the semantics are
-  documented.
+  and removing the configuration always restores the default; the
+  semantics are documented.
 * Risk: widening placement is not unconditionally safe. Custom taints
   can isolate nodes that are unsuitable for canary service. Standard
   condition-taint tolerations already apply to DaemonSet pods; this API
@@ -889,34 +965,48 @@ The case list and lane design need QE review before this EP moves to
 
 ### API validation tests (openshift/api)
 
-YAML suites under `tests/` covering schemas declaring the field: the
-field omitted; a valid single toleration; a valid list at
-the upper bound; and each rejected form — invalid `operator`, invalid
-`effect`, `value` with `operator: Exists`, an empty `key` with a
-non-`Exists` operator, an empty `key` with `operator: Exists`,
-`tolerationSeconds` without `NoExecute`, an empty
-list, and a list above `MaxItems`.
+Implemented in the API PR as two YAML suites under
+`operator/v1/tests/ingresses.operator.openshift.io/`, running against
+schemas that declare the field. `IngressCanaryNodePlacement.yaml` (gate
+enabled) covers, on both create and update: the field omitted; a valid
+single toleration; a valid list at the upper bound of 32; and each
+rejected form — unknown, omitted and empty `operator`; unknown, omitted
+and empty `effect`; `value` with `operator: Exists`; an empty `key`
+with a non-`Exists` operator; the empty-key `Exists` wildcard;
+`tolerationSeconds` without `NoExecute` and with no effect at all; an
+empty list; a list above `MaxItems`; empty `canary` and `nodePlacement`
+objects; and the unsupported `Lt` operator. Valid cases include
+duplicates, overlapping matches, zero and negative `tolerationSeconds`,
+and omitted versus explicit empty `value`.
 
-Test valid unprefixed and DNS-prefixed keys; key names of lengths 1 and
-63, prefixes of length 253 and combined keys of length 317; reject
-names of length 64, prefixes of length 254, empty names or prefixes,
-multiple slashes, uppercase DNS prefixes, empty DNS components, invalid
-characters and invalid prefix/name start/end characters. Accept
-uppercase characters in the name portion.
-For `Equal`, accept empty values and valid values of lengths 1 and 63;
-reject length 64, invalid characters and invalid boundaries. Accept
-duplicate entries, distinct seconds and overlapping matches at admission.
-Add omitted/empty operator and effect cases with the outcomes settled
-in API review, verifying any schema defaults by reading the object back.
+Key syntax is tested at the boundaries: unprefixed and DNS-prefixed
+keys; names of lengths 10 and 63; a 253-character single-label prefix;
+combined keys of lengths 264 and 317; uppercase characters in the name
+portion; and rejection of 64-character names, 254-character and
+otherwise malformed prefixes, a 318-character combined key, non-ASCII
+characters, empty prefix or name components, extra slashes, invalid
+start/end characters, and characters such as `$`. For `Equal`, values
+of lengths 0, 7 and 63 are accepted; length 64, invalid characters,
+embedded slashes and invalid boundaries are rejected.
 
-Test generated schema variants separately from runtime gate settings.
-For a variant without `spec.canary`, explicitly send requests with
-`fieldValidation=Strict`, `Warn` and `Ignore`: expect rejection, warning
-plus pruning, and pruning without that warning respectively, and verify
-readback. For a variant that declares the field, test persistence even
-with the runtime gate disabled; the separate controller test must show
-that persisted configuration is ignored. Also cover an unavailable
-parent API without confusing it with an unknown field.
+`IngressCanaryNodePlacementDisabled.yaml` tests a schema variant
+without `spec.canary` (the parent kind still served through
+`GatewayAPIManagementMode`) separately from runtime gate settings, on
+create and update with `fieldValidation=Strict`, `Warn` and `Ignore`:
+Strict rejects with `unknown field "spec.canary"`, Warn accepts with
+that warning and prunes, and Ignore accepts and prunes without the
+warning, with readback verifying the pruned object. To assert the
+warnings, the shared test framework gained per-test `fieldValidation`
+directives and `expectedWarnings` assertions: warnings are captured
+through a per-test client built from a copied rest config, so reads and
+neighboring requests cannot leak into the assertion, and Warning
+headers are accumulated across client-go retries.
+
+Still outstanding: a suite exercising a variant that declares the field
+with the runtime gate disabled (`CustomNoUpgrade`), proving the field
+persists while the gate-off controller ignores it (the controller side
+of that case is covered by unit tests); and coverage of an unavailable
+parent API, without confusing it with an unknown field.
 
 ### End-to-end tests (openshift/origin)
 
@@ -938,9 +1028,12 @@ and are therefore `[Serial]`, and those that taint nodes are also
    `[Serial]`. Edit the DaemonSet directly, assert the operator reverts
    it.
 4. *canary daemonset should return to default scheduling when the field
-   is cleared* — `[Serial][Disruptive]`. Assert baseline-only tolerations
-   even while router tolerations remain configured. Covers the field
-   remediation described in Support Procedures.
+   is cleared* — `[Serial][Disruptive]`. Remove the entire `spec.canary`
+   object while retaining another spec field such as `gatewayAPI`, since
+   `tolerations: []` and empty parent objects are rejected by admission.
+   Assert baseline-only tolerations even while router tolerations remain
+   configured. Covers the field remediation described in Support
+   Procedures.
 5. *ingress controller should recover from a canary with no schedulable
    node* — `[Serial][Disruptive][Slow]`. The full scenario from the
    Motivation; see the feasibility note below.
@@ -1087,8 +1180,8 @@ requirements in the OpenShift dev guide:
   * The stored value is not deleted from etcd by the downgrade itself,
     but it is stripped from every API response. `oc get` and `oc edit`
     do not show `spec.canary`, so an administrator cannot inspect,
-    correct or clear it. There is no "clear the field" remediation on a
-    downgraded cluster.
+    correct or remove it. There is no "remove the configuration"
+    remediation on a downgraded cluster.
   * The canary reverts to baseline-only tolerations, independently of
     router configuration, because the field is absent from the object
     the operator reads. On clusters where
@@ -1222,15 +1315,19 @@ requirements in the OpenShift dev guide:
     requests prune it without that warning. Read back accepted writes;
   * Ingress Operator logs in `openshift-ingress-operator` for
     reconciliation errors.
-* Remediation: correct or clear `spec.canary.nodePlacement.tolerations`.
-  Clearing the field restores baseline-only tolerations, regardless of
+* Remediation: correct `spec.canary.nodePlacement.tolerations` or
+  remove the entire `spec.canary` object; `tolerations: []` and empty
+  `canary`/`nodePlacement` objects are rejected by admission, and
+  `spec` must retain another field such as `gatewayAPI`. Removing the
+  configuration restores baseline-only tolerations, regardless of
   router configuration. A change to the effective
   ordered list rolls the canary DaemonSet, recreating its pods; removing
   an exact duplicate alone need not roll it. A read error does not clear
   placement: restore API connectivity or permissions so reconciliation
   can observe the intended configuration.
 * Disabling: while the feature is Tech Preview, the supported way to
-  remove the configuration is to clear the field; the
+  remove the configuration is to delete the entire `spec.canary`
+  object; the
   `TechPreviewNoUpgrade` feature set itself cannot be disabled once
   enabled, and the CRD is part of the payload and must not be removed.
   Because the feature only widens canary scheduling, leaving it
