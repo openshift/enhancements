@@ -14,7 +14,7 @@ reviewers:
 approvers:
   - "@sdodson"
 creation-date: 2020-07-07
-last-updated: 2021-09-23
+last-updated: 2026-10-20
 status: implementable
 ---
 
@@ -112,8 +112,8 @@ This condition always matches.
 
 The `type: PromQL` condition entry is an [object][json-object] with the following additional property:
 
-* `PromQL` (required, [object][json-object]), with the following properties:
-  * `PromQL` (required, [string][json-string]), with a [PromQL][] query classifying clusters.
+* `promql` (required, [object][json-object]), with the following properties:
+  * `promql` (required, [string][json-string]), with a [PromQL][] query classifying clusters.
     This query will be evaluated on the local cluster, so it has access to data beyond the subset that is [uploaded to Telemetry][uploaded-telemetry].
     The query should return a 1 in the match case (risk matches, update should not be recommended) and a 0 in the does-not-match case (risk does not match, update should be recommended).
     Queries which return no time series, or which return values besides 0 or 1, are evaluation failures, as discussed in [the query coverage section](#query-coverage).
@@ -269,21 +269,21 @@ type ClusterCondition struct {
 	// +required
 	Type string `json:"type"`
 
-	// PromQL represents a cluster condition based on PromQL.
+	// promql represents a cluster condition based on PromQL.
 	// +optional
-	PromQL *PromQLClusterCondition `json:"PromQL,omitempty"`
+	PromQL *PromQLClusterCondition `json:"promql,omitempty"`
 }
 
 // PromQLClusterCondition represents a cluster condition based on PromQL.
 type PromQLClusterCondition struct {
-	// PromQL is a PromQL query classifying clusters. This query
+	// promql is a PromQL query classifying clusters. This query
 	// query should return a 1 in the match case and a 0 in the
 	// does-not-match case case. Queries which return no time
 	// series, or which return values besides 0 or 1, are
 	// evaluation failures.
 	// +kubebuilder:validation:Required
 	// +required
-	PromQL string `json:"PromQL"`
+	PromQL string `json:"promql"`
 }
 ```
 
@@ -1019,7 +1019,7 @@ As a sub-choice of the central-struct approach to discriminating unions, I had t
 ```go
 type ClusterCondition struct {
 	Type   string
-	PromQL string `json:"PromQL,omitempty"`
+	PromQL string `json:"promql,omitempty"`
 }
 ```
 
@@ -1028,7 +1028,7 @@ with JSON like:
 ```json
 {
   "type": "PromQL",
-  "PromQL": "max(cluster_proxy_enabled{type=~\"https?\"})"
+  "promql": "max(cluster_proxy_enabled{type=~\"https?\"})"
 }
 ```
 
@@ -1037,11 +1037,11 @@ and:
 ```go
 type ClusterCondition struct {
 	Type   string
-	PromQL *PromQLClusterCondition `json:"PromQL,omitempty"`
+	PromQL *PromQLClusterCondition `json:"promql,omitempty"`
 }
 
 type PromQLClusterCondition struct {
-	PromQL string `json:"PromQL"`
+	PromQL string `json:"promql"`
 }
 ```
 
@@ -1050,13 +1050,13 @@ with JSON like:
 ```json
 {
   "type": "PromQL",
-  "PromQL": {
-    "PromQL": "max(cluster_proxy_enabled{type=~\"https?\"})"
+  "promql": {
+    "promql": "max(cluster_proxy_enabled{type=~\"https?\"})"
   }
 }
 ```
 
-The former avoids the useless `PromQL` nesting layer, as long as [the `PromQL` type](#promql) does not require additional configuration beyond the single query string.
+The former avoids the useless `promql` nesting layer, as long as [the `PromQL` type](#promql) does not require additional configuration beyond the single query string.
 The latter allows for extension if we decide the `PromQL` type requires additional configuration.
 
 In the `PromQLClusterCondition` approach, the query does not need to be a pointer, because once you have decided to use PromQL it is no longer optional and will always be required for backwards compatibility.
