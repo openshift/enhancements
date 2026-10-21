@@ -213,7 +213,7 @@ Administrators should reduce non-critical workload risk accordingly. Administrat
 
 ##### Post-Transition
 
-12. After a soak period (5 minutes) following the `TopologyTransitionCompleted` condition transitioning to `status: False`, the controller checks that control-plane/worker node readiness, etcd health, MachineConfig rollout, ingress router replicas, and API server operator replica counts have reconciled to the target values
+12. After a soak period (2 minutes) following the `TopologyTransitionCompleted` condition transitioning to `status: False`, the controller checks that control-plane/worker node readiness, etcd health, MachineConfig rollout, ingress router replicas, and API server operator replica counts have reconciled to the target values
 13. Once all checks pass, the controller updates the `TopologyTransitionCompleted` condition to `status: True`, clears the CCO `Progressing` condition, and sets `Upgradeable=True`:
     - `type: TopologyTransitionCompleted`
     - `status: True` (indicates transition completed)
@@ -466,7 +466,7 @@ These preconditions mean the administrator's node join and CEO's existing node-d
    - `status.controlPlaneTopology` → `HighlyAvailable`
    - `status.infrastructureTopology` → `HighlyAvailable`
    - `status.topologyTransitionStatus.conditions[TopologyTransitionCompleted]` updated to status: False, reason: TransitionInProgress, message, lastTransitionTime
-4. On later syncs, wait a soak period (5 minutes) anchored on the `TopologyTransitionCompleted` condition's `lastTransitionTime` — then begin checking post-transition validation criteria
+4. On later syncs, wait a soak period (2 minutes) anchored on the `TopologyTransitionCompleted` condition's `lastTransitionTime` — then begin checking post-transition validation criteria
 
 If preconditions fail, the controller omits `transitions` when `TopologyTransitionsEvaluated` is not `True`, and otherwise includes the transition with the failing checks in `evaluations`. An empty list is invalid. The controller does not update `TopologyTransitionCompleted` to `status: False` until preconditions pass.
 
