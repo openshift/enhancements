@@ -29,37 +29,37 @@ superseded-by: []
 
 ## Summary
 
-Pod Security Admission has long been a part of our development process in OpenShift. 
-Primarily, this was done through PSA Label Syncer and manually labelling our namespaces
+Pod Security Admission has long been a part of the development process in OpenShift. 
+Primarily, this was done through PSA Label Syncer and manually labelling the namespaces
 with the appropriate `pod-security.kubernetes.io/*` labels. This enhancement proposes
-that we bring this functionality to customers via a new configurable API, which enables 
+that this functionality is brought to customers via a new configurable API, which enables 
 PSA for customers with `privileged` being the default value. Additionally, it proposes 
 the permanent retirement of PSA Label Syncer and its dependent labels, while placing the 
-responsibility on us, the developers, to ensure our namespaces are labelled appropriately 
+responsibility on us, the developers, to ensure the namespaces are labelled appropriately 
 before runtime. 
 
 ## Motivation
 
-Pod Security Admission has long been part of our internal development process in OpenShift, 
-giving our team a reliable mechanism to enforce Pod Security Standards (PSS) via the PSA 
-Label Syncer based on workload SCC pinning.
+PSA has played a key role in the internal development process in OpenShift for quite some 
+time, giving the team a reliable mechanism to enforce Pod Security Standards (PSS) via 
+the PSA Label Syncer based on workload SCC pinning.
 
-However, we have not yet extended this capability to our customers. While OpenShift platform 
+However, this capability has not yet been shipped to customers. While OpenShift platform 
 workloads ship fully secured with their own PSA labels out of the box, customers cannot 
 leverage the same label syncer for their custom applications. While SCCs deliver strong 
-protection downstream, PSA remains the established upstream standard. Today, we support PSA 
+protection downstream, PSA remains the established upstream standard. Today, PSA is supported
 internally, but offer no supported pathway for customer adoption.
 
-Currently, the `OpenShiftPodSecurityAdmission` feature gate enables PSA components—such as the 
-label syncer and readiness controller—for platform development. However, while enabled on `main`, 
-it is intentionally removed at release branching (release-n).
+While the `OpenShiftPodSecurityAdmission` feature gate enabled on the `main` branch, it is 
+intentionally removed at release branching (release-n).
 
-Even if exposed, the current implementation lacks the controls customers require. Evaluating 
-workloads strictly against the `restricted` PSS level is too rigid for general customer workloads. 
-Adoption must be elective, allowing customers to choose their desired enforcement level 
-(`privileged`, `baseline`, or `restricted`), or stick exclusively with SCCs.
+Even if the `OpenShiftPodSecurityAdmission` feature gate is enabled on `release-` branches, the current 
+implementation lacks the controls customers require. Evaluating workloads strictly against the `restricted`
+PSS level is too rigid for general customer workloads. Adoption must be elective, allowing customers to 
+choose their desired enforcement level (`privileged`, `baseline`, or `restricted`), or stick exclusively 
+with SCCs.
 
-This enhancement provides security-conscious customers with an opt-in mechanism to manage workload 
+This enhancement provides customers with an additional opt-in mechanism to manage workload 
 security effectively. Crucially, it ensures that enabling or removing PSA enforcement is safe, 
 controlled, and non-disruptive across cluster upgrades and downgrades.
 
@@ -67,11 +67,6 @@ controlled, and non-disruptive across cluster upgrades and downgrades.
 
 * As a System Administrator, I want to enable PSA enforcement as I have labelled my namespaces 
 effectively and I am confident that my workloads will not break.
-* As a System Administrator, I want to pin the Pod Security Standards revision my cluster is 
-evaluated against, so that upgrading the cluster does not tighten the standard my workloads 
-are held to without my asking.
-* As a System Administrator, I want to read back the enforcement level and standards revision 
-actually in force, so that I can confirm my change was observed and detect a version that was clamped.
 * As a System Administrator, I want to revert my PSA enforcement from `restricted` to either 
 `baseline` or `privileged` because I discovered failing workloads.
 * As a System Administrator, I want to move PSA enforcement from either `restricted` or 
@@ -79,28 +74,27 @@ actually in force, so that I can confirm my change was observed and detect a ver
 
 ### Goals
 
-1. A customer can successfully enable or disable PSA enforcement for their 
-   workloads via API configuration at will.
-2. A status of PSA enforcement is provided to the customer via the API that
-   the customer can query.
-3. PSA enforcement is completely optional for the customer and serves to 
-   compliment their existing security portfolio.
-4. OpenShift managed namespaces have been labelled appropriately such that
-   customer modification of PSS will not affect the cluster's modus operandi
-   in terms of workload admission and operation.
+1. A customer can successfully configure the level of PSA enforcement (e.g. `baseline`) 
+   for their workloads via API configuration at will.
+2. PSA enforcement is completely optional for the customer and serves to 
+   compliment their existing security posture.
+3. An exhaustive effort will be made to label OCP namespaces appropriately
+   (i.e. `restricted` level) such that a customer won't run into issues
+   when configuring the global PSA enforcement level, regardless of the
+   PSA enforcement level they set.
 
 ### Non-Goals
 
-1. PSA enforcement in customer workloads is not guaranteed, and the
-   customer should be aware that there is always a possibility, that
-   the PSS enforcement level set by the customer either globally or at 
-   the namespace level, may not be suitable for the customer workloads. 
-2. A workload that has failed to meet admission requirements will continue
-   to run until it needs to restart, at which point the workload will not
-   be redeployed until the system administrator sets the PSS level for the
-   workload namespace to the appropriate level.
-3. There will be no way to predict whether a workload is safe to be admitted
-   when the PSA enforcement level is set either at namespace level or globally.
+1. The level of PSA enforcement set by the customer is not guaranteed,
+   and the customer should be aware that there is always a possibility,
+   that the PSS set may not be suitable for customer workloads.
+2. The proposal does not implement a mechanism to predict whether a workload
+   is safe to be admitted when the PSA enforcement level is set either at 
+   namespace level or globally.
+3. Migrating customers automatically to the most secure PSA setup by reading
+   the SCCs.
+4. Offering exhaustive tooling / analytics (for now). Might change if the 
+   feature is in high demand.
 
 ## Proposal
 
@@ -108,77 +102,36 @@ actually in force, so that I can confirm my change was observed and detect a ver
 
 ```mermaid
 flowchart TD
-    classDef actor fill:#e1f5fe,stroke:#0288d1,stroke-width:2px;
-    classDef control fill:#fff3e0,stroke:#f57c00,stroke-width:2px;
-    classDef status fill:#e8f5e9,stroke:#388e3c,stroke-width:2px;
-    classDef error fill:#ffebee,stroke:#d32f2f,stroke-width:2px;
-
-    Admin([Cluster Administrator]):::actor
-    AppOwner([Application Owner]):::actor
-
-    subgraph API_Layer ["API Layer"]
-        APIConfig["apiserver/cluster resource\n(spec.podSecurityAdmission)"]
-    end
-
-    subgraph Operator_Layer ["Cluster Kube API Server Operator"]
-        ConfigObserver["Config Observer"]:::control
-    end
-
-    subgraph Core_Control_Plane ["Control Plane"]
-        KAS_PSA["Kube API Server\n(Global PSA Admission)"]
-    end
-
-    %% Flow Relationships
-    Admin -->|"Writes API Config"| APIConfig
-    Admin <-->|"Consults on PSS level"| AppOwner
+    Admin([Cluster Admin]) -->|Updates spec.podSecurityAdmission<br/>e.g., EnforceLevel='Baseline', EnforceVersion='latest'| CR["APIServer CRD<br/>(apiserver/cluster)"]
     
-    APIConfig -->|"Triggers reconciliation"| ConfigObserver
-    ConfigObserver -->|"Generates global PodSecurity admission config"| KAS_PSA
-
-    AppOwner -->|"Deploys workloads"| KAS_PSA
-
-    %% State Logic
-    KAS_PSA -->|"Compliant workloads"| PassState["Pod Accepted / Rollout Continues"]:::status
-    KAS_PSA -->|"Non-compliant workloads"| FailState["Pod Rejected / Static Pod Rollout Blocked"]:::error
-
-    %% Feedback loop
-    FailState -->|"Triggers mitigation"| Admin
+    CR -->|Watches spec changes| Obs["Config Observer Controller<br/>(Kube APIServer Operator)"]
+    
+    direction TB
+    Obs -->|Generates Config & Triggers Rollout| KAS["Kube APIServer"]
 ```
-
-The **cluster administrator** is responsible for the security posture of a 
-cluster and is the only actor that writes to the API.
-
-The **application owner**  deploys workloads and is the one who knows which
-Pod Security Standard those workloads actually require. They experience the 
-consequences when a Pod is rejected. 
 
 The **Config Observer** in `cluster-kube-apiserver-operator` is the single 
 consumer, turning the API config into the kube-apiserver's global `PodSecurity` 
 admission configuration.
 
-1. The cluster administrator sits down at their keyboard.
-2. The cluster administrator takes a look at their workloads. They have not
-   configured Pod Security Admission yet. They are interested in setting the
-   Pod Security Standard (PSS) for the namespaces in which the workloads lie.
-3. The cluster administrator consults the application owner to understand what
-   level of enforcement is desirable for the workloads. 
-4. After discussion, the cluster administrator decides they would like to set
-   the global level of PSA enforcement of the cluster to `baseline` and the version
-   of enforcement to `1.34`. Both the cluster administrator and the application
-   owner want `version` set explicitly as they do not trust the `latest` version.
-5. The cluster administrator configures the API with the `baseline` option for
-   `enforce`, `audit` and `warn` labels and `1.34` for the `version` labels 
-   associated with the three labels. They also set the `reportLevel` to `restricted`
-   so `audit` and `warn` are set to `restricted to see if they could move up to
-   that level or not.
-6. The Config Observer reconciles the API config. `enforce` is at `baseline`, `warn`
-   and `audit` are now at `restricted` and the `version` of PSA enforcement is set 
-   to `1.34`. 
-7. The workloads in unset namespaces conform with the `baseline` standard, and
-   all pods continue to rollout successfully.
-8. The cluster administrator sets PSA enforcement back to `privileged` in the future
-   when a failing workload happens, and can set it to the desired enforcement level
-   at will.
+1. The cluster administrator ensures the PSA labels are set appropriately. This 
+   means they have:
+   1. Checked their workloads will support the proposed PSS.
+   2. Checked any pod security violations in audit logs before updating. Alternatively,
+      the cluster administrator sets the config to report any potential violations in
+      either `baseline` or `restricted`, while the cluster itself remains in `privileged`
+      mode.
+   3. Fixed any workloads that would not comply with the proposed PSS. This could mean
+      updating the image the pod uses to the latest version, for example.
+2. After ensuring the PSA labels are set appropriately for their workloads, they set
+   the level of PSA enforcement via the API to `baseline`. If they choose to later,
+   they can move to `restricted` . 
+3. The Config Observer validates the API config and reconciles. It sets the Kube API
+   Server configuration which triggers a rollout.
+4. PSA is now being enforced at `baseline`. If the cluster administrator notices failing
+   workloads due to PSA, they can revert to `privileged` if they are unable to fix the 
+   workload simply. If the cluster administrator does not see any report logs about 
+   failing workloads, they can move to `restricted`.
 
 ### API Extensions
 
@@ -187,20 +140,6 @@ in openshift/api.
 
 * While it does not or should not impact others, it does add to an existing struct. This will allow 
   users to modify the `apiserver` resource on their cluster to configure PSA.
-
-`PodSecurityAdmissionStatus` is added to the existing `APIServerStatus` in the same file/repo. 
-This makes it the first `status` entry in this file.
-
-* This may be the part that is at risk. The status exists so the apiserver could report whatever
-  it may need to. Since it is the first time added, additional logic will be needed to allow
-  a status report. The status will allow users to see how the configured PSA is behaving i.e.
-  does the PSA configured via the API match the expected values? This is useful for setting
-  explicit label versions, so the user can quickly spot a typo e.g. if they set the value to
-  something that does not exist, the API status reports the value being unchanged.
-
-What's also of importance is a new `baseline` option. This was previously missing from other
-enhancements. We are adding it here so a cluster administrator has a middle ground for PSA
-enforcement. It also provides all PSS options to the user.
 
 ```go
 package v1 // config/v1/types_apiserver.go in openshift/api
@@ -223,24 +162,20 @@ type APIServerSpec struct {
 	PodSecurityAdmission PodSecurityAdmissionConfig `json:"podSecurityAdmission,omitempty,omitzero"`
 }
 
-// APIServerStatus gains one subtree, declared below. It is empty today, so this
-// enhancement is its first writer; the precedent is argued in "Why there is a
-// status after all".
-
 // PodSecurityStandard names one of the upstream Pod Security Standards.
-// +kubebuilder:validation:Enum:=Privileged;Baseline;Restricted
+// +kubebuilder:validation:Enum:=privileged;baseline;restricted
 type PodSecurityStandard string
 
 const (
 	// PodSecurityStandardPrivileged is the unrestricted standard. As an
 	// enforcement level it means the cluster has opted out of enforcement.
-	PodSecurityStandardPrivileged PodSecurityStandard = "Privileged"
+	PodSecurityStandardPrivileged PodSecurityStandard = "privileged"
 	// PodSecurityStandardBaseline prevents known privilege escalations while
 	// permitting the default Pod configuration.
-	PodSecurityStandardBaseline PodSecurityStandard = "Baseline"
+	PodSecurityStandardBaseline PodSecurityStandard = "baseline"
 	// PodSecurityStandardRestricted is the hardened standard, following current
 	// Pod hardening best practices.
-	PodSecurityStandardRestricted PodSecurityStandard = "Restricted"
+	PodSecurityStandardRestricted PodSecurityStandard = "restricted"
 )
 
 // PodSecurityAdmissionConfig records the administrator's requested Pod Security
@@ -263,29 +198,6 @@ type PodSecurityAdmissionConfig struct {
 	// +optional
 	ReportLevel PodSecurityStandard `json:"reportLevel,omitempty"`
 }
-
-type APIServerStatus struct {
-	// PodSecurityAdmission reports the resolved Pod Security Admission configuration written by the operator.
-	// +optional
-	PodSecurityAdmission *PodSecurityAdmissionStatus `json:"podSecurityAdmission,omitempty"`
-}
-
-// PodSecurityAdmissionStatus reports the effective Pod Security Admission configuration applied to kube-apiserver.
-type PodSecurityAdmissionStatus struct {
-	// EnforceLevel is the Pod Security level applied by the kube-apiserver.
-	// +optional
-	EnforceLevel PodSecurityStandard `json:"enforceLevel,omitempty"`
-
-	// EnforceVersion is the actual Pod Security Standards revision applied after clamping to the cluster version.
-	// +kubebuilder:validation:MaxLength=10
-	// +optional
-	EnforceVersion string `json:"enforceVersion,omitempty"`
-
-	// ReportLevel is the resolved global audit and warning level.
-	// +optional
-	ReportLevel PodSecurityStandard `json:"reportLevel,omitempty"`
-}
-
 ```
 
 ### Topology Considerations
@@ -327,10 +239,7 @@ flowchart TD
 
 In order to configure PSA in HyperShift, the `HostedCluster` object will need to
 be modified. Furthermore, the hosted control plane logic will need to be modified
-in HyperShift to be aware of our new fields. 
-
-We will need to add new logic in the hosted cluster configuration so it is aware 
-that `APIServerStatus` exists and has a field that a user can query via `HostedCluster`.
+in HyperShift to be aware of the new fields. 
 
 Config Observer Logic should not need modification in HyperShift.
 
@@ -344,18 +253,30 @@ proposal focuses mainly on this topology.
 ##### Single-node Deployments
 
 As there is only one node available in SNO, updating `APIServer/cluster`
-to configure PSA enforcement will cause a kube-apiserver outage. This
-is because there is only one API server instance, and it needs to 
-perform a static pod rollout to apply the new changes. This should be
-temporary in nature.
+to configure PSA enforcement will cause a **temporary** kube-apiserver 
+outage. This is because there is only one API server instance, and it 
+needs to perform a static pod rollout to apply the new changes. This
+should not be **permanent**. 
 
 ##### MicroShift
 
-As MicroShift consumes the APIServer config differently, the API
-resources added for PSA enforcement config will need to be exposed
-through the MicroShift configuration file. This means we need to ensure
-both the spec and status fields are accessible in MicroShift so a
-MicroShift admin can query the status of PSA enforcement and configure it.
+MicroShift currently does not support the `APIServer` OpenShift API.
+Logic will need to be added so that MicroShift can support this feature.
+`.spec` field will need to be brought over. These changes
+would need to be made in [MicroShift's API Server logic](https://github.com/openshift/microshift/blob/main/pkg/config/apiserver.go).
+
+MicroShift sets PSA level to `restricted` by default via its own
+[Kube API Server config](https://github.com/openshift/microshift/blob/a3b74f7954e26b90aa099fefe9800879ce6abf8d/assets/controllers/kube-apiserver/defaultconfig.yaml#L12-L31). This will need to change to `privileged`
+by default to ensure the feature works the same on MicroShift as on any
+other platform. This does not mean engineers won't develop with `restricted`
+by default; it simply means any workloads outside of OCP do not need to be
+evaluated at `restricted` level unless the user decides to do so by configuring
+the API. 
+
+Configuring this feature would also look different; `config.yaml` would need
+to be edited - there is no `oc` command to do this as OpenShift API has
+limited support here. Then, MicroShift would need to be restarted by the admin
+for changes to take effect.
 
 #### OpenShift Kubernetes Engine
 
@@ -365,99 +286,132 @@ be any different from a standalone implementation.
 
 ### Implementation Details/Notes/Constraints
 
-#### Operator Lifecycle Manager (OLM) Namespaces
+#### PSA Configuration Overview
 
-OLM does PSA labelling a bit different to the rest of OpenShift. They write their
-PSA labels via their own config and follow their own behavior in regards to when
-they will write the labels. Therefore, they are exempt from the namespace
-labelling requirements due to their distinct nature.
+```mermaid
+flowchart LR
+    direction LR
+    
+    node1["<b>privileged</b><br>───────────<br>Disabled"] ---> node2["<b>baseline</b><br>───────────<br><i>(Happy Medium)</i>"] ---> node3["<b>restricted</b><br>───────────<br>Enabled"]
+```
 
-This enhancement proposes not to touch these namespaces e.g. `openshift-operators`
-The proposed monitor tests will filter these namespaces out.
+When configuring PSA, it is important to understand what each PSS standard means.
+PSA enablement/disablement is fluid. There are three states that the API can be
+configured.
+
+`baseline` is a new addition to the PSA feature for OpenShift - it will allow customers
+to have a "happy medium" so they can secure their workloads without being too 
+restrictive. 
+
+The following table was inspired from the [upstream PSS documentation](https://kubernetes.io/docs/concepts/security/pod-security-standards). 
+
+|Pod Security Standard|Description|
+|-------|-----------|
+|`privileged`| PSA enforcement is effectively disabled.|
+|`baseline`| Enforces a minimally restrictive policy which prevents known privilege escalations. |
+|`restricted`| Enforces a heavily restricted policy, following Pod hardening best practices relative the the enforcement version set. |
+
+Within the API, the standard is set when modifying `APIServer` cluster object in 
+`.spec.podSecurityAdmission` . This applies for `enforceLevel`, `enforceVersion` 
+and `reportLevel` .
+
+`reportLevel` combines `audit` and `warn` and serves as a mechanism to gather data.
+This is particularly useful for customers that want insight into how their workloads
+would "behave" under a particular PSS, without actually enforcing. 
+
+For example, the cluster admin can keep `enforceLevel` as `privileged` and set 
+`reportLevel` to `restricted` so they can view the audit and warn logs to understand what 
+workloads need to be adjusted to bring PSA enforcement to `restricted`. This can help the 
+customer predict workload admission so they are more informed about the choices they make.
 
 #### Repurposing `OpenShiftPodSecurityAdmission` feature gate
 
 The `OpenShiftPodSecurityAdmission` feature gate has been used for development
 testing since 4.12 . Its purpose was to ensure OpenShift namespaces and workloads
 were labelled as strictly as possible, i.e. `restricted` or `privileged`, so that
-customer workloads would not be impacted by PSA. This meant that PSA components, 
+customer workloads would not be affected by PSA. This meant that PSA components, 
 such as the PSA Label Syncer or Pod Security Readiness Controller, were enabled in
-dev branches, and disabled in release branches. This meant the customer never got
-the chance to use these features for their workloads, and more importantly, that
-this feature gate was never part of the `Default` feature set.
+the development process, and disabled in release branches. Because this feature gate 
+was never part of the `Default` feature set, the customer never got the chance to use
+these features for their workloads.
 
-For this feature proposal, we will be reusing the feature gate for a different
-purpose; we will be adding the API, retiring components, and providing testing
-to ensure OpenShift workloads adhere to the strictest PSS standard as possible.
+For this feature proposal, the feature gate will be used for a different
+purpose; the API will be added, retiring components, and providing testing
+to ensure OpenShift workloads adhere to the strictest PSS standard where possible.
 This means in development, the feature gate will no longer be used to check if
-our workloads conform to a PSS standard; it won't be on in development and off
+the workloads conform to a PSS standard; it won't be on in development and off
 in production. Rather, it will always be on once implemented, and monitor testing
 will take over this responsibility to ensure all OCP namespaces have PSS labels set.
 
-#### Retiring PSA Label Syncer and Pod Security Readiness Controller
+#### Retiring PSA Label Syncer
 
-The PSA Label Syncer and PodSecurityReadinessController will be retired as part
-of this feature work. The PodSecurityReadinessController's purpose was to ensure 
-workloads were ready to be labelled with `restricted` or `privileged`. Then, the 
-PSA label syncer would label the namespace with the appropriate enforcement level.
+The purpose of the PSA label syncer was to set correct PSA labels based on workload
+SCCs in a namespace. The proposal is to retire the PSA label syncer as part of the
+feature work. There will be monitoring tests present to detect the PSA labels on 
+OCP namespaces in place of the syncer, and developers will need to ensure their 
+namespaces conform to `restricted` PSS if possible.
 
-Since additional monitor tests to monitor OpenShift managed namespaces will be in
-place as part of this proposal, they are no longer needed. Additionally, this serves
-the same purpose effectively as the retired components; our workloads must be 
-operating in a namespace that uses the strictest PSA enforcement as possible, so that
-this does not affect customer workloads. Only this time, we will also provide the levers
-needed for customers to enforce PSA on their own workloads at the desired levels. 
+#### Retiring Pod Security Readiness Controller
 
-Without the monitoring tests to ensure this, we cannot safely provide this feature to
-the customer. It does not mitigate the customer risk if they decide to enable the feature,
-rather it prevents our workloads from being one of the reasons PSA failed for a customer
-workload.
-
-#### Additional Baseline Configuration Option
-
-Previously, `Privileged` and `Restricted` were the only configurable options
-for PSA enforcement on OpenShift. Its purpose was to reflect workloads either
-would not enforce PSA at all, or would enforce PSA to the highest level. This
-meant workloads needing some privileges that `restricted` PSS restricts, would
-simply not use PSA at all. This works for OpenShift's development process, but
-it does/should not work for customers. 
-
-Customers need options - they have different requirements for their workloads
-than what `restricted` may offer. They may prefer to lock down their workloads to
-deny some privileges, but not all of them. `Baseline`, an already existing PSS,
-bridges the gap for security conscious cluster admins who would like some of
-the benefits of PSA, but not to the `restricted` level. 
-
-The following table was inspired from the [upstream PSS documentation](https://kubernetes.io/docs/concepts/security/pod-security-standards). 
-
-|Profile|Description|
-|-------|-----------|
-|`Privileged`| PSA enforcement is effectively disabled.|
-|`Baseline`| Enforces a minimally restrictive policy which prevents known privilege escalations. |
-|`Restricted`| Enforces a heavily restricted policy, following Pod hardening best practices relative the the enforcement version set. |
+The purpose of the PodSecurityReadinessController was to collect metrics about
+failing workloads due to pod security violations. The proposal is to retire
+the controller as part of the feature work. This is because OCP namespaces
+will need to be labelled as part of this work. `audit` and `warn` labels
+will provide the logs necessary to debug why a namespace/workload cannot
+conform to a given PSS and to fix it.
 
 #### Configuring PSA Enforcement at Install Time
 
-Allowing a security conscious customer to configure the level
-of PSA enforcement at install time would provide great benefit.
-It would allow the cluster admin to set an enforcement level
-from the get-go, that an application owner would agree to in
-regards to their workloads. This would be the global level being
-set, not the namespace level.
+Many customers use IaC to configure their cluster. This makes
+configuring PSA enforcement at install time a necessity.
+It allows the cluster admin to set an enforcement level
+from the get-go that suits the needs for their workloads. This 
+would be the global level being set, not the namespace level.
 
-In order to enable this, two notable changes are needed. Firstly,
-`openshift/installer` repo requires an install-config option wired
-up. Let's call it `psaConfig`. `psaConfig` would have the same options
-at the APIServer spec i.e. `enforceLevel`, `enforceVersion`, etc. The
-manifest generation would need to also be wired up so a user can configure
-this at install time, either by YAML or as a config flag. 
+In order to enable this, **no changes are required for `openshift/installer`.**
+There is logic there that [loads YAML manifests at install time](https://github.com/openshift/installer/blob/main/pkg/asset/manifests/openshift.go#L321). The user only
+needs to worry about creating the YAML manfiest for `cluster/APIServer` and 
+that it is correct. 
 
-Secondly, `openshift/cluster-kube-apiserver-operator` repo would need its
-config observer controller logic changed in order to recognise these fields.
-Whether this is in addition to other changes to allow it to recognise
-`cluster/APIServer` changes is unknown. Then, the bootstrap logic would need
-modification to repurpose the feature gate and to expect the aforementioned
-API fields.
+When the user wants to install the cluster, they use the `openshift-install`
+binary. First, create the manifests structure in a chosen directory:
+
+```bash
+openshift-install create manifests --dir="./my-favorite-dir"
+```
+
+A lot of manifests are created. This only primes the cluster install - it creates 
+the manifests necessary to bootstrap the cluster. 
+**The user needs to create the `cluster/APIServer` manifest in "./my-favorite-dir/openshift.**
+This is the `cluster/APIServer` manifest called `cluster-apiserver-02-config.yml`
+with .spec.podSecurityAdmissionConfig filled out. 
+
+```yaml
+apiVersion: config.openshift.io/v1
+kind: APIServer
+...
+spec:
+...
+  podSecurityAdmission:
+    enforceLevel: "baseline"
+    enforceVersion: "1.34"
+    reportLevel: "restricted"
+```
+
+Once created, the user can proceed with install.
+
+```bash
+openshift-install create cluster --dir="./my-favorite-dir"
+```
+
+The change that we do need to make lies in `openshift/cluster-kube-apiserver-operator`
+repo. Observer logic (to configure PSA via manifest) is added to a new file in
+`pkg/operator/configobservation/apiserver/observe_podsecurityadmission.go`,
+similar to [observer logic for CORS](https://github.com/openshift/cluster-kube-apiserver-operator/blob/main/pkg/operator/configobservation/apiserver/observe_cors.go). 
+Then, the new observer logic is wired up [to the controller](https://github.com/openshift/cluster-kube-apiserver-operator/blob/main/pkg/operator/configobservation/configobservercontroller/observe_config_controller.go). 
+This enables the config observer to reconcile the new changes, and triggers a 
+static pod rollout. This should not be discernible in terms of time to the user, 
+as it happens during the bootstrap process.
 
 #### PSA configuration
 
@@ -465,7 +419,7 @@ As mentioned above, PSA Enforcement will be configurable at install time. Howeve
 it will also be configurable once the cluster is running. The cluster administrator
 needs to edit the `cluster/APIServer` crd to make this happen. 
 
-Let's say they use `oc edit apiserver cluster` and they add the following changes:
+They run `oc edit apiserver cluster` and they add the following changes:
 
 ```yaml
 apiVersion: config.openshift.io/v1
@@ -480,95 +434,38 @@ spec:
 ```
 
 Then the config observer controller picks up on these changes, resolves the version, 
-generates config, updates `status.podSecurityAdmission` and rolls out PSA Enforcement
-via the Kube APIServer.
-
-```mermaid
-flowchart TD
-    Admin([Cluster Admin]) -->|Updates spec.podSecurityAdmission<br/>e.g., EnforceLevel='Baseline', EnforceVersion='latest'| CR["APIServer CRD<br/>(apiserver/cluster)"]
-    
-    CR -->|Watches spec changes| Obs["Config Observer Controller<br/>(Kube APIServer Operator)"]
-    
-    direction TB
-    Obs -->|Resolves Version<br/>e.g., 'latest' or 'v1.34'| Status["Writes status.podSecurityAdmission"]
-    Obs -->|Generates Config & Triggers Rollout| KAS["Kube APIServer"]
-    
-    Status --> CR
-```
-
-What PSA Enforcement actually means is discussed below. 
-
-#### PSA Enforcement in Action
-
-The Kube APIServer enforces the level that is configured by either
-the cluster administrator or the default level. As mentioned before,
-enforcement values are `privileged`, `baseline`, and `restricted` . 
-These values align with the upstream PSS values and their restrictions.
-
-The Kube APIServer then begins enforcement on the cluster at both a 
-global and namespace level. Namespace level enforcement takes precedence
-over the global level, and is the level of restriction enforced for the
-workloads in a given namespace. This is also why we need the PSA enforcement
-level set in our OpenShift namespaces, so that no matter the level the cluster
-administrator has set, the workloads in these namespaces are set.
-
-We therefore encourage the cluster administrator to be mindful about this for
-their workloads; if they desire different restrictions dependent on their
-workloads, they should configure this where they lie, the namespaces.
-
-Where the namespace level PSA enforcement is not set, the global PSA enforcement
-takes precedence for the namespace and their workloads. So, if the global enforcement
-is `restricted` and there is no PSA enforcement labels set, the namespace will effectively
-have the `restricted` label enforced on their workloads.
-
-What this means in practice, for existing workloads, is that should they pass
-evaluation, the workload is admitted and continues to run. Should the workload
-fail evaluation, the workload will still continue to run, but if the pod dies
-, restarts or reschedules, it will be blocked from starting again. 
-
-For new workloads being evaluated, if they pass evaluation, they are admitted
-and run fine. If they fail, they are blocked from starting.
-
-Cluster administrators should keep this in mind when configuring the PSA enforcement
-level globally and at namespace level, and remember they can also modify the level
-of PSA enforcement desired as needed. 
-```mermaid
-flowchart TD
-    subgraph Precedence ["Effective Policy Resolution"]
-        KAS["Kube APIServer<br/>(Pod Security Admission)"]
-        NS{"Namespace Has Label?<br/>pod-security.kubernetes.io/enforce"}
-        
-        KAS -->|Checks Namespace| NS
-        NS -->|Yes| Override["Use Namespace Label Level"]
-        NS -->|No| Global["Use Resolved Global Default<br/>(status.podSecurityAdmission)"]
-    end
-
-    subgraph Impact ["Enforcement Impact"]
-        Override --> Evaluator{Workload State}
-        Global --> Evaluator
-        
-        Evaluator -->|Existing Running Pod| Running["Continues Running until Pod dies/restarts/reschedules<br/>"]
-        Evaluator -->|New Pod or Restart/Recreation| Check{Meets Enforced Standard?}
-        
-        Running -.->|Pod dies / restarts / reschedules| Check
-        
-        Check -->|Pass| Allowed["Pod Admitted & Started"]
-        Check -->|Fail| Denied["Pod Rejected / Blocked from Starting<br/>(Warn/Audit logged)"]
-    end
-```
+generates config and rolls out PSA Enforcement
+via the Kube APIServer. What PSA Enforcement actually means is discussed below. 
 
 ### Risks and Mitigations
 
+#### Operator Lifecycle Manager (OLM) Namespaces
+
+OLM does PSA labelling a bit different to the rest of OpenShift. They write their
+PSA labels via their own config and follow their own behavior in regards to when
+they will write the labels. Therefore, they are exempt from the namespace
+labelling requirements due to their distinct nature.
+
+This enhancement proposes not to touch these namespaces e.g. `openshift-operators`
+The proposed monitor tests will filter these namespaces out.
+
 #### PSA Enforcement Configuration Issues
 
-A cluster admin may use invalid enforcement levels and versions. Version will
-resolve to `latest` on invalid values e.g. `2.34` instead of `1.34` . Enforcement
-would not be re-set, so if the previous enforcement level was `privileged` it would
-remain as such. For version to be set to latest a valid enforcement level should
-have been selected. Otherwise, both values would remain the same.
+The XValidation markers in the API should account for most validation concerns.
+For example, if the user makes a typo in enforcement level configuration, the 
+enums for the  enforcement level should help by giving the validation error.
 
-This could cause issues as `latest` enforcement could have unexpected restrictions.
-The mitigation here would be to re-configure PSA enforcement with valid values.
+If the user chooses an invalid version of `enforce` or `report`, e.g. `1.39` if
+`1.38` is the latest version, and XValidation passes, then the API's
+`.spec.podSecurityAdmission` cannot be set. This means we need to make sure we have
+input validation in Kube APIServer so we don't set a wrong version. Enums should be
+sufficient to validate PSS standards as they are quite established upstream. The 
+enums can/should be modified in the case that they change.
+
+**The API is not modified until a valid configuration is provided.**
+
+If Kubernetes moves from `v1.x` to `v2.x` then changes to the XValidation marker
+after the API goes in will be needed.
 
 #### Unexpected failure to admit workload based on enforcement level
 
@@ -577,26 +474,67 @@ could be that the application owner was not aware of a privilege needed to run
 a specific workload or set of workloads. To mitigate, the cluster administrator
 would need to re-configure PSA enforcement either at namespace or global level.
 
+A workload that has failed to meet admission requirements will continue to run 
+until it needs to restart, at which point the workload will not be redeployed 
+until the system administrator sets the PSS level for the workload namespace to 
+the appropriate level.
+
+It should be straightforward to determine the workloads that have are currently
+failing PSA admission by dry run labelling all namespaces with the PSA label 
+desired.
+
+```bash
+oc label --dry-run=server --overwrite ns --all \
+ pod-security.kubernetes.io/enforce=restricted
+```
+
+However, this can only check current running workloads. If there are jobs or
+temporary pods that run occasionally, this requires a more nuanced approach.
+
+Setting `reportLevel` to the level of desired PSS will set global `audit` and
+`warn` level to that PSS. This will provide the user logs that they can use to
+debug their failing workloads. At namespace level the user can run the following
+command. 
+
+```bash
+kubectl label ns <namespace> \
+  pod-security.kubernetes.io/warn=restricted \
+  pod-security.kubernetes.io/audit=restricted
+```
+
+This would be recommended if they set the namespace labels already. Otherwise,
+`reportLevel` will be sufficient to view logs for debugging the workload.
+
 #### Impact on OCP workloads (PSA Label Syncer + Readiness Controller disablement)
 
 From the developer perspective, `OpenShiftPodSecurityAdmission` has a completely
-new meaning; it is now customer facing. We are disabling the PSA Label Syncer and
-the Readiness Controller which leaves a discernable gap in our security posture.
+new meaning; it is now customer facing. The PSA Label Syncer and the Readiness 
+Controller will be disabled, which leaves a discernable gap in OpenShift's
+security posture.
 
-The PSA Label Syncer's job is to auto label namespaces based on the SCCs set on the
-workloads. The Readiness Controller checks to see if a workload can accept the PSS
-that would be enforced based on SCC violations. They both go hand in hand to ensure
-PSA labels on non-labelled OpenShift namespaces. This will now be gone.
+The PSA Label Syncer's role was to label namespaces which has `security.openshift.io/scc.podSecurityLabelSync`
+label set to `true`, with the appropriate `enforce`,`warn` and `audit` labels.
 
-To mitigate this, monitor tests to ensure namespaces have an appropriate PSA label
-in place to enforce on workload admissions will be used to give insight to developers
-to ensure we keep our security posture. The responsibility will be on the developer
-to ensure they have labelled their namespace appropriately for either the new workloads
+To mitigate the lack of the PSA Label Syncer, monitor tests to ensure namespaces have 
+an appropriate PSA label in place to enforce on workload admissions will be used to give 
+insight to OCP engineers to ensure that OCP workloads can run with a global setting of 
+`restricted` to not block the feature. The responsibility will be on the OCP engineers to 
+ensure they have labelled their namespace appropriately for either the new workloads 
 introduced or the new namespaces. 
 
-Nothing will be there to check this, so developers will need to know their workload
-permissions and how to compare this with the Pod Security Standards based on the latest
-enforcement version available to them at the time.
+Nothing will be there to check the OCP namespaces' appropriate PSA labelling once this 
+feature is complete, so both OCP engineers and cluster admins will need to know their 
+workload permissions and how to compare the enforcement level with the Pod Security 
+Standards based on the latest enforcement version available to them at the time.
+
+The PodSecurityReadinessController collected metrics for ClusterFleetEvaluation.
+This has no discernable impact on OCP workloads upon disablement.
+
+For some customers who used this feature in Dev/Tech preview, they may have set the
+`security.openshift.io/scc.podSecurityLabelSync` label for their namespaces. They
+might not know the PSA Label Syncer is being removed. For these customers, they cannot
+upgrade, so they are stuck with their current offering. They must be informed when they
+use a new cluster, how this feature has changed.
 
 ### Drawbacks
 
@@ -617,13 +555,21 @@ not conflict with customer PSA enforcement.
 
 #### Customer Responsibility
 
+It is not guaranteed as part of this feature work, that the chosen PSS set
+by the customer, will work. If the customer is unsure about the PSS level
+they need to set, it is better not to set the label in the first place. Doing
+so can cause more harm than good; they must be informed of the implications
+for their workloads in documentation so they can make the decision best for them.
+
 The responsibility is with the customer to ensure their workloads can meet
 the level of enforcement set. This can cause issues for customers who wish
 to improve their security posture but do not know where to start.
 
 OpenShift is not becoming more secure by default with the completion of this
 feature. What it is becoming, is offering an additional measure of security
-for the customer should they wish to use it. 
+for the customer should they wish to use it. Each cluster is unique to the
+customer, so the customer needs to configure the PSA both at global and namespace
+level in a way that suits their workload needs.
 
 This conflates with a [previous enhancement proposal draft](https://github.com/ibihim/enhancements/blob/7aad97ca4a0068f0fc50fb76347852d1e683c3ad/enhancements/authentication/pod-security-admission-enforcement.md) that wanted to make 
 OpenShift more secure out of the box with the level of enforcement being restricted 
@@ -638,8 +584,8 @@ feature gate will now be used to move this feature forward, not to be used
 in development branch anymore as a mechanism to ensure the correct PSA labelling
 for their namespace and workloads.
 
-Instead, we will be moving over to monitor tests to report non labelled namespaces
-for PSA enforcement, and developers will need to be aware of this moving forward.
+Instead, monitor tests will be used to report non labelled namespaces for PSA 
+enforcement, and developers will need to be aware of this moving forward.
 
 Overall, there should not significant maintenance burden beside the manual labelling
 of namespaces as appropriate.
@@ -662,7 +608,7 @@ at the cost of a more secure platform. The API mentioned was going to be tempora
 and at a certain release be removed. New clusters had PSA enforcement out of the box,
 while existing clusters worked to transition to this new reality. 
 
-This was not something we wanted to move forward with, as customers now had to accept
+This was not something that was desired in this proposal, as customers now had to accept
 a `restricted` by default mindset for their workloads, meaning many customers would
 need to set the PSA enforcement level to `legacy` until they could not, or set `privileged`
 at namespace level for all of their workloads. This creates a lot of work for a customer
@@ -670,13 +616,13 @@ to set an enforcement level they never asked for, and would have created major h
 
 ### Do Nothing
 
-This is also a potential path forward, but it was not chosen as we needed to
+This is also a potential path forward, but it was not chosen as the EP proposes to
 stop the `OpenShiftPodSecurityAdmission` feature gate from constantly being 
 removed in release branches. There comes a time where the feature gate should
 transition to `Default` feature set, and customers should be able to take advantage
 of this. 
 
-By repurposing the feature gate, we can provide another path forward for customers
+By repurposing the feature gate, another path forward can be provided for customers
 wanting to use PSA enforcement. Equally, this needs to be made aware to developers
 so that they will manually add the appropriate PSA labels to their namespaces when
 adding new workloads to OCP.
