@@ -4,10 +4,11 @@ authors:
   - "@gnufied"
 reviewers:
   - "@jsafrane"
+  - "@dobsonj"
 approvers:
   - @jcpowermac
 api-approvers:
-  - @joelspeed
+  - "@JoelSpeed"
 creation-date: 2026-10-21
 last-updated: 2026-10-21
 status: implementable
