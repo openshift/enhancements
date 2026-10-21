@@ -10,7 +10,7 @@ approvers:
 api-approvers:
   - "@everettraven"
 creation-date: 2026-10-05
-last-updated: 2026-10-12
+last-updated: 2026-10-21
 tracking-link:
   - https://issues.redhat.com/browse/OCPSTRAT-1598
 status: provisional
@@ -153,11 +153,11 @@ automation tools consume.
    pressure affects running hosted clusters — not just
    new installations — so removing the signal after
    installation would create a monitoring blind spot;
-   (b) the HO uses direct `List()` API calls (not
-   informers) so pod/event data is transient
-   per-reconciliation with no persistent memory
-   overhead (see Implementation Details for analysis);
-   (c) the condition is level-driven and set
+   (b) the HO already has a warm informer for
+   `ControlPlaneComponent` resources (used by karpenter
+   and metrics), so the runtime cost of reading CPC
+   conditions for this purpose is zero additional
+   informers; (c) the condition is level-driven and set
    to `False` when no pressure exists, so it adds no
    noise to day-2 operations.
 
@@ -243,7 +243,7 @@ sequenceDiagram
     HCCO->>HCP: Mirror CVO conditions<br/>(ClusterVersionFailing, etc.)
     HO->>HCP: Read HCP status.conditions
     HO->>HC: Mirror HCP conditions +<br/>CVO conditions (invert Failing→Succeeding)
-    HO->>HC: Set ManagementClusterResourcePressure<br/>(direct pod/event inspection via List calls)
+    HO->>HC: Set ManagementClusterResourcePressure<br/>(from CPC conditions, no mirroring delay)
     HO->>HC: Mirror installation status<br/>from HCP to HC
 ```
 
@@ -313,8 +313,8 @@ these principles:
   to normal.
 
 - **`ManagementClusterResourcePressure`**: Set to
-  `False` when no scheduling pressure exists,
-  `Unknown` when pod status is unavailable. Persists
+  `False` when no CPC reports scheduling failures,
+  `Unknown` when CPC status is unavailable. Persists
   into day-2 as a continuous health signal (see
   Non-Goal 2). Day-2 transient `True` during rolling
   updates is expected and mitigated by the 60-second
@@ -362,10 +362,11 @@ all diagnostic enrichment from this enhancement
 requires the CPO to be running. If the CPO is dead,
 diagnostics go dark. However, the HO's
 `ManagementClusterResourcePressure` detection
-partially addresses this gap: it inspects all pods
-in the HCP namespace (including the CPO pod) via
-direct `List()` calls, so if the CPO itself is
-unschedulable, the condition will be
+partially addresses this gap: it reads CPC
+`Available` conditions (which persist from the last
+successful CPO reconciliation), so if the CPO itself
+is unschedulable and a CPC already has
+`Reason=PodSchedulingFailed`, the condition will be
 `True, Reason=FailedScheduling` on the HC. Other CPO
 failure modes (CrashLoopBackOff, OOMKilled) are
 detected by the CPC `Available` condition's
@@ -443,10 +444,13 @@ deferred to future work.
    - Message: `2 components unavailable. First failure:
      kube-apiserver — PodSchedulingFailed: Insufficient
      cpu`
-4. The HO detects `FailedScheduling` events and
-   `Pending` pods in the HCP namespace (via direct
-   `List()` calls) and sets
+4. The HO reads `ControlPlaneComponent` conditions in the
+   HCP namespace. When any CPC has `Available` condition
+   with `Reason=PodSchedulingFailed`, the HO sets
    `ManagementClusterResourcePressure=True` on the HC.
+   This uses the CPC informer already warm in the HO
+   (shared with karpenter and metrics), adding zero new
+   informers or API calls.
 5. The HO mirrors the diagnostic `Available` condition
    from HCP to HC.
 6. The cluster service provider sees both signals on
@@ -473,9 +477,9 @@ sequenceDiagram
             HO->>HC: Mirror stage + conditions
         else Deployment failure detected
             CPO->>Pods: Inspect pod conditions/events
-            CPO->>HCP: Add root cause to condition
+            CPO->>HCP: Add root cause to CPC + HCP conditions
             HO->>HC: Mirror diagnostic condition
-            HO->>HC: Set ManagementClusterResourcePressure
+            HO->>HC: Set ResourcePressure<br/>(from CPC conditions)
             CSP->>HC: Read condition, take action
         end
     end
@@ -495,7 +499,7 @@ or finalizers.
 |----------|------|----------|--------|-------------|
 | Status field | `installation.stage` | HC, HCP | CPO → HO mirrors to HC | Enum: `Initializing`, `ControlPlaneProvisioning`, `WaitingForKubeconfig`, `WaitingForOperators`, `InstallationComplete`. Forward-only monotonic. |
 | Status field | `installation.lastTransitionTime` | HC, HCP | CPO → HO mirrors to HC | Timestamp of most recent stage transition. Non-pointer `metav1.Time` with `omitzero`. |
-| Condition type | `ManagementClusterResourcePressure` | HC | HO (direct pod/event inspection) | Scheduling pressure on management cluster affecting this HC's control-plane pods. `True`/`False`/`Unknown`. |
+| Condition type | `ManagementClusterResourcePressure` | HC | HO (from CPC conditions) | Scheduling pressure on management cluster affecting this HC's control-plane pods. `True`/`False`/`Unknown`. |
 | Reason constant | `PodSchedulingFailed` | CPC `Available` | CPO | Pod cannot be scheduled on management cluster. |
 | Reason constant | `CrashLoopBackOff` | CPC `Available` | CPO | Pod is in CrashLoopBackOff. |
 | Reason constant | `ImagePullBackOff` | CPC `Available` | CPO | Pod cannot pull container image. |
@@ -579,13 +583,20 @@ const (
     // created and waiting for available replicas.
     StageControlPlaneProvisioning InstallationStage = "ControlPlaneProvisioning"
 
-    // StageWaitingForKubeconfig indicates control-plane
-    // components are available and the system is waiting
-    // for the hosted cluster kubeconfig to be generated.
+    // StageWaitingForKubeconfig indicates all
+    // ControlPlaneComponent resources report Available
+    // and the system is waiting for the kubeconfig
+    // secret reference (hcp.Status.KubeConfig) to be
+    // populated. The trigger is the existence of the
+    // reference, NOT endpoint reachability — no
+    // connectivity check is performed, avoiding issues
+    // with private clusters or management clusters
+    // without external access.
     StageWaitingForKubeconfig InstallationStage = "WaitingForKubeconfig"
 
     // StageWaitingForOperators indicates the kubeconfig
-    // is available and the system is waiting for required
+    // secret reference exists (hcp.Status.KubeConfig
+    // != nil) and the system is waiting for required
     // operators (via CVO) to become available.
     StageWaitingForOperators InstallationStage = "WaitingForOperators"
 
@@ -647,7 +658,7 @@ constraint above):
 | → `Initializing` | HCP reconciliation starts | The CPO's `Reconcile()` is invoked for this `HostedControlPlane`. Set unconditionally on first reconciliation if `installation.stage` is empty. |
 | `Initializing` → `ControlPlaneProvisioning` | At least one control-plane component deployment has been created | The CPO has called `CreateOrUpdate` for any CPC deployment (kube-apiserver, etcd, etc.) in the HCP namespace. |
 | `ControlPlaneProvisioning` → `WaitingForKubeconfig` | All required control-plane component deployments have `AvailableReplicas > 0` | `controlPlaneComponentsAvailable()` returns true — every CPC's `Available` condition is `True`. |
-| `WaitingForKubeconfig` → `WaitingForOperators` | The hosted cluster admin kubeconfig secret exists | The CPO resolves the kubeconfig secret name via `KASAdminKubeconfigSecret(hcp.Namespace, hcp.Spec.KubeConfig)`, which defaults to `admin-kubeconfig` and honors an explicit `spec.kubeConfig.name` override. The CPO confirms this secret is present in the HCP namespace. This is the same check that drives the existing `Available=False, Reason=KubeconfigWaitingForCreate` condition. |
+| `WaitingForKubeconfig` → `WaitingForOperators` | The kubeconfig secret reference exists (`hcp.Status.KubeConfig != nil`) | The CPO checks for the kubeconfig secret reference in HCP status — **not** endpoint reachability. No connectivity check is performed against the API server, avoiding issues with private clusters (endpoint reachable from data-plane VPC but not management cluster) and isolated management clusters without external access. |
 | `WaitingForOperators` → `InstallationComplete` | The CVO reports the cluster version is available | The `ClusterVersionAvailable` condition on the `HostedControlPlane` is `True`. This indicates the CVO has successfully rolled out all required cluster operators for the target version. |
 
 Note: the CPO evaluates all trigger conditions on
@@ -686,6 +697,63 @@ upgrade time, it temporarily shows an intermediate
 stage — this self-corrects once `Available` returns
 to `True`.
 
+**Installation stage FSM:**
+
+```mermaid
+stateDiagram-v2
+    [*] --> Initializing : HCP created
+
+    state "Initializing" as Init
+    state "ControlPlaneProvisioning" as CPP
+    state "WaitingForKubeconfig" as WFK
+    state "WaitingForOperators" as WFO
+    state "InstallationComplete" as IC
+
+    %% Normal sequential transitions
+    Init --> CPP : ≥1 CPC exists
+    CPP --> WFK : All CPCs Available=True
+    WFK --> WFO : KubeConfig ref exists<br/>(no reachability check)
+    WFO --> IC : ClusterVersionAvailable=True
+
+    %% Skip-forward: CPO evaluates latest-first,
+    %% SetInstallationStage allows any forward jump.
+    Init --> WFK : CPCs available +<br/>kubeconfig absent
+    Init --> WFO : CPCs available +<br/>kubeconfig exists
+    Init --> IC : ClusterVersionAvailable=True
+    CPP --> WFO : CPCs available +<br/>kubeconfig exists
+    CPP --> IC : ClusterVersionAvailable=True
+    WFK --> IC : ClusterVersionAvailable=True
+
+    %% Backfill on upgrade: pre-existing cluster
+    %% with stage=="" and HCP Available=True
+    [*] --> IC : Backfill: stage==""<br/>∧ HCPAvailable=True<br/>(pre-existing cluster)
+
+    IC --> [*]
+
+    note right of Init
+        No CPCs created yet.
+        CPO starting reconciliation.
+    end note
+
+    note right of WFK
+        All control-plane components running.
+        No connectivity check performed —
+        works for private and isolated clusters.
+    end note
+
+    note left of IC
+        Terminal state.
+        Persists into day-2.
+    end note
+```
+
+All transitions are forward-only (monotonic). The CPO
+evaluates triggers in reverse ordinal order (latest
+first) and selects the highest satisfied stage —
+intermediate stages can be skipped. The backfill path
+allows pre-existing clusters to jump directly to
+`InstallationComplete` on upgrade.
+
 **Control-plane vs full-cluster readiness:** Stages
 before `WaitingForOperators` point to control-plane
 issues on the management cluster.
@@ -714,8 +782,8 @@ enhancement's implementation:
 ```go
 // ManagementClusterResourcePressure is the condition
 // type on the HostedCluster, set directly by the HO.
-// The HO inspects pods and events in the HCP namespace
-// via List() calls to detect scheduling pressure.
+// The HO reads CPC Available conditions in the HCP
+// namespace to detect scheduling pressure.
 const ManagementClusterResourcePressure ConditionType = "ManagementClusterResourcePressure"
 
 const (
@@ -780,32 +848,29 @@ condition:
 
 | Condition Type | Set By | Scope | Purpose |
 |---|---|---|---|
-| `ManagementClusterResourcePressure` (on HC) | HO | Phase 1 | Indicates pod scheduling pressure on the management cluster affecting this hosted cluster's control-plane pods. The HO inspects pods and `FailedScheduling` events in the HCP namespace using direct `List()` API calls, correlating events to pods by UID. Set to `True` when scheduling failures are detected, `False` when none exist, `Unknown` when pod status cannot be retrieved. Scoped to pod scheduling failures only — does not detect inode, FD, or IP exhaustion. The condition message includes a summary of affected pods grouped by resource type (e.g., `"3 pods with FailedScheduling: 2 Insufficient cpu, 1 Insufficient memory"`). |
+| `ManagementClusterResourcePressure` (on HC) | HO | Phase 1 | Indicates pod scheduling pressure on the management cluster affecting this hosted cluster's control-plane pods. Set to `True` when any `ControlPlaneComponent` in the HCP namespace has `Available` condition with `Reason=PodSchedulingFailed` (set by the CPO's `diagnosePodFailure`). Set to `False` when no CPC reports scheduling failures. Set to `Unknown` when CPC status cannot be retrieved. Scoped to pod scheduling failures only — does not detect inode, FD, or IP exhaustion. The condition message lists affected components and resource types (e.g., `"2 components with scheduling failures (etcd, kube-apiserver): Insufficient cpu, Insufficient memory"`). |
 
 The condition follows the Kubernetes convention for
 "pressure" conditions (matching `DiskPressure`,
 `MemoryPressure` on Node): `True` means pressure is
 detected, `False` means no pressure.
 
-**Architectural note — HO-direct approach using
-`List()` calls:**
-The HO detects scheduling pressure directly using
-`List()` API calls (not informers/watches) on each
-reconciliation. Pod and event data is fetched,
-processed, and discarded — there is no persistent
-informer cache. This avoids fleet-scale memory growth
-that would occur with per-namespace informers (~50MB
-at 200 HCPs, ~240MB at 1000 HCPs). The trade-off is
-a small increase in API server load (2-3 List calls
-per HCP per reconciliation), which is acceptable at
-fleet scale given the 60-second reconciliation
-interval.
+**Architectural note — CPC-based approach:**
+The HO detects scheduling pressure by reading
+`ControlPlaneComponent` `Available` conditions that
+the CPO already sets. The CPC informer is already
+warm in the HO (used by karpenter and metrics), so
+this adds zero new informers and zero additional API
+calls. This avoids both the fleet-scale memory growth
+of per-namespace Pod/Event informers and the
+per-reconcile API server load of uncached `List()`
+calls.
 
-The HO inspects all pods in the HCP namespace
-(including the CPO pod itself), so if the CPO is
-unschedulable, `ManagementClusterResourcePressure`
-is set to `True` — naturally covering the
-chicken-and-egg case without a separate check.
+If the CPO is unschedulable, its CPC `Available`
+condition (set during the last successful
+reconciliation) persists with
+`Reason=PodSchedulingFailed`, so the HO still
+detects the pressure from the cached CPC state.
 
 **Security consideration for managed services**: In managed
 service environments (ROSA, ARO), the `HostedCluster`
@@ -845,13 +910,15 @@ to disable diagnostic detail. Rationale:
 
 Kubernetes Events are not *emitted* by this enhancement
 in Phase 1. Note: existing Kubernetes Events (e.g.,
-`FailedScheduling`) are *consumed* as input signals —
-specifically by the HO's `ManagementClusterResourcePressure`
-detection logic. Rationale for not emitting new Events:
-Events are ephemeral (default TTL 1 hour), not queryable
-at fleet scale, and add implementation complexity.
-Persistent conditions and metrics cover the diagnostic
-needs for installation failures.
+`FailedScheduling`) are *consumed* by the CPO's
+`diagnosePodFailure` to set CPC `Available` conditions —
+the HO's `ManagementClusterResourcePressure` reads those
+CPC conditions, not the events directly. Rationale for
+not emitting new Events: Events are ephemeral (default
+TTL 1 hour), not queryable at fleet scale, and add
+implementation complexity. Persistent conditions and
+metrics cover the diagnostic needs for installation
+failures.
 
 Future work may add Events for transient signals that
 don't warrant a persistent condition (e.g., individual
@@ -877,11 +944,11 @@ is under load (exactly when scheduling failures are most
 likely), these calls fail fast and do not exacerbate the
 problem.
 
-The HO performs scheduling pressure detection using
-direct `List()` API calls (not informers) — pod/event
-data is transient per-reconciliation with no persistent
-memory overhead. This avoids fleet-scale HO memory
-growth.
+The HO reads `ControlPlaneComponent` conditions for
+scheduling failure detection. This uses the existing CPC
+informer (already warm for karpenter and metrics), adding
+zero new informers and zero additional API calls. The
+overhead is negligible.
 
 **Guest cluster impact**: None. All diagnostic logic
 runs on the management cluster side. The guest cluster
@@ -991,33 +1058,40 @@ components:
   informational — no controller or automation uses it
   for control-flow decisions.
 - Set `ManagementClusterResourcePressure` directly on
-  the HC. The HO detects scheduling pressure using
-  direct `List()` API calls (not informers) on pods
-  and events in the HCP namespace, using two
-  mechanisms:
-  1. List `FailedScheduling` events and correlate to
-     pods by UID. An event is only counted if its
-     involved pod still exists and has
-     `PodScheduled=False` (preventing stale events
-     from keeping the condition `True` after
-     recovery).
-  2. Directly inspect pods in `Pending` state with
-     `PodScheduled=False, reason=Unschedulable` as a
-     supplementary check (handles the case where
-     events have expired but pods are still
-     unschedulable).
-  The condition is `True` when at least one pod has
-  an active scheduling failure (including the CPO
-  pod itself — the chicken-and-egg case is covered
-  naturally). When neither signal exists, the
-  condition is set to `False`. If pod status cannot
-  be retrieved, the condition is set to `Unknown,
-  Reason=ControlPlanePodStatusUnavailable`.
-- **No persistent memory overhead.** Pod and event
-  data is fetched via `List()`, processed, and
-  discarded on each reconciliation. No per-namespace
-  informer caches are maintained, avoiding the
-  fleet-scale memory concern.
+  the HC by reading `ControlPlaneComponent` (CPC)
+  conditions in the HCP namespace. The CPO's
+  `diagnosePodFailure` already inspects pods
+  per-component and sets the CPC `Available` condition
+  with `Reason=PodSchedulingFailed` and a sanitized
+  message containing only resource types (no node
+  names or topology). The HO lists CPCs in the HCP
+  namespace and checks each CPC's `Available`
+  condition. When any CPC has
+  `Reason=PodSchedulingFailed`, the condition is set
+  to `True` with a message listing affected components
+  and resource types. When no CPC reports scheduling
+  failures, the condition is set to `False`. If the
+  CPC list call fails, the condition is set to
+  `Unknown, Reason=ControlPlanePodStatusUnavailable`.
+  **Why CPC conditions instead of Pod/Event listing**:
+  The previous design listed Pods and Events from the
+  HO to detect scheduling failures. This had two
+  problems: (a) using the cached controller-runtime
+  client to list Pods and Events creates cluster-wide
+  informers for those types — caching every Pod and
+  Event on the management cluster regardless of
+  namespace filtering; (b) using the uncached
+  `APIReader` adds per-reconcile API server load that
+  scales with fleet size. The CPC-based approach
+  avoids both problems: the CPC informer is already
+  warm in the HO (used by karpenter and metrics), so
+  this adds zero new informers and zero additional
+  API calls.
+- **Zero additional memory overhead.** The CPC
+  informer is already warm and cached — reading CPC
+  conditions for scheduling pressure detection reuses
+  the existing cache. No new informers for Pods or
+  Events are created.
 - **Compact cluster behavior**: On compact self-managed
   deployments, transient scheduling pressure is more
   common. The condition reports observed state as-is.
@@ -1180,8 +1254,9 @@ The `installation.stage` field is a single enum string.
 **Truncation behavior**: Messages exceeding 256
 characters are truncated. CPC/HCP `Available` uses a
 "first failure" pattern.
-`ManagementClusterResourcePressure` groups by resource
-type with trailing groups dropped.
+`ManagementClusterResourcePressure` lists affected
+components and resource types with trailing content
+truncated.
 `ClusterVersionSucceeding` truncates CVO messages at
 a word boundary.
 
@@ -1221,18 +1296,21 @@ in source fields assert these do not appear in HC
 condition messages. ROSA/ARO security teams confirm
 before GA.
 
-**Risk: Event TTL dependency.** The scheduling
-pressure detection relies on `FailedScheduling`
-events, which have a 1-hour default TTL. If events
-have expired, the condition could flip to `False` even
-if pods are still unschedulable.
+**Risk: CPC condition staleness.** The
+`ManagementClusterResourcePressure` condition relies
+on CPC `Available` conditions set by the CPO. If the
+CPO is not running or has not reconciled recently, the
+CPC conditions may be stale.
 
-*Mitigation*: The HO supplements event inspection with
-direct pod status inspection (checking for pods in
-`Pending` state with
-`PodScheduled=False, reason=Unschedulable`). Pod
-status persists as long as the pod exists, eliminating
-the event TTL dependency for the core signal.
+*Mitigation*: CPC conditions are level-driven — the
+CPO recomputes them on every reconciliation pass. The
+CPC informer in the HO is already warm (used by
+karpenter and metrics), so the HO reads current CPC
+state with no additional API calls. If the CPO stops
+running, the CPC conditions persist in their last
+state (which correctly reflects the last known pod
+status). When the CPO resumes, conditions are
+recomputed from scratch on the next reconciliation.
 
 ### Drawbacks
 
@@ -1388,7 +1466,7 @@ Testing strategy:
    - Pod failure reason extraction (scheduling, CrashLoopBackOff, ImagePullBackOff)
    - CPC/HCP `Available` aggregation with per-component detail
    - CVO reason override and message passthrough
-   - `ManagementClusterResourcePressure`: event-based and pod-status-based detection, UID correlation, recovery clearing, Unknown fallback
+   - `ManagementClusterResourcePressure`: CPC condition-based detection, recovery clearing, Unknown fallback
    - `installation.stage` monotonic transitions, 5-second pod inspection timeout
    - Failure counter episode semantics (one increment per `Status` transition, no double-count on restart)
    - Security sanitization: node names, IPs, credentials in source fields do not leak to HC conditions
@@ -1409,8 +1487,10 @@ Testing strategy:
      self-clearing after recovery. Marked `[Serial]`.
    - CrashLoopBackOff, RouteNotAdmitted, CVO degraded
      → verifies correct diagnostic reasons
-   - Event TTL expiry fallback → pod-status-based
-     detection
+   - CPC condition propagation → verifies
+     `ManagementClusterResourcePressure` detects
+     pressure via CPC `Available` condition with
+     `Reason=PodSchedulingFailed`
    - Stage progression `Initializing` →
      `InstallationComplete`
 
@@ -1452,8 +1532,8 @@ follows the standard HyperShift release process.
 - `installation.stage` field implemented with monotonic
   forward-only stage transitions.
 - `ManagementClusterResourcePressure` condition
-  implemented (FailedScheduling detection and pod
-  PodScheduled=False supplementary check).
+  implemented (CPC `Available` condition-based
+  scheduling failure detection).
 - Metrics exposed
   (`hypershift_hostedclusters_installation_stage`).
 - Feedback collected from ROSA/ARO SRE teams.
@@ -1520,8 +1600,13 @@ window (new HO, older CPO):
 
 - HO mirrors existing (default) values from HCP to HC
   — nil/absent fields are safe.
-- `ManagementClusterResourcePressure` works regardless
-  of CPO version (HO sets it directly via `List()`).
+- `ManagementClusterResourcePressure` depends on CPO
+  setting `Reason=PodSchedulingFailed` on CPC
+  conditions. With an older CPO, the CPC conditions
+  will not have this reason, so scheduling pressure
+  will not be detected until the CPO is updated. This
+  is safe — the condition simply remains absent or
+  `False` during the skew window.
 - Diagnostic conditions and `installation` appear once
   the CPO is updated per cluster.
 - **Consumer guidance**: nil `installation` means
@@ -1537,9 +1622,11 @@ Status-only changes to existing CRDs. No webhooks,
 aggregated API servers, or finalizers.
 
 **SLI impact**: Negligible (<10MB memory, <5ms
-reconciliation overhead). HO scheduling pressure uses
-transient `List()` calls with no persistent memory. No
-API throughput impact (status subresource writes).
+reconciliation overhead). HO scheduling pressure
+detection reads CPC conditions from an already-warm
+informer cache — zero new informers, zero additional
+API calls. No API throughput impact (status subresource
+writes).
 
 **Failure modes**: Misleading messages self-correct on
 next reconciliation; `Type`/`Reason` remain correct.
@@ -1556,8 +1643,9 @@ minutes:**
      Skew). Check HCP directly.
    - `ControlPlaneProvisioning` → check CPC `Available`
      conditions for pod-level failure reasons.
-   - `WaitingForKubeconfig` → kubeconfig generation is
-     blocked; check `Available` condition reason.
+   - `WaitingForKubeconfig` → all CPCs are available but
+     `hcp.Status.KubeConfig` is not yet populated;
+     check `Available` condition reason.
    - `WaitingForOperators` → check
      `ClusterVersionSucceeding` for operator failures.
    - `InstallationComplete` → installation succeeded;
@@ -1610,7 +1698,7 @@ $ oc get hostedcluster my-cluster -o jsonpath='{.status.conditions}' \
   | jq '.[] | select(.type=="ManagementClusterResourcePressure")'
 {"type":"ManagementClusterResourcePressure","status":"True",
  "reason":"FailedScheduling",
- "message":"3 pods with FailedScheduling: 2 Insufficient cpu, 1 Insufficient memory"}
+ "message":"2 components with scheduling failures (etcd, kube-apiserver): Insufficient cpu, Insufficient memory"}
 ```
 
 Both `ManagementClusterResourcePressure=True` and
