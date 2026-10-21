@@ -360,7 +360,7 @@ OpenShift 5.1.
 
 ### Dev Preview -> Tech Preview
 
-TBD.
+TBD
 
 ### Tech Preview -> GA
 
@@ -387,6 +387,14 @@ explicit recovery. Observed workload consumers are informational; safety checks
 use PVC/PV identities, Pods, and VolumeAttachments. VMO observes customer-applied
 Namespace selectors and never writes them itself.
 
+### Monitoring and Observability
+
+I think use case of monitoring of progress of migration from Customer perspective is covered by different states recorded in `StorageWorkloadMigration` and `VolumeCopy` objects. Those objects accurately tell the user how far the data migration has progressed and where it is stuck. I am not sure adding any prometheus metrics for user monitoring will improve the situation.
+
+In general though I think we want to report metrics for clusters that have been migrated this way successfully and those that failed to migrate via telemetry. This will be useful to record and know. 
+
+We should also report how PVs were migrated and how long the overall migration took place.
+
 ## Support Procedures
 
 - Planning and target-preparation failures leave applications on source storage.
@@ -405,5 +413,4 @@ As according to Test Plan we will need access to more than one vCenter with foll
 
 1. Single zone vCenters with RWX volumes
 2. Zonal vCenters with multiple datacenters
-
 
