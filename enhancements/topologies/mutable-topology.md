@@ -61,6 +61,9 @@ A new `controlPlaneTopology` field in the infrastructure spec expresses the admi
 A new `oc adm transition topology` CLI command provides an interface for cluster administrators to initiate transitions.
 The initial implementation supports transitioning Single Node OpenShift (SNO) clusters to HA compact (3-node) on `platform: none`.
 
+An updated `oc adm transition status` CLI command displays transition information
+pulled from the infrastructure API spec prosed in this document.
+
 This enhancement supersedes the [Adaptable Topology proposal](https://github.com/openshift/enhancements/pull/1905), which proposed a new `Adaptable` topology mode requiring changes across all core operators. That proposal is withdrawn in favor of this controller-based approach.
 
 ## Motivation
@@ -114,6 +117,8 @@ The approach follows the standard OpenShift spec/status contract and mirrors the
 3. **`oc adm transition topology` CLI command** — A command that validates preconditions, patches `spec.controlPlaneTopology` on the infrastructure CR, and returns immediately.
 
 4. **`topologyTransitionStatus` field in InfrastructureStatus** — the authoritative state of a transition. See [Infrastructure API Changes](#infrastructure-api-changes) for field values and definitions.
+
+5. **`oc adm transition status` CLI command** - A command the displays information about available and active transitions.
 
 The transition controller is proposed to live in cluster-config-operator because CCO is the canonical owner of the `config.openshift.io` API group and the Infrastructure CR.
 The controller is feature-gated using the standard library-go FeatureGateAccess pattern: when the gate is disabled the controller is not registered with the manager and incurs negligible runtime overhead; a gate change triggers an operator restart via ForceExit so the new state is picked up cleanly.
@@ -224,10 +229,7 @@ Administrators should reduce non-critical workload risk accordingly. Administrat
     The infrastructure status reflects the completed transition — `spec.controlPlaneTopology` matches `status.controlPlaneTopology`, so no further action is taken.
 
 The CLI returns immediately after patching `spec.controlPlaneTopology` (step 5). Administrators can monitor transition progress through:
-- Check available transitions: `oc get infrastructure cluster -o jsonpath='{.status.topologyTransitionStatus.transitions}'`
-- Check transition completion status: `oc get infrastructure cluster -o jsonpath='{.status.topologyTransitionStatus.conditions[?(@.type=="TopologyTransitionCompleted")]}'`
-- Check evaluation status: `oc get infrastructure cluster -o jsonpath='{.status.topologyTransitionStatus.conditions[?(@.type=="TopologyTransitionsEvaluated")]}'`
-- Full status: `oc get infrastructure cluster -o yaml | yq .status.topologyTransitionStatus`
+- Check transition evaluations, available transitions, and completion status: `oc adm transition status`
 - CCO ClusterOperator conditions: `oc get clusteroperator cluster-config-operator -o yaml`
 
 ##### Failure Handling
@@ -817,9 +819,10 @@ The enum constraint and the `MutableTopology` kubebuilder update validation on `
 
 **Transition Stuck or Failed:**
 - Symptom: the `TopologyTransitionCompleted` condition shows `status: False` for an extended period after admission, or `transitions` is omitted while `TopologyTransitionsEvaluated` is `True` when SNO → HAC should be supported. An empty `transitions` list is invalid
-- Check transition completion status: `oc get infrastructure cluster -o jsonpath='{.status.topologyTransitionStatus.conditions[?(@.type=="TopologyTransitionCompleted")]}'`
-- Check available transitions: `oc get infrastructure cluster -o jsonpath='{.status.topologyTransitionStatus.transitions}'`
-- Check evaluation status: `oc get infrastructure cluster -o jsonpath='{.status.topologyTransitionStatus.conditions[?(@.type=="TopologyTransitionsEvaluated")]}'`
+- Check Transition Status: `oc adm transition status` shows:
+  - The status of an active transition
+  - The current and target topologies for control plane and infrastructure
+  - The topologies evaluations with their findings (conducted by the CCO)
 - Check ClusterOperator conditions: `oc get clusteroperator cluster-config-operator -o yaml`
 - Check: cluster-config-operator logs for transition controller errors
 - Check: CEO logs for etcd scaling operations
