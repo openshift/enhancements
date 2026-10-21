@@ -6,7 +6,7 @@ reviewers:
   - "@jsafrane"
   - "@dobsonj"
 approvers:
-  - @jcpowermac
+  - "@jcpowermac"
 api-approvers:
   - "@JoelSpeed"
 creation-date: 2026-10-21
@@ -71,25 +71,29 @@ relocation becomes feasible.
 
 Without being too verbose following is plan details about how CNS migration of volumes between vCenters will work using VMO:
 
-1. When VMO has storage migration enabled via `VmwareCloudFoundationMigration.spec.mirgrateStorage` opt-in, user *must* start the migration by setting `VmwareCloudFoundationMigration.spec.state` to `Planning` . Setting it directly to `Running` will result in condition `PlanningRequired` on VCFM (short for `VmwareCloudFoundationMigration` ) object.  See section [Why VCFM must start in Planning phase](#why-vcfm-must-start-in-planning-phase-for-storage-migration).
+1. When VMO has storage migration enabled via `VmwareCloudFoundationMigration.spec.migrateStorage` opt-in, user *must* start the migration by setting `VmwareCloudFoundationMigration.spec.state` to `Planning` . Setting it directly to `Running` will result in condition `PlanningRequired` on VCFM (short for `VmwareCloudFoundationMigration` ) object.  See section [Why VCFM must start in Planning phase](#why-vcfm-must-start-in-planning-phase-for-storage-migration).
 
 2. At this stage customer is expected to specify `failureDomainMappings`, `storageClassMapping` if required in VCFM object. See API changes below for more information. This is required so as we can accurately map source and target vcenter deployment targets.
 
 3. Once VMO is in `Planning` mode - VMO will create a inventory of vSphere-backed PVCs per namespace, resolves
    target failure domains and the volume mover, and reports blockers through a `StorageWorkloadMigration` object in each affected namespace. See API changes below for more details.
 
-4. VMO only starts executing storage migration bits, after VMO has successfully configured multi-site and workers are successfully running in target vCenter. So for storage migration to start VMO must be in `TargetCapacityReady` state. At this point to accurately distinguish between workers on different vCenters and to faciliate namespace node selectors. VMO adds following label to each node and Machinset:
-
-   ```
-   migration.openshift.io/site: <migration-uid>-source
-   migration.openshift.io/site: <migration-uid>-target
-   ```
+4. VMO only starts executing storage migration bits, after VMO has successfully configured multi-site and workers are successfully running in target vCenter. So for storage migration to start VMO must be in `TargetCapacityReady` state.
+   To distinguish workers on different vCenters and facilitate namespace node
+   selectors, VMO labels each source Node and MachineSet with
+   `migration.openshift.io/site: <migration-uid>-source`, and each target Node
+   and MachineSet with `migration.openshift.io/site: <migration-uid>-target`.
 
 5. After the customer sets the migration to `Running`, VMO waits for ready, schedulable target capacity, prepares target volumes, and performs optional precopy. Each namespace then reaches `AwaitingQuiesce` and this state is recorded in that namespaces' `StorageWorkloadMigration` object. 
 
 6. The customer stops all consumers, suspends mechanisms that could recreate writers, and sets `spec.actions.finalCopyApproved: true` in `StorageWorkloadMigration` object. VMO independently verifies quiescence and attachments before the authoritative final copy.
 
-7. VMO copies every PVC in the namespace, releases transfer Pods and attachments, and rebinds the original PVC names to target PVs. At this point all the data from source vCenter should have been copied to target vCenter. VMO **does not** automatically resume customer workloads, because we do not *know* if scheduling constraints of existing workloads/operators match the new vCenter's failure-domain. That is why - VMO simply sets `StorageWorkloadMigration` object in `AwaitingPlacementUpdate` state.
+7. VMO copies every inventoried, supported vSphere-backed PVC in the namespace, releases transfer
+   Pods and attachments, and rebinds the original PVC names to target PVs. At this point all the
+   data from source vCenter should have been copied to target vCenter. VMO **does not**
+   automatically resume customer workloads, because we do not *know* if scheduling constraints of
+   existing workloads/operators match the new vCenter's failure-domain. That is why - VMO simply
+   sets `StorageWorkloadMigration` object in `AwaitingPlacementUpdate` state.
 
 8. At `AwaitingPlacementUpdate`, the customer adds the published target-site constraint to the Namespace's `openshift.io/node-selector`, preserving unrelated constraints. For example:
 
@@ -104,29 +108,40 @@ Without being too verbose following is plan details about how CNS migration of v
 
 9. VMO validates placement before reporting `ReadyForResume` in `StorageWorkloadMigration` object, which means customer can at this point resume the workloads. 
    
-10. The customer resumes workloads through their authoritative configuration. VMO checks target placement, volume handles, attachments, and readiness and set `StorageWorkloadMigration` to `WorkloadMigrationComplete`. At this point - VMO still needs to remove temporary namespace selectors which were added to support CNS volume movement, because we do not want to keep them in long term. But before we do that we must ask customer to validate everything and once customer sets `validationApproved`  in `StorageWorkloadMigration` object, VMO enters `StorageWorkloadMigration` object to `AwaitingPlacementCleanup`.
+10. The customer resumes workloads through their authoritative configuration. VMO checks target
+    placement, volume handles, attachments, and readiness and set `StorageWorkloadMigration` to
+    `WorkloadMigrationComplete`. At this point - VMO still needs to remove temporary namespace selectors
+    which were added to support CNS volume movement, because we do not want to keep them in long
+    term. But before we do that we must ask customer to validate everything and once customer sets
+    `validationApproved`  in `StorageWorkloadMigration` object, VMO enters
+    `StorageWorkloadMigration` object to `AwaitingPlacementCleanup`.
 
-11. VMO will not automcatically remove namespace selector that was added to customers namespaces and once `StorageWorkloadMigration` enters `AwaitingPlacementCleanup`  - customers are expected to remove those selectors from their namespaces. VMO will remove any such selector from Openshift system namespaces automatically. Once all such dependncy on labels added in step#4 is removed - VMO will automatically remove the label from namespaces and `Succeeded` phase in `StorageWorkloadMigration` object.
+11. VMO will not automatically remove namespace selector that was added to customers namespaces and
+    once `StorageWorkloadMigration` enters `AwaitingPlacementCleanup`  - customers are expected to
+    remove those selectors from their namespaces. VMO will remove any such selector from Openshift
+    system namespaces automatically. Once all such dependencies on labels added in step#4 are
+    removed - VMO will automatically remove the label from namespaces and `Succeeded` phase in
+    `StorageWorkloadMigration` object.
 
 12. Removal of data from source vCenter is optional at this stage and will be targeted in next phase.
 
 
 We execute these steps for every namespace that has pods/pvcs that are using vSphere CSI volumes.
 
-#### Why VCFM must start in `Planning` phase for storage migration.
+#### Why VCFM must start in `Planning` phase for storage migration
 
 The reason for doing this is - we want users to be accurately aware of what they are getting into. We do not want to do a lot of upfront work only to find migration is blocked for one or more reasons. We want to assess this even before new workers are created and 2nd vCenter is configured. 
 
-Adding 2nd vCenter is a configuration which only had one failure-domain before could disrupt existing workloads and pod scheduling may break (because of PV's nodeAffinity) and hence it is important to validate all of storage migration before starting any work for infrastructure reconfigration.
+Adding 2nd vCenter is a configuration which only had one failure-domain before could disrupt existing workloads and pod scheduling may break (because of PV's nodeAffinity) and hence it is important to validate all of storage migration before starting any work for infrastructure reconfiguration.
 
 
 ### API Extensions
 
-#### VmwareCloudFoundationMigration changes:
+#### VmwareCloudFoundationMigration changes
 
 ```yaml
 spec:
-  mirgrateStorage: <true|false>  --> opt-in for enabling storage migration
+  migrateStorage: <true|false>  # opt-in for enabling storage migration
   state: Planning
   storage:
     # Volume mover used to copy data (see "Volume movers"). Defaults to Auto.
@@ -134,8 +149,8 @@ spec:
     dataMigrationStrategy: <Auto|Rsync>
     # optional
     storageClassMapping: 
-      - thin-csi
-        thin-csi-2
+      - source: thin-csi
+        target: thin-csi-2
     failureDomainMappings:
       - source: source-a
         target: target-a
@@ -150,8 +165,8 @@ spec:
 * A customer may override the mapped target failure domain for an individual source PVC by adding below annotation:
 
   ```yaml
-   metadata:
-   annotations:
+  metadata:
+    annotations:
       migration.openshift.io/target-failure-domain: target-b
   ```
 
@@ -163,7 +178,7 @@ During Planning, VMO creates one `StorageWorkloadMigration` in every namespace t
 
 Example:
 
-```go
+```yaml
 apiVersion: migration.openshift.io/v1alpha1
 kind: StorageWorkloadMigration
 metadata:
@@ -199,10 +214,9 @@ Customers write only `spec.actions`. VMO writes only `status`. VMO must never ad
 | `AwaitingPlacementUpdate` | VMO waits for the customer to add the published target-site selector to the Namespace. |
 | `ReadyForResume` | Storage and placement are ready and VMO asks the customer to resume the workloads. |
 | `Validating` | VMO validates the resumed workloads while the customer performs application validation. |
-| `WorkloadComplete` | Storage cutover and workload validation are complete; source compute retirement may proceed. |
+| `WorkloadMigrationComplete` | Storage cutover and workload validation are complete; source compute retirement may proceed. |
 | `AwaitingPlacementCleanup` | Source workers are gone and VMO waits for the customer to remove the temporary Namespace selector. |
 | `CleaningPlacement` | VMO verifies the Namespace change and removes migration labels from Nodes and MachineSets. |
-| `CleaningSource` | VMO deletes retained source PVs and source-vCenter FCDs and verifies their removal. |
 | `Succeeded` | Workload migration and all required cleanup are complete. |
 | `Failed` | An unrecoverable error requires an explicit recovery action. Retriable waits remain in their current phase with conditions describing the problem. |
 
@@ -210,7 +224,7 @@ Customers write only `spec.actions`. VMO writes only `status`. VMO must never ad
 
 Planning inventory records object identity, not names alone:
 
-```go
+```yaml
 status:
   volumes:
     - sourcePVC: {name: data-database-0, uid: <pvc-uid>}
@@ -228,7 +242,11 @@ status:
 
 VMO revalidates this inventory when the migration changes to `Running` and again before each disruptive transition. A new or replaced PVC or PV invalidates the affected plan and blocks progress until Planning is repeated.
 
-`status.consumers` is informational. It lists the workload controllers observed consuming the namespace's PVCs, so the customer knows what to stop and resume, and VMO knows which workloads to check for readiness during `Validating`. A changed or replaced consumer does not block progress; safety relies on PVC and PV identities and on the Pod and VolumeAttachment checks. Approval fields never suppress identity, placement, attachment, or writer checks.
+`status.consumers` is informational. It lists the workload controllers observed consuming the
+namespace's PVCs, so the customer knows what to stop and resume, and VMO knows which workloads to
+check for readiness during `Validating`. A changed or replaced consumer does not block progress;
+safety relies on PVC and PV identities and on the Pod and VolumeAttachment checks. Approval fields
+never suppress identity, placement, attachment, or writer checks.
 
 
 #### VolumeCopy
@@ -272,7 +290,7 @@ TBD.
 #### Using VolumeMover to support pluggable data moving strategy
 
 One of the key goals of this KEP is make actual mechanism of copying volumes pluggable. At some point if `CnsRelocateVolume` supports moving
-volumes between vCenters, we would like to replace current rsync based mechanism from `pvc-transfer` library with something like `CnsRelocateVolume`.
+volumes between vCenters, we would like to replace current rsync-based mechanism from `pvc-transfer` library with something like `CnsRelocateVolume`.
 
 To this end both Rsync and `CnsRelocateVolume` will use `VolumeMover` interface to actually move the data.
 
@@ -340,8 +358,8 @@ I think we need to test following scenarios at very minimum:
 1. Single zone OCP cluster migration from one vCenter to another.
 2. Zonal OCP cluster migration with more than one datacenter ---> Zonal target vCenter with more than one datacenter
 3. Single zone OCP cluster migration from one vCenter to another with RWX volumes.
-4. Single zone ocp cluster with intree PVs --> Single zone targer vCenter
-5. Single zone OCP cluster with datastore URL storage classes --> Single zone targer vCenter
+4. Single zone ocp cluster with in-tree PVs --> Single zone target vCenter
+5. Single zone OCP cluster with datastore URL storage classes --> Single zone target vCenter
 
 
 We may have to test additional configurations such as:
@@ -404,9 +422,7 @@ We should also report how PVs were migrated and how long the overall migration t
   preserve recorded source and target identities. Pausing preserves checkpoints,
   quiescence, and placement fences. A blocked namespace prevents source cleanup.
 - Before target writes, rollback may restore source bindings and placement,
-  except for source-consuming movers. After target writes, metadata-only rollback
-  is forbidden: workloads must be frozen again and data reverse-synchronized, or
-  recovered through an application-specific manual procedure.
+  except for source-consuming movers(Not implemented currently). After a workloads however writes to the target PVC such rollback will not be possible, so users must be informed about that.
 
 ## Infrastructure Needed [optional]
 
