@@ -260,23 +260,19 @@ should not be **permanent**.
 
 ##### MicroShift
 
-MicroShift currently does not support the `APIServer` OpenShift API.
-Logic will need to be added so that MicroShift can support this feature.
-`.spec` field will need to be brought over. These changes
-would need to be made in [MicroShift's API Server logic](https://github.com/openshift/microshift/blob/main/pkg/config/apiserver.go).
+MicroShift already sets PSA level to `restricted` by default via its own
+[Kube API Server config](https://github.com/openshift/microshift/blob/a3b74f7954e26b90aa099fefe9800879ce6abf8d/assets/controllers/kube-apiserver/defaultconfig.yaml#L12-L31). They have their own `PodSecurity` feature gate
+which already configures global PSA. There is no need or benefit for MicroShift
+to use the proposed API to configure PSA - MicroShift already has the mechanism
+to do this. 
 
-MicroShift sets PSA level to `restricted` by default via its own
-[Kube API Server config](https://github.com/openshift/microshift/blob/a3b74f7954e26b90aa099fefe9800879ce6abf8d/assets/controllers/kube-apiserver/defaultconfig.yaml#L12-L31). This will need to change to `privileged`
-by default to ensure the feature works the same on MicroShift as on any
-other platform. This does not mean engineers won't develop with `restricted`
-by default; it simply means any workloads outside of OCP do not need to be
-evaluated at `restricted` level unless the user decides to do so by configuring
-the API. 
+MicroShift can be excluded from using the API - they have [limited OpenShift API support by design](https://github.com/openshift/microshift/blob/c86f3c8a311377710506c4af252b6398033f4bfc/docs/contributor/enabled_apis.md?plain=1#L1).
+The platform has already migrated to `restricted` by default PSA and has the ability
+to configure PSA already. 
 
-Configuring this feature would also look different; `config.yaml` would need
-to be edited - there is no `oc` command to do this as OpenShift API has
-limited support here. Then, MicroShift would need to be restarted by the admin
-for changes to take effect.
+However, MicroShift specific namespaces that do not have PSA labels should
+still be labelled as part of the feature work. This is because retiring the 
+PSA label syncer will no provide the labels "for free". 
 
 #### OpenShift Kubernetes Engine
 
