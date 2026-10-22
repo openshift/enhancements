@@ -110,7 +110,7 @@ Without being too verbose following is plan details about how CNS migration of v
    
 10. The customer resumes workloads through their authoritative configuration. VMO checks target
     placement, volume handles, attachments, and readiness and set `StorageWorkloadMigration` to
-    `WorkloadMigrationComplete`. At this point - VMO still needs to remove temporary namespace selectors
+    `Validating`. At this point - VMO still needs to remove temporary namespace selectors
     which were added to support CNS volume movement, because we do not want to keep them in long
     term. But before we do that we must ask customer to validate everything and once customer sets
     `validationApproved`  in `StorageWorkloadMigration` object, VMO enters
@@ -191,7 +191,6 @@ spec:
   actions:
     finalCopyApproved: false
     validationApproved: false
-    sourceCleanupApproved: false
 status:
   phase: Planning
   volumes: []
