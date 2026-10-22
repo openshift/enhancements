@@ -11,7 +11,7 @@ approvers:
 api-approvers:
 - None
 creation-date: 2025-04-22
-last-updated: 2026-10-12
+last-updated: 2026-10-22
 tracking-link:
 - https://issues.redhat.com/browse/SPLAT-2133
 - https://issues.redhat.com/browse/OCPSTRAT-2046
@@ -39,8 +39,9 @@ additional disks beyond the primary OS disk.
 This feature allows users to define data disks in the install-config.yaml for the control plane and
 compute machine pools, with each disk being created and attached during the initial cluster
 installation. Partitioning, formatting and mounting those disks is the other half of the same
-feature. It is specified in the companion enhancement [multi-disk-setup](./multi-disk-setup.md),
-and both halves share one feature gate.
+feature. The disk setup implementation here in Azure is aligned with the mechanisms described in
+the companion enhancement [multi-disk-setup](./multi-disk-setup.md); however, it ships within the
+same `AzureMultiDisk` gate, since on Azure disk provisioning and setup need to ship together.
 
 ## Motivation
 
@@ -66,9 +67,7 @@ storage and container runtime.
   managed disks at install time, which can then be used for etcd or user-defined storage such as
   container images.
 - Allow those disks to be partitioned, formatted and mounted at install time. On Azure this is a
-  required part of the same feature. It is specified in the companion enhancement
-  [multi-disk-setup](./multi-disk-setup.md), while this enhancement specifies the provisioning of
-  the disks it acts on.
+  required part of the same feature.
 
 ### Non-Goals
 
@@ -76,12 +75,6 @@ storage and container runtime.
 - Data disks in `platform.azure.defaultMachinePlatform`. See
   [Alternatives](#alternatives-not-implemented).
 - Azure Stack Hub. Data disks are explicitly rejected on `StackCloud`.
-- Confidential-VM security profiles on data disks. `managedDisk.securityProfile` is rejected rather
-  than silently ignored, because the Machine API data disk type has no field to carry it. Adding
-  real support requires changes outside the installer and is being investigated separately in
-  [SPLAT-2897][splat-2897].
-
-[splat-2897]: https://redhat.atlassian.net/browse/SPLAT-2897
 
 ## Proposal
 
@@ -95,21 +88,28 @@ storage and container runtime.
 3. For each data disk, they specify:
    - `lun`: Logical Unit Number (0-63) - Required
    - `diskSizeGB`: Size of the disk in GB - Required
-   - `nameSuffix`: Optional suffix for the disk name
-   - `cachingType`: Optional caching strategy (None, ReadOnly, ReadWrite)
+   - `nameSuffix`: Suffix of the disk name, `<machine-name>_<nameSuffix>` - Required
+   - `cachingType`: Optional caching strategy (None, ReadOnly, ReadWrite), defaulting to None
    - `managedDisk`: Optional managed disk configuration including storage account type and
      encryption settings
-4. The cluster administrator runs `openshift-install create cluster`
-5. During cluster provisioning, the installer:
-   - Validates the data disk configuration
+4. To have a disk partitioned, formatted and mounted, they add a `diskSetup` entry for it on the
+   same machine pool, specifying:
+   - `type`: The disk's purpose - `etcd`, `swap` or `user-defined`
+   - `platformDiskID`: The data disk the entry acts on, which must be the `nameSuffix` of the
+     `dataDisks` entry at the same index
+   - `mountPath`: Where to mount the filesystem (`user-defined` only; an `etcd` disk always
+     mounts at `/var/lib/etcd`)
+5. The cluster administrator runs `openshift-install create cluster`
+6. During cluster provisioning, the installer:
+   - Validates the data disk and disk setup configuration
    - Creates `AzureMachine` (CAPI) resources for the control plane and `Machine`/`MachineSet` (MAPI)
      resources for compute, each carrying the specified data disks
+   - Generates a MachineConfig for every `diskSetup` entry, which the Machine Config Operator
+     applies as the nodes boot
    - Azure provisions the VMs with all data disks attached
-6. The data disks are available in the VM but raw: not partitioned, formatted or mounted. Setting
-   them up is the second half of the feature, specified in
-   [multi-disk-setup](./multi-disk-setup.md): the administrator adds `diskSetup` entries and the
-   installer generates the MachineConfigs that do it. A disk with no `diskSetup` entry stays raw,
-   and can still be set up with a user-supplied MachineConfig.
+7. The VMs come up with the data disks attached and, for every disk with a `diskSetup` entry,
+   partitioned, formatted and mounted as described in **Disk Setup** below. A disk with no
+   `diskSetup` entry is attached raw, and can still be set up with a user-supplied MachineConfig.
 
 #### Example Configuration
 
@@ -137,6 +137,10 @@ controlPlane:
         cachingType: ReadOnly
         managedDisk:
           storageAccountType: Premium_LRS
+  diskSetup:
+  - type: etcd
+    etcd:
+      platformDiskID: etcd  # Matches the nameSuffix above
 compute:
 - name: worker
   replicas: 3
@@ -152,11 +156,107 @@ compute:
         nameSuffix: logs
         diskSizeGB: 64
         cachingType: None
+  diskSetup:
+  - type: user-defined
+    userDefined:
+      platformDiskID: containers  # Matches the nameSuffix at the same index
+      mountPath: /var/lib/containers
 ```
 
 The resulting Azure managed disks are named `<machine-name>_<nameSuffix>`, for example
 `mycluster-abcde-master-0_etcd`, and are addressable inside the guest at
-`/dev/disk/azure/scsi1/lun<lun>`.
+`/dev/disk/azure/data/by-lun/<lun>`. That link is created by the `azure-vm-utils` udev rules for
+data disks on both the SCSI and the NVMe controller, so it exists on NVMe-only instance types too,
+and it is what the generated disk setup MachineConfigs address the disk through.
+
+In this example the `etcd` disk is partitioned, formatted and mounted at `/var/lib/etcd` on the
+control plane nodes and the `containers` disk at `/var/lib/containers` on the compute nodes, while
+the `logs` disk has no `diskSetup` entry and stays raw.
+
+#### Disk Setup
+
+`diskSetup` entries live on the machine pool, next to the `dataDisks` they act on: `diskSetup[i]`
+configures `dataDisks[i]`, and the entry's `platformDiskID` must equal that disk's `nameSuffix`
+(see **Validation Rules**). For each entry the installer generates one MachineConfig, applied
+when the nodes first boot. The entry's type is one of `etcd`, `swap` or `user-defined`. Its
+partition label names the MachineConfig, the partition and the `/dev/disk/by-partlabel/<label>`
+device: `etcd` and `swap` disks are labelled after their type, a `user-defined` disk after its
+`platformDiskID` with every non-alphanumeric character stripped. The mount unit is named after
+the systemd-escaped form of the mount path, so `/var/lib/etcd` becomes `var-lib-etcd.mount`. The
+filesystem is XFS, mounted with the `defaults` and `prjquota` options.
+
+- The device the MachineConfig partitions is the data disk's by-LUN udev link,
+  `/dev/disk/azure/data/by-lun/<lun>`, which exists on both the SCSI and the NVMe controller.
+- The `platformDiskID` is the paired disk's `nameSuffix`, so it inherits the `nameSuffix` bounds:
+  at most 15 characters and only the characters Azure admits in a disk name. A `user-defined`
+  entry's ID is additionally capped at 12 characters, because the ID becomes the GPT partition
+  label and part of the MachineConfig name, so a `user-defined` disk's `nameSuffix` is
+  effectively capped at 12.
+- `type: etcd` is permitted only on the control plane and mounts at `/var/lib/etcd`; a `swap`
+  entry is permitted only on compute pools. At most one `etcd` and one `swap` entry per pool, and
+  any number of `user-defined` entries.
+- A `user-defined` entry's `mountPath` must be an absolute, normalized path other than `/`,
+  containing only alphanumerics, `/`, `.`, `_` and `-`, and the systemd mount unit name derived
+  from it must stay within the 255 characters systemd loads.
+- Two entries in one pool must not mount at the same path: they would ship conflicting mount
+  units on different devices. The `etcd` entry's implicit `/var/lib/etcd` participates, so a
+  `user-defined` entry cannot claim it.
+
+For the `etcd` entry of the example above, the generated MachineConfig is:
+
+```yaml
+apiVersion: machineconfiguration.openshift.io/v1
+kind: MachineConfig
+metadata:
+  labels:
+    machineconfiguration.openshift.io/role: master
+  name: 01-disk-setup-etcd-master
+spec:
+  config:
+    ignition:
+      version: 3.2.0
+    storage:
+      disks:
+      - device: /dev/disk/azure/data/by-lun/0
+        partitions:
+        - label: etcd
+          sizeMiB: 0
+          startMiB: 0
+        wipeTable: true
+      filesystems:
+      - device: /dev/disk/by-partlabel/etcd
+        format: xfs
+        label: etcd
+        mountOptions:
+        - defaults
+        - prjquota
+        path: /var/lib/etcd
+        wipeFilesystem: true
+    systemd:
+      units:
+      - contents: |
+
+          [Unit]
+          Requires=systemd-fsck@dev-disk-by\x2dpartlabel-etcd.service
+          After=systemd-fsck@dev-disk-by\x2dpartlabel-etcd.service
+
+          [Mount]
+          Where=/var/lib/etcd
+          What=/dev/disk/by-partlabel/etcd
+          Type=xfs
+          Options=defaults,prjquota
+
+          [Install]
+          RequiredBy=local-fs.target
+        enabled: true
+        name: var-lib-etcd.mount
+```
+
+The partition spans the whole disk (`sizeMiB: 0`), and the configuration wipes the partition
+table of the device and any filesystem already on it, so it must only ever address a freshly
+provisioned data disk. A `swap` entry differs in the partition type (the GPT swap type GUID),
+the filesystem format and the unit (`dev-disk-by\x2dpartlabel-swap.swap`, wanted by
+`swap.target`), and has no mount path.
 
 
 
@@ -181,7 +281,9 @@ The upstream `capz.DataDisk` type is reused as-is.
 type DataDisk struct {
     // NameSuffix is the suffix to be appended to the machine name to generate
     // the disk name. Each disk name will be in format <machineName>_<nameSuffix>.
-    // The installer requires it to be unique within a pool.
+    // The installer requires it, bounds it to 15 characters so the disk name fits
+    // Azure's limits, restricts it to the characters Azure admits in a disk name,
+    // and requires it to be unique within a pool.
     NameSuffix string `json:"nameSuffix"`
 
     // DiskSizeGB is the size in GB to assign to the data disk.
@@ -198,7 +300,8 @@ type DataDisk struct {
 
     // CachingType specifies the caching requirements.
     // Possible values include: None, ReadOnly, ReadWrite. The installer rejects any other
-    // value, and anything but None for an UltraSSD_LRS disk.
+    // value, and anything but None for an UltraSSD_LRS disk. An omitted value is
+    // defaulted to None.
     // +optional
     CachingType string `json:"cachingType,omitempty"`
 }
@@ -238,20 +341,27 @@ so it is spelled out explicitly.
      below.
 
 3. **ManagedDisk.SecurityProfile**:
-   - Rejected on both control plane and compute pools. `capz.ManagedDiskParameters` carries the
-     field, but the Machine API `DataDiskManagedDiskParameters` type has no `securityProfile`
-     member at all, so the installer rejects it rather than accepting and discarding it.
+   - Rejected on both control plane and compute pools. The field is carried by the CAPZ type the
+     install-config embeds, but the Machine API type the installer converts compute disks to has
+     no `securityProfile` member, so the setting would be silently dropped there, and Azure does
+     not support confidential disk encryption on data disks in the first place. The installer
+     rejects it rather than accepting and discarding it.
 
 4. **Feature Gate**:
-   - `FeatureGateAzureMultiDisk` must be enabled when `dataDisks` are configured
+   - `FeatureGateAzureMultiDisk` must be enabled when `dataDisks` and `diskSetup` are configured
+     in Azure
    - Applies to `defaultMachinePlatform`, `controlPlane` and `compute`
-   - The same gate protects `diskSetup` on Azure, see [multi-disk-setup](./multi-disk-setup.md)
 
 5. **NameSuffix**:
-   - Must be unique within the `dataDisks` array for that pool. It is appended to the machine name
-     to form the managed disk name, and it is what `diskSetup` is matched against. Two disks
-     sharing one would otherwise only be rejected during provisioning, by the CAPZ and Machine
-     API webhooks.
+   - Required, and must be unique within the `dataDisks` array for that pool. It is appended to
+     the machine name to form the managed disk name, and it is what `diskSetup` is matched
+     against. Two disks sharing one would otherwise only be rejected during provisioning, by the
+     CAPZ and Machine API webhooks.
+   - At most 15 characters: Azure caps disk names at 80 characters and VM names at 64, and the
+     disk name is `<machineName>_<nameSuffix>`. The bound also covers the `platformDiskID` of a
+     paired `diskSetup` entry, which must equal the `nameSuffix`.
+   - Restricted to the characters Azure admits in a disk name: alphanumerics, `_`, `.` and `-`,
+     ending with an alphanumeric or `_`.
 
 6. **Lun (Logical Unit Number)**:
    - Must not be nil
@@ -260,16 +370,19 @@ so it is spelled out explicitly.
 
 7. **DiskSizeGB**:
    - Must be greater than 0
+   - On the control plane, must be within the 4-32767 GB that the CAPZ webhook admits, since
+     CAPZ creates the control plane machines at install time
 
 8. **CachingType**:
-   - When set, must be one of `None`, `ReadOnly` or `ReadWrite`. Left unset, Azure picks the
-     default for the SKU.
+   - When set, must be one of `None`, `ReadOnly` or `ReadWrite`
+   - Left unset, it is defaulted to `None`. See **Disk Provisioning** below for why
 
 9. **UltraSSD_LRS**:
    - `ultraSSDCapability` must be `Enabled`. The effective value is read from the pool, falling
      back to `platform.azure.defaultMachinePlatform` when the pool leaves it unset, so a value set
      on the pool wins over the default.
-   - `cachingType` must be `None` or unset, since Azure cannot cache an `UltraSSD_LRS` disk.
+   - `cachingType` must be `None` or unset, since Azure cannot cache an `UltraSSD_LRS` disk. An
+     unset value is defaulted to `None`, so only an explicitly set other value can conflict.
 
 **Enforced whenever `diskSetup` is non-empty:**
 
@@ -277,7 +390,11 @@ so it is spelled out explicitly.
     - `len(diskSetup)` must not exceed `len(dataDisks)`, so `diskSetup` on a pool with no
       `dataDisks` is rejected
     - `diskSetup[i]`'s `platformDiskID` must equal `dataDisks[i]`'s `nameSuffix`. The match is
-      **positional**, not by name -- see [multi-disk-setup](./multi-disk-setup.md).
+      **positional**
+
+11. **Pool platform stanza**:
+    - A pool with `diskSetup` entries must carry its own `platform.azure` stanza holding the
+      `dataDisks` they pair with
 
 #### Implementation Details
 
@@ -290,54 +407,9 @@ There are two consumers of `dataDisks`, and both are exercised by a normal insta
   that the cluster reconciles after bootstrap, including all compute machines. These require a
   conversion to `machineapi.DataDisk`.
 
-The MAPI conversion:
-
-```go
-dataDisks := make([]machineapi.DataDisk, 0, len(mpool.DataDisks))
-
-for _, disk := range mpool.DataDisks {
-    dataDisk := machineapi.DataDisk{
-        NameSuffix:     disk.NameSuffix,
-        DiskSizeGB:     disk.DiskSizeGB,
-        CachingType:    machineapi.CachingTypeOption(disk.CachingType),
-        DeletionPolicy: machineapi.DiskDeletionPolicyTypeDelete,
-    }
-
-    if disk.Lun != nil {
-        dataDisk.Lun = *disk.Lun
-    }
-
-    if disk.ManagedDisk != nil {
-        dataDisk.ManagedDisk = machineapi.DataDiskManagedDiskParameters{
-            StorageAccountType: machineapi.StorageAccountType(disk.ManagedDisk.StorageAccountType),
-        }
-
-        if disk.ManagedDisk.DiskEncryptionSet != nil {
-            dataDisk.ManagedDisk.DiskEncryptionSet = (*machineapi.DiskEncryptionSetParameters)(disk.ManagedDisk.DiskEncryptionSet)
-        }
-    }
-
-    dataDisks = append(dataDisks, dataDisk)
-}
-```
-
-The dataDisks are then applied to the CAPI AzureMachine specification:
-
-```go
-azureMachine := &capz.AzureMachine{
-    ObjectMeta: metav1.ObjectMeta{
-        Name: fmt.Sprintf("%s-%s-%d", clusterID, in.Pool.Name, idx),
-        Labels: map[string]string{
-            "cluster.x-k8s.io/control-plane": "",
-            "cluster.x-k8s.io/cluster-name":  clusterID,
-        },
-    },
-    Spec: capz.AzureMachineSpec{
-        // ... other fields ...
-        DataDisks: mpool.DataDisks,
-    },
-}
-```
+The MAPI conversion maps each entry to a `machineapi.DataDisk` with the same `nameSuffix`,
+`diskSizeGB`, `lun` and `cachingType`, and the `managedDisk.storageAccountType` and
+`diskEncryptionSet`, whose ID must be non-empty.
 
 ### Topology Considerations
 
@@ -371,81 +443,49 @@ The implementation spans several key installer components:
 - `pkg/types/azure/machinepool.go` - Adds the `DataDisks` field to the Azure MachinePool type
 - `pkg/types/azure/validation/machinepool.go` - Implements validation logic for data disk configuration
 - `pkg/types/azure/validation/machinepool_test.go` - Unit tests for validation
+- `pkg/types/azure/defaults/machinepool.go` - Defaults an omitted data disk `cachingType` to `None`
 - `pkg/asset/machines/azure/machines.go` - Converts install-config data disks to Machine API format
 - `pkg/asset/machines/azure/azuremachines.go` - Applies data disks to CAPI AzureMachine specs
+- `pkg/asset/machines/util.go` - Builds the disk setup MachineConfig for a data disk, addressing
+  it through its by-LUN udev link
 - `pkg/types/azure/validation/featuregates.go` - Implements feature gate checking
 - `pkg/types/validation/machinepools.go` - Cross-platform validation hooks
 
 **Feature Gate:**
 
-The `FeatureGateAzureMultiDisk` feature gate controls access to this functionality. The installer will validate that this feature gate is enabled when dataDisks are configured in the install-config.yaml.
-
-On Azure the same gate also protects the `diskSetup` field described in
-[multi-disk-setup](./multi-disk-setup.md). Promoting it therefore delivers data disks together
-with their setup, without depending on the `MultiDiskSetup` gate that protects `diskSetup` on the
-other platforms. The reason is that on Azure, partitioning, formatting and mounting a data disk is
-treated as a required part of the same feature, so provisioning the disk and setting it up are
-wrapped in the same feature gate.
+The `FeatureGateAzureMultiDisk` feature gate controls access to this functionality. The installer will validate that this feature gate is enabled when `dataDisks` or `diskSetup` are configured in the install-config.yaml.
 
 **Disk Provisioning:**
 
-- Data disks are created and attached during VM provisioning by Azure
-- Disks are created as managed disks in the same resource group as the cluster
-- The MAPI conversion always sets `DeletionPolicy: Delete`, so a data disk is removed when its
-  `Machine` is deleted. `capz.DataDisk` has no equivalent field; the CAPI path only provisions the
-  control plane during bootstrap, and those machines are represented by MAPI `Machine` objects and
-  a `ControlPlaneMachineSet` from then on
-- Provisioning only attaches raw disks. Partitioning, formatting and mounting them is done by
-  `diskSetup`, see [multi-disk-setup](./multi-disk-setup.md), and a disk with no `diskSetup` entry
-  is left raw
+- An omitted `cachingType` is defaulted to `None`. `None` is the only caching mode valid for every
+  SKU and matches what the Machine API path effectively applies by default
 
 **Storage Account Types:**
 
-`managedDisk.storageAccountType` is checked against the managed disk SKUs defined by the Azure
-compute SDK, so a typo is caught at install-config validation time rather than when Azure creates
-the machine. The list comes from the SDK and not from the Machine API enum, which is not enforced
-because `providerSpec` is preserved as unstructured, and which omits `StandardSSD_LRS`, already in
-use. A recognized value is still not guaranteed to be usable: Azure decides whether the SKU is
-offered for the region and instance type. At the time of writing the accepted values are:
-
-- `Standard_LRS` - Standard locally redundant storage
-- `Premium_LRS` - Premium locally redundant storage (SSD)
-- `StandardSSD_LRS` - Standard SSD locally redundant storage
-- `UltraSSD_LRS` - Ultra SSD locally redundant storage
-- `Premium_ZRS` - Premium zone redundant storage
-- `StandardSSD_ZRS` - Standard SSD zone redundant storage
-- `PremiumV2_LRS` - Premium SSD v2 locally redundant storage
+`managedDisk.storageAccountType` is checked at install time against the managed disk SKUs defined
+by the Azure compute SDK.
 
 `UltraSSD_LRS` additionally requires `ultraSSDCapability: Enabled`, which is what enables the
 capability on the VM itself. That field is independent of `dataDisks` and defaults to `Disabled`.
 
-**Constraints:**
-
-- LUN values and `nameSuffix` values must each be unique within a pool's `dataDisks`
-  configuration. Both are enforced whenever `dataDisks` is set.
-- Maximum of 64 data disks per VM (LUN 0-63). The practical limit is lower and depends on the VM
-  size; Azure rejects the VM creation if the instance type does not support the requested count.
-- `managedDisk.securityProfile` is rejected on every pool, not just compute. Supporting it is
-  tracked separately in [SPLAT-2897][splat-2897].
-- Data disks cannot be configured in `defaultMachinePlatform`.
-- Data disks are not supported on Azure Stack Hub.
-- The same `dataDisks` list applies to every machine in a pool. Per-machine disk layouts are not
-  expressible.
-
-
 ### Risks and Mitigations
 
-This feature of allowing administrators to add new disks does not really introduce any risks.  The disks will be created and added to the VMs during the provisioning.  The disks are left raw unless `diskSetup` is configured, and the risks of setting them up are covered in [multi-disk-setup](./multi-disk-setup.md).
+This feature allows administrators to add new disks at install time. The risks lie in
+misconfigurations, which are largely prevented by the validations described in this enhancement
+proposal.
 
 ### Drawbacks
 
 **Install-time Only Configuration:**
 
-Data disks can only be configured during cluster installation. Existing machines cannot have data disks added post-installation. Users who later need additional storage must create new MachineSets with the desired disk configuration and migrate workloads, or use alternative storage solutions like PersistentVolumes.
+Data disks can only be configured during cluster installation. Existing machines cannot have data disks added post-installation.
 
 **Disk Setup Is Specified Separately:**
 
-This enhancement only provisions raw, unformatted disks. Partitioning, formatting and mounting them is done through `diskSetup`, specified in [multi-disk-setup](./multi-disk-setup.md), so users have to understand and configure the two together. A disk with no `diskSetup` entry stays raw and needs a MachineConfig or another mechanism to be used.
+Provisioning a disk and setting it up are configured as two separate arrays, `dataDisks` and
+`diskSetup`, that pair positionally, so users have to understand and configure the two together.
+A disk with no `diskSetup` entry stays raw and needs a MachineConfig or another mechanism to be
+used.
 
 **Feature Gate Requirement:**
 
@@ -466,6 +506,9 @@ None.
 - `dataDisks` on `AzureStackCloud` is rejected
 - Nil LUN, LUN outside 0-63, duplicate LUNs, and `diskSizeGB <= 0` are each rejected, with or
   without `diskSetup`
+- A control plane `diskSizeGB` outside the 4-32767 GB range is rejected
+- A `nameSuffix` that is empty, longer than 15 characters, or contains characters Azure does not
+  admit in a disk name is rejected
 - A duplicate `nameSuffix` is rejected
 - An unsupported `cachingType` is rejected, and caching is allowed on a non-`UltraSSD_LRS` disk
 - An `UltraSSD_LRS` disk is rejected without `ultraSSDCapability` set, or with it `Disabled`, and
@@ -476,11 +519,29 @@ None.
 - With `diskSetup` present: `len(diskSetup) > len(dataDisks)` is rejected, including when there are
   no `dataDisks` at all, and a `platformDiskID` that does not match the `nameSuffix` at the same
   index is rejected
+- A pool with `diskSetup` entries but no `platform.azure` stanza is rejected
 - Valid configurations pass
 - `dataDisks` set on `defaultMachinePlatform`, `controlPlane` or `compute` without
   `FeatureGateAzureMultiDisk` is rejected
 - `dataDisks` are converted to `machineapi.DataDisk` with `DeletionPolicy: Delete`
 - `dataDisks` are propagated to the `AzureMachine` spec
+
+**Unit Tests** (`pkg/types/azure/defaults/machinepool_test.go`), implemented:
+
+- An omitted `cachingType` is defaulted to `None` in a per-pool copy, after
+  `defaultMachinePlatform` inheritance is resolved, so the default does not leak into the
+  default machine platform and an explicitly set value is never revisited
+
+**Asset Generation Tests** (`pkg/asset/machines/util_test.go`,
+`pkg/asset/machines/azure/machines_test.go`, `pkg/asset/machines/worker_test.go`), implemented:
+
+- The generated disk setup MachineConfig addresses an Azure data disk at
+  `/dev/disk/azure/data/by-lun/<lun>`, the udev link that exists on both the SCSI and the NVMe
+  controller
+- The defaulted `cachingType: None` reaches both the `AzureMachine` spec and the Machine API
+  provider spec
+- A machine pool with `diskSetup` entries and no platform stanza is rejected with an error
+  rather than panicking
 
 **End-to-End Tests:**
 
@@ -499,16 +560,10 @@ None.
   - Configure multiple data disks with different LUNs
   - Verify all disks are created and attached correctly
 
-- Cluster destruction:
-  - Delete cluster with data disks configured
-  - Verify all data disks are removed (DeletionPolicy: Delete)
-
 **CI Jobs:**
 
 The above is exercised by `e2e-azure-ovn-multidisk-techpreview`, defined for both
-`openshift/installer` and `openshift/machine-config-operator`, with
-`e2e-azure-ovn-multidisk-techpreview-upgrade` covering the upgrade case. Both jobs are currently
-optional and do not run by default.
+`openshift/installer` and `openshift/machine-config-operator`.
 
 ## Graduation Criteria
 
@@ -562,7 +617,9 @@ The installer validates the configuration at install time and generates appropri
 **Detecting Configuration Issues:**
 
 If the data disk configuration is invalid, `openshift-install` fails during install-config
-validation. The messages emitted today are:
+validation. Errors about an individual disk carry its index and the install-config spelling of the
+field (`dataDisks[i].nameSuffix`, `dataDisks[i].lun`), so with several disks the message names the
+one at fault. The messages emitted today are:
 
 - `"not allowed on default machine pool, use dataDisks compute and controlPlane only"`
 - `"data disks are not supported on AzureStackCloud"`
@@ -573,11 +630,22 @@ validation. The messages emitted today are:
   `cachingType`
 - `"data disk security profiles are not yet supported by the Machine API and would be silently
   ignored"`
+- `"nameSuffix is required"`
+- `"may only contain alphanumerics, '_', '.' and '-', and must end with an alphanumeric or '_'"`
+  on `nameSuffix`
+- `Too long: may not be more than 15 bytes` on `nameSuffix`
 - `Duplicate value: "<nameSuffix>"` - two disks in the pool share a `nameSuffix`
 - `"<nameSuffix>" must have lun id` - LUN omitted
 - `"<nameSuffix>" must have lun id between 0 and 63` - LUN out of range
-- `"dataDisk must have a unique lun number"` - duplicate LUN
+- `Duplicate value: <lun>` on `lun` - duplicate LUN
 - `"diskSizeGB must be greater than zero"`
+- `"must be between 4 and 32767 for control plane data disks"` on `diskSizeGB`
+- `"diskSetup entries must be paired with data disks: set dataDisks on this machine pool's
+  platform.azure stanza"`
+- `"each diskSetup entry configures the dataDisk at the same index; diskSetup length is N but
+  dataDisks length is M, so the extra diskSetup entries would be silently ignored"`
+- `does not match etcd|swap|user defined platformDiskID "<id>"` on `nameSuffix` - a `diskSetup`
+  entry and the `dataDisks` entry at the same index disagree
 
 If `FeatureGateAzureMultiDisk` is not enabled, validation fails with a feature gate error naming the
 `dataDisks` field.
@@ -588,10 +656,14 @@ The most reliable in-guest check is the Azure udev symlink tree, which is keyed 
 maps directly back to the install-config:
 
 ```console
-$ ls -l /dev/disk/azure/scsi1/
-lrwxrwxrwx. 1 root root 12 ... lun0 -> ../../../sdc
-lrwxrwxrwx. 1 root root 12 ... lun1 -> ../../../sdd
+$ ls -l /dev/disk/azure/data/by-lun/
+lrwxrwxrwx. 1 root root 12 ... 0 -> ../../../../sdc
+lrwxrwxrwx. 1 root root 12 ... 1 -> ../../../../sdd
 ```
+
+The links are created by the `azure-vm-utils` udev rules for data disks on both the SCSI and the
+NVMe controller, so the check works on NVMe-only instance types too; there the links resolve to
+NVMe namespaces rather than `/dev/sd*` devices.
 
 `lsblk` also lists the devices, but kernel `/dev/sd*` names are assigned in attach order and are not
 stable across reboots, so they should not be used to identify a specific configured disk. Disk
@@ -620,7 +692,7 @@ Instead of requiring data disks to be configured at install time, allow adding d
 
 Automatically format and mount data disks during VM provisioning, without the user specifying a layout. This was not implemented because:
 - Different use cases require different filesystem types and mount options
-- This is better handled by MachineConfig which provides more flexibility. The installer generates it from explicit `diskSetup` entries, see [multi-disk-setup](./multi-disk-setup.md)
+- This is better handled by MachineConfig which provides more flexibility
 - Separation of concerns: installer provisions infrastructure, MachineConfig configures OS
 
 **Alternative 3: Support in defaultMachinePlatform**
