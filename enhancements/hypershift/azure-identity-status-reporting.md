@@ -12,10 +12,10 @@ approvers:
 api-approvers:
   - "@JoelSpeed"
 creation-date: 2026-09-24
-last-updated: 2026-10-21
+last-updated: 2026-10-22
 status: provisional
 tracking-link:
-  - https://issues.redhat.com/browse/CNTRLPLANE-4491
+  - https://redhat.atlassian.net/browse/CNTRLPLANE-4491
 see-also:
   - "/enhancements/hypershift/api-driven-azure-topology-and-private-connectivity.md"
 replaces: []
