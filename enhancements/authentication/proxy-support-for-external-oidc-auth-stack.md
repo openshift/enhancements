@@ -11,7 +11,7 @@ approvers:
 api-approvers:
   - "@everettraven" # For the Console Operator changes.
 creation-date: 2026-09-10
-last-updated: 2026-10-13
+last-updated: 2026-10-22
 status: provisional
 tracking-link:
   - "https://redhat.atlassian.net/browse/OCPSTRAT-3721"
@@ -504,7 +504,7 @@ additions:
   [OAuth API Server Deployment and Trust](#oauth-api-server-deployment-and-trust).
 - Console Operator renders `Console.spec.authProxy` into an `auth.proxy` block in
   Console's generated `console-config.yaml`, holding the proxy URLs, resolved
-  `noProxy` list, and a `trustedCAFile` path.
+  `noProxy` list, and a `trustedCAFilePath` path.
 
 For example, the generated webhook configuration includes the following fields,
 alongside its existing `jwt` configuration. The path is illustrative and must
@@ -527,20 +527,21 @@ auth:
     httpProxy: http://proxy.example.com:3128
     httpsProxy: http://proxy.example.com:3128
     noProxy:
-      - idp.internal.example.com
       - ".cluster.local"
       - ".cluster.local."
       - ".svc"
       - ".svc."
+      - "127.0.0.1"
+      - "172.30.0.1"              # Kubernetes service IP, when the operator sees one
+      - idp.internal.example.com
       - localhost
       - localhost.
-      - "127.0.0.1"
-      # The Kubernetes service IP is also appended when available.
-    trustedCAFile: /var/auth-proxy-ca/ca-bundle.crt
+    trustedCAFilePath: /var/auth-proxy-ca/ca-bundle.crt
 ```
 
-Console Operator expands `noProxy` with the internal defaults and translates the
-`trustedCA` ConfigMap reference into the mounted bundle's `trustedCAFile` path.
+Console Operator expands `noProxy` with the internal defaults, then sorts the
+result and removes duplicates. It also translates the
+`trustedCA` ConfigMap reference into the mounted bundle's `trustedCAFilePath`.
 The path is illustrative and must match the mount it configures on the Console
 Deployment. The existing `authType` and `oidcIssuer` fields are shown for context.
 
@@ -777,8 +778,10 @@ Reuse the resolution rules from
 Extend the component proxy's implicit `noProxy` entries to include trailing-dot
 forms of the existing hostname defaults. The resulting defaults are
 `.cluster.local`, `.cluster.local.`, `.svc`, `.svc.`, `localhost`, `localhost.`,
-and `127.0.0.1`, plus the caller's Kubernetes service IP when available through
-`KUBERNETES_SERVICE_HOST`.
+and `127.0.0.1`, plus the Kubernetes service IP. The operator, not the operand,
+supplies that last entry: each operator reads `KUBERNETES_SERVICE_HOST` from its
+own process environment and bakes the resulting value into the rendered bypass
+list. Operands do not resolve it at runtime.
 
 Use these defaults consistently in the webhook's effective bypass rules and
 Console's `auth.proxy.noProxy`. Updating CAO's shared resolver also expands the
@@ -786,6 +789,16 @@ integrated authentication path's component-proxy
 defaults; no other change to that flow is intended. Do not add these entries to
 the cluster-wide fallback: preserve its supplied `NO_PROXY` values and Console's
 global proxy environment unchanged.
+
+Regarding the cluster-wide fallback and the component proxy, they act at different layers
+for Console, and both are always present. Console Operator has always rendered the
+cluster-wide proxy from `proxy.config.openshift.io/cluster` as `HTTP_PROXY`,
+`HTTPS_PROXY`, and `NO_PROXY` **environment variables on the Console Deployment**,
+which is the environment-based fallback described under
+[Console Login and Token Refresh](#console-login-and-token-refresh). Those
+variables remain set when `auth.proxy` is present, because they still govern
+Console's unrelated clients. Console must therefore install an explicit proxy
+selector on its OIDC clients whenever `auth.proxy` is present.
 
 #### `NO_PROXY` and Internal Endpoint URLs
 
@@ -915,7 +928,7 @@ See [Generated Operand Configuration](#generated-operand-configuration) for an
 example of the Console configuration rendered from `Console.spec.authProxy`.
 
 The proposed block contains `httpProxy`, `httpsProxy`, the resolved `noProxy` list
-including implicit defaults, and an optional `trustedCAFile` path. The existing
+including implicit defaults, and an optional `trustedCAFilePath`. The existing
 top-level `proxy` section configures plugin reverse proxies and is not reused.
 
 Console applies `auth.proxy` only to its OIDC discovery, JWKS, code-exchange, and
@@ -925,7 +938,8 @@ environment would also reroute unrelated traffic, so authentication uses its own
 configuration while other clients retain their existing routing and trust.
 
 Console Operator emits `auth.proxy` only when the component proxy is configured
-and its [feature prerequisites](#feature-gates) are satisfied:
+with at least one of `httpProxy` or `httpsProxy`, the authentication type is
+`oidc`, and its [feature prerequisites](#feature-gates) are satisfied:
 
 - When `auth.proxy` is absent, Console retains its existing environment-based
   cluster-wide proxy or direct-connect behavior and corresponding trust.
@@ -957,7 +971,10 @@ generic outbound CA bundle referenced by `trustedCAFilePath`. They apply valid
 trust updates atomically to the clients using those bundles without restarting.
 New TLS connections must use the updated trust. Invalid updates are reported
 while retaining the last successfully loaded trust bundle; certificate
-verification must not be disabled.
+verification must not be disabled. By reported we mean logging reload errors,
+because not much more can be trivially done in the operand. The operator should
+perform the checks necessary to ensure the ConfigMap is valid before mounting it
+for the operator and degrade on any issues found so that the issue becomes visible.
 
 On HyperShift, `konnectivity-https-proxy` does not hot-reload its proxy CA trust.
 CPO must therefore roll out the OAuth API server Deployment when the referenced
@@ -1032,6 +1049,14 @@ Secret reference. Restrict access to these resources and Pod specifications,
 and redact credentials from diagnostics, including sidecar debug logs. This
 limitation is inherited from the existing proxy API; adding a separate credential
 Secret reference is outside this proposal.
+
+The new Console field has the same exposure: `Console.spec.authProxy.httpProxy`
+and `httpsProxy` are plain-text strings on the `Console` CRD, and Console
+Operator copies them verbatim into the generated `console-config.yaml` ConfigMap
+in `openshift-console`, readable by anyone who can read either object. Operands
+need to log their effective proxy — support cannot otherwise tell a component
+proxy from the cluster-wide fallback — so they must strip userinfo from the URL
+before logging it, rather than omitting the log line.
 
 **Debugging complexity from dual proxy sources.**
 When both component-scoped and cluster-wide proxies exist, diagnosing failures
@@ -1171,7 +1196,7 @@ Pod:
 - Resolution: the field applies only to `Type: OIDC`, and integrated OAuth
   clusters are unaffected.
 - `console-config.yaml` generation: the `auth.proxy` block with resolved
-  `noProxy` and `trustedCAFile`, and removal when the proxy is removed.
+  `noProxy` and `trustedCAFilePath`, and removal when the proxy is removed.
 
 **Console Operator — integration tests.**
 
@@ -1347,7 +1372,11 @@ is unavailable. On standalone clusters:
   conditions on the operator `Authentication` and `Console` resources.
 - Check events and operator logs in `openshift-authentication-operator` and
   `openshift-console-operator`, plus webhook and Console logs in
-  `openshift-oauth-apiserver` and `openshift-console`.
+  `openshift-oauth-apiserver` and `openshift-console`. After a proxy CA rotation,
+  the operand logs are the only place a rejected bundle appears: a healthy
+  `console` cluster operator means the ConfigMap synchronized, not that Console
+  loaded it. The operands log their effective proxy with credentials redacted at
+  startup; use that to confirm which proxy is actually in the path.
 - Compare the configured component proxy, cluster-wide fallback, rendered operand
   configuration, CA references, and mounted CA copies. Inspect the webhook's proxy
   environment and Console's generated `auth.proxy` block separately; Console's
