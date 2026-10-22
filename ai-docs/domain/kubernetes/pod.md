@@ -251,7 +251,7 @@ oc logs my-pod -c container-name
 # Execute command
 oc exec -it my-pod -- /bin/sh
 
-# Debug with ephemeral container (K8s 1.25+)
+# Debug with a copy pod (starts a new pod based on the target pod's spec)
 oc debug pod/my-pod --image=busybox
 ```
 
