@@ -272,7 +272,7 @@ This makes it straightforward to distinguish clusters that have undergone a tran
 
 The field uses the existing `TopologyMode` type with an enum validation constraint that restricts accepted values to topology modes that have defined transitions. For the initial implementation, only `SingleReplica` and `HighlyAvailable` are valid enum values. Additional values can be added as new transitions are supported.
 
-**Mapping to status fields**: For SNO → HAC, both `status.controlPlaneTopology` and `status.infrastructureTopology` become `HighlyAvailable`. `spec.infrastructureTopology` is optional; omitting it has no effect. If it is set, the controller admits the request only when the pair is both `SingleReplica` → both `HighlyAvailable`.
+**Mapping to status fields**: For SNO → HAC, both `status.controlPlaneTopology` and `status.infrastructureTopology` become `HighlyAvailable`. `spec.infrastructureTopology` is not required; `oc` will set `spec.infrastructureTopology` to `spec.ControlPlaneTopology` automatically for SNO → HAC transitions. The controller admits the request only when the pair is both `SingleReplica` → both `HighlyAvailable`.
 
 **Status (observed state):**
 
@@ -490,7 +490,7 @@ Once all criteria pass, the controller updates the `TopologyTransitionCompleted`
 The CLI command provides an interface for topology transitions:
 
 - Validates preconditions client-side (feature gate enabled, no transition in progress)
-- Patches `spec.controlPlaneTopology` on the infrastructure CR
+- Patches `spec.controlPlaneTopology` and `spec.infrastructureTopology` on the infrastructure CR
 - Returns immediately after a successful patch
 
 The CLI does not contain transition logic — it delegates entirely to the CCO controller. This follows the same pattern as `oc adm upgrade`, which patches `spec.desiredUpdate` and lets the CVO do the work.
