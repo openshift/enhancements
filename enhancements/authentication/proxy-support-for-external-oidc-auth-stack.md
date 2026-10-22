@@ -1319,6 +1319,37 @@ continue to accept configuration that omits the new inputs, retaining Console's
 existing environment-based fallback when `auth.proxy` is absent. Mixed old and new
 replicas during rollout must retain a working configuration until replaced.
 
+This requirement covers two distinct hazards that an image-version check alone
+does not resolve, because the generated configuration, the CA mount, and the
+running replica are reconciled by three independent, asynchronous paths:
+
+- **Schema skew.** The webhook decodes its configuration strictly, so a replica
+  running an image that predates `trustedCAFilePath` rejects a configuration
+  containing it outright rather than ignoring the unrecognized field. Because
+  CAO/CPO and the webhook image ship in the same release payload, this window
+  exists only transiently during a rollout. It is also cushioned by the
+  webhook's reload behavior: a failed reload keeps the last successfully
+  loaded authenticator rather than tearing it down, so an already-running
+  replica tolerates a configuration it cannot yet parse. A replica performing
+  its first configuration load has no prior authenticator to fall back on, so
+  the only residual exposure is a replica created from a stale, pre-upgrade
+  template racing the operand rollout that is already replacing it.
+- **Resource-ordering skew.** Even once the image understands
+  `trustedCAFilePath`, the operator must not publish the path before the
+  referenced CA bundle is actually synchronized into the operand's namespace
+  and mounted into the Deployment, since ConfigMap synchronization, the
+  Deployment's volume mount, and generated-configuration distribution are
+  reconciled independently of one another. CAO addresses this by deferring
+  `trustedCAFilePath` until it can confirm the destination ConfigMap already
+  exists, rather than assuming mount provisioning keeps pace with
+  configuration generation. Confirming the ConfigMap exists does not by
+  itself guarantee the Deployment's pod template already mounts it as a
+  volume; that is reconciled separately. But because the same workload
+  controller responsible for the mount is already converging independently
+  once the ConfigMap exists, any remaining gap is covered by a rollout
+  already in progress rather than left open-ended. CPO must apply the same
+  ordering when populating the hosted webhook's configuration.
+
 HyperShift's management cluster OpenShift version and HyperShift Operator version
 are distinct from the releases supplying the hosted cluster's components.
 By default, `HostedCluster.spec.release` supplies both hosted control-plane and
