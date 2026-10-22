@@ -99,6 +99,7 @@ Post-quantum migration to ML-DSA builds on this baseline and is covered by the s
 - Maintain backward compatibility: clusters upgraded without PKI configuration continue using existing defaults
 - Ensure new certificates generated during rotation respect the PKI configuration
 - Reissue non-conforming certificates immediately when the configuration changes (reconciliation), rather than waiting for natural expiry; certificates that already conform are left untouched
+- Make PKI configuration changes observable: each PKI-managing operator reports `Progressing` on its ClusterOperator while its managed certificates do not match the desired PKI configuration
 
 ### Non-Goals
 
@@ -110,6 +111,7 @@ Post-quantum migration to ML-DSA builds on this baseline and is covered by the s
 - Changing certificate subject names, SANs (Subject Alternative Names), or other X.509 extensions (only cryptographic parameters)
 - Configuring the certificate issuance of layered products (OLM-installed operators that manage their own certificates); layered-product authors maintain their own certificate configuration, and OLM applies the cluster PKI configuration only to the certificates OLM itself manages
 - Rotating external or third-party token issuers, and changing the OAuth server access-token keys, which are random 256-bit secrets rather than configurable signing algorithms
+- Tracking whether consumers of platform-managed certificates have reloaded new material as part of the `Progressing` contract; that contract covers the operator's own managed resources only (see [PKI Change Status Reporting](#pki-change-status-reporting)). Prune readiness is assessed separately through the phased readiness conditions (see [Pruning superseded CAs](#pruning-superseded-cas))
 
 ### Relationship to Existing Certificate Configuration Features
 
@@ -273,7 +275,7 @@ This walks a single algorithm migration from a configuration change through opti
 2. **Immediate reconciliation.** Each PKI-managing operator detects the mismatch and reconciles immediately. For each affected CA it mints a new CA with the same subject, appends the new CA to the union trust bundle (the old CA stays until pruned or expires), and ships a forward cross-signing certificate (old signs new) with the new leaves, so consumers that still trust only the old CA keep validating.
 3. **Trust distribution.** Updated trust bundles propagate. Because of cross-signing, new-CA leaves already validate against still-old trust, so leaves can be reissued without waiting for every consumer to observe the new bundle.
 4. **Leaf reissue.** Non-conforming server and client certificates are reissued under the new configuration; conforming certificates are left untouched.
-5. **Convergence and readiness.** The cluster converges when every consumer trusts the new anchors directly and every presenter has rotated to a new-CA leaf. Each operator reports prune-readiness through status conditions.
+5. **Convergence and readiness.** Each operator's `Progressing` condition clears once its own managed certificates match the new configuration (see [PKI Change Status Reporting](#pki-change-status-reporting)). The cluster as a whole converges when every consumer trusts the new anchors directly and every presenter has rotated to a new-CA leaf; each operator reports what it can observe of this through prune-readiness conditions (phased; see [Pruning superseded CAs](#pruning-superseded-cas)).
 6. **Optional prune.** Once converged and the administrator has prepared off-cluster consumers and break-glass credentials, the out-of-band prune tooling removes the now-orphaned old CA certs from the trust bundles, which also drops any cross-signing certificates that depend on them. This step is forward-only.
 7. **Optional further rotation.** A later configuration change repeats the sequence; a post-quantum migration is the same reissue-then-prune sequence, with ML-DSA specifics owned by the separate layered enhancement.
 
@@ -678,9 +680,10 @@ Each PKI-managing operator will:
 1. Watch the `PKI` cluster resource for changes
 2. Implement configuration resolution logic to determine parameters for each certificate
 3. Reissue non-conforming certificates immediately on detecting a configuration change (reconciliation), rather than waiting for natural expiry; certificates that already conform are left untouched (see [Rotation and CA Retirement](#rotation-and-ca-retirement)). Cross-signing keeps existing clients working during the change.
-4. Report prune-readiness status conditions for the CAs it owns (phased; see [Pruning superseded CAs](#pruning-superseded-cas))
-5. Annotate the Secrets and ConfigMaps it generates with the certificate's well-known override name and category (for example, the `pki.openshift.io/name` annotation set to `openshift.io/etcd.ca`), so that administrators can discover the exact name to target with a named override
-6. Update operator status conditions if configuration is invalid or cannot be applied
+4. Report `Progressing` on its ClusterOperator while any of its managed certificates do not match the desired PKI configuration, and clear it at convergence (see [PKI Change Status Reporting](#pki-change-status-reporting))
+5. Report prune-readiness status conditions for the CAs it owns (phased; see [Pruning superseded CAs](#pruning-superseded-cas))
+6. Annotate the Secrets and ConfigMaps it generates with the certificate's well-known override name and category (for example, the `pki.openshift.io/name` annotation set to `openshift.io/etcd.ca`), so that administrators can discover the exact name to target with a named override
+7. Update operator status conditions if configuration is invalid or cannot be applied
 
 Key operators to update:
 - `cluster-kube-apiserver-operator` - API server server and client certificates
@@ -724,6 +727,30 @@ OLM consumes the PKI configuration for the certificates it manages. The deeper d
 Certificates issued by layered products through their own certificate-management code are a non-goal (see [Non-Goals](#non-goals)). The PKI configuration resource is not a control surface for layered products; layered-product authors remain responsible for their own certificate issuance and for adopting compatible algorithms. Such certificates fall into the off-cluster or unmanaged set that the administrator is responsible for during migrations and pruning.
 
 The specifics of OLM integration, including whether any per-operator mechanism is added later, are deferred to engagement with the OLM team.
+
+#### PKI Change Status Reporting
+
+**Responsibility.** Each PKI-managing operator is responsible for reporting its own progress through a PKI configuration change, through its ClusterOperator's `Progressing` condition. There is no central PKI status aggregator, consistent with the model above in which each operator watches the `PKI` resource and reconciles its own certificates: an administrator watching `oc get clusteroperators` sees each operator's PKI convergence independently, and the aggregate view is simply the set of per-operator conditions.
+
+**Required semantics.** All PKI-managing operators report as follows (components without a ClusterOperator of their own, such as the HyperShift control-plane components, report through their equivalent status surface):
+
+- The operator sets `Progressing=True` on its ClusterOperator while any of the certificates it manages do not match the desired PKI configuration, with a message describing the gap (the PKI conditions controller below reports it in the form `3/12 certificates at PKI generation 4 but should be at 5`). When every managed certificate matches the desired configuration, the operator sets `Progressing=False`.
+- The signal is level-triggered on the configuration, not on time: `Progressing` is True whenever managed certificate material does not match the desired PKI configuration (a managed resource that still reflects a previous configuration, or that was previously issued and has since been deleted), and False when it matches. Two cases never set it: routine expiry-driven refresh, and first-time issuance for new demand (for example the initial serving certificate for a newly annotated Service), which is growth of the managed set rather than a failure to converge, consistent with platform guidance that scale-up of owned resources is not operator progress. Material an operator cannot reissue (for example long-lived installer-generated CAs) is outside the managed set and does not hold `Progressing` open.
+- The contract covers whether the operator performed the work (the resources it manages, typically Secrets and ConfigMaps, are at the desired configuration), not whether every consumer has reloaded the new material; consumer-reload tracking is out of scope (see [Non-Goals](#non-goals)). Level-triggered reconciliation makes this durable: achieved states are re-derived on every sync rather than remembered.
+- Where an operator surfaces this signal through internal condition types, their names must be formed so they roll up to the ClusterOperator's aggregate `Progressing` condition through the operator's status machinery (in the common pattern, a `Progressing`-suffixed type); a distinct type such as `*_Rotating` would not roll up and is ruled out. Exact internal condition naming is left to each operator's technical design.
+
+**A reusable controller (offered, not required).** To make the above cheap, a reusable **PKI conditions controller** may be embedded by each PKI-managing operator, together with the resource markings it evaluates:
+
+- **Configuration stamps.** The resources an operator manages (typically Secrets and ConfigMaps) are annotated with the PKI configuration their contents were last verified against, and labeled with the identity of the managing operator, so that the managed set is selectable and each resource's conformance is discoverable.
+- **Condition evaluation.** The PKI conditions controller evaluates the operator's managed resources against the operator's current resolved PKI configuration and maintains the ClusterOperator-visible `Progressing` condition with a message of the `x/y certificates` shape above. It runs within each operator against that operator's own resources; it is not a central evaluator.
+
+The stamps, labels, and controller are one bundle: an operator that adopts it gets the required semantics without writing its own status logic. An operator that prefers its own mechanism (for example because it does not use the shared certificate-rotation controllers) may meet the semantics however it likes; it need not stamp, so its managed resources will not necessarily carry the stamps, although it may follow the stamp and label convention on its own, since the stamps aid debugging and tooling independently of the controller. This is deliberately an offering rather than the universal stamping requirement originally proposed in the status-reporting discussions; whether to tighten it into a requirement once adoption is widespread is an open question (see [Open Questions](#open-questions)). Nothing else in this enhancement depends on the stamps being present.
+
+**Special case: service-ca-operator (two-tier reporting).** service-ca-operator cannot report PKI change progress from its own reconcile loop alone: the operator mints the signing CA, but the controllers that actually inject CA bundles and issue serving certificates run in a separate operand deployment with no API to relay their state back to the operator, which is where rotation-state fidelity is lost today. service-ca-operator must close this gap to meet the required semantics, whether through the offered PKI conditions controller or through custom controllers; how state crosses the operator/operand boundary, and which resource kinds its reporting covers, are left to the technical design.
+
+**Relationship to prune-readiness.** The phased prune-readiness conditions (see [Pruning superseded CAs](#pruning-superseded-cas)) are a separate reporting concern (whether it is safe to drop a superseded CA) and do not assume this bundle. Where an operator does adopt the bundle, its stamps are a natural input to those conditions, but the two mechanisms are independently adoptable. `Progressing=False` is necessary but not sufficient for prune readiness: the administrator preparation steps (consumer rotation, break-glass credentials, off-cluster consumers) remain prerequisites.
+
+**Finer-grained visibility through events and logs.** Beyond the `Progressing` contract, visibility into the minting process itself comes from events and structured logs emitted by the rotation controllers, not from additional condition types: a signer created or updated, a trust bundle updated, a target certificate issued, a refresh performed. This is a deliberate division of labor: conditions carry the level-triggered aggregate signal, while the edge-triggered play-by-play belongs in events and logs, where it cannot flap conditions or interact with roll-up rules. The support procedures (see [Detection and Diagnosis](#detection-and-diagnosis)) rely on these events and logs when debugging a slow or stuck rotation.
 
 #### Validation
 
@@ -1023,11 +1050,18 @@ During a CA rotation, in addition to the forward cross-signing certificate, the 
 
 **Not selected.** Append-only trust propagation makes it unnecessary: because the old CA remains in the union trust bundle until it is pruned or expires, an updated consumer validates not-yet-rotated old-CA leaves via the old CA directly, with no need for the new CA to vouch for the old. It also introduces a trust **downgrade**: a consumer on the new anchor would accept old-CA-issued leaves, capping the new anchor's effective security at the old anchor's. That is acutely dangerous for a post-quantum migration, where the new (PQC) anchor vouching for the old (classical) anchor would let a forged old-CA certificate be accepted by PQC-trusting consumers if the classical algorithm is later broken. OpenShift has no revocation primitive, so such a certificate could not be withdrawn once issued, and X.509 path constraints (`pathLenConstraint`, `NameConstraints`) only partially mitigate it and are not honored by all clients. The platform therefore never mints a backward cross-signing certificate.
 
+### Alternative 10: Fine-grained per-chain status conditions in the rotation controllers
+
+Instead of a single conformance-scoped `Progressing` signal evaluated against the desired PKI configuration, the rotation controllers could report per-chain condition types for each stage of a rotation (signer, trust bundle, target certificate), with rich reason vocabularies describing each chain's state.
+
+**Not selected.** The stage-by-stage progress of a rotation is edge-triggered information (what just happened), which belongs in events and logs; conditions are reserved for level-triggered state (what is currently true), which this enhancement expresses as the single conformance-scoped `Progressing` signal. Per-chain condition types would also multiply the condition surface every consumer must understand, and operators whose issuance controllers cannot write operator status (service-ca's two-tier split) could not produce them faithfully. This rejection is specific to rotation-stage conditions: the phased prune-readiness conditions (see [Pruning superseded CAs](#pruning-superseded-cas)) report different, level-triggered facts and are unaffected.
+
 ## Open Questions
 
 - The exact prune interface (an `oc adm` subcommand, for which `oc adm pki prune-superseded-cas` is a candidate name, a documented procedure, or another configuration signal) and what minimal safety checks it performs, and which operator-reported readiness conditions gate it (see [Pruning superseded CAs](#pruning-superseded-cas)).
 - Which core-platform certificates do not auto-rotate today, and which issuers support cross-signing (both under investigation).
-- PKI status reporting is distributed (per-operator), reusing existing operator conditions; migration documentation will include an `oc get clusteroperators` convergence check. (Still open: whether an aggregated view is worth adding later.)
+- Whether an aggregated view of PKI convergence beyond per-operator `Progressing` conditions (for example a single command or condition summarizing all operators' PKI convergence) is worth adding later; the initial design relies on `oc get clusteroperators` as the convergence check during migrations.
+- Whether the configuration stamps and manager labels should become a required contract on all platform-managed certificate resources (as originally proposed in the status-reporting discussions) once adoption of the PKI conditions controller is widespread, or remain an optional convention.
 - Whether rollout coordination across control-plane instances is needed to prevent simultaneous reissue or restart during a reconfiguration (relevant to multi-node clusters, most impactful on SNO).
 - Whether to detect and report conflicts between the PKI configuration and the cluster's `TLSSecurityProfile`. The one real conflict today is TLS 1.2-specific: there the cipher suite encodes the authentication algorithm, so a profile whose cipher list offers only RSA-authentication suites (for example `ECDHE-RSA-*`) cannot complete a handshake with an ECDSA server certificate, and vice versa. TLS 1.3 removes this coupling (authentication is negotiated via `signature_algorithms`, and Go supports both RSA and ECDSA), so profiles that require TLS 1.3 are immune. In Go the cipher-suite list is honored only for TLS 1.2 (ignored for 1.3) and signature algorithms are not admin-configurable, which bounds the conflict surface to this single case. Looking ahead, post-quantum signature algorithms (ML-DSA) are TLS 1.3-only, which adds a second axis: a PKI configuration selecting ML-DSA requires `minTLSVersion: 1.3` and conflicts with any profile that permits TLS 1.2 (ML-DSA mechanics are owned by the layered ML-DSA / PQC enhancement, and cross-signing does not bridge algorithm capability, only trust-anchor distribution). The two settings are independent today; detection (for example, warning when a TLS-1.2-capable profile pins a single-auth cipher list that excludes the resolved server-cert algorithm, or when ML-DSA is configured without TLS 1.3) is not yet designed.
 - Whether the installer should accept a full PKI manifest at install time (for GitOps), given that some compile-time certificate paths may not pick it up.
@@ -1077,6 +1111,7 @@ During a CA rotation, in addition to the forward cross-signing certificate, the 
 - RSA key size combinations: 2048, 3072, and 4096 bits
 - ECDSA curve combinations: P-256, P-384, and P-521
 - Upgrade path (empty config → defaults)
+- PKI conditions controller: a lagging or deleted managed resource sets `Progressing`; conforming resources do not; first-time issuance for new demand does not; the `x/y` message counts are correct
 
 **Integration Tests:**
 - Deploy cluster with PKI configuration in install-config
@@ -1093,6 +1128,9 @@ During a CA rotation, in addition to the forward cross-signing certificate, the 
 - Upgrade cluster from version without feature to version with feature
 - Verify existing certificates continue to work and rotate with defaults
 - Create PKI config post-upgrade and verify it applies on next rotation
+- Change the PKI configuration on a running cluster and verify each PKI-managing operator's ClusterOperator reports `Progressing=True` with a message describing the gap, then `Progressing=False` at convergence
+- Verify routine expiry-driven rotation does not set `Progressing` on an otherwise idle cluster (no condition flapping over the normal rotation cadence)
+- Verify upgrades do not spuriously set `Progressing` on PKI-managing operators when no PKI configuration change is in progress (coordinate exception handling with origin monitor tests that assert no `Progressing` blip during upgrade)
 
 **Performance Tests:**
 - Measure certificate generation time for different algorithms/sizes
@@ -1103,6 +1141,8 @@ During a CA rotation, in addition to the forward cross-signing certificate, the 
 - Verify old clients can connect to servers with ECDSA certificates
 - Verify RSA and ECDSA certificates can coexist in the same cluster
 - Test certificate chains with mixed algorithms (ECDSA cert signed by RSA CA)
+- Verify a webhook CA bundle continues to verify an older serving certificate while its replacement is issued without a reload (append-only trust during rotation)
+- Verify disruption-free certificate rotation for platform aggregated API services whose serving certificates are service-ca-issued
 
 ## Graduation Criteria
 
@@ -1118,6 +1158,7 @@ During early development with v1alpha1 and TechPreviewNoUpgrade feature gate:
 - Installer integration for CA certificate configuration
 - At least kube-apiserver-operator, etcd-operator, and service-ca-operator:
   - Support PKI configuration for certificate generation
+  - Report `Progressing` while their managed certificates do not match the desired PKI configuration (see [PKI Change Status Reporting](#pki-change-status-reporting))
 - Comprehensive unit and integration test coverage
 - Basic documentation in openshift-docs
 - Early feedback gathered from development testing
@@ -1128,6 +1169,7 @@ Before the M.N release, all of the following criteria must be met:
 
 - All PKI-managing operators:
   - Support PKI configuration for certificate generation
+  - Report `Progressing` while their managed certificates do not match the desired PKI configuration, mechanism-agnostic: operators meet the semantics whether or not they adopt the PKI conditions controller (components without a ClusterOperator of their own report through their equivalent status surface)
   - `service-ca-operator` updated to append-only trust propagation, replacing its atomic bundle replacement and backward cross-signing certificate
 - Thorough e2e test coverage including upgrade scenarios
 - **API promoted to v1 at Compatibility Level 1:**
@@ -1152,6 +1194,7 @@ Before the M.N release, all of the following criteria must be met:
   - **API migration guide (v1alpha1 → v1)** if breaking changes were made
 - SLIs defined and documented:
   - Operator `Degraded` condition rate for PKI-related failures
+  - PKI convergence time: operator `Progressing` clears within a bounded interval after a PKI configuration change
   - PKI resource readability (operators can watch and read the PKI resource)
   - Certificate rotation completes without PKI-related errors (observed via operator status conditions and events)
 - Support procedures documented for common failure modes
@@ -1248,6 +1291,7 @@ However, there are some considerations:
 3. **Operator Resource Consumption**: Watching the PKI resource adds minimal overhead
    - Memory: Negligible (one additional watch, cached resource is small <10KB)
    - CPU: Negligible (config changes are rare, operators already watch many resources)
+   - Status reporting: operators that adopt the PKI conditions controller also watch their managed resources. Most already cache these, but where an operator's managed set spans the cluster (for example service-ca-operator's serving-cert Secrets in user namespaces), the added watch cost can be significant; it is to be measured before GA, with optimizations left to the technical design
 
 **Failure Modes:**
 
@@ -1341,6 +1385,27 @@ However, there are some considerations:
    ```bash
    # Certificate NotBefore time should be after PKI config update
    oc get pki cluster -o jsonpath='{.metadata.creationTimestamp}'
+   ```
+
+**Symptom: PKI configuration change is not converging**
+
+1. Check PKI-managing operators for a `Progressing` condition describing the gap:
+   ```bash
+   oc get clusteroperators
+   # A PKI-managing operator shows Progressing=True with a message describing the gap
+   # (operators adopting the PKI conditions controller report messages such as
+   # "3/12 certificates at PKI generation 4 but should be at 5")
+   ```
+
+2. Review the managing operator's events for rotation milestones and failures:
+   ```bash
+   oc get events -n <operator-namespace> --field-selector involvedObject.kind=Deployment
+   # For service-ca, also check the operand namespace openshift-service-ca
+   ```
+
+3. Review operator logs for PKI-related errors:
+   ```bash
+   oc logs -n <operator-namespace> <operator-deployment> | grep -i pki
    ```
 
 ### Reverting to Default State
@@ -1465,7 +1530,7 @@ The initial release supports RSA and ECDSA. Future releases may add:
 
 ### TLS Artifact Audit
 
-A **nice-to-have** future capability, building on the existing TLS artifact registry, would let a support engineer or administrator enumerate every certificate and CA bundle in the cluster together with the **cryptographic algorithm actually in use** and **ownership/management metadata** (which operator manages it, how it is managed). This would make it possible to verify conformance to the PKI configuration and to diagnose migration and coverage gaps, including whether all certificates have converged after a configuration change, and which artifacts fall outside automated coverage before a prune. It addresses the need to audit certificate and PKI coverage (a capability deferred from the initial release) and the open question on PKI status reporting.
+A **nice-to-have** future capability, building on the existing TLS artifact registry, would let a support engineer or administrator enumerate every certificate and CA bundle in the cluster together with the **cryptographic algorithm actually in use** and **ownership/management metadata** (which operator manages it, how it is managed). This would make it possible to verify conformance to the PKI configuration and to diagnose migration and coverage gaps, including whether all certificates have converged after a configuration change, and which artifacts fall outside automated coverage before a prune. It addresses the need to audit certificate and PKI coverage (a capability deferred from the initial release) and the open question on an aggregated view of PKI convergence (see [Open Questions](#open-questions)).
 
 ### Certificate Expiry Monitoring
 
