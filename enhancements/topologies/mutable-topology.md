@@ -21,7 +21,7 @@ approvers:
 api-approvers:
   - "@joelspeed, for API and infrastructure config"
 creation-date: 2026-05-11
-last-updated: 2026-10-19
+last-updated: 2026-10-22
 tracking-link:
   - https://issues.redhat.com/browse/OCPEDGE-2280
   - https://issues.redhat.com/browse/OCPEDGE-2640
@@ -365,16 +365,18 @@ The `TopologyTransitionStatus` structure enables administrators to discover avai
 The controller reports transition status through two required conditions and an optional transitions array:
 
 **1. TopologyTransitionsEvaluated Condition** (in `status.topologyTransitionStatus.conditions`):
+
+Indicates whether `transitions` array reflects current state
 - **Unknown**: Before evaluation or while refreshing checks
 - **True**: Evaluation finished successfully (even if no transitions are supported)
 - **False**: Evaluation failed
-- **Purpose**: Indicates whether `transitions` array reflects current state
 
 **2. TopologyTransitionCompleted Condition** (in `status.topologyTransitionStatus.conditions`):
+
+Tracks the status of the current or most recent transition
 - **Unknown**: Before a transition is admitted
 - **False**: Transition in progress or blocked (check `reason` and `message` for details). Reaching the target topologies leaves this `False` until post-transition checks pass
 - **True**: Transition successfully completed, post-transition checks passed
-- **Purpose**: Tracks the status of the current or most recent transition
 
 **3. transitions Array** (in `status.topologyTransitionStatus`):
 - Contains transitions valid for current cluster state
