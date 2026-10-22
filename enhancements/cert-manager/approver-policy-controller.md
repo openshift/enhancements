@@ -13,7 +13,7 @@ api-approvers:
   - "@tgeer" ## approver for cert-manager component
   - "@mytreya-rh"
 creation-date: 2026-02-06
-last-updated: 2026-09-21
+last-updated: 2026-10-06
 tracking-link:
   - https://issues.redhat.com/browse/CM-917
 see-also:
@@ -83,8 +83,8 @@ management, trust distribution, and policy enforcement on OpenShift.
   simply creating a single CR, so that I can enforce certificate issuance policies across my cluster without
   any additional manual steps.
 - As an OpenShift administrator, I want the cert-manager operator to automatically disable the built-in
-  auto-approver when I deploy approver-policy, so that the transition is seamless and I don't risk a race
-  condition between approvers.
+  auto-approver when I deploy approver-policy, so that I can wait for the handoff to complete
+  before relying on policy enforcement.
 - As an OpenShift administrator, I want to be able to configure which signer names approver-policy can
   approve or deny, so that I can integrate with external issuers.
 - As an OpenShift security engineer, I want to define policies that restrict certificate attributes (DNS names,
@@ -186,8 +186,8 @@ referencing external issuers are NOT auto-approved unless explicitly configured 
 
 Ref: [CertificateRequest — Approval](https://cert-manager.io/docs/usage/certificaterequest/#approval)
 
-This is provided as background context only. **The built-in auto-approver and approver-policy must not
-run simultaneously.** Running both means the built-in approver
+This is provided as background context only. **The built-in auto-approver must be disabled
+before relying on approver-policy for policy enforcement.** Running both means the built-in approver
 will auto-approve all requests to cert-manager's own issuers, completely bypassing any
 `CertificateRequestPolicy` rules you define for those issuers.
 
@@ -377,7 +377,7 @@ the condition (e.g., `"policy.cert-manager.io"` for approver-policy). The `Messa
 ### Design for Auto-disabling the Default Approver
 
 This is the most critical design decision in this enhancement. cert-manager ships with a built-in CertificateRequest
-approver that automatically approves all requests. When approver-policy is deployed alongside this built-in approver,
+approver that automatically approves all requests. When approver-policy has an applicable policy and runs alongside this built-in approver,
 **both will race to process CertificateRequests**. If the built-in approver wins the race and sets `Approved=True`
 first, the issuer will immediately sign the certificate — the `Denied` condition that approver-policy might
 subsequently set is irrelevant at that point, since an approved CertificateRequest is already being processed.
@@ -401,15 +401,18 @@ CR reports a successful reconciliation.
    `Ready=True` status condition on the `ApproverPolicyManager` CR when the operand is fully running and healthy.
 4. The cert-manager controller, watching the `ApproverPolicyManager` CR, detects the `Ready=True` status and
    automatically:
-   - Injects `--controllers=*,-certificaterequests-approver` into the cert-manager controller Deployment
-     args, disabling only the built-in approver controller while keeping all other controllers functional.
-   - **Deletes** the `cert-manager-controller-approve:cert-manager-io` ClusterRole and its ClusterRoleBinding.
+   - Persists disable intent before changing resources (see Persistence below).
+   - **Deletes** the `cert-manager-controller-approve:cert-manager-io` ClusterRoleBinding, then its ClusterRole,
+     and confirms both are absent before proceeding. Treat `NotFound` as success; retry other errors.
      This is a capability-level guard: cert-manager's admission webhook enforces the `approve` verb on
      `signers` via SubjectAccessReview. Without this ClusterRole, the `cert-manager` ServiceAccount cannot
      approve CRs even if the controller flag were somehow reverted. The failure is an explicit RBAC error
      rather than a silent policy bypass.
-   - Sets `AutoApproverDisabled=True` on the CertManager CR status.
-5. The cert-manager controller pod restarts with the updated args.
+   - Injects `--controllers=*,-certificaterequests-approver` into the cert-manager controller Deployment
+     args, disabling only the built-in approver controller while keeping all other controllers functional.
+5. Wait for the Deployment's disabling generation to be observed, its requested replicas to be updated
+   and available, and old approver-enabled pods (including terminating pods) to be gone. Reconfirm RBAC
+   absence, then set `AutoApproverDisabled=True` on the CertManager CR status.
 6. From this point, **no CertificateRequests will be auto-approved** — approver-policy processes all
    CertificateRequests based on `CertificateRequestPolicy` resources.
 
@@ -421,7 +424,7 @@ default), so removing cert-manager's ClusterRole has no impact on approver-polic
 The cert-manager controller gates the auto-disable on `ApproverPolicyManager` CR reporting a **fully successful
 reconciliation** (`Ready=True`). This ensures:
 - The built-in approver is not disabled until approver-policy is confirmed running and ready to process
-  CertificateRequests, preventing a gap in certificate approval.
+  CertificateRequests. Requests can remain pending until policies and policy-use RBAC are configured.
 - If the `ApproverPolicyManager` CR exists but the operand fails to become ready, the built-in approver continues
   to function normally.
 
@@ -432,36 +435,42 @@ needs multiple reconciliation loops to deploy all resources and set `Ready=True`
   on the `ApproverPolicyManager` CR re-triggers a reconciliation of the `CertManager` CR.
 - When the cert-manager controller reconciles and finds `ApproverPolicyManager` CR present but `Ready=True` is
   not yet set, it **requeues** the event request rather than disabling the approver.
-  The auto-disable happens only on the reconciliation loop where `Ready=True` is confirmed.
+  The initial auto-disable starts when `Ready=True` is confirmed; persisted intent allows later retries regardless of readiness.
 
 **Transition period RBAC safety:**
 
-When the auto-disable is triggered, the cert-manager Deployment update is asynchronous (pod restart takes a
-few seconds). During this rollout window, the RBAC deletion (step 4 above) provides an immediate hard
-guard: the `cert-manager` ServiceAccount loses its `approve` RBAC capability the moment the ClusterRole is
-deleted, even before the old pod terminates. Any CertificateRequest approval attempt by the old pod during
-this window results in an explicit RBAC rejection from cert-manager's admission webhook.
+The Deployment update is asynchronous. Remove approval RBAC before updating the Deployment, but do not
+assume deletion instantly propagates through authorization or cancels in-flight approvals. Completion
+requires observing the rollout and old-pod termination, not merely accepting the Deployment update.
+The existing-policy installation limitation is documented under [Risks and Mitigations](#risks-and-mitigations).
 
 **Atomicity of flag injection and ClusterRole deletion:**
 
-Disabling the built-in approver requires two separate Kubernetes API calls:
-1. Update the cert-manager Deployment (add `--controllers=*,-certificaterequests-approver`)
-2. Delete the `cert-manager-controller-approve:cert-manager-io` ClusterRole and ClusterRoleBinding
+Disabling the built-in approver requires these ordered operations:
+1. Delete the `cert-manager-controller-approve:cert-manager-io` ClusterRoleBinding and ClusterRole; confirm absence.
+2. Update the cert-manager Deployment (add `--controllers=*,-certificaterequests-approver`) and observe rollout completion.
 
 These cannot be made truly atomic (no Kubernetes cross-resource transaction). The controller handles
 each failure mode safely:
 
 | Failure scenario                               | Effective security posture                                                                                                                                                           | Recovery                                          |
 | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------- |
-| Deployment updated, ClusterRole deletion fails | cert-manager pod restarts without the approver controller (flag in effect); ClusterRole still present but irrelevant — the pod is no longer running the approver.                    | Next reconciliation retries ClusterRole deletion. |
-| ClusterRole deleted, Deployment update fails   | Hard RBAC guard is immediately active — any approval attempt by the still-running pod is rejected by cert-manager's admission webhook with an explicit RBAC error. No silent bypass. | Next reconciliation retries Deployment update.    |
+| Approval RBAC deletion fails | Disablement is not confirmed; do not advance to the Deployment update. | Retry deletion without restoring any RBAC already removed. |
+| Approval RBAC deleted, Deployment update fails | Retain disable intent and keep approval RBAC absent. | Retry the Deployment update. |
+| Deployment update accepted, rollout incomplete | Old approver-enabled pods may still run; initial completion remains false. | Observe rollout and old-pod termination; do not restore RBAC. |
 
-The `autoApproverDisabled` field is only set to `true` on the CertManager CR **after both operations
-succeed**. If either fails, the controller returns an error, which triggers an immediate retry. The
+The `autoApproverDisabled` field is only set to `true` on the CertManager CR **after RBAC absence and
+rollout completion are observed**. Until then, false/absent means completion is unconfirmed, not that the
+built-in approver is active. Report progress/errors through conditions and retry failures without rollback. The
 reconciler is idempotent — re-running either operation when it's already in the desired state is a
 safe no-op — so partial failures are self-correcting on the next reconciliation loop.
 
 **Persistence — one-way latch until ApproverPolicyManager CR deletion:**
+
+Before the first RBAC mutation, persist `AutoApproverDisableRequested=True` in CertManager conditions;
+stop if that write fails. Retain this intent across restarts, readiness changes, and failed Deployment or
+completion-status writes; clear it only on confirmed ApproverPolicyManager `NotFound`. Approval RBAC
+must have one conditional owner: the static-resource controller must not recreate it while intent is set.
 
 Once `autoApproverDisabled` is set to `true`, the cert-manager controller **keeps the auto-approver
 disabled as long as the `ApproverPolicyManager` CR exists** — regardless of the operand's `Ready` state.
@@ -479,14 +488,22 @@ func reconcile(certManagerCR):
 
   if IsNotFound(err):
     // ApproverPolicyManager CR gone → re-enable
+    clearDisableIntent()
     enableAutoApprover()       // recreate ClusterRole/CRB, remove --controllers flag
     set(status.autoApproverDisabled=false)
     return
 
+  if err != nil:
+    return error              // uncertain reads must not restore approval
+
   // ApproverPolicyManager CR exists → ensure auto-approver is disabled
-  if approverPolicy.Status.Ready == True AND autoApproverCurrentlyEnabled():
-    // First time Ready=True observed → trigger the disable
-    disableAutoApprover()      // inject --controllers flag + delete ClusterRole/CRB (both must succeed)
+  if (approverPolicy.Status.Ready == True AND autoApproverCurrentlyEnabled()) OR disableIntentPersisted():
+    persistDisableIntent()    // idempotent; stop on failure before resource mutation
+    disableAutoApprover()      // confirm approval RBAC absent, then update Deployment; stop on errors
+    if not rolloutCompleteAndOldPodsGone():
+      requeue()
+      return
+    confirmApprovalRBACAbsent() // stop on errors; retry status writes without restoring RBAC
     set(status.autoApproverDisabled=true)
   else if autoApproverAlreadyDisabled():
     // Latch held: keep disabled (idempotent no-op if already in desired state)
@@ -498,8 +515,8 @@ func reconcile(certManagerCR):
 
 > **Note on CertManager CR delete/recreate**: Deliberately deleting and recreating the CertManager CR
 > while an `ApproverPolicyManager` CR is active is already a disruptive manual operation. The watch mechanism
->  ensures the cert-manager controller re-reconciles within seconds of
-> the ApproverPolicyManager CR becoming `Ready=True` again, keeping the disable window negligibly short.
+> triggers reconciliation again, but does not guarantee a bounded enforcement gap. Apply the existing-policy
+> maintenance precautions in [Risks and Mitigations](#risks-and-mitigations).
 
 **Automatic cleanup and re-enablement on ApproverPolicyManager CR deletion:**
 
@@ -526,11 +543,11 @@ Step 1: Deploy approver-policy
   oc apply -f approverpolicymanager-cr.yaml
   → approver-policy-controller deploys the operand
   → When operand is Ready=True, cert-manager controller automatically:
+      - Persists disable intent and removes the approval ClusterRoleBinding and ClusterRole
       - Restarts with --controllers=*,-certificaterequests-approver
-      - Deletes cert-manager-controller-approve:cert-manager-io ClusterRole and ClusterRoleBinding
-      - Sets .status.autoApproverDisabled=true on CertManager CR
+      - Confirms RBAC absence and completed rollout before setting .status.autoApproverDisabled=true
 
-Step 2: Create CertificateRequestPolicies
+Step 2: After Ready=True and autoApproverDisabled=true, create CertificateRequestPolicies and policy-use RBAC
   oc apply -f my-policy.yaml
   → approver-policy evaluates future CertificateRequests against this policy
 ```
@@ -624,8 +641,8 @@ flowchart TB
     subgraph AutoDisable["Automatic Disable of Built-in Approver"]
         D --> Q[Set Ready=True on ApproverPolicyManager CR]
         Q --> R[cert-manager controller detects Ready=True]
-        R --> S[Inject --controllers flag<br/>Delete approve ClusterRole/CRB]
-        S --> T[Set .status.autoApproverDisabled=true<br/>on CertManager CR]
+        R --> S[Persist intent; remove approval RBAC<br/>then inject --controllers flag]
+        S --> T[Observe rollout and old-pod termination<br/>Confirm RBAC absent; set autoApproverDisabled=true]
     end
 
     subgraph TrustManagerIntegration["Automatic Trust-Manager Integration (managementState: Managed)"]
@@ -666,18 +683,18 @@ flowchart TB
 
 #### 1. Changes to Existing `CertManager` CR
 
-A new `AutoApproverDisabled` boolean field is added directly to `CertManagerStatus` to surface the **effective**
-state of auto-approval in the running cluster:
+A new `AutoApproverDisabled` boolean field is added directly to `CertManagerStatus` to report completion
+of disabling the built-in approver:
 
 ```golang
 // CertManagerStatus defines the observed state of CertManager.
 type CertManagerStatus struct {
 	apiv1.OperatorStatus `json:",inline"`
 	// autoApproverDisabled reports whether cert-manager's built-in CertificateRequest
-	// auto-approver is currently disabled. It is set to true once an ApproverPolicyManager
-	// CR reports Ready=True (approver-policy is running and responsible for approvals) and
+	// auto-approver has completed disabling: approval RBAC is absent, rollout is complete,
+	// and old approver-enabled pods are gone. Initial Ready=True starts this transition; it
 	// remains true until the ApproverPolicyManager CR is deleted. The default zero value
-	// (false) means the built-in auto-approver is active.
+	// (false) means completion is unconfirmed; default approval may already be unavailable.
 	// +optional
 	AutoApproverDisabled bool `json:"autoApproverDisabled,omitempty"`
 }
@@ -685,8 +702,8 @@ type CertManagerStatus struct {
 
 | `autoApproverDisabled` value | Meaning                                                                                                                                              |
 | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `false` (default)            | Built-in auto-approver is active. No `ApproverPolicyManager` CR found (or it has not yet reported `Ready=True`).                                     |
-| `true`                       | Built-in auto-approver is disabled. An `ApproverPolicyManager` CR reported `Ready=True` — controller flag injected, approve ClusterRole/CRB removed. |
+| `false` (default)            | Disablement is not confirmed; consult conditions. The built-in approver may already lack approval RBAC during a partial transition. |
+| `true`                       | Approval RBAC absence and rollout/old-pod termination were confirmed; this completion state remains latched until ApproverPolicyManager deletion. |
 
 The field is set automatically by the cert-manager controller. Once set to `true`, it stays `true` until the
 `ApproverPolicyManager` CR is deleted. The Go zero value (`false`) makes the "not yet written" case safe by
@@ -739,13 +756,13 @@ type ApproverPolicyWebhookConfig struct {
 	//
 	// Managed (default): the trust-manager-controller watches the CertManager CR's
 	// AutoApproverDisabled field and reconciles toward it:
-	//   - AutoApproverDisabled=true (built-in approver disabled, e.g. an ApproverPolicyManager
-	//     CR is Ready): creates a CertificateRequestPolicy, ClusterRole, and ClusterRoleBinding.
+	//   - AutoApproverDisabled=true (disable transition completed): creates a
+	//     CertificateRequestPolicy, ClusterRole, and ClusterRoleBinding.
 	//     The ClusterRoleBinding is bound to the cert-manager ServiceAccount (always
 	//     "cert-manager" in the "cert-manager" namespace — hardcoded by the operator, not
 	//     configurable).
 	//   - AutoApproverDisabled=false (default zero value): any previously created CertificateRequestPolicy, ClusterRole, and ClusterRoleBinding are deleted. The
-	//     built-in approver is active in this state, so trust-manager does not need approver-policy's involvement.
+	//     completion is unconfirmed; webhook certificate requests can remain pending during the transition.
 	//
 	// Unmanaged: the trust-manager-controller does not create, update, or delete any policy or
 	// RBAC resources, and does not watch the CertManager CR. 
@@ -1027,14 +1044,24 @@ The cert-manager controller watches the `ApproverPolicyManager` CR. On each reco
   `AutoApproverEnabled: built-in CertificateRequest auto-approver has been re-enabled`.
 - **ApproverPolicyManager CR exists, auto-approver already disabled** (idempotent): Keep disabled — no-op,
   ensure `.status.autoApproverDisabled=true`. No Event is emitted (no state change).
-- **ApproverPolicyManager CR exists, auto-approver currently enabled, `Ready=True`**: Trigger disable —
-  inject `--controllers` flag into Deployment and delete ClusterRole/CRB. Both operations must succeed
-  before setting `.status.autoApproverDisabled=true`. If either fails, return an error to trigger an immediate
-  retry on the next loop. On success, emits a `Normal` Event on the CertManager CR:
+- **ApproverPolicyManager CR exists, `Ready=True` or disable intent persisted**: Follow the ordered
+  transition above: persist intent, remove RBAC, update Deployment, observe rollout/old-pod termination,
+  then reconfirm RBAC absence before setting `.status.autoApproverDisabled=true`. On failure, retry without rollback;
+  on success, emits a `Normal` Event on the CertManager CR:
   `AutoApproverDisabled: built-in CertificateRequest auto-approver has been disabled; approver-policy is now responsible for approvals`.
-- **ApproverPolicyManager CR exists, auto-approver currently enabled, `Ready != True`**: **Requeue**
+- **ApproverPolicyManager CR exists, no disable intent, auto-approver currently enabled, `Ready != True`**: **Requeue**
   (`ctrl.Result{Requeue: true}`). The `Watches()` trigger fires again when the ApproverPolicyManager CR status
   is updated.
+
+**Conflicting controller overrides:** While disable intent is recorded or handoff completion is latched,
+`spec.unsupportedConfigOverrides.controller.args` must not re-enable `certificaterequests-approver`.
+If the final controller selection would enable it (for example, `--controllers=*`), the operator blocks
+the conflicting Deployment update, retains disable intent and keeps the default approver RBAC absent.
+It reports a conflict in CertManager status and retries after the administrator removes the override or
+changes it to exclude the built-in approver. Initial `autoApproverDisabled` remains false or absent;
+a previously completed true value stays latched while the manager exists, with the conflict reported
+through conditions. Compatible controller selections and unrelated overrides, including TLS overrides,
+retain their existing behavior. The operator does not silently rewrite the conflicting user override.
 
 #### Webhook TLS Management
 
@@ -1384,20 +1411,25 @@ Below are example static manifests used for creating required resources for inst
 
 ### Risks and Mitigations
 
-- **Race Condition During Transition**: When approver-policy becomes `Ready=True` and the cert-manager
-  controller begins its rollout (to add `--controllers=*,-certificaterequests-approver`), there is a brief
-  window during which the old cert-manager pod may still be running alongside the now-active approver-policy.
-  - Mitigation: The RBAC deletion is immediate and synchronous — the `cert-manager-controller-approve:cert-manager-io`
-    ClusterRole is deleted before the Deployment rollout completes. cert-manager's admission webhook enforces
-    the `approve` verb via SubjectAccessReview on every approval attempt; without the ClusterRole, the old
-    cert-manager pod's approval attempts are rejected with an explicit RBAC error rather than silently racing.
+- **Race Condition During Transition**: With no `CertificateRequestPolicy`, approver-policy makes no
+  approval or denial decision. An applicable existing or concurrently created policy can race with the
+  built-in approver before the handoff completes, including during reinstallation with retained policies.
+  - Mitigation: product documentation must require first installs to start with no policies, prevent
+    concurrent policy creation, wait for both operand `Ready=True` and `autoApproverDisabled=true`, then
+    create policies and policy-use RBAC. Readiness alone does not confirm disablement.
+  - Continuous policy enforcement is not guaranteed during an existing-policy transition; removing RBAC
+    first does not eliminate the earlier activation interval or revoke approvals already granted. Where
+    default approval is unacceptable, arrange maintenance covering new requests, automated renewals, and
+    already-pending requests. Resume only after readiness and handoff completion with suitable policy/RBAC.
+    Product documentation must explain that pausing new submissions alone is insufficient and policies
+    do not retroactively validate issued certificates.
 
 - **Certificate Issuance Gap During Transition**: Between when the cert-manager controller is updated
   (approver-policy ready → auto-approval disabled) and when the user creates `CertificateRequestPolicy`
   resources, new CertificateRequests will be pending.
   - Mitigation: The auto-disable is gated on `ApproverPolicyManager` `Ready=True`, so approver-policy is running
-    before the built-in approver is disabled. Users should create `CertificateRequestPolicy` resources as
-    soon as possible after deploying approver-policy. Documentation highlights this expected behavior.
+    before the built-in approver is disabled. Create policies and policy-use RBAC after the completed
+    handoff; until then, requests can remain pending unless another approver acts. Document this issuance gap.
 
 - **Accidental ApproverPolicyManager CR Deletion Restores Auto-Approval**: If the `ApproverPolicyManager` CR is accidentally
   deleted, the built-in auto-approver is re-enabled, and all CertificateRequests are auto-approved until
@@ -1512,7 +1544,7 @@ When `enabled=true`, the Helm chart creates three additional resources:
 We use an API field (`managementState`) on the TrustManager CR that defaults to `Managed`. Under `Managed`,
 the trust-manager-controller **watches the `CertManager` CR's `AutoApproverDisabled` status field** and
 reconciles the `CertificateRequestPolicy`, `ClusterRole`, and `ClusterRoleBinding` resources to match it —
-creating them when the built-in approver is disabled, and removing them when it is active again. With both operands enabled using default settings, trust-manager's webhook
+creating them when `AutoApproverDisabled=true`, and removing them when it is `false`. With both operands enabled using default settings, trust-manager's webhook
 certificate is approved automatically, with no additional user action.
 
 Setting `managementState: Unmanaged` opts out entirely: the controller does not create, update, or delete any
@@ -1535,11 +1567,12 @@ The API definition for the new `approverPolicy` field on `TrustManagerConfig` is
 | -------------------------------- | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `Unmanaged`                      | *(not checked)*                               | **No-op** — no watches, no checks, no policy/RBAC resources created, updated, or deleted. User is fully responsible for their own resources.                                                          |
 | `Managed` (default)              | `true`                                        | **Create/ensure present**: `CertificateRequestPolicy` + `ClusterRole` + `ClusterRoleBinding` (bound to `cert-manager` SA, hardcoded).                                                                 |
-| `Managed` (default)              | `false` (default zero value)                  | **Delete/ensure absent**: `CertificateRequestPolicy` + `ClusterRole` + `ClusterRoleBinding`, if previously created. The built-in approver is active in this state, so these resources are not needed. |
+| `Managed` (default)              | `false` (default zero value)                  | **Delete/ensure absent**: `CertificateRequestPolicy` + `ClusterRole` + `ClusterRoleBinding`, if previously created. Default approval is not guaranteed during an incomplete handoff; requests can remain pending. |
 
 > Because `AutoApproverDisabled` is a plain boolean field, its Go zero value is `false`. A `CertManager` CR
 > that has not yet been fully reconciled (e.g. during bootstrap) will already present `false` — the safe,
-> conservative default that avoids creating policy/RBAC resources prematurely.
+> conservative default that avoids creating policy/RBAC resources prematurely. It does not guarantee
+> default approval is active; webhook certificate requests can remain pending during a partial handoff.
 
 > The `ClusterRoleBinding` subject is always bound to `ServiceAccount: cert-manager` in namespace `cert-manager`
 > — the fixed name used by the operator's cert-manager deployment (see `cert-manager-sa.yaml` bindata). This
@@ -1554,8 +1587,8 @@ controller)**:
 - trust-manager owns its own webhook TLS lifecycle end-to-end.
 - Resources are cleaned up naturally when the TrustManager CR is deleted.
 - Follows the upstream pattern where these resources are part of the trust-manager Helm chart.
-- The approver-policy-controller has no knowledge of trust-manager and does not need to; it only needs to
-  continue setting `AutoApproverDisabled` accurately on the `CertManager` CR, which trust-manager-controller treats as a read-only, well-defined signal.
+- The cert-manager controller sets `AutoApproverDisabled` on the `CertManager` CR;
+  trust-manager-controller treats it as a read-only signal. Approver-policy-controller reports operand readiness.
 
 **User workflow (with both approver-policy and trust-manager using default settings):**
 
@@ -1610,10 +1643,10 @@ None
   - Verify that the `cert-manager-controller-approve:cert-manager-io` ClusterRole and its ClusterRoleBinding
     are **deleted** automatically when the `ApproverPolicyManager` CR reports `Ready=True`.
   - Verify that the `autoApproverDisabled` field on the CertManager CR is set to `true` after
-    auto-disable is triggered.
+    RBAC absence and rollout/old-pod termination are confirmed; Ready=True alone is insufficient.
   - Verify that when the `ApproverPolicyManager` CR exists but has NOT yet reported `Ready=True` (e.g., operand
     still deploying), the built-in approver remains active and `autoApproverDisabled` is `false`.
-  - Verify that after `Ready=True` is reached once, the built-in approver remains disabled even if the
+  - Verify that after the initial disable transition completes, the built-in approver remains disabled even if the
     ApproverPolicyManager operand has a transient failure (pod crash, brief NotReady) — `autoApproverDisabled`
     must remain `true`.
   - Verify cert-manager's issuer controllers (CA, ACME, etc.) continue to sign certificates that are
@@ -1632,12 +1665,23 @@ None
     the built-in approver is disabled.
   - Verify that no duplicate Event is emitted on subsequent idempotent reconciliations (latch already held).
 - **Atomicity tests (partial disable failure):**
-  - Verify that if the Deployment update succeeds but the ClusterRole deletion fails (simulated transient
-    error), the cert-manager controller retries on the next reconciliation and eventually completes both
-    operations. `autoApproverDisabled` must not be set to `true` until both succeed.
-  - Verify that if the ClusterRole is deleted but the Deployment update fails, the RBAC guard is
-    immediately active (approval attempts rejected by admission webhook) and the Deployment update is
-    retried on the next loop.
+  - Fail RBAC deletion and verify the Deployment update is not started; retry without restoring removed RBAC.
+  - Fail the Deployment update after RBAC removal; verify RBAC remains absent and the update is retried.
+  - Stall rollout with an old approver-enabled pod (including terminating pods); verify a Ready new pod or
+    accepted update is insufficient to set `autoApproverDisabled=true`. Require the intended generation.
+  - Fail intent/completion status writes and restart during each step; verify durable recovery, no mutation
+    before intent persistence, and no restoration on transient Ready=False or non-NotFound read errors.
+  - Verify the static-resource controller cannot recreate approval RBAC while disable intent is set.
+  - After completion, verify a request disallowed by an applicable policy cannot be default-approved.
+  - Verify no-policy installation leaves requests pending after disablement until a policy and RBAC exist
+    (assuming no other approver); document the existing-policy transition limitation.
+
+- **Conflicting controller override tests:**
+  - Verify an unsupported override that enables `certificaterequests-approver` blocks the Deployment
+    update, reports the conflict, retains intent/removed RBAC and withholds initial completion.
+  - Verify correcting/removing the override resumes handoff; compatible controller selections and
+    unrelated overrides remain effective. A conflict after completion must not clear the true latch.
+
 - **Latch persistence test:**
   - Verify that after the latch is engaged (auto-approver disabled), a transient `Ready=False` on the
     ApproverPolicyManager CR (e.g., rolling update, pod crash) does NOT cause the cert-manager controller to
@@ -1746,7 +1790,7 @@ approver-policy will be supported for:
 
 - **ApproverPolicyManager Operand Fails to Become Ready**: If the approver-policy operand cannot reach `Ready=True`, the cert-manager controller will not auto-disable the
   built-in approver. The `ApproverPolicyManager` CR status will show a `Degraded` condition describing the failure.
-  The built-in approver continues to function during this period.
+  The built-in approver continues to function before initial disable intent; later readiness failures do not cancel an initiated transition.
 
 - **cert-manager Not Available**: If cert-manager is not installed or not running, approver-policy will
   not function correctly as it depends on cert-manager's CertificateRequest resources.
@@ -1763,9 +1807,9 @@ approver-policy will be supported for:
 
 - **`CertManager` CR or `autoApproverDisabled` Field Not Yet Set**: If the trust-manager-controller
   has not yet observed a `CertManager` CR (or the CR exists but controller has not yet written `autoApproverDisabled` on it — a narrow bootstrap window), `approverPolicy.managementState: Managed`
-  reads the field as `false` (Go zero value) and does not create the policy/RBAC resources. This is safe:
-  the built-in approver is still active in that window, so trust-manager's certificate continues to be
-  approved by it.
+  reads the field as `false` (Go zero value) and does not create the policy/RBAC resources. Approval RBAC
+  may already be absent during a partial handoff, so its webhook certificate can remain pending until
+  completion is confirmed and the policy/RBAC resources are created.
 
 
 ### Example Configurations
