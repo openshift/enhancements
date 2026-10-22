@@ -272,7 +272,7 @@ This makes it straightforward to distinguish clusters that have undergone a tran
 
 The field uses the existing `TopologyMode` type with an enum validation constraint that restricts accepted values to topology modes that have defined transitions. For the initial implementation, only `SingleReplica` and `HighlyAvailable` are valid enum values. Additional values can be added as new transitions are supported.
 
-**Mapping to status fields**: For SNO → HAC, both `status.controlPlaneTopology` and `status.infrastructureTopology` become `HighlyAvailable`. `spec.infrastructureTopology` is not required; `oc` will set `spec.infrastructureTopology` to `spec.ControlPlaneTopology` automatically for SNO → HAC transitions. The controller admits the request only when the pair is both `SingleReplica` → both `HighlyAvailable`.
+**Mapping to status fields**: For SNO → HAC, both `status.controlPlaneTopology` and `status.infrastructureTopology` become `HighlyAvailable`. `oc` will set `spec.infrastructureTopology` to `spec.ControlPlaneTopology` automatically for SNO → HAC transitions. The controller admits the request only when the pair is both `SingleReplica` → both `HighlyAvailable`.
 
 **Status (observed state):**
 
