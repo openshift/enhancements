@@ -21,7 +21,7 @@ approvers:
 api-approvers:
   - "@everettraven" # new API in config.openshift.io/v1alpha1
 creation-date: 2025-10-20
-last-updated: 2026-10-19
+last-updated: 2026-10-23
 status: provisional
 tracking-link:
   - https://issues.redhat.com/browse/OCPSTRAT-2271
@@ -473,7 +473,7 @@ Before pruning, the administrator prepares the cluster following documented guid
 
 **Server vs. client CAs.** The two directions differ in what "safe to prune" requires:
 
-- **Server CAs**: once the superseded server CA has left the trust bundles (all consumers trust the new CA and are server chains that validate), the platform's responsibility ends and the CA can be pruned. A subsequent client-side rotation, so clients no longer trust the old CA, is the administrator's follow-up.
+- **Server CAs**: a superseded server CA is safe to prune once every server certificate chained to it has been reissued under the new CA. Append-only propagation has already placed the new CA in every managed trust bundle by that point, so every consumer of those bundles still validates every server once the old CA is removed. Both facts are observable in-cluster as rotation convergence, which is where the platform's responsibility ends. The administrator's follow-up is off-cluster consumers that hold their own copies of the trust (for example kubeconfigs and external mTLS clients): they must adopt the new CA, since only the short-lived forward cross-signing certificate keeps their old trust validating new-CA servers, and it ages out.
 - **Client CAs**: dropping a superseded client CA additionally requires explicit administrator acknowledgement that **break-glass client certificates and critical-path clients have rotated** to the new CA. Because the cluster cannot observe every holder of a client certificate (notably off-cluster break-glass kubeconfigs), this ACK keeps a human in the loop before the old client trust anchor is removed.
 
 The exact prune interface is still being designed (it may be an `oc adm` subcommand, for example `oc adm pki prune-superseded-cas`, or a documented procedure). Whatever its form, it is cluster-wide and removes the CA generations that no longer match the resolved PKI configuration.
@@ -481,7 +481,7 @@ The exact prune interface is still being designed (it may be an `oc adm` subcomm
 ##### Scope and continuity
 
 - **Cluster-wide only.** Rotation and pruning operate across the cluster, not on individual certificates or CA lineages.
-- **Cross-signing continuity.** Immediate rotation is safe because the new CA cross-signs the old CA's key, so both old and new trust validate during the transition (see [Cross-Signing to Ease Rotation](#cross-signing-to-ease-rotation)).
+- **Cross-signing continuity.** Immediate rotation is safe because the old CA issues a forward cross-signing certificate for the new CA's key and the old CA remains in the union trust bundle, so both old- and new-CA leaves validate during the transition (see [Cross-Signing to Ease Rotation](#cross-signing-to-ease-rotation)).
 - **Migration shape.** A configuration change (applied immediately) followed by a prune brackets a full algorithm migration: reissue under the new algorithm, then disable the old one by pruning its CAs.
 
 ##### Scenarios
@@ -736,7 +736,7 @@ The specifics of OLM integration, including whether any per-operator mechanism i
 
 - The operator sets `Progressing=True` on its ClusterOperator while any of the certificates it manages do not match the desired PKI configuration, with a message describing the gap (the PKI conditions controller below reports it in the form `3/12 certificates at PKI generation 4 but should be at 5`). When every managed certificate matches the desired configuration, the operator sets `Progressing=False`.
 - The signal is level-triggered on the configuration, not on time: `Progressing` is True whenever managed certificate material does not match the desired PKI configuration (a managed resource that still reflects a previous configuration, or that was previously issued and has since been deleted), and False when it matches. Two cases never set it: routine expiry-driven refresh, and first-time issuance for new demand (for example the initial serving certificate for a newly annotated Service), which is growth of the managed set rather than a failure to converge, consistent with platform guidance that scale-up of owned resources is not operator progress. Material an operator cannot reissue (for example long-lived installer-generated CAs) is outside the managed set and does not hold `Progressing` open.
-- The contract covers whether the operator performed the work (the resources it manages, typically Secrets and ConfigMaps, are at the desired configuration), not whether every consumer has reloaded the new material; consumer-reload tracking is out of scope (see [Non-Goals](#non-goals)). Level-triggered reconciliation makes this durable: achieved states are re-derived on every sync rather than remembered.
+- The contract covers whether the operator performed the work (the resources it manages, typically Secrets and ConfigMaps, are at the desired configuration), not whether every consumer has reloaded the new material; consumer-reload tracking is out of scope (see [Non-Goals](#non-goals)). Level-triggered reconciliation makes this durable: achieved states are re-derived on every sync from cluster state rather than remembered by the controller.
 - Where an operator surfaces this signal through internal condition types, their names must be formed so they roll up to the ClusterOperator's aggregate `Progressing` condition through the operator's status machinery (in the common pattern, a `Progressing`-suffixed type); a distinct type such as `*_Rotating` would not roll up and is ruled out. Exact internal condition naming is left to each operator's technical design.
 
 **A reusable controller (offered, not required).** To make the above cheap, a reusable **PKI conditions controller** may be embedded by each PKI-managing operator, together with the resource markings it evaluates:
@@ -1028,7 +1028,7 @@ Earlier drafts expressed rotation and pruning as either new request resources (C
 Variants considered:
 - **Standing policy enums** (for example `rollout.strategy: OnExpiry|Immediate`, `rollout.supersededSigners: Retain|Prune`). Rejected because a standing prune would keep retiring superseded CAs automatically (the failure mode behind rapid-regeneration cascades).
 - **A `forceRedeploymentReason`-style nonce string** on the spec. Rejected because re-triggering is awkward and it offers no history.
-- **Request-resource CRDs.** Rejected to minimize complexity: the design is cluster-wide only, rotation is simply immediate reconciliation, and pruning is a one-off administrator action delivered through a configuration signal processed by the existing rotation controllers rather than a new control loop.
+- **Request-resource CRDs.** Rejected to minimize complexity: the design is cluster-wide only, rotation is simply immediate reconciliation, and pruning is a one-off, tool-driven administrator action (for example an `oc adm` subcommand) that runs out-of-band from the PKI-managing operators and removes the superseded CAs' now-orphaned certs directly from the managed trust bundles, so it needs neither a request resource nor a new control loop.
 
 ### Alternative 7: Management floor plus HostedCluster override for Hypershift
 
@@ -1058,7 +1058,7 @@ Instead of a single conformance-scoped `Progressing` signal evaluated against th
 
 ## Open Questions
 
-- The exact prune interface (an `oc adm` subcommand, for which `oc adm pki prune-superseded-cas` is a candidate name, a documented procedure, or another configuration signal) and what minimal safety checks it performs, and which operator-reported readiness conditions gate it (see [Pruning superseded CAs](#pruning-superseded-cas)).
+- The exact prune interface (an `oc adm` subcommand, for which `oc adm pki prune-superseded-cas` is a candidate name, or a documented procedure) and what minimal safety checks it performs, and which operator-reported readiness conditions gate it (see [Pruning superseded CAs](#pruning-superseded-cas)).
 - Which core-platform certificates do not auto-rotate today, and which issuers support cross-signing (both under investigation).
 - Whether an aggregated view of PKI convergence beyond per-operator `Progressing` conditions (for example a single command or condition summarizing all operators' PKI convergence) is worth adding later; the initial design relies on `oc get clusteroperators` as the convergence check during migrations.
 - Whether the configuration stamps and manager labels should become a required contract on all platform-managed certificate resources (as originally proposed in the status-reporting discussions) once adoption of the PKI conditions controller is widespread, or remain an optional convention.
@@ -1110,24 +1110,23 @@ Instead of a single conformance-scoped `Progressing` signal evaluated against th
 - Certificate generation with different algorithms and parameters
 - RSA key size combinations: 2048, 3072, and 4096 bits
 - ECDSA curve combinations: P-256, P-384, and P-521
-- Upgrade path (empty config → defaults)
+- Upgrade path (resource created with the `Legacy` configuration reproduces the pre-feature defaults, with no reissue)
 - PKI conditions controller: a lagging or deleted managed resource sets `Progressing`; conforming resources do not; first-time issuance for new demand does not; the `x/y` message counts are correct
 
 **Integration Tests:**
 - Deploy cluster with PKI configuration in install-config
 - Verify CA certificates generated with correct parameters
-- Create PKI resource post-installation
+- Edit the installer-created PKI resource post-installation
 - Verify certificate rotation applies new parameters
 - Test configuration changes (edit PKI resource)
 
 **E2E Tests:**
 - Install cluster with RSA 4096 CA certificates
 - Configure ECDSA P-384 for server certificates post-install
-- Force certificate rotation
-- Verify all server certificates use ECDSA P-384 after rotation
+- Verify non-conforming server certificates are reissued with ECDSA P-384 without waiting for natural expiry
 - Upgrade cluster from version without feature to version with feature
-- Verify existing certificates continue to work and rotate with defaults
-- Create PKI config post-upgrade and verify it applies on next rotation
+- Verify existing certificates continue to work and rotate with the `Legacy` configuration
+- Edit the PKI configuration post-upgrade and verify non-conforming certificates are reissued immediately
 - Change the PKI configuration on a running cluster and verify each PKI-managing operator's ClusterOperator reports `Progressing=True` with a message describing the gap, then `Progressing=False` at convergence
 - Verify routine expiry-driven rotation does not set `Progressing` on an otherwise idle cluster (no condition flapping over the normal rotation cadence)
 - Verify upgrades do not spuriously set `Progressing` on PKI-managing operators when no PKI configuration change is in progress (coordinate exception handling with origin monitor tests that assert no `Progressing` blip during upgrade)
@@ -1155,7 +1154,7 @@ During early development with v1alpha1 and TechPreviewNoUpgrade feature gate:
 - Feature complete as described in this enhancement
 - ConfigurablePKI feature gate available with TechPreviewNoUpgrade enablement
 - PKI CRD installed
-- Installer integration for CA certificate configuration
+- Installer integration for `pki.profile` (Day-1 certificate configuration)
 - At least kube-apiserver-operator, etcd-operator, and service-ca-operator:
   - Support PKI configuration for certificate generation
   - Report `Progressing` while their managed certificates do not match the desired PKI configuration (see [PKI Change Status Reporting](#pki-change-status-reporting))
@@ -1194,7 +1193,7 @@ Before the M.N release, all of the following criteria must be met:
   - **API migration guide (v1alpha1 → v1)** if breaking changes were made
 - SLIs defined and documented:
   - Operator `Degraded` condition rate for PKI-related failures
-  - PKI convergence time: operator `Progressing` clears within a bounded interval after a PKI configuration change
+  - PKI convergence time: each operator's `Progressing` clears within a bounded interval after a PKI configuration change, with the bound set per operator
   - PKI resource readability (operators can watch and read the PKI resource)
   - Certificate rotation completes without PKI-related errors (observed via operator status conditions and events)
 - Support procedures documented for common failure modes
@@ -1383,8 +1382,9 @@ However, there are some considerations:
 
 4. Check certificate generation time vs PKI configuration update time:
    ```bash
-   # Certificate NotBefore time should be after PKI config update
-   oc get pki cluster -o jsonpath='{.metadata.creationTimestamp}'
+   # A non-conforming certificate's replacement should have a NotBefore after the PKI config update
+   # (conforming certificates are not reissued, so may predate it)
+   oc get pki cluster -o jsonpath='{.metadata.managedFields[*].time}'
    ```
 
 **Symptom: PKI configuration change is not converging**
@@ -1438,7 +1438,7 @@ The PKI resource is a required, undeletable singleton, so reverting means restor
    oc delete secret -n openshift-kube-apiserver kube-apiserver-serving-cert
    ```
 
-4. Monitor rotation progress:
+3. Monitor rotation progress:
    ```bash
    oc get clusteroperators
    # Wait for all operators to report Available=True, Progressing=False
@@ -1489,7 +1489,7 @@ The PKI resource is a required, undeletable singleton, so reverting means restor
    # Repeat for other certificates as needed
    ```
 
-3. Certificates will be regenerated with hardcoded defaults
+3. Non-conforming certificates are regenerated with the restored (Legacy-equivalent) configuration
 
 ## Infrastructure Needed [optional]
 
