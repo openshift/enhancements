@@ -355,8 +355,9 @@ spec:
     reason: Forbidden
   # Require pod-bound token claims, rejecting unbound service account
   # credentials and username-only impersonation. This validation is omitted
-  # on External control planes and IBM Cloud managed clusters, where generated
+  # for HyperShift clusters (ibm-cloud-managed CVO profile), where generated
   # kubeconfig credentials do not include the pod and node claims.
+  # See https://redhat.atlassian.net/browse/CNTRLPLANE-710.
   - expression: >-
       !variables.hasManagedProfileName ||
       (has(request.userInfo.extra) &&
@@ -388,13 +389,15 @@ CIO reports an `openshift.io/Configured` status condition on each Managed Profil
 It checks that the expected class-default ConfigMap exists in
 `openshift-ingress` and has the
 `gateway.istio.io/defaults-for-class: <gatewayclass-name>` label.
+CIO also reports the existing `ControllerInstalled` and `CRDsReady`
+installation conditions on Managed Profiles, consistent with User-created
+OpenShift GatewayClasses.
 
 - `True / Configured`: the expected ConfigMap and label are present.
 - `False / ConfigurationMissing`: the expected ConfigMap is absent or
   its class-selection label is missing or incorrect.
 - `False / Unmanaged`: CIO has stopped managing and guaranteeing the profile
   configuration.
-- `Unknown / Pending`: CIO has not yet checked the configuration.
 
 The condition message identifies the ConfigMap by namespace and name
 so users can inspect it. The ConfigMap is managed implementation output,
@@ -410,7 +413,7 @@ status:
       reason: Configured
       message: >-
         ConfigMap
-        openshift-ingress/openshift-gatewayclass-loadbalancer-external-config
+        openshift-ingress/istio-openshift-gateway-gatewayclass-openshift-loadbalancer-external
         is present and associated with GatewayClass openshift-loadbalancer-external.
         Inspect the ConfigMap for configuration details.
 ```
@@ -940,13 +943,14 @@ User-created OpenShift GatewayClasses.
 
 ### Failure Modes
 
-- If CIO fails to create the GatewayClass defaults ConfigMap,
-  Gateways referencing that class will be provisioned with
-  Istio's default behavior (LoadBalancer, no platform
-  annotations). CIO should set a condition on the GatewayClass
-  to indicate the failure.
-- If the ConfigMap is deleted manually, CIO should recreate it
-  on the next reconciliation in `Managed` mode.
+- If Sail does not create the GatewayClass defaults ConfigMap, CIO does not
+  create the Managed Profile. CIO logs that it is waiting for the ConfigMap and
+  retries reconciliation. Because the GatewayClass does not yet exist, CIO
+  cannot report the failure through `openshift.io/Configured`.
+- If an existing Managed Profile's ConfigMap is deleted, CIO reports
+  `openshift.io/Configured=False` with reason `ConfigurationMissing`. Sail
+  recreates the ConfigMap through subsequent reconciliation, after which CIO
+  restores `openshift.io/Configured=True`.
 - If the ValidatingAdmissionPolicy is deleted, the Managed Profile name
   reservation is lost but Gateway provisioning continues to work. CVO will
   restore the VAP as a static manifest.
