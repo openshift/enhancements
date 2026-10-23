@@ -22,8 +22,8 @@ OpenShift platform reliability is measured through SLIs (Service Level Indicator
 Operators must handle partial failures gracefully:
 
 1. **Set `Degraded=True`** with a clear reason when functionality is impaired but not lost
-2. **Set `Available=False`** only when the component is completely non-functional
-3. **Never block upgrades** unless there is a genuine data-loss or corruption risk
+2. **Set `Available=False`** when pods aren't ready, the API is not serving, or the component cannot fulfill its function — not only for complete failure
+3. **Block upgrades when preconditions are unmet** — set `Upgradeable=False` when any documented upgrade precondition is not satisfied, not only for data-loss risk
 4. **Implement exponential backoff** for retries on transient failures
 5. **Report `Progressing=True`** only during active state transitions, not during steady-state
 
@@ -36,11 +36,7 @@ Operators must handle partial failures gracefully:
 
 ## Disruption Budget
 
-OpenShift tracks disruption budgets for API availability during upgrades. Components must not introduce regressions in:
-- API availability (no new downtime windows)
-- Console responsiveness
-- Ingress connectivity
-- DNS resolution
+OpenShift uses PodDisruptionBudgets (PDBs) to limit voluntary disruption of selected pods during upgrades and maintenance. PDBs do not guarantee API, console, ingress, or DNS availability — they only constrain voluntary eviction of pods matching the PDB's selector. PDBs also do not cover involuntary failures (node crashes, OOM kills). Components should not introduce regressions in disruption testing.
 
 ## Platform Documentation
 

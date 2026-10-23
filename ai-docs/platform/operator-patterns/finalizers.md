@@ -17,7 +17,7 @@ Finalizers prevent Kubernetes from deleting a resource until the controller has 
 3. Resource enters "terminating" state (still exists)
 4. Controller detects deletionTimestamp, performs cleanup
 5. Controller removes finalizer
-6. Kubernetes garbage-collects the resource
+6. Once no finalizers remain, the API server completes deletion of the object (garbage collection of dependents is handled separately through owner references)
 ```
 
 ## Key Conventions
@@ -31,7 +31,7 @@ Finalizers prevent Kubernetes from deleting a resource until the controller has 
 ## Common Mistakes
 
 - **Forgetting to handle the deletion path** — the controller must check `DeletionTimestamp` and handle cleanup
-- **Leaving orphaned finalizers** — if the controller is removed, resources with its finalizer can never be deleted
+- **Leaving orphaned finalizers** — if the controller is removed, resources with its finalizer remain stuck in terminating state until the finalizer is manually removed
 - **Using finalizers for in-cluster resources** — prefer owner references for resources within the same cluster
 
 ## Owner References vs Finalizers

@@ -18,12 +18,14 @@ OpenShift security practices encompass RBAC patterns, SCC (Security Context Cons
 
 ## Security Context Constraints (SCC)
 
-OpenShift extends Kubernetes PodSecurity with SCCs:
-- `restricted` — default for workloads; no privilege escalation
+OpenShift extends Kubernetes PodSecurity with SCCs. The default SCC varies by version:
+- `restricted` — legacy default (pre-4.11 installations)
+- `restricted-v2` — default on 4.11+ new installations; `restricted` is not available to users unless explicitly granted
+- `restricted-v3` — introduced in later versions with further constraints
 - `anyuid` — allows running as any UID (avoid unless required)
 - `privileged` — full host access (only for infrastructure components)
 
-**Convention**: Workloads must declare their required SCC via the `openshift.io/required-scc` annotation.
+**Convention**: Workloads that need a pinned SCC may opt in by declaring the `openshift.io/required-scc` annotation. This is not required on every workload — only those that need a specific SCC beyond the default.
 
 ## Secret Management
 

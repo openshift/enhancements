@@ -2,7 +2,7 @@
 
 **Purpose**: Visual navigation map showing how concepts connect
 
-**Last Updated**: 2026-06-23
+**Last Updated**: 2026-10-23
 
 ---
 

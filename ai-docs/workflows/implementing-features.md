@@ -15,13 +15,14 @@ This guide covers the workflow for implementing features in OpenShift after an e
 ```
 1. Enhancement approved (status: implementable)
 2. Create Jira Epic linked to enhancement tracking ticket
-3. Implement behind feature gate (TechPreviewNoUpgrade)
-4. Write unit and integration tests
-5. Submit PRs to component repo(s)
-6. Add e2e tests to openshift/origin if needed
-7. Update CI configuration in openshift/release
-8. Graduate through feature gate stages
-9. Update enhancement status to "implemented"
+3. Define feature gate in openshift/api and vendor it into the component
+4. Implement behind feature gate (TechPreviewNoUpgrade)
+5. Write unit and integration tests
+6. Submit PRs to component repo(s)
+7. Add e2e tests to openshift/origin if needed
+8. Update CI configuration in openshift/release
+9. Graduate through feature gate stages
+10. Update enhancement status to "implemented"
 ```
 
 ## Feature Gate Stages
@@ -29,7 +30,8 @@ This guide covers the workflow for implementing features in OpenShift after an e
 | Stage | Audience | Stability | Upgrade Support |
 |-------|----------|-----------|-----------------|
 | **TechPreviewNoUpgrade** | Internal/early adopters | May change between releases | No upgrade path guaranteed |
-| **Default** | All users | Stable API, stable behavior | Full upgrade support required |
+| **Accessible-by-default** | All users (opt-in) | Stable API, feature accessible | Upgrade support required |
+| **On-by-default** | All users (enabled) | Stable API, stable behavior | Full upgrade support required |
 
 Feature gates are defined in [openshift/api](https://github.com/openshift/api) and must trace through: definition → runtime check → startup wiring. See [dev-guide/featuresets.md](../../dev-guide/featuresets.md).
 

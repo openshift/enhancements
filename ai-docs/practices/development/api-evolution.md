@@ -24,7 +24,7 @@ OpenShift APIs are supported immediately once merged. API evolution must preserv
 ## Compatibility Requirements
 
 1. **No breaking changes** to GA APIs — ever. New fields must be optional with backward-compatible defaults
-2. **No conversion webhooks** in OpenShift APIs — unlike upstream Kubernetes, OpenShift does not use webhook-based CRD conversion between versions
+2. **Conversion strategy varies by API type** — most OpenShift APIs use internal or aggregated-server conversion rather than CRD conversion webhooks, but exceptions exist (e.g., `ConsoleDynamicPlugin`). Check the specific API
 3. **Pointer avoidance** — avoid pointer fields in CRD-based APIs unless there is an absolute need (distinguishing unset from zero-value)
 4. **Validation via CEL** — preferred over webhooks for new APIs; see `dev-guide/api-conventions.md`
 
@@ -36,7 +36,7 @@ v1alpha1 → v1beta1 → v1 (GA)
 
 - **Alpha**: May change or be removed between releases. Behind TechPreviewNoUpgrade feature gate
 - **Beta**: Deprecated in OpenShift; new APIs should go straight from alpha to GA
-- **GA (v1)**: Supported indefinitely. Breaking changes require a new API group
+- **GA (v1)**: Supported indefinitely. Breaking changes within the same non-beta version are bugs. Transitioning to a new API requires deprecating the existing API and supporting it across upgrades
 
 ## Common API Evolution Mistakes
 

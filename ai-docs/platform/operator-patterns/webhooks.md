@@ -17,7 +17,7 @@ Kubernetes admission webhooks intercept API requests for validation and mutation
 | **Mutating** | Set defaults, inject fields | Before validation |
 | **Conversion** | Convert between API versions | On storage/retrieval |
 
-**Important**: OpenShift does NOT use CRD conversion webhooks for its own APIs. API version transitions are handled by maintaining a single storage version. This differs from upstream Kubernetes patterns.
+**Important**: Most OpenShift APIs handle version transitions via internal or aggregated-server conversion rather than CRD conversion webhooks. Exceptions exist — for example, `ConsoleDynamicPlugin` uses a CRD conversion webhook. Check the specific API before assuming no conversion webhook is in use.
 
 ## Registration
 
@@ -31,7 +31,7 @@ mgr.GetWebhookServer().Register("/validate-myresource", &webhook.Admission{
 
 ## Key Conventions
 
-1. **Fail-open for non-critical webhooks** — use `failurePolicy: Ignore` unless the webhook enforces security invariants
+1. **Choose failurePolicy carefully** — use `failurePolicy: Fail` when the webhook enforces invariants; use `Ignore` only when a safe fallback exists and the webhook is not required for correctness
 2. **Namespace selectors** — scope webhooks to relevant namespaces to avoid performance impact
 3. **Timeout** — set `timeoutSeconds` to 10 or less; default is 10s
 4. **Side effects** — webhooks must be side-effect-free (`sideEffects: None`)

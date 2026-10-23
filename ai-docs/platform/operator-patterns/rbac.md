@@ -7,7 +7,7 @@
 
 ## Overview
 
-Role-Based Access Control (RBAC) in OpenShift extends Kubernetes RBAC with additional roles, SCCs, and project-scoped bindings. Operators must follow least-privilege principles for their ServiceAccounts.
+Role-Based Access Control (RBAC) in OpenShift extends Kubernetes RBAC with additional roles and project-scoped bindings. Security Context Constraints (SCCs) are a separate pod-security mechanism — not RBAC roles. Operators must follow least-privilege principles for their ServiceAccounts.
 
 ## RBAC Components
 
@@ -43,8 +43,8 @@ For OLM-managed operators:
 ## Auditing RBAC
 
 ```bash
-# List all ClusterRoleBindings for a ServiceAccount
-oc get clusterrolebindings -o json | jq '.items[] | select(.subjects[]?.name == "my-operator")'
+# List all ClusterRoleBindings for a specific ServiceAccount (filter by kind and namespace)
+oc get clusterrolebindings -o json | jq '.items[] | select(.subjects[]? | .kind == "ServiceAccount" and .name == "my-operator" and .namespace == "my-namespace")'
 
 # Check what a ServiceAccount can do
 oc auth can-i --list --as=system:serviceaccount:my-namespace:my-operator

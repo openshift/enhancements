@@ -8,15 +8,15 @@
 
 ## Overview
 
-OpenShift follows a testing pyramid with the standard ratio: heavy unit testing at the base, integration in the middle, and targeted end-to-end tests at the top.
+OpenShift follows a testing pyramid: heavy unit testing at the base, integration in the middle, and targeted end-to-end tests at the top.
 
 ## Test Layers
 
-| Layer | Ratio | Scope | Where |
-|-------|-------|-------|-------|
-| **Unit** | ~60% | Single package, mocked dependencies | `*_test.go` beside source |
-| **Integration** | ~30% | Multiple packages, real APIs where feasible | `test/integration/` or `test/e2e/` |
-| **End-to-end** | ~10% | Full cluster, real workloads | [openshift/origin](https://github.com/openshift/origin) conformance suites |
+| Layer | Scope | Where |
+|-------|-------|-------|
+| **Unit** | Single package, mocked dependencies | `*_test.go` beside source |
+| **Integration** | Multiple packages, real APIs where feasible | `test/integration/` or `test/e2e/` |
+| **End-to-end** | Full cluster, real workloads | [openshift/origin](https://github.com/openshift/origin) conformance suites |
 
 ## Key Conventions
 
@@ -36,9 +36,9 @@ Tests must **always produce a result** (pass or fail). Tests that only emit fail
 
 ### Suites
 
-- `openshift/conformance/parallel` — runs concurrently; tests must not mutate shared cluster state
+- `openshift/conformance/parallel` — runs concurrently; tests must not mutate shared cluster state AND must clean up after themselves, including on errors
 - `openshift/conformance/serial` — isolated, sequential execution
-- Tests can be ordered with `[Early]` or `[Late]` annotations
+- `[Early]` and `[Late]` annotations place tests near the start or end of a run; all other ordering is randomized and not guaranteed
 
 ### Flake Handling
 

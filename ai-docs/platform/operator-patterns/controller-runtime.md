@@ -15,7 +15,7 @@ OpenShift operators use two primary controller frameworks. Understanding which f
 |--------|-------------------|------------|
 | **Import** | `sigs.k8s.io/controller-runtime` | `github.com/openshift/library-go/pkg/operator` |
 | **Reconcile signature** | `Reconcile(ctx, Request) (Result, error)` | Sync-based with `SyncContext` |
-| **Resource apply** | `client.Patch` (SSA) or `client.Update` | `resourceapply` helpers |
+| **Resource apply** | `client.Patch` (supports multiple patch types; SSA requires explicit apply patch type with field-manager) or `client.Update` | `resourceapply` helpers |
 | **Used by** | Newer operators, OLM-managed | Core platform operators |
 | **Manager** | `ctrl.NewManager()` | Custom startup via `library-go/pkg/cmd` |
 
@@ -45,7 +45,7 @@ Controllers register through library-go's operator framework, using `factory.Con
 1. **Never mix frameworks** within a single controller — use the framework the repo has standardized on
 2. **Always re-read state** at the start of reconciliation; never cache state between reconcile calls
 3. **Use context cancellation** for graceful shutdown
-4. **Log at appropriate levels** — `V(0)` for errors, `V(2)` for state changes, `V(4)` for detailed reconciliation
+4. **Log at appropriate levels** — use `log.Error` for errors; reserve `V(0)` for high-priority informational messages, `V(2)` for state changes, `V(4)` for detailed reconciliation
 
 ## Platform Documentation
 

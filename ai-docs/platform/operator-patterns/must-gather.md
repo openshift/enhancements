@@ -7,7 +7,7 @@
 
 ## Overview
 
-`must-gather` is OpenShift's diagnostic data collection framework. Each operator provides a must-gather image that collects component-specific logs, resources, and configuration for debugging.
+`must-gather` is OpenShift's diagnostic data collection framework. The default `oc adm must-gather` image collects platform-wide diagnostics. Additional must-gather images may be provided by CVO-managed operators (listed in the release payload), OLM-managed operators (annotated in ClusterServiceVersion or ClusterOperator objects), or third-party sources. Not every operator provides a dedicated must-gather image.
 
 ## How It Works
 
@@ -42,7 +42,7 @@ A component's must-gather should collect:
 2. **Use namespaced collection** — collect only from relevant namespaces
 3. **Include recent events** — events provide timeline context for debugging
 4. **Collect both operator and operand logs** — the operator's view and the operand's behavior often differ
-5. **Note**: must-gather creates namespaces with an `openshift-` prefix and randomly generated suffix — tests must exclude these namespaces
+5. **Note**: must-gather creates namespaces named `openshift-must-gather-*` with a randomly generated suffix — tests must exclude these specific namespaces (not all `openshift-*` namespaces). When using `--run-namespace`, must-gather runs in an existing namespace instead
 
 ## Creating a must-gather Image
 
