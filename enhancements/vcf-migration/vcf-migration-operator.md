@@ -344,7 +344,7 @@ Same vSphere/Machine API assumptions as standalone clusters where those subsyste
 
 - **API group:** `migration.openshift.io`, `VmwareCloudFoundationMigration` `v1alpha1`.
 - **Secrets:** target vCenter credentials come from the referenced Secret. Installer metadata is written during `SourceCleaned` to the `<migration-name>-metadata` Secret in the CR namespace (key `metadata.json`). It is installer-compatible JSON that includes vCenter credentials, so restrict read access.
-  The operator sets no owner reference and never deletes it, so it survives failed cleanup and CR deletion.
+  The operator sets no owner reference and never deletes it, so once written it survives failed cleanup and CR deletion.
 - **Cloud config:** `openshift-config/cloud-provider-config` key `config` is read and written as YAML only; supported clusters are OpenShift **4.20+**, whose installs use YAML configs.
 - **Failure domain mapping:** `spec.failureDomainMappings` is the only source→destination relationship in the CR; source topology is read from `Infrastructure`. Preflight resolves it once and records it write-once in `status.failureDomainMappings`; later reconciles reject spec changes order-insensitively (reordering equivalent entries is fine);
   for multi-failure-domain migrations the list must stay present.
