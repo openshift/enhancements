@@ -184,7 +184,7 @@ This stage runs only when **`spec.state: Running`**. Status is set to **`Infrast
 | 13 | **Cluster readiness:** `VSphereMultiVCenterDay2` feature gate enabled and no ClusterVersion upgrade in progress | `feature gate … is not enabled`, `cluster upgrade is in progress` |
 | 14 | ClusterOperators healthy | unhealthy ClusterOperator |
 | 15 | No bound or provisioned **vSphere CSI** storage (PVs / PVCs / StorageClasses) | vSphere CSI storage detected |
-| 16 | `ClusterCSIDriver/vsphere` is `Removed`; `Storage/cluster` is `Unmanaged` or `Removed` (warning otherwise) | `set ClusterCSIDriver/vsphere spec.managementState to Removed` |
+| 16 | `ClusterCSIDriver/vsphere` is `Removed` and `Storage/cluster` is `Unmanaged` or `Removed`; an unreadable management state also fails | `set ClusterCSIDriver/vsphere spec.managementState to Removed`, `Storage/cluster managementState is …; set Unmanaged or Removed` |
 | 17 | No user **MachineHealthCheck**, **ClusterAutoscaler**, or **MachineAutoscaler** resources | `remove interfering rollout resources before migration` |
 | 18 | Source vCenter session using `kube-system/vsphere-creds`; per destination failure domain: target credentials and session, with datacenter, cluster, datastore, networks, resource pool, and template resolving | missing keys, connect failure, object not found |
 | 19 | **Probe VM** per destination failure domain: guest masked subnet, prefix length, and default gateway match a source node VM (10-minute budget) | `destination networking preflight failed: … does not match any source node network` |
