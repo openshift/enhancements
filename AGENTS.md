@@ -1,6 +1,6 @@
 # OpenShift Enhancements - Agent Navigation Index
 
-**Version**: 1.0 | **Docs**: ./ai-docs/ | **Role**: Ecosystem Hub
+**Version**: 1.1 | **Docs**: ./ai-docs/ | **Role**: Ecosystem Hub
 
 ---
 
@@ -162,18 +162,18 @@ When working on OpenShift:
 ./ai-docs/
 ├── DESIGN_PHILOSOPHY.md         # Core principles
 ├── KNOWLEDGE_GRAPH.md            # Visual navigation
-├── platform/                     # Operator patterns
-│   ├── operator-patterns/        # Controller runtime, status, webhooks
+├── platform/
+│   ├── operator-patterns/        # Controller runtime, status, webhooks, finalizers, RBAC, must-gather
 │   └── openshift-specifics/      # Upgrade safety, CVO coordination
-├── domain/                       # Core API concepts
-│   ├── kubernetes/               # Pod, Service, CRD, Node
-│   └── openshift/                # ClusterOperator, ClusterVersion, Machine
-├── practices/                    # Cross-cutting concerns
-│   ├── testing/                  # Pyramid, e2e framework
-│   ├── security/                 # STRIDE, RBAC, secrets
-│   ├── reliability/              # SLI/SLO, degraded mode
+├── domain/
+│   ├── kubernetes/               # Pod, Service, CRD
+│   └── openshift/                # ClusterOperator, ClusterVersion
+├── practices/
+│   ├── testing/                  # Testing pyramid (60/30/10)
+│   ├── security/                 # RBAC patterns, SCCs, secrets
+│   ├── reliability/              # SLI/SLO, degraded-mode patterns
 │   └── development/              # API evolution, compatibility
-├── decisions/                    # Cross-repo ADRs
+├── decisions/                    # Cross-repo ADRs (CVO orchestration, template)
 ├── workflows/                    # AI-optimized process guides
 │   ├── exec-plans/               # Feature tracking templates (Platform)
 │   ├── enhancement-process.md
