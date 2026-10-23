@@ -9,7 +9,8 @@ approvers:
   - "@mytreya" ## approver for cert-manager component
   - "@Bharath B" ## approver for cert-manager component
 api-approvers:
-  - TBD ## TrustManager.spec.networkPolicy is a new CRD field; assign from #forum-api-review
+  - "@mytreya" ## approver for cert-manager component
+  - "@Bharath B" ## approver for cert-manager component
 creation-date: 2026-10-19
 last-updated: 2026-10-23
 status: provisional
