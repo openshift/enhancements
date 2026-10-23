@@ -10,7 +10,7 @@ approvers:
 api-approvers:
   - None
 creation-date: 2026-10-01
-last-updated: 2026-10-13
+last-updated: 2026-10-22
 status: provisional
 tracking-link:
   - https://issues.redhat.com/browse/NE-2689
@@ -83,9 +83,9 @@ backing load-balancer infrastructure.
    ListenerSet resources that attach to existing Gateways
    without requiring cluster administrator privileges.
 
-2. Enable cluster administrators to disable application
-   developer access to ListenerSets by editing the default
-   RBAC settings.
+2. Change the gateway-service-dns controller to additionally
+   create DNS records for ListenerSet hostnames, so the set of
+   listeners work like classic listeners.
 
 3. Support self-service TLS certificate management, allowing
    users to bring their own certificates for listeners within
@@ -119,6 +119,11 @@ backing load-balancer infrastructure.
 4. Fixing the issue where a dummy listener needs to be added
    to a Gateway that hosts only ListenerSets.
 
+5. Implementing ListenerSet listener validation, conflict
+   detection, precedence, or conflict resolution in the Cluster
+   Ingress Operator. These features are defined by Gateway API
+   and implemented by the managed Istio Gateway controller.
+
 ## Proposal
 
 Implement support for Gateway API ListenerSets in the
@@ -131,9 +136,7 @@ The implementation involves the following high-level changes:
   ListenerSets with the listeners of a Gateway.  The controllers
   will reconcile ListenerSets for configuration of the load balancer,
   assignment of DNS entries, and updates of status conditions in
-  ListenerSets and the default Ingress Cluster operator.  Add a new
-  metric called `listenersets_reconciliation_errors_total` for
-  ListenerSet reconciliation errors.
+  ListenerSets and the default Ingress Cluster operator.
 
 
 - **DNS management**: When a ListenerSet attaches to a
@@ -144,19 +147,40 @@ The implementation involves the following high-level changes:
   resolve to the listener's load balancer IP address.  We
   watch listeners and load balancer services on a
   Gateway, and we will need to unpack ListenerSet entries
-  to find conflicts so that we don't assign multiple DNS
-  records for one service.
+  to deduplicate hostnames before assigning DNS records.
+
+  When a ListenerSet is in a different namespace than the
+  Gateway parentRef, the DNS records must be created in the
+  Gateway's namespace. At this point in time, DNS records are
+  only created for Gateways in the openshift-ingress namespace.
+  DNS records for ListenerSet entries will also be created only
+  in the openshift-ingress namespace.  ListenerSet entries
+  that attach to Gateways in other namespaces will not have
+  DNS management.
+
+  There are special concerns when there are listener hostname
+  conflicts because these listeners will be marked `Conflicted`.
+  The DNS record should be removed from a listener when it is
+  marked `Conflicted`, because the listener is invalid.
+
+
+  TODO: we could impose our own rules here, but if Istio does
+  as the Gateway API spec says to do, no traffic will be served
+  to any `Conflicted` listener/s per
+  https://github.com/kubernetes-sigs/gateway-api/blob/main/apis/v1/gateway_types.go#L184.
+
 
   **Note:**  If two listeners are already allowed to share a
   service, we will need to fix a bug in the
   method of DNS record creation.
 
 
-- **Conflict detection**: Implement listener conflict
-  detection within and across ListenerSets. A ListenerSet
+- **Conflict detection reporting**: Implement listener conflict
+  detection reporting. A ListenerSet
   with one or more conflicting listeners will continue to
   function for its non-conflicting listeners; set appropriate
-  status conditions on the default Ingress Cluster operator.  Add a
+  status conditions on the default Ingress Cluster operator to report
+  when there is a detected conflict.  Add a
   new metric called `listenersets_conflicts_total` for
   ListenerSet conflicts, and an alert for reporting those conflicts.
   It is easy to envision a cluster with hundreds of conflicts, so
@@ -164,7 +188,9 @@ The implementation involves the following high-level changes:
 
 
 - **Status reporting**: Provide Gateway API-compliant status
-  updates on ListenerSet resources if needed.
+  updates on ListenerSet resources, including changes to
+  `ComputeGatewayAPIDNSStatus` to check all entries in
+  ListenerSets as well as individual listeners.
 
 
 - **RBAC model**: Define RBAC policies that allow namespace
@@ -243,15 +269,13 @@ records for ListenerSet hostnames.
 3. All non-conflicting listeners in the ListenerSet continue
    to function normally.
 
-4. If all listeners are Conflicted, then the ListenerSet is
-   marked ListenersNotValid.
+4. If all listeners are `Conflicted`, then the ListenerSet is
+   marked `ListenersNotValid`.
 
-5. The ingress controller reviews the ListenerSet statuses and
-   updates its status accordingly.
+6. The application developer reviews the listeners and ListenerSet
+   statuses and resolves the conflict by updating their listener
+   and ListenerSet configuration.
 
-6. The application developer reviews the ingress controller,
-   listeners, and ListenerSet statuses and resolves the conflict
-   by updating their listener and ListenerSet configuration.
 
 ```mermaid
 sequenceDiagram
@@ -286,10 +310,16 @@ sequenceDiagram
 
 This proposal does not introduce new CRDs, admission
 webhooks, conversion webhooks, or finalizers into the
-OpenShift API surface. The ListenerSet CRD is defined
-upstream in the Gateway API project. OpenShift's role is to
-implement controller support for reconciling ListenerSet
-resources.
+OpenShift API surface.  However, since we are integrating
+a new upstream-defined Gateway API CRD and providing DNS
+records for it, we can extend the signal for DNS provisioning
+into ListenerSet and its entries' status conditions.
+
+We add the `DNSReady` condition to each entry in the ListenerSet
+(in `status.listeners[].conditions[]`) and as an aggregate
+to the ListenerSet status (in `status.conditions[]`). The
+ListenerSet status summarizes `DNSReady`, and the per-listener
+status describes each listener's DNS state.
 
 ### Topology Considerations
 
@@ -336,13 +366,12 @@ The implementation requires changes to the following
 components:
 
 - **openshift/cluster-ingress-operator**: Extend the Gateway
-  API controller to watch and reconcile ListenerSet resources.
-  Add logic for conflict detection across ListenerSets and
-  Gateway listeners. Update the DNS management logic to
-  handle ListenerSet hostnames. Revert the code that disallowed
+  API controller to watch and provide DNS for ListenerSet resources.
+  Update the DNS management logic to
+  handle ListenerSet hostnames on `Accepted` ListenerSets for
+  listeners that are not in `Conflict`. Revert the code that disallowed
   ListenerSets in OCP 5.0.  Refactor status updates to reflect
   status of ListenerSets.
-
 
 <!-- TODO: Fill in specific implementation details as the
 design solidifies, including controller reconciliation loop
@@ -367,7 +396,8 @@ ListenerSet containing 64 distinct listeners.  Collect the
 measurements up to 6400 distinct listeners across 10
 ListenerSets.  Attempt to set a recommended cap on the total
 number of listeners or document that we have no data and
-results may vary.
+results may vary.  This testing in this mitigation may be
+deferred if we document a recommended cap.
 
 **Cross-namespace trust boundaries**: ListenerSets attached
 to Gateways in other namespaces must respect the Gateway's
@@ -406,6 +436,12 @@ security team or other appropriate party.
 - Documenting the use of ListenerSets could be difficult,
   given the lack of customer demand in Red Hat.
 
+- ListenerSets allow admins to extend DNS provisioning to
+  application developers that may not have access to
+  resources to troubleshoot why their listeners never
+  become `DNSReady`.  The `allowedListeners` mechanism
+  may help alleviate this issue.
+
 ## Alternatives (Not Implemented)
 
 **Use ExternalDNS for ListenerSet DNS management**: This was
@@ -428,11 +464,14 @@ in the future.
 
 3. Should there be a cluster-wide policy for controlling
    which namespaces can create ListenerSets that attach to
-   Gateways in other namespaces?
+   Gateways in other namespaces?  Due to `allowedListeners`
+   we may not need this.  Besides, allowing the cluster
+   admin to make this decision is arguably preferred.
 
 4. Do we need a knob for
    cluster administrators to disable the use of ListenerSets
    entirely, or to configure a maximum number of listeners?
+   The answer to open question 3 applies here as well.
 
 5. Do we want to set any new Ingress Controller status conditions,
    metrics, or alerts based on the other ListenerSet conditions?
@@ -442,6 +481,8 @@ in the future.
    TooManyListeners, InvalidCertificateRef, InvalidRouteKinds,
    or RefNotPermitted. Perhaps any conflicts or certificate
    issues should be aggregated and propagated to status.
+   Feedback is that this is out of scope and could be a followup
+   enhancement.
 
 6. A dummy listener is required on the Gateway even if only ListenerSets
    are configured.  Do we want to use a mutating admission policy to add
@@ -454,18 +495,28 @@ in the future.
 
 The test strategy includes:
 
-- **Unit tests**: Cover conflict detection logic, ListenerSet
+- **Unit tests**: Cover conflict detection reporting, ListenerSet
   reconciliation, DNS record creation, and status condition
   updates.
 
 - **Integration tests**: Verify end-to-end ListenerSet
   attachment to Gateways, cross-namespace attachment with
   allowedListeners, listener conflict handling, and DNS
-  record management.
+  record management in the face of hostname conflicts.
 
-- **E2E tests**: Validate the full workflow from ListenerSet
-  creation through DNS resolution and traffic routing, across
-  supported platforms.
+- **E2E tests**:
+1. Validate the full workflow from ListenerSet
+    creation through DNS resolution and traffic routing, across
+    supported platforms.
+2. Reparent a ListenerSet and verify the old Gateway’s DNSRecords
+    are removed and new records target the new Gateway Service.
+3. Create a ListenerSet that is not allowed by allowedListeners;
+    verify Accepted=False and no DNSRecords are created.
+4. Revoke allowedListeners authorization and verify ListenerSet
+    DNSRecords are removed; restore authorization and verify recreation.
+5. Change a ListenerSet hostname and verify the old DNSRecord is removed and the new one created.
+6. Verify top-level and per-listener DNSReady, including mixed success and failure.
+7. Delete the parent Gateway and verify its ListenerSet DNSRecords are cleaned up.
 
 - **Upgrade tests**: Verify that clusters with existing
   ListenerSet resources upgrade cleanly.
@@ -521,14 +572,11 @@ ListenerSet support to one without it, existing ListenerSet
 resources will remain in etcd but will no longer be
 reconciled. The backing load balancer configuration for
 ListenerSet listeners will be removed during the downgrade as
-the controller stops managing them. DNS records created for
-ListenerSet hostnames will be cleaned up by the DNS
-controller. Routes attached to ListenerSet listeners will
+the controller stops managing them.
+Routes attached to ListenerSet listeners will
 need to be re-attached to Gateway listeners or will stop
-functioning.
-
-Clusters should remove ListenerSet resources, including any
-DNS records, before downgrading to avoid orphaned resources in etcd.
+functioning.  DNS records that were provisioned will need
+to be manually removed.
 
 ## Version Skew Strategy
 
@@ -551,15 +599,14 @@ resources has the following operational characteristics:
 
 - **Health indicators**: The ingress operator will report
   conditions reflecting ListenerSet reconciliation health.
-  New metrics for ListenerSet reconciliation errors and
-  conflicts will be exposed.
+  New metrics for ListenerSet conflicts will be exposed.
 
 - **Performance impact**: Each ListenerSet adds a small
   amount of watch cache memory and reconciliation work. For
   clusters with fewer than 100 ListenerSets, the impact on
-  API throughput and controller performance should be negligible.
-  However, it remains to be demonstrated what happens when
-  we begin to allow an unlimited number of listeners.
+  API throughput and controller performance should be
+  negligible but remains unverified until benchmark results
+  are available.
 
 - **Failure modes**: If the ingress controller cannot
   reconcile a ListenerSet or Istio cannot program a ListenerSet
@@ -581,13 +628,10 @@ resources has the following operational characteristics:
   ```
 
 - Check the ingress operator logs for ListenerSet
-  reconciliation errors:
+  reconciliation errors or conflicts:
   ```
   oc logs -n openshift-ingress-operator deployment/ingress-operator
   ```
-
-- Monitor the `listenersets_reconciliation_errors_total`
-  metric for reconciliation failures.
 
 - Monitor the `listenersets_conflicts_total` metric for
   failures due to conflicting listener definitions.
@@ -600,6 +644,14 @@ resources has the following operational characteristics:
 It is not possible to disable the feature unless we
 decide to implement a knob to disable the use of
 ListenerSets.
+
+### Dev Preview -> Tech Preview
+
+N/A
+
+### Tech Preview -> GA
+
+N/A
 
 ## Infrastructure Needed [optional]
 
