@@ -39,7 +39,7 @@ Customers are upgrading to greenfield VCF environments, they need a better metho
 
 ### User Stories
 
-The stories below are the current child issues of epic [SPLAT-2644](https://issues.redhat.com/browse/SPLAT-2644), verified against Jira on 2026-10-23 (JQL `parent = SPLAT-2644`; the epic is authoritative). Status is the Jira status at that time.
+Child issues of epic [SPLAT-2644](https://issues.redhat.com/browse/SPLAT-2644):
 
 | Area | Child issues |
 |------|--------------|
