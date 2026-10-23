@@ -77,6 +77,8 @@ git push origin enhancement-your-feature
 
 ### 5. After Approval
 
+> **Note**: These steps apply to enhancements that proceed to implementation. For `informational` enhancements, skip these steps—informational enhancements remain in `informational` status and do not move to `implementable`.
+
 - Update enhancement status to `implementable`
 - Create Jira epic/stories for tracking
 - Begin implementation following [implementing-features.md](implementing-features.md)

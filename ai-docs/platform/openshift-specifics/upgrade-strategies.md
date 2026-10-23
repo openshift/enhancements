@@ -217,7 +217,7 @@ type MyResourceSpec struct {
 
 ### API Version Transitions (OpenShift Pattern)
 
-**OpenShift approach**: Transition API versions across OpenShift minor releases without serving multiple versions simultaneously (no conversion webhooks needed).
+**OpenShift approach**: Transition API versions across OpenShift minor releases with a bounded migration window where both versions are served, but avoid long-term multi-version serving (no conversion webhooks needed).
 
 ```yaml
 # Release N: Serve v1alpha1 only
