@@ -310,8 +310,16 @@ The configured value reaches the hosted kube-apiserver through the existing `ope
 
 1. The user sets `HostedCluster.spec.operatorConfiguration.kubeAPIServer.eventTTLMinutes`.
 2. The HyperShift operator's `HostedCluster` controller deep-copies `spec.operatorConfiguration` onto `HostedControlPlane.spec.operatorConfiguration` (in `hypershift-operator/controllers/hostedcluster/hostedcluster_controller.go`). This is the same mechanism that already carries `kubeAPIServer.logLevel`, so nothing has to be added to the list of mirrored settings.
-3. In the control-plane-operator, `kas.NewConfigParams(hcp, featureGates)` (`control-plane-operator/controllers/hostedcontrolplane/v2/kas/params.go`) resolves the effective value: if `hcp.Spec.OperatorConfiguration` is non-nil and `KubeAPIServer.EventTTLMinutes` is non-zero, use it; otherwise use the existing default.
-   This is the same function that already resolves `goAwayChance`, `maxRequestsInflight`, and friends, and it is the natural home for the default constant that is inlined as `3h` today.
+3. In the control-plane-operator, `kas.NewConfigParams(hcp, featureGates)` (`control-plane-operator/controllers/hostedcontrolplane/v2/kas/params.go`) resolves the effective value: if `hcp.Spec.OperatorConfiguration` is non-nil and `KubeAPIServer.EventTTLMinutes` is non-zero, use it; otherwise use the default constant.
+   `NewConfigParams` is where the other rendered kube-apiserver argument values — `goAwayChance`, `maxRequestsInflight`, `maxMutatingRequestsInflight`, and friends — are resolved, so it is the natural home for the default that is inlined as `3h` today.
+
+   One point to be explicit about, because the two things are easy to conflate: **`eventTTLMinutes` would be the first value resolved in `NewConfigParams` that reads from `operatorConfiguration`, and there is no existing field in that function to copy the access pattern from.**
+   Everything resolved there today reads from annotations — `hcp.Annotations[hyperv1.KubeAPIServerGoAwayChance]`, `hyperv1.KubeAPIServerMaximumRequestsInFlight`, `hyperv1.KubeAPIServerMaximumMutatingRequestsInFlight`, `hyperv1.KubeAPIServerServiceAccountTokenMaxExpiration` — or from top-level `hcp.Spec` fields.
+   The sibling `operatorConfiguration` setting, `kubeAPIServer.logLevel`, is not resolved in `NewConfigParams` at all: it is resolved by `resolveKASVerbosity` in `kas/deployment.go`, because verbosity becomes a `-v` container argument on the pod spec rather than a key in the rendered kube-apiserver config.
+
+   So the precedent being followed is *where the value is rendered* (`event-ttl` is a key in the kube-apiserver config, like `goaway-chance`), not *where it is read from* (`operatorConfiguration`, like `logLevel`).
+   Reading `operatorConfiguration` inside `NewConfigParams` is new and deliberate: it keeps the resolution next to the other config arguments while sourcing the value from the typed API rather than an annotation, which is the direction HyperShift is already moving for user-facing settings.
+   An implementer should expect to add that read, not to find one.
 4. `generateConfig` (`control-plane-operator/controllers/hostedcontrolplane/v2/kas/config.go`) replaces the current `args.Set("event-ttl", "3h")` with the resolved value rendered as a Go duration string (e.g. `60m`), and the resulting `KubeAPIServerConfig` is written to the kube-apiserver config `ConfigMap` in the hosted control plane namespace.
 5. The CPO v2 control-plane-component framework computes a composite hash over the component's mounted ConfigMaps and Secrets and records it on the pod template as `component.hypershift.openshift.io/config-hash` (`support/controlplane-component/defaults.go`). A change to the rendered config changes the hash, which changes the pod template, which causes the kube-apiserver `Deployment` to roll.
 
@@ -329,6 +337,25 @@ Rollout behavior follows from the propagation path above and is the same as for 
 - The hosted cluster's `Available` and `Progressing` conditions reflect the rollout; no new conditions are introduced.
 - Convergence: once the new pods are ready, every subsequently created event carries the new TTL. Events already in etcd retain the TTL they were created with, so after lowering the value the storage reduction is only fully realized once the previously created events have expired (up to the old TTL, so at most 3 hours) and etcd has compacted and defragmented.
   Raising the value has no effect on already-stored events either; they still expire on their original schedule.
+
+**Returning to the platform default.** The way to undo a configured value is to **remove the field, not to set it to `180`**.
+Both produce 180-minute retention today, but they are not the same statement: an absent field means "no opinion" and tracks the platform default wherever it goes, while an explicit `180` pins the value and will not follow a future change to the platform default — which the godoc explicitly reserves the right to make, per [`dev-guide/api-conventions.md`](https://github.com/openshift/enhancements/blob/master/dev-guide/api-conventions.md#configuration-vs-workload-apis).
+A cluster left at an explicit `180` would silently diverge from the fleet the first time that default moves.
+
+Because `KubeAPIServerOperatorSpec` carries `+kubebuilder:validation:MinProperties=1`, removing the field means removing the whole `kubeAPIServer` stanza when `eventTTLMinutes` is the only setting in it; leaving `kubeAPIServer: {}` behind is rejected at admission.
+If `logLevel` is also set, remove just the one field:
+
+```console
+# eventTTLMinutes is the only setting under kubeAPIServer
+$ oc patch hostedcluster <name> -n <ns> --type=json \
+    -p '[{"op":"remove","path":"/spec/operatorConfiguration/kubeAPIServer"}]'
+
+# logLevel is also set, so the stanza must stay
+$ oc patch hostedcluster <name> -n <ns> --type=json \
+    -p '[{"op":"remove","path":"/spec/operatorConfiguration/kubeAPIServer/eventTTLMinutes"}]'
+```
+
+Removing the field rolls the kube-apiserver exactly as setting it does, since the rendered config changes back to the default literal. The same remove-don't-pin guidance applies to the standalone `eventTTLMinutes` field, for the same reason.
 
 Operators should expect one kube-apiserver rollout per change to this field. It is therefore not a field to flip repeatedly; it is a configuration setting, and the enhancement does not propose any rate limiting or coalescing beyond what the existing reconciliation already provides.
 
@@ -416,7 +443,8 @@ HyperShift must-gather collects all three, so a support case can establish the c
 Still open:
 
 1. **Visibility when a configured value is not yet honored.** During a HyperShift-operator/control-plane-operator skew window the field is accepted and persisted but silently ignored, with no condition telling the user their input has not taken effect; see [Version Skew Strategy](#version-skew-strategy).
-   The fix belongs at the `operatorConfiguration` level rather than in this field, since every setting in that stanza has the same gap, and there has been prior work toward a generic condition for it. Tracked as a follow-up, not as part of this enhancement. Raised by @muraee.
+   The fix belongs at the `operatorConfiguration` level rather than in this field, since every setting in that stanza has the same gap, and there has been prior work toward a generic condition for it.
+   It is therefore out of scope here, but it is tracked rather than left as a note: [CNTRLPLANE-4829](https://issues.redhat.com/browse/CNTRLPLANE-4829), under the same epic as this work ([CNTRLPLANE-4415](https://issues.redhat.com/browse/CNTRLPLANE-4415)). Raised by @muraee.
 2. **Reviewers and approvers.** The `reviewers`/`approvers` metadata on this enhancement currently reflects the standalone kube-apiserver work only. HyperShift representation should be added before merge.
 3. **Release target.** No release target is claimed for the HCP portion of this enhancement.
 
@@ -459,15 +487,27 @@ Test coverage for the HCP portion, matching the layers that already exist in ope
    - Assert the hosted cluster returns to `Available` after the rollout.
    - Assert that creating an event after the change results in it being removed at approximately the configured TTL (for a short TTL such as 5 minutes, this is feasible within an e2e run).
 
-5. **Upgrade compatibility**
+5. **Upgrade compatibility (automated e2e)**
 
-   Take a hosted cluster created before the field existed and upgrade its HyperShift operator and CPO to a version that has it. The claim breaks into four assertions, verified separately because they are not all true in the same way:
-   - Event retention is unchanged at 180 minutes.
-   - The field is still absent from the stored `HostedCluster` spec; nothing defaulted a value into it.
-   - The rendered flag moves from `--event-ttl=3h` to `--event-ttl=180m` exactly once, and never to any other value.
-   - The kube-apiserver rollout count across the upgrade is no higher than for a control plane upgrade that does not carry this change, i.e. the config-hash change is absorbed by the upgrade rather than adding a rollout.
+   Take a hosted cluster created before the field existed and upgrade its HyperShift operator and CPO to a version that has it.
+   The claim breaks into four assertions, verified separately because they are not all true in the same way.
+   All four are automated — each is a mechanical comparison of API objects captured before and after the upgrade, with no human judgement in the loop:
 
-   This is covered as TC-010 in [hypershift-community/test-results-verification#11](https://github.com/hypershift-community/test-results-verification/pull/11), with the rollout count measured across several hosted clusters.
+   | Assertion | Automated check |
+   | --- | --- |
+   | Event retention is unchanged at 180 minutes | The rendered `event-ttl` value in the `kas-config` `ConfigMap`, parsed as a duration, equals 3 hours before and after |
+   | The field is still absent from the stored `HostedCluster` spec; nothing defaulted a value into it | `eventTTLMinutes` is unset on the retrieved `HostedCluster` and `HostedControlPlane` after the upgrade |
+   | The rendered flag moves from `--event-ttl=3h` to `--event-ttl=180m` exactly once, and never to any other value | Diff the full rendered `config.json` against the pre-upgrade capture: `event-ttl` is the only differing key, and its new value is `180m`. A subsequent reconcile produces no further change, so the rewrite is one-time rather than per-reconcile |
+   | The kube-apiserver rollout count across the upgrade is no higher than for an upgrade that does not carry this change | Compare the kube-apiserver `Deployment` generation deltas and ReplicaSet revision count across the upgrade window against a control baseline. One generation bump, coinciding with the CPO image change, means absorbed; two means additive |
+
+   The rollout-count assertion is the one that actually needs the test, since it is the only one that can regress silently and at fleet scale, and it is the assertion the enhancement's [Upgrade Strategy](#upgrade-strategy) rests on.
+   Comparing deployment generations is a few lines of test code, so there is no reason for it to be a human procedure.
+
+   This runs as a CI-gated e2e upgrade test in openshift/hypershift (`test/e2e`), alongside the existing upgrade coverage, so it keeps catching regressions after the feature lands.
+   Automating it is listed as a Tech Preview → GA graduation criterion below.
+
+   The corresponding manual walkthrough, TC-010 in [hypershift-community/test-results-verification#11](https://github.com/hypershift-community/test-results-verification/pull/11), is a one-time pre-merge validation only: an upgrade e2e cannot exist until the field has shipped in a release the test can upgrade *from*, so the manual run establishes the baseline measurement across several hosted clusters.
+   It is not the ongoing verification method and does not substitute for the automated test.
 
 6. **Downgrade and re-upgrade**
 
@@ -477,7 +517,10 @@ Test coverage for the HCP portion, matching the layers that already exist in ope
    - Re-enable the gate with no intervening spec-rewriting write and assert whether the previously stored value reappears and takes effect.
    - Roll the control-plane-operator back to a version predating the field and assert the kube-apiserver renders that version's default, `3h`.
 
-7. **Standalone regression**
+7. **Fleet observability metric**
+   - Unit test on the metrics collector that `hypershift_cluster_event_ttl_minutes` reports the configured value when the field is set, and the platform default when it is unset, for every hosted cluster.
+
+8. **Standalone regression**
    - The existing standalone kube-apiserver-operator unit and e2e tests for `eventTTLMinutes` continue to pass unchanged; the HCP work must not alter standalone behavior or defaults.
 
 ## Tech Preview
@@ -504,6 +547,7 @@ For hosted control planes:
 - The `HostedCluster` field is implemented behind the `KubeAPIServerEventTTL` gate, enabled in `TechPreviewNoUpgrade`
 - Validation, defaulting, and propagation unit tests are in place
 - An e2e test demonstrates a day-2 change propagating to the hosted kube-apiserver
+- The `hypershift_cluster_event_ttl_minutes` gauge is exported for every hosted cluster, so the fleet-wide configured value is observable before the feature is offered broadly
 - Upstream HyperShift documentation describes the field
 
 ### Tech Preview -> GA
@@ -516,7 +560,8 @@ For hosted control planes:
 
 For hosted control planes:
 
-- Upgrade compatibility verified: hosted clusters created before the field existed keep 180-minute retention after the control plane is upgraded, and the one-time change of the rendered default literal adds no kube-apiserver rollout beyond the upgrade's own
+- Upgrade compatibility verified by an automated, CI-gated e2e test rather than a manual procedure: hosted clusters created before the field existed keep 180-minute retention after the control plane is upgraded, and the one-time change of the rendered default literal adds no kube-apiserver rollout beyond the upgrade's own.
+  The rollout count is asserted from `Deployment` generation deltas, so the claim keeps being checked on every run
 - Rollout behavior verified for both `SingleReplica` and `HighlyAvailable` control planes
 - The `KubeAPIServerEventTTL` gate is enabled in `Default` and then removed as the field becomes GA
 
@@ -538,7 +583,9 @@ For hosted control planes:
 - The rendered flag does change once, from `--event-ttl=3h` to `--event-ttl=180m`. The two are the same duration, but the implementation expresses the default in minutes so that it is lexically identical to what `eventTTLMinutes: 180` renders; otherwise explicitly asking for the default value would rewrite the config and roll the kube-apiserver for no semantic change.
   The price of that choice is a one-time change to the rendered literal on the release in which the field lands.
   Because the rendered config feeds the component config hash, that one-time change would roll the kube-apiserver on its own. In practice it is absorbed rather than additive: the control-plane-operator ships in the OCP release payload, so the new literal only reaches a hosted cluster as part of a control plane upgrade, which rolls the kube-apiserver anyway.
-  The claim to verify is therefore "no *additional* rollout", not "no rollout". The test plan measures the rollout count across several hosted clusters through an upgrade to confirm it; see TC-010 in [hypershift-community/test-results-verification#11](https://github.com/hypershift-community/test-results-verification/pull/11).
+  The claim to verify is therefore "no *additional* rollout", not "no rollout".
+  This is pinned by an automated e2e upgrade test that compares the kube-apiserver `Deployment` generation delta across the upgrade against a baseline upgrade without this change; see [Upgrade compatibility](#hosted-control-planes-test-coverage) in the test plan.
+  The initial measurement across several hosted clusters was taken manually as TC-010 in [hypershift-community/test-results-verification#11](https://github.com/hypershift-community/test-results-verification/pull/11), because an upgrade e2e requires a shipped release to upgrade from.
 - Because the field has no CRD-level default, the API server does not write a value into existing `HostedCluster` objects when the new CRD is applied, so no stored object is modified by the upgrade.
 - A hosted cluster upgraded from a version predating the field can opt in at any time after the control plane components support it; the first time the field is set, the kube-apiserver rolls as described in [Mutability and rollout](#mutability-and-rollout).
 
@@ -572,7 +619,8 @@ For hosted control planes there is a management/hosted split and a HyperShift-op
   The value is preserved in the spec and takes effect once the CPO is upgraded. This is a no-op, not an error, because the field travels inside the already-mirrored `operatorConfiguration` struct.
 - If the CRDs are upgraded before the HyperShift operator, the field can be set but is not yet mirrored or consumed; again a no-op until the operator is upgraded.
 - In both skew windows the user's input is **silently ignored**: the field is accepted and persisted, the cluster stays `Available`, and nothing reports that the requested TTL is not the one in effect. The only way to tell is to read `--event-ttl` off the rendered config or the running pods.
-  Reporting this properly needs a condition on the `HostedCluster`, and the right shape is a generic one covering every `operatorConfiguration` field that a lagging control plane does not yet honor, not a condition specific to event-ttl. There has been prior work toward such a generic condition. This enhancement does not introduce one; it is recorded as a follow-up in [Open Questions](#open-questions).
+  Reporting this properly needs a condition on the `HostedCluster`, and the right shape is a generic one covering every `operatorConfiguration` field that a lagging control plane does not yet honor, not a condition specific to event-ttl.
+  There has been prior work toward such a generic condition. This enhancement does not introduce one; it is tracked as [CNTRLPLANE-4829](https://issues.redhat.com/browse/CNTRLPLANE-4829) under the [CNTRLPLANE-4415](https://issues.redhat.com/browse/CNTRLPLANE-4415) epic, and recorded in [Open Questions](#open-questions).
 - The feature gate is evaluated where the CRDs are served, on the management cluster, so a gate that is off prevents the field from being set at all rather than producing partial behavior.
   That applies to new writes only. A value stored while the gate was on is not erased by turning the gate off, because pruning happens on write rather than on read; see [Downgrade Strategy](#downgrade-strategy).
 
@@ -592,6 +640,27 @@ For hosted control planes:
   What is not possible is retaining events for longer than today: 180 minutes is both the maximum accepted value and the value the platform applies when the field is unset, so a request above 180 is rejected and there is no configuration that increases etcd event usage beyond the current behavior.
 - Setting the field causes a kube-apiserver rollout in the hosted control plane. The SLO impact is the same as any other kube-apiserver configuration change: none for `HighlyAvailable` topologies beyond transient connection resets, and a short API outage for `SingleReplica` topologies.
 
+### Fleet observability
+
+Because the primary motivation is managed-fleet etcd storage, the people who care most about this value are SREs looking at many management clusters at once, not an administrator looking at one `HostedCluster`. As written so far the only audit path is `oc get hostedcluster -A -o jsonpath='{...}'` run per management cluster, which does not aggregate and is not alertable.
+
+We therefore propose a gauge exported by the HyperShift operator's existing per-`HostedCluster` metrics collector (`hypershift-operator/controllers/hostedcluster/metrics`, with the name constant in `pkg/metrics/hostedcluster/names.go`), reporting the **effective** TTL in minutes — the configured value when the field is set, and the platform default when it is not:
+
+```text
+# HELP hypershift_cluster_event_ttl_minutes Effective kube-apiserver event TTL in minutes for the hosted cluster.
+# TYPE hypershift_cluster_event_ttl_minutes gauge
+hypershift_cluster_event_ttl_minutes{namespace="clusters",name="example",_id="..."} 60
+```
+
+Notes on the shape:
+
+- The `hypershift_cluster_*` prefix and the `namespace`/`name`/`_id` label set match the other per-cluster gauges already exported by that collector (`hypershift_cluster_limited_support_enabled`, `hypershift_cluster_size_override_instances`, and others), so it needs no new collector, no new scrape target, and no new RBAC.
+- Reporting the *effective* value rather than only the configured one is deliberate: it means every hosted cluster appears in the series, so a fleet query is a plain aggregation (for example `count(hypershift_cluster_event_ttl_minutes < 180)` for clusters that have opted in) rather than a join against the set of clusters that happen to have the field set.
+- The TTL is not put in a label. It is a low-cardinality value today, but a gauge value is the correct representation for a number, and it keeps the series count fixed at one per hosted cluster.
+- The metric reflects what the HyperShift operator reads from the `HostedCluster`, which during a HyperShift-operator/CPO skew window is not necessarily what the hosted kube-apiserver is running; see [Version Skew Strategy](#version-skew-strategy). It is a configuration-audit signal, not a liveness signal, and should not be used to conclude that a rollout has completed.
+
+This is scoped as part of this enhancement's HCP work rather than deferred, since it is a single gauge in an existing collector and the fleet-audit gap it closes is the motivating use case. Raised by @jparrill.
+
 ## Support Procedures
 
 ### Detection
@@ -606,6 +675,7 @@ For hosted control planes:
 - The mirrored value is on the `HostedControlPlane` in the hosted control plane namespace, which tells you whether the HyperShift operator has propagated it
 - The effective value is the `--event-ttl` argument in the kube-apiserver config `ConfigMap` in the hosted control plane namespace, and on the running kube-apiserver pods
 - HyperShift must-gather collects the `HostedCluster`, the `HostedControlPlane`, and the hosted control plane namespace's ConfigMaps and pod specs, so all three are available from an existing must-gather
+- Across a fleet, the configured value is queryable as `hypershift_cluster_event_ttl_minutes` from the HyperShift operator's metrics, without a per-management-cluster `oc` loop; see [Fleet observability](#fleet-observability)
 
 ### Troubleshooting
 
@@ -623,4 +693,8 @@ For hosted control planes:
 
 - 2025-10-08: Initial enhancement proposal
 - 2026-10-09: Extended to cover hosted control planes (HyperShift), replacing the previously proposed annotation-based approach with a `HostedCluster` API field
+- 2026-10-23: Review feedback from @jparrill. Clarified that `eventTTLMinutes` is the first `operatorConfiguration`-sourced value in `NewConfigParams`;
+  documented returning to the platform default by removing the field; filed [CNTRLPLANE-4829](https://issues.redhat.com/browse/CNTRLPLANE-4829) for the generic
+  `operatorConfiguration` skew condition; made upgrade-compatibility verification an automated e2e test rather than a manual procedure; added the
+  `hypershift_cluster_event_ttl_minutes` fleet-observability gauge
 
