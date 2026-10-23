@@ -26,14 +26,14 @@ If the feature introduces or modifies APIs:
 
 1. **Define types** in [openshift/api](https://github.com/openshift/api)
 2. **Follow conventions**: See `./dev-guide/api-conventions.md`
-3. **Generate code**: `make generate` after type changes
+3. **Generate code**: `make update` after type changes (the openshift/api repo uses `make update`, not `make generate`)
 4. **Version appropriately**: alpha features use `v1alpha1`
 5. **Update vendor**: Bump `openshift/api` dependency in component repo
 
 ```bash
 # In openshift/api
 # Edit types in the appropriate package
-make generate
+make update
 make verify
 ```
 

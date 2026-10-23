@@ -20,7 +20,7 @@ API evolution in OpenShift follows Kubernetes API conventions. APIs progress thr
 
 ## Version Transition Pattern
 
-OpenShift transitions API versions across minor releases without serving multiple versions simultaneously:
+OpenShift transitions API versions across minor releases. During migration, multiple versions **can** be served simultaneously to provide a deprecation window:
 
 ```text
 Release N:   Serve v1alpha1 (storage: v1alpha1)
@@ -28,9 +28,10 @@ Release N+1: Serve v1 + v1alpha1 (storage: v1, v1alpha1 deprecated)
 Release N+2: Serve v1 only (v1alpha1 removed)
 ```
 
-**OpenShift avoids**:
+**OpenShift prefers**:
+- ✅ Short multi-version windows (as shown in Release N+1 above) for migration
 - ❌ Conversion webhooks (complexity rarely justified)
-- ❌ Long-term multi-version serving (increases API surface)
+- ❌ **Long-term** multi-version serving (increases API surface over time)
 
 ## Backward-Compatible Changes
 
@@ -63,11 +64,11 @@ type MySpec struct {
 2. **Release N+1**: Log warnings when deprecated field is used
 3. **Release N+2** (earliest): Remove deprecated field/version
 
-**Minimum**: 2 release deprecation window before removal.
+**Minimum**: 2 release deprecation window before removal (for most APIs). However, compatibility timelines vary by [API tier](https://docs.openshift.com/container-platform/latest/rest_api/understanding-compatibility-level.html) — Tier 1 (GA) APIs remain supported much longer than this minimum, while Tech Preview APIs may change without notice.
 
 ## Best Practices
 
-1. **Use Pointer Types**: Optional fields must be pointers (`*string`, not `string`)
+1. **Use Pointers Judiciously**: For CRD-based APIs, [OpenShift API conventions advise avoiding pointers](https://github.com/openshift/enhancements/blob/master/dev-guide/api-conventions.md) unless the field must distinguish between unset and the zero value. For aggregated API servers, pointers are still required for optional fields. See the conventions doc for details
 2. **Omitempty Tag**: All optional fields need `json:"field,omitempty"`
 3. **Validation Webhooks**: Enforce constraints beyond OpenAPI schema
 4. **Status Subresource**: Always use status subresource for status updates

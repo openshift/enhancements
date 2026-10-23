@@ -61,9 +61,14 @@ func (m *MyResourceDefaulter) Handle(ctx context.Context, req admission.Request)
         return admission.Denied(err.Error())
     }
 
-    // Set defaults
-    if obj.Spec.Replicas == 0 {
-        obj.Spec.Replicas = 1
+    // Set defaults — only when Replicas was not explicitly provided.
+    // Using a pointer (*int32) for Replicas distinguishes "not set" (nil)
+    // from "explicitly set to zero" so users can intentionally scale to 0.
+    // With a plain int, Replicas == 0 is ambiguous:
+    //   obj.Spec.Replicas == 0  ← could be "user wants zero" OR "field was omitted"
+    if obj.Spec.Replicas == nil {
+        one := int32(1)
+        obj.Spec.Replicas = &one
     }
 
     marshalled, _ := json.Marshal(obj)

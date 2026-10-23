@@ -25,7 +25,7 @@ Controller-runtime is the standard Go framework for building Kubernetes operator
 Watch Event → Predicate Filter → Work Queue → Reconcile(Request) → Requeue/Done
 ```
 
-**Level-driven**: Reconcile observes current state and converges toward desired state. It does not react to specific events — missed events are corrected on the next loop iteration.
+**Level-driven (level-triggered)**: Reconcile observes current state and converges toward desired state. It does not react to specific events — instead, a watch event or an explicit requeue triggers a reconciliation pass. If no event fires and no requeue is scheduled, a missed change will not automatically cause another pass until the next trigger.
 
 ```go
 import (
@@ -53,10 +53,14 @@ func (r *MyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 ## Manager Setup
 
 ```go
+import (
+    metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
+)
+
 func main() {
     mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
         Scheme:                 scheme,
-        MetricsBindAddress:     ":8080",
+        Metrics:                metricsserver.Options{BindAddress: ":8080"},
         HealthProbeBindAddress: ":8081",
         LeaderElection:         true,
         LeaderElectionID:       "my-operator-lock",
@@ -115,12 +119,23 @@ ctrl.SetControllerReference(owner, owned, r.Scheme)
 
 ### Status Update Pattern
 ```go
-// Always update status as last step
-defer func() {
-    if err := r.Status().Update(ctx, obj); err != nil {
-        log.Error(err, "Failed to update status")
-    }
-}()
+// Always update status as last step, propagating the error so
+// controller-runtime requeues if the status update fails.
+func (r *MyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ctrl.Result, retErr error) {
+    // ... fetch obj ...
+
+    defer func() {
+        if err := r.Status().Update(ctx, obj); err != nil {
+            log.Error(err, "Failed to update status")
+            if retErr == nil {
+                retErr = err // Propagate so the reconciliation is requeued
+            }
+        }
+    }()
+
+    // ... reconciliation logic ...
+    return ctrl.Result{}, nil
+}
 ```
 
 ## OpenShift Considerations

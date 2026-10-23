@@ -22,7 +22,7 @@ Role-Based Access Control (RBAC) governs what actions service accounts can perfo
 | Scope | Resource | When to Use |
 |-------|----------|-------------|
 | **ClusterRole + ClusterRoleBinding** | Cluster-wide resources (Nodes, ClusterOperators) | Operator manages cluster-scoped resources |
-| **ClusterRole + RoleBinding** | Namespaced resources across multiple namespaces | Operator manages resources in specific namespaces |
+| **ClusterRole + RoleBinding** | Namespaced resources across multiple namespaces | Operator manages resources in specific namespaces. **Note**: A RoleBinding grants permissions only in its own namespace — each target namespace needs its own RoleBinding |
 | **Role + RoleBinding** | Single namespace | Operator only works in its own namespace |
 
 ## Implementation

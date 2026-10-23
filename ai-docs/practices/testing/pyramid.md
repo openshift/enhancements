@@ -87,6 +87,6 @@ go test ./test/e2e/... -timeout 60m
 
 ## References
 
-- **Guide**: [Testing in OpenShift](https://github.com/openshift/enhancements/blob/master/dev-guide/testing.md)
+- **Guide**: [Testing Conventions](https://github.com/openshift/enhancements/blob/master/dev-guide/test-conventions.md)
 - **Upstream**: [Go Testing](https://pkg.go.dev/testing)
 - **Framework**: [envtest](https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/envtest)

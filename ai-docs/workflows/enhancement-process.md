@@ -27,13 +27,16 @@ Start from the template:
 cp guidelines/enhancement_template.md enhancements/your-area/your-feature.md
 ```
 
-**Required sections** (from the template):
+**Key required sections** (not exhaustive — see the [full template](../../guidelines/enhancement_template.md) for all sections):
 - Summary
-- Motivation (goals, non-goals)
+- Motivation (user stories, goals, non-goals)
 - Proposal (API changes, workflow, topology considerations)
 - Design details (test plan, graduation criteria)
-- Operational aspects (failure modes, support procedures)
+- Drawbacks
 - Alternatives
+- Upgrade / Downgrade Strategy
+- Version Skew Strategy
+- Operational aspects (failure modes, support procedures)
 
 ### 2. Submit PR
 
@@ -66,6 +69,7 @@ git push origin enhancement-your-feature
 | **provisional** | Under discussion, not yet approved |
 | **implementable** | Approved for implementation |
 | **implemented** | Code merged and released |
+| **informational** | Documents a decision or context; not tied to implementation |
 | **deferred** | Postponed to future release |
 | **rejected** | Not accepted |
 | **withdrawn** | Withdrawn by author |

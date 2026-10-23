@@ -12,10 +12,10 @@ Finalizers prevent resource deletion until cleanup logic completes. They ensure 
 
 ## Key Concepts
 
-- **Finalizer**: A string in `metadata.finalizers` that blocks deletion
+- **Finalizer**: A string in `metadata.finalizers` that blocks deletion until a controller removes it
 - **DeletionTimestamp**: Set when a delete request is received; non-nil means deletion is pending
 - **Cleanup**: The operator's logic that runs before removing the finalizer
-- **Foreground Deletion**: Kubernetes waits for finalizers before garbage collection
+- **Foreground Cascading Deletion**: A separate garbage-collection mechanism where the API server deletes dependents before the owner. This is distinct from finalizers — foreground deletion uses the `foregroundDeletion` finalizer internally but follows different semantics than custom controller finalizers
 
 ## Lifecycle
 

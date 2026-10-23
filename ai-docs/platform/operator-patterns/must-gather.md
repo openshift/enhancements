@@ -58,8 +58,10 @@ oc get co my-operator -o yaml \
 ### Dockerfile
 ```dockerfile
 FROM quay.io/openshift/origin-must-gather:latest
-COPY gather_my_operator /usr/bin/gather_my_operator
-ENTRYPOINT /usr/bin/gather_my_operator
+# The CLI runs /usr/bin/gather by default, so the script must be
+# installed at that path (or the ENTRYPOINT must be overridden).
+COPY gather_my_operator /usr/bin/gather
+ENTRYPOINT /usr/bin/gather
 ```
 
 ## What to Collect

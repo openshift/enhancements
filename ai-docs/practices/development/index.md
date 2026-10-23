@@ -11,8 +11,9 @@ Development conventions and API evolution guidelines for OpenShift components.
 | Area | Convention |
 |------|-----------|
 | **API Versions** | alpha → beta → stable; follow Kubernetes API conventions |
-| **Backward Compatibility** | N→N+1 version support required for all APIs |
-| **Deprecation** | Minimum 2 release deprecation window before removal |
+| **Lifecycle Stages** | **Tech Preview**: API may change without notice, no upgrade guarantees. **GA (stable)**: API is a long-term contract, backward-compatible changes only, deprecation policy applies |
+| **Backward Compatibility** | N→N+1 version support required for all GA APIs |
+| **Deprecation** | Minimum 2 release deprecation window before removal (varies by [API compatibility tier](https://docs.openshift.com/container-platform/latest/rest_api/understanding-compatibility-level.html)) |
 | **Generated Code** | Never hand-edit `zz_generated*` files; use `make generate` |
 | **Code Style** | Follow `CONVENTIONS.md` in the enhancements repo |
 

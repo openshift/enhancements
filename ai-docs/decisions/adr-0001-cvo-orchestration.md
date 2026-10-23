@@ -23,10 +23,10 @@ The Cluster Version Operator (CVO) serves as the centralized upgrade orchestrato
 
 ## Rationale
 
-- **Deterministic ordering**: Runlevel-based manifest ordering provides predictable upgrade sequence
+- **Deterministic ordering**: Runlevel-based manifest ordering (lexicographic by filename prefix) provides a predictable upgrade sequence. This ordering applies during upgrades; during steady-state reconciliation, CVO reapplies manifests but ordering constraints are less critical
 - **Health monitoring**: ClusterOperator conditions (Available/Progressing/Degraded) give CVO visibility into component health
 - **Declarative**: Release payloads contain all manifests; CVO applies the desired state
-- **Upgrade safety**: Upgradeable condition allows operators to block unsafe upgrades
+- **Upgrade safety**: The `Upgradeable` condition allows operators to block unsafe **minor-level (Y-stream)** upgrades (e.g., 4.15 → 4.16). Patch-level (z-stream) updates (e.g., 4.15.3 → 4.15.4) are not blocked by `Upgradeable=False`
 
 ## Alternatives Considered
 
