@@ -396,6 +396,7 @@ Same vSphere/Machine API assumptions as standalone clusters where those subsyste
 - **Controller coordination:** v1 blocks while user `MachineHealthCheck`, `ClusterAutoscaler`, or `MachineAutoscaler` resources exist. Should a future version pause and restore them automatically?
 - **Non-vSphere storage:** which stacks besides vSphere CSI are explicitly supported, unsupported, or need partner certification for Phase 1?
 - **Finer mapping:** should a future version map below failure-domain granularity, and how should mappings express destination failure domains spanning multiple vCenters?
+- **Post-preflight spec changes:** later phases re-read `spec.failureDomains` and the target credentials Secret. Should preflight snapshot them and reject changes once `InfrastructurePrepared` is True?
 - **Probe and latency checks:** extend the probe VM to API (6443), MCS (22623), ingress (80/443), DNS, proxy, storage, and MTU checks, and add RTT measurement with documented thresholds?
 
 ## Test Plan
@@ -444,7 +445,7 @@ N/A for initial release; future API versions should follow Kubernetes deprecatio
 
 ## Support Procedures
 
-- **Troubleshooting:** conditions, Kubernetes events, and operator logs; re-run preflight when stuck in early conditions.
+- **Troubleshooting:** inspect conditions, Kubernetes events, and operator logs. Before `InfrastructurePrepared`, correct the cause and let reconciliation requeue; after it, follow the phase-specific recovery procedure below.
 - **Before migration:** take an etcd / cluster-state backup and record the current `Infrastructure`, `cloud-provider-config`, and relevant Secrets.
 - **Recovery by phase:**
   - Before `InfrastructurePrepared` completes: correct or delete the CR; no cluster-critical mutations should have landed.
