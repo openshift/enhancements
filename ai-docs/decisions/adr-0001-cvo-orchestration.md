@@ -21,7 +21,7 @@ The **Cluster Version Operator (CVO)** is the root operator for all OpenShift co
 
 1. **Runlevel-based ordering**: The CVO sweeps manifests alphabetically by payload filename and waits for the current runlevel to complete before advancing to the next. Components within the same runlevel may proceed in parallel
 2. **Release image as source of truth**: The CVO reads manifests from the release image, providing versioned desired state. A rollout can remain partial if it encounters failures
-3. **ClusterOperator status contract**: Each operator reports `Available`, `Progressing`, and `Degraded` conditions. The CVO waits for operators to become `Available` at each runlevel before proceeding. The CVO itself reports `Degraded` based on its overall reconciliation outcome, not on a per-runlevel basis
+3. **ClusterOperator status contract**: Each operator reports `Available`, `Progressing`, `Degraded` conditions and a `versions` field. During upgrades the CVO waits for operators to report the target version via `versions`, not just `Available=True` — an operator can stay `Available` while running its previous version. CVO reports `Degraded` based on overall reconciliation outcome
 4. **Rollback is limited**: An administrator can attempt rollback only to a previous version within the current minor version, and the attempt may fail and leave the cluster unrecoverable
 
 ### CVO Does NOT:
