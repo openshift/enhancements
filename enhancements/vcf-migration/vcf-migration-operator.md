@@ -15,7 +15,7 @@ approvers:
 api-approvers:
   - "@JoelSpeed"
 creation-date:  2026-03-19
-last-updated: 2026-03-24
+last-updated: 2026-10-23
 status: provisional
 tracking-link:
   - https://issues.redhat.com/browse/SPLAT-2644
@@ -31,7 +31,7 @@ superseded-by:
 
 ## Summary
 
-Migrate OpenShift clusters from a source vCenter to a destination vCenter.
+Migrate OpenShift clusters from a source vCenter to a destination vCenter. Worker placement on destination failure domains follows an explicit, validated source→destination failure domain mapping in `spec.failureDomainMappings`.
 
 ## Motivation
 
@@ -85,10 +85,10 @@ Deliverables present in-tree: **`VmwareCloudFoundationMigration`** CRD (`migrati
 
 Reconciliation runs only when **`spec.state`** is **`Running`**; **`Pending`** and **`Paused`** skip work (pause is spec-driven). Stages map to **`status.conditions`** in order:
 
-1. **InfrastructurePrepared** — Prerequisites validation (CR, secrets, **Infrastructure**, storage eligibility, live vSphere inventory on source and each target), then **CVO** scaled to **0** in **`openshift-cluster-version` / `cluster-version-operator`**. See [InfrastructurePrepared: prerequisites validation](#infrastructureprepared-prerequisites-validation).
+1. **InfrastructurePrepared** — Prerequisites validation (CR, secrets, **Infrastructure**, **failure domain mapping** resolution and source MachineSet coverage, storage eligibility, live vSphere inventory on source and each target), then **CVO** scaled to **0** in **`openshift-cluster-version` / `cluster-version-operator`**. See [InfrastructurePrepared: prerequisites validation](#infrastructureprepared-prerequisites-validation).
 2. **DestinationInitialized** — On target vCenter: VM folders, **`openshift-region` / `openshift-zone`** tag categories and tags, attach tags to datacenter/cluster (govmomi vAPI).
 3. **MultiSiteConfigured** — Add target vCenter(s) and failure domains to **`Infrastructure`** `spec.platformSpec.vsphere`, merge **`cloud-provider-config`** in `openshift-config` (YAML, `k8s.io/cloud-provider-vsphere` config types), refresh affected pods; cluster must see both sites.
-4. **WorkloadMigrated** — **CPMS** failure domains updated and rolled out to target; new worker **MachineSets** on target failure domains; scale old source worker sets to zero; wait for machines ready / rollout complete.
+4. **WorkloadMigrated** — For each recorded source→destination failure domain mapping, copy worker **MachineSets** onto the destination failure domain: one copy per source MachineSet, named `{infraID}-worker-{sanitizedDestinationFailureDomain}` (base truncated to 59 characters) with `-2`, `-3`, … suffixes for additional copies. Persist the generated names in **`status.workerMachineSetNames`** *before* any destructive step. Then update and roll out **CPMS** failure domains to the target, verify every source worker MachineSet is represented, scale old source worker sets to zero, and wait for machines ready / rollout complete.
 5. **SourceCleaned** — Remove source vCenter from Infrastructure and cloud config; update installer **`metadata.json`** (stored in a **Secret** `<migration-name>-metadata`, key `metadata.json`); re-enable **CVO** and wait for it healthy.
 6. **Ready** — Aggregate completion.
 
@@ -110,7 +110,11 @@ sequenceDiagram
 
     Note over C,Vt: Phase 1 - InfrastructurePrepared
     C->>K: GET target credentials Secret, GET vsphere-creds
-    C->>CFG: GET infrastructures/cluster (source vCenter)
+    C->>CFG: GET infrastructures/cluster (source vCenter + source failure domains)
+    C->>C: Resolve spec.failureDomainMappings (infer when single source/destination pair)
+    C->>M: LIST source worker MachineSets per source failure domain
+    Note over C,K: Fail if mappings are missing, unknown, duplicate, or leave source worker capacity unmapped
+    C->>K: PATCH status.failureDomainMappings (effective mapping becomes immutable)
     C->>K: LIST PVs / PVCs / StorageClasses
     Note over C,K: Fail immediately if vSphere CSI-backed PVs are present
     C->>Vs: Session, validate datacenter and inventory
@@ -134,7 +138,11 @@ sequenceDiagram
     end
 
     Note over C,Vt: Phase 4 - WorkloadMigrated
-    C->>M: CREATE worker MachineSets on target failure domains (template from source MS)
+    loop Each recorded source -> destination mapping
+        C->>M: LIST source worker MachineSets in the source failure domain
+        C->>M: CREATE destination worker MachineSet copies (template from source MS)
+    end
+    C->>K: PATCH status.workerMachineSetNames (before destructive cleanup)
     loop Until new workers and nodes ready
         C->>M: List machines, nodes
     end
@@ -142,7 +150,7 @@ sequenceDiagram
     loop Until control plane machines rolled
         C->>M: Check CPMS generation observed and machine readiness
     end
-    C->>M: SCALE source vCenter worker MachineSets to 0
+    C->>M: Verify source MachineSet coverage, then SCALE source vCenter worker MachineSets to 0
     loop Until old machines and nodes deleted
         C->>M: List machines and nodes for old sets
     end
@@ -170,17 +178,23 @@ This stage runs only when **`spec.state: Running`**. Status is set to **`Infrast
 | 1 | **`spec.failureDomains`** non-empty | `spec.failureDomains must not be empty` |
 | 2 | **`spec.targetVCenterCredentialsSecret.name`** set; Secret exists in referenced namespace (default = migration CR namespace) | secret not found |
 | 3 | **`Infrastructure`** `cluster`: **`spec.platformSpec.vsphere.vcenters[0]`** present (source vCenter); **`.datacenters[0]`** non-empty | no vCenters / no datacenters |
-| 4 | **Storage eligibility:** inspect cluster **PVs / PVCs / StorageClasses** and **fail immediately** if any bound or provisioned storage is backed by **vSphere CSI** (for example via CSI driver **`csi.vsphere.vmware.com`**, a vSphere CSI provisioner, or a vSphere CSI storage class) | vSphere CSI storage detected |
-| 5 | **Source credentials** in **`kube-system/vsphere-creds`**: keys **`{sourceServer}.username`** and **`{sourceServer}.password`** (`sourceServer` = Infrastructure source vCenter **server** string) | missing keys |
-| 6 | **Source vSphere session** (govmomi, TLS verify skipped in implementation) to **source vCenter** using datacenter **name** from step 3 | connect/login failure |
-| 7 | **Source datacenter** resolvable via finder | datacenter not accessible |
-| 8 | **Per `failureDomain`** (sequential): read **`{fd.server}.username` / `{fd.server}.password`** from the **target** credentials Secret; open session to **`fd.server`** using **`fd.topology.datacenter`** | bad keys or connect failure |
-| 9 | Same failure domain: finder resolves **datacenter**, **compute cluster** path, **datastore** path, each **network** name/path | object not found |
-| 10 | If **`topology.resourcePool`** set: finder resolves resource pool | not found |
-| 11 | If **`topology.template`** set: finder resolves **virtual machine** (template) path | not found |
-| 12 | **Disable CVO**: scale Deployment **`cluster-version-operator`** in **`openshift-cluster-version`** to **0** replicas | scale API error |
+| 4 | **Destination server uniformity:** every **`spec.failureDomains[]`** entry has a non-empty **`server`** and all entries reference the **same** vCenter server (multiple destination servers are out of scope for v1) | `failure domain … has no vCenter server`, `spec.failureDomains must use a single vCenter server` |
+| 5 | **Source vCenter count:** at preflight the source **`Infrastructure`** must have exactly **one** vCenter (checked *before* `MultiSiteConfigured` adds the destination) | `source infrastructure must have exactly one vCenter` |
+| 6 | **Disjoint source topology:** source failure domains sharing a **`topology.datacenter`** must each set a **distinct, non-empty** **`topology.resourcePool`**, so a source MachineSet can match at most one source failure domain | `overlapping topology in datacenter …: each must specify a distinct resource pool` |
+| 7 | **Failure domain mapping resolution:** every **`spec.failureDomainMappings`** entry must name a real source failure domain (from **`Infrastructure`** `spec.platformSpec.vsphere.failureDomains`) and a real destination failure domain (in **`spec.failureDomains`**), and the list must cover every source and destination failure domain **exactly once**. Omitted list is inferred only when both sides are a single failure domain | `failureDomainMappings is required: …`, `references unknown source/destination failure domain`, `must cover every source and destination failure domain exactly once` |
+| 8 | **Generated MachineSet name safety:** names generated as `{infraID}-worker-{sanitizedDestinationFailureDomain}` (plus `-N` copy suffixes; base truncated to **59** characters to reserve suffix room) must be **≤ 63 characters** and must not collide with each other or with **existing MachineSets** in `openshift-machine-api` | `generated MachineSet name … exceeds the 63-character … limit`, `collides with existing MachineSet; rename the destination failure domain` |
+| 9 | **Source MachineSet coverage gate (preflight half):** every source-vCenter worker MachineSet **with running replicas** must match **exactly one** source failure domain that has a mapping, so no worker capacity is silently left behind. Zero-replica MachineSets and empty source failure domains are skipped (they run no capacity). This runs **before** the mapping is published as immutable and before any cluster mutation | `validating source machineset coverage: machineset … does not match any source failure domain`, `… matches source failure domain … which has no mapping`, `… matches multiple source failure domains` |
+| 10 | **Storage eligibility:** inspect cluster **PVs / PVCs / StorageClasses** and **fail immediately** if any bound or provisioned storage is backed by **vSphere CSI** (for example via CSI driver **`csi.vsphere.vmware.com`**, a vSphere CSI provisioner, or a vSphere CSI storage class) | vSphere CSI storage detected |
+| 11 | **Source credentials** in **`kube-system/vsphere-creds`**: keys **`{sourceServer}.username`** and **`{sourceServer}.password`** (`sourceServer` = Infrastructure source vCenter **server** string) | missing keys |
+| 12 | **Source vSphere session** (govmomi, TLS verify skipped in implementation) to **source vCenter** using datacenter **name** from step 3 | connect/login failure |
+| 13 | **Source datacenter** resolvable via finder | datacenter not accessible |
+| 14 | **Per `failureDomain`** (sequential): read **`{fd.server}.username` / `{fd.server}.password`** from the **target** credentials Secret; open session to **`fd.server`** using **`fd.topology.datacenter`** | bad keys or connect failure |
+| 15 | Same failure domain: finder resolves **datacenter**, **compute cluster** path, **datastore** path, each **network** name/path | object not found |
+| 16 | If **`topology.resourcePool`** set: finder resolves resource pool | not found |
+| 17 | If **`topology.template`** set: finder resolves **virtual machine** (template) path | not found |
+| 18 | **Disable CVO**: scale Deployment **`cluster-version-operator`** in **`openshift-cluster-version`** to **0** replicas | scale API error |
 
-On success: **`InfrastructurePrepared`** = **True**, **`reason: Completed`**, message *Infrastructure prepared and CVO disabled*; Kubernetes **Event** *Preflight validation passed, CVO disabled*.
+On success: **`InfrastructurePrepared`** = **True**, **`reason: Completed`**, message *Infrastructure prepared and CVO disabled*; Kubernetes **Event** *Preflight validation passed, CVO disabled*. The mapping resolved in step 7 is recorded in **`status.failureDomainMappings`** and is **immutable** from then on: later reconciles compare **`spec.failureDomainMappings`** against the recorded pairs (order-insensitively) and reject changes. Clearing **`spec.failureDomainMappings`** after preflight is allowed — the recorded effective mapping keeps driving every later phase.
 
 Phase 1 of the [end-to-end migration sequence](#migration-sequence-end-to-end) diagram matches this checklist at the interaction level.
 
@@ -230,9 +244,10 @@ Additional printer columns: **`spec.state`**, **`status.conditions[Ready].status
 |-------|------|----------|-------------|
 | `state` | `string` enum | yes | `Pending` (default), `Running`, or `Paused`. The controller **only reconciles when `Running`**; `Paused` stops work without tearing down completed steps. |
 | `targetVCenterCredentialsSecret` | object | yes | Reference to a Secret (`name`, optional `namespace`; default namespace is the migration CR’s namespace). Secret **must** contain credential keys named `{server}.username` and `{server}.password` where `{server}` is the **target vCenter FQDN or IP** matching each `failureDomains[].server`. |
-| `failureDomains` | array | yes | Min length **1**. Each element is **`config.openshift.io`’s `VSpherePlatformFailureDomainSpec`** (embedded OpenAPI): `name`, `region`, `zone`, `server`, `topology` (datacenter, computeCluster, networks, datastore, optional resourcePool/folder/template), optional feature-gated fields (`regionAffinity`, `zoneAffinity`). Aligns with [`Infrastructure` vSphere failure domains](https://docs.openshift.com/container-platform/latest/installing/installing_vsphere/installing-vsphere-installer-provisioned.html) so the same topology shape can be copied into `Infrastructure` during migration. |
+| `failureDomains` | array | yes | Min length **1**, max length **64**. Each element is **`config.openshift.io`’s `VSpherePlatformFailureDomainSpec`** (embedded OpenAPI): `name`, `region`, `zone`, `server`, `topology` (datacenter, computeCluster, networks, datastore, optional resourcePool/folder/template), optional feature-gated fields (`regionAffinity`, `zoneAffinity`). Aligns with [`Infrastructure` vSphere failure domains](https://docs.openshift.com/container-platform/latest/installing/installing_vsphere/installing-vsphere-installer-provisioned.html) so the same topology shape can be copied into `Infrastructure` during migration. `topology.template` is required on every destination failure domain. All destination failure domains must reference the **same** vCenter `server`. |
+| `failureDomainMappings` | array | no | Min length **1**, max length **64**, list map keyed by **`source`**. Each entry is `{source, destination}` (both required, 1–256 characters): `source` is a failure domain name from the cluster’s **`Infrastructure`**; `destination` must match a **`spec.failureDomains[].name`**. Required unless exactly one source and one destination failure domain exist, in which case the single pair is inferred. Must cover every source and destination failure domain **exactly once** (CRD CEL enforces source and destination uniqueness and destination membership in `spec.failureDomains`; the controller additionally verifies source membership and completeness). Before migration **v1 does not support** destination failure domains spanning more than one vCenter `server`. |
 
-No `source` block on the CR: the **source** vCenter and failure domain are read from the cluster **`Infrastructure`** (`cluster`) and existing cloud credentials.
+No `source` block on the CR: the **source** vCenter and source failure domains are read from the cluster **`Infrastructure`** (`cluster`) and existing cloud credentials. Only the source failure domain **names** are supplied, through `failureDomainMappings`.
 
 #### `status`
 
@@ -241,6 +256,9 @@ No `source` block on the CR: the **source** vCenter and failure domain are read 
 | `conditions` | List of **`metav1.Condition`**, list map key **`type`**. Types and order are defined below. |
 | `startTime` | Set on first reconcile while `spec.state` is `Running`. |
 | `completionTime` | Set when the workflow finishes successfully (all conditions satisfied). |
+| `failureDomainMappings` | Effective source→destination mapping resolved at preflight (the single inferred pair when `spec.failureDomainMappings` is omitted). **Write-once:** the controller does not rewrite it after preflight, and it drives every later phase even if `spec.failureDomainMappings` is cleared. Later spec changes are rejected while it is recorded. |
+| `workerMachineSetNames` | Destination worker MachineSet names generated for the recorded mapping, max **256** entries. Persisted **before** source MachineSets are deleted so a retry that re-enters workload migration still requires those MachineSets to exist and be ready. Mappings whose source failure domain had no running MachineSets contribute no names and intentionally stay empty. |
+| `completionSpecHash` | Hash of the spec that actually completed; binds `completionTime` to that spec so a spec change after completion does not inherit the old completion timestamp. |
 
 #### Condition types (ordered pipeline)
 
@@ -283,13 +301,20 @@ spec:
         folder: /TargetDC/vm/my-cluster-infra-id
         resourcePool: /TargetDC/host/TargetCluster/Resources
         template: /TargetDC/vm/rhcos-template
+  # Optional when the source and destination each have exactly one failure
+  # domain; required otherwise.
+  failureDomainMappings:
+    - source: source-fd-1
+      destination: target-fd-1
 ```
 
 #### API review notes
 
 - **Alpha:** field renames or condition semantics may change; prefer **`beta`** before declaring GA-stable install paths.
 - **Embedding `VSpherePlatformFailureDomainSpec`:** couples this CR to OpenShift **`config/v1`**; when OpenShift adds fields or validation, regenerate CRD and re-test.
-- **Single active migration:** not enforced by CRD; operators should document whether multiple CRs per cluster are supported (today’s controller assumes one coherent workflow per cluster).
+- **Single active migration:** enforced by the controller (one `openshift-vcf-migration/cluster` resource), documented in the operator’s API reference.
+- **`failureDomainMappings` is validated twice by design:** CEL covers destination membership, per-field lengths, list size, and source/destination uniqueness; the controller covers source membership, coverage completeness, and the inferred single-pair case, because source failure domain names live in **`Infrastructure`**, which CEL cannot read. Prefer keeping controller-side checks that depend on live cluster state.
+- **Effective mapping is recorded in status and immutable** rather than enforced by CEL: the mapping depends on live `Infrastructure` at preflight, and clearing `spec.failureDomainMappings` after preflight must remain allowed. Later edits are rejected by comparing against `status.failureDomainMappings` order-insensitively.
 
 ### API Extensions
 
@@ -312,6 +337,8 @@ N/A
 #### Standalone Clusters
 
 **In scope for the current code path:** vSphere **IPI-style** clusters with **ControlPlaneMachineSet** and **Machine API** (workers as MachineSets). The controller updates CPMS failure domains and creates/targets MachineSets explicitly.
+
+Source worker placement is driven by `spec.failureDomainMappings`: each mapped source failure domain's worker MachineSets are copied one-for-one onto the mapped destination failure domain (preserving per-MachineSet VM shape), so clusters whose source failure domains share a datacenter must distinguish them with distinct `topology.resourcePool` values. A single source/destination failure domain pair needs no explicit mapping; anything larger requires every failure domain on both sides to be named exactly once.
 
 **Not yet covered in-repo:** **UPI** control-plane and worker flows (tracked as separate epic stories); multi-cluster/fleet orchestration beyond applying one CR per cluster.
 
@@ -350,6 +377,13 @@ Same vSphere/Machine API assumptions as standalone clusters where those subsyste
 - **Secrets:** Target vCenter creds via referenced Secret; migration metadata persisted as JSON in a Secret (not a ConfigMap) because it includes credentials.
 - **Cloud config:** Reads/writes `openshift-config/cloud-provider-config` key `config` as **YAML** only; **legacy INI→YAML conversion is not implemented** in this repository yet (epic item still open).
 - **Storage eligibility:** Before migration begins, the operator should query Kubernetes storage objects and **fail immediately** when **vSphere CSI-backed PVs** are present; Phase 1 is limited to stateless or non-vSphere-CSI storage footprints.
+- **Failure domain mapping:** `spec.failureDomainMappings` is the only source→destination relationship the CR expresses; source topology itself is read from **`Infrastructure`**. Resolution, completeness, single-destination-server, disjoint-source-topology, and generated-name collision checks run in preflight ([checklist](#controller-enforced-checklist-order-enforced-in-controller)) and the effective mapping is recorded write-once in **`status.failureDomainMappings`**. Later reconciles compare spec against status **order-insensitively** and reject changes; reordering entries or clearing the spec list is allowed because status keeps driving.
+- **Worker MachineSet copy semantics:** for each mapping, the controller lists the source failure domain's worker MachineSets (deterministically sorted by name), then creates one destination MachineSet per source MachineSet, preserving heterogeneous provider specs (VM size, disks) while taking template and target topology from the destination failure domain. Replicas are copied exactly (no minimum-1 floor; a source set deliberately at zero stays at zero). A source MachineSet feeding two destinations is rejected instead of duplicating replicas.
+- **Generated names and crash safety:** destination names are `{infraID}-worker-{sanitizedDestinationFD}`, truncated to **59** characters to reserve room for `-2`…`-999` copy suffixes within the 63-character Kubernetes label limit. Each generated name is added to **`status.workerMachineSetNames`** and that status is **persisted before any destructive step**, failing closed if publication fails: the names are derived from source MachineSets about to be deleted and cannot be re-derived later. On retry, unrecorded-but-created names are recovered by re-deriving them from the still-present source MachineSets and verifying each resolves to a MachineSet targeting the destination vCenter.
+- **Coverage gate (fail closed twice):** preflight rejects source worker MachineSets with running replicas that match no mapped source failure domain; scale-down re-checks and additionally requires a recorded destination MachineSet for each mapped source failure domain. Zero-replica MachineSets and empty source failure domains are skipped because they run no capacity.
+- **Readiness scope:** readiness checks iterate the recorded mappings rather than only the current destination failure domains, so a mapping whose source failure domain had no MachineSets is skipped unless destination MachineSets already exist and still need readiness verification.
+- **CPMS / MCP rollout gate:** a **MachineConfigPool** counts as rolled out only when it has an **Updated** condition, `UpdatedMachineCount == MachineCount`, **`status.observedGeneration >= metadata.generation`**, and `status.configuration.name == spec.configuration.name` — so a config change that has not yet been observed or rendered is not mistaken for a completed rollout.
+- **Single destination vCenter:** multiple destination vCenter servers in `spec.failureDomains` are rejected in preflight for this release; the API shape allows them later.
 - **OpenShift API:** Adding a second vCenter in **`Infrastructure`** requires **`openshift/api`** validation relaxation (see API Extensions); operator logic assumes multi-vCenter spec updates are permitted.
 - **CVO:** Intentionally unmanaged during middle phases; failure to complete **SourceCleaned** leaves the cluster in a sensitive state—operational runbooks must cover recovery.
 - **Console plugin:** Separate image/deployment; vCenter browse uses admin-supplied credentials through the plugin backend—hardening and support boundaries should be documented for reviewers.
@@ -376,7 +410,11 @@ Same vSphere/Machine API assumptions as standalone clusters where those subsyste
 | **Topology-aware workloads or remediation controllers interfere with rollout** | Audit **`topologySpreadConstraints`**, affinity rules, **PDBs**, and zone expectations; pause or narrow **`MachineHealthCheck`** / autoscaling controllers during migration. |
 | **UPI / customized VM shapes** not reproducible on the destination | Add a **source VM discovery** phase that inspects live VM characteristics and generates the target template/providerSpec for CPMS / MAO consumption; do not assume stock IPI machine definitions. |
 | **Static IP / IPAM / subnet expansion** not coordinated with node replacement | Treat addressing as a first-class preflight item: validate IP ownership model, required IPAM integration, and whether **`machineNetworks`** must be updated before any target-node creation. |
-| **Rollback expectations are unclear once dual-site changes begin** | Publish a per-phase recovery matrix, require pre-migration **etcd** backup, and document when to prefer pause/resume, forward-fix, or restore rather than automatic rollback. |
+| **Rollout expectations are unclear once dual-site changes begin** | Publish a per-phase recovery matrix, require pre-migration **etcd** backup, and document when to prefer pause/resume, forward-fix, or restore rather than automatic rollback. |
+| **Source worker capacity silently left behind** (a source MachineSet maps to no destination failure domain) | Fail-closed coverage gate at preflight and again before source scale-down; reject source failure domains sharing a datacenter unless each sets a distinct resource pool, so a MachineSet can only match one. |
+| **Generated destination MachineSet names collide or exceed the label limit** | Name derivation reserves suffix room and truncates below 63 characters; preflight rejects collisions against existing MachineSets and other generated names with an actionable “rename the destination failure domain” error. |
+| **Crash between MachineSet creation and status update strands destination capacity** | Generated names are persisted before destructive cleanup, and unrecorded names are re-derived and verified on retry instead of being silently dropped at scale-down. |
+| **Mapping changed mid-migration** | Effective mapping is recorded in status at preflight and treated as immutable; controller rejects spec changes (order-insensitively) with a message naming the offending source failure domain. |
 | `v1alpha1` API changes | Version CRD carefully; OLM upgrade graph and release notes. |
 
 ### Drawbacks
@@ -401,6 +439,8 @@ Same vSphere/Machine API assumptions as standalone clusters where those subsyste
 - **Controller coordination:** Should v1 merely document required suspension of **`MachineHealthCheck`** / autoscaling, or should a future version pause and restore those objects automatically?
 - **Non-vSphere storage support matrix:** Which storage stacks besides **vSphere CSI** are explicitly supported, unsupported, or require partner certification for Phase 1?
 - **INI cloud-config:** Conversion path for pre-4.18-style configs not present in repo ([SPLAT-2651](https://issues.redhat.com/browse/SPLAT-2651)).
+- **Mapping granularity beyond failure domains:** v1 maps whole failure domains one-to-one, so all source MachineSets in one failure domain land in a single destination failure domain, with provider-spec heterogeneity preserved only per source MachineSet. Should a future version allow finer (per-MachineSet or per-pool) mapping, and how would that interact with CPMS?
+- **Destination multi-vCenter:** when destination failure domains span more than one vCenter server, should mappings gain a server dimension (or require per-server CRs), and what ordering guarantees are needed for rollout?
 - **Feature gate** for day-2 vCenter count vs. plain API change ([SPLAT-2664](https://issues.redhat.com/browse/SPLAT-2664)).
 - **Konflux / OpenShift release** inclusion ([SPLAT-2701](https://issues.redhat.com/browse/SPLAT-2701), [SPLAT-2681](https://issues.redhat.com/browse/SPLAT-2681)).
 - **Console vs CLI-only** UX ownership and support ([SPLAT-2644](https://issues.redhat.com/browse/SPLAT-2644) open questions).
@@ -410,12 +450,12 @@ Same vSphere/Machine API assumptions as standalone clusters where those subsyste
 ## Test Plan
 
 - Use existing CI, request a two pool lease across vCenters. Install on one pool, migrate to the other.
-- **Unit / integration:** `make test` (envtest) — controller reconciliation paths, `internal/openshift` (e.g. CPMS updates), `internal/vsphere` (tags), `internal/metadata`.
+- **Unit / integration:** `make test` (envtest) — controller reconciliation paths, `internal/openshift` (e.g. CPMS updates), `internal/vsphere` (tags), `internal/metadata`. Failure domain mapping has dedicated coverage: mapping resolution/inference and immutability, source MachineSet coverage gate, name generation/collision/truncation, per-mapping MachineSet creation with copy suffixes, name persistence and crash recovery, and MCP/CPMS rollout gate behavior.
 - **E2E (Kind):** `test/e2e` — deploy manager, CR lifecycle smoke, metrics RBAC probe (see Makefile `setup-test-e2e` / e2e targets).
 - **Pre-migration qualification:** In real infrastructure, validate **`api`**, **`api-int`**, and **`*.apps`** reachability, certificate validity, load balancer health checks, **`Proxy`** / **`noProxy`** coverage, node-to-vCenter reachability, node-to-storage reachability, **NTP**, and **MTU** assumptions before setting **`spec.state: Running`**.
 - **Real infra:** CI or manual job on **two reachable vCenters** (or two pools): install OCP on source, run migration CR to destination, validate nodes, workloads, external LB behavior, and **CVO** health after completion (align with [SPLAT-2646](https://issues.redhat.com/browse/SPLAT-2646), [SPLAT-2647](https://issues.redhat.com/browse/SPLAT-2647)).
 - **Workload matrix:** Exercise at least one stateless app, one disruption-sensitive app with a **PDB**, one topology-aware workload, and one supported non-**vSphere CSI** storage footprint so drain, scheduling, and data-path assumptions are tested in addition to node readiness.
-- **Recovery drills:** Pause and resume during at least **`MultiSiteConfigured`** and **`WorkloadMigrated`**, restart the operator mid-migration, verify manual **CVO** re-enable guidance, and document expected operator behavior when external dependencies (DNS / LB / proxy) are intentionally misconfigured.
+- **Recovery drills:** Pause and resume during at least **`MultiSiteConfigured`** and **`WorkloadMigrated`**, restart the operator mid-migration, verify manual **CVO** re-enable guidance, and document expected operator behavior when external dependencies (DNS / LB / proxy) are intentionally misconfigured. Include a drill that deletes an unrecorded destination worker MachineSet created just before an operator restart, and confirm scale-down refuses until coverage is restored.
 - **Console plugin:** Separate build (`make console-plugin-frontend`, `console-plugin-backend`) and manual UI verification on a live console.
 
 ## Graduation Criteria
