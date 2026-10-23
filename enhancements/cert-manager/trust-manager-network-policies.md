@@ -49,7 +49,7 @@ Without its own policies, a trust-manager pod has unrestricted ingress and egres
 ### Goals
 
 - Create four `NetworkPolicy` objects in the `cert-manager` namespace when a `TrustManager` resource named `cluster` exists and `spec.networkPolicy` is unset or `Enabled`.
-- When `spec.networkPolicy` is `Disabled`, delete those four named policies and do not recreate them. Leave every other `NetworkPolicy` in the namespace alone. Changing the field back to `Enabled`, or clearing it, creates the four policies again.
+- When `spec.networkPolicy` is `Disabled`, delete those four reserved names and do not recreate them. Leave every other `NetworkPolicy` in the namespace alone. Changing the field back to `Enabled`, or clearing it, creates the four policies again.
 - Select only pods labeled `app: cert-manager-trust-manager`.
 - Allow egress to the Kubernetes API server on TCP 6443.
 - Allow ingress to the validating webhook on TCP 6443, with no source peer restriction, so hostNetwork `kube-apiserver` can call it.
@@ -79,9 +79,11 @@ Without its own policies, a trust-manager pod has unrestricted ingress and egres
 
 Follow the istio-csr asset path from the cert-manager network policy enhancement, and add `TrustManager.spec.networkPolicy` so an administrator can turn the policies off. Istio-csr reconciles its four policies for as long as the `IstioCSR` object exists and has no field to stop that. Trust-manager defaults to the same reconcile behavior. `Disabled` is the difference.
 
-When the Trust Manager controller sees the `TrustManager` resource and `spec.networkPolicy` is unset or `Enabled`, it applies four policies in the operand namespace `cert-manager`. The pod selector on every policy is `app: cert-manager-trust-manager`. Cert-manager policies use different labels, so the two sets do not select each other's pods even though they share the namespace. When the field is `Disabled`, the controller deletes the four named policies and does not recreate them. A watch on `NetworkPolicy` repairs drift only while the field is `Enabled`.
+When the Trust Manager controller sees the `TrustManager` resource and `spec.networkPolicy` is unset or `Enabled`, it applies four policies in the operand namespace `cert-manager`. The pod selector on every policy is `app: cert-manager-trust-manager`. Cert-manager policies use different labels, so the two sets do not select each other's pods even though they share the namespace. When the field is `Disabled`, the controller deletes the four reserved names and does not recreate them. A watch on `NetworkPolicy` repairs drift only while the field is `Enabled`.
 
-The allow rules match traffic observed on a live trust-manager 0.20.3 pod:
+Those four names in `cert-manager` are reserved for the operator: `trust-manager-deny-all`, `trust-manager-allow-egress-to-api-server`, `trust-manager-allow-ingress-to-webhook`, and `trust-manager-allow-ingress-to-metrics`. Each object carries `trustmanager.operator.openshift.io/owned-by: trust-manager`. Kubernetes identity is `(namespace, name)`, so an extra administrator `NetworkPolicy` must use a different name. Allows combine, which is how extra scrapes or egress coexist with the operator set. There is no user-policy name prefix: `TrustManager` has no `networkPolicies[]` field, unlike `CertManager`. While the field is `Enabled`, apply of those four names is intended; the operator takes over an existing object of the same name. `Disabled` deletes those four names only.
+
+The allow rules match traffic on the GA trust-manager operand **v0.25.0**, which the operator ships (`RELATED_IMAGE_CERT_MANAGER_TRUST_MANAGER`). Webhook TCP 6443, metrics TCP 9402, readiness TCP 6060, and API egress enforced as TCP 6443 are the same ports as the v0.25.0 Deployment and Services. v0.25.0 did not add listen or dial ports beyond that set:
 
 - The process dials `kubernetes.default.svc` (`172.30.0.1:443`). OVN delivers that to the API server endpoints on TCP 6443. The egress rule allows TCP 6443, the same port the shipped cert-manager and istio-csr API egress policies use. A rule on 443 does not match the enforced port.
 - The validating webhook listens on container port 6443. Its Service exposes port 443 and targets 6443. The ingress rule allows TCP 6443. The caller is hostNetwork `kube-apiserver`, which appears on the pod network as the control-plane node gateway, so the rule has no `from` peer.
@@ -101,7 +103,7 @@ No administrator action turns the policies on. Installing the trust-manager oper
 4. Bundle create and update requests are admitted through the webhook on TCP 6443. The controller reconciles Bundles through the API on TCP 6443.
 5. If a user-workload-monitoring ServiceMonitor targets `trust-manager-metrics` port 9402, that scrape is allowed. The operator does not create that ServiceMonitor. A scrape from another namespace, while the field stays `Enabled`, is an additional `NetworkPolicy` selecting `app: cert-manager-trust-manager`. Allows combine, so that object does not require `Disabled`.
 6. If someone edits one of the four policies while the field is `Enabled`, the controller writes the desired spec back.
-7. If an administrator sets `spec.networkPolicy` to `Disabled`, the controller deletes `trust-manager-deny-all`, `trust-manager-allow-egress-to-api-server`, `trust-manager-allow-ingress-to-webhook`, and `trust-manager-allow-ingress-to-metrics`. It does not delete other `NetworkPolicy` objects. It does not recreate the four names on later reconciles.
+7. If an administrator sets `spec.networkPolicy` to `Disabled`, the controller deletes the four reserved names (`trust-manager-deny-all`, `trust-manager-allow-egress-to-api-server`, `trust-manager-allow-ingress-to-webhook`, and `trust-manager-allow-ingress-to-metrics`). It does not delete other `NetworkPolicy` objects. It does not recreate the four names on later reconciles.
 8. Setting the field back to `Enabled`, or clearing it, creates the four policies again.
 9. Deleting the `TrustManager` resource does not delete the policies. If `Disabled` already removed them, they stay absent.
 
@@ -117,10 +119,11 @@ One new field on the existing cluster-scoped `TrustManager` CRD. No new CRD, web
 // networkPolicy controls the operator-managed NetworkPolicy objects for the
 // trust-manager operand.
 //
-// When unset or "Enabled", the operator creates four policies in the
-// cert-manager namespace and reconciles them to the desired spec.
-// When "Disabled", the operator deletes those four policies and does not
-// recreate them. Other NetworkPolicy objects in the namespace are left alone.
+// This is not an opt-in. Policies are created whenever a TrustManager exists.
+// Unset and "Enabled" both create and reconcile the four reserved names.
+// "Disabled" is the only way to delete them and stop recreation.
+// Extra administrator allows do not use this field; they are separate
+// NetworkPolicy objects with other names.
 //
 // The field can change from Enabled to Disabled and back.
 // CertManager.spec.defaultNetworkPolicy has no effect on this field.
@@ -168,15 +171,19 @@ The cert-manager operator is an optional operator. These policies use the stable
 
 ### Implementation Details/Notes/Constraints
 
-Implement the policies as static assets, on the same path as `bindata/networkpolicies/istio-csr-*.yaml` and `istioCSRNetworkPolicyAssets`. Reconcile them from the Trust Manager controller when `spec.networkPolicy` is unset or `Enabled`. Watch `NetworkPolicy` so drift is repaired in that state. When the field is `Disabled`, delete the four named policies and ignore later changes to those names. Unit tests cover create, spec equality, delete on `Disabled`, and recreate when the field returns to `Enabled`.
+Implement the policies as static assets, on the same path as `bindata/networkpolicies/istio-csr-*.yaml` and `istioCSRNetworkPolicyAssets`. Reconcile them from the Trust Manager controller when `spec.networkPolicy` is unset or `Enabled`. Watch `NetworkPolicy` so drift is repaired in that state. When the field is `Disabled`, delete the four reserved names and ignore later changes to those names. Unit tests cover create, spec equality, delete on `Disabled`, and recreate when the field returns to `Enabled`.
 
-All four objects live in namespace `cert-manager` and use this selector:
+All four objects live in namespace `cert-manager`, use the reserved names below, and carry `trustmanager.operator.openshift.io/owned-by: trust-manager` on metadata (that label is in the static assets). Apply also merges the same default operand labels used on Deployment and Service: `app`, `app.kubernetes.io/name`, `app.kubernetes.io/instance`, `app.kubernetes.io/managed-by`, `app.kubernetes.io/part-of`, and `app.kubernetes.io/version` from the operand image env. Those labels are not repeated in the examples below so the snippets do not go stale when the image version changes. `spec.controllerConfig.labels` is merged the same way as for other operand resources.
+
+Metadata labels are for ownership and watches. They are not the isolation rule. Isolation is only `spec.podSelector`, which stays:
 
 ```yaml
 podSelector:
   matchLabels:
     app: cert-manager-trust-manager
 ```
+
+Do not add the `app.kubernetes.io/*` set to `podSelector`. The Deployment already selects pods with `app: cert-manager-trust-manager`; the policies use that same match.
 
 1. **Deny all trust-manager traffic**
 
@@ -186,6 +193,8 @@ podSelector:
     metadata:
       name: trust-manager-deny-all
       namespace: cert-manager
+      labels:
+        trustmanager.operator.openshift.io/owned-by: trust-manager
     spec:
       podSelector:
         matchLabels:
@@ -203,6 +212,8 @@ podSelector:
     metadata:
       name: trust-manager-allow-egress-to-api-server
       namespace: cert-manager
+      labels:
+        trustmanager.operator.openshift.io/owned-by: trust-manager
     spec:
       podSelector:
         matchLabels:
@@ -225,6 +236,8 @@ podSelector:
     metadata:
       name: trust-manager-allow-ingress-to-webhook
       namespace: cert-manager
+      labels:
+        trustmanager.operator.openshift.io/owned-by: trust-manager
     spec:
       podSelector:
         matchLabels:
@@ -247,6 +260,8 @@ podSelector:
     metadata:
       name: trust-manager-allow-ingress-to-metrics
       namespace: cert-manager
+      labels:
+        trustmanager.operator.openshift.io/owned-by: trust-manager
     spec:
       podSelector:
         matchLabels:
@@ -303,7 +318,7 @@ The policies are not removed when the operand is removed, so a later uninstall l
 
 ## Test Plan
 
-- **Unit tests:** Creating `TrustManager` `cluster` with `spec.networkPolicy` unset or `Enabled` creates the four policies in `cert-manager` with the selector and ports above. A mutated policy is reconciled back to the desired spec. `CertManager.spec.defaultNetworkPolicy` is not consulted. Setting `spec.networkPolicy` to `Disabled` deletes the four named policies and a later reconcile does not recreate them. Another `NetworkPolicy` in the namespace is not deleted. Setting the field back to `Enabled` creates the four policies again.
+- **Unit tests:** Creating `TrustManager` `cluster` with `spec.networkPolicy` unset or `Enabled` creates the four reserved policies in `cert-manager` with the selector, ports, and `owned-by` label above. A mutated policy is reconciled back to the desired spec. `CertManager.spec.defaultNetworkPolicy` is not consulted. Setting `spec.networkPolicy` to `Disabled` deletes the four reserved names and a later reconcile does not recreate them. Another `NetworkPolicy` in the namespace is not deleted. Setting the field back to `Enabled` creates the four policies again.
 - **Cluster test, admission and reconcile:** With the policies applied, create a `Bundle` and confirm the validating webhook admits it and the target ConfigMap or Secret is written. With `spec.networkPolicy: Disabled`, confirm the four policies are gone.
 - **Cluster test, metrics:** The operator does not ship a trust-manager ServiceMonitor. Create one the way the cert-manager e2e tests do (`test/e2e/testdata/observe/servicemonitor.yaml` in cert-manager-operator), aimed at Service `trust-manager-metrics` port 9402 with scheme HTTP. Confirm user-workload monitoring can scrape it, and confirm a client outside that namespace cannot.
 - **Negative check:** A pod in `cert-manager` that is not trust-manager is not selected by these policies. Cert-manager operand connectivity does not change when trust-manager policies exist and `defaultNetworkPolicy` is unset.
@@ -356,10 +371,10 @@ The existing trust-manager validating webhook is unchanged. If the webhook pod c
 1. Confirm the operand is installed: `oc get trustmanager cluster` and `oc get deploy -n cert-manager trust-manager`.
 2. Confirm `CertManager.spec.defaultNetworkPolicy` is irrelevant: trust-manager policies follow `TrustManager.spec.networkPolicy`, not that field. They can exist while `CertManager.spec.defaultNetworkPolicy` is empty or `"false"`.
 3. Read `TrustManager.spec.networkPolicy`. Unset or `Enabled` means the four policies should exist. `Disabled` means they should be absent.
-4. List the policies: `oc get networkpolicy -n cert-manager`. When the field is unset or `Enabled`, expect `trust-manager-deny-all`, `trust-manager-allow-egress-to-api-server`, `trust-manager-allow-ingress-to-webhook`, and `trust-manager-allow-ingress-to-metrics`. Each must select `app: cert-manager-trust-manager`.
+4. List the policies: `oc get networkpolicy -n cert-manager`. When the field is unset or `Enabled`, expect the four reserved names `trust-manager-deny-all`, `trust-manager-allow-egress-to-api-server`, `trust-manager-allow-ingress-to-webhook`, and `trust-manager-allow-ingress-to-metrics`. Each must select `app: cert-manager-trust-manager` and carry `trustmanager.operator.openshift.io/owned-by: trust-manager`.
 5. If Bundle admission fails, check `kube-apiserver` logs for errors calling `trust.cert-manager.io`. Confirm the webhook policy allows TCP 6443 and not only Service port 443. If `spec.networkPolicy` is `Disabled`, the operator is not keeping that path open.
 6. If reconcile fails with API timeouts, confirm the egress policy allows TCP 6443, or that `spec.networkPolicy` is not `Disabled` without a replacement allow.
 7. If metrics are missing, confirm the ServiceMonitor uses scheme HTTP against port 9402 and runs in `openshift-user-workload-monitoring`. A scraper in any other namespace is denied while `spec.networkPolicy` is `Enabled`. Allow it with a separate `NetworkPolicy`, or set the field to `Disabled` and apply the administrator's own rules.
 8. If a policy was edited by hand while `spec.networkPolicy` is `Enabled`, wait for the controller to restore it. That restore is expected.
-9. To turn the policies off, set `TrustManager.spec.networkPolicy` to `Disabled`. The controller deletes the four named objects and does not recreate them. Deleting the objects by hand while the field is `Enabled` does not stick. Deleting the `TrustManager` resource does not remove the policies.
+9. To turn the policies off, set `TrustManager.spec.networkPolicy` to `Disabled`. The controller deletes the four reserved names and does not recreate them. Deleting the objects by hand while the field is `Enabled` does not stick. Deleting the `TrustManager` resource does not remove the policies. Extra administrator policies must not reuse those names.
 
