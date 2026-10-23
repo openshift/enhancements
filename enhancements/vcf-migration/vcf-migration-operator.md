@@ -343,8 +343,7 @@ Same vSphere/Machine API assumptions as standalone clusters where those subsyste
 
 - **API group:** `migration.openshift.io`, `VmwareCloudFoundationMigration` `v1alpha1`.
 - **Secrets:** target vCenter credentials come from the referenced Secret; migration metadata is stored as JSON in a Secret because it includes credentials.
-- **Cloud config:** `openshift-config/cloud-provider-config` key `config` is read and written as YAML only. INI conversion ships via CMO backports through 4.18 ([SPLAT-2651](https://issues.redhat.com/browse/SPLAT-2651), Closed), so this operator assumes 4.18+ configs.
-- **No CVO pause:** migration uses the native day-2 multi-vCenter path. Preflight requires the `VSphereMultiVCenterDay2` feature gate and blocks while a ClusterVersion upgrade is in progress.
+- **Cloud config:** `openshift-config/cloud-provider-config` key `config` is read and written as YAML only; supported clusters are OpenShift **4.20+**, whose installs use YAML configs.
 - **Failure domain mapping:** `spec.failureDomainMappings` is the only source→destination relationship in the CR; source topology is read from `Infrastructure`. Preflight resolves it once and records it write-once in `status.failureDomainMappings`; later reconciles reject spec changes order-insensitively, while reordering or clearing the spec list stays allowed.
 - **Worker MachineSet copies:** for each mapping, source worker MachineSets are sorted by name and copied one-for-one to the destination failure domain. Each source provider spec (VM size, disks) is preserved while template and target topology come from the destination failure domain;
   replicas are copied exactly (a source set at zero stays at zero), and one source MachineSet feeding two destinations is rejected.
@@ -394,7 +393,6 @@ Same vSphere/Machine API assumptions as standalone clusters where those subsyste
 - **Controller coordination:** v1 blocks while user `MachineHealthCheck`, `ClusterAutoscaler`, or `MachineAutoscaler` resources exist. Should a future version pause and restore them automatically?
 - **Non-vSphere storage:** which stacks besides vSphere CSI are explicitly supported, unsupported, or need partner certification for Phase 1?
 - **Finer mapping:** should a future version map below failure-domain granularity, and how should mappings express destination failure domains spanning multiple vCenters?
-- **Legacy INI cloud config:** preflight does not inspect `cloud-provider-config` today. Should it hard-block a non-YAML `config` value (or convert it) before `MultiSiteConfigured` can fail later?
 - **Probe and latency checks:** extend the probe VM to API (6443), MCS (22623), ingress (80/443), DNS, proxy, storage, and MTU checks, and add RTT measurement with documented thresholds?
 
 ## Test Plan
@@ -433,7 +431,7 @@ N/A for initial release; future API versions should follow Kubernetes deprecatio
 
 ## Version Skew Strategy
 
-- Target **OpenShift 4.18+** on vSphere per epic; operator must pin/test against supported `openshift/api` and `machine` API levels bundled in that stream.
+- Target **OpenShift 4.20+** on vSphere; operator must pin/test against supported `openshift/api` and `machine` API levels bundled in that stream.
 
 ## Operational Aspects of API Extensions
 
