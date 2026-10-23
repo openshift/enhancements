@@ -256,7 +256,7 @@ versions:
 - ❌ Conversion webhooks (adds complexity, rarely needed)
 - ❌ Serving multiple versions long-term (increases API surface)
 
-See [API evolution](../../practices/development/api-evolution.md) for version transition patterns.
+See [api-conventions](../../../dev-guide/api-conventions.md) and [breaking-changes](../../../dev-guide/breaking-changes.md) for API version transition patterns.
 
 ## Node Upgrades
 
