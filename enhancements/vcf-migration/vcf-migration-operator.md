@@ -315,7 +315,7 @@ Day-2 updates to `Infrastructure` (`config.openshift.io/v1`, `cluster`) must all
 3. **`vcenters` list field** — size may only change from empty to fewer than two entries.
 
 **Required change:** remove all three markers so admission no longer blocks growing `vcenters`, then re-run `openshift/api` codegen; the maximum list length stays whatever the CRD and feature gates already enforce.
-[SPLAT-2649](https://issues.redhat.com/browse/SPLAT-2649) (Closed) shipped the relaxation behind the [SPLAT-2664](https://issues.redhat.com/browse/SPLAT-2664) (Closed) `VSphereMultiVCenters` gate; GA promotion is [SPLAT-2864](https://issues.redhat.com/browse/SPLAT-2864) (In Progress).
+[SPLAT-2649](https://issues.redhat.com/browse/SPLAT-2649) (Closed) shipped the relaxation behind the historical `VSphereMultiVCenters` gate tracked by [SPLAT-2664](https://issues.redhat.com/browse/SPLAT-2664) (Closed). The current day-2 gate is `VSphereMultiVCenterDay2`, and GA promotion is [SPLAT-2864](https://issues.redhat.com/browse/SPLAT-2864) (In Progress).
 
 ### Topology Considerations
 
@@ -451,7 +451,8 @@ N/A for initial release; future API versions should follow Kubernetes deprecatio
 - **Before migration:** take an etcd / cluster-state backup and record the current `Infrastructure`, `cloud-provider-config`, and relevant Secrets.
 - **Recovery by phase:**
   - Before `InfrastructurePrepared` completes: correct or delete the CR; no cluster-critical mutations should have landed.
-  - After `InfrastructurePrepared`, before `WorkloadMigrated`: the cluster is still source-primary but target-side artifacts may exist; remove partial target configuration and re-run preflight rather than expecting automatic rollback.
+  - After `InfrastructurePrepared`, before `WorkloadMigrated`: the cluster is still source-primary but target-side artifacts may exist. Preflight does not re-run once `InfrastructurePrepared` is True (conditions are monotonic): forward-fix the partial target state and resume via `Paused` -> `Running`.
+    To start over, clean up target artifacts, set `migration.openshift.io/allow-deletion: "true"`, delete the CR, and create a new one.
   - During `WorkloadMigrated`: mixed source/target machines are expected; prefer `Paused` plus forward-fix and resume.
   - After `SourceCleaned`: the destination is authoritative; returning to the old vCenter is a new migration or a restore from backup, not a rollback.
 - **Escalation:** epic [SPLAT-2644](https://issues.redhat.com/browse/SPLAT-2644) until GSS handoff is defined.
