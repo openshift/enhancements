@@ -65,8 +65,7 @@ Related work that is not a child of SPLAT-2644: [SPLAT-2649](https://issues.redh
 
 Implementation lives in [`openshift/vcf-migration-operator`](https://github.com/openshift/vcf-migration-operator): Kubebuilder / Operator SDK v4, Go 1.25+, `controller-runtime`, OpenShift `config` and `machine` clients, and `govmomi`. The manager deploys into **`openshift-vcf-migration`** (kustomize default).
 
-In-tree deliverables: the **`VmwareCloudFoundationMigration`** CRD (`migration.openshift.io/v1alpha1`, namespaced, short name `vcfm`), the reconciler with ordered conditions, the OLM **`bundle/`**, Prometheus metrics, envtest unit tests (`make test`), and Ginkgo e2e scaffolding against Kind (`test/e2e`). An optional
-**OpenShift Console dynamic plugin** (React/PatternFly + Go backend) adds a migration wizard, vCenter inventory browse APIs, and an SSE progress stream; it is built and installed separately (`make deploy-console-plugin`).
+In-tree deliverables: the **`VmwareCloudFoundationMigration`** CRD (`migration.openshift.io/v1alpha1`, namespaced, short name `vcfm`), the reconciler with ordered conditions, the OLM **`bundle/`**, Prometheus metrics, envtest unit tests (`make test`), and Ginkgo e2e scaffolding against Kind (`test/e2e`).
 
 ### Workflow Description
 
@@ -356,7 +355,6 @@ Same vSphere/Machine API assumptions as standalone clusters where those subsyste
 - **Rollout gate:** a MachineConfigPool counts as rolled out only with `Updated=True`, `UpdatedMachineCount == MachineCount`, `observedGeneration >= generation`, and `status.configuration.name == spec.configuration.name`.
 - **Single destination vCenter:** multiple destination servers are rejected in preflight; the API shape allows them later.
 - **Cross-site networking:** L2 continuity (stretched VLAN / same subnet) is required; routed-only or NAT topologies are out of scope. The probe VM enforces subnet and gateway parity, but not MTU, ACLs, micro-segmentation, or latency — long RTT can inflate Machine API, CSI, and etcd timeouts and needs capacity planning.
-- **Console plugin:** separate image and deployment; vCenter browse uses admin-supplied credentials through the plugin backend.
 - **`openshift/api` dependency:** growing `vcenters` after install requires the validation relaxation described in [API Extensions](#api-extensions).
 
 ### Risks and Mitigations
@@ -364,7 +362,7 @@ Same vSphere/Machine API assumptions as standalone clusters where those subsyste
 | Risk | Mitigation |
 |------|------------|
 | Unrelated cluster changes during migration (upgrades, operator drift) | Preflight blocks while an upgrade is in progress; keep conditions and events visible and requeue rather than force progress. |
-| Partial rollout (mixed vCenters) | Ordered conditions with requeue semantics; status conditions, events, and console SSE for visibility. |
+| Partial rollout (mixed vCenters) | Ordered conditions with requeue semantics; status conditions and events for visibility. |
 | Endpoint, load balancer, proxy, or firewall drift | Require stable `api` / `api-int` / `*.apps` endpoints; pre-validate LB pools, `Proxy` / `noProxy`, and routing from nodes before starting (see [prerequisites](#additional-customer-prerequisites-before-setting-specstate-running)). |
 | L2/L3 mismatch (destination would not preserve node IP connectivity) | Probe-VM preflight hard-blocks on subnet/prefix/gateway mismatch; MTU, ACL, and micro-segmentation checks stay manual. |
 | High latency between sites | Longer rollout windows and timeout tuning where supported; consider an optional RTT check or a documented manual test. |
@@ -381,7 +379,7 @@ Same vSphere/Machine API assumptions as standalone clusters where those subsyste
 
 - **Alpha API** and behavior may change.
 - **Reduced capacity** during rolling replacement (by design).
-- **Two components** (operator + optional console plugin) increase install and upgrade surface.
+- **No Console UI:** the initial release is operated through the CR; no Console plugin is shipped.
 
 ## Alternatives (Not Implemented)
 
@@ -408,7 +406,6 @@ Same vSphere/Machine API assumptions as standalone clusters where those subsyste
 - **Pre-migration (real infrastructure):** validate `api` / `api-int` / `*.apps` reachability, certificates, load balancer health checks, `Proxy` / `noProxy`, node-to-vCenter and node-to-storage reachability, NTP, and MTU. Deliberately test a subnet/gateway mismatch and a template without open-vm-tools to confirm preflight hard-blocks with `NetworkMismatch`.
 - **Full migration:** install on the source, run the CR, and validate nodes, a workload matrix (stateless, PDB-sensitive, topology-aware, one supported non-CSI storage footprint), external LB behavior, and cluster health after completion ([SPLAT-2646](https://issues.redhat.com/browse/SPLAT-2646), [SPLAT-2647](https://issues.redhat.com/browse/SPLAT-2647)).
 - **Recovery drills:** pause/resume during `MultiSiteConfigured` and `WorkloadMigrated`, restart the operator mid-migration, and delete an unrecorded destination MachineSet before a restart to confirm scale-down refuses until coverage is restored.
-- **Console plugin:** separate build (`make console-plugin-frontend`, `console-plugin-backend`) and manual UI verification on a live console.
 
 ## Graduation Criteria
 
@@ -437,7 +434,6 @@ N/A for initial release; future API versions should follow Kubernetes deprecatio
 ## Version Skew Strategy
 
 - Target **OpenShift 4.18+** on vSphere per epic; operator must pin/test against supported `openshift/api` and `machine` API levels bundled in that stream.
-- Console plugin version should track operator/API expectations for the same OCP minor.
 
 ## Operational Aspects of API Extensions
 
@@ -447,7 +443,7 @@ N/A for initial release; future API versions should follow Kubernetes deprecatio
 
 ## Support Procedures
 
-- **Troubleshooting:** conditions, Kubernetes events, operator logs, and the console plugin SSE stream; re-run preflight when stuck in early conditions.
+- **Troubleshooting:** conditions, Kubernetes events, and operator logs; re-run preflight when stuck in early conditions.
 - **Before migration:** take an etcd / cluster-state backup and record the current `Infrastructure`, `cloud-provider-config`, and relevant Secrets.
 - **Recovery by phase:**
   - Before `InfrastructurePrepared` completes: correct or delete the CR; no cluster-critical mutations should have landed.
