@@ -7,7 +7,7 @@
 
 ## Overview
 
-`must-gather` is OpenShift's diagnostic data collection framework. The default `oc adm must-gather` image collects platform-wide diagnostics. Additional must-gather images may be provided by CVO-managed operators (listed in the release payload), OLM-managed operators (annotated in ClusterServiceVersion or ClusterOperator objects), or third-party sources. Not every operator provides a dedicated must-gather image.
+`must-gather` is OpenShift's diagnostic data collection framework. The default `oc adm must-gather` image collects platform-wide diagnostics. When using `--all-images`, must-gather reads annotations from both ClusterOperator objects (CVO-managed) and ClusterServiceVersion objects (OLM-managed) to discover additional must-gather images. Not every operator provides a dedicated must-gather image.
 
 ## How It Works
 

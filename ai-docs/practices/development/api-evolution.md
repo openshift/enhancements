@@ -36,7 +36,7 @@ v1alpha1 → v1beta1 → v1 (GA)
 
 - **Alpha**: May change or be removed between releases. Behind TechPreviewNoUpgrade feature gate
 - **Beta**: Deprecated in OpenShift; new APIs should go straight from alpha to GA
-- **GA (v1)**: Supported indefinitely. Breaking changes within the same non-beta version are bugs. Transitioning to a new API requires deprecating the existing API and supporting it across upgrades
+- **GA (v1)**: Breaking changes within the same non-beta version are bugs. Individual fields may be deprecated and removed in a future API version. Transitioning to a new API requires deprecating the existing API and supporting it across upgrades
 
 ## Common API Evolution Mistakes
 

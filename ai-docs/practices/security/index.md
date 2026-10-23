@@ -18,14 +18,18 @@ OpenShift security practices encompass RBAC patterns, SCC (Security Context Cons
 
 ## Security Context Constraints (SCC)
 
-OpenShift extends Kubernetes PodSecurity with SCCs. The default SCC varies by version:
-- `restricted` — legacy default (pre-4.11 installations)
-- `restricted-v2` — default on 4.11+ new installations; `restricted` is not available to users unless explicitly granted
-- `restricted-v3` — introduced in later versions with further constraints
+OpenShift Security Context Constraints (SCCs) and Kubernetes Pod Security Admission (PSA) are separate, independent admission mechanisms. Both evaluate pod specs during admission, but they operate independently — OpenShift does not treat SCC as an extension of PSA.
+
+The default SCC varies by OpenShift version and cluster upgrade history:
+- `restricted` — legacy default (pre-4.11 installations); not available to users on new 4.11+ clusters unless explicitly granted
+- `restricted-v2` — default on new 4.11+ installations through some 4.x releases
+- `restricted-v3` — current default as of 4.20+; adds further constraints
 - `anyuid` — allows running as any UID (avoid unless required)
 - `privileged` — full host access (only for infrastructure components)
 
-**Convention**: Workloads that need a pinned SCC may opt in by declaring the `openshift.io/required-scc` annotation. This is not required on every workload — only those that need a specific SCC beyond the default.
+Clusters upgraded from earlier versions may retain their original default SCC. Check the actual cluster configuration rather than assuming a specific default based on version alone.
+
+**Convention**: The `openshift.io/required-scc` annotation is opt-in. Workloads can use it to pin a specific SCC (ensuring a known security context), to prevent a different SCC from being selected by the admission controller, or to request an SCC other than the cluster default. It is not required on every workload.
 
 ## Secret Management
 

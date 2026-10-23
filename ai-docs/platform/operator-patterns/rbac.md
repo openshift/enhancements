@@ -31,7 +31,7 @@ Role-Based Access Control (RBAC) in OpenShift extends Kubernetes RBAC with addit
 For operators managed by the Cluster Version Operator:
 - RBAC manifests live in the operator's `manifests/` directory
 - The CVO applies these during installation and upgrades
-- Changes to RBAC require bumping the operator image in the release payload
+- RBAC-only changes do not require an operator image bump — a new release payload carrying updated manifests is sufficient since the CVO applies manifests independently of the operator image
 
 ## OLM-Managed Operators
 

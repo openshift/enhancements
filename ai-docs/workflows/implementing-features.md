@@ -16,7 +16,7 @@ This guide covers the workflow for implementing features in OpenShift after an e
 1. Enhancement approved (status: implementable)
 2. Create Jira Epic linked to enhancement tracking ticket
 3. Define feature gate in openshift/api and vendor it into the component
-4. Implement behind feature gate (TechPreviewNoUpgrade)
+4. Implement behind feature gate (TechPreview)
 5. Write unit and integration tests
 6. Submit PRs to component repo(s)
 7. Add e2e tests to openshift/origin if needed
