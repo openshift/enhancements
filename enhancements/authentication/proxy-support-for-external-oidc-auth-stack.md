@@ -11,7 +11,7 @@ approvers:
 api-approvers:
   - "@everettraven" # For the Console Operator changes.
 creation-date: 2026-09-10
-last-updated: 2026-10-22
+last-updated: 2026-10-23
 status: provisional
 tracking-link:
   - "https://redhat.atlassian.net/browse/OCPSTRAT-3721"
@@ -251,7 +251,8 @@ support this feature, as described in
 [Version Skew Strategy](#version-skew-strategy). The required management and
 hosted feature gates must be enabled, and the proxy must be reachable from the
 guest/worker-node network — both the webhook (via konnectivity) and guest Console
-egress there, as described under
+egress there — and, for login before the first worker node joins, also from the
+management-cluster network, as described under
 [Webhook Egress and Connection Paths](#webhook-egress-and-connection-paths). The
 administrator must be authorized to update the HostedCluster and create ConfigMaps
 in its namespace on the management cluster.
@@ -290,7 +291,7 @@ in its namespace on the management cluster.
    Deployment so its egress applies the component proxy and passes the optional
    mounted CA bundle's path through `trustedCAFilePath`. Because this egress is
    tunneled through konnectivity into the guest network, the proxy is applied via the
-   webhook pod's `konnectivity-https-proxy` sidecar, not as raw proxy environment on
+   webhook pod's existing konnectivity sidecar, not as raw proxy environment on
    the webhook container. The optional proxy CA is mounted in both containers. See
    [Webhook Egress and Connection Paths](#webhook-egress-and-connection-paths).
 6. The Hosted Cluster Config Operator (HCCO) fans the same block out to Console:
@@ -584,8 +585,10 @@ the hosted cluster's cluster-wide proxy when that field is absent, and never to 
 management cluster's own proxy.
 
 The running webhook egresses to the IdP **through konnectivity into the guest
-network**. That
-connection path, and the sidecar that applies the proxy, are detailed under
+network**, via the konnectivity sidecar already present on its pod. CPO
+configures that sidecar to chain to the component proxy in preference to the
+hosted cluster-wide proxy. That connection path, including its behavior before
+worker nodes exist, is detailed under
 [Webhook Egress and Connection Paths](#webhook-egress-and-connection-paths) below.
 
 The proxy CA must reach both clusters through the following distribution path:
@@ -598,7 +601,7 @@ Management cluster: namespace containing the HostedCluster resource (HostedClust
     v
 Management cluster: namespace running this hosted cluster's control plane (HostedControlPlane.metadata.namespace)
   Proxy CA ConfigMap
-    |-- Mounted on the konnectivity-https-proxy sidecar (HTTPS proxy certificate trust)
+    |-- Mounted on the konnectivity sidecar (HTTPS proxy certificate trust)
     |-- Mounted on the webhook container (certificate trust for TLS interception)
     |
     | HCCO copies ca-bundle.crt across clusters
@@ -652,7 +655,7 @@ Standalone (single cluster)
 
 On HyperShift, guest Console egresses directly (it runs on a worker node), but the
 webhook's egress is tunneled through konnectivity into the guest network, where the
-component proxy lives. A `konnectivity-https-proxy` sidecar in the webhook pod applies
+component proxy lives. A konnectivity sidecar in the webhook pod applies
 the component proxy:
 
 ```text
@@ -663,14 +666,14 @@ HyperShift
   | oauth-apiserver pod (External OIDC mode)  |
   |   webhook container                       |
   |     HTTP(S)_PROXY = http://127.0.0.1:P --+|
-  |   konnectivity-https-proxy sidecar  <----+|
+  |   konnectivity sidecar (HTTPS mode) <----+|
   |     Layer 1: --https-proxy=<component>,   |
   |              --no-proxy=<in-cluster>      |
   |     Layer 2: konnectivity dialer ---------+--+
   |     (CA mounted in both containers)       |  |
   +-------------------------------------------+  |
                                                  +== konnectivity tunnel ==> konnectivity agent (worker node)
-                                                                                  |
+                                                                                 |
                                                        in --no-proxy / internal: |--> in-guest endpoint (direct)
                                                        otherwise:                |--> component proxy --> external IdP
                                                                                       (resolved + reached in guest net)
@@ -687,19 +690,44 @@ guest-reachable proxy serves both.
 Consequences:
 
 - The component proxy must be reachable and DNS-resolvable **from the guest/worker-node
-  network**, not the management cluster — konnectivity resolves via guest DNS and dials
-  from a worker node.
+  network** — konnectivity resolves via guest DNS and dials from a worker node — and,
+  during the [day-0 window](#day-0-egress-before-worker-nodes) before the first
+  worker joins, also from the **management-cluster network**.
 - The sidecar's `--no-proxy` must list the in-cluster endpoints (KAS, the `token-review`
   Service, `.svc`, `.cluster.local`) so they tunnel through konnectivity directly rather
   than via the forward proxy.
-- The proxy host is excluded from the sidecar's cloud-API direct-dial bypass, so the
-  proxy itself is reached through konnectivity (from the guest), not from the management
-  cluster.
+- The proxy host is excluded from the sidecar's cloud-API direct-dial bypass, so that
+  once the tunnel is healthy the proxy itself is reached through konnectivity (from the
+  guest) rather than from the management cluster.
 - The component proxy takes precedence over the hosted cluster's
   `spec.configuration.proxy` for the webhook pod when set.
 - Verify the webhook and guest Console independently: successful webhook
   authentication does not prove Console connectivity, and vice versa. See the
   [`NO_PROXY` rules](#no_proxy-and-internal-endpoint-urls).
+
+###### Day-0 Egress Before Worker Nodes
+
+The konnectivity tunnel only has a backend for this traffic once a worker node
+runs the data-plane konnectivity agent. Between the hosted control plane becoming
+available and the first worker joining there is therefore a window in which
+nothing can be dialed through the tunnel. The webhook's sidecar covers that window
+with `--resolve-from-management-cluster-dns`: while the tunnel is unavailable it
+resolves through management-cluster DNS and dials directly, reverting permanently
+to the tunnel once it becomes healthy. Without it, hosted login would not work
+until the first worker joined — the same reason the integrated identity-provider
+path already carries this fallback.
+
+That fallback does not bypass the component proxy. The two layers above are
+ordered: the sidecar decides whether to insert the proxy hop *before* the
+konnectivity dialer runs, so by dial time the address being dialed is already the
+component proxy's. The fallback therefore bypasses konnectivity, not the proxy — it
+dials the component proxy directly from the management-cluster network and the
+proxy hop survives.
+
+This is the only window in which webhook egress does not originate from the guest
+network, and it is why the component proxy must also be reachable and
+DNS-resolvable from the management-cluster network. CPO applies the same proxy
+flags regardless; nothing in the configuration is conditional on the window.
 
 ##### Component Inventory
 
@@ -712,12 +740,12 @@ New components and artifacts:
 | Proxy field on `operatorv1.Console` | both | Console's own login-proxy configuration. |
 | `operatorConfiguration.authentication.proxy` on HostedCluster/HostedControlPlane | HyperShift | Single hosted entry point that fans out to webhook and Console. |
 | HCCO reconciler for the guest Console proxy | HyperShift | Writes the guest Console proxy field + guest `openshift-config` CA copy. |
-| `konnectivity-https-proxy` sidecar on the External-OIDC oauth-apiserver pod | HyperShift | Applies the component proxy to the webhook's konnectivity egress (new, or an HTTPS/Dual extension of the existing socks5 injection). |
 
 Existing components whose behavior changes:
 
 | Affected | Change |
 | --- | --- |
+| Konnectivity sidecar on the External-OIDC oauth-apiserver pod | Already present on the webhook pod; its proxy flags (`--https-proxy`, `--http-proxy`, `--no-proxy`) are now populated from the component proxy, and the proxy CA is mounted on it. |
 | CAO | Resolves the component proxy; injects env + mounts CA on the webhook Deployment and sets `trustedCAFilePath` in its configuration (standalone). |
 | oauth-apiserver (webhook) | Reads the generic outbound CA bundle through `trustedCAFilePath` for HTTPS endpoint trust, plus the proxy's own certificate on standalone only; outbound clients honor the proxy; on HyperShift egress flows through the new sidecar, which holds that proxy trust instead. |
 | CPO | Builds the webhook Deployment including the konnectivity sidecar flags and both CA mounts; sets `trustedCAFilePath` in the webhook configuration (HyperShift). |
@@ -730,8 +758,10 @@ Configuration that must hold for it to work:
 - Standalone: the proxy is set on **both** the Authentication and Console operator
   resources.
 - HyperShift: the proxy is set once on the HostedCluster; it must be reachable from the
-  **guest network**; the sidecar `--no-proxy` covers in-cluster endpoints; and the
-  component proxy takes precedence over `spec.configuration.proxy` for the webhook pod.
+  **guest network**, and from the **management-cluster network** for day-0 login to work
+  before the first worker joins; the sidecar `--no-proxy` covers in-cluster endpoints;
+  and the component proxy takes precedence over `spec.configuration.proxy` for the
+  webhook pod.
 - All topologies: `trustedCA` ConfigMaps carry `ca-bundle.crt` and are distributed as in
   the [CA path](#hypershift--hosted-control-planes) above.
 
@@ -833,9 +863,14 @@ The OAuth API server loads the bundle and performs outbound discovery, JWKS, and
 claim-source requests using the configured proxy and trust.
 
 CPO performs the corresponding configuration and mount reconciliation for hosted
-control planes, including the konnectivity sidecar settings. Endpoint connectivity
+control planes, including the konnectivity sidecar's proxy flags. Endpoint connectivity
 is exercised by the running webhook through the guest network, as described under
 [Webhook Egress and Connection Paths](#webhook-egress-and-connection-paths).
+
+CAO and CPO generate the webhook's authentication configuration through the same
+shared library-go generator. Adding `trustedCAFilePath` is therefore a single
+change in that generator rather than two parallel ones, even though each operator
+resolves the proxy and mounts the bundle itself.
 
 #### OAuth API Server Deployment and Trust
 
@@ -851,8 +886,9 @@ management cluster and must egress through konnectivity (see
   configuration references the mounted bundle through `trustedCAFilePath`.
 - **HyperShift.** CPO does not set the external proxy as container env — that env
   already points at the konnectivity sidecar. Instead it configures the webhook pod's
-  `konnectivity-https-proxy` sidecar with the component proxy (`--https-proxy`,
-  `--http-proxy`, `--no-proxy`). When `trustedCA` is configured, CPO mounts the bundle
+  konnectivity sidecar with the component proxy (`--https-proxy`,
+  `--http-proxy`, `--no-proxy`), in preference to the hosted cluster's
+  `spec.configuration.proxy`. When `trustedCA` is configured, CPO mounts the bundle
   in both the sidecar and webhook container, referencing it through `trustedCAFilePath`
   in the webhook configuration. The webhook never validates the component proxy's own
   certificate on this topology: it reaches the sidecar over plaintext loopback, and the
@@ -976,7 +1012,7 @@ because not much more can be trivially done in the operand. The operator should
 perform the checks necessary to ensure the ConfigMap is valid before mounting it
 for the operator and degrade on any issues found so that the issue becomes visible.
 
-On HyperShift, `konnectivity-https-proxy` does not hot-reload its proxy CA trust.
+On HyperShift, the konnectivity sidecar does not hot-reload its proxy CA trust.
 CPO must therefore roll out the OAuth API server Deployment when the referenced
 CA bundle's contents change. This replaces the entire Pod, restarting both the
 sidecar and webhook even though the webhook itself supports CA hot reload.
@@ -1019,8 +1055,15 @@ and requests must not silently bypass a configured proxy on failure.
 On HyperShift, webhook requests also depend on konnectivity, guest DNS,
 worker-network availability, and the webhook's sidecar. OIDC authentication can fail while the management-side API remains
 reachable. Diagnostics must distinguish these dependencies from proxy failures.
-Do not fall back to direct management-cluster egress when the guest-network path
-fails.
+The sidecar's day-0 fallback may bypass konnectivity while the tunnel is
+unavailable, but it must never bypass the component proxy: it dials that proxy
+directly from the management-cluster network instead of through the tunnel, as
+described under
+[Day-0 Egress Before Worker Nodes](#day-0-egress-before-worker-nodes).
+A hosted cluster whose proxy is reachable only from the guest network therefore
+cannot authenticate until its first worker node joins, and this must be
+documented rather than worked around by dropping the proxy hop. The management
+cluster's own proxy is never substituted for the tenant's.
 
 **Partial application across management and guest clusters.**
 The hosted webhook and guest Console reconcile asynchronously and can temporarily
@@ -1107,9 +1150,6 @@ without requiring the hosted administrator to enter it twice.
 - Identify an API approver for the HyperShift additions and confirm the shared
   `operatorConfiguration.authentication.proxy` placement on HostedCluster and
   HostedControlPlane, its validation, and the management-side feature gate.
-- Confirm the [webhook egress integration](#webhook-egress-and-connection-paths)
-  with HyperShift maintainers, including compatibility with existing SOCKS5
-  egress and the [CA-triggered webhook rollouts](#configuration-updates-and-ca-reload).
 
 ## Test Plan
 
@@ -1218,6 +1258,13 @@ verify:
 - Webhook egress through the sidecar: the webhook reaches the provider from the
   guest network, in-cluster endpoints stay on the konnectivity tunnel, and a proxy
   reachable only from the guest network works.
+- Day-0 login: with the hosted control plane up and no worker nodes joined, token
+  validation succeeds and the webhook's provider requests are still observed on the
+  component proxy, reaching it from the management-cluster network. After the first
+  worker joins, the same requests are observed arriving from the guest network.
+- An intercepting proxy: with TLS interception enabled and the interception CA in
+  `trustedCA`, token validation succeeds, and it fails with an actionable error
+  when the webhook container's copy of the bundle is absent.
 - A proxy CA content change rolls out the OAuth API server Deployment while guest
   Console reloads without a rollout.
 - Isolation between two hosted clusters, with the guest cluster-wide Proxy and
@@ -1233,7 +1280,10 @@ verify:
 
 **CPO and HCCO — unit and integration tests.**
 
-- The `konnectivity-https-proxy` sidecar arguments derived from the HCP block.
+- The konnectivity sidecar's proxy arguments derived from the HCP block, including
+  that the component proxy takes precedence over the hosted cluster-wide proxy, that
+  the cluster-wide proxy is used when the component block is absent, and that the
+  management cluster's own proxy is never used.
 - CPO reconciles the webhook configuration and the CA mounts in both the sidecar
   and the webhook container; removal cleans all of it up.
 - HCCO writes only the proxy field on the CVO-seeded guest
