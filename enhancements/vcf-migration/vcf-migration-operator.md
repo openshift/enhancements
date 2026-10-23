@@ -111,7 +111,7 @@ sequenceDiagram
     end
     C->>Vs: Read source node VM guest networks (masked subnet, gateway)
     loop Each destination failure domain
-        C->>Vt: Reap stale netcheck-* probes, clone netcheck-<infraID>-<fd> from fd template, power on
+        C->>Vt: Reap netcheck-<infraID>-* VMs carrying the probe marker, clone netcheck-<infraID>-<fd> from fd template, power on
         C->>Vt: Wait for guest tools IPv4 + default gateway
         C->>C: Require masked subnet + default gateway to match a source node network
         C->>Vt: Destroy probe VM
@@ -189,7 +189,8 @@ This stage runs only when **`spec.state: Running`**. Status is set to **`Infrast
 | 18 | Source vCenter session using `kube-system/vsphere-creds`; per destination failure domain: target credentials and session, with datacenter, cluster, datastore, networks, resource pool, and template resolving | missing keys, connect failure, object not found |
 | 19 | **Probe VM** per destination failure domain: guest masked subnet, prefix length, and default gateway match a source node VM (10-minute budget) | `destination networking preflight failed: … does not match any source node network` |
 
-Step 19 clones a throwaway `netcheck-<infraID>-<fd>` VM from `topology.template` on `topology.networks[0]` and reaps it on every path; a mismatch raises a **`NetworkMismatch`** warning Event. It needs open-vm-tools in the template and on source nodes, source node names equal to VM names, and one source datacenter.
+Step 19 clones a throwaway `netcheck-<infraID>-<fd>` VM from `topology.template` on `topology.networks[0]` and reaps it on every path; a mismatch raises a **`NetworkMismatch`** warning Event.
+Before cloning, each destination datacenter is swept for VMs whose name starts with `netcheck-<infraID>-` and that carry the probe marker; matching probes are destroyed regardless of age. It needs open-vm-tools in the template and on source nodes, source node names equal to VM names, and one source datacenter.
 
 On success: **`InfrastructurePrepared`** = **True** / **`Completed`**, and only then is the resolved mapping recorded write-once in **`status.failureDomainMappings`**; later spec changes are rejected order-insensitively, while clearing the spec list stays allowed.
 
