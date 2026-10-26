@@ -384,9 +384,11 @@ cannot mirror CVO conditions, so
 sees `installation.stage=WaitingForOperators` with
 no indication that the root cause is connectivity.
 This gap is partially covered by existing
-conditions: `KubeAPIServerAvailable` tracks KAS
-readiness and `KASLoadBalancerNotReachable` (reason
-on HCP `Available`) signals LB-level failures.
+conditions and the `APIServerAvailable` installation
+stage: `KubeAPIServerAvailable` tracks KAS readiness
+(and gates the `APIServerAvailable` stage transition),
+and `KASLoadBalancerNotReachable` (reason on HCP
+`Available`) signals LB-level failures.
 Dedicated HCCO connectivity diagnostics are
 deferred to future work.
 
@@ -497,7 +499,7 @@ or finalizers.
 
 | Category | Name | Resource | Set By | Description |
 |----------|------|----------|--------|-------------|
-| Status field | `installation.stage` | HC, HCP | CPO → HO mirrors to HC | Enum: `Initializing`, `ControlPlaneProvisioning`, `WaitingForKubeconfig`, `WaitingForOperators`, `InstallationComplete`. Forward-only monotonic. |
+| Status field | `installation.stage` | HC, HCP | CPO → HO mirrors to HC | Enum: `Initializing`, `ControlPlaneProvisioning`, `APIServerAvailable`, `WaitingForKubeconfig`, `WaitingForOperators`, `InstallationComplete`. Forward-only monotonic. |
 | Status field | `installation.lastTransitionTime` | HC, HCP | CPO → HO mirrors to HC | Timestamp of most recent stage transition. Non-pointer `metav1.Time` with `omitzero`. |
 | Condition type | `ManagementClusterResourcePressure` | HC | HO (from CPC conditions) | Scheduling pressure on management cluster affecting this HC's control-plane pods. `True`/`False`/`Unknown`. |
 | Reason constant | `PodSchedulingFailed` | CPC `Available` | CPO | Pod cannot be scheduled on management cluster. |
@@ -542,6 +544,7 @@ type InstallationStatus struct {
     // the problem.
     // Valid values are: "Initializing",
     // "ControlPlaneProvisioning",
+    // "APIServerAvailable",
     // "WaitingForKubeconfig",
     // "WaitingForOperators", "InstallationComplete".
     // +optional
@@ -569,7 +572,7 @@ type InstallationStatus struct {
 // In the normal HyperShift upgrade flow, the HO updates
 // the CRD schema before the new controller starts, so
 // new values are accepted by the time they are written.
-// +kubebuilder:validation:Enum=Initializing;ControlPlaneProvisioning;WaitingForKubeconfig;WaitingForOperators;InstallationComplete
+// +kubebuilder:validation:Enum=Initializing;ControlPlaneProvisioning;APIServerAvailable;WaitingForKubeconfig;WaitingForOperators;InstallationComplete
 type InstallationStage string
 
 const (
@@ -583,15 +586,21 @@ const (
     // created and waiting for available replicas.
     StageControlPlaneProvisioning InstallationStage = "ControlPlaneProvisioning"
 
-    // StageWaitingForKubeconfig indicates all
-    // ControlPlaneComponent resources report Available
-    // and the system is waiting for the kubeconfig
-    // secret reference (hcp.Status.KubeConfig) to be
-    // populated. The trigger is the existence of the
-    // reference, NOT endpoint reachability — no
-    // connectivity check is performed, avoiding issues
-    // with private clusters or management clusters
-    // without external access.
+    // StageAPIServerAvailable indicates the hosted
+    // cluster's kube-apiserver is available and serving
+    // requests. The trigger is the KubeAPIServerAvailable
+    // condition on the HostedControlPlane being True.
+    StageAPIServerAvailable InstallationStage = "APIServerAvailable"
+
+    // StageWaitingForKubeconfig indicates the
+    // kube-apiserver is available and the system is
+    // waiting for the kubeconfig secret reference
+    // (hcp.Status.KubeConfig) to be populated. The
+    // trigger is the existence of the reference, NOT
+    // endpoint reachability — no connectivity check
+    // is performed, avoiding issues with private
+    // clusters or management clusters without external
+    // access.
     StageWaitingForKubeconfig InstallationStage = "WaitingForKubeconfig"
 
     // StageWaitingForOperators indicates the kubeconfig
@@ -638,9 +647,10 @@ the progression:
 var stageOrdinal = map[InstallationStage]int{
     StageInitializing:              0,
     StageControlPlaneProvisioning:  1,
-    StageWaitingForKubeconfig:      2,
-    StageWaitingForOperators:       3,
-    StageInstallationComplete:      4,
+    StageAPIServerAvailable:        2,
+    StageWaitingForKubeconfig:      3,
+    StageWaitingForOperators:       4,
+    StageInstallationComplete:      5,
 }
 ```
 
@@ -657,7 +667,8 @@ constraint above):
 |---|---|---|
 | → `Initializing` | HCP reconciliation starts | The CPO's `Reconcile()` is invoked for this `HostedControlPlane`. Set unconditionally on first reconciliation if `installation.stage` is empty. |
 | `Initializing` → `ControlPlaneProvisioning` | At least one control-plane component deployment has been created | The CPO has called `CreateOrUpdate` for any CPC deployment (kube-apiserver, etcd, etc.) in the HCP namespace. |
-| `ControlPlaneProvisioning` → `WaitingForKubeconfig` | All required control-plane component deployments have `AvailableReplicas > 0` | `controlPlaneComponentsAvailable()` returns true — every CPC's `Available` condition is `True`. |
+| `ControlPlaneProvisioning` → `APIServerAvailable` | The kube-apiserver is available and serving requests | The `KubeAPIServerAvailable` condition on the `HostedControlPlane` is `True`. This is an existing condition already tracked by HyperShift, surfaced here as a distinct installation milestone. |
+| `APIServerAvailable` → `WaitingForKubeconfig` | All required control-plane component deployments have `AvailableReplicas > 0` | `controlPlaneComponentsAvailable()` returns true — every CPC's `Available` condition is `True`. |
 | `WaitingForKubeconfig` → `WaitingForOperators` | The kubeconfig secret reference exists (`hcp.Status.KubeConfig != nil`) | The CPO checks for the kubeconfig secret reference in HCP status — **not** endpoint reachability. No connectivity check is performed against the API server, avoiding issues with private clusters (endpoint reachable from data-plane VPC but not management cluster) and isolated management clusters without external access. |
 | `WaitingForOperators` → `InstallationComplete` | The CVO reports the cluster version is available | The `ClusterVersionAvailable` condition on the `HostedControlPlane` is `True`. This indicates the CVO has successfully rolled out all required cluster operators for the target version. |
 
@@ -677,6 +688,17 @@ progression. In practice, the kubeconfig is created
 before all CP components are available, so this stage
 is typically skipped (the CPO jumps directly to
 `WaitingForOperators`).
+
+**`APIServerAvailable` rationale:** The kube-apiserver
+becoming available is a significant milestone — it is
+the point at which the guest cluster becomes
+API-addressable. HyperShift already tracks this via
+the `KubeAPIServerAvailable` condition on the
+`HostedControlPlane`. Surfacing it as a distinct
+installation stage makes it visible in the stage
+progression and in metrics,
+providing a clear signal for when the API server is
+up independently of other control-plane components.
 
 **Backfill for pre-existing clusters:** If
 `installation.stage` is empty AND HCP `Available` is
@@ -705,23 +727,29 @@ stateDiagram-v2
 
     state "Initializing" as Init
     state "ControlPlaneProvisioning" as CPP
+    state "APIServerAvailable" as ASA
     state "WaitingForKubeconfig" as WFK
     state "WaitingForOperators" as WFO
     state "InstallationComplete" as IC
 
     %% Normal sequential transitions
     Init --> CPP : ≥1 CPC exists
-    CPP --> WFK : All CPCs Available=True
+    CPP --> ASA : KubeAPIServerAvailable=True
+    ASA --> WFK : All CPCs Available=True
     WFK --> WFO : KubeConfig ref exists<br/>(no reachability check)
     WFO --> IC : ClusterVersionAvailable=True
 
     %% Skip-forward: CPO evaluates latest-first,
     %% SetInstallationStage allows any forward jump.
-    Init --> WFK : CPCs available +<br/>kubeconfig absent
-    Init --> WFO : CPCs available +<br/>kubeconfig exists
+    Init --> ASA : KAS available +<br/>not all CPCs available
+    Init --> WFK : All CPCs available +<br/>kubeconfig absent
+    Init --> WFO : All CPCs available +<br/>kubeconfig exists
     Init --> IC : ClusterVersionAvailable=True
-    CPP --> WFO : CPCs available +<br/>kubeconfig exists
+    CPP --> WFK : All CPCs available +<br/>kubeconfig absent
+    CPP --> WFO : All CPCs available +<br/>kubeconfig exists
     CPP --> IC : ClusterVersionAvailable=True
+    ASA --> WFO : All CPCs available +<br/>kubeconfig exists
+    ASA --> IC : ClusterVersionAvailable=True
     WFK --> IC : ClusterVersionAvailable=True
 
     %% Backfill on upgrade: pre-existing cluster
@@ -733,6 +761,12 @@ stateDiagram-v2
     note right of Init
         No CPCs created yet.
         CPO starting reconciliation.
+    end note
+
+    note right of ASA
+        KAS is serving requests.
+        Other CP components may
+        still be provisioning.
     end note
 
     note right of WFK
@@ -756,9 +790,11 @@ allows pre-existing clusters to jump directly to
 
 **Control-plane vs full-cluster readiness:** Stages
 before `WaitingForOperators` point to control-plane
-issues on the management cluster.
-`WaitingForOperators` → `InstallationComplete` tracks
-CVO/operator rollout in the hosted cluster.
+issues on the management cluster. `APIServerAvailable`
+marks the point where the guest cluster's API becomes
+addressable. `WaitingForOperators` →
+`InstallationComplete` tracks CVO/operator rollout in
+the hosted cluster.
 
 **Diagnostic detail in existing conditions — reason code analysis:**
 
@@ -1112,7 +1148,8 @@ components:
   is in `WaitingForOperators`, the gauge emits:
   `{stage="WaitingForOperators"} 1`,
   `{stage="Initializing"} 0`,
-  `{stage="ControlPlaneProvisioning"} 0`, etc.
+  `{stage="ControlPlaneProvisioning"} 0`,
+  `{stage="APIServerAvailable"} 0`, etc.
   This enables queries like
   `hypershift_hostedclusters_installation_stage == 1`
   to select clusters in a specific stage. Uses the
@@ -1342,7 +1379,7 @@ during Tech Preview (<5% reversal ratio threshold).
 
 ## Alternatives (Not Implemented)
 
-**Alternative 1: Introduce 6 new condition types
+**Alternative 1: Introduce 6+ new condition types
 instead of adding diagnostic detail to existing conditions.**
 
 The original proposal created 6 new condition types
@@ -1643,6 +1680,10 @@ minutes:**
      Skew). Check HCP directly.
    - `ControlPlaneProvisioning` → check CPC `Available`
      conditions for pod-level failure reasons.
+   - `APIServerAvailable` → kube-apiserver is up but
+     other control-plane components are still
+     provisioning; check remaining CPC `Available`
+     conditions.
    - `WaitingForKubeconfig` → all CPCs are available but
      `hcp.Status.KubeConfig` is not yet populated;
      check `Available` condition reason.
