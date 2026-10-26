@@ -11,7 +11,7 @@ approvers:
 api-approvers:
   - "@Prashanth684"
 creation-date: 2026-09-17
-last-updated: 2026-10-21
+last-updated: 2026-10-26
 status: provisional
 tracking-link:
   - https://redhat.atlassian.net/browse/MG-376
@@ -21,7 +21,7 @@ tracking-link:
 
 ## Summary
 
-This enhancement adds machine-readable error status reporting to `must-gather` by producing a versioned `/must-gather/status.json` that records per-collector success, skip, degraded, or error outcomes with bounded messages. Phase 1 (must-gather) establishes the archive-level contract for immediate use via `oc adm must-gather`. Phase 2 (must-gather-operator) propagates Job lifecycle conditions and `status.json` results to the `MustGather` CR, with Job-based fallback for older or custom images.
+This enhancement adds machine-readable error status reporting to `must-gather` by producing a versioned `/must-gather/status.json` that records per-collector success, skip, or error outcomes with bounded messages. Phase 1 (must-gather) establishes the archive-level contract for immediate use via `oc adm must-gather`. Phase 2 (must-gather-operator) propagates Job lifecycle conditions and `status.json` results to the `MustGather` CR, with Job-based fallback for older or custom images.
 
 ## Motivation
 
@@ -52,7 +52,7 @@ An audit of the collector scripts shows:
 
 * Produce valid, versioned `/must-gather/status.json` in every successfully finalized default archive (Phase 1).
 * Report status for every top-level work unit (28 units).
-* Distinguish success, expected skip, degraded/partial, and collector failure.
+* Distinguish success, expected skip, and collector failure (partial or total).
 * Preserve best-effort collection: one failure must not stop unrelated collectors or block archive finalization when possible.
 * Capture non-zero top-level exits automatically; allow explicit `report_skip` / `report_error`.
 * Aggregate nested child-process failures inside collectors.
@@ -87,7 +87,7 @@ After all units reach a terminal condition, the parent writes versioned `status.
 | Layer | What it reports | Source | Phase |
 |-------|-----------------|--------|-------|
 | **Job/Pod** | Job phase, termination, OOMKilled, timeout, image pull | Job/Pod status and events | Phase 2 |
-| **Collector** | Per-collector success/skip/degraded/error; overall completeness | `/must-gather/status.json` | Phase 1 + Phase 2 consumption |
+| **Collector** | Per-collector success/skip/error; overall completeness | `/must-gather/status.json` | Phase 1 + Phase 2 consumption |
 
 | Requirement | Layer | Phase 1 | Phase 2 |
 |-------------|-------|---------|---------|
@@ -110,7 +110,7 @@ One enhancement; two sequential phases across two repositories. Phase 2 depends 
 | Core | `status_reporting.sh`: `report_error`, `report_skip`, init/finalize, atomic merge |
 | Parent | Per-PID wait in `gather`; all 28 top-level units |
 | Paths | Standardize `/must-gather/` for report and inconsistent collector outputs |
-| Schema v1 | `schemaVersion`, collector outcomes, `framework`, bounded messages |
+| Schema v1 | `schemaVersion`, collector outcomes (`success`/`skipped`/`error`), `framework`, bounded messages |
 | Instrumentation | Priority set: `get_operator_ns` callers, monitoring, etcd, ppc, metallb, nested-wait collectors |
 | Exit | `gather` exits `0` when archive finalizes; `overallStatus` carries completeness |
 | Tests | BATS helpers/wrapper; fake collectors; archive validation; exit-0 regression; CI lint against group `wait` without per-PID handling |
@@ -122,11 +122,11 @@ One enhancement; two sequential phases across two repositories. Phase 2 depends 
 |----|-------|----------|------|
 | **PR 1: Infrastructure** | Framework | `status_reporting.sh`, per-PID wait, `status.json` `schemaVersion: 1`, BATS for helpers, dead-code cleanup | Low — additive |
 | **PR 2: Skip instrumentation** | Silent skips | `get_operator_ns` → `report_skip`; silent-skip collectors; BATS for skip detection | Low — exit codes unchanged |
-| **PR 3: Error instrumentation** | Swallow + nested wait | monitoring, etcd, ppc, network_logs_basics, sriov, olm_v1, insights; nested-wait per-PID; BATS for error/degraded | Medium — collector behavior |
+| **PR 3: Error instrumentation** | Swallow + nested wait | monitoring, etcd, ppc, network_logs_basics, sriov, olm_v1, insights; nested-wait per-PID; BATS for error scenarios | Medium — collector behavior |
 
 PR 1 does not change individual collectors. Support docs / error-code registry can proceed in parallel with PRs 2–3.
 
-**Graduation gate:** Default image emits valid `status.json` for all top-level units on success, degraded, and collector-error runs where finalization succeeds. Schema v1 frozen before Phase 2.
+**Graduation gate:** Default image emits valid `status.json` for all top-level units on success and collector-error runs where finalization succeeds. Schema v1 frozen before Phase 2.
 
 **Out of scope for Phase 1:** `MustGather` CR, operator controller, Kubernetes API review.
 
@@ -139,7 +139,7 @@ PR 1 does not change individual collectors. Support docs / error-code registry c
 | Job lifecycle | Conditions: Pending, Running, Gathering, Uploading, Completed, Failed |
 | Report consumption | Read `status.json` from gather output before cleanup/upload |
 | CR status | Bounded `status.collectionReport` (counts, `overallStatus`, affected collectors) |
-| Mapping | Job Failed → Failed; Succeeded + `degraded` → Completed/`CollectionDegraded`; Succeeded + report `error` → Completed/`CollectionFrameworkError`; missing/invalid → Job-only fallback |
+| Mapping | Job Failed → Failed; Succeeded + collector errors → Completed/`CollectionDegraded`; Succeeded + report `error` → Completed/`CollectionFrameworkError`; missing/invalid → Job-only fallback |
 | Skew | New/old image×operator; unsupported `schemaVersion` → graceful fallback |
 | Tests / API review | Controller + e2e; conditions, reasons, size limits, redaction |
 
@@ -182,16 +182,14 @@ Each top-level unit has one outcome:
 
 * `success` — exit `0`, no errors reported.
 * `skipped` — intentionally not applicable (not a failure).
-* `degraded` — some output produced, but non-fatal errors or incomplete sub-operations.
-* `error` — unsuccessful termination, unexpected non-zero exit, or fatal reported error.
+* `error` — something went wrong: unsuccessful termination, unexpected non-zero exit, or `report_error` call. Covers both partial-output (non-fatal) and total-failure cases. Message severity (`warning` vs `error`) distinguishes partial from fatal within the collector entry.
 
 Original process exit codes are always retained. Status normalization is in `status.json` only; collector exit codes are **not changed in v1**.
 
 Normalization:
 
 * `skipped` — explicit `report_skip`, or wrapper maps known skip patterns (e.g. `get_operator_ns` INFO + exit `0`).
-* `degraded` — `report_error` severity `warning` (default), or bounded heuristics (e.g. non-empty `monitoring/**/*.stderr`), and exit `0`.
-* `error` — non-zero exit without skip mapping, or `report_error` severity `error`.
+* `error` — non-zero exit without skip mapping, any `report_error` call (regardless of severity), or bounded heuristics (e.g. non-empty `monitoring/**/*.stderr`).
 * Every scheduled unit gets a wrapper entry; no `unknown` state.
 
 #### Overall outcomes and exit semantics
@@ -199,13 +197,13 @@ Normalization:
 Overall status is separate from per-collector outcomes:
 
 * `success` — all units succeeded or were intentionally skipped.
-* `degraded` — archive and report finalized, but one or more units reported `degraded` or `error`.
+* `degraded` — archive and report finalized, but one or more units reported `error`.
 * `error` — framework could not init/finalize the report, archive could not be finalized, or timeout/cancellation prevented a trustworthy report.
 
 | Scenario | `overallStatus` | `gather` / Job exit |
 |----------|-----------------|---------------------|
 | All success or skipped | `success` | `0` |
-| Archive finalized, any unit `degraded` or `error` | `degraded` | `0` (report is the completeness signal) |
+| Archive finalized, any unit `error` | `degraded` | `0` (report is the completeness signal) |
 | Timeout/cancellation (`interrupted: true`) | `error` | non-zero |
 | Framework failure, archive not finalized | `error` | non-zero |
 
@@ -217,7 +215,7 @@ On timeout/cancellation, write a partial report when possible. Include an entry 
 
 #### Status report format
 
-`schemaVersion: 1` (field names illustrative until owner review). Allowed values: `overallStatus` ∈ {`success`,`degraded`,`error`}; collector `status` ∈ {`success`,`skipped`,`degraded`,`error`}; message `severity` ∈ {`warning`,`error`}; framework step `status` ∈ {`success`,`skipped`,`error`}.
+`schemaVersion: 1` (field names illustrative until owner review). Allowed values: `overallStatus` ∈ {`success`,`degraded`,`error`}; collector `status` ∈ {`success`,`skipped`,`error`}; message `severity` ∈ {`warning`,`error`}; framework step `status` ∈ {`success`,`skipped`,`error`}.
 
 Example — degraded archive (`gather_etcd` failed; `compress_logs` not enabled):
 
@@ -266,7 +264,7 @@ Preserve Job-based behavior as fallback; add report-derived data when `status.js
 
 **Layer 1 — Job lifecycle conditions:** `Pending`, `Running`, `Gathering`, `Uploading`, `Completed`, `Failed` with standard condition fields. Sources: Job/Pod phase, `terminated.reason`, `exitCode`, events (`OOMKilled`, `DeadlineExceeded`, `ImagePullBackOff`).
 
-**Layer 2 — Collection quality:**
+**Layer 2 — Collection quality** (field definitions in [Proposed `MustGatherStatus` additions](#proposed-mustgatherstatus-additions-phase-2) below):
 
 ~~~yaml
 status:
@@ -274,20 +272,19 @@ status:
     - type: Completed
       status: "True"
       reason: CollectionDegraded
-      message: "Archive available; 2 collectors reported errors"
+      message: "Archive available; 1 collector reported errors"
       lastTransitionTime: "2026-09-17T10:00:00Z"
   collectionReport:
     schemaVersion: 1
     reportAvailable: true
     overallStatus: degraded
     counts:
-      success: 20
+      success: 22
       skipped: 5
-      degraded: 1
-      error: 0
+      error: 1
     affectedCollectors:
       - name: gather_monitoring
-        status: degraded
+        status: error
         reason: "Prometheus collection was incomplete"
 ~~~
 
@@ -296,11 +293,66 @@ status:
 | Job Failed (OOM, timeout, image pull) | N/A or partial | `Failed` with Pod/Job reason — do not wait for `status.json` |
 | Job Succeeded, no report | — | `Completed` + `reportAvailable: false` |
 | Job Succeeded, report `success` | present | `Completed` |
-| Job Succeeded, report `degraded` | present | `Completed` + `CollectionDegraded` |
+| Job Succeeded, report `overallStatus: degraded` | present | `Completed` + `CollectionDegraded` |
 | Job Succeeded, report `error` (framework) | present | `Completed` + `CollectionFrameworkError` |
 | Report parse fails | invalid | `Completed` + `reportAvailable: false` + parse error in message |
 
+`CollectionFrameworkError` is a defensive mapping: Phase 1 exit semantics do not currently produce `overallStatus: error` with exit `0`, but the operator must handle unexpected report/Job combinations gracefully (e.g., future schema evolution, gather script bugs, or custom images).
+
 Detailed per-collector messages remain in the archive. CR status holds bounded, non-sensitive summary only. Read after Job container terminates and before cleanup/upload.
+
+#### Proposed `MustGatherStatus` additions (Phase 2)
+
+The current `MustGatherStatus` has `conditions`, `status`, `lastUpdate`, `reason`, and `completed`. Phase 2 adds one new top-level field:
+
+**`collectionReport`** (optional object) — bounded summary of archive-level collection quality, populated when `status.json` is available from the gather output volume.
+
+`collectionReport` fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `schemaVersion` | integer, required | `status.json` schema version consumed; initially `1` |
+| `reportAvailable` | bool, required | Whether a parseable `status.json` was found |
+| `overallStatus` | string enum: `success` / `degraded` / `error` | Archive-level collection completeness; omitted when `reportAvailable` is `false` |
+| `counts` | object (below) | Outcome totals across all 28 work units (collectors + framework steps); omitted when `reportAvailable` is `false` |
+| `affectedCollectors` | array of object (below), max 28 | Only collectors with `error`; omitted when all succeeded/skipped or `reportAvailable` is `false` |
+
+`counts` fields:
+
+| Field | Type |
+|-------|------|
+| `success` | int32 |
+| `skipped` | int32 |
+| `error` | int32 |
+
+`affectedCollectors` entry fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Stable collector name from the work-unit inventory |
+| `status` | string enum: `error` | Collector-level outcome |
+| `reason` | string, max 256 chars | Bounded, redacted summary — no secrets or tokens |
+
+New condition types and reasons (standard `metav1.Condition`):
+
+| Condition `type` | `reason` | When set |
+|------------------|----------|----------|
+| `Completed` | `CollectionDegraded` | Job succeeded, archive available, one or more collectors errored |
+| `Completed` | `CollectionFrameworkError` | Job succeeded, but `status.json` reports `overallStatus: error` (e.g. interrupted) |
+| `Failed` | *(existing, enriched)* | Pod termination details: OOMKilled, DeadlineExceeded, ImagePullBackOff |
+
+Size bounds:
+
+* `affectedCollectors`: max 28 entries (one per work unit).
+* `reason` per collector: max 256 characters, no secrets/tokens.
+* Total `collectionReport` serialized size bounded by field-level limits; no unbounded arrays or free-text.
+
+Omission rules:
+
+* When `reportAvailable` is `false`: `overallStatus`, `counts`, and `affectedCollectors` are omitted (not set to zero values).
+* When report parse fails: `reportAvailable: false`, condition message includes parse error summary.
+
+Exact field names, kubebuilder annotations, and validation markers are subject to Phase 2 API review.
 
 ### API Extensions (Phase 2)
 
@@ -321,9 +373,9 @@ Report is generated inside the same gather execution; no topology-specific confi
 
 `status_reporting.sh` provides:
 
-* `report_error <code> <message> [severity]` — `warning` (default, → `degraded` if exit `0`) or `error` (fatal → collector `error`).
+* `report_error <code> <message> [severity]` — any call marks the collector as `error`. Optional `severity` (`warning` default, `error` for fatal) is recorded in the message for human triage but does not change the collector outcome.
 * `report_skip <code> <message>` — intentional non-applicability.
-* Init/finalize of per-collector result data; normalize exits into four outcomes; atomic report generation and validation.
+* Init/finalize of per-collector result data; normalize exits into three outcomes; atomic report generation and validation.
 
 Reporting failures must not block unrelated collection. The parent must distinguish "collector data failed" from "status report could not be finalized."
 
@@ -356,7 +408,7 @@ Actionable for re-run decisions: what happened, which resource/namespace (no sec
 
 #### Archive and custom-image compatibility
 
-`status.json` is additive at `/must-gather/status.json`. Diagnostic layout unchanged. Consumers must tolerate: absent report (older/custom image); older supported schema; unknown additive fields. Unsupported major `schemaVersion` → treat as unavailable, not success.
+`status.json` is additive at `/must-gather/status.json`. Diagnostic layout unchanged. Consumers must tolerate: absent report (older/custom image); older supported schema; unknown additive fields. Unsupported `schemaVersion` → treat as unavailable, not success.
 
 Custom images (`--image`, `--all-images`) are **recommended but not required** to produce `status.json`. Phase 1 changes only the default image entrypoint/collectors/helper — no new env, mounts, or entrypoint contract for custom images. Missing report means the contract was not adopted, not that collection failed (Resolved Decision #8). Phase 2: Job lifecycle still works; `reportAvailable: false`; no cross-image aggregation in v1. Optional adopt path: vendor `status_reporting.sh`, use `schemaVersion: 1`.
 
@@ -404,11 +456,11 @@ Security and UX/support review: must-gather maintainers, operator maintainers, s
 | # | Decision |
 |---|----------|
 | 1 | One enhancement, **two phases**: Phase 1 = must-gather; Phase 2 = must-gather-operator (blocked on Phase 1 schema stability). |
-| 2 | Overall `degraded` (not `error`) when the report is finalized with collector failures. No required-collector list in v1. |
+| 2 | Overall `degraded` (not `error`) when the archive is finalized with collector errors. Collector outcomes are `success`/`skipped`/`error` (no per-collector `degraded`); `degraded` applies only at the archive level. No required-collector list in v1. |
 | 3 | `gather` and Job exit `0` when the archive is finalized; the report carries completeness truth. |
 | 4 | On timeout/cancellation, partial report with `interrupted: true` and `overallStatus: error`. |
 | 5 | No `unknown` state — every scheduled unit gets a wrapper entry. |
-| 6 | CR status: bounded `collectionReport` + standard K8s conditions. Final field names require Phase 2 API review. |
+| 6 | CR status: bounded `collectionReport` + standard K8s conditions. Proposed fields defined in [MustGatherStatus additions](#proposed-mustgatherstatus-additions-phase-2); exact names/annotations subject to Phase 2 API review. |
 | 7 | Operator reads `status.json` after Job container termination and before cleanup/upload. |
 | 8 | `status.json` recommended for custom images but not required; missing report → Job-only fallback. |
 | 9 | Message limits: max 10/unit, 500 chars, stable `code`, no secrets/tokens in CR status. |
@@ -419,7 +471,7 @@ Security and UX/support review: must-gather maintainers, operator maintainers, s
 
 ### Phase 1 — must-gather
 
-* Unit tests for `status_reporting.sh`: success, skip, degraded, error, repeated events, message limits, redaction, atomic finalization.
+* Unit tests for `status_reporting.sh`: success, skip, error, repeated events, message limits, redaction, atomic finalization.
 * Wrapper tests with fake collectors: success; error exit; `report_skip` + exit `0`; report error + continue exit `0`; stderr; concurrent finish; fail before output; nested children; interrupt/timeout.
 * One failed collector does not prevent unrelated collectors.
 * Final JSON valid with all 28 top-level units (including post-wait steps).
@@ -454,7 +506,7 @@ Ships as **GA** (no Dev Preview / Tech Preview). Phase 1 and Phase 2 are deliver
 ### GA readiness — Phase 1
 
 * Default image emits valid report for all 28 top-level units.
-* Report preserved for success, degraded, and collector-error runs where finalization succeeds.
+* Report preserved for success and collector-error runs where finalization succeeds.
 * Tests cover suppressed-error, skip, nested-process, and timeout cases.
 * Support docs explain interpretation and re-run decisions.
 * Schema v1 frozen.
@@ -480,7 +532,7 @@ Additive archive change; no cluster migration. Newer operator + older image → 
 `schemaVersion` is independent of image build version.
 
 * Accept current schema; ignore additive unknown fields.
-* Unsupported major version → unavailable + Job fallback; never treat as success.
+* Unsupported schema version → unavailable + Job fallback; never treat as success.
 * Older operator must not block archive delivery for a newer report.
 * Newer operator must not fabricate per-collector outcomes for an older image without a report.
 * Stable collector names; renames need compatibility notes.
@@ -488,14 +540,14 @@ Additive archive change; no cluster migration. Newer operator + older image → 
 
 ## Operational Aspects of API Extensions (Phase 2)
 
-Status-only change: no admission, conversion webhook, aggregated API, finalizer, or synchronous dependency for ordinary operations. Update summary when the Job reaches terminal state (not per collector). Bounded serialized size. Clear reasons for: report success; degraded; framework error; unavailable (old/custom); unreadable/incompatible. Failure mode: graceful degradation to Job-based status without blocking archive retrieval.
+Status-only change: no admission, conversion webhook, aggregated API, finalizer, or synchronous dependency for ordinary operations. Update summary when the Job reaches terminal state (not per collector). Bounded serialized size. Clear reasons for: report success; collector errors (overall degraded); framework error; unavailable (old/custom); unreadable/incompatible. Failure mode: graceful degradation to Job-based status without blocking archive retrieval.
 
 ## Support Procedures
 
 Check `/must-gather/status.json` before diving into collector directories.
 
 * `success` — normal inspection.
-* `degraded` — review affected collectors/messages; re-run only if recoverable or required for the case.
+* `degraded` (overall) — review affected collectors/messages; re-run only if recoverable or required for the case.
 * Collector `skipped` — confirm target not expected; not a collection failure.
 * Collector `error` — inspect artifacts and messages; report signature to owners if reproducible.
 * Overall `error` — determine timeout, cancellation, report-generation, or finalization failure; use gather log if report absent/incomplete.
@@ -505,4 +557,4 @@ Phase 2 exposes the same aggregate in CR status; archive remains the detailed so
 
 ## Infrastructure Needed [optional]
 
-No new production infrastructure. Existing image, archive output, and operator Job lifecycle suffice: shell unit/integration tests and fake collectors (Phase 1); archive validation (Phase 1); operator controller tests and manifest validation (Phase 2). Fleet-wide reporting/metrics would be a separate proposal.
+N/A
