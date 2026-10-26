@@ -13,7 +13,7 @@ approvers:
 api-approvers:
   - "@JoelSpeed"
 creation-date: 2026-09-29
-last-updated: 2026-10-19
+last-updated: 2026-10-26
 status: provisional
 tracking-link:
   - https://issues.redhat.com/browse/OCPSTRAT-2653
@@ -41,7 +41,7 @@ indirection is deferred as future work:
   KAS Service. The user provides the exact annotations their LB provider expects.
   HyperShift never learns vendor-specific semantics.
 
-A CEL-based allowlist restricts annotations to known, tested LB provider
+A CEL-based allowlist restricts annotations to known LB provider
 prefixes. Adding support for a new provider requires adding its prefix to
 the allowlist — a one-line type change requiring a CRD bump, not a structural
 API change.
@@ -73,18 +73,18 @@ configure provider-specific LoadBalancer settings.
   controller, I want to choose which controller provisions the kube-apiserver
   Service, so that the API endpoint is served by the intended provider.
 
-- As a HyperShift service provider, I want to limit the LoadBalancer configurations
-  tenants can request to the providers my team has tested, so that I only take
-  operational responsibility for providers I actually support. The CEL-based
-  annotation allowlist in the CRD enforces this: only known provider prefixes
-  are accepted at admission time.
+- As a HyperShift user, I want the system to only accept annotation keys from
+  known LB providers, so that misconfigured or unsupported annotations
+  are rejected at admission time. HyperShift enforces this via a CEL-based
+  annotation allowlist baked into the CRD — adding a new provider requires a
+  CRD bump with the new prefix.
 
 ### Goals
 
 - Allow Day 1 deterministic IP/pool assignment for kube-apiserver LB across all
   LB providers.
 - Support controller selection for management clusters with multiple LB controllers.
-- Enforce an allowlist: only known, tested providers are accepted by default.
+- Enforce an allowlist: only known providers are accepted by default.
 - Maintain backward compatibility: clusters without the new fields behave identically.
 
 ### Non-Goals
@@ -132,10 +132,13 @@ This approach is provider-agnostic by design:
   guest cluster platform. An Agent-platform HC on an AWS management cluster
   has its KAS Service processed by the AWS LB controller, not MetalLB.
 
-Because the fields live inside `LoadBalancerPublishingStrategy`, they
-automatically apply per-service. If other services (OAuthServer, Konnectivity)
-need deterministic LB IPs in the future, they reuse the same struct with zero
-API changes.
+Because the fields live inside `LoadBalancerPublishingStrategy`, the API
+struct is shared across all services (APIServer, OAuthServer, Konnectivity).
+However, **Day 1 only implements annotation passthrough for KAS** in CPO.
+If a user sets `serviceAnnotations` on OAuthServer or Konnectivity today,
+the fields are accepted by the API but CPO does not process them — the
+annotations are silently ignored. Adding passthrough for other services
+requires CPO changes in a follow-up.
 
 #### spec.services Immutability
 
@@ -158,8 +161,6 @@ requires mutable annotations.
   mirrors HCP conditions to HC status, relays annotations HC→HCP.
 - **CPO (Control Plane Operator):** Reconciles control plane components including
   KAS Service and TLS certificates.
-- **NodePool controller:** Renders HAProxy ignition config, computes rollout hash,
-  manages progressive rollouts.
 - **LB Provider:** External controller (MetalLB, F5 CIS, AWS LB Controller, etc.)
   that processes Service annotations and assigns IPs.
 
@@ -305,7 +306,7 @@ type LoadBalancerPublishingStrategy struct {
     // for tenant workloads). Maps to the Kubernetes Service field directly.
     //
     // +optional
-    LoadBalancerClass *string `json:"loadBalancerClass,omitempty"`
+    LoadBalancerClass string `json:"loadBalancerClass,omitempty"`
 
     // serviceAnnotations is a map of annotations passed through to the
     // LoadBalancer Service. The user provides the exact annotations their LB
@@ -315,7 +316,7 @@ type LoadBalancerPublishingStrategy struct {
     // Annotations are applied per-key — existing annotations set by other
     // controllers (e.g., MetalLB status annotations) are preserved.
     //
-    // Only annotation keys matching known, tested LB provider prefixes are
+    // Only annotation keys matching known LB provider prefixes are
     // accepted (see allowlist below). Adding a new provider requires adding
     // its prefix to the CEL rule — a one-line type change requiring a CRD bump.
     //
@@ -323,6 +324,10 @@ type LoadBalancerPublishingStrategy struct {
     // CEL rule. No per-field immutability rules needed.
     //
     // +optional
+    // +kubebuilder:validation:MinProperties=1
+    // +kubebuilder:validation:MaxProperties=10
+    // +kubebuilder:validation:XValidation:rule="self.all(k, k.matches('^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*\\/)?[A-Za-z0-9][-A-Za-z0-9_.]{0,62}$'))",message="annotation keys must be valid qualified names (optional prefix/name, prefix ≤ 253, name ≤ 63)"
+    // +kubebuilder:validation:XValidation:rule="self.all(k, size(self[k]) <= 253)",message="annotation values must be at most 253 characters"
     // +kubebuilder:validation:XValidation:rule (see allowlist table for full rule)
     ServiceAnnotations map[string]string `json:"serviceAnnotations,omitempty"`
 }
@@ -335,19 +340,20 @@ immutability rules are needed for Day 1.
 
 #### Annotation allowlist
 
-Only annotation keys matching known, tested LB provider prefixes are accepted
-via CEL on `serviceAnnotations`. Adding a new provider is a conscious decision
-that includes E2E testing.
+Only annotation keys matching known LB provider prefixes are accepted
+via CEL on `serviceAnnotations`. Each prefix is matched using CEL `startsWith()`
+— these are plain string prefixes, not regular expressions. Adding a new
+provider is a conscious decision that includes E2E testing.
 
-| Prefix | Provider | Example annotations |
-|--------|----------|-------------------|
+| Prefix (matched via `startsWith()`) | Provider | Example annotations |
+|--------------------------------------|----------|-------------------|
 | `metallb.io/` | MetalLB (v0.13+) | `loadBalancerIPs`, `address-pool` |
 | `metallb.universe.tf/` | MetalLB (legacy) | `loadBalancerIPs`, `address-pool` |
-| `service.beta.kubernetes.io/aws-load-balancer-eip*` | AWS NLB (EIP) | `eip-allocations` |
-| `service.beta.kubernetes.io/aws-load-balancer-subnet*` | AWS NLB (subnet) | `subnets` |
-| `service.beta.kubernetes.io/aws-load-balancer-target-group*` | AWS NLB (TG) | `target-group-attributes` |
-| `service.beta.kubernetes.io/azure-load-balancer-ipv*` | Azure LB | `ipv4`, `ipv6` |
-| `service.beta.kubernetes.io/azure-load-balancer-resource-group*` | Azure LB (RG) | `resource-group` |
+| `service.beta.kubernetes.io/aws-load-balancer-eip` | AWS NLB (EIP) | `eip-allocations` |
+| `service.beta.kubernetes.io/aws-load-balancer-subnet` | AWS NLB (subnet) | `subnets` |
+| `service.beta.kubernetes.io/aws-load-balancer-target-group` | AWS NLB (TG) | `target-group-attributes` |
+| `service.beta.kubernetes.io/azure-load-balancer-ipv` | Azure LB | `ipv4`, `ipv6` |
+| `service.beta.kubernetes.io/azure-load-balancer-resource-group` | Azure LB (RG) | `resource-group` |
 | `networking.gke.io/` | GCP | `load-balancer-ip-addresses` |
 | `cis.f5.com/` | F5 BIG-IP CIS | `ip`, `ipamLabel` |
 | `lbipam.cilium.io/` | Cilium LB IPAM | `ips`, `sharing-key` |
@@ -356,6 +362,17 @@ that includes E2E testing.
 Annotations not matching any prefix produce a CEL validation error. Adding a
 new provider requires adding its prefix to the CEL rule — a conscious decision
 that includes E2E testing.
+
+> **CI coverage note:** CI E2E tests cover MetalLB only. Other providers in the
+> allowlist are included based on upstream documentation and customer RFEs, not
+> HyperShift CI testing. One-time provider validation (F5, Cilium) is documented
+> under Test Plan.
+
+**Implementation order:** The initial API PR
+([hypershift#9913](https://github.com/openshift/hypershift/pull/9913)) introduces
+the types with `MinProperties=1`, `MaxProperties=10`, and the feature gate. The
+allowlist CEL rule (`startsWith()` prefixes) and key/value size bounds are added
+in a subsequent PR during implementation, once the base types are merged.
 
 ### Topology Considerations
 
@@ -366,14 +383,12 @@ operator (management cluster) and CPO (HCP namespace). No guest cluster componen
 are modified.
 
 - **Management cluster**: Modified API types on HostedCluster/HostedControlPlane.
-  CPO reconciler changes for KAS Service annotation passthrough and cert SAN
-  management.
+  CPO reconciler changes for KAS Service annotation passthrough.
 - **Guest cluster**: No changes. Worker HAProxy configuration is managed via
   MachineConfig/Ignition from the management cluster.
 - **Split components**: The kubeconfig Secret is generated by CPO in the HCP
-  namespace and copied to the HC namespace by the HC controller. The NodePool
-  controller reads from HC namespace. This existing chain is leveraged for the
-  natural rollout trigger — no new cross-namespace communication needed.
+  namespace and copied to the HC namespace by the HC controller. No new
+  cross-namespace communication needed.
 
 #### Standalone Clusters
 
@@ -394,13 +409,18 @@ identically to OCP.
 #### Annotation Passthrough
 
 CPO's `ReconcileService()` uses per-key annotation writes (`svc.Annotations[key] = value`),
-never full map overwrite (confirmed at `service.go:67-68`). This means annotations
+never full map overwrite (confirmed at `kas/service.go:81, 86, 98`, etc.). This means annotations
 set by external controllers (MetalLB `ip-allocated-from-pool`, cloud-controller-manager
 status annotations) survive every reconciliation loop.
 
 For this feature, `serviceAnnotations` entries from the APIServer's
 `LoadBalancerPublishingStrategy` are applied directly as per-key writes.
 No translation layer, no vendor-specific logic in CPO.
+
+**Conflict resolution:** If an annotation key from `serviceAnnotations` already
+exists on the Service with a different value (e.g., set by an external controller),
+the user-specified value always wins — CPO overwrites it on every reconciliation.
+Annotations on keys *not* in `serviceAnnotations` are left untouched.
 
 #### Provider examples
 
@@ -448,10 +468,11 @@ whatever LB controller runs on the management cluster itself.
 | Risk | Mitigation |
 |------|-----------|
 | **User provides invalid annotations** | LB provider ignores unknown annotations. Service stays Pending. Existing conditions surface the failure. Documented. |
-| **Reconciliation stripping user annotations** | Confirmed per-key writes at `service.go:67-68`. Unit tests will verify annotation preservation. |
+| **Reconciliation stripping user annotations** | Confirmed per-key writes at `kas/service.go:81, 86, 98`. Unit tests will verify annotation preservation. |
 | **Unknown provider needed** | Adding a provider prefix to the allowlist is a one-line CEL change with E2E test and CRD bump. Turnaround is one release cycle. |
 | **No type safety on annotations** | Deliberate tradeoff. Allowlist constrains which providers are accepted; annotation value correctness is the user's responsibility — same as setting annotations directly on any K8s Service. |
-| **HAProxy as SPOF for kubelet** | Kubelet → HAProxy (172.20.0.1) makes HAProxy a dependency for kubelet connectivity. Mitigated: HAProxy is a static pod started from local manifests — runs as long as kubelet runs. |
+| **Misspelled annotation key within allowed prefix** | A key like `metallb.io/loadBalancerIP` (missing trailing `s`) passes the allowlist but MetalLB ignores it — Service stays Pending with no error. Mitigated: documented per-provider annotation examples; operator can compare Service annotations against provider docs. No programmatic mitigation — HyperShift does not validate provider-specific key names. |
+| **No controller for `loadBalancerClass`** | If the user specifies a `loadBalancerClass` with no matching controller on the management cluster, the Service stays Pending indefinitely. Mitigated: same failure mode as any Kubernetes Service with an unmatched `loadBalancerClass` — surfaced via existing `Available` condition on HC. |
 
 ### Drawbacks
 
@@ -498,6 +519,19 @@ is a 1-file change, but auto-detection introduces complexity around multi-provid
 clusters and default selection. Can be added as an enhancement on top of this
 proposal.
 
+### 5. Typed `loadBalancerIPs` + `addressPool` Fields
+
+Typed fields (`loadBalancerIPs []string`, `addressPool string`) with per-provider
+translation in CPO. Discarded:
+- `spec.loadBalancerIP` is deprecated since Kubernetes 1.24 and will be removed.
+  There is no common standard for IP assignment across LB providers.
+- Each provider uses different annotation keys for the same concept (MetalLB:
+  `metallb.io/loadBalancerIPs`, AWS: EIP allocations, Azure: `ipv4`/`ipv6`).
+  A translation layer in CPO would need to understand every provider's schema —
+  the same maintenance burden as per-provider typed structs (Alternative 1).
+- The annotation passthrough approach lets each provider define its own semantics
+  without HyperShift acting as a translation broker.
+
 ## Future Work
 
 ### Day 2 IP Migration ([OCPSTRAT-3926](https://issues.redhat.com/browse/OCPSTRAT-3926))
@@ -519,9 +553,6 @@ passthrough approach.
    inherited from the Kubernetes Service semantics (fail at Service creation)?
    Recommendation: enforce at HC level via CEL for clearer UX.
 
-2. Should we add an annotation key length or count limit on `serviceAnnotations`?
-   Kubernetes already limits total annotation size to 256KB. Probably sufficient.
-
 ## Test Plan
 
 ### Unit Tests
@@ -540,6 +571,16 @@ passthrough approach.
 - `loadBalancerClass`: Create HC with `loadBalancerClass`, verify it's set on
   KAS Service and the correct LB controller processes it.
 
+### Negative E2E Tests
+
+- IP already in use: Create HC requesting an IP that is already assigned to
+  another Service. Verify Service stays Pending and HC condition surfaces
+  the failure.
+- Invalid `loadBalancerClass`: Create HC with a `loadBalancerClass` that has
+  no matching controller. Verify Service stays Pending.
+- Unknown annotation prefix: Create HC with an annotation key not in the
+  allowlist. Verify the CEL rule rejects the request at admission.
+
 ### Provider Validation (One-Time, Not CI)
 
 - F5 BIG-IP VE Trial VM for end-to-end proof with F5 CIS annotations.
@@ -551,8 +592,6 @@ passthrough approach.
 
 - Day 1 annotation passthrough functional.
 - `loadBalancerClass` support functional.
-- Prerequisite: kubelet → HAProxy routing for bare-metal public clusters
-  (see [kubelet-haproxy-routing-bare-metal.md](kubelet-haproxy-routing-bare-metal.md)).
 - Unit test coverage for annotation passthrough and CEL allowlist validation.
 - Basic E2E test with MetalLB (if available in CI).
 
@@ -562,11 +601,12 @@ passthrough approach.
 - Load testing with multiple concurrent HostedClusters.
 - User-facing documentation in openshift-docs with per-provider examples.
 - F5 one-time validation completed.
-- Sufficient soak time on TechPreview clusters without regressions.
+- Minimum soak time at TechPreview without regressions.
 
 ### GA
 
-- Backhaul SLI telemetry for IP assignment success/failure.
+- IP assignment latency observable via `Service.Status.LoadBalancer.Ingress`
+  population time.
 - All E2E tests passing in CI.
 
 ### Removing a deprecated feature
@@ -580,10 +620,23 @@ continue to work identically. The new fields are optional and have no default
 behavior when unset. The existing `spec.services` immutability rule is unchanged.
 No data migration needed.
 
-**Downgrade**: If a cluster was created with `serviceAnnotations`, downgrading the
-operator removes the reconciler that applies them. The annotations already set on
-the Service persist (Kubernetes does not remove annotations when the controller
-that set them is gone). LB provider continues to serve the configured IP.
+**Downgrade**: If a cluster was created with `serviceAnnotations`, downgrading
+HO has two effects:
+
+1. **CRD pruning**: The downgraded CRD no longer defines `loadBalancerClass` or
+   `serviceAnnotations`. The API server prunes these fields from stored
+   HostedCluster objects on the next write. The values are lost — they cannot
+   be recovered by re-upgrading HO. Users must re-create the HC to restore
+   the fields.
+2. **Service annotations persist**: Annotations already written to the KAS
+   Service by CPO are Kubernetes-native — they survive the operator downgrade.
+   The LB provider continues to serve the configured IP.
+3. **CPO must never clear `loadBalancerClass`**: On downgrade, old CPO does not
+   know about `loadBalancerClass`. Since CPO never sets
+   `Service.spec.loadBalancerClass` to empty (it only sets it when the field
+   is present), the existing value on the Service is preserved. This is the
+   correct behavior — clearing it would cause the default LB controller to
+   re-provision the Service.
 
 ## Version Skew Strategy
 
@@ -596,10 +649,18 @@ upgrades before CPO (HO deploys CPO), so the only version skew scenario is:
   IP or LB configuration that is **silently not honored**. This is not a
   transient upgrade window — the CPO version is pinned to the HC's release
   image, so a cluster on an older release runs the old CPO indefinitely until
-  the HC itself is upgraded. A `ValidConfiguration` condition on the HC must
-  detect when `serviceAnnotations` are present on HCP but absent from the KAS
-  Service, and set `ValidConfiguration=False` with a message directing the user
-  to upgrade the HC release. This condition is a prerequisite for GA.
+  the HC itself is upgraded.
+
+  Detection must use CPO image labels, not Service annotation comparison —
+  the absence of annotations on the Service could be transient (CPO hasn't
+  reconciled yet). The new CPO image adds a label
+  `io.openshift.hypershift.control-plane-operator-supports-deterministic-lb`.
+  HO reads it via `GetControlPlaneOperatorImageLabels()` (the same mechanism
+  used for `supports-kas-custom-kubeconfig`, `restricted-psa`, etc.). When
+  `serviceAnnotations` or `loadBalancerClass` are present on HC but the CPO
+  image label is absent, HO sets `ValidConfiguration=False` with a message
+  directing the user to upgrade the HC release. This condition is a
+  prerequisite for GA.
 - **Both at new version**: Feature fully functional.
 
 ## Operational Aspects of API Extensions
