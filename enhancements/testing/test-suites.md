@@ -1583,26 +1583,23 @@ where the new suites run.
   Component Readiness.
 
 **Existing jobs (e.g., `aws-ovn`, `aws-ovn-serial`, `aws-ovn-upgrade`):**
-a single job cannot run both the `active` and `stable` suites — they run
-at different frequencies and serve different signals — so we do not try
-to map an existing job onto both. Instead:
+the general approach is to keep each lifecycle suite scoped to its own
+run, while leaving the existing jobs untouched during migration:
 
 - The existing jobs are **kept as they are** (same names, same
   configuration) during migration, preserving their current signal and
   avoiding a mass rename.
-- For each existing job we add **two new jobs**: one that runs the
-  corresponding `active` suite and one that runs the corresponding
-  `stable` suite, each at its own cadence (`active` more frequent,
-  `stable` least frequent). For example, alongside `aws-ovn` we add an
-  `active` variant and a `stable` variant; likewise for `aws-ovn-serial`
-  (against the serial shards) and for the upgrade jobs.
+- Where two suites run at genuinely different cadences, they are driven
+  as separate runs — for example `active` more frequently than `stable`.
+  For the payload case, where `stable` and `active` run together on each
+  payload, both can instead share one cluster in a single combined job
+  (see the combined-payload-job usage described below).
 - `minimal` continues to be used on its own for the fast
   presubmit/payload smoke jobs.
 
-This keeps each job scoped to a single lifecycle suite while leaving the
-existing jobs untouched. The exact naming of the new `active`/`stable`
-variants is a follow-up detail; the preference remains to avoid renaming
-any existing job (see [Open Questions](#open-questions-optional)).
+The exact naming of any new `active`/`stable` runs is a follow-up detail;
+the preference remains to avoid renaming any existing job (see
+[Open Questions](#open-questions-optional)).
 
 **Cost:** this proposal is not expected to increase cost and may reduce
 it, but the effect is uncertain. The most frequently run jobs will be
@@ -1613,6 +1610,52 @@ provisioning a cluster (~40 minutes), especially if the reorganization
 increases the number of distinct jobs. A quantitative before/after
 comparison of total cluster-hours should be produced during validation
 (see [Test Plan](#test-plan)).
+
+**Potential usage — one combined payload job replacing an aggregated
+job.** The most promising application of this model is in payload jobs.
+Rather than adding a separate job per lifecycle suite, a single job can
+provision one cluster, perform the upgrade if it is an upgrade job, and
+then run the `stable` and `active` suites against that same cluster as
+**two sequential `openshift-tests` invocations** — one selecting
+`stable`, the other selecting `active`. Both invocations are blocking:
+the job fails if either suite fails.
+
+The goal is to let this one combined job **replace the aggregated jobs**
+used on payloads today. Aggregation exists to absorb per-run flakiness —
+a flaky test should not block a release on a single unlucky run, so the
+job is run many times in parallel and gated on the fleet's combined pass
+rate. Both `stable` and `active` are composed of tests selected for
+demonstrated reliability (`stable` members have graduated on sustained
+pass-rate evidence, and `active` holds `Informing`/`Blocking` tests that
+are already gated individually), so a single run is a trustworthy signal.
+With reliable suites there is no flakiness to average out, so the
+combined job needs **no aggregation and no retry** and can gate the
+payload on its own single result.
+
+This has three attractive properties:
+
+- **One cluster, two signals.** The fixed cost of provisioning (and, for
+  upgrade jobs, upgrading) a cluster is paid once and amortized across
+  both suites, instead of once per suite in separate jobs.
+- **Separable results.** Running `stable` and `active` as distinct
+  `openshift-tests` invocations keeps their pass/fail signals separate
+  (and separately attributable in Sippy/Component Readiness) even though
+  they share a cluster, so a regression is still pinned to the right
+  suite.
+- **No aggregation fan-out.** Replacing an aggregated job with a single
+  combined run removes the parallel-copy multiplier that dominates
+  payload CI cost today, which is only sound because the suites it runs
+  are flake-resistant by construction (see
+  [Graduating a Test to Stable](#graduating-a-test-to-stable)).
+
+This usage supersedes the "add two new jobs per existing job" sketch
+above for the payload case: the two suites travel together in one job
+rather than in two. Jobs that must remain aggregated for reasons other
+than test flakiness (for example disruption or upgrade jobs with genuine
+run-to-run environmental variance) are out of scope for this
+replacement. A quantitative before/after cluster-hours comparison for a
+representative payload job should be produced during validation (see
+[Test Plan](#test-plan)).
 
 ### Risks and Mitigations
 
