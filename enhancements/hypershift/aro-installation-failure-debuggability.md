@@ -40,12 +40,11 @@ condition messages without introducing new condition
 types or API fields. This EP is the Azure-specific follow-up, sharing the
 OCPSTRAT-1598 strategy. The platform-agnostic
 enhancement establishes the shared patterns
-(observability, message enrichment); the escape
-hatch (`HYPERSHIFT_DISABLE_DIAGNOSTIC_ENRICHMENT`)
-and the diagnostic fallback counter already exist
-in the HyperShift codebase at
-`support/diagnostics/enrichment.go` and do not
-depend on PR #2134 merging.
+(message enrichment, condition-level diagnostics).
+This EP introduces the diagnostic fallback counter
+(`hypershift_diagnostic_fallback_total`) and the
+`HYPERSHIFT_DISABLE_DIAGNOSTIC_ENRICHMENT` escape
+hatch, shared with the sibling ROSA EP.
 
 ### Relationship to Sibling Enhancements
 
@@ -101,9 +100,8 @@ owned by the respective component teams.
   Active Directory) — identity and access management
 - **Managed Identity**: An Azure identity automatically
   managed by Azure for authenticating to Azure services
-- **SCP / Azure Policy**: Governance mechanism that
-  enforces rules on Azure resources during creation
-  and updates
+- **Azure Policy**: Governance mechanism that enforces
+  rules on Azure resources during creation and updates
 - **ASO**: Azure Service Operator — bridges Kubernetes
   and Azure resources
 
@@ -734,11 +732,9 @@ Observability below).
 
 ### Observability
 
-The implementation uses the platform-agnostic
-Prometheus counter defined in the parent enhancement
-([PR #2134](https://github.com/openshift/enhancements/pull/2134))
-to detect silent degradation of diagnostic
-enrichment:
+This EP introduces a platform-agnostic Prometheus
+counter (shared with the sibling ROSA EP) to detect
+silent degradation of diagnostic enrichment:
 
 - **Metric name**: `hypershift_diagnostic_fallback_total`
 - **Type**: Counter
@@ -819,15 +815,13 @@ the platform-agnostic diagnostic enhancement
    codes fall through to the existing HTTP status code
    handling. No behavioral change for error codes not
    in the explicit list.
-4. **Escape hatch**: The
+4. **Escape hatch**: This EP introduces the
    `HYPERSHIFT_DISABLE_DIAGNOSTIC_ENRICHMENT=true`
-   environment variable already exists in the
-   HyperShift codebase
-   (`support/diagnostics/enrichment.go:18`). Setting
-   it on the HO/CPO Deployment disables diagnostic
-   enrichment without a restart — the value is read
-   on every reconciliation loop via
-   `IsEnrichmentDisabled()`. This EP's
+   environment variable (shared with the sibling
+   ROSA EP). Setting it on the HO/CPO Deployment
+   disables diagnostic enrichment without a restart
+   — the value is read on every reconciliation loop
+   via `IsEnrichmentDisabled()`. This EP's
    `ClassifyAzureError()` changes will call
    `IsEnrichmentDisabled()` before `ErrorCode`
    branching: when set, the function skips
