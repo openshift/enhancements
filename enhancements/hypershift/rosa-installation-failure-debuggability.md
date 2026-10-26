@@ -722,8 +722,8 @@ for its diagnostic enrichment changes.
 If the enriched messages produce problems at fleet
 scale, the changes can be reverted by rolling back
 the HyperShift Operator version. As a faster
-alternative to a full rollback, both this EP and the
-sibling ARO EP respect the
+alternative to a full rollback, this EP introduces
+(jointly with the sibling ARO EP) the
 `HYPERSHIFT_DISABLE_DIAGNOSTIC_ENRICHMENT=true`
 environment variable on the HO and CPO Deployments.
 When set, all diagnostic enrichment logic (role ARN
@@ -739,9 +739,9 @@ up the change).
 
 ### Observability
 
-The implementation exposes one new Prometheus
-counter to detect silent degradation of the
-diagnostic enrichment:
+This EP introduces a platform-agnostic Prometheus
+counter (shared with the sibling ARO EP) to detect
+silent degradation of the diagnostic enrichment:
 
 - **Metric name**: `hypershift_diagnostic_fallback_total`
 - **Type**: Counter
