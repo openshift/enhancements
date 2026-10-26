@@ -40,7 +40,7 @@ Support for nested SPIRE topologies enables scalable, highly available workload 
 ### Goals
 
 1. Allow a **downstream cluster** to obtain its intermediate signing CA from an upstream server, with the operator managing all required infrastructure end to end.
-2. Allow the **upstream cluster's operator** to expose the upstream server's gRPC API so downstream clusters can reach it over the network.
+2. Enable communication with the upstream server via the gRPC API, allowing downstream clusters to reach it across a multi-cluster environment.
 3. Allow an **upstream cluster's operator** to register one or more downstream clusters for CA chaining through CR configuration.
 4. Support **N-level nesting**: a cluster may be both upstream and downstream simultaneously.
 5. Garbage-collect all operator-created nested SPIRE resources when the feature is removed from the CR.
