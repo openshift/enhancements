@@ -13,8 +13,8 @@ api-approvers:
   - "@enxebre"
   - "@csrwng"
 creation-date: 2026-08-14
-last-updated: 2026-08-20
-status: provisional
+last-updated: 2026-10-26
+status: implemented
 tracking-link:
   - https://redhat.atlassian.net/browse/RFE-9235
 see-also:
@@ -57,6 +57,7 @@ This is a gap for the ROSA HyperFleet architecture, where the goal is to minimiz
 
 - Base domain allocation (multi-tenant concern handled by the consuming platform)
 - Modifying existing behavior for clusters that do not set `managedDNS`
+- Enabling or disabling managed DNS on an existing cluster
 
 ## Proposal
 
@@ -74,12 +75,12 @@ This enhancement introduces two changes to the CPO, both gated behind `spec.plat
 1. The cluster lifecycle component creates a HostedCluster CR on the Management Cluster with `spec.platform.aws.managedDNS` configured and a `BaseDomain`.
 2. The HyperShift hypershift-operator deep-copies `spec.platform` to the HostedControlPlane. The CPO reconciles the HCP and detects the `managedDNS` configuration.
 3. The CPO creates a `.hypershift.local` private Route53 zone associated with the guest cluster's VPC (if the zone does not already exist — see Change 1). Shared VPC: see Change 1 for scoping differences.
-4. The CPO creates public and private ingress Route53 zones using `{managedDNS.ingressDomainPrefix}.{baseDomainPrefix}.{baseDomain}` as the zone domain name (default prefix: `in`). The private ingress zone is associated with the guest cluster's VPC so that in-cluster DNS resolution works. Shared VPC: only the public ingress zone is created (see Change 1).
+4. The CPO creates public and private ingress Route53 zones using `{managedDNS.ingressDomainPrefix}.{baseDomainPrefix}.{baseDomain}` as the zone domain name. The private ingress zone is associated with the guest cluster's VPC so that in-cluster DNS resolution works. Shared VPC: only the public ingress zone is created (see Change 1).
 5. If delegation is configured, the CPO creates an ACME DNS01 challenge delegation CNAME record in the public ingress zone.
-6. If `delegation.nsDelegation` is `ExternalDNS`, the CPO creates a `DNSEndpoint` CR (external-dns CRD, owned by the HCP via `SetControllerReference`) in the control plane namespace containing NS delegation records for the public ingress zone. external-dns picks up the CR and creates the NS records in the parent zone. If `nsDelegation` is `Manual`, the CPO skips `DNSEndpoint` creation — the consuming platform handles NS delegation using nameservers from HostedCluster status.
+6. If `delegation.nsDelegationMode` is `ExternalDNS`, the CPO creates a `DNSEndpoint` CR (external-dns CRD, owned by the HCP via `SetControllerReference`) in the control plane namespace containing NS delegation records for the public ingress zone. external-dns picks up the CR and creates the NS records in the parent zone. If `nsDelegationMode` is `Manual`, the CPO skips `DNSEndpoint` creation — the consuming platform handles NS delegation using nameservers from HostedCluster status.
 7. The CPO populates `hcp.Status.Platform.AWS.DNSZones` with zone IDs and nameservers. The hypershift-operator propagates this to `hcluster.Status.Platform.AWS.DNSZones` via the existing `hcp.Status.Platform → hcluster.Status.Platform` copy.
 8. The CPO sets the `AWSManagedDNSAvailable` condition on the HostedControlPlane. If delegation is configured, the CPO performs a live `net.LookupNS()` check and keeps the condition `False` with reason `NSDelegationPending` until NS delegation resolves. Once confirmed (or if no delegation is configured), the condition is set to `True`. The hypershift-operator propagates this condition to the HostedCluster.
-9. The CPO overrides `dns.Spec.PublicZone` and `dns.Spec.PrivateZone` in the guest cluster's `dns.config` with the managed ingress zone IDs, so the OpenShift ingress operator creates wildcard DNS records (`*.apps`) in the managed zones.
+9. The Hosted Cluster Config Operator (HCCO) overrides `dns.Spec.PublicZone` and `dns.Spec.PrivateZone` in the guest cluster's `dns.config` with the managed ingress zone IDs, so the OpenShift ingress operator creates wildcard DNS records (`*.apps`) in the managed zones.
 
 If ingress DNS zone creation fails (steps 4–8), the `AWSManagedDNSAvailable` condition is set to `False` with the error message. The cluster administrator can check this condition on the HostedCluster to diagnose and resolve issues (e.g., missing IAM permissions). The controller retries on the next reconciliation cycle, throttled to avoid Route53 rate limits (see Rate Limiting section). `.hypershift.local` zone failures (step 3) are reported through the existing `AWSEndpointAvailable` condition on the `AWSEndpointService` resource.
 
@@ -91,74 +92,80 @@ When `spec.platform.aws.managedDNS` is set, the PrivateLink controller auto-crea
 
 In shared VPC scenarios, the VPC owner's account operates under a more restrictive permission model — the shared VPC IAM policies are intentionally scoped to the minimum required operations. Extending these policies with zone-management permissions (`CreateHostedZone`, `DeleteHostedZone`) would widen that trust boundary. Therefore, in shared VPC scenarios the `.hypershift.local` zone and the private ingress zone must be pre-created by the VPC owner, as they are today. `SharedVPC.LocalZoneID` remains required even when `managedDNS` is set. The scope of `managedDNS` in shared VPC is limited to the public ingress zone, which is created in the cluster account using the CPO's own credentials (not the `SharedVPC.RolesRef.IngressARN` role), along with the ACME challenge CNAME and NS delegation.
 
-The controller tracks zones it created via `AWSEndpointServiceStatus.ManagedLocalZone` (set to `"Managed"`) and only deletes zones carrying this marker during cleanup. Gating auto-create behind `managedDNS` is pragmatic: any consumer that wants managed ingress DNS also wants managed local zones, and it avoids adding new IAM requirements to clusters that do not opt in.
+Ownership is derived from the HCP spec: a cluster with `managedDNS` set and no shared VPC owns its `.hypershift.local` zone, and the controller deletes it when the `AWSEndpointService` is deleted. Gating auto-create behind `managedDNS` is pragmatic: any consumer that wants managed ingress DNS also wants managed local zones, and it avoids adding new IAM requirements to clusters that do not opt in.
 
 ### Change 2: Managed ingress DNS zones (gated by `managedDNS`)
 
 When `spec.platform.aws.managedDNS` is set on the HostedCluster, the CPO creates and reconciles public and private Route53 ingress zones in the customer's AWS account (shared VPC: public only — see Change 1).
 
-**Without delegation** (`managedDNS.delegation` is nil): The CPO creates zones using `{ingressDomainPrefix}.{baseDomainPrefix}.{baseDomain}` as the zone name (default prefix `in`). No ACME CNAME or DNSEndpoint is created. The consuming platform is responsible for all delegation and certificate management.
+**Without delegation** (`managedDNS.delegation` is omitted): The CPO creates zones using `{ingressDomainPrefix}.{baseDomainPrefix}.{baseDomain}` as the zone name. No ACME CNAME or DNSEndpoint is created. The consuming platform is responsible for all delegation and certificate management.
 
-**With delegation** (`managedDNS.delegation` is set): The ingress zones use `managedDNS.ingressDomainPrefix` on the cluster domain (`{ingressDomainPrefix}.{baseDomainPrefix}.{baseDomain}`, default prefix `in`), keeping the cluster domain itself in the parent zone. The prefix creates a DNS delegation boundary that allows the service provider to complete ACME DNS01 challenges and provision TLS certificates for the customer's ingress domain without needing write access to the customer's zone (see [Implementation Details](#implementation-detailsnotesconstraints) for a detailed explanation).
+**With delegation** (`managedDNS.delegation` is set): The ingress zones use `managedDNS.ingressDomainPrefix` on the cluster domain (`{ingressDomainPrefix}.{baseDomainPrefix}.{baseDomain}`), keeping the cluster domain itself in the parent zone. The prefix creates a DNS delegation boundary that allows the service provider to complete ACME DNS01 challenges and provision TLS certificates for the customer's ingress domain without needing write access to the customer's zone (see [Implementation Details](#implementation-detailsnotesconstraints) for a detailed explanation).
 
 The controller creates an ACME DNS01 challenge delegation CNAME record in the public ingress zone, enabling service-side certificate generation for the customer-delegated zone.
 
-For NS delegation, the `nsDelegation` field controls how NS records are created in the parent zone:
+For NS delegation, the `nsDelegationMode` field controls how NS records are created in the parent zone:
 
-- **`ExternalDNS`**: The CPO creates a `DNSEndpoint` CR in the control plane namespace. external-dns must be configured with `--source=crd` to watch for `DNSEndpoint` resources. The `DNSEndpoint` CRD (`externaldns.k8s.io/v1alpha1`) is bundled with `hypershift install` and installed on all management clusters. external-dns itself is only deployed when `--external-dns-provider` is set (AWS or GCP). If the CRD is missing (e.g., manual deletion), the `AWSManagedDNSAvailable` condition is set to `False` with an error message indicating the CRD is unavailable.
+- **`ExternalDNS`**: The CPO creates a `DNSEndpoint` CR in the control plane namespace. external-dns must be configured with `--source=crd` to watch for `DNSEndpoint` resources. The `DNSEndpoint` CRD (`externaldns.k8s.io/v1alpha1`) is installed by `hypershift install` when external-dns is deployed with `--external-dns-provider` set to AWS or GCP. If the CRD is missing (e.g., manual deletion), the `AWSManagedDNSAvailable` condition is set to `False` with an error message indicating the CRD is unavailable.
 - **`Manual`**: The CPO skips `DNSEndpoint` creation. The consuming platform reads nameservers from `hcluster.Status.Platform.AWS.DNSZones` and creates NS delegation records in the parent zone. The consuming platform must verify NS delegation is complete before initiating ACME certificate challenges.
+
+**Existing zones:** A public ingress zone with the same name is adopted, and a private ingress zone is adopted only if it is associated with the cluster VPC. Adopted zones are deleted with the cluster.
 
 ### API Extensions
 
-All changes are additive and non-breaking. New spec fields are gated by the `AWSManagedDNS` feature gate (see Graduation Criteria).
+All changes are additive and non-breaking. New spec and status fields are gated by the `AWSManagedDNS` feature gate (see Graduation Criteria).
 
 **New spec types** in `api/hypershift/v1beta1/aws.go`:
 
 ```go
-// AWSManagedDNSSpec configures CPO-managed Route53 DNS zones.
-// When set, the CPO creates the .hypershift.local private zone and
-// public/private ingress Route53 zones using ingressDomainPrefix to form
-// the zone domain name. Delegation (ACME CNAME + NS records) is configured
-// separately via the delegation field.
-// +openshift:enable:FeatureGate=AWSManagedDNS
+// AWSManagedDNSSpec configures ControlPlaneOperator-managed Route53 DNS zones
+// for ingress. When set, the ControlPlaneOperator creates public and private
+// ingress Route53 zones in the customer's AWS account using ingressDomainPrefix
+// to form the zone domain name.
+// Delegation (ACME CNAME + NS records) is configured separately via the
+// delegation field.
 type AWSManagedDNSSpec struct {
-    // ingressDomainPrefix is the subdomain prefix for ingress DNS zones.
-    // Zones are created as {prefix}.{baseDomainPrefix}.{baseDomain}.
-    // When delegation is configured, the prefix creates a DNS delegation boundary
+    // ingressDomainPrefix is the subdomain prefix for the managed ingress DNS zones.
+    // The zone is created as {ingressDomainPrefix}.{clusterBaseDomain}, where
+    // {clusterBaseDomain} is the cluster base domain configured via the HostedCluster
+    // spec.dns (baseDomainPrefix and baseDomain).
+    // When delegation is configured, this prefix creates a DNS delegation boundary
     // that separates the ingress zone from the cluster domain, enabling ACME
     // challenge CNAME delegation back to the parent zone.
-    // +optional
-    // +default="in"
+    // Must be 1-63 characters, consist only of lowercase alphanumeric characters or
+    // hyphens, and must start and end with an alphanumeric character.
+    // ingressDomainPrefix is immutable.
+    // +required
     // +kubebuilder:validation:MinLength=1
     // +kubebuilder:validation:MaxLength=63
-    // +kubebuilder:validation:Pattern=`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`
+    // +kubebuilder:validation:XValidation:rule="self.matches('^[a-z0-9]([a-z0-9-]*[a-z0-9])?$')",message="ingressDomainPrefix must consist of lowercase alphanumeric characters or '-', and must start and end with an alphanumeric character"
+    // +kubebuilder:validation:XValidation:rule="self == oldSelf",message="ingressDomainPrefix is immutable"
     IngressDomainPrefix string `json:"ingressDomainPrefix,omitempty"`
 
     // delegation configures service-side DNS delegation for certificate generation.
-    // When set, the CPO creates an ACME DNS01 challenge CNAME in the public ingress
-    // zone and handles NS delegation based on the nsDelegation mode.
-    // When absent (zero value), only zones are created and the consuming platform handles
+    // When set, the ControlPlaneOperator creates an ACME DNS01 challenge CNAME in the
+    // public ingress zone and handles NS delegation based on the nsDelegationMode.
+    // When absent, only zones are created and the consuming platform handles
     // delegation and certificate management.
     // +optional
-    Delegation AWSManagedDNSDelegationSpec `json:"delegation,omitzero,omitempty"`
+    Delegation AWSManagedDNSDelegationSpec `json:"delegation,omitzero"`
 }
 
 // AWSManagedDNSDelegationSpec configures service-side DNS delegation for
-// certificate generation. When set, the CPO creates an ACME DNS01 challenge
-// CNAME in the public ingress zone pointing back to the parent zone, and
-// handles NS delegation based on the nsDelegation mode.
+// certificate generation. When set, the ControlPlaneOperator creates an ACME
+// DNS01 challenge CNAME in the public ingress zone pointing back to the parent
+// zone, and handles NS delegation based on the nsDelegationMode.
 type AWSManagedDNSDelegationSpec struct {
-    // nsDelegation specifies how NS delegation records are created in the parent zone.
-    // "ExternalDNS": the CPO creates a DNSEndpoint CR in the control plane namespace;
+    // nsDelegationMode specifies how NS delegation records are created in the parent zone.
+    // "ExternalDNS": the ControlPlaneOperator creates a DNSEndpoint CR in the control plane namespace;
     // external-dns creates NS records in the parent zone.
     // "Manual": the consuming platform handles NS delegation using nameservers
     // reported in HostedCluster status.
     // +required
-    // +kubebuilder:validation:Enum=ExternalDNS;Manual
-    NSDelegation NSDelegationMode `json:"nsDelegation,omitempty"`
+    NSDelegationMode NSDelegationMode `json:"nsDelegationMode,omitempty"`
 }
 
-// NSDelegationMode specifies how NS delegation is performed.
+// NSDelegationMode specifies how NS delegation is performed for managed DNS zones.
 // +kubebuilder:validation:Enum=ExternalDNS;Manual
 type NSDelegationMode string
 
@@ -171,15 +178,22 @@ const (
 **Extended `AWSPlatformSpec`:**
 
 ```go
+// +openshift:validation:FeatureGateAwareXValidation:featureGate=AWSManagedDNS,rule="has(oldSelf.managedDNS) == has(self.managedDNS)",message="managedDNS cannot be added or removed after creation"
 type AWSPlatformSpec struct {
     // ... existing fields ...
 
-    // managedDNS configures CPO-managed Route53 DNS zones for this cluster.
+    // managedDNS configures managed Route53 DNS zones for this cluster.
+    // Managed DNS is enabled when this field is set, which requires
+    // ingressDomainPrefix.
+    // managedDNS can only be set at cluster creation; it cannot be added to or
+    // removed from an existing cluster.
     // +optional
     // +openshift:enable:FeatureGate=AWSManagedDNS
-    ManagedDNS *AWSManagedDNSSpec `json:"managedDNS,omitempty"`
+    ManagedDNS AWSManagedDNSSpec `json:"managedDNS,omitzero"`
 }
 ```
+
+`managedDNS` can only be set at creation, and `ingressDomainPrefix` cannot be changed, because moving a cluster's ingress zones requires a DNS migration that is not implemented. `delegation` can be changed after creation.
 
 **New status type** in `api/hypershift/v1beta1/aws.go`:
 
@@ -193,10 +207,11 @@ const (
     PrivateIngressZone AWSDNSZoneType = "PrivateIngress"
 )
 
+// AWSDNSZoneStatus represents a managed Route53 DNS zone and its metadata.
 type AWSDNSZoneStatus struct {
     // zoneID is the Route53 hosted zone ID.
     // +required
-    // +kubebuilder:validation:MinLength=1
+    // +kubebuilder:validation:MinLength=2
     // +kubebuilder:validation:MaxLength=32
     ZoneID string `json:"zoneID,omitempty"`
 
@@ -211,27 +226,22 @@ type AWSDNSZoneStatus struct {
     Name string `json:"name,omitempty"`
 
     // nameServers are the authoritative name servers for this zone.
-    // Used for NS delegation when nsDelegation is Manual.
+    // Used for NS delegation when external-dns is not available.
+    // Private ingress zones never populate this field.
     // +optional
-    // +listType=atomic
-    // +kubebuilder:validation:MaxItems=10
+    // +listType=set
+    // +kubebuilder:validation:MinItems=1
+    // +kubebuilder:validation:MaxItems=8
+    // +kubebuilder:validation:items:MinLength=1
+    // +kubebuilder:validation:items:MaxLength=253
     NameServers []string `json:"nameServers,omitempty"`
 }
 ```
 
-**Mutual exclusivity with `DNSSpec` zone IDs:**
+**Interaction with `DNSSpec` zone IDs:**
 
-`managedDNS` and the existing `DNSSpec.publicZoneID` / `DNSSpec.privateZoneID` fields both feed into the guest cluster's `dns.config.PublicZone` / `PrivateZone`. When `managedDNS` is set, the CPO creates the ingress zones and overrides `dns.config` with the managed zone IDs, making any user-provided zone IDs for the same purpose redundant. The following CEL rules enforce mutual exclusivity at admission time:
-
-- `managedDNS` is always mutually exclusive with `publicZoneID`: the CPO always creates the public ingress zone when `managedDNS` is set (including shared VPC).
-- `managedDNS` without `SharedVPC` is mutually exclusive with `privateZoneID`: the CPO creates the private ingress zone for standard clusters.
-- `managedDNS` with `SharedVPC` allows `privateZoneID`: the VPC owner pre-creates the private ingress zone and provides the zone ID via `privateZoneID`. The CPO only manages the public zone.
-
-```go
-// On HostedClusterSpec (cross-field validation):
-// +kubebuilder:validation:XValidation:rule="!has(self.platform.aws) || !has(self.platform.aws.managedDNS) || self.dns.publicZoneID == ''",message="publicZoneID and managedDNS are mutually exclusive: managedDNS creates the public ingress zone"
-// +kubebuilder:validation:XValidation:rule="!has(self.platform.aws) || !has(self.platform.aws.managedDNS) || has(self.platform.aws.sharedVPC) || self.dns.privateZoneID == ''",message="privateZoneID and managedDNS are mutually exclusive for non-shared-VPC clusters: managedDNS creates the private ingress zone"
-```
+`managedDNS` and the existing `DNSSpec.publicZoneID` / `DNSSpec.privateZoneID` fields both feed into the guest cluster's `dns.config.PublicZone` / `PrivateZone`. There is no admission-time exclusivity between them.
+Instead, the managed zones take precedence: the HCCO first applies any zone IDs from `spec.dns`, then overrides each zone type with the managed zone recorded in `hcp.Status.Platform.AWS.DNSZones`. For shared VPC clusters, no private ingress zone is recorded, so `spec.dns.privateZoneID` (the VPC owner's zone) continues to supply `dns.config.PrivateZone`.
 
 The `.hypershift.local` zone has no conflict: `SharedVPC.LocalZoneID` is always required when SharedVPC is set (regardless of `managedDNS`), and without SharedVPC the PrivateLink controller auto-creates the local zone with no user-provided zone ID to conflict with.
 
@@ -241,14 +251,17 @@ The `.hypershift.local` zone has no conflict: `SharedVPC.LocalZoneID` is always 
 
 ```go
 type AWSPlatformStatus struct {
-    DefaultWorkerSecurityGroupID string              `json:"defaultWorkerSecurityGroupID,omitempty"`
-    // dnsZones contains DNS zone information for zones managed by the
-    // control plane operator. This is the source of truth for zone IDs
-    // used during cleanup and for consuming platform NS delegation.
+    DefaultWorkerSecurityGroupID string `json:"defaultWorkerSecurityGroupID,omitempty"`
+
+    // dnsZones contains DNS zone information for zones managed by the control plane operator.
+    // Contains 1-2 entries keyed by zoneType, so at most one PublicIngress zone and
+    // one PrivateIngress zone.
     // +optional
     // +listType=map
     // +listMapKey=zoneType
+    // +kubebuilder:validation:MinItems=1
     // +kubebuilder:validation:MaxItems=2
+    // +openshift:enable:FeatureGate=AWSManagedDNS
     DNSZones []AWSDNSZoneStatus `json:"dnsZones,omitempty"`
 }
 ```
@@ -257,18 +270,24 @@ type AWSPlatformStatus struct {
 
 ```go
 // AWSManagedDNSAvailable indicates whether the managed DNS configuration
-// has been successfully created. Only set when spec.platform.aws.managedDNS
-// is configured.
-AWSManagedDNSAvailable ConditionType = "AWSManagedDNSAvailable"
+// has been successfully created for the hosted cluster. This condition is
+// only set when spec.platform.aws.managedDNS is configured.
+const AWSManagedDNSAvailable ConditionType = "AWSManagedDNSAvailable"
+
+const (
+    AWSManagedDNSSuccessReason = "ManagedDNSSuccess"
+    AWSManagedDNSErrorReason   = "ManagedDNSError"
+    AWSManagedDNSPendingReason = "NSDelegationPending"
+)
 ```
 
-Status propagation: the CPO sets `hcp.Status.Platform.AWS.DNSZones` on the HostedControlPlane. The hypershift-operator already deep-copies `hcp.Status.Platform` to `hcluster.Status.Platform` and propagates conditions from HCP to HC, so no additional propagation logic is needed.
+Status propagation: the CPO sets `hcp.Status.Platform.AWS.DNSZones` on the HostedControlPlane. The hypershift-operator already deep-copies `hcp.Status.Platform` to `hcluster.Status.Platform`. It copies the `AWSManagedDNSAvailable` condition from HCP to HC when `managedDNS` is set, and removes it from the HC otherwise.
 
 ### Topology Considerations
 
 #### Hypershift / Hosted Control Planes
 
-This enhancement is specifically for the HyperShift/HCP topology. It only affects the AWS platform. GCP already creates all three zone types (`.hypershift.local`, public ingress, private ingress) in the CPO. Azure creates the `.hypershift.local` zone but not ingress zones. The change runs within the CPO (per-HCP deployment in the control plane namespace on the management cluster). The CPO's Role in the control plane namespace includes RBAC for `externaldns.k8s.io/dnsendpoints` so the CPO can create `DNSEndpoint` CRs when `nsDelegation` is `ExternalDNS`. The RBAC is always present and is a no-op when not used.
+This enhancement is specifically for the HyperShift/HCP topology. It only affects the AWS platform. GCP already creates all three zone types (`.hypershift.local`, public ingress, private ingress) in the CPO. Azure creates the `.hypershift.local` zone but not ingress zones. The change runs within the CPO (per-HCP deployment in the control plane namespace on the management cluster) and the HCCO. The CPO's Role in the control plane namespace includes RBAC for `externaldns.k8s.io/dnsendpoints` so the CPO can create `DNSEndpoint` CRs when `nsDelegationMode` is `ExternalDNS`. The RBAC is always present and is a no-op when not used.
 
 #### Standalone Clusters
 
@@ -286,7 +305,7 @@ Not applicable. This feature does not depend on OKE-excluded capabilities.
 
 **Why the ingress domain prefix creates a delegation boundary (ACME DNS01 challenge delegation):**
 
-The ingress zones are created with a configurable prefix (default `in`) on the cluster domain: `{prefix}.{baseDomainPrefix}.{baseDomain}`. This prefix is not just a naming convention — it creates a DNS delegation boundary that is essential for the ACME challenge pattern to work.
+The ingress zones are created with a configurable prefix on the cluster domain: `{prefix}.{baseDomainPrefix}.{baseDomain}`. This prefix is not just a naming convention — it creates a DNS delegation boundary that is essential for the ACME challenge pattern to work.
 
 The DNS topology has two zones in different accounts:
 
@@ -302,7 +321,7 @@ This works because the NS delegation boundary is at `{prefix}.{baseDomainPrefix}
 
 **Example (ROSA HyperFleet):**
 
-Given a cluster with `BaseDomainPrefix` = `mycluster` and `BaseDomain` = `a1b2.0.us-east-1.rosa.openshiftapps.com`:
+Given a cluster with `BaseDomainPrefix` = `mycluster`, `BaseDomain` = `a1b2.0.us-east-1.rosa.openshiftapps.com` and `ingressDomainPrefix` = `in`:
 
 ```text
 Zone shard (service provider account):
@@ -319,13 +338,17 @@ Customer public ingress zone (in.mycluster.a1b2.0.us-east-1.rosa.openshiftapps.c
 
 The CNAME target has no `in.` prefix, so it resolves in the zone shard — outside the NS delegation. The consuming platform writes TXT records there for ACME validation.
 
+**Apps domain:**
+
+When `managedDNS` is set, the guest cluster's default apps domain is `apps.{ingressDomainPrefix}.{baseDomainPrefix}.{baseDomain}`, so the `*.apps` wildcard record falls inside the managed ingress zone (Route53 rejects records outside a zone's domain). An apps domain or ingress domain set explicitly in `spec.configuration.ingress` still takes precedence.
+
 **Resource tagging:**
 
 All managed Route53 zones are tagged with `hcp.Spec.Platform.AWS.ResourceTags` via `ChangeTagsForResource` after creation. This is consistent with how the PrivateLink controller tags VPC endpoints and security groups. Tagging failures are logged but do not block zone creation.
 
 **dns.config population:**
 
-When `managedDNS` is set, the CPO overrides `dns.Spec.PublicZone` and `dns.Spec.PrivateZone` in the guest cluster's `dns.config` with the managed ingress zone IDs from `hcp.Status.Platform.AWS.DNSZones`. This is how the OpenShift ingress operator discovers the correct zones and creates wildcard DNS records (`*.apps`) for ingress. Without this override, the ingress operator would not know about the managed zones. The CPO only populates `dns.Spec.PublicZone` and `dns.Spec.PrivateZone` after the managed ingress zone IDs are available in `hcp.Status.Platform.AWS.DNSZones`. If the zone IDs are not yet populated (zones still being created), the override is a no-op and the ingress operator does not receive zone configuration until the next successful reconciliation. This ensures the ingress operator does not attempt to create records in zones that do not yet exist (shared VPC: only `PublicZone` is overridden — see Change 1).
+When `managedDNS` is set, the HCCO overrides `dns.Spec.PublicZone` and `dns.Spec.PrivateZone` in the guest cluster's `dns.config` with the managed ingress zone IDs from `hcp.Status.Platform.AWS.DNSZones`. This is how the OpenShift ingress operator discovers the correct zones and creates wildcard DNS records (`*.apps`) for ingress. Without this override, the ingress operator would not know about the managed zones. The HCCO only populates `dns.Spec.PublicZone` and `dns.Spec.PrivateZone` after the managed ingress zone IDs are available in `hcp.Status.Platform.AWS.DNSZones`. If the zone IDs are not yet populated (zones still being created), the override is a no-op and the ingress operator does not receive zone configuration until the next successful reconciliation. This ensures the ingress operator does not attempt to create records in zones that do not yet exist (shared VPC: only `PublicZone` is overridden — see Change 1).
 
 **NS delegation verification:**
 
@@ -342,11 +365,14 @@ The CPO needs additional Route53 permissions beyond its current set. The existin
 | `route53:DeleteHostedZone`         | Zone cleanup on cluster deletion                 |
 | `route53:ChangeTagsForResource`    | Tagging zones with `ResourceTags`                |
 
-Additionally, the existing `route53:ChangeResourceRecordSets` statement is scoped to `*.hypershift.local` record names. This must be widened to also cover ACME CNAME records in the ingress zone and record cleanup before zone deletion.
+Additionally, the existing `route53:ChangeResourceRecordSets` statement is scoped to `*.hypershift.local` record names. This must be widened to also cover ACME CNAME records in the ingress zone and record cleanup before zone deletion. Because the managed zone IDs are not known in advance, record changes are granted on `arn:aws:route53:::hostedzone/*`; the ingress operator role needs the same to write the `*.apps` records into the managed zones.
+
+The HyperShift CLI only grants these permissions when `--managed-dns` is passed to `hypershift create cluster aws` or `hypershift create iam aws`.
 
 The following managed policies must be updated to include these permissions:
 
 - **`ROSAControlPlaneOperatorPolicy`** ([managed-cluster-config](https://github.com/openshift/managed-cluster-config/blob/master/resources/sts/hypershift/openshift_hcp_control_plane_operator_credentials_policy.json)): Updated for all ROSA HCP clusters, since the entire fleet is expected to migrate to managed DNS.
+- The ROSA ingress operator policy, so that `route53:ChangeResourceRecordSets` covers the managed ingress zones.
 
 **Route53 rate limiting:**
 
@@ -359,17 +385,19 @@ In both cases, throttle errors are surfaced in the relevant condition message fo
 
 **external-dns configuration:**
 
-The `--source=crd` and `--managed-record-types=A,AAAA,CNAME,NS` flags are added to the external-dns deployment for all AWS management clusters, not only those with `managedDNS` configured. This is necessary because external-dns is deployed once per management cluster, not per HostedCluster. When no `DNSEndpoint` CRs exist, the additional CRD source adds an idle watch with negligible overhead. The ClusterRole for external-dns is also extended with read/update permissions for `externaldns.k8s.io/dnsendpoints`.
+The `--source=crd` and `--managed-record-types=A,AAAA,CNAME,NS` flags are added to the external-dns deployment, and the `DNSEndpoint` CRD is installed, on every management cluster where external-dns is deployed with the AWS or GCP provider, not only those with `managedDNS` configured. This is necessary because external-dns is deployed once per management cluster, not per HostedCluster. When no `DNSEndpoint` CRs exist, the additional CRD source adds an idle watch with negligible overhead. The ClusterRole for external-dns is also extended with read/update permissions for `externaldns.k8s.io/dnsendpoints`.
 
 **Zone cleanup:**
 
 On HostedCluster deletion, the HCP reconciler handles ingress zone cleanup. It deletes the `DNSEndpoint` CR (if created), drains all non-SOA/NS records from each managed ingress zone, then deletes the zones. Zone IDs are read from `hcp.Status.Platform.AWS.DNSZones` on the reconciled resource directly. The `.hypershift.local` zone is cleaned up separately by the PrivateLink controller via `AWSEndpointServiceStatus` (shared VPC: only the public ingress zone is cleaned up — see Change 1).
 
+Cleanup only runs when the HostedCluster has the `hypershift.openshift.io/cleanup-cloud-resources` annotation and the AWS identity provider is valid. Zones that are already gone, or that cannot be deleted because of permission errors, are skipped so cluster deletion is not blocked; other errors are retried.
+
 ### Risks and Mitigations
 
 **Risk: Orphaned zones on failed cleanup**
 
-If the controller cannot delete zones during HostedCluster deletion (e.g., IAM permissions revoked, or HCP already deleted before cleanup runs), ingress zones may be orphaned in the customer's account. The zone names follow a predictable pattern (`{ingressDomainPrefix}.{baseDomainPrefix}.{baseDomain}`) and can be identified for manual cleanup. The `.hypershift.local` zone is tracked in `AWSEndpointServiceStatus` and is cleaned up independently.
+If the controller cannot delete zones during HostedCluster deletion (e.g., IAM permissions revoked), ingress zones may be orphaned in the customer's account. The zone names follow a predictable pattern (`{ingressDomainPrefix}.{baseDomainPrefix}.{baseDomain}`) and can be identified for manual cleanup. The `.hypershift.local` zone is tracked in `AWSEndpointServiceStatus` and is cleaned up independently.
 
 **Risk: Race between zone creation and certificate issuance**
 
@@ -387,11 +415,11 @@ The current approach requires a separate component with customer AWS credentials
 
 **NS delegation exclusively by the cluster lifecycle component:**
 
-Instead of the CPO supporting `nsDelegation: ExternalDNS`, the consuming platform could always handle NS delegation itself (`Manual` mode) by reading nameservers from HostedCluster status. This is supported as the `Manual` mode, but as the exclusive approach it adds a round-trip through the management layer for every cluster. When external-dns is available on the Management Cluster, `ExternalDNS` mode is preferred as it completes the delegation chain directly.
+Instead of the CPO supporting `nsDelegationMode: ExternalDNS`, the consuming platform could always handle NS delegation itself (`Manual` mode) by reading nameservers from HostedCluster status. This is supported as the `Manual` mode, but as the exclusive approach it adds a round-trip through the management layer for every cluster. When external-dns is available on the Management Cluster, `ExternalDNS` mode is preferred as it completes the delegation chain directly.
 
 **No external-dns integration in the CPO:**
 
-The CPO could limit its scope to zone creation, CNAME setup, and status reporting — without creating `DNSEndpoint` CRs. This is effectively `managedDNS: {}` (zones-only mode) or `delegation` with `nsDelegation: Manual`. The API supports this as a first-class mode for consumers that don't have external-dns or prefer to handle delegation themselves.
+The CPO could limit its scope to zone creation, CNAME setup, and status reporting — without creating `DNSEndpoint` CRs. This is effectively `managedDNS` without `delegation` (zones-only mode) or `delegation` with `nsDelegationMode: Manual`. The API supports this as a first-class mode for consumers that don't have external-dns or prefer to handle delegation themselves.
 
 ## Open Questions
 
@@ -401,14 +429,14 @@ None at this time.
 
 - **Unit tests** with mock Route53 client covering:
   - `managedDNS` absent → no-op (backwards compatibility)
-  - Zones-only mode (no delegation) → zones created with default prefix (in.{baseDomainPrefix}.{baseDomain}), no CNAME or DNSEndpoint
+  - Zones-only mode (no delegation) → zones created, no CNAME or DNSEndpoint
   - Delegation mode → zones created with prefix, ACME CNAME created
-  - `nsDelegation: ExternalDNS` → `DNSEndpoint` CR created with correct NS records
-  - `nsDelegation: Manual` → no `DNSEndpoint` CR created
+  - `nsDelegationMode: ExternalDNS` → `DNSEndpoint` CR created with correct NS records
+  - `nsDelegationMode: Manual` → no `DNSEndpoint` CR created
   - Custom `ingressDomainPrefix` → zone naming uses custom prefix
   - ACME CNAME record derivation from prefixed ingress zone domain
   - Idempotent zone creation (zone already exists → reuse)
-  - Cleanup: records drained before zone deletion, tag-based fallback when HCP unavailable
+  - Cleanup: records drained before zone deletion
   - Status condition set on success and failure
   - NS delegation verification via `net.LookupNS()` (mocked)
   - Route53 throttle handling → condition set to False, requeue after backoff
@@ -416,15 +444,15 @@ None at this time.
   - `.hypershift.local` NOT auto-created when `managedDNS` is absent (backwards compatibility)
   - Shared VPC + `managedDNS` → only public ingress zone created and deleted
 - **Envtest** for CEL validation on new spec and status types
-- **E2e** testing via the existing `e2e-aws` suite with `managedDNS` configured
+- **E2e** testing via the e2e-v2 AWS suite on a dedicated cluster created with `--managed-dns`. Delegation is not covered in e2e, because verifying it requires a controllable parent zone.
 
 ## Graduation Criteria
 
-The `AWSManagedDNS` feature gate controls the availability of the `managedDNS` spec field on `AWSPlatformSpec`.
+The `AWSManagedDNS` feature gate controls the availability of the `managedDNS` spec field on `AWSPlatformSpec` and the `dnsZones` status field.
 
 ### Dev Preview -> Tech Preview
 
-The feature gate is enabled for `TechPreviewNoUpgrade`. The `managedDNS` field is only present in the CRD when the management cluster runs with this feature set.
+The feature gate is enabled for `TechPreviewNoUpgrade`. The `managedDNS` field is only present in the CRD when the hypershift-operator is installed with this feature set.
 
 ### Tech Preview -> GA
 
@@ -444,13 +472,13 @@ No action required. The new spec and status fields are additive — old controll
 
 If a cluster was created with managed DNS and the CPO is downgraded to a version without this feature, the zones will persist in the customer's Route53 account but will no longer be reconciled. The zones remain functional (DNS records still resolve), but will not be cleaned up on cluster deletion. Manual cleanup using the predictable zone naming pattern (`{ingressDomainPrefix}.{baseDomainPrefix}.{baseDomain}`) would be needed.
 
-The status fields populated by the new CPO will be ignored by the old CPO and the old hypershift-operator (unknown fields in status are preserved by Kubernetes but not acted upon). The `managedDNS` spec field will be stripped from the stored object on any subsequent update (including unrelated field changes) if the old CRD schema does not include the field, because Kubernetes validates and prunes unknown fields on write. The zones remain functional in Route53, but the CPO configuration is effectively lost from the Kubernetes object. Re-upgrading to a version with managed DNS support would require re-applying the `managedDNS` spec field.
+The status fields populated by the new CPO will be ignored by the old CPO and the old hypershift-operator, and are pruned on the next write if the old CRD schema does not include them. The `managedDNS` spec field will be stripped from the stored object on any subsequent update (including unrelated field changes) if the old CRD schema does not include the field, because Kubernetes validates and prunes unknown fields on write. The zones remain functional in Route53, but the CPO configuration is effectively lost from the Kubernetes object. Because `managedDNS` can only be set at creation, it cannot be re-applied after re-upgrading, and the zones must be cleaned up manually.
 
 ## Version Skew Strategy
 
 The hypershift-operator must include the managed DNS types to copy spec/status and render CPO RBAC. The `AWSManagedDNS` feature gate ensures the `managedDNS` field is only present in the CRD when the management cluster runs a version that includes this feature.
 
-The CPO is OCP version bound, so it can be at a lower version than the hypershift-operator. An older CPO that does not include managed DNS support will ignore the `managedDNS` field. The consuming platform should only set `managedDNS` on clusters running an OCP version whose CPO includes this feature.
+The CPO is OCP version bound, so it can be at a lower version than the hypershift-operator. An older CPO that does not include managed DNS support will ignore the `managedDNS` field. The consuming platform should only set `managedDNS` on clusters running OCP 5.1 or later, whose CPO includes this feature.
 
 ## Operational Aspects of API Extensions
 
@@ -458,13 +486,13 @@ This enhancement adds new spec and status fields to existing CRDs and a new cond
 
 - All zone creation (`.hypershift.local`, ingress public, ingress private), CNAME setup, and `DNSEndpoint` CR creation only occur when `managedDNS` is set. Clusters without `managedDNS` are unaffected. Failure to create the `.hypershift.local` zone is surfaced via the `AWSEndpointAvailable` condition on the `AWSEndpointService` resource and CPO logs.
 - The `AWSManagedDNSAvailable` condition is only set when `managedDNS` is configured. It provides a clear signal for operational monitoring. When `False`, the message field contains the specific error (Route53 API error, missing CRD, NS delegation pending, etc.).
-- All zone and record creation is idempotent — subsequent reconciliation cycles verify zones and records exist via stored zone IDs before creating. If a managed zone is deleted out-of-band (e.g., the customer deletes the Route53 zone directly), the controller detects the `NoSuchHostedZone` error on the next reconciliation via `verifyOrCreateZone`, clears the stored zone ID, and recreates the zone. Note that a recreated zone will have new nameservers, so any existing NS delegation records in the parent zone will become stale. For `nsDelegation: ExternalDNS`, the `DNSEndpoint` CR is updated on the next reconciliation with the new nameservers, and external-dns propagates the change. For `nsDelegation: Manual`, the consuming platform must read the updated nameservers from HostedCluster status and update delegation records.
+- All zone and record creation is idempotent — subsequent reconciliation cycles verify zones and records exist via stored zone IDs before creating. If a managed zone is deleted out-of-band (e.g., the customer deletes the Route53 zone directly), the controller detects the `NoSuchHostedZone` error on the next reconciliation via `verifyOrCreateZone`, clears the stored zone ID, and recreates the zone. Note that a recreated zone will have new nameservers, so any existing NS delegation records in the parent zone will become stale. For `nsDelegationMode: ExternalDNS`, the `DNSEndpoint` CR is updated on the next reconciliation with the new nameservers, and external-dns propagates the change. For `nsDelegationMode: Manual`, the consuming platform must read the updated nameservers from HostedCluster status and update delegation records.
 - Route53 rate limiting: ingress zones use in-memory timestamps (30s minimum between attempts, 5-minute re-verify when healthy); `.hypershift.local` zone uses the PrivateLink controller's existing throttle-and-requeue pattern. See the Rate Limiting section in Implementation Details.
 
 ## Support Procedures
 
 - **Detection:** For managed ingress DNS failures, check the `AWSManagedDNSAvailable` condition on the HostedCluster. If `False`, the message contains the error (e.g., `AccessDenied`, `ThrottlingException`, `NSDelegationPending`, `DNSEndpoint CRD not installed`). For `.hypershift.local` zone failures, check the `AWSEndpointAvailable` condition on the `AWSEndpointService` resource and CPO logs.
-- **Diagnosis:** Verify the CPO IAM role has the required Route53 permissions. For `NSDelegationPending`, verify that external-dns is running and the parent zone has the NS records (if using `ExternalDNS` mode) or that the consuming platform has created them (if using `Manual` mode). Review CPO logs for Route53 API errors.
+- **Diagnosis:** Verify the CPO IAM role has the required Route53 permissions. For `NSDelegationPending`, verify that external-dns is running and the parent zone has the NS records (if using `ExternalDNS` mode) or that the consuming platform has created them (if using `Manual` mode), and that they resolve from the management cluster. Review CPO logs for Route53 API errors.
 - **Recovery:** DNS zone creation is idempotent — fixing the underlying issue (e.g., IAM permissions) and waiting for the next reconciliation cycle will resolve the problem automatically.
 
 ## Infrastructure Needed
