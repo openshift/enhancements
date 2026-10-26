@@ -90,6 +90,10 @@ owned by the respective component teams.
 
 ## Glossary
 
+For common HyperShift terms (HC, HCP, HO, CPO, HCCO,
+CPC, CVO) see the
+[parent enhancement glossary](installation-failure-debuggability.md#glossary).
+
 - **ARO HCP**: Azure Red Hat OpenShift, Hosted Control
   Planes architecture
 - **CAPZ**: Cluster API Provider Azure — the CAPI
