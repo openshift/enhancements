@@ -106,6 +106,10 @@ on PR #9781 and can proceed independently.
 
 ## Glossary
 
+For common HyperShift terms (HC, HCP, HO, CPO, HCCO,
+CPC, CVO) see the
+[parent enhancement glossary](installation-failure-debuggability.md#glossary).
+
 - **ROSA HCP**: Red Hat OpenShift Service on AWS,
   Hosted Control Planes architecture
 - **CAPA**: Cluster API Provider AWS — the CAPI
