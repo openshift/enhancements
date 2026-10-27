@@ -448,50 +448,6 @@ spec:
 Here, `managed-auth-proxy-ca` is an illustrative name for the synchronized
 ConfigMap in `clusters-example`, also on the management cluster.
 
-#### Feature Gates
-
-The feature applies when `authentication.config.openshift.io/cluster` has
-`spec.type: OIDC`:
-
-| Consumer | Required gates |
-| --- | --- |
-| CAO and the External OIDC webhook | `ExternalOIDC`, `ExternalOIDCAsWebhook`, `AuthenticationComponentProxy`, `AuthenticationComponentProxyExternalOIDC` |
-| Console Operator | `ExternalOIDC`, `AuthenticationComponentProxyExternalOIDC` |
-
-The new `AuthenticationComponentProxyExternalOIDC` gate extends component proxy
-support to both paths and gates the new Console operator field. Console does not
-require `AuthenticationComponentProxy`: it reads its own operator resource, not the
-authentication operator field that gate controls.
-
-`ExternalOIDCAsWebhook` selects the webhook architecture and is required for this
-proposal's token-validation path even without external claim sources.
-
-##### HyperShift Feature Gating
-
-Hosted support requires the following gating:
-
-- The new `spec.operatorConfiguration.authentication` block on HostedCluster and
-  HostedControlPlane is gated by `AuthenticationComponentProxyExternalOIDC` on the
-  management side, distinct from the tenant's OpenShift gate of the same name.
-  This is a HyperShift operator feature, declared alongside its siblings in
-  `hypershift-operator/featuregate` and enabled by the operator's own feature
-  set rather than by any hosted-cluster configuration. The gate name is subject
-  to HyperShift API review.
-- The guest `console.operator.openshift.io/cluster` proxy field is gated by
-  `AuthenticationComponentProxyExternalOIDC`. `TechPreviewNoUpgrade` enables that
-  gate, so a hosted cluster on that feature set already serves the field; no
-  cluster-profile change in `openshift/api` is needed.
-- The hosted preview feature set must include the gates in the
-  [gate matrix](#feature-gates): `ExternalOIDC` and
-  `AuthenticationComponentProxyExternalOIDC` for the guest consumers.
-
-To use the preview feature, the administrator must enable both HyperShift's
-management-side preview feature set
-(`hypershift install --tech-preview-no-upgrade` upstream) and the tenant's
-`HostedCluster.spec.configuration.featureGate.featureSet: TechPreviewNoUpgrade`.
-These are [independent settings](https://hypershift.pages.dev/how-to/feature-gates/);
-neither enables the other.
-
 #### Generated Operand Configuration
 
 Besides the administrator-facing fields above, the operators render the resolved
@@ -548,6 +504,120 @@ result and removes duplicates. It also translates the
 `trustedCA` ConfigMap reference into the mounted bundle's `trustedCAFilePath`.
 The path is illustrative and must match the mount it configures on the Console
 Deployment. The existing `authType` and `oidcIssuer` fields are shown for context.
+
+#### Feature Gates
+
+A short refresher on where feature gates are set and how they propagate; the
+design below depends on it.
+
+A standalone cluster has one feature set,
+`featuregate.config.openshift.io/cluster`, and one payload. A hosted cluster has
+two independent feature sets, neither of which enables the other: the HyperShift
+operator's own, selected per management cluster at `hypershift install` time,
+and the hosted cluster's `spec.configuration.featureGate.featureSet`, selected
+by the tenant and covering control-plane and guest components alike. The hosted
+cluster's gates reach CPO as a `FeatureGate` resource rendered into a ConfigMap
+in the HCP namespace rather than through a guest API read.
+
+Gates also decide which API fields exist, because CRD manifests are generated
+per feature set and per cluster profile: writing a field whose gate is off is
+silently pruned rather than rejected. The profile is not configurable — CVO
+applies only the manifests annotated for the profile it was started with,
+`self-managed-high-availability` on standalone and `ibm-cloud-managed` for a
+hosted cluster — so a gate restricted to one profile is unavailable on the other
+topology.
+
+```text
+Standalone — one cluster, one payload
+
+  featuregate.config.openshift.io/cluster .spec.featureSet
+      |      ^-- feature set chosen here
+      v
+  cluster release payload      profile: self-managed-high-availability
+      |      ^-- fixed by how the cluster was installed, not configurable
+      |--> CRD variants the API server serves (incl. the Console proxy field)
+      '--> gate list seen by CAO, Console Operator, and the webhook
+
+
+HyperShift — two clusters, up to two payloads, two independent feature sets
+
+  MANAGEMENT CLUSTER
+    hypershift install [--tech-preview-no-upgrade]
+      |      ^-- HyperShift operator feature set chosen here
+      |--> management-side HyperShift operator gate
+      '--> HostedCluster/HCP CRD variant, by feature-set annotation
+
+    HostedCluster .spec.configuration.featureGate.featureSet
+      |      ^-- hosted feature set: one knob, control plane and guest alike
+      |
+      |--(a) featuregate-generator Job in the HCP namespace
+      |        renderer image   : control-plane payload
+      |        --payload-version: guest payload (spec.release)
+      |        --cluster-profile: ibm-cloud-managed
+      |        => ConfigMap in the HCP namespace, read by CPO
+      |
+      '--(b) hosted CVO in the HCP namespace applies the guest payload
+               |
+               v
+  GUEST CLUSTER                profile: ibm-cloud-managed
+      |--> CRD variants served (incl. the Console proxy field)
+      '--> gate list seen by Console Operator
+```
+
+##### Gates This Proposal Requires
+
+The feature applies when `authentication.config.openshift.io/cluster` has
+`spec.type: OIDC`, with these gates enabled on the cluster whose configuration
+each consumer reads:
+
+| Consumer | Topology | Required gates |
+| --- | --- | --- |
+| CAO and the External OIDC webhook | standalone | `ExternalOIDC`, `ExternalOIDCAsWebhook`, `AuthenticationComponentProxy`, `AuthenticationComponentProxyExternalOIDC` |
+| CPO and the External OIDC webhook | HyperShift | `ExternalOIDC`, `ExternalOIDCAsWebhook`, `AuthenticationComponentProxyExternalOIDC` |
+| Console Operator | both | `ExternalOIDC`, `AuthenticationComponentProxyExternalOIDC` |
+
+`AuthenticationComponentProxyExternalOIDC` is new. It extends component proxy
+support to both paths and gates the new Console operator field. The gate is
+enabled in `TechPreviewNoUpgrade` while the feature is in Tech Preview and adds
+`Default` at GA. Separately, it declares no cluster-profile restriction, so the
+Console field appears in the `ibm-cloud-managed` CRD variants as well as the
+self-managed ones — standalone and hosted clusters gain it in the same release,
+with no HyperShift-specific enablement in `openshift/api`.
+
+`ExternalOIDCAsWebhook` selects the webhook architecture and is required for the
+token-validation path even without external claim sources. This proposal depends
+on it, so it must reach `Default` no later than the gate above.
+
+`AuthenticationComponentProxy` appears only in the standalone row. It gates
+CAO's use of `Authentication.spec.proxy` and is declared
+[`inClusterProfile(SelfManaged)`](https://github.com/openshift/api/blob/24b2699a9b32/features/features.go#L347-L353),
+so by the profile rule above it is unavailable on HyperShift. Neither hosted
+consumer needs it: CPO resolves the proxy from the HostedControlPlane field, and
+Console reads its own operator resource.
+
+On HyperShift this table is necessary but not sufficient, because propagation
+also depends on the management-side gate below.
+
+##### HyperShift Feature Gating
+
+- The new `spec.operatorConfiguration.authentication` block on HostedCluster and
+  HostedControlPlane is gated by a management-side HyperShift operator feature,
+  declared alongside its siblings in `hypershift-operator/featuregate` and
+  enabled by the operator's own feature set rather than by any hosted-cluster
+  configuration. The HyperShift operator evaluates it before propagating
+  anything to the HostedControlPlane, so without it neither the webhook nor
+  Console ever sees a component proxy.
+- The guest `console.operator.openshift.io/cluster` proxy field is served
+  wherever `AuthenticationComponentProxyExternalOIDC` is enabled, on the
+  Hypershift profile as on SelfManaged, so no cluster-profile change in
+  `openshift/api` is needed at any phase.
+
+During preview the administrator must enable both HyperShift's management-side
+preview feature set (`hypershift install --tech-preview-no-upgrade` upstream)
+and the tenant's
+`HostedCluster.spec.configuration.featureGate.featureSet: TechPreviewNoUpgrade`
+([independent settings](https://hypershift.pages.dev/how-to/feature-gates/)). At
+GA both gates are enabled by default and neither opt-in remains necessary.
 
 ### Topology Considerations
 
@@ -1336,8 +1406,8 @@ and hosted topologies must be covered.
 ### Dev Preview -> Tech Preview
 
 The feature is proposed to ship directly as Tech Preview behind
-`AuthenticationComponentProxyExternalOIDC`, with the prerequisite gates already enabled
-in `TechPreviewNoUpgrade`.
+`AuthenticationComponentProxyExternalOIDC`, with the prerequisite gates already
+enabled in `TechPreviewNoUpgrade`.
 
 ### Tech Preview -> GA
 
@@ -1484,6 +1554,30 @@ guest components. When set, `spec.controlPlaneRelease` selects a separate payloa
 for management-side components, including CPO, HCCO, and OAuth API server; Console
 Operator and Console continue to come from `spec.release` in the guest cluster.
 
+Feature sets and release payloads are orthogonal, and the distinction matters
+for the rest of this section. A hosted cluster has exactly one feature set,
+`spec.configuration.featureGate.featureSet`, covering control-plane and guest
+components alike, so the [gates](#feature-gates) the webhook and Console require
+cannot be configured apart. Releases are chosen per target and nothing compares
+them. The feature set decides whether a gate is on; the payload decides whether
+the field and the code behind it exist at all, and a feature set can only enable
+gates the payload interpreting it knows about. Feature-set parity is therefore
+structural, while release parity is not — which is why the validation below is
+built on release floors and treats gates as the secondary check.
+
+Gate agreement across the split is not automatic either. The hosted cluster's
+effective gate list is rendered management-side by a job in the HCP namespace
+and published as a ConfigMap that CPO reads, and that render mixes payloads: the
+renderer image comes from the control-plane payload, while the payload version
+it evaluates comes from `spec.release` (it also renders for the Hypershift
+cluster profile, which is why the SelfManaged-only
+`AuthenticationComponentProxy` is unavailable there). The guest resolves its own
+list independently from `spec.release` through its CVO and the per-feature-set
+CRD manifests. With `spec.controlPlaneRelease` set, the two sides can therefore
+disagree about whether a gate exists at all — a newer control-plane payload can
+report this proposal's gate enabled to CPO while the guest payload has never
+heard of it.
+
 Within supported HyperShift version combinations, newer Console components with
 older authentication components, or the reverse, must preserve existing behavior.
 Skew can prevent use of the shared component proxy but must not itself break
@@ -1508,12 +1602,31 @@ HostedControlPlane, the HyperShift operator validates both targets against a
 minimum supported release, and confirms the gates permit the configuration on
 both sides: the management-side gate, and the hosted feature set, since the
 guest Console proxy field is only served while the gate is enabled (see
-[HyperShift Feature Gating](#hypershift-feature-gating)). Unsupported releases
+[HyperShift Feature Gating](#hypershift-feature-gating)). The gate half of that
+check is load-bearing only while the gates remain preview-scoped; once both reach
+their default feature sets at GA it is satisfied on every cluster and the release
+floors become the operative check. Unsupported releases
 or gates set the HostedCluster's `ValidConfiguration` condition to `False` with
 an `InvalidConfiguration` reason naming the target that fell short, and **block
 propagation**, so no part of the configuration is applied. Release metadata
 lookup or version parsing failures set the condition `Unknown` and retry rather
 than reporting the payload unsupported.
+
+A third version participates but cannot be validated here: the HyperShift
+operator's own. It is installed independently of both payloads, and
+`hypershift install` selects which CRD variant to apply by feature-set
+annotation. An operator predating the feature — or a current one installed
+without the preview feature set while the field is still preview-scoped — therefore
+serves a HostedCluster CRD without `operatorConfiguration.authentication`, and
+the API server prunes the administrator's proxy block on write. The apply
+succeeds, `ValidConfiguration` stays `True`, and the configuration is simply
+absent, because the component that would report the loss is the one that is too
+old or ungated. No condition can cover this case. It is the inverse of the
+guest-side pruning in [Cross-Cluster Write Skew](#cross-cluster-write-skew),
+which HCCO can detect precisely because a newer component performs the write;
+here the administrator or support must confirm the field persisted on the
+HostedCluster, as [Diagnosing Hosted Clusters](#diagnosing-hosted-clusters)
+describes.
 
 This follows HyperShift's established pattern for feature-level support
 checks — a minimum release constant evaluated during reconciliation and
@@ -1541,9 +1654,12 @@ falls back to the cluster-wide proxy or direct connectivity — a split that
 persists until the payload is updated. A control-plane payload below the floor
 configures neither consumer, since CPO and HCCO both come from it, so the
 result is inert rather than half-applied; but nothing inside that payload can
-report it, because neither operator knows the feature exists. The HyperShift
+report it, because neither operator knows the feature exists. The guest floor
+additionally covers the divergent gate resolution described above, which no
+feature-set check can: a control-plane payload that knows the gate can report it
+enabled to CPO regardless of what the guest payload understands. The HyperShift
 operator is versioned independently of both payloads and is therefore the only
-component able to detect either case before anything is applied.
+component able to detect any of these cases before anything is applied.
 
 Blocking on the guest target means a hosted cluster whose control plane
 supports the feature but whose guest payload does not gets nothing, including
@@ -1566,11 +1682,11 @@ One skew path crosses the cluster boundary and would otherwise defeat the
 guarantee above. HCCO comes from the control-plane payload but writes
 `console.operator.openshift.io/cluster` in the guest cluster, whose CRD schema
 comes from `spec.release`. If the guest payload predates the Console proxy
-field, or its feature set does not enable the gate that serves it, the API
-server prunes the field: HCCO's write appears to succeed and the setting
-silently disappears. The resulting state — webhook proxied, Console falling back
-to the cluster-wide proxy or direct connectivity — persists for as long as the
-mismatch does.
+field, or — while the gate is still preview-scoped — its feature set does not
+enable the gate that serves it, the API server prunes the field: HCCO's write
+appears to succeed and the setting silently disappears. The resulting state —
+webhook proxied, Console falling back to the cluster-wide proxy or direct
+connectivity — persists for as long as the mismatch does.
 
 Two layers address this:
 
@@ -1643,7 +1759,7 @@ Hazards](#asynchronous-reconciliation-hazards)) — so working authentication do
 not prove the current configuration is in effect. Confirm the operand side in
 operand logs.
 
-### Standalone Clusters
+### Diagnosing Standalone Clusters
 
 - Inspect `oc get clusteroperator authentication console` and the detailed
   conditions on the operator `Authentication` and `Console` resources. A missing
@@ -1674,7 +1790,7 @@ operand logs.
   network, and the correct issuer/source and proxy CAs are available. Distinguish
   proxy connectivity errors from endpoint TLS errors and invalid tokens.
 
-### Hosted Clusters
+### Diagnosing Hosted Clusters
 
 The checks above apply unchanged to the guest Console, which runs in
 `openshift-console` on a worker node and is configured by Console Operator from
@@ -1682,14 +1798,22 @@ its own guest resource exactly as on standalone. The webhook differs: it runs in
 the HCP namespace on the management cluster and egresses through its konnectivity
 sidecar.
 
-- **Start with the HostedCluster conditions.** `ValidConfiguration` set to `False`
+- **First confirm the proxy block is actually stored on the HostedCluster.** If
+  the HyperShift operator predates the feature, or was installed without the
+  preview feature set while the field is still preview-scoped, its HostedCluster
+  CRD does not carry the field and the API server pruned it on write without an
+  error. Every condition below then reports a cluster that simply has no
+  component proxy configured ([Hosted Support
+  Validation](#hosted-support-validation)).
+- **Then read the HostedCluster conditions.** `ValidConfiguration` set to `False`
   with an `InvalidConfiguration` reason naming a release target is the expected
   signal for an unsupported payload: the HyperShift operator blocked propagation,
   nothing was applied, and the cluster keeps its previous proxy behavior
   ([Hosted Support Validation](#hosted-support-validation)). `Unknown` means
-  release lookup or version parsing failed and is being retried. Both gate sides
-  must be enabled — the management-side HyperShift gate and the hosted
-  `featureGate.featureSet`
+  release lookup or version parsing failed and is being retried. Before GA, also
+  confirm both gate sides — the management-side HyperShift gate and the hosted
+  `featureGate.featureSet`; once the gates reach their default feature sets, the
+  release floors are the only remaining constraint
   ([HyperShift Feature Gating](#hypershift-feature-gating)).
 - **Do not read the webhook container's proxy environment as the effective
   proxy.** CPO points that environment at the pod's konnectivity sidecar; the
