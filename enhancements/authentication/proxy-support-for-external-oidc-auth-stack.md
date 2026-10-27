@@ -6,10 +6,12 @@ authors:
 reviewers:
   - "@liouk" # The author of the original External OIDC EP, to review the whole EP.
   - "@everettraven" # The reviewer of the Proxy Support for the Integrated Auth Stack EP; to review the whole EP.
+  - "@csrwng" # To review the HyperShift part.
 approvers:
   - "@benluddy"
 api-approvers:
   - "@everettraven" # For the Console Operator changes.
+  - "@csrwng" # For HyperShift API changes.
 creation-date: 2026-09-10
 last-updated: 2026-10-23
 status: provisional
@@ -1220,9 +1222,6 @@ without requiring the hosted administrator to enter it twice.
 
 ## Open Questions [optional]
 
-- Identify an API approver for the HyperShift additions and confirm the shared
-  `operatorConfiguration.authentication.proxy` placement on HostedCluster and
-  HostedControlPlane, its validation, and the management-side feature gate.
 - Agree the two minimum supported releases used by
   [Hosted Support Validation](#hosted-support-validation) — the control-plane
   floor with the HyperShift team, and the guest floor with the Console team —
