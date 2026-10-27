@@ -7,7 +7,7 @@ reviewers:
   - "@mkowalski" # On-prem networking, cloud DNS, and CNO reconciliation
   - "@cybertron" # Runtime networking and legacy API compatibility
   - "@pmtk" # SNO DNS-only behavior and OCPSTRAT-3609 integration
-  - "@sinnykumari" # MCO rendering and node rollout
+  - "@team-mco" # MCO rendering and node rollout
   - "@zaneb" # Platform integration, bootstrap, and provisioning isolation
   - "@sadasu" # Installer configuration and bootstrap
   - "@jaypoulz"
@@ -893,20 +893,12 @@ platform-specific bootstrap and image-based evidence before claiming adoption
 support. Lab execution, code changes, and payload qualification are separate
 work, not results of this design document.
 
-[sno-dns-design]:
-    https://github.com/openshift/enhancements/blob/f78b50340589564f8998ed13186d1d1c38abf15b/enhancements/single-node/sno-none-platform-internal-dns.md
+[sno-dns-design]: https://github.com/openshift/enhancements/blob/f78b50340589564f8998ed13186d1d1c38abf15b/enhancements/single-node/sno-none-platform-internal-dns.md
 [prior-proposal]: https://github.com/openshift/enhancements/pull/1666
-[mco-render]:
-    https://github.com/openshift/machine-config-operator/blob/3f863f437e3af4d975300927b3ca7e2bf7dbbb29/pkg/controller/template/render.go
-[cno-sync]:
-    https://github.com/openshift/cluster-network-operator/blob/069ef080db6b20f6704e4dc0c07d48937cef0ef8/pkg/controller/infrastructureconfig/sync_vips.go
-[runtime-guard]:
-    https://github.com/openshift/baremetal-runtimecfg/blob/3057d9978db74dcd5012a293d37d571b524c4e46/pkg/monitor/dynkeepalived.go#L133-L145
-[cloud-api]:
-    https://github.com/openshift/api/blob/38053d30e7e728362c4c6df1e402f6f7eb37d299/config/v1/types_infrastructure.go#L929-L1000
-[cloud-mco]:
-    https://github.com/openshift/machine-config-operator/blob/3f863f437e3af4d975300927b3ca7e2bf7dbbb29/templates/common/cloud-platform-alt-dns/files/coredns.yaml
-[cloud-resolver]:
-    https://github.com/openshift/machine-config-operator/blob/3f863f437e3af4d975300927b3ca7e2bf7dbbb29/templates/common/cloud-platform-alt-dns/files/usr-local-bin-update-dns-server.yaml
-[resource-conventions]:
-    https://github.com/openshift/enhancements/blob/2cf7bf953506ba2a463848e59c8bc574e340406d/CONVENTIONS.md#resources-and-limits
+[mco-render]: https://github.com/openshift/machine-config-operator/blob/3f863f437e3af4d975300927b3ca7e2bf7dbbb29/pkg/controller/template/render.go
+[cno-sync]: https://github.com/openshift/cluster-network-operator/blob/069ef080db6b20f6704e4dc0c07d48937cef0ef8/pkg/controller/infrastructureconfig/sync_vips.go
+[runtime-guard]: https://github.com/openshift/baremetal-runtimecfg/blob/3057d9978db74dcd5012a293d37d571b524c4e46/pkg/monitor/dynkeepalived.go#L133-L145
+[cloud-api]: https://github.com/openshift/api/blob/38053d30e7e728362c4c6df1e402f6f7eb37d299/config/v1/types_infrastructure.go#L929-L1000
+[cloud-mco]: https://github.com/openshift/machine-config-operator/blob/3f863f437e3af4d975300927b3ca7e2bf7dbbb29/templates/common/cloud-platform-alt-dns/files/coredns.yaml
+[cloud-resolver]: https://github.com/openshift/machine-config-operator/blob/3f863f437e3af4d975300927b3ca7e2bf7dbbb29/templates/common/cloud-platform-alt-dns/files/usr-local-bin-update-dns-server.yaml
+[resource-conventions]: https://github.com/openshift/enhancements/blob/2cf7bf953506ba2a463848e59c8bc574e340406d/CONVENTIONS.md#resources-and-limits
