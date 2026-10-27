@@ -223,7 +223,7 @@ Standalone IPI and UPI clusters on vSphere support `credentialType: component-sc
 
 #### Single-node Deployments or MicroShift
 
-For Single-Node OpenShift (SNO), per-component credentials reduce the privilege scope without affecting CPU/memory consumption. MicroShift does not use CCO or installer-generated component credential secrets.
+vSphere is not supported for Single-Node OpenShift (SNO) or MicroShift. Therefore, this enhancement does not apply to them.
 
 #### OpenShift Kubernetes Engine
 
