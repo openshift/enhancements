@@ -791,12 +791,10 @@ emulator exists for the QAT PCI accelerator:
   worker pool, NFD labeling, and Intel Device Plugin Operator already in
   place), with and without `spec.nodePlacement` set, confirming the pod
   schedules correctly and the router activates QAT either way.
-- QAT-specific lifecycle tests: a router reload while QAT offload is active
-  (triggered by an unrelated route change), a rolling upgrade of an
-  IngressController with QAT-enabled router pods, certificate rotation on a
-  route served by a QAT-enabled router pod, and node drain of a QAT-capable
-  node hosting a router pod - confirming each of these ordinary lifecycle
-  events behaves the same with QAT active as without it.
+- QAT-specific lifecycle tests: verify that router reload, certificate
+  rotation, rolling upgrades, and node drain preserve the documented
+  availability and QAT-state invariants. A replacement must retain QAT only
+  when the operator mirrors the resource and a QAT-capable node is available.
 
 ## Graduation Criteria
 
