@@ -9,7 +9,7 @@ reviewers:
   - "@pmtk" # SNO DNS-only behavior and OCPSTRAT-3609 integration
   - "@sinnykumari" # MCO rendering and node rollout
   - "@zaneb" # Platform integration, bootstrap, and provisioning isolation
-  - "@patrickdillon" # Installer configuration and bootstrap
+  - "@sadasu" # Installer configuration and bootstrap
   - "@jaypoulz"
   # Assisted/ABI and image-based-install reviewer coverage remains to be confirmed.
 approvers:
