@@ -1269,6 +1269,13 @@ Pod:
   proxy, with the operator resettling promptly.
 - With `ExternalOIDCExternalClaimsSourcing` enabled, claim retrieval from the
   suite's external claims endpoint also goes through the proxy.
+- A configuration the running webhook cannot parse does not tear down a working
+  authenticator: the replica keeps serving token validation with its last
+  successfully loaded configuration, as
+  [Asynchronous Reconciliation Hazards](#asynchronous-reconciliation-hazards)
+  assumes.
+- A proxy URL carrying credentials still authenticates, and the webhook's
+  effective-proxy log line has the userinfo stripped.
 
 **Cluster Authentication Operator — unit tests.**
 
@@ -1287,7 +1294,8 @@ Pod:
   removed.
 - The [update contract](#configuration-updates-and-ca-reload): proxy and CA
   reference changes alter the Deployment Pod template; CA content changes only
-  replace the mounted file.
+  replace the mounted file; and disabling the gate reconciles the component
+  settings and CA mount away, like removing the proxy does.
 
 ### Console Login
 
@@ -1306,6 +1314,8 @@ Pod:
   proxy.
 - Removing the field restores the previous behavior, with the component proxy
   confirmed to be out of the path.
+- A proxy URL carrying credentials still allows login, and Console's
+  effective-proxy log line has the userinfo stripped.
 
 **Console Operator — unit tests.**
 
@@ -1313,13 +1323,18 @@ Pod:
   clusters are unaffected.
 - `console-config.yaml` generation: the `auth.proxy` block with resolved
   `noProxy` and `trustedCAFilePath`, and removal when the proxy is removed.
+- Console's global `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` environment
+  variables keep their cluster-wide values while `auth.proxy` is present, so
+  non-OIDC clients retain their existing routing
+  ([Proxy Resolution](#proxy-resolution)).
 
 **Console Operator — integration tests.**
 
 - Synchronizing the referenced `trustedCA` ConfigMap into `openshift-console`,
   mounting it separately from issuer trust, and cleaning up on removal.
 - The [update contract](#configuration-updates-and-ca-reload): proxy and CA
-  reference changes alter the Console Deployment; CA content changes do not.
+  reference changes alter the Console Deployment; CA content changes do not; and
+  disabling the gate reconciles the `auth.proxy` block and CA mount away.
 
 ### Hosted Clusters
 
@@ -1338,6 +1353,10 @@ verify:
   validation succeeds and the webhook's provider requests are still observed on the
   component proxy, reaching it from the management-cluster network. After the first
   worker joins, the same requests are observed arriving from the guest network.
+- The day-0 limitation holds as documented: with a proxy reachable only from the
+  guest network, hosted authentication fails while no worker node has joined and
+  recovers once one does. The proxy hop is never dropped to make the window work
+  ([Day-0 Egress Before Worker Nodes](#day-0-egress-before-worker-nodes)).
 - An intercepting proxy: with TLS interception enabled and the interception CA in
   `trustedCA`, token validation succeeds, and it fails with an actionable error
   when the webhook container's copy of the bundle is absent.
@@ -1366,6 +1385,12 @@ verify:
 - A prerelease build of the minimum supported release — an engineering or
   release candidate — passes both floors rather than being rejected for sorting
   below its own final version.
+- Install-level: an operator installed without the preview feature set serves a
+  HostedCluster CRD variant without the `operatorConfiguration.authentication`
+  block, so a HostedCluster carrying a proxy block is pruned on write. This is
+  the one hosted failure with no in-product detection
+  ([Hosted Support Validation](#hosted-support-validation)); the test pins the
+  CRD variant's contents rather than the pruning behavior itself.
 
 **CPO and HCCO — unit and integration tests.**
 
@@ -1386,6 +1411,20 @@ verify:
   `ValidHostedControlPlaneConfiguration`, which CPO owns.
 - A CA bundle content change triggers an OAuth API server Deployment rollout,
   because the sidecar does not hot-reload trust.
+
+### Lockout and Recovery
+
+The [primary mitigation](#risks-and-mitigations) for a misconfigured proxy is
+independent administrative access, so the recovery path is exercised rather than
+assumed. Using the suite's break-glass certificate kubeconfig:
+
+- A proxy URL that cannot be reached breaks token validation and Console login,
+  while client-certificate and service-account authentication keep working.
+- Correcting the proxy at its source restores both paths, and removing the
+  component proxy restores the previous cluster-wide or direct behavior.
+- On hosted clusters the same flow runs against the HostedCluster and its source
+  CA ConfigMap on the management cluster, confirming that the guest-side copies
+  reconcile back without editing generated resources.
 
 ### Regression and Upgrade Coverage
 
