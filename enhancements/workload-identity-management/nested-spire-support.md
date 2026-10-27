@@ -11,7 +11,7 @@ approvers:
 api-approvers:
   - "@tgeer"
 creation-date: 2026-09-18
-last-updated: 2026-10-14
+last-updated: 2026-10-27
 status: provisional
 tracking-link:
   - https://redhat.atlassian.net/browse/SPIRE-625
@@ -59,19 +59,20 @@ Support for nested SPIRE topologies enables scalable, highly available workload 
 1. *Upstream cluster*: a cluster whose SPIRE server signs intermediate CAs for downstream servers.
 2. *Downstream cluster*: a cluster whose SPIRE server holds an intermediate CA from an upstream server.
 3. *Mid-tier cluster*: a cluster that is both upstream and downstream simultaneously.
-4. *Upstream agent*: a dedicated SPIRE agent deployed on the downstream cluster, attested against the upstream server. It is distinct from the existing `spire-agent` DaemonSet that serves workloads.
+4. *Upstream agent*: a SPIRE agent running as a sidecar container in the downstream cluster's `spire-server` StatefulSet, attested against the upstream server. It is distinct from the existing `spire-agent` DaemonSet that serves workloads.
 
 **Supported topologies.** A nested topology is a tree of SPIRE servers sharing one trust domain. Each downstream chains to exactly one upstream; an upstream may register many downstreams. All clusters share the same trust bundle, so workloads in any tier can authenticate workloads in any other tier. The root server's CA may also come from external PKI (cert-manager, Vault) rather than being self-signed; in that case, the external CA's path length constraint must allow at least one subordinate CA per nesting level.
+
+**Why `k8s_psat`.** The upstream agent uses `k8s_psat` attestation. Each attestation attempt presents a fresh token, so the attestation data is never reused. This gives `k8s_psat` two properties: `CanReattest=true` (the agent re-attests automatically on pod restart without manual eviction) and no trust-on-first-use (TOFU) problem (there is no static secret to trust only once). Cloud attestors (`gcp_iit`, `aws_iid`, `azure_*`) and `http_challenge` (default `tofu=true`) hardcode `CanReattest=false`, causing crash-loops on restart unless stale entries are manually evicted. `k8s_psat` is also cloud-agnostic. See [Alternatives](#alternatives-not-implemented) for the full attestor comparison.
 
 **On the upstream cluster**, the operator exposes the SPIRE server's gRPC API over the network, configures the server to recognize agents from each registered downstream cluster, so downstream cluster's SPIRE server can request an intermediate CA.
 
 **On the downstream cluster**, the operator:
 
-1. Deploys a dedicated upstream agent that authenticates with the upstream server.
-2. Connects the upstream agent's Workload API socket to the downstream server via a second CSI driver.
-3. Configures the downstream server to obtain its signing CA from the upstream server.
+1. Adds the upstream agent as a sidecar container (`spire-agent-upstream`) in the downstream cluster's `spire-server` StatefulSet, sharing the Workload API socket via an `emptyDir` volume.
+2. Configures the downstream server's `UpstreamAuthority spire` plugin to read from the shared socket.
 
-A dedicated agent and a second CSI driver are needed because the existing workload-facing agent is attested to the local server (not the upstream one). The full list of resources and the design rationale are in [Implementation Details](#implementation-detailsnotesconstraints) and [Alternatives](#alternatives-not-implemented).
+A dedicated agent is needed because the existing `spire-agent` DaemonSet is attested to the *local* SPIRE server, not the upstream one. The full list of resources and the design rationale are in [Implementation Details](#implementation-detailsnotesconstraints) and [Alternatives](#alternatives-not-implemented).
 
 ### Workflow Description
 
@@ -97,7 +98,7 @@ The workflow has four phases. Phases 1 and 3 are **manual** administrator steps.
 **Phase 4 - Operator-driven: configure the downstream cluster**
 
 1. Administrator sets `spec.upstreamAuthority.spire` on the downstream SpireServer CR, referencing the trust bundle Secret and upstream server address.
-2. The operator deploys the upstream agent on the downstream cluster, connects the upstream agent's Workload API socket to the downstream server, configures the downstream server to obtain its signing CA from the upstream server, and restarts the downstream server to apply the changes.
+2. The operator adds the upstream agent as a sidecar container in the `spire-server` StatefulSet, configures the downstream server to read from the shared socket, and triggers a StatefulSet rollout to apply the changes.
 
 **Runtime (automatic):**
 
@@ -136,8 +137,8 @@ sequenceDiagram
     rect rgb(230, 245, 255)
     Note over DownOp: Phase 4 - Operator-driven
     Admin->>DownOp: Set spec.upstreamAuthority.spire on downstream CR
-    DownOp->>DownOp: Deploy upstream agent, connect socket to downstream server
-    DownOp->>DownSrv: Restart downstream server
+    DownOp->>DownOp: Add upstream agent sidecar, configure shared socket
+    DownOp->>DownSrv: StatefulSet rollout
     end
 
     rect rgb(230, 255, 230)
@@ -158,8 +159,6 @@ sequenceDiagram
 - **Adding another downstream cluster.** Append an entry to `spec.nestedSpire.downstreamClusters`. Regenerating `k8s_psat` configuration restarts the upstream server briefly; existing downstreams keep issuing from their cached intermediate CAs.
 - **Removing a downstream cluster.** On the downstream cluster, clearing `spec.upstreamAuthority.spire` removes all operator-created nested SPIRE resources. On the upstream cluster, the operator removes the downstream cluster's attestation configuration and registration entries.
 - **Upstream outage.** The downstream server keeps issuing from its cached intermediate CA. SPIRE retries CA preparation automatically until upstream returns.
-- **Node drain.** Both `spire-server` and the upstream agent are evicted. When both are rescheduled, pod affinity naturally places the agent on the same node as the server. No operator intervention is needed.
-- **Server-only reschedule.** If only `spire-server` moves to a different node (e.g., pod eviction without node drain), the upstream agent stays running on the old node. The operator detects the node mismatch during reconciliation, deletes the agent pod, and pod affinity places the replacement on the server's new node. CA rotation stalls during this window but workload issuance continues from the cached intermediate CA.
 
 ### API Extensions
 
@@ -257,6 +256,8 @@ type DownstreamCluster struct {
 }
 ```
 
+The `+listType=map` with `+listMapKey=name` enforces cluster name uniqueness at the API level.
+
 ### Topology Considerations
 
 #### Hypershift / Hosted Control Planes
@@ -277,37 +278,24 @@ Not applicable.
 
 ### Implementation Details/Notes/Constraints
 
-#### Why a dedicated upstream agent and a second CSI driver
+#### Why a sidecar upstream agent with unix workload attestor
 
 The `UpstreamAuthority spire` plugin fetches an SVID from a local Workload API Unix socket. There is no option to bypass the socket. The existing `spire-agent` DaemonSet cannot provide that SVID because it is attested to the *local* SPIRE server. A second agent, attested to the upstream server, is required.
 
-Because the upstream agent runs in a separate pod, a second CSI driver (`upstream.csi.spiffe.io`) bind-mounts the socket into the SPIRE server pod, following the same pattern ZTWIM already uses for workload sockets. This keeps the SPIRE server pod on the `restricted` SCC. Alternative approaches (sidecar, shared `hostPath`) are in the [Alternatives](#alternatives-not-implemented) section.
+The upstream agent runs as a sidecar container (`spire-agent-upstream`) in the downstream cluster's `spire-server` StatefulSet. The sidecar and the downstream server share the Workload API socket via an `emptyDir` volume. This approach:
 
-#### Upstream agent co-location with SPIRE server
+- Uses the `unix` workload attestor with `discover_workload_path: true` and `shareProcessNamespace: true` to produce a `unix:path:/spire-server` selector. The path is baked into the container image and portable across clusters.
+- Keeps the `spire-server` pod on the `restricted` SCC.
 
-The upstream agent is a one-replica Deployment with `requiredDuringSchedulingIgnoredDuringExecution` pod affinity to the SPIRE server pod. Kubernetes does not support `RequiredDuringExecution` for pod affinity, so if the server moves to a different node, the agent stays behind.
-
-The operator restores co-location automatically:
-
-1. The `SpireServer` controller watches the `StatefulSet`. When `spire-server-0` is recreated, the StatefulSet status change triggers reconciliation.
-2. The controller compares the server pod's `spec.nodeName` with the upstream agent pod's `spec.nodeName`.
-3. On mismatch, the controller deletes the agent pod. Pod affinity places the replacement on the server's current node.
-
-During the reschedule window, CA rotation stalls but workload issuance from the cached intermediate continues.
+The sidecar shares the `spire-server` ServiceAccount. The `unix` workload attestor and `k8s_psat` node attestor do not require any additional RBAC beyond what the `spire-server` SA already has.
 
 #### Resources created by the operator on the downstream cluster
 
 
-| Resource                           | Kind                         | Purpose                                                                | SCC                     |
-| ---------------------------------- | ---------------------------- | ---------------------------------------------------------------------- | ----------------------- |
-| `spire-agent-upstream`             | ServiceAccount               | Upstream agent identity                                                |                         |
-| `spire-agent-upstream`             | ClusterRole + Binding        | `get` on `pods`, `nodes`, `nodes/proxy`                                |                         |
-| `spire-agent-upstream`             | ConfigMap                    | Generated `agent.conf`                                                 |                         |
-| `spire-agent-upstream`             | Deployment (1 replica)       | Upstream agent, pod affinity to SPIRE server                           | `spire-agent-upstream`  |
-| `spire-agent-upstream`             | SecurityContextConstraints   | Same privileges as existing `spire-agent`, scoped to upstream agent SA |                         |
-| `upstream.csi.spiffe.io`           | CSIDriver                    | Second driver, `csi-ephemeral-volume-profile: restricted`              |                         |
-| `spire-spiffe-csi-driver-upstream` | SA + RoleBinding + DaemonSet | Projects upstream agent socket into SPIRE server pod                   | `privileged` (existing) |
-| `spire-server`                     | StatefulSet (modified)       | Gains CSI volume at `/run/spire/upstream-agent`                        | `restricted`, unchanged |
+| Resource                | Kind                   | Purpose                                                                                                                                    | SCC                     |
+| ----------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------- |
+| `spire-agent-upstream`  | ConfigMap              | Generated `agent.conf` with `k8s_psat` attestor, `unix` workload attestor (`discover_workload_path: true`), and upstream server address    |                         |
+| `spire-server`          | StatefulSet (modified) | Gains sidecar container, `emptyDir` socket volume, `shareProcessNamespace: true`, projected SA token volume, parent trust bundle mount      | `restricted`, unchanged |
 
 
 #### Resources created by the operator on the upstream cluster
@@ -342,10 +330,15 @@ spec:
   selectors:
   - k8s_psat:cluster:cluster01
   - k8s_psat:agent_ns:<operator-namespace>
-  - k8s_psat:agent_sa:spire-agent-upstream
+  - k8s_psat:agent_sa:spire-server
+  - k8s_psat:agent_pod_name:spire-server-0
 ```
 
-**Downstream server entry** (`nested-spire-cluster01-downstream`): authorizes the downstream server to request an intermediate CA. The `downstream: true` flag grants the SPIRE `Downstream` role.
+The node-alias uses four stable `k8s_psat` selectors. `agent_sa:spire-server` reflects the sidecar sharing the StatefulSet's ServiceAccount. `agent_pod_name:spire-server-0` is stable because the StatefulSet has exactly one replica with a deterministic name. Unstable selectors (`agent_pod_uid`, `agent_node_uid`, `agent_node_name`, `agent_node_ip`) are excluded because they change on pod or node replacement.
+
+On the upstream server, the `k8s_psat` plugin's `service_account_allow_list` is set to `<operator-namespace>:spire-server`. Only agents presenting a projected SA token from that namespace and ServiceAccount are allowed to attest.
+
+**Downstream server entry** (`nested-spire-cluster01-downstream`): authorizes the downstream server to request an intermediate CA. The `downstream: true` flag grants the SPIRE `Downstream` role. Uses `unix:path:/spire-server` to validate the binary path of the connecting process.
 
 ```yaml
 apiVersion: spire.spiffe.io/v1alpha1
@@ -357,10 +350,7 @@ spec:
   parentID: spiffe://example.com/downstream/cluster01
   spiffeID: spiffe://example.com/downstream/cluster01/spire-server
   selectors:
-  - k8s:ns:<operator-namespace>
-  - k8s:sa:spire-server
-  - k8s:pod-name:spire-server-0
-  - k8s:container-name:spire-server
+  - unix:path:/spire-server
   downstream: true
   x509SVIDTTL: 1h
 ```
@@ -369,8 +359,7 @@ spec:
 
 Downstream:
 
-- `UpstreamAgentAvailable`: upstream agent Deployment has an available replica, trustBundleSecret exists. Reasons: `Ready`, `DeploymentNotReady`, `TrustBundleMissing`.
-- `UpstreamCSIDriverAvailable`: upstream CSI DaemonSet is fully ready. Reasons: `Ready`, `DaemonSetNotReady`.
+- `UpstreamAgentAvailable`: upstream agent sidecar container in `spire-server-0` is ready, trustBundleSecret exists. Reasons: `Ready`, `UpstreamAgentNotReady`, `TrustBundleMissing`.
 
 Upstream:
 
@@ -388,9 +377,7 @@ Upstream:
 
 #### Network policies for nested SPIRE
 
-**Upstream agent** (`spire-agent-upstream`, downstream cluster): default-deny baseline plus egress to the upstream server gRPC port (`serverPort`, default 443/TCP), Kubernetes API server (6443/TCP), kubelet (10250/TCP for workload attestation), and DNS (5353 TCP+UDP). Ingress for metrics (9402/TCP from openshift-monitoring). No other ingress needed; the downstream server accesses the upstream agent via Unix socket (CSI mount).
-
-**Upstream CSI driver**: no NetworkPolicy required (Unix domain sockets only).
+**Upstream agent sidecar** (downstream cluster): the sidecar shares the `spire-server` pod's network namespace. When nested SPIRE is enabled, the `spire-server` pod's NetworkPolicy gains egress to the upstream server gRPC port (`serverPort`, default 443/TCP). The downstream server accesses the upstream agent via Unix socket (`emptyDir` mount), which requires no NetworkPolicy.
 
 **SpireServer - new capability gates:**
 
@@ -406,12 +393,11 @@ Upstream:
 | Upstream cluster holds `TokenReview` + pod/node read credentials on every downstream cluster                                                                 | High: lateral movement across fleet           | Bind kubeconfig to a SA with exactly `system:auth-delegator` + `get` on `pods` and `nodes`                                                                           |
 | Upstream outage stops CA rotation on downstream clusters                                                                                                     | High, time-delayed                            | Downstream keeps issuing from cached intermediate until it expires; SPIRE retries automatically                                                                      |
 | Trust domain or cluster name mismatch across clusters                                                                                                        | Medium: opaque attestation failure            | Three distinct failure modes with diagnosable errors (see [Support Procedures](#support-procedures))                                                                 |
-| SPIRE server rescheduled while upstream agent stays behind                                                                                                   | Medium: CA rotation stalls                    | Operator detects node mismatch during reconcile and deletes upstream agent pod                                                                                       |
-| Upstream agent cannot schedule on SPIRE server's node                                                                                                        | Medium: CA rotation blocked                   | `UpstreamAgentAvailable` reports status                                                                                                                              |
-| Kubeconfig Secret targets wrong cluster's API server                                                                                                         | Medium: `invalid bearer token` at TokenReview | Document that kubeconfig must match `downstreamClusters[].name`; error is diagnosable via server logs                                                                |
+| Kubeconfig Secret targets wrong cluster's API server                                                                                                         | Medium: `Unauthorized` at TokenReview         | Document that kubeconfig must match `downstreamClusters[].name`; error is diagnosable via server logs                                                                |
 | No enforced limit on nesting depth. Each tier adds an intermediate CA to the chain, increasing TLS handshake size and blast radius of a mid-tier compromise. | Medium                                        | SPIRE imposes no depth limit. With external PKI, the root certificate's path length constraint caps the maximum depth; set it to at least the number of nesting levels required by the topology. Tested up to 2 levels of nesting depth. Deeper topologies are untested. |
 | Each `downstreamClusters` change rolls the upstream server                                                                                                   | Low: brief unavailability                     | Batch onboarding during maintenance windows                                                                                                                          |
-| Impersonation of downstream server via `pods/create`                                                                                                         | High: intermediate CA minting                 | `k8s:pod-name:spire-server-0` blocks duplicates while real pod exists; restrict `pods/create` in operator namespace                                                  |
+| Impersonation of downstream server via unix socket                                                                                                           | High: intermediate CA minting                 | `unix:path:/spire-server` selector validates the binary path of the connecting process; only the real `spire-server` binary at that path can match. |
+| StatefulSet rollout restarts server and sidecar together                                                                                                     | Low: brief I/O disruption                     | CA rotation pauses during rollout; workload issuance continues from cached intermediate CA. |
 
 ### Drawbacks
 
@@ -421,9 +407,9 @@ Upstream:
 
 ## Alternatives (Not Implemented)
 
-### 1. Sidecar container
+### 1. Upstream agent as a separate Deployment + second CSI driver
 
-Upstream agent as a second container in the `spire-server` pod, sharing an `emptyDir` for the socket. Removes the Deployment, CSI driver, and pod affinity. **Not chosen**: both containers share the `spire-server` ServiceAccount. The upstream agent needs `pods`, `nodes`, and `nodes/proxy` RBAC for attestation, which would grant those permissions to the SPIRE server SA that currently does not need them. A separate Deployment keeps two ServiceAccounts, stable selectors, and independent lifecycle.
+Upstream agent as a one-replica Deployment with pod affinity to downstream `spire-server-0` pod, delivering the Workload API socket to the SPIRE server pod via a second CSI driver (`upstream.csi.spiffe.io`). **Not chosen**: the operator must detect co-location drift (server moves while agent stays behind), delete the agent pod, and wait for pod affinity to reschedule it. Also requires a second CSI driver DaemonSet, a dedicated SCC, and a separate ServiceAccount with ClusterRole and ClusterRoleBinding.
 
 ### 2. Raw `hostPath`
 
@@ -433,31 +419,22 @@ Simplest socket delivery. **Rejected**: a `hostPath` mount moves the SPIRE serve
 
 **Not possible**: it is attested to the local SPIRE server, which is the server that needs the upstream-signed CA.
 
-### 4. Share the existing `spire-agent` SCC
+### 4. `gcp_iit` / `aws_iid` / `azure_*` cloud attestors for upstream agent to upstream server attestation
 
-**Rejected**: the `spire-agent` SCC's `Users` list is reconciled by the `SpireAgent` controller. If the `SpireServer` controller adds the upstream agent SA to the same SCC, the `SpireAgent` controller would overwrite the `Users` list on its next reconcile and remove it. Avoiding this would require both controllers to coordinate writes to a shared SCC, adding coupling between the two controllers.
+**Rejected**: cloud attestors hardcode `CanReattest=false` because their attestation data is fixed per VM instance. If the upstream agent pod restarts on the same node, the upstream server rejects the agent because an entry for that instance already exists; the stale entry must be manually evicted before re-attestation can succeed. A PVC-backed `KeyManager` allows the agent to persist its SVID across restarts, but it only defers the problem: if the SVID expires or the PVC is lost, eviction is still required. Cloud attestors also require `hostNetwork: true` to reach the metadata endpoint (e.g., `169.254.169.254`), which means the downstream server's pod would need to move off the `restricted` SCC. They also do not work on bare-metal clusters.
 
-### 5. `x509pop` node attestation
+### 5. `http_challenge` attestor for upstream agent to upstream server attestation
 
-**Deferred**: needs certificate provisioning, distribution, and rotation on both clusters.
+**Rejected**: with default `tofu=true`, `CanReattest=false`, producing the same restart problem as cloud attestors. With `tofu=false`, `CanReattest=true`, but any process controlling the configured hostname can attest. Also requires the upstream agent on the downstream cluster to expose an HTTP endpoint (via a Service and Route) that the upstream server can reach to issue the challenge.
 
-### 6. `join_token` node attestation
-
-**Rejected**: tokens are single-use and produce a non-re-attestable agent.
-
-### 7. Upstream agent as a DaemonSet
+### 6. Upstream agent as a DaemonSet
 
 **Rejected**: only the agent on the SPIRE server's node is useful. N-1 extra agents waste resources and multiply attestation load.
 
-### 8. SPIRE federation instead of nesting
-
-**Different capability**: federation joins distinct trust domains with separate roots; nesting produces one trust domain with one root.
 
 ## Open Questions [optional]
 
-1. **Upstream agent as Deployment (1 replica) vs. DaemonSet.** The current proposal uses a single-replica Deployment with pod affinity to co-locate with the SPIRE server pod, plus operator-assisted restoration when co-location breaks. A DaemonSet is simpler (no co-location logic) but wastes resources on every node where no SPIRE server runs and multiplies attestation load on the upstream server. The Deployment approach is more resource-efficient but adds operator complexity.
-2. **Maximum downstream clusters per upstream.** Each downstream cluster adds a kubeconfig Secret mount and a `k8s_psat` entry to the upstream server, and every change to the `downstreamClusters` list rolls the StatefulSet. Is there a practical ceiling that should be documented or enforced?
-3. **Dedicated** `spire-agent-upstream` **SCC vs. sharing existing** `spire-agent` **SCC.** Current proposal: dedicated SCC to avoid cross-controller coordination. Consolidation possible later.
+1. **Maximum downstream clusters per upstream.** Each downstream cluster adds a kubeconfig Secret mount and a `k8s_psat` entry to the upstream server, and every change to the `downstreamClusters` list rolls the StatefulSet. Is there a practical ceiling that should be documented or enforced?
 
 ## Test Plan
 
@@ -470,7 +447,6 @@ Simplest socket delivery. **Rejected**: a `hostPath` mount moves the SPIRE serve
 ### Integration tests
 
 - CRUD lifecycle for `spec.upstreamAuthority.spire`, `spec.grpcEndpoint`, and `spec.nestedSpire`: assert resource creation, update, and garbage collection.
-- SCC lifecycle: enable creates `spire-agent-upstream` SCC; disable removes it.
 
 ### End-to-end tests
 
@@ -480,8 +456,6 @@ Requires at least two clusters; mid-tier scenarios need three.
 - **Multiple downstreams**: two downstreams on one upstream; assert independent CA issuance.
 - **Mid-tier**: A → B → C; assert B is both upstream and downstream, cross-tier authentication works.
 - **Cleanup**: remove config; assert all operator-created resources deleted.
-- **Node drain**: assert server and agent reschedule together, CA rotation continues.
-- **Server-only reschedule**: assert operator detects mismatch, deletes agent pod, pod affinity places replacement on server's node, CA rotation resumes.
 - **Upstream outage**: assert downstream keeps issuing from cached CA.
 - **Misconfiguration**: trust domain mismatch, cluster name mismatch, missing trust bundle, invalid kubeconfig.
 
@@ -489,25 +463,16 @@ Requires at least two clusters; mid-tier scenarios need three.
 
 ### Dev Preview
 
-- Downstream receives intermediate CA from upstream (certificate chain verification).
-- Mid-tier topology works (three-cluster chain).
-- Multiple downstreams per upstream.
-- Resource cleanup on removal.
-- Status conditions report health.
+Not applicable. This feature will be GA'd directly.
 
 ### Dev Preview -> Tech Preview
 
-- Upgrade and failure scenario test coverage.
-- End user documentation.
-- Open questions settled; `k8s_psat`-only scope confirmed.
-- Enumerate SLIs (e.g., CA rotation latency, upstream agent attestation success rate)
-- Gather feedback from users deploying multi-cluster topologies.
+Not applicable. This feature will be GA'd directly.
 
 ### Tech Preview -> GA
 
 - End-to-end tests pass for all supported topologies.
 - Load testing at maximum downstream cluster count.
-- All open questions resolved.
 - Upgrade and downgrade tested.
 - Document SLOs for CA rotation and upstream agent availability.
 - Alerts and metrics implemented.
@@ -537,7 +502,7 @@ Within a cluster, the upstream agent uses the same SPIRE image the operator ship
 
 Health indicators (SLIs):
 
-- `UpstreamAgentAvailable` and `UpstreamCSIDriverAvailable` conditions on the downstream `SpireServer` CR.
+- `UpstreamAgentAvailable` condition on the downstream `SpireServer` CR.
 - `GRPCEndpointAvailable` and `DownstreamClustersValid` conditions on the upstream `SpireServer` CR.
 
 Impact is validated by e2e tests in CI that assert these conditions reach `Ready` across supported topologies.
@@ -546,7 +511,6 @@ Failure modes:
 
 - Externally deleted `ClusterStaticEntry` objects are recreated on next reconcile. Downstream CA minting pauses until restored; workload issuance continues from cached CAs.
 - Externally deleted Route is recreated. Downstream clusters cannot reach upstream until restored.
-- Externally deleted `spire-agent-upstream` SCC prevents upstream agent startup until recreated.
 
 The ZTWIM team owns all components and is the escalation point.
 
@@ -568,11 +532,11 @@ A healthy nested downstream logs `X509 CA prepared` with `self_signed=false` and
 | `self_signed=true` in server logs                   | Server holds valid self-signed CA, ignoring plugin | Re-initialize datastore (scale to 0, delete PVC, scale to 1)        |
 | `no X.509 bundle found for trust domain`            | Trust domain mismatch between clusters             | Ensure all clusters share the same `trustDomain`                    |
 | `not configured for cluster "<name>"`               | Cluster name not registered on upstream            | Verify `downstreamClusters[].name` matches downstream `clusterName` |
-| `invalid bearer token`                              | Kubeconfig points to wrong API server              | Fix kubeconfig Secret to target correct downstream cluster          |
+| `Unauthorized` at TokenReview                       | Kubeconfig points to wrong API server              | Fix kubeconfig Secret to target correct downstream cluster          |
 | `certificate contains no URI SAN`                   | Route hostname mismatch or not passthrough         | Ensure Route host matches `serverAddress`, passthrough TLS          |
 | `authentication handshake failed: EOF`              | Upstream server unreachable                        | Check upstream server and Route                                     |
-| `403 Forbidden` from workload attestor              | SA lacks `nodes/proxy`                             | Verify `spire-agent-upstream` ClusterRole                           |
-| Pod in `ContainerCreating`                          | CSI DaemonSet not running or no agent socket       | Check `UpstreamCSIDriverAvailable` and agent pod                    |
+| Pod stuck in `ContainerCreating`                    | Trust bundle Secret missing or not yet created     | Verify `parent-trust-bundle` Secret exists; check pod events        |
+| Sidecar container in `CrashLoopBackOff`             | Misconfigured upstream agent ConfigMap              | Check `UpstreamAgentAvailable` condition and sidecar logs           |
 | `too many intermediates for path length constraint` | External PKI CA has pathLen 0                      | Reissue CA with pathLen >= nesting levels                           |
 
 ### Disabling nested SPIRE
