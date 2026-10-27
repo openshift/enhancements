@@ -751,10 +751,10 @@ Existing components whose behavior changes:
 | Konnectivity sidecar on the External-OIDC oauth-apiserver pod | Already present on the webhook pod; its proxy flags (`--https-proxy`, `--http-proxy`, `--no-proxy`) are now populated from the component proxy, and the proxy CA is mounted on it. |
 | CAO | Resolves the component proxy; injects env + mounts CA on the webhook Deployment and sets `trustedCAFilePath` in its configuration (standalone). |
 | oauth-apiserver (webhook) | Reads the generic outbound CA bundle through `trustedCAFilePath` for HTTPS endpoint trust, plus the proxy's own certificate on standalone only; outbound clients honor the proxy; on HyperShift egress flows through the new sidecar, which holds that proxy trust instead. |
-| CPO | Checks the resolved guest feature gates before configuring anything ([Hosted Support Validation](#hosted-support-validation)); builds the webhook Deployment including the konnectivity sidecar flags and both CA mounts; sets `trustedCAFilePath` in the webhook configuration (HyperShift). |
+| CPO | Builds the webhook Deployment including the konnectivity sidecar flags and both CA mounts; sets `trustedCAFilePath` in the webhook configuration (HyperShift). |
 | Console Operator | Reads the Console operator proxy field; renders `auth.proxy` and mounts the CA. |
 | Console | Applies `auth.proxy` to its OIDC clients only. |
-| HyperShift operator | Copies `operatorConfiguration` HC→HCP; synchronizes the referenced CA HC→HCP; bubbles the HCP validation condition onto the HostedCluster. |
+| HyperShift operator | Validates the control-plane and guest release targets and the gates on both sides, blocking propagation through the HostedCluster's `ValidConfiguration` condition when either is unsupported ([Hosted Support Validation](#hosted-support-validation)); copies `operatorConfiguration` HC→HCP; synchronizes the referenced CA HC→HCP. |
 
 Configuration that must hold for it to work:
 
@@ -1153,11 +1153,10 @@ without requiring the hosted administrator to enter it twice.
 - Identify an API approver for the HyperShift additions and confirm the shared
   `operatorConfiguration.authentication.proxy` placement on HostedCluster and
   HostedControlPlane, its validation, and the management-side feature gate.
-- Confirm with HyperShift maintainers that CPO consulting the rendered
-  `feature-gate` ConfigMap for a guest-payload capability
-  ([Hosted Support Validation](#hosted-support-validation)) is an accepted use
-  of that ConfigMap, which today feeds operand flags rather than gating
-  configuration.
+- Agree the two minimum supported releases used by
+  [Hosted Support Validation](#hosted-support-validation) — the control-plane
+  floor with the HyperShift team, and the guest floor with the Console team —
+  before the feature is introduced.
 
 ## Test Plan
 
@@ -1288,17 +1287,19 @@ verify:
 - Validation of the optional HostedCluster and HostedControlPlane fields,
   including feature-gated admission and serialization compatibility.
 - Propagation of the HostedCluster block to the HostedControlPlane.
+- [Release validation](#hosted-support-validation): a control-plane target below
+  the minimum, a guest target below the minimum, and a hosted feature set that
+  does not enable the gate each set the HostedCluster's `ValidConfiguration`
+  condition to `False` with a message naming the failing target, and leave the
+  HostedControlPlane block unwritten.
+- An unresolvable or unparseable release image sets the condition `Unknown` and
+  retries rather than blocking permanently or propagating.
+- A prerelease build of the minimum supported release — an engineering or
+  release candidate — passes both floors rather than being rejected for sorting
+  below its own final version.
 
 **CPO and HCCO — unit and integration tests.**
 
-- [Gate validation](#hosted-support-validation) against the rendered
-  `feature-gate` ConfigMap: the gate absent from both the Enabled and Disabled
-  lists, and the gate present but Disabled, each set
-  `ValidHostedControlPlaneConfiguration=False` and leave **both** the webhook
-  and the guest Console resource unconfigured.
-- A missing or not-yet-populated `feature-gate` ConfigMap is retried rather than
-  treated as the gate being absent, so a slow generator Job does not look like
-  an unsupported payload.
 - The konnectivity sidecar's proxy arguments derived from the HCP block, including
   that the component proxy takes precedence over the hosted cluster-wide proxy, that
   the cluster-wide proxy is used when the component block is absent, and that the
@@ -1373,8 +1374,8 @@ bypass rules first.
 On standalone clusters, enable component-proxy use only after the participating
 operators and operands meet the
 [version-skew requirements](#version-skew-strategy); the feature gate and this
-sequencing are the only controls. On HyperShift CPO enforces the equivalent
-check itself against the guest payload's resolved feature gates and blocks an
+sequencing are the only controls. On HyperShift the HyperShift operator
+enforces the equivalent check itself against both release targets and blocks an
 unsupported configuration, as described under
 [Hosted Support Validation](#hosted-support-validation), so upgrading
 management-side API/operator support before using the new field is advisory
@@ -1493,82 +1494,71 @@ hosted cluster keeps its previous proxy behavior.
 
 Acceptance of the new HostedCluster field or enablement of the management-side
 gate alone does not establish end-to-end support, because the two payloads are
-selected independently.
+selected independently and `spec.controlPlaneRelease` is unconstrained: the API
+performs no comparison against `spec.release`. Each payload supplies different
+consumers of this feature:
 
-The control-plane side needs no explicit check, because both consumers of the
-configuration come from that payload: CPO configures the webhook and HCCO
-writes the guest Console resource, which CVO otherwise seeds without a proxy
-field. A control-plane payload predating this feature therefore configures
-neither consumer — the configuration is inert rather than half-applied, and
-the hosted cluster keeps its previous proxy behavior on both paths. Nothing
-inside that payload can report the condition, since neither operator knows the
-feature exists; this is the generic consequence of selecting a control-plane
-release older than a feature it is asked to run, not something specific to this
-proposal. `spec.controlPlaneRelease` accepts such a value: the API performs no
-comparison against `spec.release`.
-
-What must be established is the **guest** side, where Console Operator and
-Console come from a separately selectable payload and where the asymmetry is
-therefore real.
-
-HyperShift already resolves the guest payload's effective feature gates. CPO
-reconciles a `featuregate-generator` Job whose init container runs the guest
-payload's own `cluster-config-api` renderer against the tenant's
-`spec.configuration.featureGate` selection, and writes the rendered
-`FeatureGate` resource to the `feature-gate` ConfigMap in the HCP namespace,
-annotated with the payload version it was rendered for. Components read it
-through the existing `support/config` helpers, as kube-apiserver, KCM, the
-scheduler and the OpenShift API servers already do.
-
-A hosted cluster has exactly one such set, and it is rendered at the
-**data-plane** release version even though control-plane components consume it.
-That is deliberate: the gate set defines the hosted cluster's behavioral
-contract, so it tracks the release the tenant selected rather than whichever
-control-plane image is running — `spec.controlPlaneRelease` exists for
-transparent management-side patching and is not meant to alter hosted-cluster
-behavior. Two consequences follow. The ConfigMap answers for the same payload
-and selection that produce the guest cluster's own `FeatureGate` resource, so
-it is an exact oracle for what Console Operator will see rather than an
-approximation. And there is no control-plane-versioned gate set to consult,
-which is why the control-plane direction above cannot be expressed as a gate
-check at all.
-
-CPO consults that ConfigMap for `AuthenticationComponentProxyExternalOIDC`
-before configuring either consumer. The signal is three-state:
-
-| State in the rendered gates | Meaning | Action |
+| Target | Resolved from | Supplies |
 | --- | --- | --- |
-| Absent from both Enabled and Disabled | The guest payload predates the gate | Do not configure; report unsupported |
-| Present, Disabled | The payload supports it; the feature set does not enable it | Do not configure; report unsupported |
-| Present, Enabled | Supported and enabled | Configure both consumers |
+| Control plane | `spec.controlPlaneRelease.image`, else `spec.release.image` | CPO, HCCO, the OAuth API server and its konnectivity sidecar |
+| Guest | `spec.release.image` | Console Operator, Console, and the `console.operator.openshift.io` CRD that must serve the proxy field |
 
-Absence is what makes a separate release floor unnecessary: a payload that does
-not know the gate is, by definition, too old for the feature. This also handles
-`CustomNoUpgrade` feature sets, which a version comparison cannot express, and
-leaves no hardcoded minimum version to maintain as releases advance.
+Before propagating `operatorConfiguration.authentication.proxy` to the
+HostedControlPlane, the HyperShift operator validates both targets against a
+minimum supported release, and confirms the gates permit the configuration on
+both sides: the management-side gate, and the hosted feature set, since the
+guest Console proxy field is only served while the gate is enabled (see
+[HyperShift Feature Gating](#hypershift-feature-gating)). Unsupported releases
+or gates set the HostedCluster's `ValidConfiguration` condition to `False` with
+an `InvalidConfiguration` reason naming the target that fell short, and **block
+propagation**, so no part of the configuration is applied. Release metadata
+lookup or version parsing failures set the condition `Unknown` and retry rather
+than reporting the payload unsupported.
 
-Unsupported states set `ValidHostedControlPlaneConfiguration` to `False` with a
-message naming the gate, and CPO configures **neither** the webhook nor
-Console, so no part of the configuration is applied. The HyperShift operator
-already bubbles that condition onto the HostedCluster, so the administrator sees
-it on the resource they own. A `feature-gate` ConfigMap that is missing or not
-yet populated means the generator Job has not completed, which is a retry rather
-than an unsupported verdict; it must not be read as the gate being absent.
+This follows HyperShift's established pattern for feature-level support
+checks — a minimum release constant evaluated during reconciliation and
+surfaced through the existing HostedCluster validation condition — and the
+validation the
+[External Claims Sourcing enhancement](external-oidc-additional-identity-information-sources.md)
+defines for the control-plane target, extended to the guest target because this
+feature has a guest-side consumer that one does not. It introduces no new
+condition type.
 
-Refusing both consumers means a hosted cluster whose control plane supports the
-feature but whose guest payload does not gets nothing, including the webhook
-proxying that would have worked on its own. That is deliberate: a half-applied
-proxy leaves token validation working while Console login fails in exactly the
-restricted networks this feature targets, and the
+Each floor is a constant in the HyperShift operator. The version is not read
+from a field: `spec.release.image` and `spec.controlPlaneRelease.image` are
+pullspecs, so the operator resolves each through the release provider — a
+cached registry lookup — and parses the resulting release version before
+comparing. When `spec.controlPlaneRelease` is unset both targets resolve to the
+same image, so the second check adds no lookup in the default topology. The
+comparison must ignore the prerelease segment, so that an engineering or
+release candidate of the release introducing support is not rejected for
+sorting below its own final version. The two minimum releases are determined
+before the feature is introduced.
+
+The two targets fail differently, which is why both are checked. A guest
+payload below the floor would otherwise leave the webhook proxied while Console
+falls back to the cluster-wide proxy or direct connectivity — a split that
+persists until the payload is updated. A control-plane payload below the floor
+configures neither consumer, since CPO and HCCO both come from it, so the
+result is inert rather than half-applied; but nothing inside that payload can
+report it, because neither operator knows the feature exists. The HyperShift
+operator is versioned independently of both payloads and is therefore the only
+component able to detect either case before anything is applied.
+
+Blocking on the guest target means a hosted cluster whose control plane
+supports the feature but whose guest payload does not gets nothing, including
+the webhook proxying that would have worked on its own. That is deliberate: a
+half-applied proxy leaves token validation working while Console login fails in
+exactly the restricted networks this feature targets, and the
 [graduation criteria](#tech-preview---ga) already treat webhook-only support as
 insufficient.
 
-Responsibility therefore differs by topology. On HyperShift CPO enforces this
-against the resolved gates, and the
+Responsibility therefore differs by topology. On HyperShift the HyperShift
+operator enforces this, and the
 [upgrade guidance](#upgrade--downgrade-strategy) is advisory. On standalone
 clusters there is no equivalent gatekeeper — CAO and Console Operator co-ship
-with their operands — so the feature gate and the administrator's own sequencing
-remain the only controls.
+with their operands — so the feature gate and the administrator's own
+sequencing remain the only controls.
 
 ### Cross-Cluster Write Skew
 
@@ -1584,29 +1574,34 @@ mismatch does.
 
 Two layers address this:
 
-- **Prevention.** The [gate check](#hosted-support-validation) above stops the
-  configuration before anything is applied. It covers both causes, because the
-  same resolved gates govern whether the guest CRD serves the field. This is the
-  guarantee.
+- **Prevention.** The [guest release floor](#hosted-support-validation) above
+  stops the configuration before anything is applied. It covers both causes,
+  since a payload below the floor is also the one whose CRD will not serve the
+  field. This is the guarantee.
 - **Detection.** After writing the guest Console resource, HCCO re-reads it and
-  confirms the proxy field persisted. If it did not, HCCO treats this as a
-  reconciliation error rather than reporting success, surfacing it through its
-  own `ConfigOperatorReconciliationSucceeded` condition on the
+  confirms the proxy field persisted. That re-read must bypass HCCO's guest
+  cache, which backs its default client and is filtered to objects labeled
+  [`hypershift.openshift.io/managed=true`](https://github.com/openshift/hypershift/blob/e19f174168d9d4ab6cabb63f9d1bca374c7b3edc/support/labelenforcingclient/labelenforcer.go#L14-L17):
+  a cached read immediately after the write can return stale content and report
+  a successful write as pruned, flapping the condition below. HCCO already
+  maintains an uncached client for checks of this kind. If the field did not
+  persist, HCCO treats this as a reconciliation error rather than reporting
+  success, surfacing it through its own
+  `ConfigOperatorReconciliationSucceeded` condition on the
   HostedControlPlane. It must not report through
   `ValidHostedControlPlaneConfiguration`: CPO sets that condition on every
   reconcile from its own validation and would overwrite HCCO's result. This is a
-  backstop for state that changed after the gate check passed — the guest
-  payload or its feature set moving underneath an already configured cluster,
-  before CPO re-evaluates.
+  backstop for state that changed after validation passed — the guest payload or
+  its feature set moving underneath an already propagated configuration.
 
-Support should treat `ValidHostedControlPlaneConfiguration` as the expected
-signal for an unsupported guest payload, and an HCCO read-back failure as an
+Support should treat a blocked `ValidConfiguration` on the HostedCluster as the
+expected signal for an unsupported payload, and an HCCO read-back failure as an
 indication that something changed underneath an already-validated
 configuration.
 
 HCP and guest reconciliation remain asynchronous; this proposal adds no aggregate
 condition confirming proxy and CA propagation across both paths, relying instead
-on the existing `ValidHostedControlPlaneConfiguration` and
+on the existing `ValidConfiguration` and
 `ConfigOperatorReconciliationSucceeded` conditions described above. No new kubelet
 or node API dependencies are introduced, and existing platform skew limits remain
 unchanged.
@@ -1633,44 +1628,120 @@ alerting system is added.
 ## Support Procedures
 
 Use independent client-certificate administrative access when External OIDC login
-is unavailable. On standalone clusters:
+is unavailable. On HyperShift, recovery also requires independent
+management-cluster access with permission to update the HostedCluster and its
+source CA ConfigMap; guest-cluster credentials alone cannot repair those
+authoritative inputs.
+
+Two properties shape every procedure below. The webhook and Console are separate
+paths with separate configuration, trust, and egress, so a working `oc` token
+proves nothing about Console login, and vice versa. And a healthy operator means
+the operator reconciled, not that the operand loaded the result: both operands
+retain their last good state when a reload fails — the webhook keeps its
+previously loaded authenticator ([Asynchronous Reconciliation
+Hazards](#asynchronous-reconciliation-hazards)) — so working authentication does
+not prove the current configuration is in effect. Confirm the operand side in
+operand logs.
+
+### Standalone Clusters
 
 - Inspect `oc get clusteroperator authentication console` and the detailed
-  conditions on the operator `Authentication` and `Console` resources.
+  conditions on the operator `Authentication` and `Console` resources. A missing
+  or malformed `trustedCA` ConfigMap degrades the responsible operator before the
+  bundle is mounted
+  ([Configuration Updates and CA Reload](#configuration-updates-and-ca-reload)).
 - Check events and operator logs in `openshift-authentication-operator` and
   `openshift-console-operator`, plus webhook and Console logs in
-  `openshift-oauth-apiserver` and `openshift-console`. After a proxy CA rotation,
-  the operand logs are the only place a rejected bundle appears: a healthy
-  `console` cluster operator means the ConfigMap synchronized, not that Console
-  loaded it. The operands log their effective proxy with credentials redacted at
-  startup; use that to confirm which proxy is actually in the path.
+  `openshift-oauth-apiserver` and `openshift-console`. A bundle that passes
+  operator validation but is rejected or incomplete at load time appears only in
+  the operand logs: a healthy `console` cluster operator means the ConfigMap
+  synchronized, not that Console loaded it. The operands log their effective proxy
+  with credentials redacted; use that to confirm which proxy is actually in the
+  path.
 - Compare the configured component proxy, cluster-wide fallback, rendered operand
-  configuration, CA references, and mounted CA copies. Inspect the webhook's proxy
-  environment and Console's generated `auth.proxy` block separately; Console's
-  global environment still describes its cluster-wide fallback, not an active
-  authentication-specific override. Verify the required gates and that
-  kube-apiserver uses the External OIDC webhook path.
+  configuration, CA references, and mounted CA copies. Inspect the webhook
+  container's proxy environment and Console's generated `auth.proxy` block
+  separately; Console's global environment still describes its cluster-wide
+  fallback, not an active authentication-specific override. A generated webhook
+  configuration without `trustedCAFilePath` while `trustedCA` is set means CAO is
+  still deferring the path until the destination ConfigMap exists
+  ([resource-ordering skew](#asynchronous-reconciliation-hazards)); that resolves
+  itself and is not missing trust.
+- Verify the [required gates](#feature-gates) and that kube-apiserver uses the
+  External OIDC webhook path.
 - Check discovery, JWKS, claim-source, and token endpoints independently. Confirm
   that `NO_PROXY` matches the URL hostname, the endpoint resolves from the caller's
   network, and the correct issuer/source and proxy CAs are available. Distinguish
   proxy connectivity errors from endpoint TLS errors and invalid tokens.
 
-For HyperShift, also inspect HostedCluster and HostedControlPlane conditions,
-HyperShift operator/CPO/HCCO logs, HCP-side operand settings and CA copies, and the
-guest `console.operator.openshift.io/cluster` proxy field HCCO writes for Console.
-Trace the configuration from the HostedCluster source; editing a generated guest
-resource or Deployment is not a persistent fix. Check management-plane and guest
-connectivity separately.
+### Hosted Clusters
+
+The checks above apply unchanged to the guest Console, which runs in
+`openshift-console` on a worker node and is configured by Console Operator from
+its own guest resource exactly as on standalone. The webhook differs: it runs in
+the HCP namespace on the management cluster and egresses through its konnectivity
+sidecar.
+
+- **Start with the HostedCluster conditions.** `ValidConfiguration` set to `False`
+  with an `InvalidConfiguration` reason naming a release target is the expected
+  signal for an unsupported payload: the HyperShift operator blocked propagation,
+  nothing was applied, and the cluster keeps its previous proxy behavior
+  ([Hosted Support Validation](#hosted-support-validation)). `Unknown` means
+  release lookup or version parsing failed and is being retried. Both gate sides
+  must be enabled — the management-side HyperShift gate and the hosted
+  `featureGate.featureSet`
+  ([HyperShift Feature Gating](#hypershift-feature-gating)).
+- **Do not read the webhook container's proxy environment as the effective
+  proxy.** CPO points that environment at the pod's konnectivity sidecar; the
+  component proxy appears as the sidecar's `--https-proxy`, `--http-proxy`, and
+  `--no-proxy` arguments
+  ([Webhook Egress and Connection Paths](#webhook-egress-and-connection-paths)).
+  Bypass problems for the webhook are sidecar `--no-proxy` problems, and that list
+  must still cover the in-cluster endpoints. Failures reaching the proxy itself
+  appear in sidecar logs, not webhook logs.
+- **Expect webhook egress to originate from the guest network.** The proxy must be
+  reachable and DNS-resolvable from a worker node. Before the first worker joins,
+  the sidecar instead resolves through management-cluster DNS and dials the proxy
+  directly, so a proxy reachable only from the guest network leaves hosted login
+  failing until that worker arrives, then recovers on its own
+  ([Day-0 Egress Before Worker Nodes](#day-0-egress-before-worker-nodes)). Rule
+  that window in or out before treating the symptom as a configuration fault.
+- **Walk the CA chain hop by hop:** the source ConfigMap in the HostedCluster's
+  namespace, the HyperShift operator's copy in the HCP namespace, the HCCO copy in
+  guest `openshift-config`, and Console Operator's copy in `openshift-console`
+  ([distribution path](#hypershift--hosted-control-planes)). A content update that
+  stalls at any hop leaves the remaining hops on the old bundle. Because the
+  sidecar does not hot-reload, confirm the OAuth API server pod actually rolled
+  after a CA rotation; an updated ConfigMap with an older pod means the sidecar
+  still holds the previous trust.
+- **If the guest `console.operator.openshift.io/cluster` proxy field is absent
+  while the HostedCluster has one set,** the guest API server pruned HCCO's write
+  because the guest payload or its feature set no longer serves the field. The
+  webhook is then proxied while Console falls back to the cluster-wide proxy or
+  direct connectivity. HCCO reports the failed read-back through
+  `ConfigOperatorReconciliationSucceeded` on the HostedControlPlane, which bubbles
+  up to the HostedCluster; it deliberately does not use
+  `ValidHostedControlPlaneConfiguration`, which CPO overwrites on every reconcile
+  ([Cross-Cluster Write Skew](#cross-cluster-write-skew)).
+- Check HyperShift operator, CPO, and HCCO logs, and check management-cluster and
+  guest connectivity separately. Trace the configuration from the HostedCluster
+  source; editing a generated HostedControlPlane field, guest resource, or
+  Deployment is not a persistent fix.
+
+### Recovery
 
 Correct the proxy URL, bypass list, or referenced CA at the source. Alternatively,
 remove the component proxy to restore a verified working cluster-wide proxy or
-direct path. On standalone clusters the sources are
-`authentication.operator.openshift.io/cluster` (webhook) and
-`console.operator.openshift.io/cluster` (Console login); on hosted clusters both
-derive from the single HostedCluster component proxy field. Do not disable TLS verification or remove
-the TokenReview webhook as a proxy workaround. Reconciliation resumes after the
-configuration is fixed; verify both API token authentication and a fresh Console
-login/refresh, not just cleared operator conditions.
+direct path; on hosted clusters the webhook then falls back to the hosted
+cluster's own cluster-wide proxy, never the management cluster's. On standalone
+clusters the sources are `authentication.operator.openshift.io/cluster` (webhook)
+and `console.operator.openshift.io/cluster` (Console login); on hosted clusters
+both derive from
+`HostedCluster.spec.operatorConfiguration.authentication.proxy`. Do not disable
+TLS verification or remove the TokenReview webhook as a proxy workaround.
+Reconciliation resumes after the configuration is fixed; verify both API token
+authentication and a fresh Console login/refresh, not just cleared operator
+conditions.
 
 Disabling component proxy use does not delete user or workload data, but affected
 users cannot submit new API requests while authentication is broken. Existing
