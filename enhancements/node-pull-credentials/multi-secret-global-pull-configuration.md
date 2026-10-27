@@ -188,7 +188,7 @@ The controller writes the merged output to a **separate** Secret `openshift-conf
 
 When all `GlobalPullCredential` instances are deleted, the controller deletes `pull-secret-merged`. Consumers fall back to reading the original `pull-secret`, restoring pre-feature behavior.
 
-Direct edits to `pull-secret-merged` are unsupported — the controller overwrites this Secret on every reconcile. The `managed-by` label is informational; it does not prevent manual edits but signals that the Secret is controller-owned.
+Direct edits to `pull-secret-merged` are deprecated — the controller overwrites this Secret on every reconcile, and any manual changes will be silently lost. The `managed-by` label is informational; it does not prevent manual edits but signals that the Secret is controller-owned. Users should create or update `GlobalPullCredential` resources instead.
 
 **Consumer coordination:**
 
