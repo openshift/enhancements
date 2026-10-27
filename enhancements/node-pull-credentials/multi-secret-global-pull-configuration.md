@@ -10,7 +10,7 @@ approvers:
 api-approvers:
   - "@everettraven"
 creation-date: 2026-09-29
-last-updated: 2026-10-23
+last-updated: 2026-10-27
 status: provisional
 tracking-link:
   - https://redhat.atlassian.net/browse/OCPSTRAT-3353
@@ -188,7 +188,7 @@ The controller writes the merged output to a **separate** Secret `openshift-conf
 
 When all `GlobalPullCredential` instances are deleted, the controller deletes `pull-secret-merged`. Consumers fall back to reading the original `pull-secret`, restoring pre-feature behavior.
 
-Direct edits to `pull-secret-merged` are deprecated — the controller overwrites this Secret on every reconcile, and any manual changes will be silently lost. The `managed-by` label is informational; it does not prevent manual edits but signals that the Secret is controller-owned. Users should create or update `GlobalPullCredential` resources instead.
+Direct edits to `pull-secret-merged` are no longer supported — the controller overwrites this Secret on every reconcile, and any manual changes will be silently lost. The `managed-by` label is informational; it does not prevent manual edits but signals that the Secret is controller-owned. Users should create or update `GlobalPullCredential` resources instead.
 
 **Consumer coordination:**
 
@@ -217,7 +217,7 @@ This consumer coordination is within scope of this proposal. Both changes are sm
 
 When the feature gate is **off**, the controller does not start — no watching, no merging, no writing. `GlobalPullCredential` resources may exist but are inert.
 
-**MCO node update behavior:** MCO's template controller watches `openshift-config/pull-secret-merged` (when present) or `pull-secret` and re-syncs `ControllerConfig` when the Secret's data changes. The rendered node file `/var/lib/kubelet/config.json` is updated as part of the new `MachineConfig`. The MCD classifies pull-secret/`config.json` changes as a **non-reboot** update; nodes pick up the new credentials without a drain or reboot cycle.
+**MCO node update behavior:** Today, the MCO operator sets `ControllerConfig.Spec.PullSecret` to reference `openshift-config/pull-secret`, and the template controller reads that Secret to render `/var/lib/kubelet/config.json` into a `MachineConfig`. This reference is not changed by this feature. Instead, the template controller is updated to check for `openshift-config/pull-secret-merged` first — if it exists, use its content; otherwise fall back to `pull-secret`. When `pull-secret-merged` is created or updated, the template controller re-renders the `MachineConfig` and MCD applies it as a **non-reboot** update — nodes pick up the new credentials without a drain or reboot cycle.
 
 ### Risks and Mitigations
 
@@ -239,7 +239,7 @@ When the feature gate is **off**, the controller does not start — no watching,
 
 The original design used labeled `kubernetes.io/dockerconfigjson` Secrets in `openshift-config` as modular inputs, with a controller merging them into `pull-secret` in place. This required no new CRD.
 
-This was rejected based on arch/API review feedback ([#forum-api-review discussion](https://github.com/openshift/enhancements/pull/2116)):
+This was rejected based on arch and API review feedback during the enhancement review process:
 
 - **No admission-time validation:** Invalid Secrets would only manifest as controller logs or events — opaque to administrators and easy to miss.
 - **Baseline persistence problem:** Merging into `pull-secret` in place required the controller to capture and persist a baseline snapshot of the original content. On controller restart, if the snapshot was lost, the already-merged `pull-secret` would be incorrectly treated as baseline, permanently baking in stale modular entries.
