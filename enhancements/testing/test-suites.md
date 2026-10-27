@@ -65,6 +65,10 @@ the section that defines it fully.
 - **`Suite` (tag)** — an opt-out marker: a test carrying a `Suite` tag is
   excluded from the agent-managed lifecycle suites and runs in its own
   dedicated job instead. See [Dedicated Suites](#dedicated-suites).
+- **`Component` (tag)** — the test's owning Jira component, derived by the
+  agent from the component-mapping table; used to add component-relevant
+  tests to a presubmit alongside `minimal`. Does not affect lifecycle-suite
+  membership. See [Job Plan and Cost](#job-plan-and-cost).
 - **Lifecycle suites** — the agent-managed hierarchy: `minimal` (core smoke
   tests), `active` (recent `Informing`/`Blocking` tests), and `stable`
   (matured tests), each possibly sharded. See
@@ -434,6 +438,7 @@ enhancement defines a single ordered lifecycle axis plus one overlay:
 | `Lifecycle` | `Draft`, `Informing`, `Blocking`, `Stable` | The one ordered axis describing where a test sits from creation to permanent graduation. `Draft` → in no suite; `Informing` → runs non-blocking in `active`; `Blocking` → runs and gates in `active`; `Stable` → graduated, gates permanently in `stable`. |
 | `Criticality` | `Core` | The test is a core smoke test and additionally belongs to the `conformance/*/minimal` suites. |
 | `Shard` | Zero-padded two-digit string, `01`–`NN` | Which shard the test runs in, scoped *within* a `(suite class, mode)` pair (suite class = `active` or `stable`) — parallel `stable`/`01` and serial `stable`/`01` are different suites. Mandatory for non-`Draft` tests; exactly one value, owned by automation and reassigned by the balancing workflow (see [Mandatory Metadata](#mandatory-metadata)). |
+| `Component` | Jira component string (e.g. `Networking / ovn-kubernetes`) | The test's owning component, derived by the lifecycle agent from the component-mapping table. Does **not** drive lifecycle-suite membership; it is an optional overlay used for component-scoped presubmit selection (see [Job Plan and Cost](#job-plan-and-cost)). |
 
 `Lifecycle` is the **single dimension** that drives lifecycle-suite
 membership. There is deliberately no separate reliability or maturity
@@ -1656,6 +1661,83 @@ run-to-run environmental variance) are out of scope for this
 replacement. A quantitative before/after cluster-hours comparison for a
 representative payload job should be produced during validation (see
 [Test Plan](#test-plan)).
+
+**Potential usage — component-scoped presubmits.** Presubmit jobs today
+are numerous and often flaky, and many of the tests they run have no
+relationship to the repository or change under test, which makes the
+developer feedback loop both slow and noisy. A better presubmit for a
+given change is **the `minimal` suite plus every test that belongs to the
+same component as the repository under test** — a small, fast, and
+directly relevant set, instead of a broad conformance run.
+
+This requires one new piece of metadata: a **`Component` tag** on tests.
+The lifecycle agent populates it by walking the tests in a repository and
+looking up each test's Jira component in the BigQuery component-mapping
+table (`ci_analysis_us.component_mapping_latest`, which maps a test
+`name` to its `jira_component`), then adding the corresponding
+`Component` tag to each test through the same inline-metadata path used
+for the other tags (see [Test Metadata](#test-metadata)). Like the other
+tags, `Component` is a key/value tag queryable in CEL as
+`test.tags.Component`.
+
+*Picking the component automatically.* The presubmit should not need a
+component configured by hand in every job. OpenShift repositories already
+declare their component in the repository's root `OWNERS` file (the
+`component:` field, historically the Bugzilla component and compatible
+with the Jira component name), so the component for a presubmit can be
+read from the source under test rather than set statically per job. There
+is one wrinkle: the `openshift-tests` binary runs in a test-step
+container that does not contain the checked-out source, so it cannot read
+`OWNERS` directly. The checkout *is* available to a step built from the
+`src` image. The clean wiring is therefore a single reusable
+step-registry step (built `from: src`) that reads `component:` from the
+repository's root `OWNERS` and writes it to a file in the shared
+directory (`SHARED_DIR`) that steps use to pass values down the chain;
+the existing `openshift-tests` step then reads that file and selects the
+matching component. Because the component comes from `OWNERS`, the same
+step works for every repository's presubmit with **no per-job
+configuration and no statically set component**.
+
+*Expressing "minimal plus the component".* The union mechanism already
+exists. A suite's `Qualifiers` are CEL expressions that are **OR'd**
+together, and the CEL evaluation environment already exposes a test's
+tags as a queryable map. So the component selection is expressed as one
+additional qualifier — `test.tags.Component == "<component>"` — and
+**appended to the `minimal` suite's qualifiers** at invocation. Because
+qualifiers union, the result is exactly `minimal ∪ {tests whose Component
+matches}`; no intersection and no change to how `minimal` itself is
+defined. Concretely this is a small addition in origin's run command (the
+single place that decides suite membership, where the suite's qualifiers
+are turned into the filter that selects the run set): read the component
+value provided by the step above, build the `test.tags.Component == ...`
+expression, and append it to the suite's qualifiers before the membership
+filter runs. To keep the component tests consistent with the rest of
+`minimal`, the appended qualifier is wrapped with the same global
+exclusions the `minimal` qualifiers already carry, so a globally disabled
+test is not pulled back in by component selection.
+
+Notes:
+
+- **No new selection concept.** This reuses the existing OR'd-qualifier
+  union — the same mechanism by which child suites graft into a parent
+  via `Parents` (see
+  [Exclusive Membership and Rollout](#exclusive-membership-and-rollout)).
+  The only genuinely new pieces are the `Component` tag, the small step
+  that reads `OWNERS` into `SHARED_DIR`, and a small component-to-qualifier
+  addition in the run command; OTE and the extension binaries do not
+  change, beyond tests carrying the `Component` tag.
+- **Repository-level granularity.** The component is taken from the
+  repository's root `OWNERS`, so the presubmit runs `minimal` plus that
+  repository's component — not a per-changed-file selection. This matches
+  how `OWNERS` is used in practice (the component is declared at the root;
+  nested `OWNERS` mostly refine review assignment, not component), and
+  keeps the selection predictable. A repository whose root `OWNERS`
+  declares no component falls back to `minimal`-only, a safe
+  (under-selecting) direction.
+- **Accuracy of the mapping.** Component assignment is only as good as the
+  component-mapping table; a test the table marks `Unknown` simply is not
+  pulled into any component-scoped presubmit until its mapping is
+  corrected, which is a safe (under-selecting) direction.
 
 ### Risks and Mitigations
 
