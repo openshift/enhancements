@@ -118,7 +118,10 @@ The **CVO and upgrade clients** (`oc adm upgrade`, console) are unchanged.
 3. It then starts a provider extraction pod that mounts the referenced provider images, selects the applicable content, and creates `CompatibilityRequirement` objects describing the CRD schemas, API versions, and field exclusions required by each target component.
 4. The controller waits for extraction completion and for the asynchronous checker results. Pod success alone is not assessment success.
 5. For each existing CRD that the target would manage but which is not already managed by the CAPI installer, the controller verifies the ownership and compatibility criteria below.
-6. With no relevant conflicts, it reports `Upgradeable=True` for the recorded target. Otherwise it reports `Upgradeable=False`, identifying the CRD, the target, and the failing requirement.
+6. With no relevant conflicts, the controller sets the `Upgradeable=True` condition on the
+   `cluster-api` ClusterOperator for the recorded target. Otherwise it sets
+   `Upgradeable=False` on that ClusterOperator, identifying the CRD, the target, and the
+   failing requirement.
 7. The administrator follows the normal upgrade workflow. In N+1, the CAPI installer begins managing the applicable operands, leaving declared unmanaged CRDs externally managed.
 
 #### Compatibility criteria
