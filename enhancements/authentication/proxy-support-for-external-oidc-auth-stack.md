@@ -1904,9 +1904,3 @@ TLS verification or remove the TokenReview webhook as a proxy workaround.
 Reconciliation resumes after the configuration is fixed; verify both API token
 authentication and a fresh Console login/refresh, not just cleared operator
 conditions.
-
-Disabling component proxy use does not delete user or workload data, but affected
-users cannot submit new API requests while authentication is broken. Existing
-workloads and service-account authentication do not depend on this OIDC proxy.
-Redact proxy credentials, client secrets, and tokens from diagnostic output and
-support attachments.
