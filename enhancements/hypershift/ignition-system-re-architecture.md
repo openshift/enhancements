@@ -11,7 +11,7 @@ api-approvers:
   - "@JoelSpeed"
 creation-date: 2026-09-15
 last-updated: 2026-09-15
-status: provisional
+status: implementable
 tracking-link:
   - https://issues.redhat.com/browse/OCPSTRAT-3052
 see-also:
@@ -176,62 +176,65 @@ Starting state: a NodePool exists and references user/core/NTO configs.
    which it watches. It reads each referenced ConfigMap, splits it into
    individual manifests, and defaults + validates each. If validation fails it
    sets `PayloadGenerated: False` and stops — no hash, no token, no rollout.
-3. Over the validated config it computes the payload-identity hash and the
+3. Over the validated config it computes the payload-identity hash (`configHash`) and the
    rollout hash. The payload-identity hash covers everything embedded in the
    rendered payload — including the pull-secret and trust-bundle *contents* — so
-   an in-place rotation of either produces a new payload-identity and
-   `FindByIdentity` never reuses stale bytes. The rollout hash instead uses the
+   an in-place rotation of either produces a new `configHash` and the generator
+   never serves stale bytes. The rollout hash instead uses the
    *references* (`rolloutConfigMaps` config + version + `pullSecret` +
    `additionalTrustBundle` name + `rolloutGlobalConfig` config + osStream), preserving
    parity with today's NodePool `ConfigGenerator.Hash()` (which hashes
    `pullSecret`/`additionalTrustBundle`, not their contents) so an
    in-place credential/CA rotation does not roll the fleet; instead it refreshes
-   the current token's bytes under Policy A (step 4), so scale-up/replacement
+   the current rollout's bytes under Policy A (step 4), so scale-up/replacement
    nodes boot with current credentials while existing nodes are untouched.
-   Before pulling the release image it calls `PayloadStore.FindByIdentity` for
-   this CR and the payload-identity hash; on a hit it reuses that entry and skips
-   the pull, otherwise it runs the MCO pipeline (which pulls the release image).
+   Before pulling the release image it reads the current `(owner, rolloutHash)`
+   store entry; if its recorded `configHash` already matches, it reuses those bytes
+   and skips the pull, otherwise it runs the MCO pipeline (which pulls the release image).
 4. If the rollout hash changed, it moves `status.current` to `status.previous` —
    deleting from the store any token already occupying `status.previous`
-   (delete-on-evict), so at most two *status-referenced* tokens (current +
-   previous) are ever live per CR even when rollouts overtake each other
-   (A->B->C) — mints a new UUID
-   token, calls `PayloadStore.Put(newToken, payload)`, and sets `status.current`
-   with the new hashes, token, and `rolloutGeneration + 1`. Otherwise
+   (delete-on-evict), so at most two payloads (current + previous) are ever live
+   per CR even when rollouts overtake each other (A->B->C) — mints a new signed,
+   audience-bound, expiring token, calls `PayloadStore.Put(newToken, payload)`, **authors
+   the pointer-ignition userdata Secret** (named `<ignitionpayload-name>-<rolloutHash>`,
+   embedding the token plus the ignition endpoint and CA — see Node authentication and token
+   handling), and sets
+   `status.current` with the new hashes, `rolloutGeneration + 1`, and the
+   `userDataSecretName`. **The token itself is never written to status.** Otherwise
    (management-side/cloud-config change only) it refreshes the bytes behind the
-   *current* token and updates only `status.current.configHash`. On the first
-   reconcile after the hash *formula* itself changes (`status.rolloutHashVersion`
-   older than the binary's constant) it rebaselines instead of rolling: it rewrites
-   `status.current.rolloutHash` to the new-formula value and updates the version
-   without advancing `rolloutGeneration` (see Version Skew Strategy).
-5. When `status.current.rolloutGeneration` advances, the NodePool controller creates a
-   userdata Secret embedding `status.current.token` and re-points the
-   MachineDeployment; CAPI provisions new machines with the new payload.
-6. A booting node calls `GET /ignition` with `Authorization: Bearer <token>`.
-   The ignition-server serves the payload from its per-pod local cache; on a
-   cache miss (e.g. a token published before the replica's informer has hydrated
-   it) it reads through to `PayloadStore.Get`, serves the result, and populates
-   the local cache — so there is no window between `PayloadStore.Put` and
-   informer propagation in which a valid token returns HTTP 511. On the first
-   successful serve of the *current* token (`served token ==
-   status.current.token`) it sets `IgnitionReached: True` on the CR via one
-   idempotent status update; serving a `status.previous` token during drain does
-   not flip the condition, so a node still booting on the old generation cannot
-   mark the new one reached.
-7. When a rollout drains (old MachineDeployment scaled to 0), the NodePool
-   controller deletes the retired userdata Secret and advances
-   `spec.retiredRolloutGeneration`. The PayloadController frees the old token from the
-   store and clears `status.previous` only when
-   `status.previous.rolloutGeneration <= spec.retiredRolloutGeneration` — so if rollouts
-   overtake each other (A->B->C), an earlier generation's (A) drain signal does
-   not clear a still-draining `status.previous` (B), keeping this step consistent
-   with the `retiredRolloutGeneration` contract in the CRD spec.
+   *current* token, refreshes that userdata Secret's content in place, and updates only
+   `status.current.configHash`. On the first reconcile after the hash *formula* itself
+   changes (`status.rolloutHashVersion` older than the binary's constant) it rebaselines
+   instead of rolling: it rewrites `status.current.rolloutHash` to the new-formula value
+   and updates the version without advancing `rolloutGeneration` (see Version Skew
+   Strategy).
+5. When `status.current.rolloutGeneration` advances, the NodePool controller points the
+   MachineDeployment's bootstrap `DataSecretName` at `status.current.userDataSecretName`;
+   CAPI provisions new machines with the new payload. The consumer never mints userdata or
+   handles the token — it only references the generator-authored Secret by name.
+6. A booting node calls `GET /ignition` with `Authorization: Bearer <token>` (the token it
+   was provisioned with in userdata). The ignition-server serves the payload from its
+   per-pod local cache; on a cache miss it reads through to `PayloadStore.Get`, serves the
+   result, and populates the cache — so there is no window between `PayloadStore.Put` and
+   informer propagation in which a valid token returns HTTP 511. On the first successful
+   serve of the *current* rollout's payload (the served payload's rollout identity matches
+   `status.current.rolloutHash`) it sets `IgnitionReached: True` on the CR via one
+   idempotent status update; serving a `status.previous` payload during drain does not flip
+   the condition, so a node still booting on the old generation cannot mark the new one
+   reached.
+7. When a rollout drains (old MachineDeployment scaled to 0), the NodePool controller
+   advances `spec.retiredRolloutGeneration`. The PayloadController then frees the old token
+   from the store, deletes the retired userdata Secret, and clears `status.previous` only
+   when `status.previous.rolloutGeneration <= spec.retiredRolloutGeneration` — so if rollouts
+   overtake each other (A->B->C), an earlier generation's (A) drain signal does not clear a
+   still-draining `status.previous` (B), keeping this step consistent with the
+   `retiredRolloutGeneration` contract in the CRD spec.
 8. On teardown, the creating consumer removes its consumer finalizer and deletes
    the CR; the PayloadController then frees all remaining store tokens and removes
-   its store-cleanup finalizer, after which only the CR-owned projections (the
-   user and HAProxy ConfigMaps) cascade-delete via their owner references — the
-   referenced-in-place core and NTO ConfigMaps carry no owner reference and are
-   left untouched.
+   its store-cleanup finalizer, after which the CR-owned objects (the user and HAProxy
+   ConfigMaps and the generator-authored userdata Secrets) cascade-delete via their owner
+   references — the referenced-in-place core and NTO ConfigMaps carry no owner reference and
+   are left untouched.
 
 ```mermaid
 sequenceDiagram
@@ -247,10 +250,12 @@ sequenceDiagram
     PC->>PC: Split + validate configs, compute both hashes
     alt rollout hash changed
         PC->>PS: Put(newToken, payload)
-        PC->>CR: status.current = {hashes, token, gen+1}
-        NP->>NP: Create userdata Secret + re-point MachineDeployment
+        PC->>PC: author userdata Secret (name = <np>-rolloutHash, embeds token)
+        PC->>CR: status.current = {hashes, gen+1, userDataSecretName}
+        NP->>NP: point MachineDeployment at userDataSecretName
     else management/cloud-config change only
         PC->>PS: Put(current token, refreshed payload)
+        PC->>PC: refresh userdata content
         PC->>CR: update status.current.configHash only
     end
     Node->>SRV: GET /ignition (Bearer token)
@@ -258,19 +263,19 @@ sequenceDiagram
     SRV-->>Node: serve payload
     SRV->>CR: set IgnitionReached=True (one-shot)
     NP->>CR: advance spec.retiredRolloutGeneration after drain
-    PC->>PS: Delete(previous token); clear status.previous
+    PC->>PS: Delete(previous token); delete previous userdata; clear status.previous
 ```
 
 **Consumers other than the NodePool controller.** The workflow above is written
 for the NodePool controller, but the CRD contract is consumer-agnostic and every
 consumer follows the same shape: create the `IgnitionPayload` (adding its own
-consumer finalizer), watch `status.current.rolloutGeneration`, and read
-`status.current.token` to stamp the userdata of the machines it provisions. The
-difference is rollout execution. The NodePool controller runs a *coordinated*
-rollout (userdata Secret, MachineDeployment re-point, drain watch,
+consumer finalizer), watch `status.current.rolloutGeneration`, and point the machines
+it provisions at `status.current.userDataSecretName` (the generator authors that Secret;
+consumers never handle the token). The difference is rollout execution. The NodePool
+controller runs a *coordinated* rollout (MachineDeployment re-point, drain watch,
 `retiredRolloutGeneration`). Karpenter — and external-provider integrations that want a
 payload without a NodePool — provision nodes just-in-time and do **not** run a
-coordinated rollout: they always stamp the *current* token onto new nodes, let
+coordinated rollout: they always point new nodes at the *current* `userDataSecretName`, let
 their own node lifecycle replace older nodes, and advance `spec.retiredRolloutGeneration`
 as they observe a generation's nodes disappear (or leave it at zero and rely on
 delete-on-evict plus the store-cleanup finalizer for reclamation). On teardown
@@ -287,12 +292,16 @@ This enhancement adds a new CRD and a finalizer:
    living in the HCP namespace. One resource per consumer request (one per
    NodePool for the NodePool controller; Karpenter creates its own on demand).
    The CRD is **consumer-agnostic** — it carries no back-reference to a NodePool
-   so that non-NodePool consumers can use it. Payload bytes do **not** live in
-   status; the token is the key into the `PayloadStore`. The type is defined
+   so that non-NodePool consumers can use it. Neither payload bytes nor the auth
+   token live in status; status references the generator-authored userdata Secret by
+   name (`userDataSecretName`), and the token is the key into the `PayloadStore` that
+   lives only in that Secret and the store (see Node authentication and token handling).
+   The type is defined
    here (v1beta1, group `hypershift.openshift.io`). Note: The API was placed in
    v1beta1 instead of v1alpha1 to align with the existing v1beta1 API group
-   convention in HyperShift (see api/AGENTS.md), as it is a first-class production
-   API with no experimental status.
+   convention in HyperShift (see api/AGENTS.md); it is gated behind the
+   `IgnitionPayloadSystem` feature gate (TechPreviewNoUpgrade) and the CRD installs
+   only under that feature set (see the Feature Gate section).
 
    ```go
    // IgnitionPayload is one consumer's ignition payload request: the consumer's
@@ -353,10 +362,11 @@ This enhancement adds a new CRD and a finalizer:
    	// +kubebuilder:validation:XValidation:rule=`self.matches('^(\\w+\\S+)$')`,message="releaseImage must start with a word character (letters, digits, or underscores) and contain no whitespace"
    	ReleaseImage string `json:"releaseImage,omitempty"`
 
-   	// pullSecret references a Secret in the IgnitionPayload's namespace holding the registry pull
-   	// secret used to fetch the release image and embedded in the payload. This field is
-   	// required and immutable: change the pull secret in place (via the global pull secret
-   	// mechanism) rather than updating this reference, so it never triggers a node rollout.
+   	// pullSecret references the pull-secret Secret in the IgnitionPayload's namespace
+   	// (conventionally named "pull-secret") that the generator reads to fetch the release
+   	// image and embed in the payload. This field is required and immutable: change the pull
+   	// secret in place (via the global pull secret mechanism) rather than updating this
+   	// reference, so it never triggers a node rollout.
    	// +required
    	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="pullSecret is immutable; update the pull secret in place via the global pull secret mechanism"
    	PullSecret SecretReference `json:"pullSecret,omitzero"`
@@ -367,24 +377,27 @@ This enhancement adds a new CRD and a finalizer:
    	// +optional
    	AdditionalTrustBundle ConfigMapReference `json:"additionalTrustBundle,omitzero"`
 
-   	// osStream selects the RHEL OS stream the payload targets. Valid values are "rhel-9"
+   	// osImageStream selects the RHEL OS stream the payload targets. Valid values are "rhel-9"
    	// (RHEL 9 boot images) and "rhel-10" (RHEL 10 boot images). When omitted, the stream
-   	// defaults to the one implied by the release version (RHEL 10 for newer releases,
-   	// RHEL 9 for older ones). rhel-9 is the legacy stream and is expected to be retired
-   	// as supported releases move to RHEL 10.
+   	// defaults to the one implied by the release version (rhel-9 for OCP < 5.0, rhel-10 for
+   	// OCP >= 5.0). rhel-9 is the legacy stream and is expected to be retired as supported
+   	// releases move to RHEL 10.
    	// +optional
-   	OSStream OSImageStreamReference `json:"osStream,omitzero"`
+   	OSImageStream OSImageStreamReference `json:"osImageStream,omitzero"`
 
-   	// rolloutGlobalConfig references an IgnitionPayload-owned ConfigMap in the IgnitionPayload's namespace
-   	// holding the rollout-relevant subset of the hosted cluster's global
-   	// configuration, canonicalized and authored by the consumer. Its contents are
-   	// a rollout-hash input; see predictable-nodepool-rollout-control (#8698).
+   	// rolloutGlobalConfig references an IgnitionPayload-owned ConfigMap in the
+   	// IgnitionPayload's namespace holding the rollout-relevant subset of the hosted
+   	// cluster's global configuration, canonicalized and authored by the consumer. The
+   	// content is read from the "config" key and feeds the rollout hash; a ConfigMap
+   	// missing that key contributes nothing. See predictable-nodepool-rollout-control (#8698).
    	// +optional
    	RolloutGlobalConfig ConfigMapReference `json:"rolloutGlobalConfig,omitzero"`
 
    	// rolloutConfigMaps lists ConfigMaps in the IgnitionPayload's namespace whose contents
-   	// are rollout-relevant (user, core, and NTO machine configs). A change to
-   	// any of them can advance the rollout hash and trigger a node rollout.
+   	// are rollout-relevant (user, core, and NTO machine configs). Each referenced ConfigMap
+   	// provides its content under the "config" key as multi-document YAML of MachineConfig
+   	// manifests; a ConfigMap missing that key contributes nothing. A change to any of them
+   	// can advance the rollout hash and trigger a node rollout.
    	// +optional
    	// +listType=map
    	// +listMapKey=name
@@ -393,9 +406,11 @@ This enhancement adds a new CRD and a finalizer:
    	RolloutConfigMaps []ConfigMapReference `json:"rolloutConfigMaps,omitempty"`
 
    	// managementConfigMaps lists ConfigMaps in the IgnitionPayload's namespace whose contents are
-   	// management-side only (the apiserver-HAProxy config). A change to them refreshes
-   	// the payload behind the current token without advancing rolloutGeneration, so it
-   	// does not trigger a rollout. A name here must not also appear in rolloutConfigMaps.
+   	// management-side only (the apiserver-HAProxy config). Each referenced ConfigMap provides
+   	// its content under the "config" key as multi-document YAML of MachineConfig manifests;
+   	// a ConfigMap missing that key contributes nothing. A change to them refreshes the payload
+   	// behind the current token without advancing rolloutGeneration, so it does not trigger a
+   	// rollout. A name here must not also appear in rolloutConfigMaps.
    	// +optional
    	// +listType=map
    	// +listMapKey=name
@@ -403,10 +418,11 @@ This enhancement adds a new CRD and a finalizer:
    	// +kubebuilder:validation:MaxItems=100
    	ManagementConfigMaps []ConfigMapReference `json:"managementConfigMaps,omitempty"`
 
-   	// retiredRolloutGeneration lets the consumer release storage for payloads it no
-   	// longer needs: set it to the highest rolloutGeneration whose nodes have all been
-   	// replaced, and the payloads for that generation and below are freed (the current
-   	// payload is always kept). It only ever increases; when omitted, no payloads are freed.
+   	// retiredRolloutGeneration releases the previous payload early. At most two payloads are
+   	// retained — current and previous — and a new rollout always evicts the old previous
+   	// regardless of this field. Set it to the highest rolloutGeneration whose nodes have all
+   	// been replaced to free previous before the next rollout; the current payload is always
+   	// kept. It only ever increases.
    	// +optional
    	// +kubebuilder:validation:Minimum=1
    	RetiredRolloutGeneration int64 `json:"retiredRolloutGeneration,omitempty"`
@@ -423,26 +439,25 @@ This enhancement adds a new CRD and a finalizer:
    	Name string `json:"name,omitempty"`
    }
 
-   // IgnitionPayloadStatus has two writers with disjoint field ownership. The
-   // PayloadController owns current, previous, and the PayloadGenerated
-   // condition; the serving tier owns only the IgnitionReached condition and
-   // sets it through a field-scoped, conflict-retried patch (see the Status
-   // ownership contract in Implementation Details). No writer replaces the whole
-   // status. The invariants between current and previous are enforced at admission
+   // IgnitionPayloadStatus has two writers. The PayloadController owns current,
+   // previous, and the PayloadGenerated condition, and resets IgnitionReached to False
+   // when rolloutGeneration advances; the serving tier sets IgnitionReached to True
+   // through a field-scoped, conflict-retried patch once a node fetches the current
+   // rollout's payload (see the Status ownership contract in Implementation Details). No writer replaces the
+   // whole status. The invariants between current and previous are enforced at admission
    // by CEL rather than only in the controller.
    //
    // +kubebuilder:validation:MinProperties=1
    // +kubebuilder:validation:XValidation:rule="!has(self.previous) || has(self.current)",message="previous requires current"
    // +kubebuilder:validation:XValidation:rule="!has(self.previous) || !has(self.current) || self.previous.rolloutGeneration < self.current.rolloutGeneration",message="previous.rolloutGeneration must be lower than current.rolloutGeneration"
-   // +kubebuilder:validation:XValidation:rule="!has(self.previous) || !has(self.current) || self.previous.token != self.current.token",message="previous and current must not share a token"
    // +kubebuilder:validation:XValidation:rule="!has(oldSelf.current) || (has(self.current) && self.current.rolloutGeneration >= oldSelf.current.rolloutGeneration)",message="current.rolloutGeneration cannot decrease and current cannot be removed"
    type IgnitionPayloadStatus struct {
    	// conditions reports generation and rollout progress. Known types:
    	// "PayloadGenerated" (the latest config produced a payload; its observedGeneration
    	// tracks the spec generation last processed, so consumers can tell whether
-   	// status.current reflects the latest spec) and "IgnitionReached" (a node has fetched
-   	// status.current's token; written by the serving tier under the Status ownership
-   	// contract).
+   	// status.current reflects the latest spec) and "IgnitionReached" (False after each new
+   	// rollout until a node has fetched the current payload, then True; the PayloadController
+   	// resets it on rollout and the serving tier sets it on fetch).
    	// +optional
    	// +listType=map
    	// +listMapKey=type
@@ -455,8 +470,8 @@ This enhancement adds a new CRD and a finalizer:
    	Current PayloadReference `json:"current,omitzero"`
 
    	// previous describes the immediately prior payload, retained during a
-   	// rollout so in-flight boots on the old token are served until they drain.
-   	// It is serving/observability state, not the cleanup mechanism: tokens are
+   	// rollout so in-flight boots on the previous payload are served until they drain.
+   	// It is serving/observability state, not the cleanup mechanism: payloads are
    	// reclaimed by delete-on-evict and the store-cleanup finalizer, not by
    	// tracking every generation here.
    	// +optional
@@ -490,20 +505,20 @@ This enhancement adds a new CRD and a finalizer:
    	// +kubebuilder:validation:MaxLength=64
    	RolloutHash string `json:"rolloutHash,omitempty"`
 
-   	// token is the credential a booting node presents to fetch its generated payload.
-   	// Because the payload embeds registry and bootstrap credentials, treat token as a
-   	// bearer secret. It is an opaque, non-derivable, canonical lowercase UUID. (The
-   	// payload bytes never live in status; the store keeps the token only in Secret data,
-   	// and its lifecycle/serving semantics are described under PayloadStore below.)
+   	// userDataSecretName is the name of the generator-authored pointer-ignition Secret in
+   	// the IgnitionPayload's namespace, formatted `<ignitionpayload-name>-<rolloutHash>`. The
+   	// consumer points its machines' bootstrap dataSecretName at it; it is a non-secret
+   	// reference. The bearer token that fetches the payload lives only inside that Secret and
+   	// the PayloadStore, never in status (see Node authentication and token handling).
    	// +required
    	// +kubebuilder:validation:MinLength=1
-   	// +kubebuilder:validation:MaxLength=36
-   	// +kubebuilder:validation:XValidation:rule="self.matches('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')",message="token must be a canonical lowercase UUID"
-   	Token string `json:"token,omitempty"`
+   	// +kubebuilder:validation:MaxLength=253
+   	UserDataSecretName string `json:"userDataSecretName,omitempty"`
 
    	// rolloutGeneration is a monotonically increasing counter the consumer watches to
    	// execute a rollout. It advances only when rolloutHash changes (a management-only
-   	// payload refresh does not advance it).
+   	// payload refresh does not advance it); each advance mints a new token, while a refresh
+   	// re-issues the token with a fresh expiry under the same rollout identity.
    	// +required
    	// +kubebuilder:validation:Minimum=1
    	RolloutGeneration int64 `json:"rolloutGeneration,omitempty"`
@@ -520,8 +535,12 @@ This enhancement adds a new CRD and a finalizer:
    after the PayloadController has deleted every remaining `PayloadStore` token
    for the CR. This split keeps store reclamation consumer-agnostic, so a
    Karpenter-created CR's tokens are freed even though Karpenter, not the NodePool
-   controller, drives its deletion. Once both finalizers clear, the CR's owned
-   ConfigMaps cascade-delete via their owner references.
+   controller, drives its deletion. Once both finalizers clear, the CR's owned objects
+   — the projected user/HAProxy ConfigMaps and the generator-authored userdata Secrets,
+   all in the HCP namespace with a same-namespace owner reference to the CR — cascade-delete.
+   (The userdata Secrets can be CR-owned precisely because the generator authors them in the
+   HCP namespace; the NodePool controller, in the management namespace, could not own them
+   cross-namespace — one reason generator authorship is cleaner.)
 
 This enhancement also changes the behaviour of the HyperShift NodePool
 controller and the ignition server, but it does not modify any CRDs owned by
@@ -620,81 +639,65 @@ reside in the HCP namespace and are referenced in place (a mapped `Watches`,
 ported from the existing `enqueueNodePoolsForConfig` dispatcher); user and
 HAProxy ConfigMaps are CR-owned (a plain `Owns`).
 
-**PayloadStore.** The token-keyed core (`Put`/`Get`/`Delete`) already
-exists in today's ignition server, backed by an in-pod `ExpiringCache`. Because
-the token is an opaque UUID, two flows must address entries without holding a
-token: idempotent generation has to find an existing entry by payload identity,
-and the store-cleanup finalizer has to reach every entry for a CR (including one
-an interrupted generation left unreferenced by status). The interface therefore
-adds two lookups — `FindByIdentity(owner, identityHash)` and `ListByOwner(owner)`
-— resolved against labels the entries already carry, so they are
-backend-independent rather than assuming a Secret query. `Get(token)` returns the
-payload together with its owning-CR reference (every entry is owner-labeled), so
-the `/ignition` handler resolves the CR to patch `IgnitionReached` from the served
-token alone, with no separate token-to-owner lookup. v1 swaps
-the implementation for a `SecretBackedStore`: the generator writes each payload
-(gzip-compressed, to stay well under the etcd object-size cap) to a Secret in the
-HCP namespace whose name is a non-reversible digest of the token — so the bearer
-token never appears in a resource name (and therefore never in audit logs, which
-record object names even at the default Metadata level); the token itself is kept
-only in Secret data. The Secret carries fixed-length digests of its owning CR and
-payload-identity hash as labels (digested so the selectors work even when the raw
-values exceed the 63-character label limit), with the exact values in annotations
-for precise post-list matching. The store uses a direct, **uncached** client so
-`Get`/`FindByIdentity`/`ListByOwner` always observe the latest write regardless of
-informer-cache state (and the store performs writes, so a read-only API reader is
-insufficient). Server replicas hydrate a per-pod local cache (emptyDir/memory) via
-an informer; there the two lookups are label-selector `List` calls. The local cache is an
-optimization, not a correctness dependency: the `/ignition` handler reads
-through to `PayloadStore.Get` on a miss, so a token is servable as soon as `Put`
-returns, before the informer propagates it. On a management-side refresh (Policy
-A) the generator overwrites the store entry for the *current* token in place;
-the informer delivers an update event and each replica replaces its cached bytes
-for that token (last-write-wins), so a replacement node served by any replica
-gets the current content. Deletions propagate the same way: the informer delivers
-a delete event and each replica evicts the token from its local cache, so a freed
-token converges to HTTP 511 on every replica within informer lag. Because a token
-is deleted only after its generation has drained (its nodes are gone) or at CR
-teardown, no live consumer depends on it during that bounded window. v2 swaps in a
-`DatabaseBackedStore` keyed by token, removing the etcd object-size cap on
-payloads without changing the CRD contract or the serving hot path; there the
-same two lookups are indexed queries on `(owner, identityHash)` and `owner`.
+**PayloadStore.** The store maps a **rollout identity** (`owner` + `rolloutHash`) to the
+current payload bytes for that rollout; it does **not** store or key on the token. The interface
+is `Put(owner, rolloutHash, configHash, payload)` / `Get(owner, rolloutHash)` /
+`Delete(owner, rolloutHash)`, plus `ListByOwner(owner)` for cleanup. The signed token the node
+presents carries the rollout identity as claims, so the `/ignition` handler validates the
+token's signature, audience, and expiry, extracts `(owner, rolloutHash)`, and resolves the
+payload by identity — the token is never stored, and re-issuing a fresh-expiry token for the
+same rollout resolves the same entry, so periodic re-issue (see Node authentication and token
+handling) costs nothing in the store. `(owner, rolloutHash)` also identifies the CR, so the
+handler can patch `IgnitionReached` without a separate lookup. Each entry records the
+`configHash` of the bytes it holds, for idempotent generation and observability.
 
-**Idempotent generation across failover.** Each store entry is labeled with its
-owning CR and the payload-identity hash of the content it holds. Before pulling
-the release image, the leader calls `FindByIdentity` for the target
-payload-identity hash and reuses any existing entry instead of regenerating.
-Leader election already guarantees a single active generator, so this labeling
-closes the remaining gap: a failover that interrupts an in-flight generation
-costs at most one repeated pull for that config version (the new leader may
-re-pull only if the crash preceded `PayloadStore.Put`), and the steady-state
-guarantee is exactly one pull per config version at any replica count. If such a
-crash lands after `Put` but before the `status` write and the config then
-advances to a different identity, the entry it wrote is left unreferenced by
-`status`. Such an orphan is reused if that identity recurs (`FindByIdentity`
-adopts it) and is otherwise reclaimed at CR teardown, when the store-cleanup
-finalizer deletes everything `ListByOwner` returns. This case is extremely rare —
-it needs a crash in the microsecond-scale `Put`-to-`status` window followed by a
-config change before adoption — but as defense-in-depth each generation reconcile
-also runs an inline, per-CR sweep: after resolving
-`status.current`/`status.previous` it calls `ListByOwner` and deletes any
-owner-labeled entry whose payload-identity hash matches neither those nor the
-identity being generated this pass. This is not the old background
-`secretsJanitor`: it is level-triggered, single-active (leader election), and
-scoped to the one CR already being reconciled, so it cannot race a concurrent
-generator. With it, the live per-CR entry count stays bounded to the two
-status-referenced tokens plus at most the one in flight.
+v1 is a `SecretBackedStore`: the generator writes each payload (gzip-compressed, to stay well
+under the etcd object-size cap) to a Secret in the HCP namespace named by a digest of
+`(owner, rolloutHash)` — all non-secret values, so nothing sensitive appears in a resource name
+or audit log, and the token (not being the key) never touches the store. The Secret carries
+fixed-length digests of `owner` and `configHash` as labels (digested so selectors work past the
+63-character label limit), with exact values in annotations for precise post-list matching. The
+store uses a direct, **uncached** client so reads always observe the latest write regardless of
+informer-cache state (and it performs writes, so a read-only API reader is insufficient).
+
+Server replicas hydrate a per-pod local cache (emptyDir/memory) via an informer; a cache miss
+reads through to `PayloadStore.Get`, so a payload is servable as soon as `Put` returns, before
+the informer propagates it. On a management-side refresh (Policy A) the generator **overwrites
+the current `(owner, rolloutHash)` entry in place** with the new bytes (new `configHash`); the
+informer delivers an update and each replica replaces its cached bytes (last-write-wins), so a
+scale-up node served by any replica gets current content with no roll. Deletions propagate the
+same way: a freed entry converges to HTTP 511 on every replica within informer lag. Because an
+entry is deleted only after its rollout has drained (its nodes are gone) or at CR teardown, no
+live consumer depends on it during that bounded window. v2 swaps in a `DatabaseBackedStore`
+keyed the same way, removing the etcd object-size cap without changing the CRD contract or the
+serving hot path.
+
+**Idempotent generation across failover.** Each store entry records the `configHash` of the
+bytes it holds. Before pulling the release image, the leader reads the current
+`(owner, rolloutHash)` entry and regenerates only when its recorded `configHash` differs from
+the target — so a failover that interrupts an in-flight generation costs at most one repeated
+pull (the new leader re-pulls only if the crash preceded `PayloadStore.Put`), and the
+steady-state guarantee is exactly one pull per config version at any replica count. Entries no
+longer named by `status.current`/`status.previous` — e.g. a rollout interrupted between `Put`
+and the `status` write, or an overtaken one — are reclaimed at CR teardown, when the
+store-cleanup finalizer deletes everything `ListByOwner` returns, and, as defense-in-depth, by
+an inline per-CR sweep each reconcile: after resolving `status.current`/`status.previous` the
+leader calls `ListByOwner` and deletes any `(owner, rolloutHash)` entry named by neither (nor
+the one being generated this pass). This is not the old background `secretsJanitor`: it is
+level-triggered, single-active (leader election), and scoped to the one CR already being
+reconciled, so it cannot race a concurrent generator. With it, the live per-CR entry count
+stays bounded to the two status-referenced rollouts plus at most the one in flight.
 
 **Rollout detection lives with generation.** Because a rollout must not be
 triggered for a config that cannot produce a payload, rollout detection is
-placed downstream of validation, in the PayloadController. It emits a new token
-and advances `status.current.rolloutGeneration` only when the rollout hash changes; the
-NodePool controller reacts to that generation bump to execute the rollout
-(userdata Secret, MachineDeployment re-point, drain watch, `retiredRolloutGeneration`).
-Payload refresh follows **Policy A**: the token is a rollout identity, and
-management-side/cloud-config changes refresh the bytes behind the current token
-so scale-up/replacement nodes always boot with current content while existing
-nodes are untouched until they roll.
+placed downstream of validation, in the PayloadController. It mints a new token,
+authors the userdata Secret, and advances `status.current.rolloutGeneration` only when the
+rollout hash changes; the NodePool controller reacts to that generation bump to execute the
+rollout (point the MachineDeployment at `status.current.userDataSecretName`, drain watch,
+`retiredRolloutGeneration`). Payload refresh follows **Policy A**: the token is a rollout
+identity, and management-side/cloud-config changes refresh the bytes behind the current
+token (and that userdata Secret's content in place) so scale-up/replacement nodes always
+boot with current content while existing nodes are untouched until they roll.
 
 This work depends on and extends
 [predictable-nodepool-rollout-control](./predictable-nodepool-rollout-control.md)
@@ -704,61 +707,97 @@ moves into the PayloadController, and the rollout state it holds in annotations
 CRD `status` (`current.rolloutGeneration` / `current.rolloutHash`), so those
 annotation/token mechanisms are not carried over.
 
-**Status ownership.** `IgnitionPayloadStatus` has two writers with disjoint
-field ownership rather than a single owner. The PayloadController writes
-`status.current`, `status.previous`, and the `PayloadGenerated` condition. The
-serving tier writes only the `IgnitionReached` condition, and does so with a
-field-scoped patch — Server-Side Apply under its own field manager (or a
+**Status ownership.** `IgnitionPayloadStatus` has two writers rather than a single
+owner. The PayloadController writes `status.current`, `status.previous`, and the
+`PayloadGenerated` condition, and resets `IgnitionReached` to `False` when
+`rolloutGeneration` advances. The serving tier sets `IgnitionReached` to `True`, and
+does so with a field-scoped patch — Server-Side Apply under its own field manager (or a
 JSON-patch targeting just that condition entry) — never a full-status replace, so
 it can never clobber `current`/`previous`. That write is conditional and
 conflict-retried: a replica sets `IgnitionReached: True` only while
-`status.current.token` still equals the token it served, re-checking under
-optimistic concurrency and dropping the update if a retry observes the generation
-has advanced. Field-scoping plus the token precondition together mean concurrent
+`status.current.rolloutHash` still matches the rollout identity of the payload it served,
+re-checking under optimistic concurrency and dropping the update if a retry observes the
+generation has advanced. Field-scoping plus that precondition together mean concurrent
 writes can neither lose the PayloadController's rollout reset nor overwrite
 unrelated status fields, so no separate reporting resource or single-owner funnel
 is needed.
 
-**Token access (least privilege).** The tokens in `status.current` and
-`status.previous` are capabilities, so read access to `IgnitionPayload` status —
-and to the backing store Secrets in v1 — is confined to the management-side
-service accounts that need it: the PayloadController (writes status, reads its own
-tokens), the NodePool controller and other consumers (read `status.current.token`
-to stamp userdata), and the ignition-server (resolves a Bearer token to a
-payload). RBAC grants those Roles only in the HCP namespace; guest-cluster and
-tenant identities have no access to the CR or its backing store. Authorization for
-`GET /ignition` itself is unchanged from today's ignition server — the opaque
-Bearer token is the capability, and the standalone HAProxy Deployment remains the
-only externally reachable hop (see Risks).
+**Node authentication and token handling.** The token is a bearer capability: whoever
+holds it can `GET /ignition` and fetch a payload that embeds the pull secret and node
+bootstrap credentials. Two properties contain that risk.
+
+*Where it lives.* The token lives **only** in two Secrets in the HCP namespace — the
+generator-authored userdata Secret (baked into the node at provisioning) and the PayloadStore
+entry — and is **never written to `IgnitionPayload.status`**. Status carries only non-secret
+identity (`configHash`, `rolloutHash`, `rolloutGeneration`) plus the `userDataSecretName`
+reference. This is a deliberate least-privilege boundary: a principal that can read the CR but
+not Secrets — e.g. the `hypershift-readers` ClusterRole, which grants get/list/watch on
+`hypershift.openshift.io` resources but not Secrets — cannot obtain a token, and OpenShift's
+`WriteRequestBodies`/`AllRequestBodies` audit profiles (which log custom-resource bodies but
+keep Secrets at Metadata level) never capture it. The actors that legitimately need the token
+already have HCP-namespace Secret access: the PayloadController (mints it, writes the userdata
+Secret and the store entry), the NodePool controller and other consumers (reference
+`userDataSecretName`, and for the InPlace compatibility write resolve the bytes via
+`PayloadStore.Get(owner, status.current.rolloutHash)`), and the ignition-server (resolves a
+presented token to a payload). RBAC grants those Roles only in the HCP namespace; guest-cluster
+and tenant identities have no access to the CR or its backing Secrets.
+
+*What it is.* The token is not an opaque random string but a **generator-signed token carrying
+the rollout identity (`owner` + `rolloutHash`), an audience, and an expiry** (e.g. a JWT). The
+serving tier holds only the public verification key, so it **validates the signature, audience,
+and expiry statelessly** — rejecting forgeries and expired tokens before any lookup — then
+resolves the payload by that rollout identity (the PayloadStore is keyed by it, not by the
+token; see PayloadStore). This bounds a leaked token's blast radius (it expires and is scoped to
+this serving tier) and lets the stateless, horizontally-scaled servers authenticate without a
+shared secret.
+
+*Keeping it fresh.* CAPI bakes the userdata token into an instance when it **creates** the
+instance, which can be long after the rollout (e.g. an autoscaler scale-up reads the rollout's
+userdata Secret hours later), so the token in the current — and draining-`previous` — userdata
+Secret must stay valid for a *future* instance. The generator therefore **re-issues the token
+with a fresh expiry on a timer** (well before expiry), and also on any payload refresh, rewriting
+it **in place** into the same userdata Secret with the rollout identity (`rolloutHash`, hence
+`userDataSecretName`) unchanged — so re-issue never triggers a roll and, because the store is
+keyed by rollout identity, costs nothing in the store (every re-issued token resolves the same
+entry). Already-booted nodes never re-fetch, so an expired token after boot is harmless — only
+the *userdata* must stay fresh for not-yet-created/not-yet-booted instances. Two first-boot
+realities size the parameters: clocks may be wrong before NTP (validation allows generous skew /
+`nbf`), and the instance-creation→boot gap plus the re-issue cadence must fit comfortably within
+the token TTL.
+
+The standalone HAProxy Deployment remains the only externally reachable hop (see Risks). Moving
+beyond a bearer token entirely — to possession-proof mTLS — is future work (see Alternatives);
+it is blocked today by Ignition's static-header-only first-boot fetch.
 
 **Legacy in-place-upgrade compatibility.** The HCCO `InPlaceUpgrader` reads a
 Secret named `token-{machineSetName}-{targetConfigVersion}`, where
 `targetConfigVersion` is the payload-identity hash (`status.current.configHash`)
-stamped on the matching MachineSet annotation. The **NodePool controller** owns
-this compatibility write — it already owns CAPI naming, the userdata Secret, and
-MachineSet annotations, whereas making the PayloadController the writer would
-force MachineSet names into the consumer-agnostic CRD spec. In the same reconcile
-that reacts to a `status.current.rolloutGeneration` advance and creates the userdata
-Secret, the NodePool controller also writes the byte-compatible legacy Secret and
-stamps the MachineSet annotation, both *before* re-pointing the MachineDeployment,
-so HCCO never observes the annotation without its Secret. The step is
-level-triggered and idempotent: if either write fails the reconcile requeues and
-does not re-point the MachineDeployment until the userdata Secret, the legacy
-Secret, and the annotation all exist. This is why no HCCO change is required — the
-guest side keeps reading the same Secret shape it reads today.
+stamped on the matching MachineSet annotation. The **NodePool controller** owns this
+compatibility write — it is inherently machineSet/upgrade-type scoped (CAPI concepts absent
+from the consumer-agnostic CR), so making the PayloadController the writer would force
+MachineSet names and upgrade type into the CRD spec. It holds payload *bytes* (not the
+token), which the consumer resolves from the store via
+`PayloadStore.Get(owner, status.current.rolloutHash)` — needing
+HCP-namespace Secret access, which the NodePool controller has and CR-only readers do not, so
+this path does not re-introduce the token into any readable place. In the same reconcile that
+reacts to a `status.current.rolloutGeneration` advance, the NodePool controller writes the
+byte-compatible legacy Secret and stamps the MachineSet annotation *before* re-pointing the
+MachineDeployment, so HCCO never observes the annotation without its Secret. The step is
+level-triggered and idempotent: if either write fails the reconcile requeues and does not
+re-point until the legacy Secret and the annotation both exist. No HCCO change is required —
+the guest side keeps reading the same Secret shape it reads today.
 
-**Feature gating.** This is a HyperShift management-side operator change and is
-**not** gated through the OpenShift feature-gate mechanism in
-`https://github.com/openshift/api/blob/master/features/features.go` — that
-mechanism gates guest-cluster/product feature sets (DevPreviewNoUpgrade /
-TechPreviewNoUpgrade), not HyperShift-operator-internal architecture. Release
-gating is instead achieved through the migration model (see
-[Upgrade / Downgrade Strategy](#upgrade--downgrade-strategy)): the new path is
-selected per-HostedCluster and the old token-Secret path is retained as a
-frozen, independent module until fleet EOL. If, during review, stakeholders
-prefer an explicit opt-in (e.g. a HyperShift annotation on HostedCluster to
-select the new path as Tech Preview before it becomes default), that can be
-layered on top of the migration model without changing the core design.
+**Feature gating.** The whole re-architecture is gated behind the management-cluster
+`IgnitionPayloadSystem` feature gate (fleet-wide, enabled for TechPreviewNoUpgrade /
+CustomNoUpgrade, off by default) — see the [Feature Gate](#feature-gate) section. It
+is a HyperShift management feature gate (configured on the HyperShift operator), not
+an openshift/api guest feature set, and the `IgnitionPayload` CRD is born gated behind
+the same gate via the openshift/api CRD feature-set machinery, so it installs only
+under TechPreviewNoUpgrade / CustomNoUpgrade. The old token-Secret path is retained as
+a frozen, independent module through the coexistence window, and the migration model
+(see [Upgrade / Downgrade Strategy](#upgrade--downgrade-strategy)) rides the mandatory
+N->N+1 upgrade. Promotion to GA flips the gate's default on and graduates the CRD to
+the default feature set.
 
 ### Risks and Mitigations
 
@@ -770,10 +809,16 @@ layered on top of the migration model without changing the core design.
   boundary holds. v2 removes the payload-read KAS dependency and can move
   `IgnitionReached` off the hot path, after which the proxy can be retired with
   security sign-off.
-- **Cross-tenant data boundary.** Copying user ConfigMaps into the HCP namespace
-  moves the same data that already crosses the boundary today (as `mcoRawConfig`
-  inside the token Secret) one step earlier; it does not introduce a new class of
-  data to the boundary. Reviewers should confirm this equivalence.
+- **Cross-tenant data boundary.** The ignition system never reaches across
+  namespaces to pull in resources: the `IgnitionPayload` CR and the PayloadController
+  only ever read resources in their own HCP namespace (`pullSecret`,
+  `additionalTrustBundle`, and every `ConfigMapReference` resolve in-namespace), so no
+  privileged controller copies a resource across namespaces on a caller's behalf.
+  Making every input available in the HCP namespace is the **consumer's**
+  responsibility — the NodePool controller copies the user config ConfigMaps from the
+  clusters namespace into the HCP namespace. That copy moves the same data that already
+  crosses the boundary today (as `mcoRawConfig` inside the token Secret) one step
+  earlier; it does not introduce a new class of data to the boundary.
 - **Generator availability gap.** At a single generator replica, a pod loss
   creates a cold-start gap during which new rollouts and scale-up payload
   refreshes stall. *Mitigation:* run 2 replicas with leader election; standby
@@ -832,6 +877,27 @@ layered on top of the migration model without changing the core design.
   Policy A applies fleet-wide until then.
 - **Payload bytes in CRD status.** Rejected: it would cap payloads at the etcd
   object size and bloat every status read. Bytes live in the PayloadStore.
+- **Auth token in CRD status.** An earlier revision published the per-rollout token in
+  `status.current/previous.token` so consumers could read it directly. Rejected: the token
+  is a bearer capability for a pull-secret-bearing payload, and CRD status is readable by
+  principals that cannot read Secrets (e.g. `hypershift-readers`) and is captured by
+  custom-resource audit profiles — a privilege-escalation leak. The generator now authors
+  the userdata Secret and status carries only a non-secret `userDataSecretName`; the token
+  lives only in Secrets (see Node authentication and token handling).
+- **Possession-proof node authentication (mTLS) — future work.** The design authenticates
+  nodes with a signed, audience-bound, expiring bearer token (see Node authentication and
+  token handling); the stronger end state is possession-proof auth where only public material
+  lives in the CR/userdata and the credential is non-replayable, keeping the serving tier
+  stateless (verify against a static CA) and platform-portable. It is **blocked by Ignition
+  today**: the first-boot fetch can present only static headers, not a client certificate or a
+  computed/attested proof (coreos/ignition#1870). Unblocking needs either driving that upstream
+  or a thin **first-boot fetch agent** (a minimal baked Ignition stub that runs an agent which
+  performs the authenticated fetch and hands the payload to Ignition) — which also enables the
+  **two-step bootstrap** every strong system uses (bake a low-value, short-lived credential;
+  release the secret-grade payload only after a possession/identity check). Instance-identity
+  attestation (AWS IID / Azure IMDS) was rejected as a primary mechanism: it is not expressible
+  in static Ignition, not portable (None/agent/bare-metal have no metadata authority), and
+  proves "a legit instance," not "the authorized node."
 
 ## Open Questions [optional]
 
@@ -847,10 +913,10 @@ layered on top of the migration model without changing the core design.
 
 <!-- TODO: Complete once targeted at a release.
 Per dev-guide/feature-zero-to-hero.md and dev-guide/test-conventions.md, tests
-must be appropriately labeled. Because this is a HyperShift management-side
-change with no openshift/api feature gate, the standard
-`[OCPFeatureGate:FeatureName]` label does not apply; tests instead run in the
-HyperShift e2e suite. Include:
+must be appropriately labeled. Because this is gated by the HyperShift
+management-side `IgnitionPayloadSystem` feature gate (not an openshift/api guest
+feature gate), the standard `[OCPFeatureGate:FeatureName]` label does not apply;
+tests instead run in the HyperShift e2e suite with the gate enabled. Include:
 - `[Jira:"HyperShift"]` (or the appropriate component) so regressions are routed.
 - Suite/behavior labels as needed: `[Serial]`, `[Slow]`, `[Disruptive]`.
 Fill in the concrete cases below. -->
@@ -919,36 +985,53 @@ targeting a release. -->
 
 ## Upgrade / Downgrade Strategy
 
-Migration piggybacks on the mandatory N->N+1 OCP upgrade, which already rolls
-every worker node, so there is no extra rollout and no adoption shim:
+Migration is driven by the management-cluster `IgnitionPayloadSystem` feature gate
+(fleet-wide, default off — see Feature Gate), **not** by per-HostedCluster OCP upgrades.
+Enabling the gate on a management cluster must be a no-op for already-running nodes, so the
+design makes the flip fleet-safe through adoption rather than relying on a worker roll.
 
-1. **HostedCluster on old CPO (OCP <= N):** the HO sets
-   `DisableIgnitionServerAnnotation` on the HostedControlPlane; the old CPO stops
-   managing its ignition server component; the HO deploys the ignition server
-   with the HO image and uses the `IgnitionPayload` path.
-2. **HostedCluster upgraded to new CPO (OCP N+1):** the new CPO has no ignition
-   server code — nothing to disable. The HO is already deploying the server on
-   the same CRD path. The worker roll performed by the OCP upgrade carries nodes
-   onto the new path.
-3. **Fleet EOL:** once the oldest supported OCP has reached the cutover release
-   (~2-3 releases), the HO removes the frozen old token-Secret module and the
-   `DisableIgnitionServerAnnotation` handling.
+**Gate off (default).** The legacy ignition path is unchanged, byte-for-byte: the CPO
+ignition server runs and the NodePool controller uses the legacy token-Secret path. The new
+components are not deployed and the `IgnitionPayload` CRD is not installed.
 
-Because the cutover rides this worker roll — during which every node is replaced
-and comes up on the new system from new userdata — the old token Secrets are
-never read after a cluster flips and need no compatibility serving path.
+**Gate on.** The HO deploys the generator, server, and proxy from the HO image, and the
+NodePool controller creates an `IgnitionPayload` CR (and projects the config ConfigMaps) for
+every NodePool. Each HostedControlPlane then cuts over independently, driven forward-only by
+the existing `DisableIgnitionServerAnnotation`:
 
-No backports are required: old CPOs already recognize
-`DisableIgnitionServerAnnotation`, new CPOs simply lack the component, and the HO
-handles both. The old module is retained only to drain in-flight rollouts within
-the upgrade window and shares no code with the new path.
+1. **Pre-cutover.** The CR exists and the generator produces payloads, but CAPI still points
+   at the legacy userdata and the legacy CPO server still serves — nothing has moved.
+2. **Cutover.** Once the new `ignition-payload-server` component reports Available, the HO sets
+   `DisableIgnitionServerAnnotation` on the HostedControlPlane (after the HC->HCP mirror,
+   forward-only). That stands down the legacy CPO ignition server and proxy and switches the
+   NodePool consumer onto the `IgnitionPayload` path; the HO re-points `hc.Status.IgnitionEndpoint`
+   at the new proxy Route, and new nodes boot with the new server's node-facing CA.
+3. **Adoption (no roll).** For already-provisioned NodePools the consumer does **not** re-point
+   CAPI. It reads the live `Bootstrap.DataSecretName`, keeps CAPI on that existing userdata
+   Secret, and ensures its content is refreshed from the generator's canonical userdata (new
+   endpoint, CA, and token) — so `DataSecretName` is unchanged and **no roll occurs**. Existing
+   nodes (which never re-read userdata) are untouched; scale-up nodes get current content. The
+   pool is marked adopted; the next genuine config change rolls it onto the canonical
+   `<ignitionpayload-name>-<rolloutHash>` name. For InPlace NodePools, adoption must **not**
+   re-stamp the MachineSet `targetConfigVersion`, or HCCO would reboot every node. NodePools
+   with no automated machine management (Platform None, IBM UPI) get a CR served by the new
+   server but are skipped for CAPI/adoption (they have no Machines).
+4. **Fleet EOL.** Once the oldest supported OCP has reached the cutover release (~2-3 releases),
+   the HO removes the frozen legacy token-Secret module and the `DisableIgnitionServerAnnotation`
+   handling.
 
-**Downgrade.** HyperShift does not support downgrading a HostedCluster's control
-plane to an earlier OCP version, so there is no supported N+1 -> N rollback of the
-ignition path to design for. The migration is therefore forward-only: it rides
-the mandatory N->N+1 upgrade, and the frozen old token-Secret module is retained
-solely to drain in-flight rollouts within that upgrade window (not to enable a
-rollback) before it is deleted at fleet EOL.
+The OCP N->N+1 upgrade is orthogonal: it rolls nodes as it always has, and rolled nodes simply
+boot from the new path once their HostedControlPlane has cut over. The legacy token-Secret
+module is retained — frozen and sharing no code with the new path — only to drain in-flight
+rollouts during the coexistence window.
+
+**Downgrade.** The `IgnitionPayloadSystem` gate is a management-cluster TechPreview gate and
+cutover is forward-only (`DisableIgnitionServerAnnotation` is set, not cleared), so disabling
+the gate after a HostedControlPlane has cut over is not a supported rollback. HyperShift
+likewise does not support downgrading a HostedCluster's control plane to an earlier OCP
+version. The migration is therefore forward-only; the frozen legacy module exists solely to
+drain in-flight rollouts during the coexistence window (not to enable a rollback) before it is
+deleted at fleet EOL.
 
 ## Version Skew Strategy
 
@@ -1031,8 +1114,9 @@ rollback) before it is deleted at fleet EOL.
   `IgnitionReached` conditions; a `PayloadGenerated: False` with an error names
   the source ConfigMap that failed validation (provenance is preserved by
   per-ConfigMap projection). Nodes returning HTTP 511 on `GET /ignition`
-  indicate a token miss in the serving cache — check that the token in the
-  userdata Secret matches `status.current.token` and that the serving tier's
+  indicate a token miss in the serving cache — check that the MachineDeployment's bootstrap
+  Secret matches `status.current.userDataSecretName`, that the token baked into that userdata
+  Secret resolves to a live PayloadStore entry, and that the serving tier's
   cache has hydrated (informer lag metric / ignition-server logs). Generator
   logs (leader) show MCO-pipeline and store-write errors.
 - **Disabling the extension.** The `IgnitionPayload` CRD cannot be removed
