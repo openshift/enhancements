@@ -33,7 +33,7 @@ This enhancement adds operator-managed `NetworkPolicy` objects for the trust-man
 
 [cert-manager network policies](cert-manager-network-policies.md) secure the cert-manager controller, webhook, cainjector, and istio-csr. Those policies do not select trust-manager. Cert-manager operand policies match `app.kubernetes.io/instance: cert-manager` or `app: cert-manager` / `app: webhook`. Trust-manager pods are labeled `app: cert-manager-trust-manager` and `app.kubernetes.io/instance: cert-manager-trust-manager`.
 
-Without its own policies, a trust-manager pod has unrestricted ingress and egress. Trust-manager distributes CA bundles inside the cluster. It does not call external issuers, so the operator applies a fixed allow list for as long as the `TrustManager` object exists, the same way istio-csr does. Extra allows, including a metrics scrape from a namespace other than `openshift-user-workload-monitoring`, are a separate `NetworkPolicy` selecting the same pods. Allows combine. There is no user-defined egress list on `TrustManager`.
+Without its own policies, a trust-manager pod has unrestricted ingress and egress. Trust-manager distributes CA bundles inside the cluster. It does not call external issuers, so the operator applies a fixed allow list for as long as the `TrustManager` object exists, the same way istio-csr does. Extra allows, including a metrics scrape from a namespace other than `openshift-user-workload-monitoring`, are a separate `NetworkPolicy` selecting the same pods. Trust-manager needs egress only to the API server, so there is no need for a user-defined egress list on `TrustManager`.
 
 ### User Stories
 
@@ -59,7 +59,7 @@ Without its own policies, a trust-manager pod has unrestricted ingress and egres
 - These policies do not read or follow `CertManager.spec.defaultNetworkPolicy`. Enabling or disabling cert-manager operand policies has no effect on trust-manager policies.
 - No namespace-wide deny-all (`podSelector: {}`) in `cert-manager`.
 - No AdminNetworkPolicy.
-- No user-defined extra egress through the `TrustManager` API. An extra allow, including a metrics scrape from a namespace other than `openshift-user-workload-monitoring`, is a separate `NetworkPolicy`.
+- No ability to configure user-defined network policies through the `TrustManager` API.
 - No operator-namespace or OLM policies. Those remain in the cert-manager network policy enhancement.
 - No ACME or DNS-01 egress. That stays on the cert-manager controller.
 - No DNS allow rule. Steady-state trust-manager does not issue DNS queries.
@@ -90,7 +90,7 @@ No administrator action turns the policies on or off. Installing the trust-manag
 2. The operator deploys the trust-manager operand in the `cert-manager` namespace.
 3. The Trust Manager controller applies the four `NetworkPolicy` objects in that namespace. It does this whether or not `CertManager.spec.defaultNetworkPolicy` is set.
 4. Bundle create and update requests are admitted through the webhook on TCP 6443. The controller reconciles Bundles through the API on TCP 6443.
-5. If a user-workload-monitoring ServiceMonitor targets `trust-manager-metrics` port 9402, that scrape is allowed. The operator does not create that ServiceMonitor. A scrape from another namespace is an additional `NetworkPolicy` selecting `app: cert-manager-trust-manager`. Allows combine.
+5. If a user-workload-monitoring ServiceMonitor targets `trust-manager-metrics` port 9402, that scrape is allowed. The operator does not create that ServiceMonitor. Any additional ingress or egress needs a separate `NetworkPolicy` created by the administrator, selecting `app: cert-manager-trust-manager` and using a name other than the four reserved names. Examples include a metrics scrape from a namespace that does not match `openshift-user-workload-monitoring`, or egress to the API server on a port other than TCP 6443.
 6. If someone edits one of the four policies, the controller writes the desired spec back.
 7. Deleting the `TrustManager` resource does not delete the policies.
 
