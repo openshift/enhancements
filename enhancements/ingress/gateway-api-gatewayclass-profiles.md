@@ -15,7 +15,7 @@ approvers:
 api-approvers:
   - "@Miciah"
 creation-date: 2026-04-28
-last-updated: 2026-10-14
+last-updated: 2026-10-28
 status: provisional
 tracking-link:
   - https://redhat.atlassian.net/browse/NE-2698
@@ -337,15 +337,22 @@ spec:
     expression: object
   - name: hasOpenShiftPrefix
     expression: variables.gatewayClass.metadata.name.startsWith('openshift-')
-  - name: hasManagedProfileName
+  # Names users may create despite the openshift- prefix. openshift-default is
+  # the normal user-created class; openshift-ai-inference is created through
+  # the automated MaaS installation path.
+  - name: userCreatableNames
+    expression: "['openshift-default', 'openshift-ai-inference']"
+  - name: hasReservedName
     expression: >-
       variables.hasOpenShiftPrefix &&
-      variables.gatewayClass.metadata.name != 'openshift-default'
+      !(variables.gatewayClass.metadata.name in variables.userCreatableNames)
   validations:
   # Allow only the Ingress Operator service account to create a GatewayClass
-  # using a Managed Profile name. Users may create openshift-default.
+  # using a reserved name. Users may create openshift-default and
+  # openshift-ai-inference. The deny message deliberately names only
+  # openshift-default, so the MaaS exception is not advertised to users.
   - expression: >-
-      !variables.hasManagedProfileName ||
+      !variables.hasReservedName ||
       (has(request.userInfo.username) &&
       request.userInfo.username ==
       'system:serviceaccount:openshift-ingress-operator:ingress-operator')
@@ -359,7 +366,7 @@ spec:
   # kubeconfig credentials do not include the pod and node claims.
   # See https://redhat.atlassian.net/browse/CNTRLPLANE-710.
   - expression: >-
-      !variables.hasManagedProfileName ||
+      !variables.hasReservedName ||
       (has(request.userInfo.extra) &&
       'authentication.kubernetes.io/node-name' in request.userInfo.extra &&
       'authentication.kubernetes.io/pod-name' in request.userInfo.extra)
