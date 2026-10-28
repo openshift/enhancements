@@ -172,7 +172,7 @@ CAPI Operator does not run on these configurations, so this does not apply there
 
 #### OpenShift Kubernetes Engine
 
-TBD.
+As with standalone clusters, the CAPI Operator runs on OKE, so this feature applies to this configuration.
 
 ### Implementation Details/Notes/Constraints
 
