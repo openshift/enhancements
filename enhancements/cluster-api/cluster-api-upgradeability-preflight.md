@@ -229,13 +229,18 @@ This introduces a continuously running controller, transient extraction pods, a 
 
 ## Test Plan
 
-- **End-to-end (controlled update service advertising an N+1 payload):**
-  - We think this is possible but currently are still defining it. We want an e2e test
-    that validates an upgrade against a real target release payload image. The e2e will
-    create an `Upgradeable` condition, initially `=true`, modify cluster state so it
-    becomes `=False`, and then verify it returns to `=true`. On `main`, the target release
-    image will identically match the current one. For future releases, stable branch e2es
-    will run against X.Y+1 nightly.
+This will be tested by a new set of tests which run by default in the serial suite, ensuring wide coverage. The test will create a fake cincinnati server exposing a single Y+1 update using the value of $OPENSHIFT_UPGRADE_RELEASE_IMAGE_OVERRIDE. It will wait for Upgradeable=True because a fresh install must always be compatible with release:next before doing one of the following:
+
+  - If Cluster CRD is not currently present (upgrade to initial release containing CAPI)
+    - Add it and wait for Upgradeable=False
+    - Add it to unmanaged and wait for Upgradeable=True
+    - Modify it and wait for upgradeable=False
+    - Modify it back and wait for Upgradeable=True
+
+  - If Cluster CRD is current present (upgrade from CAPI release to subsequent CAPI release):
+    - TBD - We should be prevented from making incompatible changes here, so this could be hard to test.
+
+We unregistery and clean up the fake cincinnati server, but note that this does still leave the cluster in a dirty state because we will have added a value to unmanagedCRDs, and it is not permitted to remove these. Given that this should not impact any other test it should be safe in practice to run this in serial. However, if we have time I would consider a change to CAPI operator which would permit a CRD to be removed from unmanagedCRDs if it is *identical* to the managed version. This may also be a useful break-glass mechanism for when somebody inevitably regrets a change on their production cluster.
 
 ## Graduation Criteria
 
