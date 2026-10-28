@@ -121,11 +121,13 @@ The **CVO and upgrade clients** (`oc adm upgrade`, console) are unchanged.
 6. With no relevant conflicts, it reports `Upgradeable=True` for the recorded target. Otherwise it reports `Upgradeable=False`, identifying the CRD, the target, and the failing requirement.
 7. The administrator follows the normal upgrade workflow. In N+1, the CAPI installer begins managing the applicable operands, leaving declared unmanaged CRDs externally managed.
 
-#### Conflict remediation
+#### Compatibility criteria
 
-A conflict can arise in one of the two following situations:
-- A CRD that exists in release N, that is not listed in `ClusterAPI/cluster.spec.unmanagedCustomResourceDefinitions` and it is not owned by the CAPI Installer.
-- A CRD that exists in release N, that is listed in `ClusterAPI/cluster.spec.unmanagedCustomResourceDefinitions` but that is not compatible with release N+1's new CRD definition.
+The upgradeable controller will verify, for each CRD it processes, the following compatibility criteria:
+- A CRD that exists in release N, should be owned by the CAPI Installer or listed in `ClusterAPI/cluster.spec.unmanagedCustomResourceDefinitions`.
+- A CRD that exists in release N, should be compatible with release N+1's new CRD definition even if listed in `ClusterAPI/cluster.spec.unmanagedCustomResourceDefinitions`. What "compatibility" means is defined in the [`crd-compatibility-checker`](https://github.com/openshift/enhancements/blob/master/enhancements/cluster-api/crd-compatibility-checker.md) enhancement 
+
+A conflict can arise if any of the above criteria is not fulfilled.
 
 To resolve such conflicts a cluster administrator must ensure that any CRD that would be installed by Release N+1 is either already owned by the CAPI Installer or is unmanaged (listed in the `ClusterAPI/cluster.spec.unmanagedCustomResourceDefinitions`) and already compatible with the Release N+1.
 
