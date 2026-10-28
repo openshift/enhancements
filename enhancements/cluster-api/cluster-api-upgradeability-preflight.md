@@ -129,6 +129,7 @@ The upgradeable controller will verify, for each CRD it processes, the following
 
 A conflict can arise if any of the above criteria is not fulfilled.
 
+#### Conflict remediation
 To resolve such conflicts a cluster administrator must ensure that any CRD that would be installed by Release N+1 is either already owned by the CAPI Installer or is unmanaged (listed in the `ClusterAPI/cluster.spec.unmanagedCustomResourceDefinitions`) and already compatible with the Release N+1.
 
 The message associated with the `Upgradeable=False` condition will detail all the conflicts and suggests remediations that the admin will need to perform.
