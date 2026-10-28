@@ -124,6 +124,7 @@ All changes are additive and non-breaking. New spec and status fields are gated 
 // to form the zone domain name.
 // Delegation (ACME CNAME + NS records) is configured separately via the
 // delegation field.
+// +kubebuilder:validation:XValidation:rule="has(oldSelf.delegation) == has(self.delegation)",message="delegation cannot be added or removed after creation"
 type AWSManagedDNSSpec struct {
     // ingressDomainPrefix is the subdomain prefix for the managed ingress DNS zones.
     // The zone is created as {ingressDomainPrefix}.{clusterBaseDomain}, where
@@ -147,7 +148,9 @@ type AWSManagedDNSSpec struct {
     // public ingress zone and handles NS delegation based on the nsDelegationMode.
     // When absent, only zones are created and the consuming platform handles
     // delegation and certificate management.
+    // delegation can only be set at cluster creation and is immutable.
     // +optional
+    // +kubebuilder:validation:XValidation:rule="self == oldSelf",message="delegation is immutable"
     Delegation AWSManagedDNSDelegationSpec `json:"delegation,omitzero"`
 }
 
@@ -193,7 +196,7 @@ type AWSPlatformSpec struct {
 }
 ```
 
-`managedDNS` can only be set at creation, and `ingressDomainPrefix` cannot be changed, because moving a cluster's ingress zones requires a DNS migration that is not implemented. `delegation` can be changed after creation.
+`managedDNS` can only be set at creation, and `ingressDomainPrefix` cannot be changed, because moving a cluster's ingress zones requires a DNS migration that is not implemented. `delegation` can only be set at creation.
 
 **New status type** in `api/hypershift/v1beta1/aws.go`:
 
@@ -238,10 +241,19 @@ type AWSDNSZoneStatus struct {
 }
 ```
 
-**Interaction with `DNSSpec` zone IDs:**
+**Mutual exclusivity with `DNSSpec` zone IDs:**
 
-`managedDNS` and the existing `DNSSpec.publicZoneID` / `DNSSpec.privateZoneID` fields both feed into the guest cluster's `dns.config.PublicZone` / `PrivateZone`. There is no admission-time exclusivity between them.
-Instead, the managed zones take precedence: the HCCO first applies any zone IDs from `spec.dns`, then overrides each zone type with the managed zone recorded in `hcp.Status.Platform.AWS.DNSZones`. For shared VPC clusters, no private ingress zone is recorded, so `spec.dns.privateZoneID` (the VPC owner's zone) continues to supply `dns.config.PrivateZone`.
+`managedDNS` and the existing `DNSSpec.publicZoneID` / `DNSSpec.privateZoneID` fields both feed into the guest cluster's `dns.config.PublicZone` / `PrivateZone`. When `managedDNS` is set, the CPO creates the ingress zones and overrides `dns.config` with the managed zone IDs, making any user-provided zone IDs for the same purpose redundant. The following CEL rules enforce mutual exclusivity at admission time:
+
+- `managedDNS` is always mutually exclusive with `publicZoneID`: the CPO always creates the public ingress zone when `managedDNS` is set (including shared VPC).
+- `managedDNS` without `SharedVPC` is mutually exclusive with `privateZoneID`: the CPO creates the private ingress zone for standard clusters.
+- `managedDNS` with `SharedVPC` allows `privateZoneID`: the VPC owner pre-creates the private ingress zone and provides the zone ID via `privateZoneID`. The CPO only manages the public zone.
+
+```go
+// On HostedClusterSpec (cross-field validation):
+// +openshift:validation:FeatureGateAwareXValidation:featureGate=AWSManagedDNS,rule="!self.platform.?aws.?managedDNS.hasValue() || self.dns.?publicZoneID.orValue('') == ''",message="publicZoneID and managedDNS are mutually exclusive: managedDNS creates the public ingress zone"
+// +openshift:validation:FeatureGateAwareXValidation:featureGate=AWSManagedDNS,rule="!self.platform.?aws.?managedDNS.hasValue() || self.platform.?aws.?sharedVPC.hasValue() || self.dns.?privateZoneID.orValue('') == ''",message="privateZoneID and managedDNS are mutually exclusive for non-shared-VPC clusters: managedDNS creates the private ingress zone"
+```
 
 The `.hypershift.local` zone has no conflict: `SharedVPC.LocalZoneID` is always required when SharedVPC is set (regardless of `managedDNS`), and without SharedVPC the PrivateLink controller auto-creates the local zone with no user-provided zone ID to conflict with.
 
@@ -472,7 +484,9 @@ No action required. The new spec and status fields are additive — old controll
 
 If a cluster was created with managed DNS and the CPO is downgraded to a version without this feature, the zones will persist in the customer's Route53 account but will no longer be reconciled. The zones remain functional (DNS records still resolve), but will not be cleaned up on cluster deletion. Manual cleanup using the predictable zone naming pattern (`{ingressDomainPrefix}.{baseDomainPrefix}.{baseDomain}`) would be needed.
 
-The status fields populated by the new CPO will be ignored by the old CPO and the old hypershift-operator, and are pruned on the next write if the old CRD schema does not include them. The `managedDNS` spec field will be stripped from the stored object on any subsequent update (including unrelated field changes) if the old CRD schema does not include the field, because Kubernetes validates and prunes unknown fields on write. The zones remain functional in Route53, but the CPO configuration is effectively lost from the Kubernetes object. Because `managedDNS` can only be set at creation, it cannot be re-applied after re-upgrading, and the zones must be cleaned up manually.
+The status fields populated by the new CPO will be ignored by the old CPO and the old hypershift-operator, and are pruned on the next write if the old CRD schema does not include them. The `managedDNS` spec field is likewise stripped from the stored object on any subsequent write (including unrelated field changes). The same applies when the hypershift-operator is reinstalled without the `TechPreviewNoUpgrade` feature set, since the CRD schema then no longer includes the gated `managedDNS` field.
+
+Once `managedDNS` is pruned, the running cluster falls back to the non-managed behavior: the default ingress domain reverts to `apps.{baseDomainPrefix}.{baseDomain}`, which changes the ingress configuration, the ingress certificates and the OpenShift API server routing subdomain; the HCCO stops pointing `dns.config` at the managed zones; and neither the ingress zones nor the `.hypershift.local` zone are deleted with the cluster. Because `managedDNS` can only be set at creation, it cannot be re-applied, so the cluster must be recreated to use managed DNS again and the zones must be cleaned up manually.
 
 ## Version Skew Strategy
 
