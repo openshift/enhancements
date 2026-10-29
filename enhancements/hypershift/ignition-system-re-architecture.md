@@ -116,8 +116,9 @@ bootstrapping:
   change is required; moving it to the PayloadStore is a later, release-tied
   step.
 - Reducing raw line count. The value here is architectural clarity, horizontal
-  scaling, and observability; net lines rise during the coexistence window and
-  fall only after the frozen old module is deleted at end-of-life (EOL).
+  scaling, and observability; the legacy ignition server is deleted from the CPO at
+  GA (older release branches keep it, as usual), so net lines on `main` fall once that
+  deletion lands rather than lingering behind a long coexistence window.
 
 ## Proposal
 
@@ -146,7 +147,8 @@ consumer's inputs in `spec` and the generator's results in `status`. Around it:
 The change deliberately lands as one unit: the cross-pod `PayloadStore` and the
 two-Deployment split are the shared foundation regardless, a CPO-only phase
 would build on top of the token-Secret coordination this redesign exists to
-remove, and the migration rides a mandatory N->N+1 upgrade window either way.
+remove, and activation is bound to the OCP upgrade to 5.1 either way (see
+Upgrade / Downgrade Strategy).
 
 ### Workflow Description
 
@@ -574,36 +576,39 @@ conversion, or mutation webhooks, nor an aggregated API server.
 
 ### Feature Gate
 
-The whole re-architecture is gated behind a single **management-cluster** feature
-gate, `IgnitionPayloadSystem`, enabled for `TechPreviewNoUpgrade` and **off by
-default**. The gate is a HyperShift management
-feature gate (configured on the management cluster / HyperShift operator), not a
-hosted-cluster feature gate, and it is **fleet-wide**: there is no per-HostedCluster
-opt-in. This matches how the HyperShift operator deploys the split
-ignition-payload-controller + ignition-payload-server (and proxy) from the operator
-image, and how the NodePool controller selects the IgnitionPayload path instead of
-the legacy ignition-server — both are all-or-nothing for the management cluster.
+Activation is **version-scoped**: the new system is the ignition path for
+HostedControlPlanes at **OCP >= 5.1**. For HostedControlPlanes at an earlier version the
+legacy CPO ignition server remains, unchanged, in that release's CPO. There is no
+management-cluster switch that moves a *running* cluster between the two systems — the
+transition is bound to the control-plane version, so a cluster reaches the new system only
+by being **created** at 5.1+ or **upgraded** to 5.1+ (see Upgrade / Downgrade Strategy).
+This is HyperShift's standard way of shipping version-dependent control-plane behavior:
+branch on the control-plane release version, which the HO already knows per HostedCluster.
 
-The gate controls two things in lockstep:
+Because the ignition server is **removed from the CPO** as of 5.1, the new system is the
+*only* ignition path for 5.1+ — it is not optional there. The **`IgnitionPayloadSystem`**
+management feature gate therefore plays a reduced role compared with a classic fleet-flip
+gate: it is a **development / Tech Preview guard**, not a migration driver.
 
-- **Behavior:** when the gate is off, the operator deploys the legacy ignition
-  server and the NodePool controller uses the legacy token-Secret path unchanged;
-  when it is on, it deploys the split controller/server and the NodePool controller
-  consumes `IgnitionPayload`. Flipping the gate is intended to be a no-op for
-  already-running clusters (Policy A — see Version Skew Strategy); it does not by
-  itself roll the fleet. The gate is the only switch for the consumer path and the
-  new-component deploy; standing down the *legacy* CPO ignition server is a separate,
-  per-HostedControlPlane step the HO drives via `DisableIgnitionServerAnnotation` (see
-  Upgrade / Downgrade Strategy).
+- **During Tech Preview** the gate is **off by default** and guards the new CRD and
+  components. Because the feature is pre-GA the legacy ignition server still ships in the 5.1
+  CPO, so enabling the gate on a (non-production) Tech Preview cluster activates the new system
+  and stands the legacy server down for that HostedControlPlane. This standdown is a
+  **temporary Tech Preview-only measure** — there is no production 5.1 fleet to protect yet —
+  and it is deleted at GA; it is deliberately not the load-bearing part of the design.
+- **At GA** the gate's default flips on and the legacy ignition server is **deleted from the
+  CPO**, so from then on there is nothing to stand down — the version branch alone selects the
+  system (`< 5.1` legacy, `5.1+` new). Because 5.1 is unreleased, this flips **no running
+  production cluster** onto the new system — only new or upgraded-to-5.1 clusters reach it,
+  which is exactly the property that keeps the GA steady state safe without a fleet-wide cutover.
 - **CRD installation:** the `IgnitionPayload` CRD is born gated via the
   `+openshift:enable:FeatureGate=IgnitionPayloadSystem` marker and the openshift/api
   CRD feature-set machinery, so it is rendered and installed **only** under the
   `TechPreviewNoUpgrade` feature set (the only feature-set variant the HyperShift
-  installer selects). There is no `-Default` variant of the CRD while the feature is in
-  Tech Preview.
+  installer selects) until GA graduates it to the default feature set.
 
-Promotion to GA flips the gate's default on (and graduates the CRD to the default
-feature set), gated on the Tech Preview -> GA criteria below.
+The gate is a HyperShift **management** feature gate (configured on the management cluster /
+HyperShift operator), not a hosted-cluster feature gate.
 
 ### Topology Considerations
 
@@ -616,8 +621,8 @@ running in the HCP namespace (the PayloadController, ignition-server, and proxy
 Deployments). The move of the ignition server from the CPO image to the HO
 image changes which binary hosts these components and keeps the *shape* of the
 per-HostedCluster serving topology (Route + Service + proxy) the same, though resource
-names, the endpoint host, and the node-facing CA change on cutover. The guest cluster is
-unaffected except
+names, the endpoint host, and the node-facing CA change on the upgrade to 5.1. The guest
+cluster is unaffected except
 that the in-place upgrade channel (HCCO `InPlaceUpgrader`) continues to read a
 byte-compatible legacy token Secret, so no guest-side change is required.
 
@@ -834,18 +839,18 @@ level-triggered and idempotent: if either write fails the reconcile requeues and
 re-point until the legacy Secret and the annotation both exist. No HCCO change is required —
 the guest side keeps reading the same Secret shape it reads today.
 
-**Feature gating.** The whole re-architecture is gated behind the management-cluster
-`IgnitionPayloadSystem` feature gate (fleet-wide, enabled for TechPreviewNoUpgrade,
-off by default) — see the [Feature Gate](#feature-gate) section. It
+**Feature gating.** Activation is version-scoped to OCP >= 5.1 and, during Tech Preview,
+guarded by the management-cluster `IgnitionPayloadSystem` feature gate (enabled for
+TechPreviewNoUpgrade, off by default) — see the [Feature Gate](#feature-gate) section. It
 is a HyperShift management feature gate (configured on the HyperShift operator), not
 an openshift/api guest feature set, and the `IgnitionPayload` CRD is born gated behind
 the same gate via the openshift/api CRD feature-set machinery, so it installs only
-under TechPreviewNoUpgrade. The old token-Secret path is retained as
-a gate-selected path through the coexistence window (coexisting with the new path behind
-the gate rather than as a fully independent module), and the migration model
-(see [Upgrade / Downgrade Strategy](#upgrade--downgrade-strategy)) rides the mandatory
-N->N+1 upgrade. Promotion to GA flips the gate's default on and graduates the CRD to
-the default feature set.
+under TechPreviewNoUpgrade until GA. The legacy ignition server stays in the CPO only while
+the gate is off during Tech Preview (the gate-off fallback on 5.1); it is deleted from the
+CPO at GA. The migration model (see
+[Upgrade / Downgrade Strategy](#upgrade--downgrade-strategy)) is bound to the OCP upgrade to
+5.1, not to a fleet-wide gate flip. Promotion to GA flips the gate's default on and graduates
+the CRD to the default feature set.
 
 ### Risks and Mitigations
 
@@ -886,9 +891,10 @@ the default feature set.
 
 ### Drawbacks
 
-- **Net LOC rises during the coexistence window.** The frozen old token-Secret
-  module is retained until fleet EOL, so the line-count benefit only materializes
-  after cleanup — and the value proposition is architectural, not LOC.
+- **Net LOC and the GA commitment.** The value proposition is architectural, not
+  LOC. Because the legacy ignition server is deleted from the CPO at GA, the new
+  system is the *only* ignition path for 5.1+ and must be GA-quality by 5.1 GA —
+  there is no perpetual gate-off fallback on 5.1.
 - **More objects to manage.** Per-ConfigMap projection means N ConfigMaps to
   sync, watch, and garbage-collect per consumer instead of one bundle (though GC
   is automatic via owner references and the ref lists are self-describing).
@@ -897,9 +903,10 @@ the default feature set.
 - **More pods per HCP.** Two Deployments (2 + 3 replicas) plus the proxy
   increase the per-HostedCluster pod count relative to today's single ignition
   server Deployment.
-- **Coexistence complexity.** The migration introduces a branch point and a
-  retained legacy path (gate-branched, not fully isolated) that must keep compiling
-  until EOL.
+- **Version-branch, not coexistence.** The old and new systems never run in one
+  CPO build: `< 5.1` releases keep the legacy server, `5.1+` has only the new one.
+  The cost is instead the GA commitment above (no gate-off fallback on 5.1) plus a
+  one-time per-pool adoption at the upgrade to 5.1.
 
 ## Alternatives (Not Implemented)
 
@@ -957,12 +964,6 @@ the default feature set.
    should `DatabaseBackedStore` use, and when does v2 land relative to v1?
 3. **Proxy retirement in v2.** Under what exact conditions does security sign off
    on retiring the HAProxy proxy Deployment once the serving tier is KAS-free?
-4. **In-flight instances at cutover.** An instance whose userdata (endpoint, CA, token)
-   was baked by the legacy server just before cutover, but that first boots just after the
-   legacy server is stood down, would fetch a now-dead endpoint with the wrong node-facing
-   CA. Should the legacy ignition server/Route keep serving through a bounded drain window
-   after cutover, or are such pre-cutover in-flight instances expected to fail and be
-   replaced? (See [Upgrade / Downgrade Strategy](#upgrade--downgrade-strategy).)
 
 ## Test Plan
 
@@ -993,7 +994,8 @@ The general strategy:
   config version at any replica count).
 - **e2e tests**: node provisioning through `GET /ignition`, a rollout-triggering
   config change, a management-side change that must *not* roll the fleet, and
-  the N->N+1 migration cutover (see Upgrade/Downgrade).
+  the upgrade-to-5.1 transition — adoption (no roll) plus in-flight Machine
+  recreation (see Upgrade/Downgrade).
 - **Managed-service coverage**: exercise scale-out of the serving tier under
   concurrent node provisioning to confirm no registry/KAS amplification.
 
@@ -1023,8 +1025,8 @@ targeting a release. -->
 
 ### Tech Preview -> GA
 
-- Upgrade and scale testing, including the N->N+1 migration cutover
-  and the frozen-old-module coexistence path.
+- Upgrade and scale testing, including the upgrade-to-5.1 transition (adoption
+  and in-flight Machine recreation) and the deletion of the legacy CPO server at GA.
 - The `IgnitionPayloadSystem` gate's default flipped on and the `IgnitionPayload`
   CRD graduated to the default feature set; migration validated across supported
   platforms (including AWS and KubeVirt userdata GC behavior).
@@ -1034,94 +1036,126 @@ targeting a release. -->
 
 ### Removing a deprecated feature
 
-- Announce and remove the frozen old token-Secret module and the HO's
-  legacy-standdown use of `DisableIgnitionServerAnnotation` once the oldest supported
-  OCP has reached the cutover release. The user-facing disable-ignition semantics of
-  the annotation remain (now disabling the new stack).
+- The legacy ignition server is removed from the CPO at GA (version-branched; older
+  release branches retain it until they age out of support), so no separate deprecation
+  step is needed for it. The byte-compatible token Secret the consumer writes for HCCO
+  InPlace is removed only once HCCO's in-place path is migrated off it — a later,
+  release-tied step (see Non-Goals). The user-facing `DisableIgnitionServerAnnotation`
+  disable-ignition semantics remain.
 
 ## Upgrade / Downgrade Strategy
 
-Migration is driven by the management-cluster `IgnitionPayloadSystem` feature gate
-(fleet-wide, default off — see Feature Gate), **not** by per-HostedCluster OCP upgrades.
-Enabling the gate on a management cluster must be a no-op for already-running nodes, so the
-design makes the flip fleet-safe through adoption rather than relying on a worker roll.
+Activation is bound to the **control-plane version**, not to a fleet-wide gate flip (see
+Feature Gate). A cluster reaches the new system in exactly two ways:
 
-**Gate off (default).** The legacy ignition path is unchanged, byte-for-byte: the CPO
-ignition server runs and the NodePool controller uses the legacy token-Secret path. The new
-components are not deployed and the `IgnitionPayload` CRD is not installed.
+- **Created at 5.1+** — born on the new system; no migration.
+- **Upgraded to 5.1+** — the control plane moves to a 5.1 CPO that no longer contains the
+  ignition server, and the HO takes over ignition for that HostedControlPlane.
 
-**Gate on.** When the gate is on *and* the user has not disabled ignition on the
-HostedCluster, the HO deploys the generator, server, and proxy from the HO image, and the
-NodePool controller — now on the gate-selected consumer path — creates an `IgnitionPayload`
-CR (and projects the config ConfigMaps) for every NodePool. The **gate**, not any annotation,
-selects the new consumer path and the new-component deploy; `DisableIgnitionServerAnnotation`
-does one narrower job, standing down the *legacy* CPO ignition server and proxy per
-HostedControlPlane. Because the HO must own that standdown signal, the annotation is **removed
-from the HC->HCP annotation mirror** and written directly on the HostedControlPlane by the HO,
-which reconciles it to `(user disabled ignition on the HostedCluster) OR (this
-HostedControlPlane has cut over)` in both gate states — preserving today's user-driven disable
-when the gate is off. The new components never key off this HCP annotation (if they did, the
-HO's own standdown would tear them down); they are gated on the HO deploy decision above.
+There is no third path: a HO upgrade alone never moves a running `< 5.1` cluster onto the new
+system. That is what removes the hard part — there is no gate flip over a live, mixed-version
+fleet to make safe.
 
-Each HostedControlPlane then cuts over independently, forward-only:
+### Serving continuity across the CPO->HO move (upgrade to 5.1)
 
-1. **Pre-cutover.** The CR exists and the generator produces payloads, but CAPI still points
-   at the legacy userdata and the legacy CPO server still serves — nothing has moved.
-2. **Adoption (no roll) — before standdown.** Once the new `ignition-payload-server` reports
-   Available, the HO re-points `hc.Status.IgnitionEndpoint` at the new proxy Route (with the
-   new node-facing CA). For each already-provisioned NodePool the consumer does **not** re-point
-   CAPI: it reads the live `Bootstrap.DataSecretName`, keeps CAPI on that existing userdata
-   Secret, and refreshes its *content* from the generator's canonical userdata (new endpoint,
-   CA, token) in place — so `DataSecretName` is unchanged and **no roll occurs**. Existing nodes
-   (which never re-read userdata) are untouched; scale-up nodes get current content, and the
-   legacy server stays up as a safety net for a scale-up whose pool has not been adopted yet.
-   For InPlace NodePools, adoption must **not** re-stamp the MachineSet `targetConfigVersion`,
-   or HCCO would reboot the pool's nodes. The pool is marked adopted; the next genuine config
-   change rolls it onto the canonical `<ignitionpayload-name>-<rolloutHash>` name.
-3. **Legacy standdown.** Only after every pool on the HostedControlPlane has been adopted does
-   the HO set `DisableIgnitionServerAnnotation` on the HostedControlPlane, standing down the
-   legacy CPO ignition server and proxy. Ordering matters: standing down before adoption would
-   leave a scale-up in the gap booting stale userdata (old endpoint/CA) against a server that
-   is already gone. (Instances already *created* by CAPI but not yet booted at cutover are the
-   subject of the in-flight open question.)
-4. **Fleet EOL.** Once the oldest supported OCP has reached the cutover release (~2-3 releases),
-   the HO removes the frozen legacy token-Secret module and its direct
-   `DisableIgnitionServerAnnotation` handling.
+When a control plane upgrades to 5.1, the 5.1 CPO drops the ignition server and the HO's new
+system takes over. The new system brings its **own** ignition Route/Service, node-facing CA, and
+token model — it does **not** need to reuse the old endpoint, CA, or token, because a node
+consumes ignition exactly once at first boot and never contacts the server again. So the only
+population that cares about the endpoint/CA/token is **first-booting** nodes:
 
-**Other consumers at cutover.** Karpenter takes its ignition endpoint from
-`hc.Status.IgnitionEndpoint`, so the re-point reaches new just-in-time nodes automatically; it
-runs no coordinated adoption (it has no stable `DataSecretName` to refresh), so existing
-Karpenter nodes are replaced by its own lifecycle and only in-flight instances fall under the
-open question. The Agent platform carries both the ignition endpoint and the node-facing CA in
-`AgentCluster.Spec.IgnitionEndpoint`; cutover updates both, already-booted agents are untouched,
-and new agents fetch from the new endpoint/CA. NodePools with no automated machine management
-(Platform None, IBM UPI) get a CR served by the new server but are skipped for CAPI/adoption
-(they have no Machines).
+- **Already-joined nodes** — booted, running workloads; never re-fetch. Indifferent to the move.
+- **Future scale-ups** — read whatever userdata is current when CAPI creates them.
+- **In-flight (created, not-yet-joined)** — an instance with old userdata baked in, kubelet not
+  registered, **no Node and no workloads**.
 
-The OCP N->N+1 upgrade is orthogonal: it rolls nodes as it always has, and rolled nodes simply
-boot from the new path once their HostedControlPlane has cut over. The legacy token-Secret
-module is retained — gate-selected and coexisting with the new path (their shared
-NodePool-controller wiring is branched on the gate, not fully isolated) — only to drain
-in-flight rollouts during the coexistence window.
+The first two are handled by adoption, the third by recreation (both below). The HO brings the
+new system up as part of the 5.1 transition, and a node whose fetch lands in any residual handoff
+gap simply retries — a missing payload returns HTTP 511, which Ignition backs off and retries.
 
-**Downgrade.** The `IgnitionPayloadSystem` gate is a management-cluster TechPreview gate and
-cutover is forward-only (the HO owns the HCP `DisableIgnitionServerAnnotation` and keeps it set
-once a HostedControlPlane has cut over), so disabling the gate after a HostedControlPlane has
-cut over is not a supported rollback. HyperShift
-likewise does not support downgrading a HostedCluster's control plane to an earlier OCP
-version. The migration is therefore forward-only; the frozen legacy module exists solely to
-drain in-flight rollouts during the coexistence window (not to enable a rollback) before it is
-deleted at fleet EOL.
+### Adoption (no roll) and the deployed-generation baseline
+
+For each existing NodePool the consumer decides **refresh in place** vs **re-point CAPI** from a
+dedicated per-pool annotation recording the IgnitionPayload `rolloutGeneration` its current nodes
+are on (`hypershift.openshift.io/ignition-payload-deployed-generation`):
+
+1. **No baseline yet (first encounter) → adopt, no roll.** Copy the generator's canonical
+   userdata *content* (`status.current.userDataSecretName`) into the pool's current
+   `Bootstrap.DataSecretName` (the legacy-named secret CAPI already references), do **not**
+   re-point, record `baseline = status.current.rolloutGeneration`, and run the in-flight sweep
+   (below). No roll — *by construction*, with no hash comparison, so a difference between the
+   legacy and the new rollout-hash formulae cannot trigger a spurious fleet roll.
+2. **Baseline set and `status.current.rolloutGeneration` > baseline → genuine rollout →
+   re-point.** Set `DataSecretName = status.current.userDataSecretName` (the canonical
+   `<ignitionpayload-name>-<rolloutHash>` name) and bump the baseline; CAPI rolls. The pool is now
+   on canonical naming and adoption is over for it.
+3. **Baseline set and generation == baseline → steady.** Keep the current secret's content synced
+   to the generator's userdata (token re-issue on the timer, management-side refresh); no
+   re-point, no roll.
+
+Adoption is a **one-time baseline, not a hash comparison** — the same "absorb into the baseline on
+migration" pattern the NodePool controller already uses (`token.go` `isOutdated()`) and the
+`rolloutHashVersion` rebaseline philosophy. Accepted limitation (identical to that rebaseline): a
+genuine config change landing coincident with the first adoption reconcile is absorbed into the
+baseline and rolls on the *next* change instead — rare and self-correcting.
+
+### In-flight Machines
+
+The only node the endpoint/CA/token change can strand is one **created before adoption refreshed
+the userdata** that has not yet joined. Since it has no Node and no workloads, the consumer
+**deletes** it and lets CAPI recreate it off the refreshed userdata. Detection is bounded and
+cannot loop: delete Machines where `status.nodeRef == nil` **and** `creationTimestamp <` the
+pool's userdata-refresh time — a candidate set fixed at refresh time that only shrinks, so
+Machines created afterward (new token) are never candidates. This is a one-shot action tied to the
+adoption reconcile; outside it there is no sweep. A `MachineHealthCheck` (autoRepair pools only)
+is a secondary backstop via `nodeStartupTimeout`, not the primary mechanism — non-autoRepair pools
+would otherwise leak a stuck Machine holding a replica slot.
+
+### Platform coverage
+
+- **Replace** NodePools — adoption + in-flight sweep as above.
+- **InPlace** NodePools — unaffected by the serving move: HCCO's `InPlaceUpgrader` reads the token
+  Secret **directly** (no HTTP fetch) and its nodes are already joined. The consumer keeps writing
+  the byte-compatible token Secret HCCO expects (see Legacy in-place-upgrade compatibility);
+  adoption must **not** re-stamp the MachineSet `targetConfigVersion`, or HCCO would reboot the
+  pool's nodes.
+- **Karpenter** — does its own adoption; see below.
+- **Agent** — the endpoint and node-facing CA in `AgentCluster.Spec.IgnitionEndpoint` are updated
+  to the new system; already-booted agents are untouched, new agents fetch from the new
+  endpoint/CA, and not-yet-joined agents are recreated.
+- **Platform None / IBM UPI** — no Machine objects to sweep. Already-booted nodes are unaffected;
+  a node manually provisioned during the upgrade with stale userdata would fail ignition, so the
+  operator must (re)provision with current userdata — a documented manual caveat, not engineering.
+
+### Karpenter adoption (high level)
+
+Karpenter is a second consumer and follows the same shape as the NodePool controller, adapted to
+its just-in-time model. On its first reconcile of a 5.1+ HostedCluster it creates/reads its
+`IgnitionPayload` CR, then for its existing instances does the same **refresh-in-place** adoption:
+it syncs the generator's current userdata (new endpoint/CA/token) into the launch
+template / userdata its instances reference, records the same deployed-generation baseline, and
+lets subsequent `status.current.rolloutGeneration` advances drive new-node content. It runs no
+coordinated rollout, so it never re-points existing nodes — it relies on its own node lifecycle to
+replace them. In-flight handling is identical in spirit: a just-provisioned, not-yet-registered
+instance carrying stale userdata is **deleted** (its NodeClaim removed) and re-provisioned off the
+refreshed userdata. The concrete Karpenter integration is out of scope here beyond this contract.
+
+### Downgrade
+
+Forward-only. HyperShift does not support downgrading a HostedCluster's control plane to an
+earlier OCP version, so a 5.1+ control plane never returns to the legacy system. There is no
+legacy ignition-server code in the new path to "fall back" to: the `< 5.1` server lives only in
+older releases' CPO, reached only by clusters that never upgraded.
 
 ## Version Skew Strategy
 
 - **HO/CPO skew is intrinsic to HyperShift** — the HO spans multiple OCP
-  versions at once. The redesign turns today's intra-system, four-actor
-  entanglement into two independent modules: the fleet-wide `IgnitionPayloadSystem`
-  gate selects the HO-side consumer path and new-component deploy, while the
-  per-HostedControlPlane `DisableIgnitionServerAnnotation` (HO-owned, no longer mirrored
-  from the HostedCluster) stands down the legacy CPO server once a HostedControlPlane has
-  cut over — the standard way HyperShift ships breaking CPO/HO changes.
+  versions at once. The redesign selects the system by **control-plane version**:
+  `< 5.1` HostedControlPlanes keep the legacy CPO server (from their own release),
+  `5.1+` use the HO-side new system. This is the standard way HyperShift ships
+  version-dependent control-plane behavior — branch on the release version — and it
+  means a single HO binary serves both a `< 5.1` cluster (legacy server in its CPO)
+  and a `5.1+` cluster (new HO system) at the same time.
 - **Generation behavior remains release-image-version-branched**, not
   CPO-build-branched, so a single HO copy produces correct payloads for every
   OCP version in the fleet.
@@ -1199,15 +1233,14 @@ deleted at fleet EOL.
   Secret resolves to a live PayloadStore entry, and that the serving tier's
   cache has hydrated (informer lag metric / ignition-server logs). Generator
   logs (leader) show MCO-pipeline and store-write errors.
-- **Disabling the extension.** The `IgnitionPayload` CRD cannot be removed
-  without losing the ignition state for all consumers, and the management gate is
-  fleet-wide (disabling it after a HostedControlPlane has cut over is unsupported —
-  see Upgrade / Downgrade Strategy). `DisableIgnitionServerAnnotation` is **not** an
-  off switch for the new system: it only stands down the legacy CPO server. The only
-  way to run a HostedCluster with no ignition at all — as today — is the user-set
-  HostedCluster `DisableIgnitionServerAnnotation`, which the HO honors by disabling
-  both stacks; that stops node provisioning for that cluster and is not a fallback to
-  the legacy path.
+- **Disabling the extension.** The `IgnitionPayload` CRD cannot be removed without
+  losing the ignition state for all consumers, and for a `5.1+` control plane the new
+  system is the only ignition path — there is no fallback to the legacy server (it is
+  not in the 5.1 CPO) and no supported downgrade (see Upgrade / Downgrade Strategy).
+  The only way to run a HostedCluster with no ignition at all — as today — is the
+  user-set HostedCluster `DisableIgnitionServerAnnotation`, which the HO honors by not
+  deploying the new system (and the `< 5.1` CPO honors for the legacy server); that
+  stops node provisioning for that cluster.
 - **Graceful recovery.** The serving hot path reads a local cache, so pod
   restarts trigger a cold rehydrate (seconds) with no payload loss or
   regeneration; a leader loss is recovered on lease expiry. Payloads persist in
