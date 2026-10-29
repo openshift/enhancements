@@ -71,8 +71,8 @@ opportunity to fix these problems in shared, testable code.
    with `net/url`.
 4. Bound connection setup and transfer stalls, propagate cancellation, and add a configurable Job deadline as a final
    safety net.
-5. Make remote open, write, close, and verification failures fatal on every route. Retain the local archive on failure
-   and delete it only after confirmed transfer success.
+5. Make local read and remote open, write, and close failures fatal on every route. Require acknowledged bytes to match
+   the completed local archive size. Retain the archive on failure and delete it only after confirmed transfer success.
 6. Enable bounded SFTP write concurrency and validate throughput, resource use, and supported FIPS configurations.
 7. Strengthen artifact verification and phase diagnostics, and count terminal preflight failures as well as terminal Job
    failures.
@@ -104,8 +104,9 @@ its environment and mounted files. Neither caller maintains a separate proxy imp
 ### Workflow Description
 
 1. The controller validates the CR. When SFTP upload is configured, it validates credentials, proxy configuration, and
-   the effective trusted CA bundle, then runs preflight through the shared client with the existing maximum of three
-   transient-error attempts. Obfuscate-only Jobs do not require SFTP connectivity.
+   the effective trusted CA bundle. Pending CA injection requeues reconciliation before Job creation without a terminal
+   failure. Once trust is ready, preflight uses the shared client with the existing maximum of three transient-error
+   attempts. Obfuscate-only Jobs do not require SFTP connectivity.
 2. The controller creates the Job with the existing gather container and conditional upload container. Jobs with an
    upload/obfuscation container receive the configured whole-Job deadline.
 3. The gather container writes its output. The upload container retains the existing `pgrep` polling before invoking the
@@ -116,8 +117,8 @@ its environment and mounted files. Neither caller maintains a separate proxy imp
    without archive creation or upload; partial credentials fail.
 6. It writes and closes the local tar.gz archive, then connects through the shared SFTP client and transfers the archive
    with bounded concurrent requests.
-7. It checks every transfer result and remote close, verifies the remote size against the completed local archive, and
-   reports success only after those checks pass.
+7. It requires every write to succeed, total acknowledged bytes to equal the completed local archive size, and remote
+   close to succeed. These checks establish transfer success without requiring the remote file to remain visible.
 8. It removes the local archive on success on a best-effort basis. Any earlier failure exits non-zero and skips that
    removal.
 9. The controller observes terminal Job conditions and reports completion or phase-specific failure. A network stall can
@@ -186,11 +187,12 @@ The intentional changes are:
 5. Setup and inactivity limits can fail previously unbounded operations. A whole-Job deadline can stop an otherwise
    progressing long operation.
 6. Every transfer failure becomes non-zero on direct and proxied routes; failed uploads no longer enter success cleanup.
-7. Remote metadata verification is required before success, so endpoints must allow the post-upload size check.
+7. Pending injection-managed CA data defers preflight without completing the CR; unusable static trust remains a
+   configuration error.
 8. Preflight failures become visible in error metrics and phase-specific condition reasons.
 
 Release notes must identify these changes, the proxy port defaults and authentication support, the new timeout settings,
-and the remote metadata permission requirement.
+the transfer-success contract, and CA readiness handling.
 
 #### Environment and Operator Configuration
 
@@ -208,7 +210,7 @@ Add these operator flags with proposed defaults:
 - `--sftp-setup-timeout=30s`: protocol setup after TCP connection, covering proxy TLS/CONNECT, SSH authentication, and
   SFTP subsystem initialization together.
 - `--sftp-transfer-stall-timeout=5m`: maximum interval without successful SFTP upload progress, plus bounds for remote
-  file open, close, and verification operations.
+  file open and close operations.
 - `--must-gather-job-timeout=24h`: whole-Job safety limit for Jobs containing upload/obfuscation, including gather,
   polling, obfuscation, archive creation, and retries.
 
@@ -270,10 +272,26 @@ headers, passwords, or raw errors containing them.
 
 When `--trusted-ca-configmap` is configured, read `ca-bundle.crt` from the effective ConfigMap in the CR namespace after
 the existing replication step. Preflight supplies those bytes in memory. Upload reads the mounted copy using a
-template-provided `SFTP_CA_BUNDLE_FILE=/etc/pki/tls/certs/ca-bundle.crt`. Both use the same cert-pool builder: the
-explicit bundle is the trust source, and missing, empty, or unusable configured data is an error. Without a configured
-bundle, both use system roots from the release image. No operator CA volume mount is required for in-memory preflight
-loading.
+template-provided `SFTP_CA_BUNDLE_FILE=/etc/pki/tls/certs/ca-bundle.crt`. Both use the same cert-pool builder, with the
+explicit bundle as the trust source. Without a configured bundle, both use system roots from the release image. No
+operator CA volume mount is required for in-memory preflight loading.
+
+Distinguish pending injection from invalid trust configuration. The shipped ConfigMap requests CNO injection with
+`config.openshift.io/inject-trusted-cabundle="true"` and initially has no data. A missing `ca-bundle.crt` key or empty
+bundle in an injection-managed ConfigMap means trust is not ready. Return a transient readiness result, requeue, and
+re-read the effective ConfigMap before starting SFTP preflight. This wait must not mark the CR completed, emit a
+terminal validation-failure event, increment terminal failure counters, or consume the three network validation
+attempts. Return from reconciliation rather than blocking a worker while waiting. ConfigMap NotFound and transient API
+read failures also stay on the controller's retry path.
+
+Once data arrives, build the root pool and continue validation. A non-empty bundle that cannot produce a usable root
+pool, or missing/empty bundle data in a static ConfigMap without the injection label, is invalid configuration rather
+than pending injection. See [OpenShift certificate
+injection](https://docs.redhat.com/en/documentation/openshift_container_platform/4.12/html/networking/configuring-a-custom-pki).
+
+If mounted trust becomes unavailable after Job creation, the uploader fails that attempt cleanly and retains any local
+archive. Existing cancellation, Job retry, and whole-Job deadline rules still apply. A configured but unavailable or
+invalid bundle must never cause fallback to system roots, unverified TLS, or plaintext.
 
 Reading the effective mounted ConfigMap, rather than independently reading a possibly newer source copy, aligns trust
 inputs without promising immutable CA snapshots or changing replication ownership rules. Test both adapters with
@@ -301,14 +319,15 @@ track successful SFTP write acknowledgements: unrelated SSH traffic, keepalives,
 upload alive indefinitely. The bounded `WriteAt` workers described below refresh upload progress only after successful
 remote responses. Reading bytes from the local archive is not proof of remote progress.
 
-Bound remote open, close, and Stat separately by the stall interval. If no acknowledged upload progress occurs within
+Bound remote open and close separately by the stall interval. If no acknowledged upload progress occurs within
 that interval, close the connection, fail the upload, and keep the archive. There is no fixed per-transfer duration
 limit below the Job ceiling: a slow transfer that continues to make progress may exceed the stall interval in total
 duration. Connection I/O deadlines follow the [Go net.Conn contract](https://pkg.go.dev/net#Conn).
 
 Preflight retains at most three attempts for transient errors; authentication, invalid configuration, and certificate
 verification failures are not transient. Do not retry a canceled parent context. Preflight does not run the transfer
-watchdog because it does not transfer a file.
+watchdog because it does not transfer a file. Pending CA injection is a controller readiness requeue before network
+validation, so it does not exhaust this attempt limit or become a terminal credential failure.
 
 The uploader uses a signal-aware context and `exec.CommandContext` for obfuscation. Network inactivity limits do not
 apply to CPU or filesystem work during obfuscation or archiving. Those phases observe cancellation where supported and
@@ -356,18 +375,22 @@ byte count. Every local read, remote open/write/close, cancellation, or timeout 
 proxied routes. Check each write result, total acknowledged bytes, and transfer error. Preserve the first error and
 include secondary cleanup failures in sanitized diagnostics.
 
-After successful transfer and remote close, call Stat on the exact remote path and require its size to equal the
-expected positive local size. Missing, inaccessible, zero-length, or mismatched metadata fails verification. This is
-stronger than a non-zero check, but size equality does not prove content integrity, detect all sparse-file holes, or
-establish durable storage. Server acknowledgements and close are part of the success criteria; controlled tests
-additionally download and compare content.
+Production success requires all writes to be acknowledged without error, total acknowledged bytes to equal the
+completed local archive's positive size, and remote close to succeed. A short write or byte-count mismatch is fatal
+even when the remote path appears to have the expected length. These checks establish SFTP transfer completion; they
+do not prove durable storage or attachment to a support case.
 
-Confirm post-upload Stat support and permissions on the supported Red Hat endpoint before release. A write-only or
-immediately consumed dropbox may not allow this contract. If the endpoint cannot support it, revise the verification
-contract in this EP before implementation is accepted; do not silently skip verification or ship perpetual failures
-after successful writes.
+Do not require a post-close Stat, listing, or readback in the production success path. Red Hat automatically removes
+case-prefixed files from Secure FTP after attaching them to the case. A missing remote file after successful close can
+therefore be normal server processing rather than transfer failure. Requiring metadata at that point introduces a race
+even when permissions allow it. See the [Red Hat Secure FTP user guide](https://access.redhat.com/articles/5594481).
 
-Delete the local archive only after all transfer and verification checks pass, and keep removal best effort as today.
+Controlled verification fixtures retain artifacts for exact filename, size, and downloaded-content comparisons. These
+checks remain mandatory in tests and must detect corruption; they are not additional production endpoint permissions.
+Add a separate fixture that consumes the file immediately after successful close. The uploader must still report
+success and perform normal success cleanup when all acknowledgements, byte counts, and close results are successful.
+
+Delete the local archive only after these production transfer checks pass, and keep removal best effort as today.
 Failed obfuscation occurs before archive creation; preserve its logs and any existing workspace artifacts rather than
 claiming that a new archive exists. On transfer failure, leave the local archive and report the failure without a
 success message. Partial remote files can remain and are not valid completed artifacts; automatic remote deletion or
@@ -403,10 +426,10 @@ memory, CPU, throughput, and elapsed time on representative bundles and latency 
 claim an unmeasured speedup or fixed slowdown for sequential writes.
 
 Any concurrent-write error fails the transfer regardless of the apparent remote length: later writes can leave holes
-after earlier failures. A failed write must never be overridden by a later successful Stat. Test out-of-order responses,
-partial failures, error propagation, and watchdog progress. Validate direct and supported HTTP/HTTPS proxy paths with
-the release Go build in FIPS-enabled clusters, without enabling algorithms forbidden by policy. This validates the
-release path; it does not establish a new certification claim.
+after earlier failures. A matching size observed by a test verifier must never override a failed write. Test
+out-of-order responses, partial failures, error propagation, and watchdog progress. Validate direct and supported
+HTTP/HTTPS proxy paths with the release Go build in FIPS-enabled clusters, without enabling algorithms forbidden by
+policy. This validates the release path; it does not establish a new certification claim.
 
 #### Obfuscation
 
@@ -430,6 +453,10 @@ Use existing `ReconcileError` condition type with `PreflightValidationFailed` fo
 `JobFailed` for terminal workload failure, and `JobDeadlineExceeded` for the Job deadline. Keep messages actionable and
 sanitized, for example: "Unable to validate SFTP connectivity; verify credentials, proxy settings, and trusted CA
 configuration, then check operator logs."
+
+Waiting for injection-managed CA data is readiness, not terminal validation failure. Log the wait and requeue without
+setting `PreflightValidationFailed`, marking the CR completed, or incrementing either terminal error counter. Continue
+normal validation after the bundle becomes usable.
 
 Record protocol phase and classified cause in sanitized logs. Preflight failures belong in operator logs; runtime
 failures belong in upload logs. Never expose passwords, proxy authorization, credential-bearing URLs, or raw network
@@ -459,7 +486,7 @@ pkg/sftpclient/
 
 pkg/upload/
   archive.go             # Streaming tar.gz with input-error recovery
-  transfer.go            # Concurrent writes, progress, verification, cleanup
+  transfer.go            # Concurrent writes, progress, byte-count checks, cleanup
   *_test.go              # Archive fixtures and deterministic transfer faults
 
 pkg/mustgatherutil/
@@ -470,7 +497,7 @@ pkg/mustgatherutil/
 
 Use injectable dial, clock, SSH/SFTP, remote-file, and child-command interfaces rather than controller package globals
 as shared package state. Keep existing controller test seams at its adapter boundary as appropriate. The transfer seam
-must expose acknowledged remote progress, errors, close, and Stat; the connection seam must make cancellation and
+must expose acknowledged remote progress, errors, byte counts, and close; the connection seam must make cancellation and
 resource ownership testable.
 
 #### Entrypoint, Job Template, and Packaging
@@ -522,12 +549,13 @@ the corresponding design document and tests as well.
   same routing matrix and document the upgrade effect.
 - **Authentication and trust:** TLS verification, proper URL decoding, and common port defaults can expose previously
   accepted configuration mistakes. Cover custom roots, hostname rejection, Basic/Digest behavior, FIPS constraints, and
-  credential redaction.
+  credential redaction. Exercise delayed CA injection so a temporarily empty managed bundle cannot permanently fail a
+  CR.
 - **Timeouts:** defaults can terminate a legitimate slow phase or entire operation. Exercise slow progress, large
   bundles, obfuscation, and Job retries; publish the configuration controls and measured evidence.
-- **Verification permissions:** a remote dropbox may deny Stat or download. Confirm production Stat support; use
-  controlled endpoints for content verification and fail the release gate if the production success contract is
-  unsupported.
+- **Server consumption:** Red Hat can remove a completed file after attaching it to the case. Base production success
+  on acknowledged writes, expected byte count, and successful close. Use retaining fixtures for content verification
+  and an immediate-consumption fixture to ensure normal processing does not cause false failure or retry.
 - **Partial data:** a failed concurrent transfer can leave a partial remote file. Never report success after write/close
   errors and retain the local archive within its actual storage lifetime.
 - **Monitoring changes:** expanded counters and new condition reasons can affect alerts and automation. Ship updated
@@ -539,8 +567,8 @@ the corresponding design document and tests as well.
 
 The change is larger than a runtime-only rewrite and touches preflight, Job failure recognition, metrics, and test
 infrastructure. Connection fixes must remain shared and intentional differences must be tested explicitly, so the wider
-scope does not hide unrelated regressions. Remote metadata verification adds a round trip and a server permission
-requirement.
+scope does not hide unrelated regressions. Protocol completion does not prove durable storage or support-case ingestion;
+independent artifact verification requires controlled fixtures that retain uploaded files.
 
 ## Alternatives (Not Implemented)
 
@@ -585,12 +613,15 @@ comparison. Direct streaming would change staging and cleanup semantics and is o
    supported Digest authentication. Test the pinned dependency behavior rather than assuming current upstream defaults.
 3. **Timeout configuration:** propose operator-level defaults of 5s connect, 30s setup, 5m stall, and 24h whole Job.
    Validate the defaults against representative workloads; no CR field is added.
-4. **Remote verification:** require exact size after successful writes and close. Production endpoint Stat support is a
-   release prerequisite; unsupported metadata access requires an explicit proposal revision.
+4. **Transfer success:** require successful write acknowledgements, an exact acknowledged byte count, and successful
+   remote close. Post-close file visibility is not a production prerequisite. Controlled tests independently verify
+   artifact size/content and cover immediate server consumption.
 5. **Obfuscation:** retain the subprocess, combined diagnostics, and credential ordering. No parent global logging
    changes.
 6. **Cutover:** remove production scripts together with the Go runtime and verifier image. Older Job command
    compatibility remains unsupported.
+7. **CA readiness:** requeue while injection-managed data is missing or empty, without terminal status, events, or
+   metrics. Reject unusable non-empty bundles and missing/empty static bundle data as configuration errors.
 
 ## Test Plan
 
@@ -601,25 +632,29 @@ comparison. Direct streaming would change staging and cleanup semantics and is o
 - **Proxy parsing/authentication:** encoded delimiters, passwords containing colons, encoded `@`, scheme-less inputs,
   omitted/explicit ports, invalid URLs, unsupported schemes, Basic/Digest challenges, rejected credentials, and secret
   redaction.
-- **TLS/trust:** identical CA input through both adapters, system roots without custom configuration, missing/invalid
-  bundles, trusted/untrusted certificates, wrong proxy name, and no plaintext fallback after TLS failure.
+- **TLS/trust:** identical CA input through both adapters, system roots without custom configuration, missing/empty
+  managed bundles that become ready later, invalid static bundles, unusable non-empty PEM, trusted/untrusted
+  certificates, wrong proxy name, and no trust or plaintext fallback after a configured-bundle or TLS failure.
 - **CONNECT buffering:** response and SSH banner in one read, split headers, rejected responses, and ownership/cleanup
   of all connections.
 - **Timeouts/cancellation:** each setup layer stalling, deadline clearing, earlier parent deadlines, cancellation during
   blocked I/O, and no leaked watchdogs. Use injected clocks instead of multi-minute sleeps.
 - **Transfer progress:** slow acknowledged progress beyond five minutes of total duration succeeds; absent
   acknowledgements time out despite unrelated SSH traffic. Cover out-of-order concurrent responses and bounded
-  open/close/Stat.
+  remote open/close.
 - **Transfer outcomes:** remote open denial, local read failure, disk-full/write/close errors, disconnect, short writes,
-  missing/mismatched Stat, and concurrent sparse-file failure. Every error must be non-zero on all routes, retain the
-  archive, and omit the success message.
+  acknowledged byte-count mismatch, and concurrent sparse-file failure. Every transfer error must be non-zero on all
+  routes, retain the archive, and omit the success message. Immediate file consumption after all writes and close
+  succeed must return success and run normal cleanup without requiring Stat, listing, or readback.
 - **Archives:** compare GNU tar semantic fixtures, including gather/cleaned roots, long paths, metadata, hard/dangling
   links, FIFO, unreadable/deleted files, short reads, growth, and finalization/destination failures.
 - **Obfuscation/environment:** command arguments, combined output, child exit and cancellation, log completion/copy on
   failure, all three modes, defaults, all-empty/partial credentials, and credential-check ordering.
 - **Controller/template/metrics:** deadline fields and configuration validation, Job terminal failure with retries
   remaining, completed CRs without Job recreation, sanitized reasons, terminal transition counting, status-update
-  conflicts, and no repeated counts/events on cleanup retry.
+  conflicts, and no repeated counts/events on cleanup retry. Pending CA injection must not create a Job, consume
+  network validation attempts, set terminal failure/completion, emit terminal failure events, or increment error
+  counters; population of the bundle must allow validation and Job creation on a later reconcile.
 
 ### Integration / E2E Tests
 
@@ -637,10 +672,24 @@ Strengthen `verifySFTPUpload` to take the current attempt's expected filename fr
 the internal-user directory. Do not regenerate a name or match a case-ID substring. Account for retry attempts and
 inspect retained Job data when default cleanup would remove it.
 
-On controlled endpoints, require exact filename and local/remote size equality, download the artifact, validate
-gzip/tar, and compare expected members and contents. Use fixture-specific expectations rather than assuming every custom
-gather includes `must-gather.log`. On the live endpoint, check only operations supported by its permissions; never treat
-a listing substring as artifact proof. Include stale-artifact and corrupted-archive negative tests.
+On retaining controlled endpoints, require exact filename and local/remote size equality, download the artifact,
+validate gzip/tar, and compare expected members and contents. Use fixture-specific expectations rather than assuming
+every custom gather includes `must-gather.log`. Include stale-artifact and corrupted-archive negative tests in the
+independent verifier; these checks must not turn test-only metadata requirements into production success conditions.
+
+Use a separate controlled server that consumes or removes the artifact immediately after a successful close response.
+Assert successful transfer, success cleanup, and no retry when every write and byte-count check passed. Also retain
+negative cases where a write or close fails even though the server exposes a file of the expected size.
+
+Live Red Hat smoke checks must allow normal case-prefixed artifact consumption. Require protocol completion and the
+expected Job/CR outcome without requiring the file to remain accessible for listing, Stat, or download. If an existing
+supported facility independently confirms the case attachment, record that separately; neither listing absence nor a
+case-ID substring is proof of transfer failure or successful ingestion.
+
+Start a controlled injection-managed CA ConfigMap without bundle data, then populate it after reconciliation has
+observed the empty state. Assert nonterminal requeue with no Job or failure-count increment, followed by successful
+validation and Job creation once trust is usable. Test invalid static data separately and verify that unavailable
+mounted trust after Job creation respects normal attempt failure, cancellation, and Job retry limits.
 
 Exercise normal gather/upload, obfuscate-only, gather/obfuscate/upload with and without PVC, and read-only source PVC
 modes. Cover direct, HTTP, HTTPS, exclusion bypass, and custom CA configurations, plus timeout and Job deadline status
@@ -671,7 +720,10 @@ No separate preview phase is proposed. Development validation must complete befo
 - Preflight and upload pass the same route, authentication, HTTPS trust, buffering, timeout, and cancellation suite.
 - Slow progressing uploads work within the configured Job ceiling; stalled or failed transfers never report success or
   delete the local archive.
-- Production endpoint post-upload Stat permissions and exact-size verification are confirmed.
+- Production transfer completion uses acknowledged writes, exact byte count, and successful close. Immediate server
+  consumption does not trigger false failure or retry; retaining fixtures verify exact artifact size and contents.
+- Delayed CA injection recovers through reconciliation without terminal failure status/events/metrics or exhausted
+  network validation attempts. Invalid static or unusable non-empty trust data is rejected without insecure fallback.
 - Job deadline failures complete the CR correctly before backoff exhaustion, with sanitized phase reasons and tested
   metric transitions.
 - Representative throughput/resource results and supported FIPS upload/proxy validation are recorded and reviewed.
@@ -694,9 +746,9 @@ This image reference is configured independently of the controller image. No CR 
 Jobs keep their recorded command, environment, and deadline settings; this enhancement does not rewrite them.
 
 Document the routing/exclusion change, corrected credential parsing, common proxy defaults, HTTPS certificate
-validation, fatal transfer errors, remote Stat requirement, timeout defaults, condition reasons, and metrics. Validate
-proxy/trust configuration and adjust the operator Job limit before running workloads that need longer than the proposed
-default.
+validation, fatal transfer errors, transfer-success criteria, CA readiness, timeout defaults, condition reasons, and
+metrics. Validate proxy/trust configuration and adjust the operator Job limit before running workloads that need longer
+than the proposed default.
 
 For downgrade, restore the earlier controller and matching upload image together, remove unsupported new operator flags,
 and restore compatible monitoring expectations. New Jobs return to script behavior, including its known limitations.
@@ -734,11 +786,12 @@ the artifact.
 
 Use operator logs for `PreflightValidationFailed`, where no upload Pod may exist. Use upload logs and Job/container
 state for runtime failures. `JobDeadlineExceeded` identifies the whole-Job ceiling; phase logs distinguish connection
-setup, transfer stall, remote verification, obfuscation, and archive failures.
+setup, transfer stall, byte-count/close failures, obfuscation, and archive failures. A pending CA injection is a
+nonterminal readiness wait in operator logs; it does not imply failed credentials or a completed CR.
 
 For archive inspection, set the existing `retainResourcesOnCompletion` before creating the CR and account for emptyDir
-versus PVC lifetime. Successful transfer confirms checked protocol operations and size, not remote durable storage or
-support-case ingestion.
+versus PVC lifetime. Successful transfer confirms acknowledged bytes and successful close, not remote durable storage
+or support-case ingestion. A case-prefixed file may disappear from Secure FTP after successful attachment.
 
 ### Troubleshooting
 
@@ -746,10 +799,12 @@ support-case ingestion.
 2. Verify credential Secret keys and the matching controller/upload release configuration.
 3. Check effective proxy variables, uppercase precedence, exclusions, target/port, authentication scheme, and the
    decoded credential configuration without printing secrets.
-4. For HTTPS proxies, check certificate name and the effective `ca-bundle.crt` in the CR namespace and upload mount. TLS
-   verification never falls back to plaintext.
-5. For verification failure, check exact remote path, expected byte count, post-upload Stat permissions, and whether the
-   endpoint moves or consumes files immediately.
+4. For HTTPS proxies, check certificate name and the effective `ca-bundle.crt` in the CR namespace and upload mount.
+   For a managed empty bundle, inspect CNO injection and readiness; for static data, correct the bundle configuration.
+   Configured trust never falls back to system roots, unverified TLS, or plaintext.
+5. For transfer failure, inspect the remote open/write/close result and acknowledged byte count. A file disappearing
+   after successful close can be normal case attachment processing and must not alone trigger a retry. Use retaining
+   controlled fixtures for size/content checks and supported case tooling for separate ingestion confirmation.
 6. For timeout, distinguish TCP establishment, setup, transfer progress, and whole-Job limit. Increase limits only after
    identifying legitimate slow work; a Job deadline stops retries as well as the current attempt.
 7. Inspect retained artifacts while the relevant Pod or PVC exists. A retry may rerun gather and leave a partial remote
@@ -776,3 +831,5 @@ production service is required.
 - 2026-10-29: Expanded the proposal to shared preflight/upload transport and the explicit proxy, buffering, timeout,
   failure handling, pipelining, verification, and diagnostic fixes. Preserved artifact and obfuscation compatibility and
   documented the intentional behavior changes.
+- 2026-10-29: Corrected production success to use acknowledged bytes and remote close without a post-upload metadata
+  requirement. Defined nonterminal CA injection readiness and added matching test, release, and support requirements.
