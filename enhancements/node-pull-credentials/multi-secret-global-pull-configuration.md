@@ -23,7 +23,7 @@ see-also:
 
 ## Summary
 
-OpenShift manages global container registry credentials through a single Secret, `openshift-config/pull-secret`. Administrators must download, decode, and hand-edit this file to add a registry, risking corruption of installer-provided credentials and breaking GitOps workflows. This proposal introduces a new cluster-scoped CRD, `GlobalPullCredential` (`config.openshift.io/v1alpha1`), that provides a structured, declarative API for adding registry credentials. Each instance represents exactly one registry hostname and a base64-encoded `auth` field matching the Docker config.json convention (`base64("username:password")`). Duplicate hostnames across `GlobalPullCredential` instances are rejected — each hostname may only be claimed by one CR. A controller in MCO's `machine-config-controller` watches all `GlobalPullCredential` instances, validates them, merges their auth entries with the existing `pull-secret`, and writes the merged result to a persistent controller-owned Secret `openshift-config/pull-secret-merged`. The original `pull-secret` is never modified and always serves as the baseline. When the feature gate is enabled, `pull-secret-merged` is always present — it reflects the merged content when CRs exist, or a copy of `pull-secret` when no CRs are active. Existing consumers (MCO template controller, `cluster-image-registry-operator`) are updated to read from `pull-secret-merged`; fallback to `pull-secret` is used only during version skew when the feature gate is disabled.
+OpenShift manages global container registry credentials through a single Secret, `openshift-config/pull-secret`. Administrators must download, decode, and hand-edit this file to add a registry, risking corruption of installer-provided credentials and breaking GitOps workflows. This proposal introduces a new cluster-scoped CRD, `GlobalPullCredential` (`config.openshift.io/v1alpha1`), that provides a structured, declarative API for adding registry credentials. Each instance represents exactly one registry hostname with structured `username` and `password` fields. Duplicate hostnames across `GlobalPullCredential` instances are rejected — each hostname may only be claimed by one CR. A controller in MCO's `machine-config-controller` watches all `GlobalPullCredential` instances, validates them, merges their auth entries with the existing `pull-secret`, and writes the merged result to a persistent controller-owned Secret `openshift-config/pull-secret-merged`. The original `pull-secret` is never modified and always serves as the baseline. When the feature gate is enabled, `pull-secret-merged` is always present — it reflects the merged content when CRs exist, or a copy of `pull-secret` when no CRs are active. Existing consumers (MCO template controller, `cluster-image-registry-operator`) are updated to read from `pull-secret-merged`; fallback to `pull-secret` is used only during version skew when the feature gate is disabled.
 
 ## Motivation
 
@@ -59,11 +59,11 @@ As a cluster administrator, I want immediate feedback when I create an invalid p
 
 ### Workflow Description
 
-1. An administrator creates a `GlobalPullCredential` cluster-scoped resource specifying a single registry hostname and base64-encoded auth credential.
+1. An administrator creates a `GlobalPullCredential` cluster-scoped resource specifying a single registry hostname with username and password.
 2. The CRD schema validates the resource at admission time — malformed objects (missing hostname or missing auth) are rejected by the API server before any controller acts on them.
 3. The merge controller (inside MCO's `machine-config-controller`) watches all `GlobalPullCredential` instances and `openshift-config/pull-secret`. On any create, update, or delete it reads the current `openshift-config/pull-secret` as the baseline and lists all `GlobalPullCredential` instances.
 4. The controller validates each CR and enforces cross-CR hostname uniqueness — if two CRs claim the same hostname, the duplicate is marked `Degraded` and skipped. Baseline (original `pull-secret` content) always wins for a given registry hostname; a CR whose hostname overlaps with the baseline is accepted but its credential is not merged, and the overlap is reported in the CR's status.
-5. The merged result is written to the persistent controller-owned Secret `openshift-config/pull-secret-merged`. The original `pull-secret` is never modified. If any `GlobalPullCredential` fails controller-level validation, the invalid CR is skipped and marked `Degraded`; valid CRs are still merged and written. The `ClusterOperator machine-config` is set `Degraded` if any CR is invalid.
+5. The merged result is written to the persistent controller-owned Secret `openshift-config/pull-secret-merged`. The original `pull-secret` is never modified. If any `GlobalPullCredential` has a hostname conflict with another CR, the duplicate is skipped and marked `Degraded`; valid CRs are still merged and written. The `ClusterOperator machine-config` is set `Degraded` if any CR has a conflict.
 6. Consumers (MCO template controller, `cluster-image-registry-operator`) read from `pull-secret-merged`. When the feature gate is enabled, `pull-secret-merged` is always present — it contains the merged output when CRs exist, or a copy of `pull-secret` when no CRs are active. Fallback to reading `pull-secret` directly is used only during version skew when the feature gate is disabled on the control plane.
 
 ```mermaid
@@ -112,12 +112,24 @@ type GlobalPullCredentialSpec struct {
     // +kubebuilder:validation:Pattern=`^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?(:[0-9]+)?$`
     Hostname string `json:"hostname"`
 
-    // auth is the base64-encoded "username:password" string for this registry,
-    // matching the Docker config.json auth field format used by
-    // openshift-config/pull-secret and ~/.docker/config.json.
+    // auth holds the registry credential for this hostname.
+    // +required
+    Auth RegistryAuth `json:"auth"`
+}
+
+// RegistryAuth holds the username and password for a single registry.
+// The controller constructs the base64-encoded Docker config.json auth
+// string (base64("username:password")) from these fields at reconcile time.
+type RegistryAuth struct {
+    // username is the registry username.
     // +required
     // +kubebuilder:validation:MinLength=1
-    Auth string `json:"auth"`
+    Username string `json:"username"`
+
+    // password is the registry password or token.
+    // +required
+    // +kubebuilder:validation:MinLength=1
+    Password string `json:"password"`
 }
 
 type GlobalPullCredentialStatus struct {
@@ -139,7 +151,9 @@ metadata:
   name: team-a-quay
 spec:
   hostname: quay.io
-  auth: dXNlcjpwYXNz              # base64("user:pass")
+  auth:
+    username: user
+    password: pass
 ---
 apiVersion: config.openshift.io/v1alpha1
 kind: GlobalPullCredential
@@ -147,22 +161,27 @@ metadata:
   name: team-a-example-registry
 spec:
   hostname: registry.example.com:5000
-  auth: cm9ib3Q6czNjcmV0LXRva2Vu  # base64("robot:s3cret-token")
+  auth:
+    username: robot
+    password: s3cret-token
 ```
 
 The CRD schema enforces at admission time:
 
 - `spec.hostname` is required (non-empty, valid hostname or host:port pattern, max 253 characters).
-- `spec.auth` is required (non-empty).
+- `spec.auth.username` is required (non-empty).
+- `spec.auth.password` is required (non-empty).
+
+Because all field-level validation is handled at admission time, presence of a `GlobalPullCredential` resource means its contents are valid — invalid resources are rejected before the controller ever sees them.
+
+The controller constructs the base64-encoded Docker config.json `auth` string (`base64("username:password")`) from the structured fields at reconcile time and writes it into the merged output Secret. Administrators never need to manually base64-encode credentials.
 
 Cross-CR hostname uniqueness is enforced by the controller at reconcile time — the CRD schema does not prevent two CRs from declaring the same hostname, but the controller detects the conflict and marks the duplicate CR `Degraded`.
-
-The `auth` field uses the standard Docker config.json format: `base64("username:password")`. This is the same encoding used by `openshift-config/pull-secret` and `~/.docker/config.json`. The controller validates that `auth` is well-formed base64 containing a colon-separated `username:password` at reconcile time; a CR with an invalid `auth` value is skipped and marked `Degraded`.
 
 **Status conditions:** The controller sets two condition types on each `GlobalPullCredential` instance:
 
 - `Applied=True`: The CR's credential was successfully included in `pull-secret-merged`. If the CR's hostname overlaps with the baseline `pull-secret`, the condition message notes that the baseline credential is used instead.
-- `Degraded=True`: The CR failed controller-level validation — invalid base64 encoding, missing colon separator in the decoded auth, or a hostname that is already claimed by another `GlobalPullCredential` instance.
+- `Degraded=True`: The CR's hostname is already claimed by another `GlobalPullCredential` instance (cross-CR conflict). This is the only runtime validation that cannot be enforced at admission time, since it requires cross-object comparison.
 
 A `Degraded` CR is skipped during the merge; other valid CRs are still processed. If any CR is `Degraded`, the `ClusterOperator machine-config` is also set `Degraded`.
 
@@ -213,10 +232,10 @@ This consumer coordination is within scope of this proposal. Both changes are sm
 
 1. Read `openshift-config/pull-secret` as the baseline (always fresh, never cached).
 2. List all `GlobalPullCredential` instances. If none exist, write `pull-secret-merged` as a copy of `pull-secret` (persistent Secret) and return.
-3. Validate each CR at reconcile time: decode the `auth` field (must be valid base64 containing a colon-separated `username:password`) and check for duplicate hostnames across CRs. If two or more CRs claim the same hostname, the CR with the earliest `.metadata.creationTimestamp` owns it; later CRs are marked `Degraded` with a message identifying the conflicting CR. CRs with invalid `auth` values are also marked `Degraded`. Invalid and duplicate CRs are skipped; valid CRs proceed. If any CR is `Degraded`, set `ClusterOperator machine-config` `Degraded` condition. This skip-and-continue policy ensures one bad CR does not block merging of other valid CRs.
+3. Check for duplicate hostnames across CRs. If two or more CRs claim the same hostname, the CR with the earliest `.metadata.creationTimestamp` owns it; later CRs are marked `Degraded` with a message identifying the conflicting CR. Duplicate CRs are skipped; valid CRs proceed. If any CR is `Degraded`, set `ClusterOperator machine-config` `Degraded` condition. Field-level validation (non-empty hostname, username, password) is already enforced at admission time, so every CR that exists is structurally valid.
 4. Build the effective `auths` map starting from the baseline `auths` entries (read-only, never overridden). Then iterate valid CRs. For each CR's hostname:
    - If the hostname exists in the baseline, **skip** — baseline always wins. Set `Applied=True` on the CR with a message noting the baseline overlap.
-   - Otherwise, add the CR's credential to the effective map. Set `Applied=True`.
+   - Otherwise, construct the Docker config.json `auth` value (`base64("username:password")`) from the CR's structured fields, add it to the effective map, and set `Applied=True`.
 5. Preserve any non-`auths` top-level keys from the baseline (e.g. `HttpHeaders`).
 6. Serialize the complete output as canonical JSON with stable ordering for all object keys and stable whitespace, to guarantee byte-identical output for equivalent inputs.
 7. Write to `openshift-config/pull-secret-merged` only if the serialized content differs from the current value.
@@ -229,7 +248,7 @@ When the feature gate is **off**, the controller does not start — no watching,
 
 ### Risks and Mitigations
 
-- **Sensitive data in a CRD:** `GlobalPullCredential` stores registry credentials in spec fields rather than a Kubernetes Secret. The `auth` field is base64-encoded, using the same format as Docker config.json and the existing `openshift-config/pull-secret` (base64 is encoding, not encryption). By default, only cluster-admins have access to new CRDs. The etcd encryption controller must be updated to include `GlobalPullCredential` in its encrypted resources list, ensuring credentials are protected at rest without requiring manual administrator action. The API is documented as security-sensitive. RBAC must be configured carefully if non-admin access is ever granted.
+- **Sensitive data in a CRD:** `GlobalPullCredential` stores registry credentials (username and password) in spec fields rather than a Kubernetes Secret. The password is stored as a plain string in the CRD spec; the controller constructs the base64-encoded Docker config.json auth string at reconcile time. By default, only cluster-admins have access to new CRDs. The etcd encryption controller must be updated to include `GlobalPullCredential` in its encrypted resources list, ensuring credentials are protected at rest without requiring manual administrator action. The API is documented as security-sensitive. RBAC must be configured carefully if non-admin access is ever granted.
 - **Consumer coordination:** MCO template controller and `cluster-image-registry-operator` must be updated to read from `pull-secret-merged`. Both changes are small (prefer new Secret, fall back to original). Until all consumers are updated, the merged credentials are not propagated to that consumer. The fallback-to-`pull-secret` path exists only for version skew during upgrades; during normal operation `pull-secret-merged` is always present when the feature gate is enabled.
 - **Controller-vs-manual-edit isolation:** The controller never modifies `pull-secret`. Administrators can continue editing `pull-secret` via `oc` at any time; those changes are picked up on the next reconcile and included in the merged output. There is no mutual exclusivity between manual edits and CR-based credentials.
 - **Ownership boundary:** The Node team owns the CRD, merge logic, validation, and controller correctness. The MCO team owns ensuring that merged content is propagated to nodes and that consumer coordination changes land.
@@ -238,7 +257,7 @@ When the feature gate is **off**, the controller does not start — no watching,
 ### Drawbacks
 
 - Introduces a new cluster-scoped CRD and a new Secret (`pull-secret-merged`), adding API surface and operational complexity.
-- Registry credentials in a CRD rather than a Secret may be perceived as less secure, though access control is equivalent (cluster-admin by default) and the `auth` field uses the same base64 encoding as Docker config.json and the existing `pull-secret`.
+- Registry credentials in a CRD rather than a Secret may be perceived as less secure, though access control is equivalent (cluster-admin by default) and the credentials use the same username/password pairing as Docker config.json and the existing `pull-secret`.
 - Requires coordinated changes in MCO template controller and `cluster-image-registry-operator` to read from the new Secret.
 
 ## Alternatives (Not Implemented)
@@ -275,14 +294,13 @@ This was rejected because it does not provide stronger admission-time validation
 
 Unit and integration tests validate:
 
-- CRD admission validation (schema enforcement for required `hostname` and `auth` fields, hostname pattern, non-empty values).
-- Auth field validation: invalid base64 or missing colon separator → CR skipped and marked `Degraded` at reconcile time.
+- CRD admission validation (schema enforcement for required `hostname`, `auth.username`, and `auth.password` fields, hostname pattern, non-empty values). Invalid resources are rejected at admission — they never reach the controller.
 - Cross-CR hostname uniqueness: two CRs with the same hostname → later CR marked `Degraded`, earlier CR's credential used.
 - Merge algorithm: baseline wins over CR hostnames, auth values passed through to merged output, deterministic byte-stable canonical JSON output.
 - Persistent rendered Secret: `pull-secret-merged` created when gate is enabled; updated to copy of `pull-secret` when all CRs removed (not deleted).
 - Baseline integrity: `pull-secret` is never modified by the controller.
 - Create/update/delete lifecycle: adding a CR adds its hostname to `pull-secret-merged`, updating changes the auth, deleting removes the hostname.
-- Invalid CR handling: controller-level validation failure → CR skipped and marked `Degraded`, other valid CRs still merged, CO Degraded set.
+- Duplicate CR handling: cross-CR hostname conflict → duplicate CR skipped and marked `Degraded`, other valid CRs still merged, CO Degraded set.
 - Feature gate disabled: controller does not start, no `pull-secret-merged` created.
 - Diff-before-write: no-op update when merged output equals current `pull-secret-merged`.
 - Controller restart: `pull-secret` baseline is always fresh; no stale entries.
@@ -295,7 +313,7 @@ End-to-end tests on a multi-node cluster with a private test registry validate:
 - `GlobalPullCredential` delete → hostname's credential removed from node `config.json`.
 - All CRs deleted → `pull-secret-merged` reverts to copy of `pull-secret`, nodes use original baseline content.
 - Duplicate hostname across CRs → later CR marked `Degraded`, earlier CR's credential used.
-- Invalid CR → skipped, other valid CRs still merged, CO Degraded set.
+- Invalid CR (missing fields) → rejected at admission time, never reaches controller.
 - Feature gate toggle behavior.
 
 ## Graduation Criteria
@@ -338,7 +356,7 @@ The `GlobalPullCredential` CRD introduces a cluster-scoped resource with the fol
 - **Controller health:** The merge controller reports status via `ClusterOperator machine-config` conditions. `Degraded` is set when any `GlobalPullCredential` fails controller-level validation.
 - **Failure modes:**
   - Controller not running (pod crash/restart): `pull-secret-merged` retains last-known-good content. `pull-secret` is unchanged. No new CR changes are reconciled until the controller restarts.
-  - Invalid CR: CR is skipped and marked `Degraded`; other valid CRs are still merged and written to `pull-secret-merged`; CO Degraded is set.
+  - Duplicate hostname conflict: CR with a conflicting hostname is skipped and marked `Degraded`; other valid CRs are still merged and written to `pull-secret-merged`; CO Degraded is set.
   - RBAC misconfiguration: Non-admin users creating `GlobalPullCredential` resources could inject registry credentials cluster-wide. No custom ClusterRole is defined; this relies on existing OpenShift RBAC where cluster-admins have full access to all CRDs by default.
 - **Escalation teams:** Node team (CRD/controller issues), MCO team (propagation to nodes, consumer coordination).
 
