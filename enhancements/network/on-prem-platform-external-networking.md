@@ -10,7 +10,7 @@ approvers:
 api-approvers:
   - "@TBD"
 creation-date: 2026-09-25
-last-updated: 2026-10-15
+last-updated: 2026-10-29
 status: provisional
 tracking-link:
   - https://issues.redhat.com/browse/OPNET-771
@@ -46,21 +46,28 @@ already available on BareMetal, vSphere, and OpenStack.
 ### User Stories
 
 * As a deployer integrating the `External` platform on infrastructure without a
-  native load balancer, I want to configure API and Ingress VIPs so that
-  OpenShift's self-hosted load balancing serves cluster traffic.
-* As a deployer of an `External` cluster, I want to declare that I provide my own
-  load balancer and DNS (`loadBalancer.type: UserManaged`, `dnsRecordsType:
-  External`) so that OpenShift does not deploy its on-prem networking static pods.
+  native load balancer, I want to opt in to OpenShift's self-hosted on-prem load
+  balancing by configuring API and Ingress VIPs, so that OpenShift serves
+  cluster traffic without my having to supply an external load balancer.
+* As a deployer who already supplies my own load balancer and DNS (the current
+  `External` behavior), I want that behavior to remain the default and to be
+  explicitly representable (`loadBalancer.type: UserManaged`, `dnsRecordsType:
+  External`), so that enabling this feature never causes OpenShift to deploy
+  on-prem networking static pods I did not ask for.
 * As a cluster administrator, I want `machineNetworks` recorded in the
   infrastructure status so that components can resolve the node networks on an
   `External` cluster the same way they do on other on-prem platforms.
 
 ### Goals
 
-- Allow an `External` cluster to run with OpenShift-managed on-prem load
-  balancing and internal DNS.
-- Allow an `External` cluster to run with a user managed load balancer and
-  externally provided DNS.
+- Add a net-new capability: allow an `External` cluster to opt in to
+  OpenShift-managed on-prem load balancing and internal DNS
+  (keepalived/haproxy/CoreDNS static pods), which `External` cannot do today.
+- Preserve the current `External` behavior (user-managed load balancer and
+  externally provided DNS) as the default, and make it explicitly representable
+  in the API.
+- Provide an `install-config` interface so deployers can select the behavior at
+  install time (the installer owns these status fields).
 - Reuse the existing on-prem fields rather than inventing new
   ones.
 
@@ -68,8 +75,8 @@ already available on BareMetal, vSphere, and OpenStack.
 
 - Changing on-prem networking behavior for existing platforms (BareMetal,
   vSphere, OpenStack, Nutanix).
-- Defining the installer UX; only the API surface and its semantics are in scope
-  here.
+- Changing the default behavior of existing `External` clusters: clusters that
+  do not opt in keep running exactly as they do today.
 - Graduating the feature beyond Tech Preview in this proposal.
 
 ## Proposal
@@ -82,10 +89,19 @@ feature gate:
   load balancer, at most one IPv4 and one IPv6 address each.
 - `loadBalancer.type`: `OpenShiftManagedDefault` (deploy the API/Ingress static
   pods) or `UserManaged` (do not deploy them; the deployer supplies the load
-  balancer). Defaults to `OpenShiftManagedDefault` and is immutable once set.
+  balancer). Unlike the other on-prem platforms, `External` defaults to
+  `UserManaged`: `External` does not deploy on-prem networking today, so
+  defaulting to `OpenShiftManagedDefault` would change the behavior of existing
+  clusters when the feature gate is enabled. The self-hosted path is opt-in — a
+  deployer selects `OpenShiftManagedDefault` and sets the VIPs. The field is
+  immutable once set. Consuming components deploy the on-prem static pods only
+  when `loadBalancer.type` is `OpenShiftManagedDefault` and the VIPs are set,
+  never on the basis of a defaulted value alone.
 - `dnsRecordsType`: `Internal` (internal DNS provides api/api-int/ingress
   records) or `External` (records provided outside the cluster). Only settable to
-  `External` when `loadBalancer.type` is `UserManaged`.
+  `External` when `loadBalancer.type` is `UserManaged`. Defaults to `External`,
+  consistent with the `UserManaged` load-balancer default and with the fact that
+  `External` runs no in-cluster DNS today.
 - `machineNetworks`: the node networks, mirroring the other on-prem platforms.
 
 ### Workflow Description
@@ -94,15 +110,16 @@ feature gate:
 `External` cluster.
 
 1. The deployer chooses whether OpenShift or they provide load
-   balancing and DNS.
-2. For OpenShift-managed networking, the deployer sets `apiServerInternalIPs`,
-   `ingressIPs`, and leaves `loadBalancer.type` as `OpenShiftManagedDefault`;
-   the on-prem static pods are deployed.
-3. For user-managed networking, the deployer sets `loadBalancer.type:
-   UserManaged` and optionally `dnsRecordsType: External`, configures their own
-   load balancer and DNS. OpenShift does not deploy the on-prem
-   static pods. When `dnsRecordsType: External` is used, the deployer must
-   pre-create the cluster DNS records (see below) before the cluster is brought up.
+   balancing and DNS. With no on-prem fields set, OpenShift provides none,
+   matching today's `External` behavior.
+2. For OpenShift-managed networking, the deployer opts in by setting
+   `loadBalancer.type: OpenShiftManagedDefault`; the on-prem static pods are deployed.
+3. For user-managed networking (the default), the deployer leaves
+   `loadBalancer.type` as `UserManaged` and optionally sets `dnsRecordsType:
+   External`, and configures their own load balancer and DNS. OpenShift does not
+   deploy the on-prem static pods. When `dnsRecordsType: External` is used, the
+   deployer must pre-create the cluster DNS records (see below) before the
+   cluster is brought up.
 
 ### DNS Records
 
@@ -110,14 +127,15 @@ Which DNS records the deployer must provide depends on `dnsRecordsType`, and
 mirrors the behavior of the other on-prem platforms (BareMetal, vSphere,
 OpenStack):
 
-- `dnsRecordsType: Internal` (the default): the OpenShift-managed CoreDNS static
-  pod serves the `api`, `api-int`, and `*.apps` records internally, pointing at
-  the configured VIPs (`apiServerInternalIPs` / `ingressIPs`). The deployer's
-  external/upstream DNS only needs the records required by clients outside the
-  cluster — `api.<base_domain>` and `*.apps.<base_domain>`. The `api-int` record
-  is internal-only and is served by CoreDNS. The deployer doesn't need to
-  create it externally.
-- `dnsRecordsType: External` (only valid with `loadBalancer.type: UserManaged`):
+- `dnsRecordsType: Internal` (used with the opt-in OpenShift-managed path): the
+  OpenShift-managed CoreDNS static pod serves the `api`, `api-int`, and `*.apps`
+  records internally, pointing at the configured VIPs (`apiServerInternalIPs` /
+  `ingressIPs`). The deployer's external/upstream DNS only needs the records
+  required by clients outside the cluster — `api.<base_domain>` and
+  `*.apps.<base_domain>`. The `api-int` record is internal-only and is served by
+  CoreDNS. The deployer doesn't need to create it externally.
+- `dnsRecordsType: External` (the default; only valid with `loadBalancer.type:
+  UserManaged`):
   CoreDNS does not serve any of these records. The deployer must pre-create all
   of them in their own DNS, pointing at their user-managed load balancer:
   `api.<base_domain>`, `api-int.<base_domain>`, and `*.apps.<base_domain>`.
@@ -145,9 +163,12 @@ fields owned by the installer/infrastructure. Validation:
 
 - `apiServerInternalIPs` / `ingressIPs`: `MaxItems=2`, IP format, at most one
   address per IP family (CEL).
-- `loadBalancer.type`: enum, defaulted, immutable once set (CEL).
-- `dnsRecordsType`: only `External` when `loadBalancer.type` is `UserManaged`
-  (CEL, defined at the `ExternalPlatformStatus` level).
+- `loadBalancer.type`: enum, immutable once set (CEL). Defaulted to
+  `UserManaged` for `External` (differs from the `OpenShiftManagedDefault` used
+  by other on-prem platforms) to preserve existing behavior.
+- `dnsRecordsType`: defaulted to `External`; only `External` when
+  `loadBalancer.type` is `UserManaged` (CEL, defined at the
+  `ExternalPlatformStatus` level).
 - `machineNetworks`: `MaxItems=32`, unique entries (CEL).
 
 ### Topology Considerations
@@ -184,6 +205,19 @@ DualStack is supported with no extra mechanism: the VIP fields accept one IPv4
 and one IPv6 address each, and the existing on-prem rendering (VIP getters and the
 CoreDNS Corefile) already handles both families, emitting secondary-family records
 when a second address is present.
+
+#### Installer Interface
+
+Because these are `status` fields owned by the installer/infrastructure, a
+deployer cannot set them directly on a running cluster; the installer must
+populate them. The installer therefore needs an `install-config` interface for
+the `External` platform (VIPs, `loadBalancer.type`, `dnsRecordsType`,
+`machineNetworks`), mirroring how BareMetal/vSphere accept these in
+`install-config` and flow them through to `PlatformStatus`. The detailed
+installer UX is specified in the installer repo, but the feature is not
+considered complete until that interface exists — without it there is no
+supported way for a deployer to opt in to the OpenShift-managed path. This is
+reflected in the graduation criteria below.
 
 #### Affected Components
 
@@ -235,6 +269,8 @@ pods on `External` is added ahead of GA.
 ### Dev Preview -> Tech Preview
 
 - API available behind `ExternalPlatformOnPrem` with validation tests.
+- `install-config` interface available for the `External` on-prem fields so a
+  deployer can select the behavior at install time.
 - Ability to bring up an `External` cluster with OpenShift-managed and
   user-managed networking end to end.
 
@@ -250,10 +286,14 @@ Not applicable.
 
 ## Upgrade / Downgrade Strategy
 
-The new fields are status fields gated by a feature gate. Clusters that do not
-set them keep their current behavior. When downgrading, the fields are ignored by
-older components because `loadBalancer.type` is immutable once set. Existing
-clusters retain their chosen behavior.
+The new fields are status fields gated by a feature gate. Because
+`loadBalancer.type` defaults to `UserManaged` and the on-prem static pods are
+deployed only when `OpenShiftManagedDefault` is explicitly selected with VIPs,
+enabling the feature gate on an existing `External` cluster does not change its
+behavior. Clusters that do not opt in keep their current behavior. When
+downgrading, the fields are ignored by older components because
+`loadBalancer.type` is immutable once set. Existing clusters retain their chosen
+behavior.
 
 ## Version Skew Strategy
 
