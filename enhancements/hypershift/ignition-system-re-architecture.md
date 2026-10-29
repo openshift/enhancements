@@ -168,8 +168,11 @@ Starting state: a NodePool exists and references user/core/NTO configs.
    `spec.rolloutGlobalConfig` — while the core and NTO ConfigMaps already reside
    in the HCP namespace and are referenced in place with no CR owner reference. It
    sets the direct inputs (`releaseImage`, `pullSecret`,
-   `additionalTrustBundle`, `osStream`). It never opens a ConfigMap's contents and
-   computes no hash.
+   `additionalTrustBundle`, `osImageStream`). For any rollout-relevant input it keeps in
+   `managementConfigMaps` rather than the rendered payload (today, the API-server endpoint
+   identity), it writes a canonical summary into `spec.additionalRolloutInputs` so that input still
+   rolls existing nodes. It never opens a ConfigMap's contents and computes neither the
+   payload nor the rollout hash.
 2. The PayloadController (leader) reacts to the CR or to a change in any
    referenced ConfigMap, the pull-secret Secret named by `spec.pullSecret.name`,
    or the trust-bundle ConfigMap named by `spec.additionalTrustBundle` — all of
@@ -182,8 +185,10 @@ Starting state: a NodePool exists and references user/core/NTO configs.
    an in-place rotation of either produces a new `configHash` and the generator
    never serves stale bytes. The rollout hash instead uses the
    *references* (`rolloutConfigMaps` config + version + `pullSecret` +
-   `additionalTrustBundle` name + `rolloutGlobalConfig` config + osStream), preserving
-   parity with today's NodePool `ConfigGenerator.Hash()` (which hashes
+   `additionalTrustBundle` name + `rolloutGlobalConfig` config + osImageStream +
+   `additionalRolloutInputs`), preserving parity with today's NodePool
+   `ConfigGenerator.RolloutHash()` (whose `endpointConfig` term the consumer now supplies
+   through `additionalRolloutInputs`, and which hashes
    `pullSecret`/`additionalTrustBundle`, not their contents) so an
    in-place credential/CA rotation does not roll the fleet; instead it refreshes
    the current rollout's bytes under Policy A (step 4), so scale-up/replacement
@@ -192,10 +197,10 @@ Starting state: a NodePool exists and references user/core/NTO configs.
    store entry; if its recorded `configHash` already matches, it reuses those bytes
    and skips the pull, otherwise it runs the MCO pipeline (which pulls the release image).
 4. If the rollout hash changed, it moves `status.current` to `status.previous` —
-   deleting from the store any token already occupying `status.previous`
+   deleting from the store any payload already occupying `status.previous`
    (delete-on-evict), so at most two payloads (current + previous) are ever live
    per CR even when rollouts overtake each other (A->B->C) — mints a new signed,
-   audience-bound, expiring token, calls `PayloadStore.Put(newToken, payload)`, **authors
+   audience-bound, expiring token, calls `PayloadStore.Put` keyed by the new `(owner, rolloutHash)`, **authors
    the pointer-ignition userdata Secret** (named `<ignitionpayload-name>-<rolloutHash>`,
    embedding the token plus the ignition endpoint and CA — see Node authentication and token
    handling), and sets
@@ -223,14 +228,14 @@ Starting state: a NodePool exists and references user/core/NTO configs.
    the condition, so a node still booting on the old generation cannot mark the new one
    reached.
 7. When a rollout drains (old MachineDeployment scaled to 0), the NodePool controller
-   advances `spec.retiredRolloutGeneration`. The PayloadController then frees the old token
+   advances `spec.retiredRolloutGeneration`. The PayloadController then frees the old payload
    from the store, deletes the retired userdata Secret, and clears `status.previous` only
    when `status.previous.rolloutGeneration <= spec.retiredRolloutGeneration` — so if rollouts
    overtake each other (A->B->C), an earlier generation's (A) drain signal does not clear a
    still-draining `status.previous` (B), keeping this step consistent with the
    `retiredRolloutGeneration` contract in the CRD spec.
 8. On teardown, the creating consumer removes its consumer finalizer and deletes
-   the CR; the PayloadController then frees all remaining store tokens and removes
+   the CR; the PayloadController then frees all remaining store entries and removes
    its store-cleanup finalizer, after which the CR-owned objects (the user and HAProxy
    ConfigMaps and the generator-authored userdata Secrets) cascade-delete via their owner
    references — the referenced-in-place core and NTO ConfigMaps carry no owner reference and
@@ -249,12 +254,12 @@ sequenceDiagram
     PC->>CR: Watch CR + referenced ConfigMaps
     PC->>PC: Split + validate configs, compute both hashes
     alt rollout hash changed
-        PC->>PS: Put(newToken, payload)
+        PC->>PS: Put(owner, rolloutHash, payload)
         PC->>PC: author userdata Secret (name = <np>-rolloutHash, embeds token)
         PC->>CR: status.current = {hashes, gen+1, userDataSecretName}
         NP->>NP: point MachineDeployment at userDataSecretName
     else management/cloud-config change only
-        PC->>PS: Put(current token, refreshed payload)
+        PC->>PS: Put(owner, rolloutHash, refreshed payload)
         PC->>PC: refresh userdata content
         PC->>CR: update status.current.configHash only
     end
@@ -263,7 +268,7 @@ sequenceDiagram
     SRV-->>Node: serve payload
     SRV->>CR: set IgnitionReached=True (one-shot)
     NP->>CR: advance spec.retiredRolloutGeneration after drain
-    PC->>PS: Delete(previous token); delete previous userdata; clear status.previous
+    PC->>PS: Delete(owner, previous rolloutHash); delete previous userdata; clear status.previous
 ```
 
 **Consumers other than the NodePool controller.** The workflow above is written
@@ -393,6 +398,22 @@ This enhancement adds a new CRD and a finalizer:
    	// +optional
    	RolloutGlobalConfig ConfigMapReference `json:"rolloutGlobalConfig,omitzero"`
 
+   	// additionalRolloutInputs is an opaque, consumer-authored summary of rollout-relevant
+   	// inputs, folded into the rollout hash only (never into configHash). Changing it advances
+   	// rolloutGeneration, so running nodes roll. It is the consumer's lever to roll running
+   	// nodes for a change the rollout hash would otherwise miss — typically a managementConfigMaps
+   	// change, which on its own only refreshes the payload bytes (updating configHash) for new
+   	// nodes without rolling the running ones. Today the NodePool controller writes the API-server
+   	// endpoint identity (access mode, advertise address, port), so an endpoint change both
+   	// refreshes the payload via the HAProxy config in managementConfigMaps (which updates
+   	// configHash) and rolls running nodes via this field. It stays out of configHash so configHash
+   	// remains the payload's byte identity — a re-roll onto unchanged bytes does not make the
+   	// generator re-pull the release image. Leave empty when no out-of-band rollout trigger applies.
+   	// +optional
+   	// +kubebuilder:validation:MaxLength=1024
+   	// +kubebuilder:validation:XValidation:rule="self.matches('^[!-~]*$')",message="additionalRolloutInputs must contain only printable ASCII characters and no whitespace, so the rollout hash stays deterministic"
+   	AdditionalRolloutInputs string `json:"additionalRolloutInputs,omitempty"`
+
    	// rolloutConfigMaps lists ConfigMaps in the IgnitionPayload's namespace whose contents
    	// are rollout-relevant (user, core, and NTO machine configs). Each referenced ConfigMap
    	// provides its content under the "config" key as multi-document YAML of MachineConfig
@@ -410,7 +431,11 @@ This enhancement adds a new CRD and a finalizer:
    	// its content under the "config" key as multi-document YAML of MachineConfig manifests;
    	// a ConfigMap missing that key contributes nothing. A change to them refreshes the payload
    	// behind the current token without advancing rolloutGeneration, so it does not trigger a
-   	// rollout. A name here must not also appear in rolloutConfigMaps.
+   	// rollout. A name here must not also appear in rolloutConfigMaps. When a management
+   	// ConfigMap nonetheless holds inputs that must roll existing nodes on change (e.g. the
+   	// endpoint address/port/access mode inside the apiserver-HAProxy config), the consumer
+   	// surfaces just those inputs via spec.additionalRolloutInputs; the ConfigMap itself stays here so
+   	// image-only bumps still refresh the payload without rolling.
    	// +optional
    	// +listType=map
    	// +listMapKey=name
@@ -550,8 +575,8 @@ conversion, or mutation webhooks, nor an aggregated API server.
 ### Feature Gate
 
 The whole re-architecture is gated behind a single **management-cluster** feature
-gate, `IgnitionPayloadSystem`, enabled for `TechPreviewNoUpgrade` (and
-`CustomNoUpgrade`) and **off by default**. The gate is a HyperShift management
+gate, `IgnitionPayloadSystem`, enabled for `TechPreviewNoUpgrade` and **off by
+default**. The gate is a HyperShift management
 feature gate (configured on the management cluster / HyperShift operator), not a
 hosted-cluster feature gate, and it is **fleet-wide**: there is no per-HostedCluster
 opt-in. This matches how the HyperShift operator deploys the split
@@ -566,12 +591,16 @@ The gate controls two things in lockstep:
   when it is on, it deploys the split controller/server and the NodePool controller
   consumes `IgnitionPayload`. Flipping the gate is intended to be a no-op for
   already-running clusters (Policy A — see Version Skew Strategy); it does not by
-  itself roll the fleet.
+  itself roll the fleet. The gate is the only switch for the consumer path and the
+  new-component deploy; standing down the *legacy* CPO ignition server is a separate,
+  per-HostedControlPlane step the HO drives via `DisableIgnitionServerAnnotation` (see
+  Upgrade / Downgrade Strategy).
 - **CRD installation:** the `IgnitionPayload` CRD is born gated via the
   `+openshift:enable:FeatureGate=IgnitionPayloadSystem` marker and the openshift/api
-  CRD feature-set machinery, so it is rendered and installed **only** under
-  `TechPreviewNoUpgrade`/`CustomNoUpgrade` feature sets. There is no `-Default`
-  variant of the CRD while the feature is in Tech Preview.
+  CRD feature-set machinery, so it is rendered and installed **only** under the
+  `TechPreviewNoUpgrade` feature set (the only feature-set variant the HyperShift
+  installer selects). There is no `-Default` variant of the CRD while the feature is in
+  Tech Preview.
 
 Promotion to GA flips the gate's default on (and graduates the CRD to the default
 feature set), gated on the Tech Preview -> GA criteria below.
@@ -585,8 +614,10 @@ ignition system exists only in this topology. It affects components running in
 the management cluster (the NodePool controller in the HO) and components
 running in the HCP namespace (the PayloadController, ignition-server, and proxy
 Deployments). The move of the ignition server from the CPO image to the HO
-image changes which binary hosts these components but keeps the per-HostedCluster
-Route/Service serving topology unchanged. The guest cluster is unaffected except
+image changes which binary hosts these components and keeps the *shape* of the
+per-HostedCluster serving topology (Route + Service + proxy) the same, though resource
+names, the endpoint host, and the node-facing CA change on cutover. The guest cluster is
+unaffected except
 that the in-place upgrade channel (HCCO `InPlaceUpgrader`) continues to read a
 byte-compatible legacy token Secret, so no guest-side change is required.
 
@@ -610,7 +641,8 @@ offering. Where HyperShift is offered, the re-architecture applies transparently
 
 ### Implementation Details/Notes/Constraints
 
-**Component layout (reduced from 4 to 3, all in the HO binary).** The
+**Component layout (reduced from 4 to 3 — the new PayloadController and
+ignition-server run in the HO binary; the HAProxy proxy is unchanged).** The
 `TokenSecretReconciler`, the secret janitor, and the CPO ignition server
 component are eliminated. The PayloadController (leader-elected, 2 replicas) and
 ignition-server (stateless, 3 replicas) become two separate Deployments in the
@@ -698,6 +730,21 @@ rollout (point the MachineDeployment at `status.current.userDataSecretName`, dra
 identity, and management-side/cloud-config changes refresh the bytes behind the current
 token (and that userdata Secret's content in place) so scale-up/replacement nodes always
 boot with current content while existing nodes are untouched until they roll.
+
+A classification bucket alone cannot express an input that must refresh the payload *and*
+roll existing nodes: moving its ConfigMap into `rolloutConfigMaps` would make every change
+to it roll (regressing the management-side guarantee for, e.g., HAProxy image bumps),
+while leaving it in `managementConfigMaps` never rolls. The apiserver-HAProxy config is
+exactly this case — an image bump must not roll, but an endpoint change (Public/Private,
+API-server address/port) must, because that config runs on the node. The consumer resolves
+this without splitting the ConfigMap: it keeps the whole config in `managementConfigMaps`
+(so the payload still carries the current endpoint for new nodes) and writes a canonical
+summary of only the roll-worthy inputs into `spec.additionalRolloutInputs`, which feeds the rollout
+hash and nothing else. This also keeps endpoint resolution with the consumer, which has the
+management-cluster access it needs (the shared-ingress Router Service lives in the
+`hypershift-sharedingress` namespace, outside the HCP namespace the PayloadController is
+scoped to). `additionalRolloutInputs` is generic: any future "lives in management config but must
+still roll" input uses the same lever.
 
 This work depends on and extends
 [predictable-nodepool-rollout-control](./predictable-nodepool-rollout-control.md)
@@ -788,13 +835,14 @@ re-point until the legacy Secret and the annotation both exist. No HCCO change i
 the guest side keeps reading the same Secret shape it reads today.
 
 **Feature gating.** The whole re-architecture is gated behind the management-cluster
-`IgnitionPayloadSystem` feature gate (fleet-wide, enabled for TechPreviewNoUpgrade /
-CustomNoUpgrade, off by default) — see the [Feature Gate](#feature-gate) section. It
+`IgnitionPayloadSystem` feature gate (fleet-wide, enabled for TechPreviewNoUpgrade,
+off by default) — see the [Feature Gate](#feature-gate) section. It
 is a HyperShift management feature gate (configured on the HyperShift operator), not
 an openshift/api guest feature set, and the `IgnitionPayload` CRD is born gated behind
 the same gate via the openshift/api CRD feature-set machinery, so it installs only
-under TechPreviewNoUpgrade / CustomNoUpgrade. The old token-Secret path is retained as
-a frozen, independent module through the coexistence window, and the migration model
+under TechPreviewNoUpgrade. The old token-Secret path is retained as
+a gate-selected path through the coexistence window (coexisting with the new path behind
+the gate rather than as a fully independent module), and the migration model
 (see [Upgrade / Downgrade Strategy](#upgrade--downgrade-strategy)) rides the mandatory
 N->N+1 upgrade. Promotion to GA flips the gate's default on and graduates the CRD to
 the default feature set.
@@ -850,7 +898,8 @@ the default feature set.
   increase the per-HostedCluster pod count relative to today's single ignition
   server Deployment.
 - **Coexistence complexity.** The migration introduces a branch point and a
-  frozen module that must keep compiling until EOL.
+  retained legacy path (gate-branched, not fully isolated) that must keep compiling
+  until EOL.
 
 ## Alternatives (Not Implemented)
 
@@ -908,6 +957,12 @@ the default feature set.
    should `DatabaseBackedStore` use, and when does v2 land relative to v1?
 3. **Proxy retirement in v2.** Under what exact conditions does security sign off
    on retiring the HAProxy proxy Deployment once the serving tier is KAS-free?
+4. **In-flight instances at cutover.** An instance whose userdata (endpoint, CA, token)
+   was baked by the legacy server just before cutover, but that first boots just after the
+   legacy server is stood down, would fetch a now-dead endpoint with the wrong node-facing
+   CA. Should the legacy ignition server/Route keep serving through a bounded drain window
+   after cutover, or are such pre-cutover in-flight instances expected to fail and be
+   replaced? (See [Upgrade / Downgrade Strategy](#upgrade--downgrade-strategy).)
 
 ## Test Plan
 
@@ -957,8 +1012,8 @@ targeting a release. -->
 ### Dev Preview -> Tech Preview
 
 - The `IgnitionPayloadSystem` feature gate exists and is enabled for
-  `TechPreviewNoUpgrade`/`CustomNoUpgrade` (off by default); the `IgnitionPayload`
-  CRD installs only under those feature sets.
+  `TechPreviewNoUpgrade` (off by default); the `IgnitionPayload`
+  CRD installs only under that feature set.
 - Ability to use the new ignition path end to end on at least one platform.
 - `PayloadGenerated` and `IgnitionReached` conditions and the
   `kubectl get ignitionpayload` view implemented.
@@ -979,9 +1034,10 @@ targeting a release. -->
 
 ### Removing a deprecated feature
 
-- Announce and remove the frozen old token-Secret module and
-  `DisableIgnitionServerAnnotation` handling once the oldest supported OCP has
-  reached the cutover release.
+- Announce and remove the frozen old token-Secret module and the HO's
+  legacy-standdown use of `DisableIgnitionServerAnnotation` once the oldest supported
+  OCP has reached the cutover release. The user-facing disable-ignition semantics of
+  the annotation remain (now disabling the new stack).
 
 ## Upgrade / Downgrade Strategy
 
@@ -994,40 +1050,64 @@ design makes the flip fleet-safe through adoption rather than relying on a worke
 ignition server runs and the NodePool controller uses the legacy token-Secret path. The new
 components are not deployed and the `IgnitionPayload` CRD is not installed.
 
-**Gate on.** The HO deploys the generator, server, and proxy from the HO image, and the
-NodePool controller creates an `IgnitionPayload` CR (and projects the config ConfigMaps) for
-every NodePool. Each HostedControlPlane then cuts over independently, driven forward-only by
-the existing `DisableIgnitionServerAnnotation`:
+**Gate on.** When the gate is on *and* the user has not disabled ignition on the
+HostedCluster, the HO deploys the generator, server, and proxy from the HO image, and the
+NodePool controller — now on the gate-selected consumer path — creates an `IgnitionPayload`
+CR (and projects the config ConfigMaps) for every NodePool. The **gate**, not any annotation,
+selects the new consumer path and the new-component deploy; `DisableIgnitionServerAnnotation`
+does one narrower job, standing down the *legacy* CPO ignition server and proxy per
+HostedControlPlane. Because the HO must own that standdown signal, the annotation is **removed
+from the HC->HCP annotation mirror** and written directly on the HostedControlPlane by the HO,
+which reconciles it to `(user disabled ignition on the HostedCluster) OR (this
+HostedControlPlane has cut over)` in both gate states — preserving today's user-driven disable
+when the gate is off. The new components never key off this HCP annotation (if they did, the
+HO's own standdown would tear them down); they are gated on the HO deploy decision above.
+
+Each HostedControlPlane then cuts over independently, forward-only:
 
 1. **Pre-cutover.** The CR exists and the generator produces payloads, but CAPI still points
    at the legacy userdata and the legacy CPO server still serves — nothing has moved.
-2. **Cutover.** Once the new `ignition-payload-server` component reports Available, the HO sets
-   `DisableIgnitionServerAnnotation` on the HostedControlPlane (after the HC->HCP mirror,
-   forward-only). That stands down the legacy CPO ignition server and proxy and switches the
-   NodePool consumer onto the `IgnitionPayload` path; the HO re-points `hc.Status.IgnitionEndpoint`
-   at the new proxy Route, and new nodes boot with the new server's node-facing CA.
-3. **Adoption (no roll).** For already-provisioned NodePools the consumer does **not** re-point
-   CAPI. It reads the live `Bootstrap.DataSecretName`, keeps CAPI on that existing userdata
-   Secret, and ensures its content is refreshed from the generator's canonical userdata (new
-   endpoint, CA, and token) — so `DataSecretName` is unchanged and **no roll occurs**. Existing
-   nodes (which never re-read userdata) are untouched; scale-up nodes get current content. The
-   pool is marked adopted; the next genuine config change rolls it onto the canonical
-   `<ignitionpayload-name>-<rolloutHash>` name. For InPlace NodePools, adoption must **not**
-   re-stamp the MachineSet `targetConfigVersion`, or HCCO would reboot every node. NodePools
-   with no automated machine management (Platform None, IBM UPI) get a CR served by the new
-   server but are skipped for CAPI/adoption (they have no Machines).
+2. **Adoption (no roll) — before standdown.** Once the new `ignition-payload-server` reports
+   Available, the HO re-points `hc.Status.IgnitionEndpoint` at the new proxy Route (with the
+   new node-facing CA). For each already-provisioned NodePool the consumer does **not** re-point
+   CAPI: it reads the live `Bootstrap.DataSecretName`, keeps CAPI on that existing userdata
+   Secret, and refreshes its *content* from the generator's canonical userdata (new endpoint,
+   CA, token) in place — so `DataSecretName` is unchanged and **no roll occurs**. Existing nodes
+   (which never re-read userdata) are untouched; scale-up nodes get current content, and the
+   legacy server stays up as a safety net for a scale-up whose pool has not been adopted yet.
+   For InPlace NodePools, adoption must **not** re-stamp the MachineSet `targetConfigVersion`,
+   or HCCO would reboot the pool's nodes. The pool is marked adopted; the next genuine config
+   change rolls it onto the canonical `<ignitionpayload-name>-<rolloutHash>` name.
+3. **Legacy standdown.** Only after every pool on the HostedControlPlane has been adopted does
+   the HO set `DisableIgnitionServerAnnotation` on the HostedControlPlane, standing down the
+   legacy CPO ignition server and proxy. Ordering matters: standing down before adoption would
+   leave a scale-up in the gap booting stale userdata (old endpoint/CA) against a server that
+   is already gone. (Instances already *created* by CAPI but not yet booted at cutover are the
+   subject of the in-flight open question.)
 4. **Fleet EOL.** Once the oldest supported OCP has reached the cutover release (~2-3 releases),
-   the HO removes the frozen legacy token-Secret module and the `DisableIgnitionServerAnnotation`
-   handling.
+   the HO removes the frozen legacy token-Secret module and its direct
+   `DisableIgnitionServerAnnotation` handling.
+
+**Other consumers at cutover.** Karpenter takes its ignition endpoint from
+`hc.Status.IgnitionEndpoint`, so the re-point reaches new just-in-time nodes automatically; it
+runs no coordinated adoption (it has no stable `DataSecretName` to refresh), so existing
+Karpenter nodes are replaced by its own lifecycle and only in-flight instances fall under the
+open question. The Agent platform carries both the ignition endpoint and the node-facing CA in
+`AgentCluster.Spec.IgnitionEndpoint`; cutover updates both, already-booted agents are untouched,
+and new agents fetch from the new endpoint/CA. NodePools with no automated machine management
+(Platform None, IBM UPI) get a CR served by the new server but are skipped for CAPI/adoption
+(they have no Machines).
 
 The OCP N->N+1 upgrade is orthogonal: it rolls nodes as it always has, and rolled nodes simply
 boot from the new path once their HostedControlPlane has cut over. The legacy token-Secret
-module is retained — frozen and sharing no code with the new path — only to drain in-flight
-rollouts during the coexistence window.
+module is retained — gate-selected and coexisting with the new path (their shared
+NodePool-controller wiring is branched on the gate, not fully isolated) — only to drain
+in-flight rollouts during the coexistence window.
 
 **Downgrade.** The `IgnitionPayloadSystem` gate is a management-cluster TechPreview gate and
-cutover is forward-only (`DisableIgnitionServerAnnotation` is set, not cleared), so disabling
-the gate after a HostedControlPlane has cut over is not a supported rollback. HyperShift
+cutover is forward-only (the HO owns the HCP `DisableIgnitionServerAnnotation` and keeps it set
+once a HostedControlPlane has cut over), so disabling the gate after a HostedControlPlane has
+cut over is not a supported rollback. HyperShift
 likewise does not support downgrading a HostedCluster's control plane to an earlier OCP
 version. The migration is therefore forward-only; the frozen legacy module exists solely to
 drain in-flight rollouts during the coexistence window (not to enable a rollback) before it is
@@ -1037,9 +1117,11 @@ deleted at fleet EOL.
 
 - **HO/CPO skew is intrinsic to HyperShift** — the HO spans multiple OCP
   versions at once. The redesign turns today's intra-system, four-actor
-  entanglement into two independent modules selected by a single branch point
-  (`DisableIgnitionServerAnnotation`), the standard way HyperShift ships breaking
-  CPO/HO changes.
+  entanglement into two independent modules: the fleet-wide `IgnitionPayloadSystem`
+  gate selects the HO-side consumer path and new-component deploy, while the
+  per-HostedControlPlane `DisableIgnitionServerAnnotation` (HO-owned, no longer mirrored
+  from the HostedCluster) stands down the legacy CPO server once a HostedControlPlane has
+  cut over — the standard way HyperShift ships breaking CPO/HO changes.
 - **Generation behavior remains release-image-version-branched**, not
   CPO-build-branched, so a single HO copy produces correct payloads for every
   OCP version in the fleet.
@@ -1059,11 +1141,9 @@ deleted at fleet EOL.
   *unconditionally rebaselines*: it rewrites `status.current.rolloutHash` to the
   new-formula value over the current inputs, sets `rolloutHashVersion` to the
   constant, and does **not** advance `rolloutGeneration` — so the version bump itself
-  never rolls. This mirrors the versioned NodePool config hash
-  (`nodePoolConfigHashVersion`) introduced in openshift/hypershift#9007, and is
-  simpler here because the PayloadController is the single owner of both the hash
-  and the rolloutGeneration counter — the migration is one controller's decision rather
-  than a per-NodePool reconciliation.
+  never rolls. This is a single-controller migration: because the PayloadController
+  is the sole owner of both the rollout hash and the `rolloutGeneration` counter, the
+  rebaseline is one controller's decision rather than a per-NodePool reconciliation.
   - **Accepted limitation of unconditional rebaseline.** A config change that is
     visible to *both* the old and new formula, and that lands in the narrow window
     between the outgoing leader's last status write and the new leader's first
@@ -1120,10 +1200,14 @@ deleted at fleet EOL.
   cache has hydrated (informer lag metric / ignition-server logs). Generator
   logs (leader) show MCO-pipeline and store-write errors.
 - **Disabling the extension.** The `IgnitionPayload` CRD cannot be removed
-  without losing the ignition state for all consumers; disabling it would break
-  node provisioning for the affected HostedClusters. The supported "off switch"
-  is the migration branch point (`DisableIgnitionServerAnnotation`), which
-  selects the old vs new path rather than disabling ignition entirely.
+  without losing the ignition state for all consumers, and the management gate is
+  fleet-wide (disabling it after a HostedControlPlane has cut over is unsupported —
+  see Upgrade / Downgrade Strategy). `DisableIgnitionServerAnnotation` is **not** an
+  off switch for the new system: it only stands down the legacy CPO server. The only
+  way to run a HostedCluster with no ignition at all — as today — is the user-set
+  HostedCluster `DisableIgnitionServerAnnotation`, which the HO honors by disabling
+  both stacks; that stops node provisioning for that cluster and is not a fallback to
+  the legacy path.
 - **Graceful recovery.** The serving hot path reads a local cache, so pod
   restarts trigger a cold rehydrate (seconds) with no payload loss or
   regeneration; a leader loss is recovered on lease expiry. Payloads persist in
