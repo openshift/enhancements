@@ -21,7 +21,9 @@ tracking-link:
 
 ## Summary
 
-This enhancement adds machine-readable error status reporting to `must-gather` by producing a versioned `/must-gather/status.json` that records per-collector success, skip, or error outcomes with bounded messages. Phase 1 (must-gather) establishes the archive-level contract for immediate use via `oc adm must-gather`. Phase 2 (must-gather-operator) propagates Job lifecycle conditions and `status.json` results to the `MustGather` CR, with Job-based fallback for older or custom images.
+This enhancement adds machine-readable error status reporting to `must-gather` by producing a versioned `/must-gather/status.json` that records per-collector success, skip, or error outcomes with bounded messages.
+Phase 1 (must-gather) establishes the archive-level contract for immediate use via `oc adm must-gather`.
+Phase 2 (must-gather-operator) propagates Job lifecycle conditions and `status.json` results to the `MustGather` CR, with Job-based fallback for older or custom images.
 
 ## Motivation
 
@@ -170,7 +172,8 @@ Every top-level unit launched by main `gather` (28 units):
 | 1 | `inspect_named_resources` | Background `oc adm inspect` (named) |
 | 2 | `inspect_group_resources` | Background `oc adm inspect` (group) |
 | 3 | `inspect_all_namespaces` | Background `oc adm inspect` (all-namespaces) |
-| 4–26 | `gather_insights`, `gather_monitoring`, `gather_olm`, `gather_olm_v1`, `gather_priority_and_fairness`, `gather_etcd`, `gather_service_logs`, `gather_windows_node_logs`, `gather_haproxy_config`, `gather_kas_startup_termination_logs`, `gather_network_logs_basics`, `gather_metallb`, `gather_frrk8s`, `gather_nmstate`, `gather_nfd`, `gather_sriov`, `gather_podnetworkconnectivitycheck`, `gather_machineconfig_ondisk`, `gather_machineconfigdaemon_termination_logs`, `gather_vsphere`, `gather_ppc`, `gather_osus`, `gather_istio` | Parallel collectors |
+| 4–14 | `gather_insights`, `gather_monitoring`, `gather_olm`, `gather_olm_v1`, `gather_priority_and_fairness`, `gather_etcd`, `gather_service_logs`, `gather_windows_node_logs`, `gather_haproxy_config`, `gather_kas_startup_termination_logs`, `gather_network_logs_basics` | Parallel collectors |
+| 15–26 | `gather_metallb`, `gather_frrk8s`, `gather_nmstate`, `gather_nfd`, `gather_sriov`, `gather_podnetworkconnectivitycheck`, `gather_machineconfig_ondisk`, `gather_machineconfigdaemon_termination_logs`, `gather_vsphere`, `gather_ppc`, `gather_osus`, `gather_istio` | Parallel collectors |
 | 27 | `gather_aro` | Synchronous post-wait |
 | 28 | `compress_logs` | Post-wait framework step (`skipped` unless `COMPRESS_AFTER_GATHER=true`). Reported under `framework`, not `collectors`. |
 
@@ -362,10 +365,21 @@ Phase 1 does not modify any Kubernetes API. Phase 2 adds bounded informational `
 
 Report is generated inside the same gather execution; no topology-specific config.
 
-* **Hypershift / HCP:** Identify management vs guest collection context. No new management-cluster service. Test operator Job/volume topology before Phase 2 completion.
-* **Standalone:** Non-applicable collectors report `skipped`, not `error`.
-* **SNO / MicroShift:** No new long-running workload; reporting records outcomes only.
-* **OKE:** Archive report does not depend on OKE-excluded features; verify operator path against OKE-supported workflow.
+#### Hypershift / Hosted Control Planes
+
+Identify management vs guest collection context. No new management-cluster service. Test operator Job/volume topology before Phase 2 completion.
+
+#### Standalone Clusters
+
+Non-applicable collectors report `skipped`, not `error`.
+
+#### Single-node Deployments or MicroShift
+
+No new long-running workload; reporting records outcomes only.
+
+#### OpenShift Kubernetes Engine
+
+Archive report does not depend on OKE-excluded features; verify operator path against OKE-supported workflow.
 
 ### Implementation Details/Notes/Constraints
 
@@ -410,7 +424,11 @@ Actionable for re-run decisions: what happened, which resource/namespace (no sec
 
 `status.json` is additive at `/must-gather/status.json`. Diagnostic layout unchanged. Consumers must tolerate: absent report (older/custom image); older supported schema; unknown additive fields. Unsupported `schemaVersion` → treat as unavailable, not success.
 
-Custom images (`--image`, `--all-images`) are **recommended but not required** to produce `status.json`. Phase 1 changes only the default image entrypoint/collectors/helper — no new env, mounts, or entrypoint contract for custom images. Missing report means the contract was not adopted, not that collection failed (Resolved Decision #8). Phase 2: Job lifecycle still works; `reportAvailable: false`; no cross-image aggregation in v1. Optional adopt path: vendor `status_reporting.sh`, use `schemaVersion: 1`.
+Custom images (`--image`, `--all-images`) are **recommended but not required** to produce `status.json`.
+Phase 1 changes only the default image entrypoint/collectors/helper — no new env, mounts, or entrypoint contract for custom images.
+Missing report means the contract was not adopted, not that collection failed (Resolved Decision #8).
+Phase 2: Job lifecycle still works; `reportAvailable: false`; no cross-image aggregation in v1.
+Optional adopt path: vendor `status_reporting.sh`, use `schemaVersion: 1`.
 
 #### Operator transport and lifecycle (Phase 2)
 
@@ -469,7 +487,7 @@ Security and UX/support review: must-gather maintainers, operator maintainers, s
 
 ## Test Plan
 
-### Phase 1 — must-gather
+### Phase 1 testing — must-gather
 
 * Unit tests for `status_reporting.sh`: success, skip, error, repeated events, message limits, redaction, atomic finalization.
 * Wrapper tests with fake collectors: success; error exit; `report_skip` + exit `0`; report error + continue exit `0`; stderr; concurrent finish; fail before output; nested children; interrupt/timeout.
@@ -481,7 +499,7 @@ Security and UX/support review: must-gather maintainers, operator maintainers, s
 * Archive-level tests for present/missing/older-schema reports.
 * Existing formatting, shell lint, and test targets.
 
-### Phase 2 — must-gather-operator
+### Phase 2 testing — must-gather-operator
 
 * Controller tests: success, degraded, failed, timeout, missing report, parse failure, unsupported schema.
 * Job Failed without `status.json` (OOMKilled, DeadlineExceeded, ImagePullBackOff).
@@ -502,6 +520,14 @@ Ships as **GA** (no Dev Preview / Tech Preview). Phase 1 and Phase 2 are deliver
 * Owners identified (must-gather, operator, support, API).
 * Clear which failures need wrapper vs collector instrumentation.
 * Security and redaction rules agreed; Phase 1/2 boundaries agreed.
+
+### Dev Preview -> Tech Preview
+
+Not applicable. This enhancement ships directly as GA.
+
+### Tech Preview -> GA
+
+Not applicable. This enhancement ships directly as GA.
 
 ### GA readiness — Phase 1
 
@@ -540,7 +566,10 @@ Additive archive change; no cluster migration. Newer operator + older image → 
 
 ## Operational Aspects of API Extensions (Phase 2)
 
-Status-only change: no admission, conversion webhook, aggregated API, finalizer, or synchronous dependency for ordinary operations. Update summary when the Job reaches terminal state (not per collector). Bounded serialized size. Clear reasons for: report success; collector errors (overall degraded); framework error; unavailable (old/custom); unreadable/incompatible. Failure mode: graceful degradation to Job-based status without blocking archive retrieval.
+Status-only change: no admission, conversion webhook, aggregated API, finalizer, or synchronous dependency for ordinary operations.
+Update summary when the Job reaches terminal state (not per collector). Bounded serialized size.
+Clear reasons for: report success; collector errors (overall degraded); framework error; unavailable (old/custom); unreadable/incompatible.
+Failure mode: graceful degradation to Job-based status without blocking archive retrieval.
 
 ## Support Procedures
 
