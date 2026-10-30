@@ -240,13 +240,12 @@ type NestedSpireConfig struct {
 }
 
 type DownstreamCluster struct {
-    // name identifies the downstream cluster. Immutable once set.
+    // name identifies the downstream cluster.
     // Must match the downstream cluster's ZeroTrustWorkloadIdentityManager.spec.clusterName.
     // +kubebuilder:validation:Required
     // +kubebuilder:validation:MinLength=1
     // +kubebuilder:validation:MaxLength=63
     // +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`
-    // +kubebuilder:validation:XValidation:rule="self == oldSelf",message="name is immutable"
     Name string `json:"name"`
 
     // kubeConfigSecret is the name of a Secret in the operator namespace
