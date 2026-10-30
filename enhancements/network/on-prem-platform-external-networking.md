@@ -1,5 +1,5 @@
 ---
-title: external-platform-on-prem-networking
+title: on-prem-platform-external-networking
 authors:
   - "@emy"
 reviewers:
@@ -10,7 +10,7 @@ approvers:
 api-approvers:
   - "@TBD"
 creation-date: 2026-09-25
-last-updated: 2026-10-29
+last-updated: 2026-10-30
 status: provisional
 tracking-link:
   - https://issues.redhat.com/browse/OPNET-771
@@ -28,7 +28,7 @@ on-prem networking primitives (self-hosted API/Ingress load balancing, internal
 DNS, and machine networks) that other platforms like BareMetal, vSphere or
 OpenStack rely on. This enhancement extends `infrastructure.config.openshift.io`
 `ExternalPlatformStatus` with the same on-prem networking surface: `apiServerInternalIPs`,
-`ingressIPs`, `loadBalancer`, `dnsRecordsType`, and `machineNetworks` `so an
+`ingressIPs`, `loadBalancer`, `dnsRecordsType`, and `machineNetworks` so an
 `External` cluster can run with OpenShift-managed on-prem networking or defer to
 a user-managed load balancer and externally-provided DNS. The work is gated
 behind the `ExternalPlatformOnPrem` feature gate.
@@ -101,7 +101,10 @@ feature gate:
   records) or `External` (records provided outside the cluster). Only settable to
   `External` when `loadBalancer.type` is `UserManaged`. Defaults to `External`,
   consistent with the `UserManaged` load-balancer default and with the fact that
-  `External` runs no in-cluster DNS today.
+  `External` runs no in-cluster DNS today. The `External` default applies to the
+  user-managed path. A deployer opting in to the OpenShift-managed path
+  (`loadBalancer.type: OpenShiftManagedDefault`) must set `dnsRecordsType:
+  Internal`, since `External` is only valid with `UserManaged`.
 - `machineNetworks`: the node networks, mirroring the other on-prem platforms.
 
 ### Workflow Description
@@ -113,7 +116,8 @@ feature gate:
    balancing and DNS. With no on-prem fields set, OpenShift provides none,
    matching today's `External` behavior.
 2. For OpenShift-managed networking, the deployer opts in by setting
-   `loadBalancer.type: OpenShiftManagedDefault`; the on-prem static pods are deployed.
+   `loadBalancer.type: OpenShiftManagedDefault` and `dnsRecordsType: Internal`;
+   the on-prem static pods are deployed.
 3. For user-managed networking (the default), the deployer leaves
    `loadBalancer.type` as `UserManaged` and optionally sets `dnsRecordsType:
    External`, and configures their own load balancer and DNS. OpenShift does not
