@@ -83,10 +83,7 @@ Kubernetes-NMState.
 This enhancement adds some new fields. It does not add any CRDs, webhooks,
 aggregated API servers, or finalizers.
 
-* `ovnKubernetes`, a new section under the existing `networking` stanza of
-  the installer's install-config API. This will only be valid when the
-  `networkType` is set to `OVNKubernetes`.
-* `bridgeTopology`, a new field in the `ovnKubernetes` section. Initially
+* `bridgeTopology`, a new field in the `ovnKubernetesConfig` section. Initially
   accepts `Standard` or unset.
 * `BridgeTopology`, a new field on the `status` stanza of the cluster-scoped
   `Infrastructure` resource (`config.openshift.io/v1`), alongside the other
@@ -133,7 +130,7 @@ Example install-config for enabling this feature:
 # ...
 networking:
   networkType: OVNKubernetes
-  ovnKubernetes:
+  ovnKubernetesConfig:
     bridgeTopology: Standard
 # ...
 ```
