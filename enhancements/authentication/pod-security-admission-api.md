@@ -333,9 +333,6 @@ The PSA label syncer will get its enforce capability removed before the repurpos
 MicroShift must retain the PSA label syncer's enforcement behavior independently of this gate, including after the gate is removed following GA.
 Its dependencies are described in [MicroShift](#microshift).
 
-CI will set `enforceLevel: Restricted` explicitly to retain coverage previously provided by the gate's previous behavior.
-This detects admission failures in the OpenShift workloads exercised by those tests.
-
 #### Retiring the PSA Label Syncer
 
 This proposal retires the PSA label syncer (`openshift.io/podsecurity-admission-label-syncer`) in OpenShift's cluster-policy-controller.
@@ -350,7 +347,8 @@ SCC admission skips these namespaces, so the labels keep PSA consistent with SCC
 The PSA label syncer derives namespace PSA labels from the SCCs their service accounts can use.
 SCC admission also considers the pod creator's permissions, so generated labels can conflict with workloads admitted through user-granted SCCs.
 
-Extending the PSA label syncer to handle additional SCC admission cases would require more engineering effort and permission analysis at runtime.
+Extending the PSA label syncer to user-granted SCCs would not settle the problem by itself.
+It would take several releases of telemetry to confirm it fixes the remaining failing clusters, and another unknown SCC edge case could restart that cycle.
 This proposal considers that cost unjustified because PSA largely overlaps with protection already provided by SCCs.
 
 ##### Who Labels Namespaces
@@ -480,9 +478,12 @@ To keep reporting after the upgrade, administrators set `reportLevel`.
 The PSA label syncer would write `enforce` labels, and the Pod Security Readiness Controller would keep clusters with violating namespaces in a temporary `Legacy` mode.
 Fresh installs would start in `Restricted`, and `Legacy` would eventually be removed.
 
-This relies on the PSA label syncer deriving correct levels, which it cannot do in every case, as described in [Why the PSA Label Syncer Retires](#why-the-psa-label-syncer-retires).
-The readiness evaluation runs every 4 hours and sees only a snapshot of existing pods, so workloads missing from every snapshot could still be rejected.
-Once `Legacy` was removed, administrators could no longer opt out cluster-wide.
+Not chosen, because:
+
+- The PSA label syncer ignores SCCs granted to the user who creates a pod, so it can set a level that rejects such pods.
+  The [label syncer enhancement](pod-security-admission-autolabeling.md#psa-label-synchronization-risks) accepted this as a risk.
+  Extending the syncer to user-granted SCCs is not pursued, see [Why the PSA Label Syncer Retires](#why-the-psa-label-syncer-retires).
+- The readiness evaluation runs every 4 hours on a snapshot of existing pods, so workloads missing from every snapshot could still be rejected.
 
 ### Rely on SCCs Only
 
@@ -684,7 +685,9 @@ The [one-time tests](#one-time-tests) run after each upgrade, and [Tech Preview 
 In OCP 5.0, an enabled gate means [enforce `restricted`](https://github.com/openshift/cluster-kube-apiserver-operator/blob/5f22e9c7b00f1cd914e9938ef56899684ee8ac5a/pkg/operator/configobservation/auth/podsecurityadmission.go#L100-L109) and [run the PSA label syncer in enforcing mode](https://github.com/openshift/cluster-policy-controller/blob/c9e9a348260921c9e788e33a51e904502cbe2d13/pkg/cmd/controller/psalabelsyncer.go#L17-L37).
 In OCP 5.1, an enabled gate means the PSA label syncer and global enforce gets disabled.
 
-Each operator [reads the gate value for its own version](https://github.com/openshift/library-go/blob/79b4826daec46f1ad433ba01de636f56b955f74d/pkg/operator/configobserver/featuregates/simple_featuregate_reader.go#L204), but the kube-controller-manager-operator [copies all gates](https://github.com/openshift/cluster-kube-controller-manager-operator/blob/c4854ad5ad5d1f9b2dfef3f721f96632334acde7/pkg/operator/configobservation/configobservercontroller/observe_config_controller.go#L128-L134) into the [cluster-policy-controller config](https://github.com/openshift/cluster-kube-controller-manager-operator/blob/c4854ad5ad5d1f9b2dfef3f721f96632334acde7/pkg/operator/targetconfigcontroller/targetconfigcontroller.go#L375-L381).
+Each operator [reads the gate value for its own version](https://github.com/openshift/library-go/blob/79b4826daec46f1ad433ba01de636f56b955f74d/pkg/operator/configobserver/featuregates/simple_featuregate_reader.go#L204),
+but the kube-controller-manager-operator [copies all gates](https://github.com/openshift/cluster-kube-controller-manager-operator/blob/c4854ad5ad5d1f9b2dfef3f721f96632334acde7/pkg/operator/configobservation/configobservercontroller/observe_config_controller.go#L128-L134)
+into the [cluster-policy-controller config](https://github.com/openshift/cluster-kube-controller-manager-operator/blob/c4854ad5ad5d1f9b2dfef3f721f96632334acde7/pkg/operator/targetconfigcontroller/targetconfigcontroller.go#L375-L381).
 After a rollback, the older cluster-policy-controller can start with the gate list that the newer release wrote.
 This race comes from reading the code and has not been reproduced.
 OCP 5.0 would read an enabled gate as "run the enforcing PSA label syncer", which writes `enforce` labels on customer namespaces.
