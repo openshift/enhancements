@@ -1638,9 +1638,11 @@ any existing feature.
 This enhancement adds a new `installation` status struct
 (containing `stage` and `lastTransitionTime`)
 and one new condition type
-(`ManagementClusterResourcePressure` on HC) to the
-`HostedCluster` and `HostedControlPlane` CRDs. All
-changes are purely additive and status-only.
+(`ManagementClusterResourcePressure`) to the
+`HostedCluster` CRD, and enriches diagnostic condition
+messages on existing `HostedControlPlane` and
+`ControlPlaneComponent` condition types. All changes
+are purely additive and status-only.
 
 **EUS**: Safe — informational status fields with no
 controller dependencies. Phase 2 reason codes must not
@@ -1756,11 +1758,12 @@ bug against HyperShift.
 **Emergency status correction for a stuck
 `installation.stage`:**
 
-Patch the **`HostedControlPlane`** (source of truth;
-HO mirrors to HC within ~1 minute):
+Patch the **`HostedCluster`** status directly (the HO
+computes `installation.stage` on the HC, not mirrored
+from HCP):
 
 ```bash
-oc patch hostedcontrolplane <name> -n <hcp-namespace> \
+oc patch hostedcluster <name> -n <namespace> \
   --subresource=status --type=merge \
   -p '{"status":{"installation":{"stage":"InstallationComplete"}}}'
 ```
@@ -1768,7 +1771,7 @@ oc patch hostedcontrolplane <name> -n <hcp-namespace> \
 Only use this if the cluster is genuinely healthy
 (`Available=True`, CVO success) and the stage is the
 only inconsistency. File a bug — a stuck stage
-indicates a CPO reconciliation bug.
+indicates an HO reconciliation bug.
 
 **Example: diagnosing management cluster capacity
 exhaustion:**
