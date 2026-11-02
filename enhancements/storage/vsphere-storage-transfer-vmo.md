@@ -67,6 +67,8 @@ then remap the volumes, including topology. The copy mechanism should allow a
 future replacement of `rsync` with `CnsRelocateVolume` when cross-vCenter volume
 relocation becomes feasible.
 
+It should be noted that - this enhancement on purpose omits some implementation details for brevity, so as enhancement remains readable and be read in one sitting. 
+
 ### Workflow Description
 
 Without being too verbose following is plan details about how CNS migration of volumes between vCenters will work using VMO:
@@ -78,7 +80,7 @@ Without being too verbose following is plan details about how CNS migration of v
 3. Once VMO is in `Planning` mode - VMO will create a inventory of vSphere-backed PVCs per namespace, resolves
    target failure domains and the volume mover, and reports blockers through a `StorageWorkloadMigration` object in each affected namespace. See API changes below for more details.
 
-4. VMO only starts executing storage migration bits, after VMO has successfully configured multi-site and workers are successfully running in target vCenter. So for storage migration to start VMO must be in `TargetCapacityReady` state.
+4. VMO only starts executing storage migration bits, after VMO has successfully configured multi-site and workers are successfully running in target vCenter. We will have to split `ensureWorkloadMigrated` to start storage migration after workers in target vcenter are ready.
    To distinguish workers on different vCenters and facilitate namespace node
    selectors, VMO labels each source Node and MachineSet with
    `migration.openshift.io/site: <migration-uid>-source`, and each target Node
@@ -142,6 +144,7 @@ Adding 2nd vCenter is a configuration which only had one failure-domain before c
 ```yaml
 spec:
   migrateStorage: <true|false>  # opt-in for enabling storage migration
+  FailureDomainMappings []FailureDomainMapping  # already exists
   state: Planning
   storage:
     # Volume mover used to copy data (see "Volume movers"). Defaults to Auto.
@@ -151,13 +154,6 @@ spec:
     storageClassMapping: 
       - source: thin-csi
         target: thin-csi-2
-    failureDomainMappings:
-      - source: source-a
-        target: target-a
-      - source: source-b
-        target: target-b
-      - source: source-c
-        target: target-c
 ```
 
 * `storageClassMapping` exists to support the case of SCs with `datastoreurl` or to support vSphere volumes which were migrated from in-tree etc.
@@ -171,6 +167,8 @@ spec:
   ```
 
 If VMO can't map every vSphere PV/PVC in the cluster to a datastore in target vCenter VMO will block migration during planning phase.
+
+It should be noted that - customers can edit `spec.Storage.*` while migration object remains in `Pending` or `Planning` phase. Once migration enters `Running` phase, editing those fields is unsupported.
 
 #### StorageWorkloadMigration
 
@@ -200,7 +198,7 @@ status:
 
 Customers write only `spec.actions`. VMO writes only `status`. VMO must never advance progress by changing the object's spec.
 
-`status.phase` uses the following ordered values:
+Following is tentative API of various migration phases recorded in `StorageWorkloadMigration`  object. Since a condition like API for phases is more user friendly and easier to support, we will replace `status.phase` with something like `status.migrationCondition`. 
 
 | Phase | Meaning |
 | :---- | :---- |
@@ -264,6 +262,42 @@ type VolumeCopy struct {
 ```
 
 `VolumeCopy.spec.method` records the volume mover resolved during Planning and is immutable, like `targetFailureDomain`. Mover-specific progress lives in a per-method field of `VolumeCopy.status` (for example `status.rsync`). The `VolumeCopy` objects have `ownerRef` set to `StorageWorkloadMigration` object of that namespace.
+
+#### Volume Migration blockers
+
+Planning blocks migration for the following reasons, scoped to inventoried vSphere-backed volumes:
+
+1. The PV uses raw block mode (`volumeMode: Block`).
+2. The PVC belongs to a generic ephemeral volume.
+3. The PV is not `Bound`, including `Available` or `Released` PVs.
+4. The PV has no matching PVC, or the binding's UID or volume name is inconsistent.
+5. The resolved target StorageClass does not exist.
+6. An Immediate-binding source StorageClass lacks an explicit `storageClassMapping`.
+7. A source StorageClass with `datastoreurl` or `allowedTopologies` lacks an explicit `storageClassMapping`.
+8. The resolved target StorageClass cannot provision a suitable volume in the target failure domain.
+9. A policy referenced by the target StorageClass is missing or incompatible with the target datastore.
+10. The target failure domain cannot be resolved.
+11. The PVC's target-failure-domain override names an unknown target.
+12. A non-terminal Pod uses PVCs mapped to different target failure domains.
+13. Source and target failure domains share the same region and zone.
+14. For a single target, configured CSI topology categories differ from `openshift-zone` and `openshift-region`.
+15. A PVC is in an `openshift-*` or `kube-*` namespace without a supported quiesce procedure.
+16. The target datastore lacks sufficient free capacity for all volumes planned onto it.
+
+VMO must check aggregate target datastore capacity during Planning and recheck
+before precopy and final copy. A final-copy `NoSpace` failure must keep the
+namespace quiesced, preserve source data and copy checkpoints, and allow retry
+after sufficient capacity is restored.
+
+Source StorageClasses with Immediate binding, `datastoreurl`, or
+`allowedTopologies` are supported through explicit `storageClassMapping` entries.
+Planning validates the resolved target class; source-class settings alone do not
+block migration when a suitable target class is mapped.
+The plan defers verification of the CSI operator's default policy to target
+preparation, since it is created in the target vCenter after Planning. Planning
+currently permits only `openshift-monitoring` and `openshift-image-registry`
+among platform namespaces.
+
 
 ### Topology Considerations
 
@@ -394,7 +428,7 @@ Not applicable
 
 ## Version Skew Strategy
 
-Not applicable
+We may want to backport this operator to older versions of Openshift as long as older version of Openshift supports multi-vcenter topology.
 
 ## Operational Aspects of API Extensions
 
@@ -423,10 +457,18 @@ We should also report how PVs were migrated and how long the overall migration t
 - Before target writes, rollback may restore source bindings and placement,
   except for source-consuming movers(Not implemented currently). After a workloads however writes to the target PVC such rollback will not be possible, so users must be informed about that.
 
+### Must gather
+
+As part of this operator we need to ship a must-gather image which can be used for collecting cluster resources which were created for migration. Following resources must be collected for this:
+
+- VmwareCloudFoundationMigration object
+- StorageWorkloadMigration
+- `VolumeCopy` objects
+- `PersistentVolumeClaim` objects
+
 ## Infrastructure Needed [optional]
 
 As according to Test Plan we will need access to more than one vCenter with following topologies:
 
 1. Single zone vCenters with RWX volumes
 2. Zonal vCenters with multiple datacenters
-
