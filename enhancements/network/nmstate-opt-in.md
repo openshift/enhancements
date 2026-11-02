@@ -52,8 +52,6 @@ to provide a simpler option that still allows use of NMState.
   using the feature.
 * As a cluster administrator, I don't want to specify host networking config
   in multiple places to avoid confusion about what belongs where.
-* As a former VMWare administrator, I want a simple way to enable advanced
-  networking configurations like I had on VMWare.
 
 ### Goals
 
