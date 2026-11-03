@@ -826,7 +826,7 @@ Existing components whose behavior changes:
 | CPO | Builds the webhook Deployment including the konnectivity sidecar flags and both CA mounts; sets `trustedCAFilePath` in the webhook configuration (HyperShift). |
 | Console Operator | Reads the Console operator proxy field; renders `auth.proxy` and mounts the CA. |
 | Console | Applies `auth.proxy` to its OIDC clients only. |
-| HyperShift operator | Validates the control-plane and guest release targets and the gates on both sides, blocking propagation through the HostedCluster's `ValidConfiguration` condition when either is unsupported ([Hosted Support Validation](#hosted-support-validation)); copies `operatorConfiguration` HC→HCP; synchronizes the referenced CA HC→HCP. |
+| HyperShift operator | Validates the control-plane and guest release targets and the gates on both sides, blocking propagation of the proxy configuration through the HostedCluster's `ValidProxyConfiguration` condition when either is unsupported ([Hosted Support Validation](#hosted-support-validation)); copies `operatorConfiguration` HC→HCP; synchronizes the referenced CA HC→HCP. |
 
 Configuration that must hold for it to work:
 
@@ -1377,9 +1377,13 @@ verify:
 - Propagation of the HostedCluster block to the HostedControlPlane.
 - [Release validation](#hosted-support-validation): a control-plane target below
   the minimum, a guest target below the minimum, and a hosted feature set that
-  does not enable the gate each set the HostedCluster's `ValidConfiguration`
-  condition to `False` with a message naming the failing target, and leave the
-  HostedControlPlane block unwritten.
+  does not enable the gate each set the HostedCluster's
+  `ValidProxyConfiguration` condition to `False` with a message naming the
+  failing target, leave the HostedControlPlane proxy block unwritten, and leave
+  `ValidConfiguration` and the rest of HostedCluster reconciliation unaffected.
+- `ValidProxyConfiguration` aggregates both checks: an invalid cluster-wide
+  proxy CA bundle and an unsupported component proxy each set it `False` on
+  their own, and when both fail the condition reports both.
 - An unresolvable or unparseable release image sets the condition `Unknown` and
   retries rather than blocking permanently or propagating.
 - A prerelease build of the minimum supported release — an engineering or
@@ -1644,11 +1648,23 @@ guest Console proxy field is only served while the gate is enabled (see
 check is load-bearing only while the gates remain preview-scoped; once both reach
 their default feature sets at GA it is satisfied on every cluster and the release
 floors become the operative check. Unsupported releases
-or gates set the HostedCluster's `ValidConfiguration` condition to `False` with
-an `InvalidConfiguration` reason naming the target that fell short, and **block
-propagation**, so no part of the configuration is applied. Release metadata
-lookup or version parsing failures set the condition `Unknown` and retry rather
-than reporting the payload unsupported.
+or gates set the HostedCluster's existing `ValidProxyConfiguration` condition to
+`False` with an `AuthenticationProxyUnsupported` reason naming the target that
+fell short, and **block propagation** of
+`operatorConfiguration.authentication.proxy`, so no part of the proxy
+configuration is applied. The rest of the HostedCluster continues to reconcile:
+unlike `ValidConfiguration`, a `False` `ValidProxyConfiguration` does not halt
+HostedCluster reconciliation, so an unsupported proxy configuration withholds
+only itself rather than freezing unrelated changes. Release metadata lookup or
+version parsing failures set the condition `Unknown` and retry rather than
+reporting the payload unsupported.
+
+`ValidProxyConfiguration` today reports only the validity of the cluster-wide
+proxy CA bundle (`spec.configuration.proxy.trustedCA`, reason
+`ProxyCABundleInvalid`). This proposal extends it to cover the component proxy as
+well: the condition is `True` only when both checks pass, and when either fails
+it carries the reason and message of the failing check — both, if both fail — so
+neither result masks the other.
 
 A third version participates but cannot be validated here: the HyperShift
 operator's own. It is installed independently of both payloads, and
@@ -1657,7 +1673,7 @@ annotation. An operator predating the feature — or a current one installed
 without the preview feature set while the field is still preview-scoped — therefore
 serves a HostedCluster CRD without `operatorConfiguration.authentication`, and
 the API server prunes the administrator's proxy block on write. The apply
-succeeds, `ValidConfiguration` stays `True`, and the configuration is simply
+succeeds, `ValidProxyConfiguration` stays `True`, and the configuration is simply
 absent, because the component that would report the loss is the one that is too
 old or ungated. No condition can cover this case. It is the inverse of the
 guest-side pruning in [Cross-Cluster Write Skew](#cross-cluster-write-skew),
@@ -1668,12 +1684,13 @@ describes.
 
 This follows HyperShift's established pattern for feature-level support
 checks — a minimum release constant evaluated during reconciliation and
-surfaced through the existing HostedCluster validation condition — and the
-validation the
+surfaced through an existing HostedCluster condition — and the validation the
 [External Claims Sourcing enhancement](external-oidc-additional-identity-information-sources.md)
 defines for the control-plane target, extended to the guest target because this
-feature has a guest-side consumer that one does not. It introduces no new
-condition type.
+feature has a guest-side consumer that one does not. It reports through the
+proxy-specific `ValidProxyConfiguration` rather than the general
+`ValidConfiguration` so that a proxy-only problem blocks only the proxy
+configuration, and it introduces no new condition type.
 
 Each floor is a constant in the HyperShift operator. The version is not read
 from a field: `spec.release.image` and `spec.controlPlaneRelease.image` are
@@ -1748,14 +1765,14 @@ Two layers address this:
   backstop for state that changed after validation passed — the guest payload or
   its feature set moving underneath an already propagated configuration.
 
-Support should treat a blocked `ValidConfiguration` on the HostedCluster as the
+Support should treat a blocked `ValidProxyConfiguration` on the HostedCluster as the
 expected signal for an unsupported payload, and an HCCO read-back failure as an
 indication that something changed underneath an already-validated
 configuration.
 
 HCP and guest reconciliation remain asynchronous; this proposal adds no aggregate
 condition confirming proxy and CA propagation across both paths, relying instead
-on the existing `ValidConfiguration` and
+on the existing `ValidProxyConfiguration` and
 `ConfigOperatorReconciliationSucceeded` conditions described above. No new kubelet
 or node API dependencies are introduced, and existing platform skew limits remain
 unchanged.
@@ -1843,10 +1860,12 @@ sidecar.
   error. Every condition below then reports a cluster that simply has no
   component proxy configured ([Hosted Support
   Validation](#hosted-support-validation)).
-- **Then read the HostedCluster conditions.** `ValidConfiguration` set to `False`
-  with an `InvalidConfiguration` reason naming a release target is the expected
-  signal for an unsupported payload: the HyperShift operator blocked propagation,
-  nothing was applied, and the cluster keeps its previous proxy behavior
+- **Then read the HostedCluster conditions.** `ValidProxyConfiguration` set to
+  `False` with an `AuthenticationProxyUnsupported` reason naming a release target
+  is the expected signal for an unsupported payload: the HyperShift operator
+  blocked propagation of the proxy configuration, none of it was applied, and the
+  cluster keeps its previous proxy behavior while the rest of the HostedCluster
+  continues to reconcile
   ([Hosted Support Validation](#hosted-support-validation)). `Unknown` means
   release lookup or version parsing failed and is being retried. Before GA, also
   confirm both gate sides — the management-side HyperShift gate and the hosted
