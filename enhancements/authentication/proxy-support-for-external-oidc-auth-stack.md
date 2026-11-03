@@ -1557,6 +1557,15 @@ rather than load-bearing. Operators reconcile compatible images and generated
 configuration through normal rollouts; no authentication-data migration is
 introduced.
 
+On both topologies, configuring the component proxy during an upgrade can leave
+consumers temporarily on different paths: replicas that predate the feature keep
+their previous routing until replaced, and on HyperShift the control plane can
+apply the configuration before the guest has upgraded (see
+[Hosted Support Validation](#hosted-support-validation)). Retain the previous
+route — the cluster-wide proxy or the existing egress allowance — until the
+upgrade has completed and both webhook token authentication and a fresh Console
+login have been verified through the component proxy.
+
 `TechPreviewNoUpgrade` retains its existing upgrade restrictions. This enhancement
 does not introduce a supported downgrade path. For development rollback testing,
 first establish a working cluster-wide proxy or direct path, remove the component
@@ -1608,7 +1617,15 @@ one-sided:
   so an image that predates `auth.proxy` ignores the block and starts normally.
   Console Operator therefore needs no image pairing logic, and the requirement
   that mixed replicas retain a working configuration holds structurally rather
-  than by mitigation.
+  than by mitigation. That is configuration compatibility, not authentication
+  availability: such a replica still reaches the IdP through its previous
+  routing — the cluster-wide proxy or direct connectivity — so logins it serves
+  fail if the IdP is reachable only through the component proxy, until the
+  rollout replaces it. Because that routing is what was in effect before the
+  component proxy was configured, the window regresses nothing on its own; it
+  becomes an outage only if the previous route is removed while old replicas
+  remain, which the [upgrade guidance](#upgrade--downgrade-strategy) advises
+  against.
 
 ### Asynchronous Reconciliation Hazards
 
@@ -1785,6 +1802,25 @@ half-applied proxy leaves token validation working while Console login fails in
 exactly the restricted networks this feature targets, and the
 [graduation criteria](#tech-preview---ga) already treat webhook-only support as
 insufficient.
+
+The validation evaluates the *desired* releases named by the pullspecs, not the
+versions currently running, and does not wait for an upgrade to complete.
+Starting an upgrade updates `spec.release` immediately, so a proxy
+configuration set during an upgrade into the first supporting release passes
+validation and propagates while the rollout is still in progress. The control
+plane converges first: CPO proxies the webhook and HCCO writes the guest Console
+field, while the guest CVO may still be running the previous Console Operator,
+CRD, and Console pods. Until the guest finishes upgrading, the configuration is
+pruned or ignored on the guest side as described under
+[Cross-Cluster Write Skew](#cross-cluster-write-skew) and
+[Co-Versioning Guarantees](#co-versioning-guarantees), and Console keeps its
+previous routing. This window is bounded by the rollout converging rather than
+by the validation, which only rules out targets that will never support the
+feature; a stalled guest upgrade extends it. Requiring the last completed
+version in `status.version.history` to meet the floor as well would close it,
+at the cost of deferring the configuration for the whole upgrade; since the
+window regresses nothing while the previous route is retained, this proposal
+documents it instead.
 
 Responsibility therefore differs by topology. On HyperShift the HyperShift
 operator enforces this, and the
