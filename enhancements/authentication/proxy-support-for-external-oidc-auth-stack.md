@@ -1329,8 +1329,6 @@ Pod:
 - Rotating the proxy's serving certificate and the contents of the referenced
   `trustedCA` ConfigMap lets token validation succeed again over the rotated
   proxy, with the operator resettling promptly.
-- With `ExternalOIDCExternalClaimsSourcing` enabled, claim retrieval from the
-  suite's external claims endpoint also goes through the proxy.
 - A configuration the running webhook cannot parse does not tear down a working
   authenticator: the replica keeps serving token validation with its last
   successfully loaded configuration, as
