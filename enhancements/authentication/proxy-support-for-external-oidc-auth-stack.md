@@ -19,7 +19,7 @@ tracking-link:
   - "https://redhat.atlassian.net/browse/OCPSTRAT-3721"
 see-also:
   - "/enhancements/authentication/direct-external-oidc-provider.md"
-  - "/enhancements/authentication/external-oidc-additional-identity-information-sources.md"
+  - "/enhancements/authentication/external-oidc-as-webhook.md"
   - "/enhancements/authentication/proxy-support-for-integrated-auth-stack.md"
 replaces:
 superseded-by:
@@ -60,7 +60,7 @@ to accept tokens issued by an external OIDC provider. In its original architectu
 kube-apiserver validates those tokens directly using its structured authentication
 configuration.
 
-[External OIDC Additional Identity Information Sources](external-oidc-additional-identity-information-sources.md)
+[External OIDC as a Webhook](external-oidc-as-webhook.md)
 introduces a different authentication path: the OAuth API server runs as a TokenReview webhook authenticator.
 Kube-apiserver delegates token validation to this webhook, which validates JWTs and can retrieve
 additional identity information from configured external claim sources. The
@@ -626,7 +626,7 @@ GA both gates are enabled by default and neither opt-in remains necessary.
 #### Hypershift / Hosted Control Planes
 
 Hosted support builds on the External OIDC webhook topology supplied by the
-External Claims Sourcing enhancement. That prerequisite owns deploying the OAuth
+External OIDC as a Webhook enhancement. That prerequisite owns deploying the OAuth
 API server in `external-oidc` mode, generating its authentication configuration,
 and configuring kube-apiserver to call its TokenReview endpoint. This enhancement
 adds proxy resolution and trust distribution to that path.
