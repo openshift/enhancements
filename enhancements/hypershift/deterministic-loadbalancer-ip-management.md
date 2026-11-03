@@ -417,10 +417,47 @@ For this feature, `serviceAnnotations` entries from the APIServer's
 `LoadBalancerPublishingStrategy` are applied directly as per-key writes.
 No translation layer, no vendor-specific logic in CPO.
 
-**Conflict resolution:** If an annotation key from `serviceAnnotations` already
-exists on the Service with a different value (e.g., set by an external controller),
-the user-specified value always wins — CPO overwrites it on every reconciliation.
+**Conflict resolution:** `serviceAnnotations` are written per key *before* CPO
+writes its own platform annotations, which gives two different outcomes:
+
+- For keys CPO does not manage (for example an annotation set by an external
+  controller), the user-specified value wins — CPO rewrites it on every
+  reconciliation.
+- For keys CPO manages itself (`aws-load-balancer-type`,
+  `aws-load-balancer-cross-zone-load-balancing-enabled`,
+  `aws-load-balancer-attributes`, `aws-load-balancer-internal`,
+  `external-dns.alpha.kubernetes.io/hostname`), **CPO wins**. Letting a user value
+  survive on those keys would break the Service: setting
+  `aws-load-balancer-internal` on the public KAS Service, for instance, would turn
+  the public NLB internal and the cluster would lose its API endpoint.
+
+In practice the second case cannot be reached: the CEL allowlist on
+`serviceAnnotations` only accepts the provider prefixes listed below, and none of
+them match a CPO-managed key. The precedence rule is the defence in depth that
+makes the collision harmless if the allowlist ever grows.
+
 Annotations on keys *not* in `serviceAnnotations` are left untouched.
+
+#### Which Service receives the fields
+
+`serviceAnnotations` carry an address, so only the Service exposing the cluster's
+*primary* endpoint may request it. Requesting the same address on two Services
+leaves whichever load balancer loses the race pending forever.
+
+| Field | `Public` | `PublicAndPrivate` | `Private` |
+| --- | --- | --- | --- |
+| `serviceAnnotations` | `kube-apiserver` | `kube-apiserver` (removed from `kube-apiserver-private`) | `kube-apiserver-private` |
+| `loadBalancerClass` | every LoadBalancer Service | every LoadBalancer Service | every LoadBalancer Service |
+
+Because `endpointAccess` is mutable, the keys are actively *removed* from the
+non-primary Service rather than merely not written, so a `Private` to
+`PublicAndPrivate` transition hands the address over to the public Service instead
+of having both request it.
+
+`loadBalancerClass` selects the provisioning controller rather than an address, so
+every LoadBalancer Service needs it. Kubernetes only accepts the field on create,
+or when a Service becomes a LoadBalancer, and rejects it on non-LoadBalancer
+Services; CPO sets it accordingly and never clears it.
 
 #### Provider examples
 
@@ -594,6 +631,9 @@ passthrough approach.
 - `loadBalancerClass` support functional.
 - Unit test coverage for annotation passthrough and CEL allowlist validation.
 - Basic E2E test with MetalLB (if available in CI).
+- `DeterministicLBIPSupported` condition reported by HO. The skew it detects is a
+  Day 1 failure mode that exists from the first TechPreview release, so it is a
+  TechPreview requirement rather than a GA one.
 
 ### Tech Preview -> GA
 
@@ -658,10 +698,33 @@ upgrades before CPO (HO deploys CPO), so the only version skew scenario is:
   HO reads it via `GetControlPlaneOperatorImageLabels()` (the same mechanism
   used for `supports-kas-custom-kubeconfig`, `restricted-psa`, etc.). When
   `serviceAnnotations` or `loadBalancerClass` are present on HC but the CPO
-  image label is absent, HO sets `ValidConfiguration=False` with a message
-  directing the user to upgrade the HC release. This condition is a
-  prerequisite for GA.
+  image label is absent, HO sets the dedicated condition
+  `DeterministicLBIPSupported=False` with reason `UnsupportedControlPlaneOperator`
+  and a message directing the user to upgrade the HC release. The condition is
+  informational: reconciliation continues with the fields ignored, and the
+  condition clears by itself once the CPO image is upgraded.
 - **Both at new version**: Feature fully functional.
+
+### Why a dedicated condition instead of `ValidConfiguration`
+
+An earlier revision of this enhancement specified `ValidConfiguration=False` for
+this case. That does not work as a gate, and it is the wrong severity:
+
+- The skew check can only run once the CPO image labels have been resolved, which
+  happens in `CPOImageAndNamespace`. That is *after* the point where the
+  reconciler blocks on `ValidConfiguration`. On the next reconcile the condition
+  is recomputed from scratch by `validateConfigAndClusterCapabilities`, which has
+  no access to image labels, so it is `True` again by the time the block is
+  evaluated. The condition would therefore flap between `True` and `False` on
+  every reconcile and never actually block anything.
+- Making it block would require reporting the check as a critical step, which
+  halts the rest of control plane reconciliation (the pattern used by
+  `ManagedHSMVersionCheck`). That is disproportionate here: these are optional
+  fields whose only failure mode is being silently ignored, and halting the whole
+  control plane over them would be a far worse outcome than an unhonored address.
+
+A dedicated, non-blocking condition surfaces the skew to the user and to
+monitoring without either of those problems.
 
 ## Operational Aspects of API Extensions
 
@@ -684,9 +747,19 @@ upgrades before CPO (HO deploys CPO), so the only version skew scenario is:
   assignment errors.
 - **Diagnose**: `oc get svc kube-apiserver -n <hcp-namespace> -o yaml` — verify
   annotations are correct and match the LB provider's expected format.
-- **Disable**: Remove `serviceAnnotations` and `loadBalancerClass` from the
-  APIServer service entry. CPO stops setting LB-related annotations. LB provider
-  falls back to default behavior (dynamic IP).
+- **Disable**: not available during TechPreview, and deliberately so. Two things
+  prevent it:
+  - `spec.services` is immutable on every platform except IBMCloud
+    (`self.platform.type != "IBMCloud" ? self.services == oldSelf.services : true`),
+    so the fields cannot be removed from an existing HostedCluster at all.
+  - Even where removal is possible, CPO does not clean up annotations on a spec
+    change. The keys would stay on the Service and the provider would keep the
+    static address instead of falling back to a dynamic one.
+
+  The supported way to stop using a requested address during TechPreview is to
+  recreate the HostedCluster without the fields. A real disable procedure belongs
+  to Day 2, where `serviceAnnotations` becomes mutable and the sidecar mechanism
+  exists to drain connections; it is specified there, not here.
 
 ## Infrastructure Needed
 
