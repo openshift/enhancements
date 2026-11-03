@@ -800,8 +800,10 @@ runs the data-plane konnectivity agent. Between the hosted control plane becomin
 available and the first worker joining there is therefore a window in which
 nothing can be dialed through the tunnel. The webhook's sidecar covers that window
 with `--resolve-from-management-cluster-dns`: while the tunnel is unavailable it
-resolves through management-cluster DNS and dials directly, reverting permanently
-to the tunnel once it becomes healthy. Without it, hosted login would not work
+resolves through management-cluster DNS and dials directly, re-probing guest DNS
+through the tunnel periodically and reverting to the tunnel once that succeeds.
+The fallback is not one-shot: if the tunnel later loses its backend again, for
+example because every worker node is removed, the sidecar returns to it. Without it, hosted login would not work
 until the first worker joined — the same reason the integrated identity-provider
 path already carries this fallback.
 
@@ -812,12 +814,23 @@ component proxy's. The fallback therefore bypasses konnectivity, not the proxy �
 dials the component proxy directly from the management-cluster network and the
 proxy hop survives. When no proxy hop applies — neither a component nor a hosted
 cluster-wide proxy is configured, or the IdP is listed in `--no-proxy` — the
-fallback dials the IdP directly from the management-cluster network. The fallback
-path does not apply the management cluster's proxy.
+fallback dials the IdP directly from the management-cluster network.
+
+Configuring the component proxy does not displace the management cluster's proxy
+on this path, because that proxy is not used here today. The component proxy
+reaches the sidecar as its `--https-proxy`, `--http-proxy`, and `--no-proxy`
+flags, which replace the hosted cluster-wide proxy values CPO already passes
+there; it is not written into the sidecar's `HTTP(S)_PROXY` environment. That
+environment carries the management cluster's proxy only because the sidecar runs
+with `--connect-directly-to-cloud-apis`, and the dialer consults it solely for
+[cloud-API hostnames](#cloud-api-hostnames). The day-0 fallback dials without
+consulting the proxy environment, so the management cluster's proxy applies
+neither before nor after this proposal.
 
 Apart from [cloud-API hostnames](#cloud-api-hostnames), this is the only window in
-which webhook egress does not originate from the guest network, and it is why the component proxy must also be reachable and
-DNS-resolvable from the management-cluster network. CPO applies the same proxy
+which webhook egress does not originate from the guest network, and it is why the
+component proxy must also be reachable and DNS-resolvable from the
+management-cluster network. CPO applies the same proxy
 flags regardless; nothing in the configuration is conditional on the window.
 
 ###### Cloud-API Hostnames
@@ -1964,7 +1977,8 @@ sidecar.
 Correct the proxy URL, bypass list, or referenced CA at the source. Alternatively,
 remove the component proxy to restore a verified working cluster-wide proxy or
 direct path; on hosted clusters the webhook then falls back to the hosted
-cluster's own cluster-wide proxy, never the management cluster's. On standalone
+cluster's own cluster-wide proxy, and uses the management cluster's proxy only
+for [cloud-API hostnames](#cloud-api-hostnames). On standalone
 clusters the sources are `authentication.operator.openshift.io/cluster` (webhook)
 and `console.operator.openshift.io/cluster` (Console login); on hosted clusters
 both derive from
