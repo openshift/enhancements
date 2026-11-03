@@ -19,7 +19,7 @@ tracking-link:
 
 ## Summary
 
-This enhancement proposes extending the existing `apiserver.config.openshift.io/v1` API to serve as the unified source of truth for TLS security settings across OpenShift clusters. We will leverage the existing APIServer configuration and establish that all components should honor its TLS settings by default, with specific components supporting explicit overrides via their own Custom Resources. This enhancement introduces a new `tlsAdherence` field to control how strictly components follow the configured TLS profile, adds validation to prevent invalid TLS 1.3 cipher configurations, and provides clear documentation around TLS 1.3 cipher behavior.
+This enhancement proposes extending the existing `apiserver.config.openshift.io/v1` API to serve as the unified source of truth for TLS security settings across OpenShift clusters. We will leverage the existing APIServer configuration and establish that all components should honor its TLS settings by default, with specific components supporting explicit overrides via their own Custom Resources. This enhancement introduces a new `tlsAdherence` field to control how strictly components follow the configured TLS profile, adds validation to prevent invalid cipher suite / min TLS version configurations, and provides clear documentation around Go's TLS behavior.
 
 ## Motivation
 
@@ -41,9 +41,9 @@ As an application developer, I want to understand clearly which TLS profile appl
 
 2. **TLS Adherence Control:** Introduce a `tlsAdherence` field that allows administrators to choose between `LegacyAdheringComponentsOnly` behavior (for backward compatibility) and `StrictAllComponents` behavior (for enforced compliance).
 
-3. **TLS 1.3 Transparency:** Clearly document and enforce the behavior that TLS 1.3 uses a hardcoded set of ciphers as defined by the Go runtime, removing ambiguity about cipher configuration.
+3. **TLS Configurability Transparency:** Clearly document that the Go runtime uses a hardcoded TLS cipher order and set of TLS 1.3 ciphers, removing ambiguity about cipher configuration.
 
-4. **Validation:** Add validation to the APIServer and Kubelet (and any other component that inherits the configv1.TLSSecurityProfile type) TLS configuration to disallow cipher suite configuration when `minTLSVersion` is set to TLS 1.3.
+4. **Validation:** Add validation to the APIServer and Kubelet (and any other component that inherits the configv1.TLSSecurityProfile type) TLS configuration, to disallow configuration of TLS 1.3 cipher suites, and cipher suites not compatible with the configured minTLSVersion.
 
 ### Non-Goals
 
@@ -59,6 +59,8 @@ As an application developer, I want to understand clearly which TLS profile appl
 
 6. Enforcing client TLS settings. This enhancement applies only to the server-side TLS configuration of managed components.
 
+7. Validating custom cipher order, or insecure ciphers.
+
 ## Proposal
 
 We propose extending the existing `apiserver.config.openshift.io/v1` API to serve as the source of truth for TLS security settings across the cluster. All components should honor the TLS configuration defined in this API by default, with specific components supporting explicit overrides via their own Custom Resources.
@@ -67,9 +69,9 @@ We propose extending the existing `apiserver.config.openshift.io/v1` API to serv
 
 **Profile-Based:** The API supports the existing predefined profiles (Old, Intermediate, Modern).
 
-**Custom Profile:** A Custom profile will be available for users requiring granular control to set configuration parameters manually. However, this profile will be explicitly documented as high-risk. Users utilizing the Custom profile must understand the limitations of underlying TLS implementations. Custom profiles are subject to the same TLS 1.3 cipher behavior documented below.
+**Custom Profile:** A Custom profile will be available for users requiring granular control to set configuration parameters manually. However, this profile will be explicitly documented as high-risk. Users utilizing the Custom profile must understand the limitations of underlying TLS implementations. Custom profiles are subject to the same TLS cipher behaviors documented below.
 
-**Restrictive Validation:** The TLS configuration API used by most components will validate that cipher suites cannot be specified when `minTLSVersion` is set to TLS 1.3, preventing silent failures where users believe they have configured ciphers but they are being ignored. Non-go based components that maintain their own overrides _may_ still allow ciphers to be configured with `minTLSVersion` TLS 1.3.
+**Restrictive Validation:** The TLS configuration API used by most components will validate that TLS 1.3 cipher suites cannot be specified, and that specifying older cipher suites only makes sense with a matching minTLSVersion, preventing silent failures where users believe they have configured ciphers but they are being ignored. Non-go based components that maintain their own overrides using a different API _may_ still allow TLS 1.3 ciphers to be configured.
 
 ### TLS Adherence Modes
 
@@ -92,19 +94,28 @@ The new `tlsAdherence` field is a **sibling** to the existing `tlsSecurityProfil
 
 **Implementation Note:** Component implementors should use the `ShouldHonorClusterTLSProfile` helper function from library-go rather than checking the `tlsAdherence` field values directly. This helper encapsulates the logic for handling empty values and future enum additions.
 
-### TLS 1.3 Cipher Behavior
+### Cipher Suite Behavior
 
-When the minimum TLS version is set to TLS 1.3, the following behavior applies:
+The behavior of Go's `crypto/tls` library limits the effect of configuring a custom cipher suites list. This behavior is well [documented and justified](https://go.dev/blog/tls-cipher-suites), but might still be surprising to developers used to less opinionated TLS stacks.
 
-**Hardcoded Cipher Suites:** Go's `crypto/tls` library does not allow cipher suite configuration for TLS 1.3. When TLS 1.3 is the minimum version, the following cipher suites are automatically used and cannot be overridden:
+**Cipher Suites preference:** Go's `crypto/tls` library does not take the cipher suite order into account, using a [hardcoded priority](https://github.com/golang/go/blob/go1.26.4/src/crypto/tls/cipher_suites.go#L219-L312) instead.
+
+**Hardcoded Cipher Suites:** Go's `crypto/tls` library does not allow configuring TLS1.3 cipher suites, using a [hardcoded list](https://github.com/golang/go/blob/go1.26.4/src/crypto/tls/cipher_suites.go#L203-L217) when TLS 1.3 is negotiated during handshake, for example (ignoring FIPS mode and looking at Go 1.26):
 
 - `TLS_AES_128_GCM_SHA256`
 - `TLS_AES_256_GCM_SHA384`
 - `TLS_CHACHA20_POLY1305_SHA256`
 
-**Validation:** The APIServer TLS configuration will reject attempts to specify custom cipher suites when `minTLSVersion` is set to `VersionTLS13`. This validation prevents the "silent failure" scenario where users believe they have configured specific ciphers but the Go runtime ignores them.
+Therefore, the following applies to OpenShift:
 
-**Rationale:** This behavior is mandated by [Go's crypto/tls implementation](https://github.com/golang/go/issues/29349), which intentionally does not expose TLS 1.3 cipher suite configuration. The TLS 1.3 cipher suites are considered secure and the Go team has decided that allowing configuration could lead to weaker security postures.
+**Validation:** The APIServer TLS configuration will reject attempts to specify TLS 1.3 cipher suites, and to specify any cipher suite if `minTLSVersion=VersionTLS13`.
+
+**Rationale:** This prevents two "silent failure" scenarios, where the user's cipher suites configuration would be ignored by the Go runtime.
+
+**Ignored configuration issues:** The following issues are considered out of scope:
+ - Cipher suites in a different preference order than Go's
+ - [Insecure cipher suites](https://pkg.go.dev/crypto/tls#InsecureCipherSuites)
+
 
 ### Scope and Component Expectations
 
@@ -156,7 +167,7 @@ All override mechanisms must be explicitly documented in user-facing documentati
 
 1. The cluster administrator updates the `apiserver.config.openshift.io/v1` resource specifying the desired TLS security profile and adherence mode.
 
-2. Validation checks the configuration. If cipher suites are specified with `minTLSVersion: VersionTLS13`, the configuration is rejected with a descriptive error.
+2. Validation checks the configuration. If invalid cipher suites / minTLSVersion are specified, the configuration is rejected with a descriptive error.
 
 3. Upon successful validation, the configuration is stored in the cluster.
 
@@ -280,7 +291,7 @@ spec:
 
 #### Custom Profile with TLS 1.2 Example
 
-Custom cipher configuration is only supported with TLS 1.2:
+Custom cipher configuration is only supported with minTLSVersion 1.2 or lower:
 
 ```yaml
 apiVersion: config.openshift.io/v1
@@ -300,7 +311,7 @@ spec:
   tlsAdherence: StrictAllComponents
 ```
 
-#### Invalid Configuration (Rejected)
+#### Invalid Configuration (TLS 1.3 cipher)
 
 The following configuration will be **rejected by validation**:
 
@@ -315,18 +326,37 @@ spec:
     custom:
       ciphers:
         - TLS_AES_128_GCM_SHA256
-      minTLSVersion: VersionTLS13  # ERROR: Cannot specify ciphers with TLS 1.3
   tlsAdherence: StrictAllComponents
-# Validation Error: Cipher suites cannot be configured when minTLSVersion is VersionTLS13.
-# TLS 1.3 cipher suites are hardcoded by the Go runtime.
+# Validation Error: TLS 1.3 Cipher suites cannot be configured, they are hardcoded by the Go runtime.
 ```
 
-**Note on Existing Validation:** The APIServer already validates that cipher suites cannot be configured with TLS 1.3 via an [admission plugin in openshift-kube-apiserver](https://github.com/openshift/kubernetes/blob/9d521311f5fb67dc43f49eeb728ee2c80976835a/openshift-kube-apiserver/admission/customresourcevalidation/apiserver/validate_apiserver.go#L214-L219). This enhancement will add CEL validation expressions to match this existing behavior. The CEL validation will use ratcheting to ensure that existing resources with this configuration are not immediately invalidated upon upgrade.
+#### Invalid Configuration (ciphers incompatible with minversion)
+
+```yaml
+apiVersion: config.openshift.io/v1
+kind: APIServer
+metadata:
+  name: cluster
+spec:
+  tlsSecurityProfile:
+    type: Custom
+    custom:
+      ciphers:
+        - ECDHE-RSA-AES128-GCM-SHA256
+        - ECDHE-RSA-AES256-GCM-SHA384
+        - ECDHE-ECDSA-AES128-GCM-SHA256
+        - ECDHE-ECDSA-AES256-GCM-SHA384
+      minTLSVersion: VersionTLS13
+  tlsAdherence: StrictAllComponents
+# Validation Error: TLS 1.2 Cipher suites cannot be configured when min TLS version is 1.3.
+```
+
+**Note on Existing Validation:** The APIServer already validates that cipher suites cannot be configured with TLS 1.3 via an [admission plugin in openshift-kube-apiserver](https://github.com/openshift/kubernetes/blob/9d521311f5fb67dc43f49eeb728ee2c80976835a/openshift-kube-apiserver/admission/customresourcevalidation/apiserver/validate_apiserver.go#L214-L219). This enhancement will add CEL validation expressions to match and widen this existing behavior. The CEL validation will use ratcheting to ensure that existing resources with this configuration are not immediately invalidated upon upgrade.
 
 The API modifies existing behavior by:
 - Establishing the APIServer configuration as the default source for TLS configuration that all core components will consume
 - Introducing the `tlsAdherence` field to control enforcement behavior
-- Adding validation to reject cipher suite configuration with TLS 1.3
+- Adding validation to reject TLS 1.3 cipher suite configuration, and any cipher suite configuration when `minTLSVersion=VersionTLS13`
 - Documenting expected component behavior regarding TLS configuration inheritance
 
 ### Feature Gate
@@ -457,17 +487,6 @@ This is the primary target for this enhancement. Standalone clusters will fully 
 
 This enhancement applies to OpenShift Kubernetes Engine (OKE) clusters. The TLS configuration mechanism works identically to standard OpenShift Container Platform clusters.
 
-### Implementation Details/Notes/Constraints
-
-#### Go crypto/tls Limitations
-
-Components using Go's `crypto/tls` library have specific limitations:
-
-**TLS 1.3 Cipher Suite Configuration:** Go's `crypto/tls` does not allow cipher suite configuration for TLS 1.3 ([golang/go#29349](https://github.com/golang/go/issues/29349)). When TLS 1.3 is configured, the following ciphers are used automatically:
-- `TLS_AES_128_GCM_SHA256`
-- `TLS_AES_256_GCM_SHA384`
-- `TLS_CHACHA20_POLY1305_SHA256`
-
 ### Risks and Mitigations
 
 **Risk:** Component teams may not adopt the unified approach in the required timeframe.
@@ -506,15 +525,21 @@ Create a dedicated new Custom Resource for cluster-wide TLS configuration. This 
 
    **Resolved** We will use option A:Use omission to mean "no opinion" with `LegacyAdheringComponentsOnly` behavior. Eventually require setting `StrictAllComponents` explicitly before upgrade.
 
+4. **_Rejecting_ vs _warning about_ cipher suite configs:** The current cipher suite validation follows some opinionated choices of the Go `crypto/tls` implementation, but [other TLS stacks have different opinions, and tend to be more flexible](https://github.com/vincentdephily/tls_cipher_choice/). Rejection means that some valid user choices (for example preferring the TLS 1.3 `CHACHA20` cipher) are impossible, while some dubious choices (for example selecting a known-insecure TLS 1.2 cipher) must be left unchecked.
+   - **Reject:** Gives unmissable feedback to the user, and reduces the number of configurations that have to be supported.
+   - **Warn:** Enables configs valid in other stacks, and pointing out generally dubious configs. More generic/future-proof, but can easily be missed by the user.
+
+   The two options have different "silent failure" scenarios. The client/server components have the final say, not the APIServer.
+
 ## Graduation Criteria
 
 ### Dev Preview -> Tech Preview
 
 - `TLSAdherence` feature gate implemented
 - Ability to configure TLS profile and `tlsAdherence` in APIServer resource
-- Validation rejects cipher suites when `minTLSVersion` is TLS 1.3
+- Validation rejects TLS 1.3 cipher suites, and any cipher suite if `minTLSVersion=VersionTLS13`
 - At least one core component (e.g., kube-apiserver) respects the cluster-wide profile
-- Documentation of TLS 1.3 hardcoded cipher behavior
+- Documentation of hardcoded cipher behaviors
 - End user documentation available
 
 ### Tech Preview -> GA
@@ -537,8 +562,8 @@ Not applicable for initial implementation.
 ## Test Plan
 
 **Unit Tests:**
-- Validation correctly rejects cipher suites with TLS 1.3
-- Validation accepts valid configurations (ciphers with TLS 1.2, no ciphers with TLS 1.3)
+- Validation correctly rejects TLS 1.3 cipher suites, and any cipher suite when `minTLSVersion=VersionTLS13`
+- Validation accepts valid configurations (no ciphers with TLS 1.3, version-compatible ciphers with older TLS)
 - Profile expansion (predefined profiles to actual TLS settings)
 - `tlsAdherence` field correctly parsed and applied
 - Empty/unset `tlsAdherence` values treated as `LegacyAdheringComponentsOnly`
@@ -554,7 +579,7 @@ Not applicable for initial implementation.
 **E2E Tests:**
 - Create cluster with each predefined profile and verify TLS settings with tls-scanner
 - Change profile and verify components update correctly
-- Verify validation rejects invalid TLS 1.3 + cipher configurations
+- Verify validation rejects invalid `VersionTLS13` + cipher configurations
 - Test passthrough and re-encrypt scenarios with different profiles
 - CI tests probe TLS servers to verify they honor the configured profile (potentially leveraging existing ports-open-registry test patterns)
 
@@ -595,7 +620,7 @@ During upgrades, there will be a period where some components support the enhanc
 ### Detecting Configuration Issues
 
 **Symptoms:**
-- Validation errors when attempting to set cipher suites with TLS 1.3
+- Validation errors when attempting to set TLS cipher suites and/or minversion
 - Component operator conditions indicate TLS configuration problems
 - TLS handshake failures in component logs
 
@@ -611,7 +636,7 @@ oc get apiserver cluster -o yaml
 oc get apiserver cluster -o jsonpath='{.spec.tlsAdherence}'
 ```
 
-3. Verify no cipher suites are set with TLS 1.3:
+3. Verify no TLS 1.3 cipher suites are set, and no cipher suites are set if `minTLSVersion=VersionTLS13`:
 ```bash
 oc get apiserver cluster -o jsonpath='{.spec.tlsSecurityProfile}'
 ```
@@ -620,7 +645,10 @@ oc get apiserver cluster -o jsonpath='{.spec.tlsSecurityProfile}'
 
 ### Recovery Procedures
 
-**Validation Error (cipher suites with TLS 1.3):**
+**Validation Error (TLS 1.3 cipher suites):**
+- Remove the cipher suite configuration
+
+**Validation Error (TLS 1.2 cipher suites with VersionTLS13):**
 - Remove the cipher suite configuration, or
 - Change `minTLSVersion` to `VersionTLS12` if custom ciphers are required
 
