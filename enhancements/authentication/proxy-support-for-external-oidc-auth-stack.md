@@ -7,6 +7,7 @@ reviewers:
   - "@liouk" # The author of the original External OIDC EP, to review the whole EP.
   - "@everettraven" # The reviewer of the Proxy Support for the Integrated Auth Stack EP; to review the whole EP.
   - "@csrwng" # To review the HyperShift part.
+  - "@jhadvig" # To review Console-related changes.
 approvers:
   - "@benluddy"
 api-approvers:
