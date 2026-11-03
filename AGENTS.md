@@ -1,192 +1,54 @@
-# OpenShift Enhancements - Agent Navigation Index
+# OpenShift Enhancements
 
-**Version**: 1.0 | **Docs**: ./ai-docs/ | **Role**: Ecosystem Hub
+**Repository**: [openshift/enhancements](https://github.com/openshift/enhancements) | **Language**: Markdown, Go (tools/) | **Branch**: `master`
 
----
+## Purpose
 
-## CRITICAL: Retrieval Strategy
+Central design proposal repository for OpenShift (OCP/OKD). Contains enhancement proposals, development conventions, and platform-wide guidelines that govern all OpenShift component repositories.
 
-**IMPORTANT**: Prefer retrieval-led reasoning over pre-training-led reasoning.
+## Critical Warnings
 
-When working on OpenShift:
-- ✅ **DO**: Read relevant docs from `./ai-docs/` first
-- ✅ **DO**: Verify patterns match current APIs (`oc explain`)
-- ✅ **DO**: Check enhancement guidelines in `./guidelines/`
-- ❌ **DON'T**: Rely solely on training data
-- ❌ **DON'T**: Guess at API structures or enhancement process
+1. **NEVER** merge enhancement PRs without approver consensus -- see `guidelines/README.md`
+2. **NEVER** remove required template sections -- the linter enforces `guidelines/enhancement_template.md` headers
+3. **NEVER** skip the Topology Considerations section -- all EPs must address Hypershift/SNO/MicroShift/OKE/Standalone
+4. **ALWAYS** use retrieval from this repo over training data for OpenShift conventions
+5. **ALWAYS** check `CONVENTIONS.md` before advising on naming, API style, or error handling
 
----
+## Architecture at a Glance
 
-## AI Navigation: DON'T Read All Docs
+| Directory | Purpose | Authoritative For |
+|-----------|---------|-------------------|
+| `enhancements/` | Design proposals organized by domain (70+ areas) | Feature design decisions |
+| `dev-guide/` | Development conventions, rebase guides, component lifecycle | How to build OCP components |
+| `guidelines/` | Enhancement process, template, PR conventions | How to write/review EPs |
+| `CONVENTIONS.md` | Platform-wide coding and API conventions | Naming, errors, API style |
+| `this-week/` | Weekly newsletter reports | Community activity tracking |
+| `tools/` | Go CLI for report generation and lifecycle management | `make report`, `make lint` |
+| `hack/` | CI scripts, Dockerfiles for linting and reporting | Markdown linting, HackMD |
 
-**Read 4-5 docs per task, not everything.**
+## Documentation
 
-### Common Task Flows
+| File | Contents |
+|------|----------|
+| [ai-docs/ARCHITECTURE.md](ai-docs/ARCHITECTURE.md) | Repository internals, EP lifecycle, design principles, topology guide |
+| [ai-docs/DEVELOPMENT.md](ai-docs/DEVELOPMENT.md) | Build, lint, common tasks, PR workflow |
+| [ai-docs/TESTING.md](ai-docs/TESTING.md) | Linter validation, template checks |
+| [ai-docs/ENHANCEMENTS.md](ai-docs/ENHANCEMENTS.md) | Enhancement area catalog with key proposals |
+| [ai-docs/TOPOLOGY.md](ai-docs/TOPOLOGY.md) | Deployment topology reference (Hypershift, SNO, MicroShift, OKE) |
 
-**Writing enhancement proposal?**
-→ `./guidelines/enhancement_template.md` → `./ai-docs/workflows/enhancement-process.md` → `./ai-docs/workflows/topology-considerations-guide.md` → `./ai-docs/practices/development/api-evolution.md`
+## Key Files
 
-**Adding new component?**
-→ `./dev-guide/new-components.md` (payload vs OLM) → `./guidelines/enhancement_template.md` → `./ai-docs/workflows/enhancement-process.md`
+| Need | File |
+|------|------|
+| Write an EP | `guidelines/enhancement_template.md` |
+| Platform conventions | `CONVENTIONS.md` |
+| Add new component | `dev-guide/new-components.md` |
+| Feature lifecycle | `dev-guide/development-phases.md` |
+| Feature gates | `dev-guide/featuresets.md` |
+| API conventions | `dev-guide/api-conventions.md` |
 
-**Building operator?**
-→ `./ai-docs/DESIGN_PHILOSOPHY.md` → `./ai-docs/platform/operator-patterns/controller-runtime.md` → `./ai-docs/platform/operator-patterns/status-conditions.md` → `./ai-docs/practices/testing/pyramid.md`
+## External References
 
-**Adding API to existing operator?**
-→ `./ai-docs/practices/development/api-evolution.md` → `./ai-docs/domain/kubernetes/crds.md` → `./ai-docs/platform/operator-patterns/webhooks.md`
-
-**Understanding cluster upgrade process?**
-→ `./ai-docs/domain/openshift/clusterversion.md` → `./ai-docs/platform/openshift-specifics/upgrade-strategies.md` → `./ai-docs/decisions/adr-0001-cvo-orchestration.md`
-
-**Need visual map?**
-→ `./ai-docs/KNOWLEDGE_GRAPH.md`
-
----
-
-## Quick Navigation by Role
-
-| Role | Start Here | Then Read |
-|------|-----------|-----------|
-| **Enhancement Author** | `./guidelines/enhancement_template.md` | `./ai-docs/workflows/enhancement-process.md` → `./ai-docs/workflows/topology-considerations-guide.md` |
-| **Operator Developer** | `./ai-docs/DESIGN_PHILOSOPHY.md` | `./ai-docs/platform/operator-patterns/` |
-| **API Designer** | `./ai-docs/practices/development/api-evolution.md` | `./dev-guide/` |
-| **Platform Architect** | `./ai-docs/decisions/` | `./ai-docs/DESIGN_PHILOSOPHY.md` |
-
----
-
-## Core Platform Concepts
-
-| Topic | File | Description |
-|-------|------|-------------|
-| **Design principles** | `./ai-docs/DESIGN_PHILOSOPHY.md` | Core architectural philosophy |
-| **Visual navigation** | `./ai-docs/KNOWLEDGE_GRAPH.md` | Graph-based doc navigation |
-| **Cluster operators** | `./ai-docs/domain/openshift/clusteroperator.md` | Status reporting, lifecycle |
-| **Cluster upgrades** | `./ai-docs/domain/openshift/clusterversion.md` | CVO orchestration, upgrade ordering |
-| **Custom resources** | `./ai-docs/domain/kubernetes/crds.md` | Extending Kubernetes API |
-| **Pods** | `./ai-docs/domain/kubernetes/pod.md` | Container workload fundamentals |
-| **Services** | `./ai-docs/domain/kubernetes/service.md` | Stable networking and discovery |
-
----
-
-## Standard Operator Patterns
-
-| Pattern | File | When to Use |
-|---------|------|-------------|
-| **Controller runtime** | `./ai-docs/platform/operator-patterns/controller-runtime.md` | Every operator (reconcile loops) |
-| **Status conditions** | `./ai-docs/platform/operator-patterns/status-conditions.md` | Available/Progressing/Degraded reporting |
-| **Webhooks** | `./ai-docs/platform/operator-patterns/webhooks.md` | Validation/mutation/conversion |
-| **Finalizers** | `./ai-docs/platform/operator-patterns/finalizers.md` | Cleanup external resources on deletion |
-| **RBAC** | `./ai-docs/platform/operator-patterns/rbac.md` | Service account permissions |
-| **must-gather** | `./ai-docs/platform/operator-patterns/must-gather.md` | Debugging and diagnostics |
-| **Upgrade safety** | `./ai-docs/platform/openshift-specifics/upgrade-strategies.md` | N→N+1 version skew, CVO coordination |
-
----
-
-## Engineering Practices
-
-| Area | Index | Description |
-|------|-------|-------------|
-| **Testing** | `./ai-docs/practices/testing/` | Pyramid (60/30/10), e2e framework |
-| **Security** | `./ai-docs/practices/security/` | STRIDE, RBAC patterns, secret handling |
-| **Reliability** | `./ai-docs/practices/reliability/` | SLI/SLO/SLA, degraded-mode patterns |
-| **Development** | `./ai-docs/practices/development/` | API evolution, compatibility |
-
----
-
-## Workflows
-
-| Workflow | File | Links to Authoritative Source |
-|----------|------|-------------------------------|
-| **Enhancement process** | `./ai-docs/workflows/enhancement-process.md` | `./guidelines/enhancement_template.md` |
-| **Topology considerations** | `./ai-docs/workflows/topology-considerations-guide.md` | Guide for SNO, MicroShift, Hypershift, OKE sections |
-| **Feature implementation** | `./ai-docs/workflows/implementing-features.md` | `./dev-guide/` |
-| **Exec-plan guidance** | `./ai-docs/workflows/exec-plans/` | Template for multi-week features |
-
----
-
-## Component Repository Index
-
-**Finding component repos**: See `./ai-docs/references/repo-index.md`
-
-**Pattern**: Most components are in `openshift/<component-name>-operator` or `openshift/<component-name>`
-
-**Search**: [GitHub org search](https://github.com/orgs/openshift/repositories)
-
----
-
-## Cross-Repo Architectural Decisions
-
-**Location**: `./ai-docs/decisions/`
-
-**Index**: See `./ai-docs/decisions/index.md`
-
-**Common ADRs**:
-- Why etcd as backend
-- Why CVO orchestration model
-- Why immutable nodes (RHCOS + rpm-ostree)
-
----
-
-## Relationship to Other Documentation
-
-| Source | Purpose | When to Use |
-|--------|---------|-------------|
-| **This repo (`./ai-docs/`)** | AI-optimized ecosystem hub | Starting point, cross-repo patterns |
-| **`./guidelines/`** | Authoritative enhancement process | Writing enhancement proposals |
-| **`./dev-guide/`** | Development conventions | Git workflow, CI, coding standards |
-| **`./enhancements/`** | Historical design docs | Understanding past decisions |
-| **Component repos** | Implementation specifics | Component architecture, internal details |
-
----
-
-## How to Use This Documentation
-
-### For AI Agents
-1. Start with task-specific flow (see "AI Navigation" section)
-2. Read 4-5 linked docs, not entire tree
-3. Use `oc explain <resource>` for field-level API details
-4. Check `./guidelines/` for authoritative enhancement process
-5. Link to component repos for implementation details
-
-### For Humans
-- **Skim**: Read index files (`index.md`) to orient
-- **Search**: Use `grep -r "keyword" ./ai-docs/`
-- **Verify**: Cross-reference with `oc explain` and `./guidelines/`
-- **Navigate**: Use `KNOWLEDGE_GRAPH.md` for visual map
-
----
-
-## Documentation Structure
-
-```
-./ai-docs/
-├── DESIGN_PHILOSOPHY.md         # Core principles
-├── KNOWLEDGE_GRAPH.md            # Visual navigation
-├── platform/                     # Operator patterns
-│   ├── operator-patterns/        # Controller runtime, status, webhooks
-│   └── openshift-specifics/      # Upgrade safety, CVO coordination
-├── domain/                       # Core API concepts
-│   ├── kubernetes/               # Pod, Service, CRD, Node
-│   └── openshift/                # ClusterOperator, ClusterVersion, Machine
-├── practices/                    # Cross-cutting concerns
-│   ├── testing/                  # Pyramid, e2e framework
-│   ├── security/                 # STRIDE, RBAC, secrets
-│   ├── reliability/              # SLI/SLO, degraded mode
-│   └── development/              # API evolution, compatibility
-├── decisions/                    # Cross-repo ADRs
-├── workflows/                    # AI-optimized process guides
-│   ├── exec-plans/               # Feature tracking templates (Platform)
-│   ├── enhancement-process.md
-│   ├── topology-considerations-guide.md
-│   └── implementing-features.md
-└── references/                   # Pointers (GitHub links, oc commands)
-    ├── repo-index.md
-    ├── glossary.md
-    └── api-reference.md
-```
-
----
-
-**Navigation**: Start with `KNOWLEDGE_GRAPH.md` for visual overview.
-
-**Feedback**: Report issues at https://github.com/openshift/enhancements/issues
+- [OpenShift Documentation](https://docs.openshift.com)
+- [Kubernetes Enhancements](https://github.com/kubernetes/enhancements)
+- [OpenShift API](https://github.com/openshift/api)
