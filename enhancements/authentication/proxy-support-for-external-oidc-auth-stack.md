@@ -656,8 +656,18 @@ HostedCluster or HostedControlPlane resources or the management cluster.
 On HyperShift, CPO reconciles the webhook Deployment and its generated
 configuration. CPO resolves the proxy from
 `HostedControlPlane.spec.operatorConfiguration.authentication.proxy`, falling back to
-the hosted cluster's cluster-wide proxy when that field is absent, and never to the
-management cluster's own proxy.
+the hosted cluster's cluster-wide proxy when that field is absent. The management
+cluster's own proxy is not part of that resolution, but webhook egress still
+bypasses konnectivity and dials from the management cluster in two cases
+inherited from the shared konnectivity dialer:
+
+- Before worker nodes exist, when the dialer falls back to dialing from the
+  management cluster.
+- For IdP hostnames the dialer classifies as cloud APIs, which it always dials
+  from the management cluster through the management cluster's proxy.
+
+Both are described under
+[Webhook Egress and Connection Paths](#webhook-egress-and-connection-paths).
 
 The running webhook egresses to the IdP **through konnectivity into the guest
 network**, via the konnectivity sidecar already present on its pod. CPO
@@ -760,7 +770,10 @@ Two independent decisions compose in the sidecar: Layer 1 (`--https-proxy`/`--no
 chooses whether to insert the proxy hop; Layer 2 (the konnectivity dialer) tunnels
 every resulting TCP dial into the guest network by default. So both the webhook (via
 the tunnel) and Console (natively) egress from the **same guest network**, and one
-guest-reachable proxy serves both.
+guest-reachable proxy serves both. The exceptions are the
+[day-0 window](#day-0-egress-before-worker-nodes) and
+[cloud-API hostnames](#cloud-api-hostnames), where the webhook egresses from the
+management cluster instead.
 
 Consequences:
 
@@ -797,12 +810,47 @@ ordered: the sidecar decides whether to insert the proxy hop *before* the
 konnectivity dialer runs, so by dial time the address being dialed is already the
 component proxy's. The fallback therefore bypasses konnectivity, not the proxy — it
 dials the component proxy directly from the management-cluster network and the
-proxy hop survives.
+proxy hop survives. When no proxy hop applies — neither a component nor a hosted
+cluster-wide proxy is configured, or the IdP is listed in `--no-proxy` — the
+fallback dials the IdP directly from the management-cluster network. The fallback
+path does not apply the management cluster's proxy.
 
-This is the only window in which webhook egress does not originate from the guest
-network, and it is why the component proxy must also be reachable and
+Apart from [cloud-API hostnames](#cloud-api-hostnames), this is the only window in
+which webhook egress does not originate from the guest network, and it is why the component proxy must also be reachable and
 DNS-resolvable from the management-cluster network. CPO applies the same proxy
 flags regardless; nothing in the configuration is conditional on the window.
+
+###### Cloud-API Hostnames
+
+Like the integrated OAuth server's HTTPS sidecar, the webhook's sidecar runs with
+`--connect-directly-to-cloud-apis`. For a destination whose hostname the dialer
+classifies as a cloud API — a hardcoded suffix list covering `.amazonaws.com`,
+`.microsoftonline.com`, `.azure.com`, `.cloud.ibm.com`, and the AWS isolated-region
+domains — the sidecar bypasses both layers. It inserts no component proxy hop, does
+not tunnel through konnectivity, and dials from the management cluster through the
+management cluster's proxy, whose environment the sidecar receives for this path,
+or directly when none is configured. This check runs before the proxy decision, so
+it takes precedence over the component proxy, the hosted cluster-wide proxy, and
+`--no-proxy`, and it applies for the life of the cluster, not only before workers
+join.
+
+This affects IdPs served from those domains, among them Microsoft Entra ID
+(`login.microsoftonline.com`) and Amazon Cognito
+(`cognito-idp.<region>.amazonaws.com`). The webhook's discovery, JWKS, and
+claim-source requests to them never use the component proxy, so the IdP must be
+reachable from the management-cluster network, through the management cluster's
+proxy where one is configured. Guest Console is unaffected and still uses the
+component proxy, so for these IdPs the two consumers egress along different paths
+and must be verified independently.
+
+This classification also applies when the sidecar dials the component proxy
+itself. The sidecar excludes the proxy's hostname from it, so a proxy whose
+hostname happens to match one of those suffixes (for example, one behind an AWS
+load balancer under `elb.amazonaws.com`) is still reached through konnectivity
+from the guest network rather than from the management cluster. The exclusion is
+derived from the proxy URL only when that URL carries an explicit port; a proxy
+URL without one is not excluded, so a matching proxy hostname would then be
+dialed from the management cluster.
 
 ##### Component Inventory
 
@@ -1400,8 +1448,10 @@ verify:
 
 - The konnectivity sidecar's proxy arguments derived from the HCP block, including
   that the component proxy takes precedence over the hosted cluster-wide proxy, that
-  the cluster-wide proxy is used when the component block is absent, and that the
-  management cluster's own proxy is never used.
+  the cluster-wide proxy is used when the component block is absent, that the
+  sidecar runs with `--connect-directly-to-cloud-apis` with the component proxy
+  host excluded from the cloud-API classification, and that the management
+  cluster's own proxy reaches the sidecar only for that cloud-API path.
 - CPO reconciles the webhook configuration and the CA mounts in both the sidecar
   and the webhook container; removal cleans all of it up.
 - CPO defers `trustedCAFilePath` until the proxy CA ConfigMap exists in the HCP
