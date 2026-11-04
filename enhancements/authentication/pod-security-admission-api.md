@@ -287,7 +287,8 @@ spec:
     reportLevel: Restricted
 ```
 
-The proposed API mapping uses the existing configuration and static pod rollout controllers.
+The proposal reuses the config rollout chain that `cluster-kube-apiserver-operator` already runs: observe config → render it → snapshot a revision → install it node by node.
+Within this chain, only the PSA observer, [`ObservePodSecurityAdmissionEnforcement`](https://github.com/openshift/cluster-kube-apiserver-operator/blob/cc0ed4791d5802e613e33e89b97c9b18b1786a8a/pkg/operator/configobservation/auth/podsecurityadmission.go#L78), changes to map the new API fields.
 
 ```mermaid
 flowchart TD
@@ -295,12 +296,14 @@ flowchart TD
     API["APIServer/cluster<br/>config.openshift.io<br/>spec.podSecurityAdmission"]
     Observed["KubeAPIServer/cluster<br/>operator.openshift.io<br/>spec.observedConfig"]
     Config["ConfigMap<br/>openshift-kube-apiserver/config"]
+    Snapshot["Revisioned ConfigMaps and Secrets<br/>openshift-kube-apiserver"]
     KAS["kube-apiserver static pods<br/>PodSecurity defaults"]
 
     subgraph Operator["cluster-kube-apiserver-operator"]
-        Observer["Config Observer Controller<br/>PSA API mapping (proposed)"]
-        Target["Target Config Controller"]
-        Rollout["Revision and Installer controllers"]
+        Observer["ConfigObserver<br/>PSA observer modified"]
+        Target["TargetConfigController<br/>unchanged"]
+        Revision["RevisionController<br/>unchanged"]
+        Installer["InstallerController<br/>unchanged"]
     end
 
     Admin -->|"updates, e.g. enforceLevel: Baseline"| API
@@ -308,8 +311,10 @@ flowchart TD
     Observer -->|"writes"| Observed
     Observed -->|"read by"| Target
     Target -->|"renders"| Config
-    Config -->|"revisioned and deployed by"| Rollout
-    Rollout -->|"rolls out"| KAS
+    Config -->|"watched by"| Revision
+    Revision -->|"snapshots"| Snapshot
+    Snapshot -->|"deployed by"| Installer
+    Installer -->|"node by node, via installer pods"| KAS
 ```
 
 #### Repurposing `OpenShiftPodSecurityAdmission` feature gate
