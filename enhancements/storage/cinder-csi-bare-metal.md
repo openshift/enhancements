@@ -14,7 +14,7 @@ creation-date: 2026-11-03
 last-updated: 2026-11-03
 status: provisional
 tracking-link:
-  - TBD
+  - https://redhat.atlassian.net/browse/OCPSTRAT-3304
 see-also:
   - "/enhancements/storage/cinder-csi-driver-operator.md"
   - "/enhancements/storage/csi-driver-operator-merge.md"
@@ -144,8 +144,10 @@ or `Direct`; omission preserves Nova behavior. Direct mode requires the proposed
 `CinderCSIDirectAttach` feature gate in `TechPreviewNoUpgrade`. These additions
 and their validation and feature gating require API approval and an
 `openshift/api` change. In the initial implementation, the mode is selected before
-the cluster begins using Cinder storage and remains fixed afterward. The initial
-selection and locking mechanism is an open implementation question.
+the cluster begins using Cinder storage and remains fixed afterward. Initial
+Direct-mode selection requires that no Cinder PVCs or PVs exist, as described in
+[Upgrade / Downgrade Strategy](#upgrade--downgrade-strategy). The locking mechanism
+remains an open implementation question.
 
 Backend configuration remains separate; see
 [Host and backend prerequisites](#host-and-backend-prerequisites). The driver
@@ -193,7 +195,8 @@ applicability must be confirmed before publishing an OKE support claim.
   os-brick sidecar with supported storage dependencies and security servicing.
 - **`openshift/csi-operator`:** add feature/configuration handling, workload
   arguments, sidecar and mounts, RBAC, placement rules, and status reporting.
-  Preserve the existing Cinder cloud configuration and credential paths.
+  Direct mode reuses the existing Cinder credentials and preserves the cloud
+  configuration and credential paths.
 - **`openshift/cluster-storage-operator`:** pass the release-managed sidecar image
   reference to the Cinder operator.
 - **`openshift/api`:** add the reviewed Cinder configuration and preview gate.
@@ -326,7 +329,8 @@ for VM workers in mixed clusters.
 
 1. When and how is the initial attachment mode selected and locked? How can an
    administrator select direct mode before Cinder storage is used, without
-   locking in the operator's Nova default prematurely?
+   locking in the operator's Nova default prematurely? How is the initial PVC/PV
+   check coordinated with concurrent provisioning and binding?
 2. What fencing and stale-attachment recovery contract is required, including
    changes to upstream cleanup and missing-state handling?
 3. What RHCOS iSCSI/multipath configuration is needed, who owns the services,
@@ -348,8 +352,13 @@ Existing Nova and HyperShift test coverage remains unchanged.
 Operator unit and integration tests will cover initial attachment-mode selection,
 enforcement of the initial fixed-mode policy, feature gating, and deployment of
 the os-brick sidecar and its configuration.
-Additional validation needed for the data-safety and lifecycle requirements will
-be identified against the existing suite's coverage.
+Initial-selection tests must cover pending Cinder PVCs and retained or statically
+provisioned Cinder PVs blocking the change, with the deployed mode unchanged and
+a reported reason. Unrelated storage must not block initial Direct-mode selection
+when no Cinder PVCs or PVs exist and the feature gate is enabled.
+
+Additional validation needed for direct-mode recovery, worker replacement, and
+credential handling will be identified against the existing suite's coverage.
 
 ## Graduation Criteria
 
@@ -384,6 +393,13 @@ In the initial implementation, attachment mode is selected before the cluster
 begins using Cinder storage and remains fixed afterward. The operator must
 enforce this policy; the initialization point and enforcement mechanism remain
 open questions. Whether to support mode changes in a future version is undecided.
+
+Before applying the initial Nova-to-Direct selection, the operator must verify
+that no Cinder PVCs or PVs exist across the cluster, including pending claims
+and retained or statically provisioned volumes. If either exists, leave the
+deployed mode unchanged and report why the change cannot be applied. Unrelated
+storage must not block initial selection. Passing this check does not permit
+mode changes after prior Cinder use.
 
 The initial preview uses `TechPreviewNoUpgrade`, so ordinary cluster upgrades are
 not promised while that feature set is enabled. Changing Cinder configuration
