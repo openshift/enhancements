@@ -229,7 +229,7 @@ Changing PSA defaults triggers a kube-apiserver static pod rollout.
 
 ##### MicroShift
 
-MicroShift keeps its PSA behavior, including the PSA label syncer.
+This proposal changes no MicroShift behavior: MicroShift keeps its PSA defaults and the PSA label syncer.
 OpenShift drops its plan to enforce `restricted` by default, because workloads running today could stop being admitted after an upgrade, as described in [Motivation](#motivation).
 Every generally available MicroShift release has enforced `restricted` with the PSA label syncer, so its users meet PSA rejections when they first deploy a workload, not after an upgrade.
 
