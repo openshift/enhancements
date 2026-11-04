@@ -1347,6 +1347,12 @@ Pod:
   assumes.
 - A proxy URL carrying credentials still authenticates, and the webhook's
   effective-proxy log line has the userinfo stripped.
+- A token referencing [distributed claims](https://openid.net/specs/openid-connect-core-1_0.html#AggregatedDistributedClaims)
+  authenticates with the resolved claim, with the claim endpoint request and the
+  discovery and JWKS requests verifying its response observed on the proxy.
+- With `ExternalOIDCExternalClaimsSourcing` enabled, retrieval from a configured
+  external claim source goes through the proxy, and for a source using client
+  credentials, so does the access-token request to its token endpoint.
 
 **Cluster Authentication Operator — unit tests.**
 
@@ -1387,6 +1393,9 @@ Pod:
   confirmed to be out of the path.
 - A proxy URL carrying credentials still allows login, and Console's
   effective-proxy log line has the userinfo stripped.
+- Token refresh: with a short access-token lifetime, Console refreshes the
+  session's tokens through the proxy, the refresh request is observed on it, and
+  the session stays valid without a new login.
 
 **Console Operator — unit tests.**
 
