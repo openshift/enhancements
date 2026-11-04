@@ -432,13 +432,16 @@ If PSA blocks critical workloads, administrators can temporarily select a less r
 They can change `enforceLevel` globally or set the `pod-security.kubernetes.io/enforce` label in the affected namespaces.
 This gives them time to correct the workload or namespace configuration.
 
-#### SCC Priority Changes
+#### Prioritized Customer SCCs Can Get Pods Rejected by PSA
 
 SCC admission sorts SCCs by [priority](https://github.com/openshift/apiserver-library-go/blob/218f2c488d901eb7d06d1ebf1e5f3b41f40cd8fb/pkg/securitycontextconstraints/util/sort/bypriority.go#L19-L34) and admits a pod with the first SCC that validates it, mutating its `securityContext` on the way.
 Running pods keep their SCC, as SCC admission [mutates nothing on updates and tries the previously validated SCC first](https://github.com/openshift/apiserver-library-go/blob/218f2c488d901eb7d06d1ebf1e5f3b41f40cd8fb/pkg/securitycontextconstraints/sccadmission/admission.go#L572-L588).
 New pods, e.g. after a rollout or an eviction, go through the selection again.
 A new SCC with a higher priority than `restricted-v2` therefore replaces it for new pods of every customer workload whose service account can use the new SCC.
 Under `restricted` enforcement, workloads that passed `restricted` only due to the mutation of `restricted-v2` **get rejected by PSA on their next pod creation**.
+This failure is disruptive but loud.
+Without PSA enforcement, the new SCC would silently weaken the security context of these pods.
+
 The `openshift.io/required-scc` annotation [limits SCC admission to the pinned SCC](https://github.com/openshift/apiserver-library-go/blob/218f2c488d901eb7d06d1ebf1e5f3b41f40cd8fb/pkg/securitycontextconstraints/sccadmission/admission.go#L553-L558), but customer workloads need to set it themselves.
 
 #### Impact on OpenShift Workloads
