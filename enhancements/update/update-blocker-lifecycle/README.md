@@ -120,11 +120,10 @@ Is this a regression?
 * example: No, it has always been like this we just never noticed.
 * example: Yes, from 4.y.z to 4.y+1.z Or 4.y.z to 4.y.z+1.
 
-Under what conditions should an update risk declaration be extended to new releases?
+What product changes will allow us to stop extending this risk?
 * reasoning: We do not want to extend a declared update risk out to every subsequent patch in a z-stream.
-  What product changes will allow us to stop extending this risk?
-* example: A backport of OCPBUGS-... ships in the target release in x.y.z, after which x.(y-1) -> x.y.z will no longer be exposed, and we do not need to declare the risk.
-* example: A new guard ships into the source release in x.(y-1).z via OCPBUGS-....
+* example: A backport of OCPBUGS-# ships in target release x.y.z, after which x.(y-1) to x.y.z will no longer be exposed, and we do not need to declare the risk.
+* example: A new guard ships into source release x.(y-1).z via OCPBUGS-#.
   [The `min_versions` bump][graph-data-launch] will cause subsequent x.y.z to not include direct updates from pre-guard x.(y-1) releases.
   That x.y.z built with the `min_versions` change does not need to declare the risk.
 
