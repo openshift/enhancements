@@ -371,8 +371,9 @@ Once stopped, the PSA label syncer leaves its `warn` and `audit` labels and its 
 These labels would override `reportLevel` in every namespace the PSA label syncer managed, and removing them rejects no pods.
 
 Whether the PSA label syncer runs depends on the `OpenShiftPodSecurityAdmission` feature gate and the topology, and cluster-policy-controller already makes that decision.
-A cleanup controller in cluster-policy-controller therefore removes the leftovers wherever the PSA label syncer is stopped.
-It removes only what the PSA label syncer's field manager owns, so labels whose value an administrator changed stay.
+A cleanup controller in cluster-policy-controller therefore starts exactly when the PSA label syncer does not: on standalone and hosted clusters with the gate enabled, never on MicroShift.
+Using server-side apply, it removes only the fields that `metadata.managedFields` attributes to the PSA label syncer alone.
+An administrator who changed a label's value owns that label, so it stays.
 
 #### Retiring Pod Security Readiness Controller
 
