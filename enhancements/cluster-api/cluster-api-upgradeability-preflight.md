@@ -39,7 +39,7 @@ This proposal detects those conflicts before the upgrade, giving administrators 
 
 ## Motivation
 
-The [compatibility-checker proposal][R1] describes the shared-API model in which OpenShift
+The [compatibility-checker proposal](https://github.com/openshift/enhancements/blob/master/enhancements/cluster-api/crd-compatibility-checker.md) describes the shared-API model in which OpenShift
 can leave Cluster API CRDs under external management, provided the installed CRDs satisfy
 the API requirements of the OpenShift controllers that use them. An upgrade to N+1 can
 raise those requirements: components newly enabled by the upgrade may need CRDs that exist
@@ -98,7 +98,7 @@ The proposal has two distinct parts: component changes that make the assessment 
    checker's results with its own CRD ownership checks to compute the `cluster-api`
    ClusterOperator's `Upgradeable` condition. Any ownership conflict or failed compatibility
    check sets `Upgradeable=False`, which blocks forward minor/major upgrades via the existing
-   CVO precondition. [R2] The upgradeable controller is the **sole writer of `Upgradeable`**;
+   CVO precondition.[^cvo-upgradeable-precondition] The upgradeable controller is the **sole writer of `Upgradeable`**;
    the general status controller retains `Available`, `Progressing`, and `Degraded`, which is
    why it needs to land in release N.
 
@@ -178,7 +178,11 @@ As with standalone clusters, the CAPI Operator runs on OKE, so this feature appl
 
 ### CAPI IPAM CRDs adoption considerations
 
-The two existing payload-provided IPAM CRDs, `ipaddressclaims.ipam.cluster.x-k8s.io` and `ipaddresses.ipam.cluster.x-k8s.io`, have a one-off upgrade-preflight exemption for their transition into operator installation. [R3] This exemption extends to no other CRD; the existing `always`/`never` adoption policy is not a generic preflight bypass or consent mechanism. [R4]
+The two existing payload-provided IPAM CRDs, `ipaddressclaims.ipam.cluster.x-k8s.io` and
+`ipaddresses.ipam.cluster.x-k8s.io`, have a one-off upgrade-preflight exemption for their
+transition into operator installation.[^payload-ipam-crds]
+This exemption extends to no other CRD; the existing `always`/`never` adoption policy is
+not a generic preflight bypass or consent mechanism.[^capi-adoption-policy]
 
 ### Condition ownership and behavior
 
@@ -209,7 +213,9 @@ current observations for every requirement; absence of a failing result is not s
   requirements warn rather than enforce N+1's rules, so a change compatible with N can
   invalidate the earlier N+1 assessment. No mitigation is selected; whether the
   installation proposal's gating behavior covers this window must be verified before
-  being relied upon. [R1, R5] If the CAPI Preflights fail to catch this, the Upgrade
+  being relied upon ([R1](https://github.com/openshift/enhancements/blob/master/enhancements/cluster-api/crd-compatibility-checker.md),
+  [R5](https://github.com/openshift/enhancements/blob/master/enhancements/cluster-api/installing-cluster-api-components-in-ocp.md)).
+  If the CAPI Preflights fail to catch this, the Upgrade
   checks will be able to catch this. Less desirable but still safe.
 
 ### Drawbacks
@@ -219,10 +225,10 @@ This introduces a continuously running controller, transient extraction pods, a 
 
 ## Alternatives (Not Implemented)
 
-- **Cincinnati risk plus accepted-risk automation.** Could represent target-specific concerns, but depends on accepted-risk availability in N and on a graph-data schema that supports the required release targeting. [R6, R7]
+- **Cincinnati risk plus accepted-risk automation.** Could represent target-specific concerns, but depends on accepted-risk availability in N and on a graph-data schema that supports the required release targeting.[^cincinnati-graph-data][^accepted-risks]
 - **Manual preflight command.** Would reduce continuous orchestration but requires administrators to discover, invoke, and repeat it; does not meet the automation goals.
 - **Backport future transport bundles into N.** The earlier model in the compatibility proposal; avoids the cross-release data contract but requires recurring synchronization and backport work.
-- **Target-release checks at CVO acceptance.** Potential future integration [R8] does not currently provide an available contract; this enhancement does not depend on it.
+- **Target-release checks at CVO acceptance.** Potential future integration[^target-release-preflight] does not currently provide an available contract; this enhancement does not depend on it.
 
 ## Open Questions [optional]
 
@@ -301,20 +307,12 @@ No new repository or binary. CI needs a controlled update service and payloads, 
 
 ## References
 
-- **R1:** [CRD Compatibility Checker enhancement][R1]
-- **R2:** [CVO upgradeability precondition][R2]
-- **R3:** [Payload IPAM CRDs][R3]
-- **R4:** [Local CAPI installer adoption policy][R4]
-- **R5:** [Installing Cluster API components enhancement][R5]
-- **R6:** [Cincinnati graph-data, including Block Edges][R6]
-- **R7:** [Accepted Risks enhancement][R7]
-- **R8:** [Target-release preflight proposal][R8]
+- [CRD Compatibility Checker enhancement](https://github.com/openshift/enhancements/blob/master/enhancements/cluster-api/crd-compatibility-checker.md)
+- [Installing Cluster API components enhancement](https://github.com/openshift/enhancements/blob/master/enhancements/cluster-api/installing-cluster-api-components-in-ocp.md)
 
-[R1]: https://github.com/openshift/enhancements/blob/master/enhancements/cluster-api/crd-compatibility-checker.md
-[R2]: https://github.com/openshift/cluster-version-operator/blob/main/pkg/payload/precondition/clusterversion/upgradeable.go
-[R3]: https://github.com/openshift/cluster-api/blob/main/openshift/manifests/0000_30_cluster-api_04_crd.core-cluster-api.yaml
-[R4]: https://github.com/openshift/cluster-capi-operator/blob/main/pkg/revisiongenerator/validate.go
-[R5]: https://github.com/openshift/enhancements/blob/master/enhancements/cluster-api/installing-cluster-api-components-in-ocp.md
-[R6]: https://github.com/openshift/cincinnati-graph-data/blob/master/README.md
-[R7]: /enhancements/update/accepted-risks.md
-[R8]: https://github.com/openshift/enhancements/pull/1930
+[^cvo-upgradeable-precondition]: [CVO upgradeability precondition](https://github.com/openshift/cluster-version-operator/blob/main/pkg/payload/precondition/clusterversion/upgradeable.go)
+[^payload-ipam-crds]: [Payload IPAM CRDs](https://github.com/openshift/cluster-api/blob/main/openshift/manifests/0000_30_cluster-api_04_crd.core-cluster-api.yaml)
+[^capi-adoption-policy]: [Local CAPI installer adoption policy](https://github.com/openshift/cluster-capi-operator/blob/main/pkg/revisiongenerator/validate.go)
+[^cincinnati-graph-data]: [Cincinnati graph-data, including Block Edges](https://github.com/openshift/cincinnati-graph-data/blob/master/README.md)
+[^accepted-risks]: [Accepted Risks enhancement](/enhancements/update/accepted-risks.md)
+[^target-release-preflight]: [Target-release preflight proposal](https://github.com/openshift/enhancements/pull/1930)
