@@ -9,7 +9,7 @@ reviewers:
 approvers:
   - "@russelb"
 creation-date: 2020-08-26
-last-updated: 2026-05-25
+last-updated: 2026-11-04
 status: informational
 ---
 
@@ -173,6 +173,7 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 | 29445       | haproxy                                               |          |                    | sdn           | 4.7   | on-prem internal loadbalancer, stats port |
 | 39300       | manager                                               |          |                    | sdn           | 4.12  | metrics, ingress node firewall            |
 | 39301       | daemon                                                |          |                    | sdn           | 4.12  | metrics, ingress node firewall            |
+| 39400       | ingress-node-firewall daemon                           | HTTP     | no                 | sdn           |       | healthz/readyz probe on 127.0.0.1          |
 
 ## Previously allocated
 
