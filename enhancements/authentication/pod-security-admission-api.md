@@ -427,7 +427,9 @@ Checks against existing pods also miss Jobs and other temporary workloads whose 
 
 Administrators can use dry-run checks and review PSA violations in audit logs before tightening enforcement.
 Audit logs collected at the target reporting level provide a broader history, including Jobs whose pods no longer exist.
-If critical workloads are blocked, administrators can temporarily relax the applicable enforcement policy while correcting the workload or namespace configuration.
+If PSA blocks critical workloads, administrators can temporarily select a less restrictive PSS level.
+They can change `enforceLevel` globally or set the `pod-security.kubernetes.io/enforce` label in the affected namespaces.
+This gives them time to correct the workload or namespace configuration.
 
 #### SCC Priority Changes
 
