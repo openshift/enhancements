@@ -948,7 +948,18 @@ forms of the existing hostname defaults. The resulting defaults are
 and `127.0.0.1`, plus the Kubernetes service IP. The operator, not the operand,
 supplies that last entry: each operator reads `KUBERNETES_SERVICE_HOST` from its
 own process environment and bakes the resulting value into the rendered bypass
-list. Operands do not resolve it at runtime.
+list. Operands do not resolve it at runtime. This applies to CAO and also to Console
+Operator, which runs in the guest on HyperShift, but not to CPO: it runs on the
+management cluster.
+
+On HyperShift, CPO instead passes the webhook sidecar HyperShift's existing
+default bypass list (`proxy.DefaultNoProxy`), derived from the
+HostedControlPlane, with the trailing-dot forms added. It already covers the
+guest's Kubernetes service IP through the hosted cluster's service network CIDR.
+When the component proxy is set, CPO appends its `noProxy` in place of the
+hosted cluster-wide proxy's, per the no-inheritance rule above. Bypassed
+destinations are still dialed through the konnectivity tunnel, so they are
+reached from the guest network.
 
 Use these defaults consistently in the webhook's effective bypass rules and
 Console's `auth.proxy.noProxy`. Updating CAO's shared resolver also expands the
