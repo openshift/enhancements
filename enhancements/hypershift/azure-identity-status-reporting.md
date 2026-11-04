@@ -12,7 +12,7 @@ approvers:
 api-approvers:
   - "@JoelSpeed"
 creation-date: 2026-09-24
-last-updated: 2026-10-29
+last-updated: 2026-11-04
 status: provisional
 tracking-link:
   - https://redhat.atlassian.net/browse/CNTRLPLANE-4491
@@ -38,10 +38,12 @@ The HC aggregate supplements these records. These observations describe the
 configured resources and completion points below; they do not prove that a
 workload used a credential.
 
-The ACR/NodePool design below remains provisional. The open scope decision is
-whether RP should observe worker VM identity attachment directly through ARM,
-or whether HyperShift should expose that evidence. This revision does not
-settle that decision or assume that a separate status effort has an owner.
+ACR pull identity reporting and worker VM attachment are outside this
+enhancement. The `AzureIdentitiesApplied` condition covers the in-scope
+control-plane and data-plane consumers only; it makes no claim about ACR.
+The need, owner, and reporting surface for ACR will be determined separately
+following Todd's investigation. If reporting is required, it belongs in a
+separate enhancement.
 
 This is a provisional design for [CNTRLPLANE-4491](https://redhat.atlassian.net/browse/CNTRLPLANE-4491).
 The current spec mirror in
@@ -55,8 +57,8 @@ The ARO resource provider (RP) is taking ownership of all cluster managed
 identities. The identities have different configuration paths, but RP should
 use one rule for their HyperShift consumers: wait for positive evidence that
 every applicable consumer has applied the requested reference. A single spec
-mirror can advance before a Secret, SecretProviderClass, or AzureMachineTemplate
-write succeeds. A single cluster-wide flag cannot diagnose which consumer is
+mirror can advance before a Secret or SecretProviderClass write
+succeeds. A single cluster-wide flag cannot diagnose which consumer is
 behind. Status must also distinguish a completed write from a mounted or used
 credential.
 
@@ -65,11 +67,11 @@ current Clusters Service (CS) implementation is evidence for the identity
 inventory, not an enduring dependency of this API. CS currently maps eight
 control-plane and three data-plane roles into
 `spec.platform.azure.azureAuthenticationConfig.managedIdentities`, optional
-KMS into `spec.secretEncryption.kms.azure.kms`, and ACR pull into
-`spec.platform.azure.containerRegistry.credentials.managedIdentity.resourceID`.
-CS can patch this HC field for ACR replacement, and HyperShift creates new
-node templates. Existing VMs in InPlace NodePools do not acquire a changed
-identity from that template update; that rollout is not complete replacement.
+KMS into `spec.secretEncryption.kms.azure.kms`. CS also configures ACR pull
+through `spec.platform.azure.containerRegistry.credentials.managedIdentity.resourceID`,
+but worker VM attachment and cleanup are a separate concern. The
+`nodePoolManagement` control-plane identity used by the CAPZ pods remains in
+scope.
 
 ### User Stories
 
@@ -78,17 +80,17 @@ identity from that template update; that rollout is not complete replacement.
    identity consumer separately, so I can identify completed, partial, and
    stalled replacements even when another role has not converged.
 2. As an ARO HCP operator, I can tell whether all applicable HyperShift
-   consumers have applied the current HC configuration, so I can advance the
+   consumers have applied the in-scope HC identity configuration, so I can advance the
    replacement workflow without mistaking a desired spec for applied state.
 3. As an on-call engineer, I can distinguish resource application from mount,
-   node attachment, and credential use, so I do not remove an old identity on
+   credential use, so I do not remove an old identity on
    insufficient evidence.
 
 ### Goals
 
 1. Cover control-plane and data-plane managed identities configured through
-   the ARO HCP HC, including optional KMS. Resolve ACR's reporting surface
-   before finalizing its provisional scope.
+   the ARO HCP HC, including optional KMS and the CAPZ pod's
+   `nodePoolManagement` control-plane identity.
 2. Publish success only after observing all resources that carry a role's
    reference. On partial failure, update the condition and retain the last
    fully applied reference for diagnostics.
@@ -112,8 +114,11 @@ identity from that template update; that rollout is not complete replacement.
 3. Proving certificate mount, token acquisition, Azure authorization, or image
    pull success from a Kubernetes resource write.
 4. Authorizing old-identity deletion from `AzureIdentitiesApplied` alone. RP
-   needs the consumer evidence and cleanup gate described below. The ACR
-   worker attachment and cleanup scope remains an open decision.
+   needs the consumer evidence and cleanup gate described below.
+5. ACR pull identity reporting, worker VM attachment, and worker identity
+   cleanup. ACR is excluded from the expected consumer set and from
+   `AzureIdentitiesApplied`; a separate enhancement can define its status
+   contract if Todd's investigation shows one is needed.
 
 ## Proposal
 
@@ -127,26 +132,18 @@ identity from that template update; that rollout is not complete replacement.
    guest Secret it reconciles and writes that role's result to HCP status.
    Each role has an `Applied` condition for the generation evaluated and an
    optional `lastAppliedReference` retained for diagnostics after failure.
-3. In the provisional ACR path, the NodePool controller reads the ACR
-   resource ID from HC, reconciles the AzureMachineTemplate, and reports
-   `Applied=True` only after CAPI reports that all desired Machines use the
-   new template and are available. An updated template alone is
-   insufficient; this does not verify actual Azure VM attachment through
-   ARM. An InPlace pool whose existing Machines retain the old template
-   reports `Applied=False`, reason `UnsupportedInPlaceIdentityChange`, until
-   the Machines are replaced or an attachment-update mechanism is delivered.
-4. HO computes the expected consumers from the current HC authentication
-   mode, KMS and ACR configuration, enabled capabilities, and NodePools. It
-   correlates HC and HCP generations as described below. HC reports
+3. HO computes the expected consumers from the current HC authentication
+   mode, KMS configuration, and enabled capabilities. It correlates HC and
+   HCP generations as described below. HC reports
    `AzureIdentitiesApplied=True` only when every applicable role has a
    trustworthy current-generation success with the expected reference, or
    positive evidence of requested removal.
-5. RP reads the HC condition for cluster-wide progress. For individual
-   identities it reads CPC control-plane records, HCP data-plane records,
-   and the provisional ACR NodePool records using the same reference and
-   condition rules. The HC message names laggards for people; RP never
-   parses it. RP must also satisfy the compatibility and cleanup checks
-   below before retiring an identity.
+4. RP reads the HC condition for cluster-wide progress of the in-scope
+   identities. For individual identities it reads CPC control-plane records
+   and HCP data-plane records using the same reference and condition rules.
+   The HC message names laggards for people; RP never parses it. RP must
+   also satisfy the compatibility and cleanup checks below before retiring
+   an identity.
 
 A record identifies a HyperShift consumer, not a distinct Azure resource.
 One Azure identity reused by multiple roles must converge at every role and
@@ -157,10 +154,9 @@ plane, data plane, or service identity type changes the comparison rule.
 
 ### Expected roles, writers, and completion points
 
-The following inventory defines the control-plane and data-plane observers;
-the ACR rows describe the provisional HyperShift option. All named CPCs
-represent existing workloads. Their existing component reconcilers are the
-sole writers of their CPC status, including identity observations. Creating a
+The following inventory defines the control-plane and data-plane observers.
+All named CPCs represent existing workloads. Their existing component
+reconcilers are the sole writers of their CPC status, including identity observations. Creating a
 status-only CPC, opting a CPC out of normal rollups, or granting HCCO access
 to another controller's CPC status is unnecessary.
 
@@ -172,7 +168,7 @@ leave the condition non-True. Required-resource changes enqueue the observer.
 
 | HC role and reference | Required resources and observer |
 | --- | --- |
-| Control plane `cloudProvider` (`credentialsSecretName`) | CPO observes on `azure-cloud-controller-manager` CPC: `managed-azure-cloud-provider` SecretProviderClass, `azure-cloud-config` Secret containing `AADMSIDataPlaneIdentityPath`, and CCM Deployment reference. The separate `azure-cloud-config` ConfigMap carries the ACR ID. |
+| Control plane `cloudProvider` (`credentialsSecretName`) | CPO observes on `azure-cloud-controller-manager` CPC: `managed-azure-cloud-provider` SecretProviderClass, `azure-cloud-config` Secret containing `AADMSIDataPlaneIdentityPath`, and CCM Deployment reference. |
 | Control plane `controlPlaneOperator` (`credentialsSecretName`) | HO observes on `control-plane-operator` CPC: `managed-azure-cpo` SecretProviderClass and CPO Deployment volume reference. |
 | Control plane `nodePoolManagement` (`credentialsSecretName`) | HO observes on `capi-provider` CPC: `managed-azure-nodepool-management` SecretProviderClass, AzureClusterIdentity credential path, and a completed CAPZ Deployment rollout with the expected CSI object version mounted on every current CAPZ pod. |
 | Control plane `imageRegistry` (`credentialsSecretName`) | CPO observes on `cluster-image-registry-operator` CPC: `managed-azure-image-registry` SecretProviderClass and operator Deployment reference, when enabled. |
@@ -181,7 +177,6 @@ leave the condition non-True. Required-resource changes enqueue the observer.
 | Control plane `disk` and `file` (separate `credentialsSecretName` values) | CPO observes on `cluster-storage-operator` CPC: disk requires `azure-disk-csi-config` Secret and `managed-azure-disk-csi` SecretProviderClass; file requires `azure-file-csi-config` Secret and `managed-azure-file-csi` SecretProviderClass. Each also requires its workload reference. Disk success does not advance file. |
 | Data plane `imageRegistry`, `disk`, `file` (separate client IDs) | HCCO observes on HCP `status.azureIdentities`: respectively `openshift-image-registry/installer-cloud-credentials`, `openshift-cluster-csi-drivers/azure-disk-credentials`, and `openshift-cluster-csi-drivers/azure-file-credentials` guest Secrets. Registry is required only when enabled; disk and file are required. Managed-mode guest ingress is a placeholder and is excluded. |
 | KMS (`spec.secretEncryption.kms.azure.kms.credentialsSecretName`) | CPO observes on `kube-apiserver` CPC: the shared `managed-azure-kms` SecretProviderClass, `azure-kms-config` Secret, CPO Deployment KMS volume/mount reference, and kube-apiserver workload/configuration reference. Required only when Azure KMS is configured. |
-| ACR pull (`spec.platform.azure.containerRegistry.credentials.managedIdentity.resourceID`), provisional | CPO observes `UserAssignedIdentityID` in cloud config on `azure-cloud-controller-manager` CPC. Every NodePool reports the same resource ID after its AzureMachineTemplate and MachineDeployment rollout have converged. Required only when ACR pull identity is configured or being removed. |
 
 `managed-azure-kms` is currently reconciled by both HO and CPO. Collapsing its
 status onto `kube-apiserver` does not transfer resource ownership. Both
@@ -214,16 +209,6 @@ for that removal requires a teardown/status ordering change; HO must remain
 non-True until positive evidence exists. This does not introduce support for
 otherwise immutable spec transitions.
 
-In the provisional ACR path, removal requires a completed machine rollout
-without the old identity. A deleting NodePool remains in the expected set
-until its Machines are gone: the existing NodePool finalizer calls
-`ensureMachineDeletion` before it is removed. HO tracks the deleting NodePool
-by UID and ignores a same-name replacement until the prior UID's Machine
-deletion is observed. If the finalizer contract changes, a durable UID-keyed
-tombstone must preserve this fence. New NodePools enter the set immediately
-and make HC non-True until they converge. A cluster with no NodePools has no
-worker attachment to check.
-
 ### API Extensions
 
 Add an optional `credentialsSecretVersion` to the HC Azure managed-identity
@@ -234,8 +219,8 @@ or replacement; changing the version changes HC generation. The field is
 optional for API compatibility, but a legacy name-only reference remains
 `Unknown/VersionUnavailable` until RP supplies the version. The SPC writer
 maps `credentialsSecretVersion` to the CSI provider's existing `objectVersion`
-field. Status uses `credentialsSecretVersion` too. Client IDs and ACR
-resource IDs do not have a Key Vault version.
+field. Status uses `credentialsSecretVersion` too. Client IDs do not have a
+Key Vault version.
 
 The completion check also compares the applied SPC's Key Vault location and
 `objectEncoding` with the values derived from the persisted HCP, including
@@ -245,9 +230,9 @@ every affected role even if its identity reference is unchanged. They remain
 configuration in spec rather than duplicated identity-reference members.
 
 Add a bounded `status.azureIdentities` map list to CPC for control-plane
-roles and to HCP for HCCO's data-plane roles. The provisional NodePool
-`status.acrPullIdentity` has the same observation fields. HC adds the
-standard `AzureIdentitiesApplied` condition without a per-role list.
+roles and to HCP for HCCO's data-plane roles. HC adds the standard
+`AzureIdentitiesApplied` condition without a per-role list. No ACR or
+NodePool identity-status field is added.
 
 Each role has standard `metav1.Condition` entries keyed by type, initially
 with one type, `Applied`. There is no separate `state`, `lastAttempt`, or
@@ -311,25 +296,6 @@ status:
 ```
 
 ```yaml
-kind: NodePool
-metadata:
-  generation: 7
-status:
-  acrPullIdentity:
-    observedHCGeneration: 28
-    lastAppliedReference:
-      type: ResourceID
-      resourceID: /subscriptions/.../userAssignedIdentities/acr-v2
-    conditions:
-    - type: Applied
-      status: "True"
-      reason: AsExpected
-      observedGeneration: 7
-      lastTransitionTime: "2026-10-29T10:00:00Z"
-      message: All desired Machines use the expected template and are available
-```
-
-```yaml
 kind: HostedCluster
 status:
   conditions:
@@ -343,15 +309,15 @@ status:
 
 List keys are `(scope, role)`. Scope values are `ControlPlane` and
 `DataPlane`; role values are the PascalCase forms of the inventory names,
-including `KMS` and `ACRPull`. Each CPC accepts only its assigned roles; HCP
-accepts only `DataPlane/ImageRegistry`, `DataPlane/Disk`, and `DataPlane/File`.
-The largest CPC list is the two storage roles or the two CCM roles. HCP has
-at most three records. The SMI creates no service-scope record.
+including `KMS`. Each CPC accepts only its assigned roles; HCP accepts only
+`DataPlane/ImageRegistry`, `DataPlane/Disk`, and `DataPlane/File`. The largest
+CPC list has the two storage roles. HCP has at most three records. The SMI
+creates no service-scope record.
 
 The reference is a discriminated union: `CredentialsSecretName` requires
 `credentialsSecretName` and `credentialsSecretVersion`; `ClientID` requires
-`clientID`; `ResourceID` requires `resourceID`. Exactly the matching member
-is populated, and the version is allowed only with `CredentialsSecretName`.
+`clientID`. Exactly the matching member is populated, and the version is
+allowed only with `CredentialsSecretName`.
 Validation rejects empty values, duplicate keys, unsupported scope/role
 pairs, and more than one condition of a given type. Status contains no
 certificate, token, or secret value. CNTRLPLANE-4493's spec-mirror fields must
@@ -369,38 +335,29 @@ Every outcome carries the generation actually evaluated, including failures.
 | Requested removal is positively observed across all required resources | `True / Removed` | Retain the previous reference as history, if any |
 | First reconciliation or a known incomplete write/rollout | `False / Applying` | Absent before first success; otherwise retained |
 | A required resource apply fails | `False / ApplyFailed` | Retained; may no longer describe every live resource |
-| InPlace ACR replacement/removal cannot update existing Machines | `False / UnsupportedInPlaceIdentityChange` | Retained; retrying the same unsupported operation does not imply progress |
 | The observer cannot read a required resource or establish completion | `Unknown / ObservationUnavailable` | Retained |
 | A Key Vault-backed desired reference lacks its immutable version | `Unknown / VersionUnavailable` | Retained |
 
-`ApplyFailed` is retryable. `UnsupportedInPlaceIdentityChange` persists until
-the pool is replaced or a supported attachment-update mechanism is used;
-it is a condition reason, not a terminal state in a second state machine.
-An absent condition means no usable observation. `lastTransitionTime`
-changes only when the condition status changes and is not a progress counter.
+`ApplyFailed` is retryable. An absent condition means no usable observation.
+`lastTransitionTime` changes only when the condition status changes and is
+not a progress counter.
 
 #### HC and HCP generation correlation
 
 CPC and HCP role conditions use the generation of the HCP they evaluated,
 consistent with the existing CPC `status.observedGeneration` convention.
-The provisional NodePool role condition uses the NodePool generation, with
-`observedHCGeneration` recording the HC input evaluated in the same attempt.
-This also invalidates success when a NodePool changes without an HC change.
-The HC generation field is an input correlation field, not a separate
-successful-apply generation. HC's aggregate uses HC generation. These
-source-object semantics must be stated in the API field comments.
+HC's aggregate uses HC generation. These source-object semantics must be
+stated in the API field comments.
 
 For each aggregate reconciliation, HO:
 
 1. Reads HC at UID/generation `(C, c)` and persists its desired HCP
-   projection, including managed identities, Key Vault versions, KMS, ACR,
+   projection, including managed identities, Key Vault versions, KMS,
    authentication mode, and capabilities. It captures the returned HCP
    UID/generation `(P, p)`. HC and HCP generation numbers need not be equal.
 2. Verifies the applied HCP projection still corresponds to that HC
    snapshot. CPC records must belong to HCP UID `P`; HCCO observations come
-   from that same HCP. Both need `Applied.observedGeneration == p`. NodePool
-   records must belong to HC UID `C`, use `observedHCGeneration == c`, and
-   have an Applied condition for the current NodePool generation.
+   from that same HCP. Both need `Applied.observedGeneration == p`.
 3. Requires `Applied=True/AsExpected` **and** equality between the desired typed
    reference and `lastAppliedReference`. For removal, requires
    `Applied=True/Removed` and desired absence instead of reference equality.
@@ -416,8 +373,11 @@ For each aggregate reconciliation, HO:
 There is no persisted assumption that HC generation 28 always maps to HCP
 42; the mapping is established from the persisted projection on each pass.
 An HC change that leaves the HCP projection unchanged can reuse the same
-HCP generation. An unrelated HCP spec change conservatively requires a new
-whole-role observation. Writers and observers must use persisted HCP state;
+HCP generation. An ACR-only HC change may also advance HCP generation;
+in that case, the in-scope roles must be observed again at the new HCP
+generation before HC reports success. In either case, the current HC
+condition makes no claim about ACR. An unrelated HCP spec change also
+conservatively requires a new whole-role observation. Writers and observers must use persisted HCP state;
 HO must not tag writes made from an unpersisted HC projection with an old
 HCP generation.
 
@@ -450,9 +410,8 @@ missing, then `Unknown/StatusUnavailable` if any expected observation is
 absent, stale, or unreadable. A success whose reference or removal reason
 contradicts the desired configuration is also unusable. When all required
 sources are usable and current, precedence is
-`False/UnsupportedInPlaceIdentityChange`, `False/ApplyFailed`,
-`False/Applying`, then `True/AsExpected`. Individual records retain their
-own reasons even when another role determines the aggregate reason.
+`False/ApplyFailed`, `False/Applying`, then `True/AsExpected`. Individual
+records retain their own reasons even when another role determines the aggregate reason.
 
 Generation checks do not detect a controller rollback that stops reporting
 without changing the desired spec. Such a controller can leave an old True
@@ -501,21 +460,19 @@ positive evidence that every current consumer has switched, including pod
 rollout or a separately justified workload-use policy, before deleting an
 old control-plane or data-plane identity. A changed `AzureIdentitiesApplied`
 condition alone must never trigger cleanup. ARO-29197 excludes worker-node
-identity cleanup. The owner and reporting surface for that work are still
-being confirmed. In the provisional HyperShift path, NodePool application
-requires a completed worker rollout and does not prove actual ARM attachment
-or image pull success.
+identity cleanup. ACR pull identity replacement and cleanup are outside this
+enhancement; this status provides no worker VM attachment evidence.
 
 ### Topology Considerations
 
 #### Hypershift / Hosted Control Planes
 
-CPC control-plane detail, HCP data-plane detail, provisional NodePool detail,
-and the HC condition live in the management cluster. HCCO observes guest
+CPC control-plane detail, HCP data-plane detail, and the HC condition live
+in the management cluster. HCCO observes guest
 Secrets through its guest client and patches its own HCP status fields
 through its management client. HO watches these sources and updates the HC
 condition on meaningful changes. RP's existing HC ReadDesire supplies the
-aggregate; per-role reads require CPC, HCP, and provisional NodePool access.
+aggregate; per-role reads require CPC and HCP access.
 The HC message is for support, never a machine API.
 
 #### Standalone Clusters
@@ -561,25 +518,10 @@ workload availability/version reporting. All existing CPCs remain in the
 normal rollups; no opt-out label or synthetic component is added.
 
 The current CPO `reconcileAzurePlatformStatus` spec mirror stops writing the
-authoritative Azure identity field. HO aggregates the current CPC/HCP and
-provisional NodePool observations using the documented generation mapping,
-references, and applicability within the qualified supporting versions. It
-does not copy control-plane records to HCP or any per-role records to HC.
-
-The provisional NodePool path already watches HC and creates a new
-AzureMachineTemplate name when the ACR resource ID changes. Its new record
-reports success only after CAPI reports all desired Machines on the intended
-template and available. Template creation, a changed MachineDeployment
-reference, or a generic NodePool Ready condition alone is insufficient.
-CAPZ `VMSpec.Parameters` returns no update parameters for an existing VM,
-and the InPlace path only changes the MachineSet template reference.
-`Applied=False/UnsupportedInPlaceIdentityChange` therefore persists while
-existing Machines retain the old template. The operator can replace that
-pool with a Replace-mode pool under the existing node availability policy;
-changing `UpgradeType` on an existing pool is unsupported. Automatic
-in-place VM updates require separate design and tests. ACR cloud config and
-all applicable NodePools must agree before HC reports True, with positive
-removal observations for unset identities.
+authoritative Azure identity field. HO aggregates the CPC and HCP observations
+using the documented generation mapping, references, and applicability
+within the qualified supporting versions. It does not copy control-plane
+records to HCP or any per-role records to HC.
 
 A partial resource update sets a non-True condition at the evaluated
 generation while retaining `lastAppliedReference`. The historical reference
@@ -605,20 +547,16 @@ copies change together during implementation.
 - **CAPZ stale credentials.** Restart for a path or version change, wait for
   old pods to exit, and verify each new pod's mounted version. Retain a
   separate upstream cache fix.
-- **Existing worker VMs.** In the provisional ACR path, report the unsupported
-  InPlace operation explicitly and retain the old identity until the worker
-  workflow has trustworthy attachment and cleanup evidence.
 - **Role removal.** Require positive teardown evidence; a missing CPC or
-  NodePool is insufficient. Do not imply support for immutable transitions.
+  record is insufficient. Do not imply support for immutable transitions.
 - **Fleet scale.** Bound CPC and HCP records, avoid mirrored lists and no-op
   status writes, and measure watch/update rates before GA.
 
 ### Drawbacks
 
-RP needs CPC and HCP reads for per-identity detail and NodePool reads if the
-HyperShift ACR path is adopted. Implementation adds component observation
-hooks, HCCO-owned data-plane records, and an HO aggregator. An HC-only reader
-can wait for cluster-wide convergence, but one unrelated stalled role delays
+RP needs CPC and HCP reads for per-identity detail. Implementation adds
+component observation hooks, HCCO-owned data-plane records, and an HO
+aggregator. An HC-only reader can wait for cluster-wide convergence, but one unrelated stalled role delays
 its progress. Exceptional rollback below reporting support needs an
 operational suspension and recovery procedure; the API cannot automatically
 detect retained success from a controller that no longer updates it.
@@ -664,8 +602,9 @@ individual reporting or generation checks during qualified upgrades that
 retain reporting support. A Deployment template hash also repeats across
 an A -> B -> A build change, so it is not a complete invalidation mechanism.
 This design uses standard conditions and explicitly documents the operational
-limitation for exceptional rollback below reporting support. This choice
-does not remove the CAPZ consumer rollout and mounted-version checks.
+limitation for exceptional rollback below reporting support. The CAPZ pod's
+`nodePoolManagement` identity still needs its consumer rollout and mounted
+version checks.
 
 ### Query Key Vault on every reconcile
 
@@ -679,9 +618,9 @@ used the returned credential. Mount evidence belongs to the later phase.
 | [CNTRLPLANE-4493](https://redhat.atlassian.net/browse/CNTRLPLANE-4493) | Replace the early CPO spec mirror with observations on existing workload CPCs and HCCO-owned data-plane HCP records. Use per-role Applied conditions; do not release the mirror as an applied signal. |
 | [CNTRLPLANE-4494](https://redhat.atlassian.net/browse/CNTRLPLANE-4494) | Observe the full KMS resource set on kube-apiserver CPC, including shared SPC, config Secret, and CPO mount. Verify shared writers preserve the pinned version during supported skew. |
 | [CNTRLPLANE-4495](https://redhat.atlassian.net/browse/CNTRLPLANE-4495) | Deliver per-pod mount/version evidence for non-CAPZ CSI consumers and the RP cleanup gate; resource-applied status alone cannot satisfy ARO-29197 requirement 3. |
-| [CNTRLPLANE-4496](https://redhat.atlassian.net/browse/CNTRLPLANE-4496) | Test CP, DP, KMS, CAPZ rollout/cache reset, generation correlation, partial failure, teardown, supported upgrades/skew, and RP visibility. Finalize ACR coverage after its scope decision. |
+| [CNTRLPLANE-4496](https://redhat.atlassian.net/browse/CNTRLPLANE-4496) | Test CP, DP, KMS, CAPZ rollout/cache reset, generation correlation, partial failure, teardown, supported upgrades/skew, and RP visibility. ACR worker identity reporting is excluded. |
 | [CNTRLPLANE-4509](https://redhat.atlassian.net/browse/CNTRLPLANE-4509) | Deliver versioned HC Key Vault references, SPC `objectVersion` pinning, and same-name rotation status semantics before identity replacement implementation. |
-| [CNTRLPLANE-4491](https://redhat.atlassian.net/browse/CNTRLPLANE-4491) | Align acceptance criteria with existing CPC observations, HCCO-owned HCP detail, and HC aggregation; replace the superseded HC/HCP spec mirror. Confirm the ACR reporting scope. |
+| [CNTRLPLANE-4491](https://redhat.atlassian.net/browse/CNTRLPLANE-4491) | Align acceptance criteria with existing CPC observations, HCCO-owned HCP detail, and HC aggregation; replace the superseded HC/HCP spec mirror. Exclude ACR worker identity reporting. |
 | [ARO-29197](https://redhat.atlassian.net/browse/ARO-29197) | RP owns the final cleanup gate after evidence for all current CP/DP consumers. Worker-node cleanup is excluded; its ownership and reporting plan remain to be confirmed. |
 
 ## Open Questions
@@ -689,24 +628,23 @@ used the returned credential. Mount evidence belongs to the later phase.
 1. Which workload-use evidence or grace period should RP require after every
    affected pod or machine has converged? ARO-29197 must resolve this before
    it deletes old identities; `AzureIdentitiesApplied` never answers it.
-2. For ACR, can production RP credentials enumerate all relevant worker VMs
-   and verify that the new identity is attached and the old one can safely
-   be retired? If RP can own this observation, should the provisional
-   NodePool status/API be removed from this enhancement? Otherwise, should
-   HyperShift expose actual attachment evidence here or in a separate
-   enhancement? Confirm ownership and tracking with Todd and Bryan.
-3. Does the API review accept HCCO-owned per-role observations on HCP as the
+2. Does the API review accept HCCO-owned per-role observations on HCP as the
    representation of required individual data-plane reporting? The API shape
    is open for agreement; individual progress and last applied references
    must be preserved.
-4. Can Bryan and the RP owners accept operational suspension and recovery
+3. Can Bryan and the RP owners accept operational suspension and recovery
    for an exceptional rollback below reporting support, instead of an API
    mechanism that automatically invalidates retained status? Agree how
    recovery verifies fresh observations before re-enabling cleanup.
-5. For supported role removals, which paths can delete their CPC before a
+4. For supported role removals, which paths can delete their CPC before a
    positive removal observation is consumed? Resolve the teardown/status
    ordering or a durable evidence location before enabling those paths.
    Immutable capability changes are not supported removal operations.
+
+ACR follow-up is outside this enhancement. Whether RP can observe worker VM
+attachment directly is still under investigation. If additional reporting is
+needed, define its owner, API, rollout, and cleanup criteria in a separate
+enhancement. That decision does not block this proposal.
 
 ## Test Plan
 
@@ -728,11 +666,6 @@ used the returned credential. Mount evidence belongs to the later phase.
   cannot be qualified for replacement while they can undo version pinning.
   Exercise RP's rollback suspension/recovery procedure once it is agreed;
   do not assert automatic stale-status invalidation from generation alone.
-- Provisional ACR tests for add/replacement/removal, zero and multiple pools,
-  template creation versus completed CAPI rollout, NodePool-only spec
-  changes, unsupported InPlace changes, Replace-mode pool replacement,
-  deletion finalizer fencing, and
-  stalled rollout. Final attachment tests depend on the ACR scope decision.
 - CAPZ tests for path and same-path version changes, Deployment restart,
   old-pod termination, current-pod mounted versions, failed/missing CSI status,
   missing CRDs or read permissions, and retained old cache before restart.
@@ -749,17 +682,16 @@ used the returned credential. Mount evidence belongs to the later phase.
 ### Dev Preview -> Tech Preview
 
 API approval, role inventory and observer ownership, and tests that prove
-observation of CP, DP, and KMS resources. Resolve the ACR scope and reporting
-owner before accepting its provisional API and associated tests.
+observation of CP, DP, and KMS resources. ACR worker identity reporting is
+outside these criteria.
 
 ### Tech Preview -> GA
 
 End-to-end replacement coverage, supported-upgrade and version-skew tests,
 measured status cost, and a documented RP cleanup policy. Agree and validate
 the operational suspension/recovery procedure for exceptional rollback below
-reporting support. If the HyperShift ACR path is selected, complete its
-attachment-evidence design and end-to-end tests;
-CAPI template convergence alone does not prove actual ARM attachment.
+reporting support. ACR worker identity work has separate graduation criteria
+if a later enhancement is needed.
 
 ### Removing a deprecated feature
 
@@ -802,23 +734,22 @@ reconciliation by both writers.
 
 ## Operational Aspects of API Extensions
 
-CPC and HCP records, and provisional NodePool records, change only when
-references, conditions, or evaluated generations change.
+CPC and HCP records change only when references, conditions, or evaluated
+generations change.
 HO updates HC only on meaningful changes. Avoid periodic no-op status writes.
 Measure (1) time from a desired generation change to each role's success
 (`AsExpected` for application, `Removed` for removal) and to HC aggregate
 convergence, (2) counts and ages of non-True role conditions, and (3) CPC,
-HCP, NodePool, and HC status writes per cluster per hour. A condition's lastTransitionTime
-is not the timestamp of every attempt; RP uses its replacement operation
+HCP, and HC status writes per cluster per hour. A condition's
+lastTransitionTime is not the timestamp of every attempt; RP uses its replacement operation
 state and observed changes when deciding that progress has stalled.
 HyperShift maintainers measure status cost and convergence in fleet tests;
 RP owners define and calibrate alert thresholds before GA. These thresholds
 are operational policy rather than HyperShift API or cleanup deadlines.
 
 HyperShift on-call owns missing observations, reconciliation failures, and
-CAPZ rollout; the provisional NodePool path also requires rollout support.
-ARO RP on-call owns desired version supply, replacement orchestration,
-alerting policy, and the final cleanup gate. Alert timing is RP operational
+CAPZ rollout. ARO RP on-call owns desired version supply, replacement
+orchestration, alerting policy, and the final cleanup gate. Alert timing is RP operational
 policy, not an API guarantee or cleanup deadline. Azure platform maintainers
 own the upstream CAPZ cache follow-up. Delayed status retains the old
 identity; a late observer alone does not make the cluster unavailable.
@@ -826,18 +757,16 @@ identity; a late observer alone does not make the cluster unavailable.
 ## Support Procedures
 
 Inspect HC `AzureIdentitiesApplied` reason and message. Read the named CPC's
-`status.azureIdentities`, HCP's data-plane records, or provisional NodePool
-`status.acrPullIdentity`. Check the current condition, its source generation,
-the expected typed reference, and the configured supporting versions. A
-historical `lastAppliedReference` is not success. Inspect the role's Secret, SPC, cloud
-config, guest Secret, or AzureMachineTemplate and check mount/use evidence
-separately.
+`status.azureIdentities` or HCP's data-plane records. Check the current
+condition, its source generation, the expected typed reference, and the
+configured supporting versions. A historical `lastAppliedReference` is not
+success. Inspect the role's Secret, SPC, cloud config, or guest Secret and
+check mount/use evidence separately.
 
 ## Infrastructure Needed
 
-- HO needs bounded CPC, HCP, and provisional NodePool watches and an HC
-  condition reconciler. Component observers need read/watch access to their
-  listed Secrets, SPCs, workloads, and other completion resources.
+- HO needs bounded CPC and HCP watches and an HC condition reconciler.
+  Component observers need read/watch access to their listed Secrets, SPCs, workloads, and other completion resources.
 - CAPZ observation depends on the Secrets Store CSI driver's
   `SecretProviderClass` and `SecretProviderClassPodStatus` CRDs in the
   management cluster. Register their types and configure HO get/list/watch
@@ -849,9 +778,8 @@ separately.
 - HCCO uses guest Secret reads and management-cluster HCP status updates;
   extend its existing HCP status patch path while preserving other writers'
   fields. No CPC status permission or field-level RBAC is introduced.
-- RP needs CPC/HCP and provisional NodePool reads for individual progress;
-  its existing HC read supplies the aggregate. Release and deployment
-  procedures must establish reporting support before enabling consumption
+- RP needs CPC/HCP reads for individual progress; its existing HC read
+  supplies the aggregate. Release and deployment procedures must establish reporting support before enabling consumption
   and suspend replacement/cleanup before an exceptional rollback below it.
   No observer Deployment reads or controller-revision injection are added
   for identity status validation.
