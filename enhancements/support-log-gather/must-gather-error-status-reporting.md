@@ -11,7 +11,7 @@ approvers:
 api-approvers:
   - "@Prashanth684"
 creation-date: 2026-09-17
-last-updated: 2026-10-26
+last-updated: 2026-11-05
 status: provisional
 tracking-link:
   - https://redhat.atlassian.net/browse/MG-376
@@ -306,35 +306,84 @@ Detailed per-collector messages remain in the archive. CR status holds bounded, 
 
 #### Proposed `MustGatherStatus` additions (Phase 2)
 
-The current `MustGatherStatus` has `conditions`, `status`, `lastUpdate`, `reason`, and `completed`. Phase 2 adds one new top-level field:
+The current `MustGatherStatus` has `conditions`, `status`, `lastUpdate`, `reason`, and `completed`. Phase 2 adds `collectionReport`. The operator sets that object once the Job is terminal and it has attempted to read `status.json`, including when the report is absent (`reportAvailable: false`). Nested fields are omitted in that case.
 
-**`collectionReport`** (optional object) — bounded summary of archive-level collection quality, populated when `status.json` is available from the gather output volume.
+Proposed types (markers are subject to Phase 2 API review):
 
-`collectionReport` fields:
+~~~go
+// MustGatherStatus defines the observed state of MustGather.
+// Existing fields are unchanged. Phase 2 adds collectionReport.
+type MustGatherStatus struct {
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
+	Status     *string            `json:"status,omitempty"`
+	LastUpdate *metav1.Time       `json:"lastUpdate,omitempty"`
+	Reason     *string            `json:"reason,omitempty"`
+	Completed  *bool              `json:"completed,omitempty"`
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `schemaVersion` | integer, required | `status.json` schema version consumed; initially `1` |
-| `reportAvailable` | bool, required | Whether a parseable `status.json` was found |
-| `overallStatus` | string enum: `success` / `degraded` / `error` | Archive-level collection completeness; omitted when `reportAvailable` is `false` |
-| `counts` | object (below) | Outcome totals across all 28 work units (collectors + framework steps); omitted when `reportAvailable` is `false` |
-| `affectedCollectors` | array of object (below), max 28 | Only collectors with `error`; omitted when all succeeded/skipped or `reportAvailable` is `false` |
+	// collectionReport is set once the Job is terminal and the operator
+	// has attempted to read status.json, including when the report is absent.
+	// +optional
+	CollectionReport *CollectionReport `json:"collectionReport,omitempty"`
+}
 
-`counts` fields:
+// CollectionReport is a bounded summary of archive-level collection quality.
+type CollectionReport struct {
+	// schemaVersion is the status.json schema consumed. Initially 1.
+	// +required
+	// +kubebuilder:validation:Minimum=1
+	SchemaVersion int32 `json:"schemaVersion"`
 
-| Field | Type |
-|-------|------|
-| `success` | int32 |
-| `skipped` | int32 |
-| `error` | int32 |
+	// reportAvailable is true when a parseable status.json was found.
+	// +required
+	ReportAvailable bool `json:"reportAvailable"`
 
-`affectedCollectors` entry fields:
+	// overallStatus is archive-level completeness: success, degraded, or error.
+	// Omitted when reportAvailable is false.
+	// +optional
+	// +kubebuilder:validation:Enum=success;degraded;error
+	OverallStatus *string `json:"overallStatus,omitempty"`
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `name` | string | Stable collector name from the work-unit inventory |
-| `status` | string enum: `error` | Collector-level outcome |
-| `reason` | string, max 256 chars | Bounded, redacted summary — no secrets or tokens |
+	// counts totals all 28 work units (collectors and framework steps).
+	// Omitted when reportAvailable is false.
+	// +optional
+	Counts *CollectionCounts `json:"counts,omitempty"`
+
+	// affectedCollectors lists only collectors with status error.
+	// Omitted when none errored, or when reportAvailable is false.
+	// +optional
+	// +listType=atomic
+	// +kubebuilder:validation:MaxItems=28
+	AffectedCollectors []AffectedCollector `json:"affectedCollectors,omitempty"`
+}
+
+// CollectionCounts is the outcome total across all work units.
+type CollectionCounts struct {
+	// +kubebuilder:validation:Minimum=0
+	Success int32 `json:"success"`
+	// +kubebuilder:validation:Minimum=0
+	Skipped int32 `json:"skipped"`
+	// +kubebuilder:validation:Minimum=0
+	Error int32 `json:"error"`
+}
+
+// AffectedCollector is one collector that reported an error.
+type AffectedCollector struct {
+	// name is the stable collector name from the work-unit inventory.
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+
+	// status is the collector outcome copied into CR status. Only error is listed.
+	// +required
+	// +kubebuilder:validation:Enum=error
+	Status string `json:"status"`
+
+	// reason is a bounded, redacted summary. No secrets or tokens.
+	// +optional
+	// +kubebuilder:validation:MaxLength=256
+	Reason string `json:"reason,omitempty"`
+}
+~~~
 
 New condition types and reasons (standard `metav1.Condition`):
 
@@ -354,8 +403,6 @@ Omission rules:
 
 * When `reportAvailable` is `false`: `overallStatus`, `counts`, and `affectedCollectors` are omitted (not set to zero values).
 * When report parse fails: `reportAvailable: false`, condition message includes parse error summary.
-
-Exact field names, kubebuilder annotations, and validation markers are subject to Phase 2 API review.
 
 ### API Extensions (Phase 2)
 
