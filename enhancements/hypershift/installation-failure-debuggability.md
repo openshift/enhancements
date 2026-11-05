@@ -514,7 +514,7 @@ or finalizers.
 | Reason constant | `NoPressure` | `ManagementClusterResourcePressure` | HO | No scheduling pressure (`Status=False`). |
 | Reason constant | `ControlPlanePodStatusUnavailable` | `ManagementClusterResourcePressure` | HO | Pod status unavailable (`Status=Unknown`). |
 | Metric | `hypershift_cluster_installation_stage` | — | HO | Gauge, labels: `namespace`, `name`. Numeric value is the stage ordinal (0=Initializing, 1=InfrastructureReady, 2=ControlPlaneProvisioning, 3=APIServerAvailable, 4=WorkerAvailable, 5=WaitingForOperators, 6=InstallationComplete). Single series per cluster. |
-| Metric | `hypershift_cluster_installation_failure_reason_total` | — | HO | Counter, labels: `namespace`, `name`, `reason`. Best-effort episode count. |
+| Metric | `hypershift_cluster_installation_failure_reason` | — | HO | Gauge, labels: `namespace`, `name`, `reason`. Emits 1 if a known failure reason is currently active, 0 if not. One series per known reason per cluster. |
 
 **New status fields:**
 
@@ -1191,78 +1191,44 @@ components:
   to select clusters that have not completed
   installation.
 - Add
-  `hypershift_cluster_installation_failure_reason_total`:
-  Counter of installation failures by failure reason.
+  `hypershift_cluster_installation_failure_reason`:
+  Gauge indicating whether a known installation
+  failure reason is currently active for a cluster.
   Labels: `namespace`, `name`, `reason`.
+  Emits 1 if the reason is currently active, 0 if
+  not. One series per known reason per cluster.
   **Structured input**: The `reason` label is derived
-  from the HCP `Available` condition's structured
-  `Reason` field (e.g.,
-  `PodSchedulingFailed` → `PodSchedulingFailed`,
-  `ComponentsNotAvailable` →
-  `ComponentsNotAvailable`).
+  from CPC `Available` condition `Reason` fields and
+  HC-level `InfrastructureReady` condition `Reason`.
   The HO does **not** parse the free-text `Message`
-  field. `ManagementClusterResourcePressure` provides
-  its own structured reason. Any reason that does not
-  map to the enumerated set is recorded as `Unknown`.
-  **Increment semantics**: The counter increments
-  **once per failure episode**, not on every
-  reconciliation. A failure episode is defined by a
-  condition `Status` transition — specifically, when
-  a CPC `Available` transitions from `True` (or
-  absent) to `False`. Subsequent reconciliations
-  that observe the same ongoing failure do **not**
-  increment the counter again. A `Reason` change
-  within an ongoing `Status=False` (e.g.,
-  `CrashLoopBackOff` → `ImagePullBackOff` while the
-  CPC remains `Available=False`) is a refinement of
-  the same episode, not a new one — the counter
-  does not re-increment. If the failure resolves
-  (`Status` returns to `True`) and then recurs,
-  that is a new episode and the counter increments
-  again. Simultaneous CPC failures are tracked
-  independently — if 3 CPCs transition to
-  `Available=False`, that is 3 episodes.
-  This prevents the counter from inflating during
-  sustained failures and ensures `rate()` queries
-  reflect actual failure frequency rather than
-  reconciliation frequency. The `reason`
-  label is constrained to a fixed enumerated set:
-  `PodSchedulingFailed`, `CrashLoopBackOff`,
-  `ImagePullBackOff`, `RouteNotAdmitted`,
-  `Unknown`. This prevents unbounded cardinality
-  from dynamic content (pod event messages, node
-  names). This complements the existing
-  `hypershift_hostedclusters_failure_conditions`
+  field.
+  **Gauge semantics**: Unlike a counter, the gauge
+  reflects current state — it goes to 1 when a
+  failure is active and back to 0 when the failure
+  resolves. This is simpler than episode-based
+  counting and avoids the complexity of tracking
+  "last seen CPC status" across restarts and leader
+  changes. Fleet operators can use
+  `sum(hypershift_cluster_installation_failure_reason{reason="PodSchedulingFailed"} == 1)`
+  to count clusters currently experiencing a given
+  failure, or alert on sustained failures using
+  `for:` duration.
+  The `reason` label is constrained to a fixed
+  enumerated set: `PodSchedulingFailed`,
+  `CrashLoopBackOff`, `ImagePullBackOff`,
+  `RouteNotAdmitted`. This prevents unbounded
+  cardinality from dynamic content (pod event
+  messages, node names). This complements the
+  existing `hypershift_hostedclusters_failure_conditions`
   which counts *which* condition failed — the new
-  metric counts *why*.
-  **Restart / leader change**: The HO tracks "last
-  seen CPC status" in memory. On restart or leader
-  change, this state is lost. The HO reads current
-  CPC conditions and treats the current state as the
-  baseline — it does **not** increment counters for
-  CPCs already in `Available=False` at startup. This
-  means a failure that started before restart and
-  continues after restart may be under-counted (zero
-  or one increment total), never double-counted.
-  **Best-effort acknowledgment**: This counter is a
-  best-effort count of observed failure episodes,
-  suitable for `rate()`-based alerting and trend
-  analysis. It is not an exact audit trail.
-  Deduplication policy: one increment per `Status`
-  transition per CPC, with restart boundaries
-  causing potential under-count.
+  metric indicates *why*.
   **Cardinality note**: the
   `namespace` × `name` × `reason` label combination
-  produces at most 6 time series per cluster (one per
-  reason value). At 500 HCPs, this is ~3000 time
+  produces at most 4 time series per cluster (one per
+  reason value). At 500 HCPs, this is ~2000 time
   series — consistent with existing metrics like
   `hypershift_hostedclusters_failure_conditions` which
-  has comparable cardinality. **Cluster churn**: When
-  a `HostedCluster` is deleted, the counter's time
-  series are deregistered via `DeletePartialMatch`
-  (see "Deletion during installation" above), so
-  stale series do not accumulate across cluster
-  create/delete cycles.
+  has comparable cardinality.
 - No new installation duration metric — existing
   `hypershift_cluster_waiting_initial_availability_duration_seconds`
   and `hypershift_hosted_cluster_transition_seconds`
@@ -1284,7 +1250,7 @@ typically collected via the service's own pipeline
 (e.g., OCM telemetry) rather than the Insights Operator.
 The Prometheus metrics added by this enhancement
 (`hypershift_cluster_installation_stage`,
-`hypershift_cluster_installation_failure_reason_total`)
+`hypershift_cluster_installation_failure_reason`)
 are the primary fleet-wide telemetry mechanism and are
 already scraped by standard managed services monitoring.
 Additional integration with OCM telemetry or Insights
@@ -1539,7 +1505,7 @@ Testing strategy:
    - CVO reason override and message passthrough
    - `ManagementClusterResourcePressure`: CPC condition-based detection, recovery clearing, Unknown fallback
    - `installation.stage` monotonic transitions, 5-second pod inspection timeout
-   - Failure counter episode semantics (one increment per `Status` transition, no double-count on restart)
+   - Failure reason gauge semantics (1=active, 0=not active per known reason)
    - Security sanitization: node names, IPs, credentials in source fields do not leak to HC conditions
 
 2. **Integration tests** verifying that diagnostic
@@ -1577,8 +1543,8 @@ Testing strategy:
 5. **Metrics tests** verifying that
    `hypershift_cluster_installation_stage` is
    emitted with correct labels, and
-   `hypershift_cluster_installation_failure_reason_total`
-   increments only for the enumerated reason set.
+   `hypershift_cluster_installation_failure_reason`
+   emits correct gauge values for the enumerated reason set.
 
 Tests should use `[Jira:"HyperShift"]` labels and
 appropriate test type labels (`[Serial]`, `[Slow]`,
@@ -1814,8 +1780,8 @@ hypershift_cluster_installation_stage < 6
   and on(namespace, name)
     (changes(hypershift_cluster_installation_stage[30m]) == 0)
 
-# Top failure reasons
-topk(5, sum by (reason) (hypershift_cluster_installation_failure_reason_total))
+# Clusters with active failure reasons
+sum by (reason) (hypershift_cluster_installation_failure_reason == 1)
 
 # HCs with management cluster pressure (aggregate metric, not per-cluster)
 sum(hypershift_hostedclusters_failure_conditions{condition="ManagementClusterResourcePressure"})
@@ -1836,10 +1802,11 @@ sum(hypershift_hostedclusters_failure_conditions{condition="ManagementClusterRes
   for: 45m
   labels: { severity: warning }
   annotations: { summary: "{{ $labels.name }} stuck at stage {{ $value }}" }
-- alert: HighInstallationFailureRate
-  expr: sum(rate(hypershift_cluster_installation_failure_reason_total[1h])) > 0.1
-  for: 10m
+- alert: WidespreadInstallationFailure
+  expr: sum(hypershift_cluster_installation_failure_reason == 1) > 5
+  for: 15m
   labels: { severity: warning }
+  annotations: { summary: "{{ $value }} clusters with active installation failures" }
 ```
 
 **Metrics for monitoring:**
@@ -1848,10 +1815,12 @@ sum(hypershift_hostedclusters_failure_conditions{condition="ManagementClusterRes
   this metric is not changing for a cluster, the
   installation is stalled. Cross-reference with the
   conditions on the `HostedCluster` for the root cause.
-- `hypershift_cluster_installation_failure_reason_total`:
+- `hypershift_cluster_installation_failure_reason`:
   Use to identify systemic failure patterns across the
   fleet (e.g., widespread `PodSchedulingFailed` indicates
-  management cluster capacity issues).
+  management cluster capacity issues). A value of 1
+  means the failure reason is currently active; 0 means
+  it is not.
 
 ## Cross-Team Validation Tracker
 
