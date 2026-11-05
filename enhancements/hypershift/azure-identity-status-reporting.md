@@ -12,7 +12,7 @@ approvers:
 api-approvers:
   - "@JoelSpeed"
 creation-date: 2026-09-24
-last-updated: 2026-11-04
+last-updated: 2026-11-05
 status: provisional
 tracking-link:
   - https://redhat.atlassian.net/browse/CNTRLPLANE-4491
@@ -92,11 +92,11 @@ scope.
    the ARO HCP HC, including optional KMS and the CAPZ pod's
    `nodePoolManagement` control-plane identity.
 2. Publish success only after observing all resources that carry a role's
-   reference. On partial failure, update the condition and retain the last
+   reference. On partial failure, update the role outcome and retain the last
    fully applied reference for diagnostics.
 3. Preserve individual reporting for control-plane and data-plane identity
    consumers, including KMS. Each role exposes its last fully applied
-   reference and a current condition that RP compares with the desired
+   reference and current outcome fields that RP compares with the desired
    reference in spec. Keep control-plane detail on existing CPCs and
    data-plane detail on HCP, with an additional aggregate result on HC.
    Each role has one status owner; higher-level APIs do not mirror another
@@ -130,8 +130,8 @@ scope.
    CPC reconciler observes the complete control-plane role resource set,
    including resources written by another controller. HCCO observes each
    guest Secret it reconciles and writes that role's result to HCP status.
-   Each role has an `Applied` condition for the generation evaluated and an
-   optional `lastAppliedReference` retained for diagnostics after failure.
+   Each role record carries its current outcome and evaluated HCP generation
+   directly, plus an optional `lastAppliedReference` for diagnostics.
 3. HO computes the expected consumers from the current HC authentication
    mode, KMS configuration, and enabled capabilities. It correlates HC and
    HCP generations as described below. HC reports
@@ -140,7 +140,7 @@ scope.
    positive evidence of requested removal.
 4. RP reads the HC condition for cluster-wide progress of the in-scope
    identities. For individual identities it reads CPC control-plane records
-   and HCP data-plane records using the same reference and condition rules.
+   and HCP data-plane records using the same reference and outcome rules.
    The HC message names laggards for people; RP never parses it. RP must
    also satisfy the compatibility and cleanup checks below before retiring
    an identity.
@@ -164,7 +164,7 @@ A role reports success only after observing **all** listed resources with the
 expected reference. A successful write response or a fresh read of matching
 resources can establish application. Reading desired HCP spec alone cannot.
 Cross-controller resources must be read from applied objects; lagging writes
-leave the condition non-True. Required-resource changes enqueue the observer.
+leave the role outcome non-True. Required-resource changes enqueue the observer.
 
 | HC role and reference | Required resources and observer |
 | --- | --- |
@@ -202,7 +202,7 @@ a successful role does not imply that the other consumers have switched.
 A role that was never enabled is outside the expected set. Existing
 capability immutability rules are unchanged. For a supported removal, keep
 the former consumer in the set until its observer verifies teardown and sets
-`Applied=True`, reason `Removed`, for the current generation. A deleted CPC
+`status=True`, `reason=Removed`, for the current generation. A deleted CPC
 or an absent record is not proof of teardown. If the existing component
 lifecycle deletes a CPC before that observation can be published, support
 for that removal requires a teardown/status ordering change; HO must remain
@@ -234,13 +234,16 @@ roles and to HCP for HCCO's data-plane roles. HC adds the standard
 `AzureIdentitiesApplied` condition without a per-role list. No ACR or
 NodePool identity-status field is added.
 
-Each role has standard `metav1.Condition` entries keyed by type, initially
-with one type, `Applied`. There is no separate `state`, `lastAttempt`, or
-successful-apply generation. `lastAppliedReference` is optional and changes
-only when the complete resource set has been observed with that reference.
-It remains available after a failure or removal as historical information.
-It must never be interpreted as the current state without checking the
-current `Applied` condition. Example, with disk complete and file failing:
+Each role record carries `status`, `reason`, `observedGeneration`,
+`lastTransitionTime`, and `message` directly; there is no nested one-entry
+condition list, separate `state`, `lastAttempt`, or successful-apply
+generation. A record is absent before its first observation. Once present,
+all five outcome fields are required, `status` is `True`, `False`, or
+`Unknown`, and `observedGeneration` is the HCP generation evaluated.
+`lastAppliedReference` is optional and changes only when the complete
+resource set has been observed with that reference. It remains available
+after failure or removal as history; readers must check the current outcome
+before treating it as applied. Example, with disk complete and file failing:
 
 ```yaml
 kind: ControlPlaneComponent
@@ -255,26 +258,22 @@ status:
       type: CredentialsSecretName
       credentialsSecretName: disk-identity-v2
       credentialsSecretVersion: 4d71...
-    conditions:
-    - type: Applied
-      status: "True"
-      reason: AsExpected
-      observedGeneration: 42
-      lastTransitionTime: "2026-10-29T10:00:00Z"
-      message: All required disk identity resources match
+    status: "True"
+    reason: AsExpected
+    observedGeneration: 42
+    lastTransitionTime: "2026-10-29T10:00:00Z"
+    message: All required disk identity resources match
   - scope: ControlPlane
     role: File
     lastAppliedReference:
       type: CredentialsSecretName
       credentialsSecretName: file-identity-v1
       credentialsSecretVersion: 29ab...
-    conditions:
-    - type: Applied
-      status: "False"
-      reason: ApplyFailed
-      observedGeneration: 42
-      lastTransitionTime: "2026-10-29T10:00:00Z"
-      message: Failed to update the file identity SecretProviderClass
+    status: "False"
+    reason: ApplyFailed
+    observedGeneration: 42
+    lastTransitionTime: "2026-10-29T10:00:00Z"
+    message: Failed to update the file identity SecretProviderClass
 ```
 
 ```yaml
@@ -286,13 +285,11 @@ status:
     lastAppliedReference:
       type: ClientID
       clientID: 00000000-0000-0000-0000-000000000001
-    conditions:
-    - type: Applied
-      status: "True"
-      reason: AsExpected
-      observedGeneration: 42
-      lastTransitionTime: "2026-10-29T10:00:00Z"
-      message: Guest disk credentials Secret matches
+    status: "True"
+    reason: AsExpected
+    observedGeneration: 42
+    lastTransitionTime: "2026-10-29T10:00:00Z"
+    message: Guest disk credentials Secret matches
 ```
 
 ```yaml
@@ -319,17 +316,18 @@ The reference is a discriminated union: `CredentialsSecretName` requires
 `clientID`. Exactly the matching member is populated, and the version is
 allowed only with `CredentialsSecretName`.
 Validation rejects empty values, duplicate keys, unsupported scope/role
-pairs, and more than one condition of a given type. Status contains no
-certificate, token, or secret value. CNTRLPLANE-4493's spec-mirror fields must
+pairs, invalid status values, and missing outcome fields on an existing
+record. Status contains no certificate, token, or secret value.
+CNTRLPLANE-4493's spec-mirror fields must
 not coexist as a second authoritative applied-state signal.
 
-#### Condition transitions
+#### Per-role outcome transitions
 
-`Applied` describes whether the desired role configuration, including a
-requested removal, has been observed at its defined completion point.
+The role's `status` and `reason` describe whether the desired configuration,
+including a requested removal, has been observed at its completion point.
 Every outcome carries the generation actually evaluated, including failures.
 
-| Observation for the evaluated generation | Applied status / reason | Last applied reference |
+| Observation for the evaluated generation | Role status / reason | Last applied reference |
 | --- | --- | --- |
 | All required resources match the desired reference and completion criteria | `True / AsExpected` | Set to the observed reference |
 | Requested removal is positively observed across all required resources | `True / Removed` | Retain the previous reference as history, if any |
@@ -338,13 +336,13 @@ Every outcome carries the generation actually evaluated, including failures.
 | The observer cannot read a required resource or establish completion | `Unknown / ObservationUnavailable` | Retained |
 | A Key Vault-backed desired reference lacks its immutable version | `Unknown / VersionUnavailable` | Retained |
 
-`ApplyFailed` is retryable. An absent condition means no usable observation.
-`lastTransitionTime` changes only when the condition status changes and is
-not a progress counter.
+`ApplyFailed` is retryable. An absent record or required outcome field means
+no usable observation. `lastTransitionTime` changes only when the role status
+changes and is not a progress counter.
 
 #### HC and HCP generation correlation
 
-CPC and HCP role conditions use the generation of the HCP they evaluated,
+CPC and HCP role records use the generation of the HCP they evaluated,
 consistent with the existing CPC `status.observedGeneration` convention.
 HC's aggregate uses HC generation. These source-object semantics must be
 stated in the API field comments.
@@ -357,13 +355,13 @@ For each aggregate reconciliation, HO:
    UID/generation `(P, p)`. HC and HCP generation numbers need not be equal.
 2. Verifies the applied HCP projection still corresponds to that HC
    snapshot. CPC records must belong to HCP UID `P`; HCCO observations come
-   from that same HCP. Both need `Applied.observedGeneration == p`.
-3. Requires `Applied=True/AsExpected` **and** equality between the desired typed
-   reference and `lastAppliedReference`. For removal, requires
-   `Applied=True/Removed` and desired absence instead of reference equality.
-   A condition from another generation is unusable even if its reference
-   matches. A failed current-generation condition cannot be masked by a
-   retained matching reference.
+   from that same HCP. Each required role record needs `observedGeneration == p`.
+3. Requires `status=True`, `reason=AsExpected` **and** equality between the
+   desired typed reference and `lastAppliedReference`. For removal, requires
+   `status=True`, `reason=Removed` and desired absence instead of reference
+   equality. A role record from another generation is unusable even if its
+   reference matches. A non-True current-generation outcome cannot be masked
+   by a retained matching reference.
 4. Rechecks the HC/HCP snapshots and applicable consumer membership before
    publishing. If they changed, it retries instead of attributing the result
    to a newer HC generation. It writes the HC condition with
@@ -383,16 +381,16 @@ HCP generation.
 
 CPC `status.observedGeneration` correctly advances after an attempted
 reconcile, including a failed one. Success is expressed by the per-role
-condition. During A -> B -> A, the old A observation cannot satisfy the new
+outcome fields. During A -> B -> A, the old A observation cannot satisfy the new
 HCP generation; the observer must inspect the complete resource set again.
 The separate role records exist for disk/file independence and retained
 last-good diagnostics, not to redefine `observedGeneration` as success.
 
 #### Reporting compatibility and aggregate result
 
-Use standard API versioning and per-role `Applied` conditions. No reporter
+Use standard API versioning and direct per-role outcome fields. No reporter
 schema marker, controller revision, or observer Deployment lookup is part of
-a role record or the aggregation algorithm. Each condition describes the
+a role record or the aggregation algorithm. Each record describes the
 resources observed for its source generation; `lastAppliedReference` keeps
 that role's last complete reference. Individual reporting is unchanged.
 
@@ -403,7 +401,7 @@ qualification before enabling RP consumption. A supporting controller
 upgrade does not by itself invalidate an observation of unchanged resources;
 when the desired HCP generation changes, each role must observe it again.
 The normal component conditions continue to report workload health and
-rollout progress independently of the identity conditions.
+rollout progress independently of the identity outcomes.
 
 HO reports `Unknown/VersionUnavailable` when a required immutable version is
 missing, then `Unknown/StatusUnavailable` if any expected observation is
@@ -415,11 +413,12 @@ records retain their own reasons even when another role determines the aggregate
 
 Generation checks do not detect a controller rollback that stops reporting
 without changing the desired spec. Such a controller can leave an old True
-condition intact, including on HC if HO loses aggregation support. Before
+role outcome intact, or an HC True condition if HO loses aggregation support.
+Before
 any exceptional rollback outside the qualified supporting versions, RP
 must suspend identity replacement and cleanup. Recovery requires verifying
 supporting controllers and fresh observations before resuming; retained True
-conditions alone are insufficient. This proposal does not add automatic
+status alone is insufficient. This proposal does not add automatic
 invalidation for that rollback scenario. Agreement on this operational
 limitation and recovery procedure remains an explicit review question.
 
@@ -429,7 +428,7 @@ RP records the returned immutable Key Vault object version when it writes a
 reference or replacement, then sends the name and version through HC. The
 SPC pins that version. A same-name replacement without a new expected
 version cannot be distinguished from the old credential and must not advance
-to `Applied` or authorize cleanup. A legacy name-only reference remains
+to `status=True` or authorize cleanup. A legacy name-only reference remains
 `Unknown/VersionUnavailable` until RP supplies the version. The version
 field is an implementation prerequisite, not an open question for this
 design.
@@ -443,7 +442,7 @@ is not newer. HO therefore changes the CAPZ Deployment pod-template
 annotation whenever the nodePoolManagement credential name or version
 changes, after reconciling the SPC and AzureClusterIdentity. Fresh CAPZ pods
 start with an empty credential cache. HO's `capi-provider` CPC observer sets
-`Applied=True` only after the new Deployment revision is available, no
+`status=True` only after the new Deployment revision is available, no
 old-revision CAPZ pods remain, and every current CAPZ pod's CSI
 `SecretProviderClassPodStatus` shows the expected mounted object version.
 A pod that cannot report its version leaves the role non-True. The rollout is
@@ -494,7 +493,7 @@ evidence at the current generation before its consumer leaves the set.
 Extend the existing component reconcilers with role-specific observation
 hooks. HO owns observations on `control-plane-operator` and `capi-provider`;
 CPO owns the other listed CPCs. A hook compares applied resources against the
-persisted HCP reference and sets the role condition after checking the full
+persisted HCP reference and updates the role outcome after checking the full
 resource set. Observation is repeated after relevant Secret, SPC, workload,
 or mount-status changes, even when HCP generation has not changed.
 
@@ -523,7 +522,7 @@ using the documented generation mapping, references, and applicability
 within the qualified supporting versions. It does not copy control-plane
 records to HCP or any per-role records to HC.
 
-A partial resource update sets a non-True condition at the evaluated
+A partial resource update sets a non-True role status at the evaluated
 generation while retaining `lastAppliedReference`. The historical reference
 does not imply every live resource still uses it. Status update failures
 leave prior data intact; readers reject stale generations.
@@ -540,7 +539,7 @@ copies change together during implementation.
 - **Applied is not used.** Keep RP cleanup protection until a separate policy
   accounts for mounts, workload use, and Azure propagation.
 - **Partial writes or rollback.** Retain last-good references for diagnostics;
-  require current-generation `Applied=True` after a whole-role observation.
+  require current-generation `status=True` after a whole-role observation.
 - **Rollback below reporting support.** Suspend RP replacement and cleanup
   before the rollback. Same-generation retained status cannot detect this
   case; recovery requires operational verification before resuming.
@@ -579,7 +578,7 @@ be presented as applied or active state.
 
 `status.observedGeneration` means the component processed a generation,
 including a failed reconciliation. Pairing it with a current-generation
-success condition is the correct way to distinguish attempted from applied.
+per-role success outcome distinguishes attempted from applied.
 This proposal uses that convention. A single component-wide result still
 cannot distinguish disk success from file failure or preserve each role's
 last-good reference. Those requirements justify per-role records; no bespoke
@@ -601,10 +600,10 @@ API and lifecycle machinery to every observation. They are unnecessary for
 individual reporting or generation checks during qualified upgrades that
 retain reporting support. A Deployment template hash also repeats across
 an A -> B -> A build change, so it is not a complete invalidation mechanism.
-This design uses standard conditions and explicitly documents the operational
-limitation for exceptional rollback below reporting support. The CAPZ pod's
-`nodePoolManagement` identity still needs its consumer rollout and mounted
-version checks.
+This design uses direct per-role outcome fields and the standard HC aggregate
+condition, and documents the operational limitation for exceptional rollback
+below reporting support. The CAPZ pod's `nodePoolManagement` identity still
+needs its consumer rollout and mounted-version checks.
 
 ### Query Key Vault on every reconcile
 
@@ -615,7 +614,7 @@ used the returned credential. Mount evidence belongs to the later phase.
 
 | Task | Required outcome under this enhancement |
 | --- | --- |
-| [CNTRLPLANE-4493](https://redhat.atlassian.net/browse/CNTRLPLANE-4493) | Replace the early CPO spec mirror with observations on existing workload CPCs and HCCO-owned data-plane HCP records. Use per-role Applied conditions; do not release the mirror as an applied signal. |
+| [CNTRLPLANE-4493](https://redhat.atlassian.net/browse/CNTRLPLANE-4493) | Replace the early CPO spec mirror with observations on existing workload CPCs and HCCO-owned data-plane HCP records. Use per-role outcome fields; do not release the mirror as an applied signal. |
 | [CNTRLPLANE-4494](https://redhat.atlassian.net/browse/CNTRLPLANE-4494) | Observe the full KMS resource set on kube-apiserver CPC, including shared SPC, config Secret, and CPO mount. Verify shared writers preserve the pinned version during supported skew. |
 | [CNTRLPLANE-4495](https://redhat.atlassian.net/browse/CNTRLPLANE-4495) | Deliver per-pod mount/version evidence for non-CAPZ CSI consumers and the RP cleanup gate; resource-applied status alone cannot satisfy ARO-29197 requirement 3. |
 | [CNTRLPLANE-4496](https://redhat.atlassian.net/browse/CNTRLPLANE-4496) | Test CP, DP, KMS, CAPZ rollout/cache reset, generation correlation, partial failure, teardown, supported upgrades/skew, and RP visibility. ACR worker identity reporting is excluded. |
@@ -651,8 +650,9 @@ enhancement. That decision does not block this proposal.
 - Unit tests for inventory, capability gating, observed applied resources,
   disk/file independence, current-generation failures, A -> B -> A identity
   changes, historical-reference retention, and positive removal evidence.
-- API validation tests for bounded map lists, condition types, typed
-  references, scope/role ownership, version naming, and old-client behavior.
+- API validation tests for bounded map lists, required outcome fields and
+  status values, typed references, scope/role ownership, version naming, and
+  old-client behavior.
 - Aggregator tests for HC/HCP generations that differ, HC changes that leave
   HCP unchanged, unrelated HCP changes, stale reference matches, object UID
   replacement, concurrent spec changes, and condition-reason precedence.
@@ -661,7 +661,7 @@ enhancement. That decision does not block this proposal.
   reads/HCP patches, Key Vault location/encoding changes, KMS Secret ordering
   during creation and upgrade, and untouched CPC availability/version rollups.
 - Supported-upgrade and skew tests with both controllers retaining reporting,
-  missing or pruned status fields, and independently advancing role conditions.
+  missing or pruned status fields, and independently advancing role outcomes.
   Verify that missing observations remain Unknown and that legacy KMS writers
   cannot be qualified for replacement while they can undo version pinning.
   Exercise RP's rollback suspension/recovery procedure once it is agreed;
@@ -700,7 +700,7 @@ Not applicable.
 ## Upgrade / Downgrade Strategy
 
 New records appear when their observer first evaluates the role, including
-non-True conditions before first success. Missing records or fields produce
+non-True outcomes before first success. Missing records or fields produce
 `Unknown/StatusUnavailable` at the aggregator. Older CRDs may prune new
 fields; absence is not success. Deploy compatible CRDs and supporting
 HO/CPO/HCCO versions before enabling RP consumption.
@@ -723,7 +723,7 @@ CPO follows the hosted release and can differ from HO. Qualify the supported
 HO/CPO/HCCO combinations for reporting and pinned SPC versions. For those
 combinations, HO uses current source generations, reference equality, and
 the persisted HC/HCP correlation. An expected role without a usable current
-condition remains Unknown and stays in the expected set. RP applies the
+record leaves the aggregate Unknown and stays in the expected set. RP applies the
 same checks when reading individual records; it does not parse messages.
 
 Both KMS writers must preserve identical versioned SPC content. An older CPO
@@ -734,15 +734,15 @@ reconciliation by both writers.
 
 ## Operational Aspects of API Extensions
 
-CPC and HCP records change only when references, conditions, or evaluated
+CPC and HCP records change only when references, outcomes, or evaluated
 generations change.
 HO updates HC only on meaningful changes. Avoid periodic no-op status writes.
 Measure (1) time from a desired generation change to each role's success
 (`AsExpected` for application, `Removed` for removal) and to HC aggregate
-convergence, (2) counts and ages of non-True role conditions, and (3) CPC,
-HCP, and HC status writes per cluster per hour. A condition's
-lastTransitionTime is not the timestamp of every attempt; RP uses its replacement operation
-state and observed changes when deciding that progress has stalled.
+convergence, (2) counts and ages of non-True role outcomes, and (3) CPC,
+HCP, and HC status writes per cluster per hour. A role record's
+`lastTransitionTime` is not the timestamp of every attempt; RP uses its
+replacement operation state and observed changes to assess stalled progress.
 HyperShift maintainers measure status cost and convergence in fleet tests;
 RP owners define and calibrate alert thresholds before GA. These thresholds
 are operational policy rather than HyperShift API or cleanup deadlines.
@@ -758,7 +758,7 @@ identity; a late observer alone does not make the cluster unavailable.
 
 Inspect HC `AzureIdentitiesApplied` reason and message. Read the named CPC's
 `status.azureIdentities` or HCP's data-plane records. Check the current
-condition, its source generation, the expected typed reference, and the
+role outcome, its source generation, the expected typed reference, and the
 configured supporting versions. A historical `lastAppliedReference` is not
 success. Inspect the role's Secret, SPC, cloud config, or guest Secret and
 check mount/use evidence separately.
