@@ -1148,7 +1148,10 @@ Proxy settings and CA changes follow this update contract:
 CAO and Console Operator synchronize source CA changes to the mounted copies;
 the [hosted distribution path](#hypershift--hosted-control-planes) adds HyperShift
 operator and HCCO synchronization. CAO/CPO maintain the CA mount and
-`trustedCAFilePath` in the generated webhook configuration.
+`trustedCAFilePath` in the generated webhook configuration. CAO, CPO, and
+Console Operator publish a newly introduced CA path only after the CA mount has
+rolled out to every replica, as described under
+[Asynchronous Reconciliation Hazards](#asynchronous-reconciliation-hazards).
 
 Console watches its mounted proxy CA file; the standalone webhook watches the
 generic outbound CA bundle referenced by `trustedCAFilePath`. They apply valid
@@ -1373,6 +1376,9 @@ Pod:
   reference changes alter the Deployment Pod template; CA content changes only
   replace the mounted file; and disabling the gate reconciles the component
   settings and CA mount away, like removing the proxy does.
+- [Staged CA introduction](#asynchronous-reconciliation-hazards): the generated
+  webhook configuration gains `trustedCAFilePath` only once every replica runs a
+  template with the CA mount, and loses it before the mount is removed.
 
 ### Console Login
 
@@ -1415,6 +1421,12 @@ Pod:
 - The [update contract](#configuration-updates-and-ca-reload): proxy and CA
   reference changes alter the Console Deployment; CA content changes do not; and
   disabling the gate reconciles the `auth.proxy` block and CA mount away.
+- [Staged CA introduction](#asynchronous-reconciliation-hazards): the CA mount
+  rolls out first while the published configuration, including the whole
+  `auth.proxy` block, stays unchanged; the configuration is published only once
+  every replica runs the mounted template; an interrupted reconciliation resumes
+  without publishing early; and removal publishes the configuration without the
+  path before dropping the mount.
 
 ### Hosted Clusters
 
@@ -1486,8 +1498,10 @@ verify:
   cluster's own proxy reaches the sidecar only for that cloud-API path.
 - CPO reconciles the webhook configuration and the CA mounts in both the sidecar
   and the webhook container; removal cleans all of it up.
-- CPO defers `trustedCAFilePath` until the proxy CA ConfigMap exists in the HCP
-  namespace, and publishes it once the HyperShift operator's copy lands.
+- [Staged CA introduction](#asynchronous-reconciliation-hazards): CPO adds the
+  webhook's CA mount only once the HyperShift operator's copy lands in the HCP
+  namespace, publishes `trustedCAFilePath` only once every webhook replica runs a
+  template with the mount, and removes it before the mount.
 - HCCO writes only the proxy field on the CVO-seeded guest
   `console.operator.openshift.io/cluster` resource, plus its CA copy, using
   destination-local references.
@@ -1665,26 +1679,48 @@ independent, asynchronous paths:
   the only residual exposure is a replica created from a stale, pre-upgrade
   template racing the operand rollout that is already replacing it.
 - **Resource-ordering skew.** Even once the image understands
-  `trustedCAFilePath`, the operator must not publish the path before the
-  referenced CA bundle is actually synchronized into the operand's namespace
-  and mounted into the Deployment, since ConfigMap synchronization, the
-  Deployment's volume mount, and generated-configuration distribution are
-  reconciled independently of one another. CAO addresses this by deferring
-  `trustedCAFilePath` until it can confirm the destination ConfigMap already
-  exists, rather than assuming mount provisioning keeps pace with
-  configuration generation. Confirming the ConfigMap exists does not by
-  itself guarantee the Deployment's pod template already mounts it as a
-  volume; that is reconciled separately. But because the same workload
-  controller responsible for the mount is already converging independently
-  once the ConfigMap exists, any remaining gap is covered by a rollout
-  already in progress rather than left open-ended.
+  `trustedCAFilePath`, the operator must not publish the path while any Pod
+  lacks the CA mount. ConfigMap synchronization, the Deployment's volume mount,
+  and generated-configuration distribution are reconciled independently, and
+  both operands load the referenced bundle when they start: a Pod from the
+  previous template that restarts after the path is published reads the new
+  configuration, fails to load the missing file, and crash-loops until the
+  rollout replaces it. For the webhook, which every External OIDC token
+  validation depends on, that is lost capacity in the authentication path.
 
-  CPO applies the same rule on HyperShift, deferring `trustedCAFilePath` until
-  the proxy CA ConfigMap exists in the HCP namespace. Its dependency chain is one
-  hop longer than CAO's: that ConfigMap is written by the HyperShift operator
-  copying the bundle HC→HCP, so CPO's deferral transitively waits on that
-  synchronization completing. See the
-  [CA distribution path](#hypershift--hosted-control-planes).
+  CAO and Console Operator therefore roll out a newly introduced proxy CA in two
+  stages:
+
+  1. Once the CA copy exists in the operand's namespace, the operator adds the
+     CA volume and mount to the Deployment while keeping the previously
+     published configuration, and waits until every replica runs a template
+     with the mount: the Deployment's observed generation is current and all
+     replicas are updated. It waits on the rollout, not on authentication
+     health, since the configuration has not changed yet.
+  2. Only then does it publish the configuration referencing the CA. The
+     webhook reloads its configuration in place, so this stage needs no
+     rollout. Console reads its configuration only at startup, so the new
+     configuration rolls the Console Deployment a second time.
+
+  Console Operator holds back the entire `auth.proxy` change during the first
+  stage, not only `trustedCAFilePath`: publishing the proxy URL alone would point
+  new Pods at a proxy whose certificate they cannot yet verify. The staging
+  applies only when a CA is being introduced; once the mount exists, later
+  changes, including CA content updates, follow the normal
+  [update contract](#configuration-updates-and-ca-reload). Removal needs no
+  staging: the configuration stops referencing the path first, after which the
+  mount is no longer read and can be removed.
+
+  CPO applies the same two stages on HyperShift to the webhook's
+  `trustedCAFilePath`. Its first stage starts one hop later than CAO's: the
+  proxy CA ConfigMap in the HCP namespace is written by the HyperShift operator
+  copying the bundle HC→HCP, so CPO waits on that synchronization before adding
+  the mount (see the [CA distribution path](#hypershift--hosted-control-planes)).
+  The konnectivity sidecar needs no staging, because its proxy flags and CA mount
+  are both part of the Pod template and always change together. CPO excludes the
+  webhook configuration ConfigMap from the Pod template's config hash, so as on
+  standalone the second stage needs no rollout and the webhook reloads the
+  published configuration in place.
 
 ### Hosted Support Validation
 
@@ -1953,9 +1989,9 @@ operand logs.
   separately; Console's global environment still describes its cluster-wide
   fallback, not an active authentication-specific override. A generated webhook
   configuration without `trustedCAFilePath` while `trustedCA` is set means CAO is
-  still deferring the path until the destination ConfigMap exists
+  still rolling out the CA mount and has not published the path yet
   ([resource-ordering skew](#asynchronous-reconciliation-hazards)); that resolves
-  itself and is not missing trust.
+  itself once the rollout completes and is not missing trust.
 - Verify the [required gates](#feature-gates) and that kube-apiserver uses the
   External OIDC webhook path.
 - Check discovery, JWKS, claim-source, and token endpoints independently. Confirm
