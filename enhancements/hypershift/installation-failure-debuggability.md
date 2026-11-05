@@ -817,6 +817,18 @@ functional. `WaitingForOperators` →
 `InstallationComplete` tracks CVO/operator rollout in
 the hosted cluster.
 
+**Zero-worker clusters:** HostedClusters with no
+NodePools (or all NodePools with 0 replicas) skip
+the `WorkerAvailable` stage. Because the forward-only
+guard selects the highest satisfied trigger,
+`WaitingForOperators` (ordinal 5) advances past
+`WorkerAvailable` (ordinal 4) as soon as the
+kubeconfig is available. The progression for
+zero-worker clusters is: `Initializing` →
+`InfrastructureReady` → `ControlPlaneProvisioning` →
+`APIServerAvailable` → `WaitingForOperators` →
+`InstallationComplete`.
+
 **Diagnostic detail in existing conditions — reason code analysis:**
 
 These are changes to condition *messages* and *reasons* on
