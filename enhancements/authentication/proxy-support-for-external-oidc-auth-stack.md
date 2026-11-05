@@ -1134,6 +1134,42 @@ with at least one of `httpProxy` or `httpsProxy`, the authentication type is
 The proxy CA supplements the applicable issuer trust, preserving existing
 system-root behavior when no issuer CA is specified.
 
+#### Proxy Configuration Validation
+
+The [integrated authentication proxy enhancement](proxy-support-for-integrated-auth-stack.md)
+extended CAO's proxy configuration controller to check, through the effective
+proxy, that the OAuth route and the configured identity providers are reachable.
+That controller is skipped once External OIDC is in use, and Console Operator has
+no equivalent, so neither operator can report a misconfigured proxy for this
+feature; the failure surfaces only as failed authentication.
+
+The controller and its `noProxy` matching therefore move into library-go as a
+reusable proxy configuration checker, and both operators are refactored to use
+it. The checker takes the effective proxy, the CA bundles to trust, and the
+endpoints to probe, and keeps the existing semantics: proxy-level failures, such
+as a refused connection to the proxy, a failed TLS handshake with it, or an
+unreadable CA bundle, set the operator `Degraded`, while an unreachable endpoint
+behind a working proxy emits a Warning event, since an external IdP can be down
+for reasons unrelated to the proxy. Endpoint probes run when the effective
+configuration changes rather than on every resync.
+
+- CAO keeps its integrated OAuth checks and, under External OIDC, probes each
+  provider's discovery endpoint through the webhook's effective proxy and trust.
+- Console Operator probes the discovery endpoint of the issuer its OIDC client
+  uses, through Console's effective `auth.proxy` settings and trust.
+
+The checks run from the operator Pods, not the operands. On standalone both
+operators share the control-plane network with their operands, and on
+HyperShift Console Operator shares the guest network with Console, so a failed
+check is a reliable signal; a passing check does not prove every endpoint
+reachable from every replica. The hosted webhook is not covered. HyperShift has
+no proxy reachability checks for any component today — its proxy validation
+covers only the CA bundle, through `ValidProxyConfiguration` — and CPO runs on the
+management network, where it cannot probe the konnectivity path the webhook
+egresses through. This is a pre-existing limitation that this proposal does not
+address; hosted webhook failures remain visible in its logs, as described under
+[Diagnosing Hosted Clusters](#diagnosing-hosted-clusters).
+
 #### Configuration Updates and CA Reload
 
 Proxy settings and CA changes follow this update contract:
@@ -1201,7 +1237,9 @@ not itself expose the encrypted request contents to the proxy.
 **Network dependency in the authentication path.**
 Proxy latency or outages can impair authentication even when the provider is
 healthy. Existing caches may delay failures but are not a recovery mechanism.
-Administrators own proxy availability and capacity. Failures must be observable,
+Administrators own proxy availability and capacity. Failures must be observable
+— the [proxy configuration checks](#proxy-configuration-validation) report
+proxy-level misconfiguration through operator conditions —
 and requests must not silently bypass a configured proxy on failure.
 On HyperShift, webhook requests also depend on konnectivity, guest DNS,
 worker-network availability, and the webhook's sidecar. OIDC authentication can fail while the management-side API remains
@@ -1310,7 +1348,7 @@ end-to-end flows, which span an operator and its operand and are the primary
 coverage, and then lists the component-scoped tests underneath so each owning
 party sees its own scope in one place. Unit tests cover pure functions with
 easily asserted inputs and outputs; integration tests run the operator sync loops
-against a test API server and assert the resulting cluster state. The operands
+against fake clientsets and assert the resulting objects. The operands
 may add additional unit or integration tests of their own, but the operator tests
 cover configuration generation and the end-to-end flows cover observable behavior.
 
@@ -1350,6 +1388,9 @@ Pod:
   assumes.
 - A proxy URL carrying credentials still authenticates, and the webhook's
   effective-proxy log line has the userinfo stripped.
+- An unreachable proxy URL takes the authentication cluster operator Degraded
+  through the [proxy configuration checks](#proxy-configuration-validation), and
+  an unreachable issuer behind a working proxy emits a Warning event instead.
 - A token referencing [distributed claims](https://openid.net/specs/openid-connect-core-1_0.html#AggregatedDistributedClaims)
   authenticates with the resolved claim, with the claim endpoint request and the
   discovery and JWKS requests verifying its response observed on the proxy.
@@ -1366,6 +1407,16 @@ Pod:
   `HTTPS_PROXY`, and `NO_PROXY` values including the implicit `noProxy` defaults
   and their trailing-dot forms, and removal of all of it when the component proxy
   is removed.
+- [Proxy configuration checks](#proxy-configuration-validation) under External
+  OIDC: the providers' discovery endpoints are probed through the webhook's
+  effective proxy and trust, and the integrated OAuth checks are unchanged.
+
+**library-go — unit tests.**
+
+- The shared [proxy configuration checker](#proxy-configuration-validation):
+  `noProxy` matching, the mapping of proxy-level failures to `Degraded` and of
+  unreachable endpoints to Warning events, and probing only when the effective
+  configuration changes.
 
 **Cluster Authentication Operator — integration tests.**
 
@@ -1399,6 +1450,9 @@ Pod:
   confirmed to be out of the path.
 - A proxy URL carrying credentials still allows login, and Console's
   effective-proxy log line has the userinfo stripped.
+- An unreachable proxy URL takes the console cluster operator Degraded through
+  the [proxy configuration checks](#proxy-configuration-validation), and an
+  unreachable issuer behind a working proxy emits a Warning event instead.
 - Token refresh: with a short access-token lifetime, Console refreshes the
   session's tokens through the proxy, the refresh request is observed on it, and
   the session stays valid without a new login.
@@ -1413,6 +1467,9 @@ Pod:
   variables keep their cluster-wide values while `auth.proxy` is present, so
   non-OIDC clients retain their existing routing
   ([Proxy Resolution](#proxy-resolution)).
+- [Proxy configuration checks](#proxy-configuration-validation): the Console
+  OIDC client's issuer discovery endpoint is probed through Console's effective
+  `auth.proxy` settings and trust.
 
 **Console Operator — integration tests.**
 
