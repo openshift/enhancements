@@ -4,12 +4,12 @@ authors:
   - mandre
 reviewers:
   - stephenfin # OpenStack: Cinder integration, cloud compatibility, and CI
-  - TBD # Storage: CSI lifecycle, operator integration, and data safety
-  - TBD # Node and security: host services, privileged access, and SELinux
+  - jsafrane # Storage: CSI lifecycle, operator integration, and data safety
+  - haircommander # Node and security: host services, privileged access, and SELinux
 approvers:
-  - TBD
+  - stephenfin
 api-approvers:
-  - TBD
+  - yuqi-zhang
 creation-date: 2026-11-03
 last-updated: 2026-11-03
 status: provisional
@@ -356,6 +356,12 @@ Initial-selection tests must cover pending Cinder PVCs and retained or staticall
 provisioned Cinder PVs blocking the change, with the deployed mode unchanged and
 a reported reason. Unrelated storage must not block initial Direct-mode selection
 when no Cinder PVCs or PVs exist and the feature gate is enabled.
+
+For iSCSI and RBD, failure testing will cover a worker that loses cluster
+connectivity while retaining storage access. Recovery must prevent conflicting
+writes from the original and replacement workers. Tests will validate the agreed
+fencing and stale-attachment recovery procedure, including refusing reattachment
+when safe recovery cannot be established.
 
 Additional validation needed for direct-mode recovery, worker replacement, and
 credential handling will be identified against the existing suite's coverage.
