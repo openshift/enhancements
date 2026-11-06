@@ -143,7 +143,6 @@ type PodSecurityAdmissionConfig struct {
 	// upgrades apply automatically.
 	// +kubebuilder:validation:Pattern=`^(latest|v1\.(0|[1-9][0-9]*))$`
 	// +kubebuilder:validation:MaxLength=10
-	// +kubebuilder:validation:XValidation:rule="self == 'latest' || int(self.split('.')[1]) <= 37",message="enforceVersion must not be newer than v1.37"
 	// +optional
 	EnforceVersion string `json:"enforceVersion,omitempty"`
 
@@ -199,6 +198,7 @@ During Tech Preview, the field therefore needs a management cluster installed wi
 The control-plane-operator currently hardcodes PSA defaults: audit and warn `restricted`, and enforce `privileged` or `restricted` based on the hosted cluster's `OpenShiftPodSecurityAdmission` feature gate.
 With the gate enabled, it maps the API fields like `cluster-kube-apiserver-operator`, so hosted clusters that never set the field get the same defaults as standalone clusters.
 With the gate disabled, it keeps today's hardcoded defaults and ignores the field.
+The `config.openshift.io/ValidateAPIServer` admission plugin does not see `HostedCluster`, so the control-plane-operator keeps the previous configuration for an `enforceVersion` newer than the hosted cluster's Kubernetes version and reports `PodSecurityAdmissionConfigApplied=False`.
 One `HostedCluster` CRD serves all hosted clusters of a management cluster, so unlike on standalone clusters, a hosted cluster can store the field while its gate is disabled.
 
 Each control-plane-operator comes from its hosted cluster's release, which can be older than the hypershift-operator that exposes the field.
@@ -263,6 +263,9 @@ The API mapping replaces the existing feature-gate-based selection of PSA defaul
 Omitted `enforceLevel` defaults to `Privileged`.
 Omitted `enforceVersion` defaults to `latest`.
 When `reportLevel` is omitted, it follows `enforceLevel`, including later changes.
+
+The `config.openshift.io/ValidateAPIServer` admission plugin rejects an `enforceVersion` newer than the kube-apiserver's Kubernetes version, so the bound needs no update per release.
+If such a value reaches `cluster-kube-apiserver-operator` anyway, it keeps the previous configuration and reports `ConfigObservationDegraded`.
 
 | Administrator intent                                             | `enforceLevel`         | `enforceVersion`   | `reportLevel`          |
 | ---------------------------------------------------------------- | ---------------------- | ------------------ | ---------------------- |
