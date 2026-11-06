@@ -768,9 +768,9 @@ Rejections often appear only when pods are recreated, as described in [Unexpecte
   `oc adm must-gather -- /usr/bin/gather_audit_logs` collects the rotated logs.
 
 Rejected pods in an OpenShift namespace point to a missing PSA label in that component and are a bug.
-As a workaround, administrators can label the namespace, as described in [Going back](#going-back).
+As a workaround, administrators can label the namespace, as described in [Unblocking rejected workloads](#unblocking-rejected-workloads).
 
-### Going back
+### Unblocking rejected workloads
 
 From narrow to wide:
 
