@@ -707,7 +707,7 @@ OCP 5.0 would read an enabled gate as "run the enforcing PSA label syncer", whic
 
 OCP 5.1 closes the race:
 
-- **cluster-policy-controller**: runs the advising PSA label syncer only on `=false`, and `=true` or a missing entry stop it.
+- **cluster-policy-controller**: runs the advising PSA label syncer only on `=false`, and `=true` or a missing entry stops the syncer.
   Without any feature gates, as on MicroShift, it keeps the enforcing PSA label syncer, as described in [MicroShift](#microshift).
 - **kube-apiserver-operator and HyperShift control-plane-operator**: an enabled gate means "configure from `spec.podSecurityAdmission`", never "enforce `restricted`".
 
