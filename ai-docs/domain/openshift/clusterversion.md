@@ -149,7 +149,6 @@ oc logs -n openshift-cluster-version deployment/cluster-version-operator
 **What EUS provides:**
 - **Extended support lifecycle**: Designated releases receive ~14 months additional support
   - **OCP 4.x**: Even-numbered releases (4.8, 4.10, 4.12, 4.14, 4.16, etc.)
-  - **OCP 5.x**: Every third release (5.2, 5.5, 5.8, etc.)
 - **EUS-to-EUS upgrade path**: Streamlined upgrade with reduced worker node reboots
 
 **What EUS does NOT provide:**
