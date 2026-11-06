@@ -23,7 +23,7 @@ see-also:
 
 ## Summary
 
-OpenShift manages global container registry credentials through a single Secret, `openshift-config/pull-secret`. Administrators must download, decode, and hand-edit this file to add a registry, risking corruption of installer-provided credentials and breaking GitOps workflows. This proposal introduces a new cluster-scoped CRD, `GlobalPullCredential` (`config.openshift.io/v1alpha1`), that provides a structured, declarative API for adding registry credentials. Each instance represents exactly one registry hostname with structured `username` and `password` fields. Duplicate hostnames across `GlobalPullCredential` instances are rejected at admission — each hostname may only be claimed by one CR. A controller in MCO's `machine-config-controller` watches all `GlobalPullCredential` instances, merges their auth entries with the existing `pull-secret`, and writes the merged result to a persistent controller-owned Secret `openshift-config/pull-secret-merged`. The original `pull-secret` is never modified and always serves as the baseline. When the feature gate is enabled, `pull-secret-merged` is always present — it reflects the merged content when CRs exist, or a copy of `pull-secret` when no CRs are active. Existing consumers (MCO template controller, `cluster-image-registry-operator`) are updated to read from `pull-secret-merged`; fallback to `pull-secret` is used only during version skew when the feature gate is disabled.
+OpenShift manages global container registry credentials through a single Secret, `openshift-config/pull-secret`. Administrators must download, decode, and hand-edit this file to add a registry, risking corruption of installer-provided credentials and breaking GitOps workflows. This proposal introduces a new cluster-scoped CRD, `GlobalPullCredential` (`config.openshift.io/v1alpha1`), that provides a structured, declarative API for adding registry credentials. Each instance represents exactly one registry hostname with structured, base64-encoded `username` and `password` fields. Duplicate hostnames across `GlobalPullCredential` instances are rejected at admission — each hostname may only be claimed by one CR. A controller in MCO's `machine-config-controller` watches all `GlobalPullCredential` instances, merges their auth entries with the existing `pull-secret`, and writes the merged result to a persistent controller-owned Secret `openshift-config/pull-secret-merged`. The original `pull-secret` is never modified and always serves as the baseline. When the feature gate is enabled, `pull-secret-merged` is always present — it reflects the merged content when CRs exist, or a copy of `pull-secret` when no CRs are active. Existing consumers (MCO template controller, `cluster-image-registry-operator`) are updated to read from `pull-secret-merged`; fallback to `pull-secret` is used only during version skew when the feature gate is disabled.
 
 ## Motivation
 
@@ -59,8 +59,8 @@ As a cluster administrator, I want immediate feedback when I create an invalid p
 
 ### Workflow Description
 
-1. An administrator creates a `GlobalPullCredential` cluster-scoped resource specifying a single registry hostname with username and password.
-2. Admission rejects the resource before any controller acts on it. The CRD schema rejects a malformed object (missing hostname or missing auth). A validating admission plugin rejects a create, or a hostname change, whose `spec.hostname` is already claimed by another `GlobalPullCredential`.
+1. An administrator creates a `GlobalPullCredential` cluster-scoped resource specifying a single registry hostname and base64-encoded username and password.
+2. Admission rejects the resource before any controller acts on it. The CRD schema rejects a malformed object (missing hostname or auth, or invalid base64). A validating admission plugin rejects a create or update whose `spec.hostname` is already claimed by another `GlobalPullCredential`, or whose decoded username contains a colon.
 3. The merge controller (inside MCO's `machine-config-controller`) watches all `GlobalPullCredential` instances and `openshift-config/pull-secret`. On any create, update, or delete it reads the current `openshift-config/pull-secret` as the baseline and lists all `GlobalPullCredential` instances.
 4. Baseline (original `pull-secret` content) always wins for a given registry hostname. A CR whose hostname overlaps with the baseline is stored, but its credential is not merged, and the overlap is reported in the CR's status. Overlap with `pull-secret` is not an admission failure.
 5. The merged result is written to the persistent controller-owned Secret `openshift-config/pull-secret-merged`. The original `pull-secret` is never modified.
@@ -116,25 +116,32 @@ type GlobalPullCredentialSpec struct {
     Auth RegistryAuth `json:"auth"`
 }
 
-// RegistryAuth holds the username and password for a single registry.
-// The controller constructs the base64-encoded Docker config.json auth
-// string (base64("username:password")) from these fields at reconcile time.
+// RegistryAuth holds the base64-encoded username and password for a single registry.
+// The controller decodes these fields and constructs the Docker config.json auth
+// value base64("username:password") at reconcile time.
 type RegistryAuth struct {
-    // username is the registry username.
+    // username is the base64-encoded registry username. Its decoded value must
+    // not contain a colon. The encoded value is at most 684 characters
+    // (512 decoded bytes).
     // +required
     // +kubebuilder:validation:MinLength=1
-    Username string `json:"username"`
+    // +kubebuilder:validation:MaxLength=684
+    Username []byte `json:"username"`
 
-    // password is the registry password or token.
+    // password is the base64-encoded registry password or token. The encoded
+    // value is at most 684 characters (512 decoded bytes).
     // +required
     // +kubebuilder:validation:MinLength=1
-    Password string `json:"password"`
+    // +kubebuilder:validation:MaxLength=684
+    Password []byte `json:"password"`
 }
 
 type GlobalPullCredentialStatus struct {
     // conditions represent the latest available observations of this resource's
     // state. The known condition type is "Applied".
     // +optional
+    // +kubebuilder:validation:MinItems=1
+    // +kubebuilder:validation:MaxItems=1
     // +listType=map
     // +listMapKey=type
     Conditions []metav1.Condition `json:"conditions,omitempty"`
@@ -151,8 +158,8 @@ metadata:
 spec:
   hostname: quay.io
   auth:
-    username: user
-    password: pass
+    username: dXNlcg==
+    password: cGFzcw==
 ---
 apiVersion: config.openshift.io/v1alpha1
 kind: GlobalPullCredential
@@ -161,25 +168,26 @@ metadata:
 spec:
   hostname: registry.example.com:5000
   auth:
-    username: robot
-    password: s3cret-token
+    username: cm9ib3Q=
+    password: czNjcmV0LXRva2Vu
 ```
+
+The two auth fields are base64-encoded independently. A colon is forbidden only in the decoded username; it remains valid in the decoded password.
 
 The CRD schema enforces at admission time:
 
 - `spec.hostname` is required (non-empty, valid hostname or host:port pattern, max 253 characters).
-- `spec.auth.username` is required (non-empty).
-- `spec.auth.password` is required (non-empty).
+- `spec.auth.username` is required, valid base64, non-empty, and at most 684 encoded characters.
+- `spec.auth.password` is required, valid base64, non-empty, and at most 684 encoded characters.
 
-Because field-level validation is handled at admission time, presence of a `GlobalPullCredential` resource means its fields are valid — invalid resources are rejected before the controller ever sees them.
+A validating admission plugin decodes `spec.auth.username` and rejects it if it contains a colon. This prevents an ambiguous `username:password` value when MCO constructs Docker auth. Cross-CR hostname uniqueness is also enforced by that plugin because the CRD schema cannot compare sibling objects. A create, or an update that changes `spec.hostname`, is rejected when another `GlobalPullCredential` already claims that exact hostname. The object being updated is ignored. The duplicate is never stored. A hostname that already exists in `pull-secret` is not rejected.
 
-The controller constructs the base64-encoded Docker config.json `auth` string (`base64("username:password")`) from the structured fields at reconcile time and writes it into the merged output Secret. Administrators never need to manually base64-encode credentials.
-
-Cross-CR hostname uniqueness is enforced by a validating admission plugin in `openshift-kube-apiserver/admission/customresourcevalidation`. The CRD schema cannot compare sibling objects. A create, or an update that changes `spec.hostname`, is rejected when another `GlobalPullCredential` already claims that exact hostname. The object being updated is ignored. The duplicate is never stored. A hostname that already exists in `pull-secret` is not rejected.
+Because schema and admission validation complete before the controller acts, a stored `GlobalPullCredential` has distinct, structurally valid fields. MCO decodes the username and password, constructs the Docker config.json `auth` value `base64("username:password")`, and writes it into the merged output Secret.
 
 **Status conditions:** The controller sets `Applied` on each `GlobalPullCredential` instance:
 
-- `Applied=True`: The CR's credential was successfully included in `pull-secret-merged`. If the CR's hostname overlaps with the baseline `pull-secret`, the condition message notes that the baseline credential is used instead.
+- `Applied=True`: The CR's credential was successfully included in `pull-secret-merged`.
+- `Applied=False`, `reason=BaselinePrecedence`: The CR's hostname overlaps with the baseline `pull-secret`, so the CR's credential is not merged and the baseline credential is used instead.
 
 The `GlobalPullCredential` CRD is gated behind the `MultiSecretGlobalPullConfig` feature gate. When the gate is disabled, the CRD definition exists but the controller does not reconcile.
 
@@ -203,7 +211,7 @@ Uses the same global pull-secret model as standalone OCP; no OKE-specific exclus
 
 ### Implementation Details/Notes/Constraints
 
-The merge controller runs inside `machine-config-controller` as a new reconcile loop. Hostname uniqueness is enforced by a validating admission plugin in `openshift/kubernetes` under `openshift-kube-apiserver/admission/customresourcevalidation`. The Node team owns the CRD definition, that admission plugin, merge logic, and controller correctness; the MCO team owns propagation of merged content to nodes and consumer coordination.
+The merge controller runs inside `machine-config-controller` as a new reconcile loop. Hostname uniqueness and decoded username colon rejection are enforced by a validating admission plugin in `openshift/kubernetes` under `openshift-kube-apiserver/admission/customresourcevalidation`. The Node team owns the CRD definition, that admission plugin, merge logic, and controller correctness; the MCO team owns propagation of merged content to nodes and consumer coordination.
 
 The controller watches all `GlobalPullCredential` cluster-scoped instances and `openshift-config/pull-secret`. On any change it runs the reconcile described below.
 
@@ -230,13 +238,13 @@ This consumer coordination is within scope of this proposal. Both changes are sm
 2. List all `GlobalPullCredential` instances. If none exist, write `pull-secret-merged` as a copy of `pull-secret` (persistent Secret) and return.
 3. Admission has already rejected a duplicate `spec.hostname`, and field-level validation is already enforced at admission, so every stored CR is structurally valid and has a distinct hostname.
 4. Build the effective `auths` map starting from the baseline `auths` entries (read-only, never overridden). Then iterate valid CRs. For each CR's hostname:
-   - If the hostname exists in the baseline, **skip** — baseline always wins. Set `Applied=True` on the CR with a message noting the baseline overlap.
-   - Otherwise, construct the Docker config.json `auth` value (`base64("username:password")`) from the CR's structured fields, add it to the effective map, and set `Applied=True`.
+   - If the hostname exists in the baseline, **skip** — baseline always wins. Set `Applied=False` with `reason=BaselinePrecedence` and a message noting that the baseline credential is used.
+   - Otherwise, decode the CR username and password, construct the Docker config.json `auth` value (`base64("username:password")`), add it to the effective map, and set `Applied=True`.
 5. Preserve any non-`auths` top-level keys from the baseline (e.g. `HttpHeaders`).
 6. Serialize the complete output as canonical JSON with stable ordering for all object keys and stable whitespace, to guarantee byte-identical output for equivalent inputs.
 7. Write to `openshift-config/pull-secret-merged` only if the serialized content differs from the current value.
 
-**Example:** `pull-secret` baseline has `registry.redhat.io`. CR `team-a-quay` (hostname: `quay.io`) and CR `team-b-ghcr` (hostname: `ghcr.io`) are created. The controller adds `quay.io` from `team-a-quay` and `ghcr.io` from `team-b-ghcr` to the merged map. `registry.redhat.io` remains from the baseline. Both CRs are set `Applied=True`. A third CR `team-c-quay` with hostname `quay.io` is rejected at admission while `team-a-quay` exists, and it is not stored. After `team-a-quay` is deleted, a CR for `quay.io` can be admitted. If all CRs are deleted, `pull-secret-merged` is updated to a copy of `pull-secret`.
+**Example:** `pull-secret` baseline has `registry.redhat.io`. CR `team-a-quay` (hostname: `quay.io`) and CR `team-b-ghcr` (hostname: `ghcr.io`) are created. The controller adds `quay.io` from `team-a-quay` and `ghcr.io` from `team-b-ghcr` to the merged map. `registry.redhat.io` remains from the baseline. Both CRs are set `Applied=True`. A CR for `registry.redhat.io` is stored but set to `Applied=False`, `reason=BaselinePrecedence`, because the baseline credential wins. A third CR `team-c-quay` with hostname `quay.io` is rejected at admission while `team-a-quay` exists, and it is not stored. After `team-a-quay` is deleted, a CR for `quay.io` can be admitted. If all CRs are deleted, `pull-secret-merged` is updated to a copy of `pull-secret`.
 
 When the feature gate is **off**, the controller does not start — no watching, no merging, no writing. `GlobalPullCredential` resources may exist but are inert.
 
@@ -244,7 +252,7 @@ When the feature gate is **off**, the controller does not start — no watching,
 
 ### Risks and Mitigations
 
-- **Sensitive data in a CRD:** `GlobalPullCredential` stores registry credentials (username and password) in spec fields rather than a Kubernetes Secret. The password is stored as a plain string in the CRD spec; the controller constructs the base64-encoded Docker config.json auth string at reconcile time. By default, only cluster-admins have access to new CRDs. The etcd encryption controller must be updated to include `GlobalPullCredential` in its encrypted resources list, ensuring credentials are protected at rest without requiring manual administrator action. The API is documented as security-sensitive. RBAC must be configured carefully if non-admin access is ever granted.
+- **Sensitive data in a CRD:** `GlobalPullCredential` stores registry credentials (username and password) in spec fields rather than a Kubernetes Secret. The fields are `[]byte` values and therefore serialize as base64, but base64 is encoding rather than encryption; the controller decodes them and constructs the Docker config.json auth value at reconcile time. By default, only cluster-admins have access to new CRDs. The etcd encryption controller must be updated to include `GlobalPullCredential` in its encrypted resources list, ensuring credentials are protected at rest without requiring manual administrator action. The API is documented as security-sensitive. RBAC must be configured carefully if non-admin access is ever granted.
 - **Consumer coordination:** MCO template controller and `cluster-image-registry-operator` must be updated to read from `pull-secret-merged`. Both changes are small (prefer new Secret, fall back to original). Until all consumers are updated, the merged credentials are not propagated to that consumer. The fallback-to-`pull-secret` path exists only for version skew during upgrades; during normal operation `pull-secret-merged` is always present when the feature gate is enabled.
 - **Controller-vs-manual-edit isolation:** The controller never modifies `pull-secret`. Administrators can continue editing `pull-secret` via `oc` at any time; those changes are picked up on the next reconcile and included in the merged output. There is no mutual exclusivity between manual edits and CR-based credentials.
 - **Ownership boundary:** The Node team owns the CRD, merge logic, validation, and controller correctness. The MCO team owns ensuring that merged content is propagated to nodes and that consumer coordination changes land.
@@ -290,9 +298,9 @@ This was rejected because it does not provide stronger admission-time validation
 
 Unit and integration tests validate:
 
-- CRD admission validation (schema enforcement for required `hostname`, `auth.username`, and `auth.password` fields, hostname pattern, non-empty values). Invalid resources are rejected at admission — they never reach the controller.
+- CRD admission validation (required `hostname`, `auth.username`, and `auth.password`; hostname pattern; valid base64; non-empty and maximum encoded lengths; decoded username must not contain a colon). Invalid resources are rejected at admission — they never reach the controller.
 - Cross-CR hostname uniqueness: a create or hostname update that matches another `GlobalPullCredential` `spec.hostname` is rejected at admission and is not stored.
-- Merge algorithm: baseline wins over CR hostnames, auth values passed through to merged output, deterministic byte-stable canonical JSON output.
+- Merge algorithm: baseline wins over CR hostnames, auth values are constructed from decoded credentials, and output is deterministic byte-stable canonical JSON.
 - Persistent rendered Secret: `pull-secret-merged` created when gate is enabled; updated to copy of `pull-secret` when all CRs removed (not deleted).
 - Baseline integrity: `pull-secret` is never modified by the controller.
 - Create/update/delete lifecycle: adding a CR adds its hostname to `pull-secret-merged`, updating changes the auth, deleting removes the hostname.
@@ -300,7 +308,7 @@ Unit and integration tests validate:
 - Diff-before-write: no-op update when merged output equals current `pull-secret-merged`.
 - Controller restart: `pull-secret` baseline is always fresh; no stale entries.
 - Consumer fallback: when `pull-secret-merged` does not exist (feature gate disabled), consumers read `pull-secret`.
-- Baseline overlap signaling: CR whose hostname matches baseline is `Applied=True` with a message noting the overlap.
+- Baseline overlap signaling: CR whose hostname matches baseline is `Applied=False`, `reason=BaselinePrecedence`, with a message noting that the baseline credential is used.
 
 End-to-end tests on a multi-node cluster with a private test registry validate:
 
@@ -308,7 +316,7 @@ End-to-end tests on a multi-node cluster with a private test registry validate:
 - `GlobalPullCredential` delete → hostname's credential removed from node `config.json`.
 - All CRs deleted → `pull-secret-merged` reverts to copy of `pull-secret`, nodes use original baseline content.
 - Duplicate hostname across CRs → the second create is rejected at admission; the existing CR is unchanged.
-- Invalid CR (missing fields) → rejected at admission time, never reaches controller.
+- Invalid CR (missing fields, invalid base64, or a decoded username containing a colon) → rejected at admission time, never reaches controller.
 - Feature gate toggle behavior.
 
 ## Graduation Criteria
@@ -348,7 +356,7 @@ Not applicable for MVP — control-plane-only reconciliation. Nodes continue to 
 The `GlobalPullCredential` CRD introduces a cluster-scoped resource with the following operational characteristics:
 
 - **Expected scale:** Tens of instances per cluster (one per registry hostname). Does not impact general API throughput.
-- **Controller health:** The merge controller sets `Applied` on each `GlobalPullCredential`.
+- **Controller health:** The merge controller sets `Applied` on each `GlobalPullCredential`; baseline overlap reports `Applied=False`, `reason=BaselinePrecedence`.
 - **Failure modes:**
   - Controller not running (pod crash/restart): `pull-secret-merged` retains last-known-good content. `pull-secret` is unchanged. No new CR changes are reconciled until the controller restarts.
   - Duplicate hostname: the API server rejects the create or hostname update. The existing CR is unchanged.
@@ -357,6 +365,6 @@ The `GlobalPullCredential` CRD introduces a cluster-scoped resource with the fol
 
 ## Support Procedures
 
-- **Detect:** A duplicate hostname is rejected by admission. Check `Applied` with `oc get globalpullcredentials -o yaml`. Review `machine-config-controller` logs for `GlobalPullSecret` prefixed messages.
+- **Detect:** A duplicate hostname or invalid decoded username is rejected by admission. Check `Applied` with `oc get globalpullcredentials -o yaml`; `Applied=False` with `reason=BaselinePrecedence` is expected when the baseline credential wins. Review `machine-config-controller` logs for `GlobalPullSecret` prefixed messages.
 - **Recover:** For a rejected duplicate, delete the existing CR for that hostname or choose a different hostname, then create again. Verify merged content: `oc get secret pull-secret-merged -n openshift-config -o jsonpath='{.data.\.dockerconfigjson}' | base64 -d | jq .auths`. Verify baseline is intact: `oc get secret pull-secret -n openshift-config -o jsonpath='{.data.\.dockerconfigjson}' | base64 -d | jq .auths`.
 - **Disable:** Turn off the `MultiSecretGlobalPullConfig` feature gate; controller stops reconciling; `pull-secret-merged` retains last content but consumers on older code fall back to `pull-secret`. To fully clean up, delete all `GlobalPullCredential` instances and the `pull-secret-merged` Secret, then disable the gate.
