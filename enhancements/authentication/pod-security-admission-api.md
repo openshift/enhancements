@@ -727,7 +727,7 @@ It adds no CRD, webhook, aggregated API server or finalizer.
 PSA already evaluates every pod admission, so a stricter level adds no new request path.
 Each change to the field triggers one kube-apiserver rollout, which takes the Kubernetes API down on single-node deployments while the only instance restarts.
 
-Failure modes and their signals:
+### Failure modes and their signals
 
 - **Workloads rejected**: a level that is too strict rejects new pods, as described in [Unexpected Workload Rejection](#unexpected-workload-rejection).
 - **Configuration not observed**: an error in the config observer of `cluster-kube-apiserver-operator` sets `ConfigObservationDegraded` on `kubeapiserver/cluster`, and the observer must keep the previous configuration.
