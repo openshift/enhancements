@@ -434,11 +434,13 @@ This gives them time to correct the workload or namespace configuration.
 
 #### Prioritized Customer SCCs Can Get Pods Rejected by PSA
 
+Under `restricted` enforcement, a new SCC with a higher priority than `restricted-v2` can get existing customer workloads **rejected by PSA on their next pod creation**.
+
 SCC admission sorts SCCs by [priority](https://github.com/openshift/apiserver-library-go/blob/218f2c488d901eb7d06d1ebf1e5f3b41f40cd8fb/pkg/securitycontextconstraints/util/sort/bypriority.go#L19-L34) and admits a pod with the first SCC that validates it, mutating its `securityContext` on the way.
 Running pods keep their SCC, as SCC admission [mutates nothing on updates and tries the previously validated SCC first](https://github.com/openshift/apiserver-library-go/blob/218f2c488d901eb7d06d1ebf1e5f3b41f40cd8fb/pkg/securitycontextconstraints/sccadmission/admission.go#L572-L588).
 New pods, e.g. after a rollout or an eviction, go through the selection again.
 A new SCC with a higher priority than `restricted-v2` therefore replaces it for new pods of every customer workload whose service account can use the new SCC.
-Under `restricted` enforcement, workloads that passed `restricted` only due to the mutation of `restricted-v2` **get rejected by PSA on their next pod creation**.
+Workloads that passed `restricted` only due to the mutation of `restricted-v2` then fail PSA.
 This failure is disruptive but loud.
 Without PSA enforcement, the new SCC would silently weaken the security context of these pods.
 
