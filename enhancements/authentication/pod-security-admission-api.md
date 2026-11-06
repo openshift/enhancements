@@ -476,12 +476,12 @@ Keeping the PSA label syncer in advising mode carries the same risk, because a r
 
 #### Reporting Off by Default
 
-Clusters that leave `spec.podSecurityAdmission` unset lose the PSA warnings, audit annotations and `PodSecurityViolation` alerts OpenShift produces today.
-The PSA label syncer's `warn` and `audit` labels are removed, and reporting defaults to `privileged`.
+Clusters that leave `spec.podSecurityAdmission` unset will lose the PSA warnings, audit annotations and `PodSecurityViolation` alerts OpenShift produces today.
+The PSA label syncer's `warn` and `audit` labels are removed, and the cluster-wide `audit` and `warn` levels default to `privileged`.
 That default keeps clusters that do not opt in from reporting every pod that SCCs admit beyond `restricted`.
 
 Audit logs rotate, so administrators who want the violation history must collect it before upgrading.
-To keep reporting after the upgrade, administrators set `reportLevel`.
+To keep reporting after the upgrade, administrators must set `reportLevel`.
 
 ## Alternatives (Not Implemented)
 
