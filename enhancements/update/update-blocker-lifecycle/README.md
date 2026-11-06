@@ -120,6 +120,13 @@ Is this a regression?
 * example: No, it has always been like this we just never noticed.
 * example: Yes, from 4.y.z to 4.y+1.z Or 4.y.z to 4.y.z+1.
 
+What product changes will allow us to stop extending this risk?
+* reasoning: We do not want to extend a declared update risk out to every subsequent patch in a z-stream.
+* example: A backport of OCPBUGS-# ships in target release x.y.z, after which x.(y-1) to x.y.z will no longer be exposed, and we do not need to declare the risk.
+* example: A new guard ships into source release x.(y-1).z via OCPBUGS-#.
+  [The `min_versions` bump][graph-data-launch] will cause subsequent x.y.z to not include direct updates from pre-guard x.(y-1) releases.
+  That x.y.z built with the `min_versions` change does not need to declare the risk.
+
 ### User Stories
 
 #### A developer wondering about a serious bug
@@ -212,3 +219,4 @@ However, removing `UpgradeBlocker` would break folks who are expecting the curre
 But it's not clear to me who would want to keep consuming that label after we grow the fine-grained labeling, but we have been trying to train developers to set `UpgradeBlocker` on potential blockers, and retraining developers is hard.
 
 [graph-data-block]: https://github.com/openshift/cincinnati-graph-data/tree/0335e56cde6b17230106f137382cbbd9aa5038ed#block-edges
+[graph-data-launch]: https://github.com/openshift/cincinnati-graph-data/tree/de00beafcec13e7d81624cd6f085a9ea65d804d6#something-needs-to-be-in-the-cluster-before-an-update-launches
