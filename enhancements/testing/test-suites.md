@@ -108,13 +108,35 @@ its stable shard instead of being listed in both, and any job that runs
 `stable` also runs `minimal`, so core tests are never run twice and never
 dropped from a stable run.
 
-**Gating is per job, not per test.** A `candidate` failure cannot block
-anything because `candidate` is not run on payloads or presubmits and is
-not covered by Component Readiness. The agent is effectively the only
-consumer of `candidate` results: it looks for tests to promote and for
-new tests that are broken and whose owners should be told. Tests in the
-new suites therefore do not need OTE's per-test `Informing()` /
-`Blocking()` annotation.
+**Gating is per job, not per test.** A `candidate` failure cannot block a
+payload or presubmit because `candidate` is not run there — the guarantee
+comes from *where the suite runs*, not from any per-test flag. The agent
+is effectively the only consumer of `candidate` results: it looks for
+tests to promote and for new tests that are broken and whose owners
+should be told.
+
+OTE's native per-test lifecycle (`Informing()` / `Blocking()`) is **not**
+replaced by this model; other systems still consume it, so a test keeps
+whatever it already declares. The executor reads that field to decide
+whether a failure is fatal, and it **defaults to blocking** when absent.
+Suite membership and this field are tied together by a single agent
+action: **when the agent promotes a test out of `candidate` (into
+`active`), it removes any `Informing()` the test carries, and it never
+adds `Informing()` or `Blocking()` anywhere.** The consequences:
+
+- `candidate` tests keep whatever native lifecycle they already have;
+  their failures are harmless regardless, because `candidate` runs only in
+  dedicated periodic jobs.
+- `active`, `stable`, and `minimal` tests therefore never carry
+  `Informing()`, so they are natively blocking. `active` runs periodics
+  only, so a failure reddens its periodic (and is seen by Component
+  Readiness) without gating a payload; `stable`/`minimal` run on payloads
+  and gate them. No per-test flag is needed to express this — it falls out
+  of job placement plus the single removal rule.
+
+These suites are changed only by the agent; CodeRabbit flags
+inconsistencies (for example an `active` test still carrying
+`Informing()`) in review rather than a build-time check enforcing it.
 
 ### Workflow Description
 
@@ -126,9 +148,11 @@ or staff engineer, who approves agent PRs.
 
 #### Adding a test
 
-The author writes the test with no suite metadata. A test that matches
-no registered suite is a `candidate`, placed in a candidate shard
-automatically (see [Shards](#shards)). Nothing else is required:
+The author writes the test with no suite metadata. A test that is
+selected by today's conformance qualifier (and is not already in another
+suite) defaults into `candidate`, placed in a candidate shard
+automatically (see [Shards](#shards)); a test that does not run as
+conformance today is not swept in. Nothing else is required:
 
 ```go
 g.It("should do the thing", func() { ... })
@@ -152,7 +176,9 @@ current suite and opens a PR for each eligible test that rewrites its
 suite list. Over its life, the test above changes like this:
 
 ```go
-// candidate -> active (agent)
+// candidate -> active (agent): the suite is rewritten, and any
+// ote.Informing() the test carried is removed in the same PR, so the test
+// becomes natively blocking (see "Gating is per job, not per test").
 g.It("should do the thing",
     ote.Suites("openshift/conformance/parallel/active-02"),
     func() { ... },
@@ -190,6 +216,12 @@ g.It("should never lose etcd quorum during upgrade",
 This requires explicit approval (approver set TBD, see
 [Open Questions](#open-questions-optional)). The agent reports any test
 that first appeared outside `candidate` without an approved override.
+
+Because the agent never demotes (see [No Demotion](#no-demotion)), an
+override is a deliberate, one-way commitment: the test gates payloads from
+its first run with no automatic rollback if it proves flaky. A flaky
+overridden test can only be corrected by a human PR. This is why the
+override is gated on explicit approval and is expected to be rare.
 
 #### No Demotion
 
@@ -291,23 +323,36 @@ This is the only enforcement needed. The previous design derived these
 guarantees from qualifiers combining several tags; with explicit
 membership they become direct checks.
 
+Because rule 1 rejects a test naming a suite that is not registered, a
+suite (in particular a new shard) must be registered before any test
+references it. The agent enforces this ordering for itself — it registers
+a new shard's static suite in origin and its job in `openshift/release`
+before writing tests into it (see [Shards](#shards)). A human using the
+straight-to-`stable` override must target an already-registered shard for
+the same reason.
+
 #### Shards
 
 - **`active` and `stable`**: the agent writes the shard explicitly as part
   of the suite name, and rebalances by rewriting it. Target: every shard
   within 10% of mean runtime, using per-test runtimes from Sippy.
 - **`candidate`**: assigned automatically, in memory, when origin
-  aggregates specs from all extension binaries. Origin first evaluates
-  every registered suite. A test that **matches no other registered
-  suite** is placed in a `candidate-NN` shard for its mode (from
-  `[Serial]`) by consistent hashing of its name. This keeps tests that
-  legacy or special-purpose suites select by qualifier (for example,
-  disruptive tests) out of `candidate`. New tests need no source edit to
-  start running. The agent then makes the assignment explicit by writing
-  the *same* shard origin chose into the test's source, so the test does
-  not move. From then on, candidate shards are explicit and rebalanced
-  like any other. Hashing only covers the window between merge and the
-  agent's next run.
+  aggregates specs from all extension binaries. A test defaults into
+  `candidate` only if it (a) is selected by today's conformance
+  qualifier — the same positive membership rule the existing
+  `openshift/conformance/parallel` / `.../serial` suites use — and (b) is
+  not already placed in another registered suite. This deliberately uses
+  the *current conformance selection*, not "any unclaimed test": a test
+  that does not run as conformance today (for example a disabled,
+  niche-job-only, or dedicated-suite test) is **not** swept into
+  `candidate`, matching current behavior. A qualifying test is placed in a
+  `candidate-NN` shard for its mode (from `[Serial]`) by consistent hashing
+  of its name, so new conformance tests need no source edit to start
+  running. The agent then makes the assignment explicit by writing the
+  *same* shard origin chose into the test's source, so the test does not
+  move. From then on, candidate shards are explicit and rebalanced like any
+  other. Hashing only covers the window between merge and the agent's next
+  run.
 - **Registry**: a shard exists only when both its static suite in origin
   and its CI job in `openshift/release` have merged. The agent never
   assigns a test to an unregistered shard; it registers new shards first.
@@ -394,7 +439,10 @@ Existing tests are seeded from history instead of restarting everyone in
 - Everything else goes to `active`.
 
 Seeding must complete before the candidate default is enabled. Otherwise
-every not-yet-migrated test matches no suite and falls into `candidate`.
+every not-yet-migrated conformance test defaults into `candidate` (the
+default is scoped to today's conformance selection, so only conformance
+tests are affected — but a mature test not yet seeded would still start
+over in `candidate`).
 
 `[Suite:...]` name strings and the per-test `Informing()` /
 `Blocking()` lifecycle are deprecated along with the old suites.
