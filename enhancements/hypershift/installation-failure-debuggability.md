@@ -513,7 +513,7 @@ or finalizers.
 | Reason constant | `FailedScheduling` | `ManagementClusterResourcePressure` | HO | Scheduling pressure detected (`Status=True`). |
 | Reason constant | `NoPressure` | `ManagementClusterResourcePressure` | HO | No scheduling pressure (`Status=False`). |
 | Reason constant | `ControlPlanePodStatusUnavailable` | `ManagementClusterResourcePressure` | HO | Pod status unavailable (`Status=Unknown`). |
-| Metric | `hypershift_cluster_installation_stage` | — | HO | Gauge, labels: `namespace`, `name`. Numeric value is the stage ordinal (0=Initializing, 1=InfrastructureReady, 2=ControlPlaneProvisioning, 3=APIServerAvailable, 4=WorkerAvailable, 5=WaitingForOperators, 6=InstallationComplete). Single series per cluster. |
+| Metric | `hypershift_cluster_installation_stage` | — | HO | Gauge, labels: `namespace`, `name`. Numeric value is the stage ordinal (-1=unknown/empty, 0=Initializing, 1=InfrastructureReady, 2=ControlPlaneProvisioning, 3=APIServerAvailable, 4=WorkerAvailable, 5=WaitingForOperators, 6=InstallationComplete). Single series per cluster. Emits -1 when the stage field is empty (pre-existing clusters before first reconciliation). |
 | Metric | `hypershift_cluster_installation_failure_reason` | — | HO | Gauge, labels: `namespace`, `name`, `reason`. Emits 1 if a known failure reason is currently active, 0 if not. One series per known reason per cluster. |
 
 **New status fields:**
@@ -650,7 +650,10 @@ the progression:
 // stageOrdinal maps each InstallationStage to its
 // position in the progression. A stage transition is
 // only applied if the new ordinal > current ordinal.
+// An empty stage ("") maps to -1, so any valid stage
+// advances past it.
 var stageOrdinal = map[InstallationStage]int{
+    "":                             -1,
     StageInitializing:              0,
     StageInfrastructureReady:       1,
     StageControlPlaneProvisioning:  2,
@@ -1186,11 +1189,14 @@ components:
   Gauge indicating current installation stage per
   cluster as a numeric ordinal. Labels: `namespace`,
   `name`. The gauge value is the stage's ordinal
-  position (0=`Initializing`,
+  position (-1=unknown/empty, 0=`Initializing`,
   1=`InfrastructureReady`,
   2=`ControlPlaneProvisioning`,
   3=`APIServerAvailable`, 4=`WorkerAvailable`,
   5=`WaitingForOperators`, 6=`InstallationComplete`).
+  Emits -1 when the stage field is empty (pre-existing
+  clusters before first reconciliation), avoiding a
+  false "Initializing" signal.
   This produces a single time series per cluster
   instead of 7 (one per stage in a state-set
   pattern), reducing cardinality. Uses the
@@ -1199,9 +1205,9 @@ components:
   `hypershift_hostedclusters_` is reserved for
   aggregate fleet-level metrics.
   This enables queries like
-  `hypershift_cluster_installation_stage < 6`
-  to select clusters that have not completed
-  installation.
+  `hypershift_cluster_installation_stage >= 0 and hypershift_cluster_installation_stage < 6`
+  to select clusters that are actively installing but
+  have not completed (excluding -1 unknown).
 - Add
   `hypershift_cluster_installation_failure_reason`:
   Gauge indicating whether a known installation
@@ -1224,7 +1230,9 @@ components:
   `sum(hypershift_cluster_installation_failure_reason{reason="PodSchedulingFailed"} == 1)`
   to count clusters currently experiencing a given
   failure, or alert on sustained failures using
-  `for:` duration.
+  `for:` duration. To avoid alert resets on failed
+  scrapes, use `last_over_time`:
+  `last_over_time(hypershift_cluster_installation_failure_reason{reason="PodSchedulingFailed"}[5m]) == 1`.
   The `reason` label is constrained to a fixed
   enumerated set: `PodSchedulingFailed`,
   `CrashLoopBackOff`, `ImagePullBackOff`,
@@ -1787,7 +1795,7 @@ oc patch hostedcluster <name> --type=json --subresource=status \
 
 ```promql
 # Stalled installations (stage unchanged for 30min, not complete)
-# Stage ordinal: 0=Initializing, ..., 6=InstallationComplete
+# Stage ordinal: -1=unknown, 0=Initializing, ..., 6=InstallationComplete
 hypershift_cluster_installation_stage < 6
   and on(namespace, name)
     (changes(hypershift_cluster_installation_stage[30m]) == 0)
@@ -1809,13 +1817,13 @@ sum(hypershift_hostedclusters_failure_conditions{condition="ManagementClusterRes
   annotations: { summary: "{{ $value }} HCs with scheduling pressure" }
 - alert: HostedClusterInstallationStuck
   expr: |
-    hypershift_cluster_installation_stage < 6
+    hypershift_cluster_installation_stage >= 0 and hypershift_cluster_installation_stage < 6
       unless on(namespace, name) (hypershift_cluster_paused == 1)
   for: 45m
   labels: { severity: warning }
   annotations: { summary: "{{ $labels.name }} stuck at stage {{ $value }}" }
 - alert: WidespreadInstallationFailure
-  expr: sum(hypershift_cluster_installation_failure_reason == 1) > 5
+  expr: sum(last_over_time(hypershift_cluster_installation_failure_reason[5m]) == 1) > 5
   for: 15m
   labels: { severity: warning }
   annotations: { summary: "{{ $value }} clusters with active installation failures" }
