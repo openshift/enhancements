@@ -658,12 +658,18 @@ follow-on customization API:
    listener `DNSRecord`. The generated Service remains discoverable through
    standard cluster-local Service DNS.
 
-5. **Configuration status**: CIO watches the class-default ConfigMaps
+5. **Gateway status**: For Gateways using `openshift-clusterip`, CIO removes
+   `LoadBalancerReady` and `DNSReady` from `Gateway.status.conditions`, and
+   removes `DNSReady` from each listener's conditions. These conditions do not
+   apply without a load balancer or external DNS records, including after
+   transitioning from another GatewayClass.
+
+6. **Configuration status**: CIO watches the class-default ConfigMaps
    and reconciles `openshift.io/Configured` on each Managed Profile based
    on ConfigMap presence and its class-selection label, preserving
    conditions owned by other controllers.
 
-6. **Lifecycle management**: User-created OpenShift GatewayClasses retain the
+7. **Lifecycle management**: User-created OpenShift GatewayClasses retain the
    existing install and uninstall semantics and receive the Sail lifecycle
    finalizer. Managed Profiles do not receive the finalizer, and CIO does not
    count GatewayClasses labeled
@@ -833,7 +839,9 @@ Testing will cover the following scenarios:
 4. Verify that DNS records are created for listeners on Gateways attached to
    `openshift-loadbalancer-external` and
    `openshift-loadbalancer-internal`, but not for listeners on Gateways attached
-   to `openshift-clusterip`.
+   to `openshift-clusterip`. Verify that ClusterIP Gateways do not report
+   `LoadBalancerReady` or `DNSReady`, and that stale Gateway and listener
+   conditions are removed after transitioning to `openshift-clusterip`.
 5. Verify that CIO restores a missing Managed Profile and its defaults
    ConfigMap.
 6. Verify that upgrading a cluster where `openshift-default`
