@@ -11,7 +11,7 @@ approvers:
 api-approvers:
   - None
 creation-date: 2026-10-30
-last-updated: 2026-10-30
+last-updated: 2026-11-06
 tracking-link:
   - https://redhat.atlassian.net/browse/OCPSTRAT-2899
 see-also:
@@ -138,8 +138,8 @@ Kubernetes API objects.
 IPv6 is supported by an address such as `[::1]:9090`. One address is bound, not
 both families automatically. Hostnames, wildcard addresses, non-loopback IPs,
 zone-qualified addresses, and port zero are rejected. Invalid settings follow
-normal configuration validation and prevent startup; this differs from a valid
-configuration whose port cannot be bound at runtime.
+normal configuration validation and prevent startup. When metrics are enabled,
+failure to bind the configured address also prevents MicroShift from starting.
 
 Configuration defaults, generated schema, packaged configuration, and user
 documentation must remain consistent.
@@ -285,9 +285,13 @@ listener; this proposal does not change that policy.
 First-pass HTTP limits are two concurrent scrapes, a five-second metrics-handler
 timeout, five-second header-read timeout, ten-second read/write timeouts,
 thirty-second idle timeout, and 16 KiB request headers. Gather errors may still
-expose successful families from other registered collectors. A bind or serving
-failure is logged and does not stop the control plane. There is no automatic
-listener retry; an administrator fixes the problem and restarts.
+expose successful families from other registered collectors. Invalid configuration
+or failure to bind an enabled endpoint returns an error through the service
+manager and fails startup without reporting metrics readiness. Once the listener
+has started, a serving failure is logged without stopping the control plane.
+There is no automatic listener retry; an administrator fixes the problem and
+restarts. Operators must configure scrape-failure or missing-data alerts in their
+monitoring backend; MicroShift does not install alert rules.
 
 Service cancellation closes the listener and stops scheduling observations. The
 first pass uses ordinary filesystem reads: the non-blocking operation lock does
@@ -398,15 +402,15 @@ The observability-specific coverage should focus on these boundaries:
   shutdown; distinguish cancellation of scheduling from in-flight filesystem
   I/O.
 - Validate defaults, configuration drop-ins, rejected addresses, IPv4/IPv6
-  loopback listeners, disabled operation, busy-port behavior, and operation
-  without API readiness or an installed OTel Collector.
+  loopback listeners, disabled operation, startup failure on an occupied port,
+  and operation without API readiness or an installed OTel Collector.
 - On a real MicroShift host, compare inventory identities and dates to CLI
   output; prepare renewal while running and verify active series do not change;
   restart and verify activated/rejected pending state on the next observation.
   Include custom validity and warn-only restart policy.
 - Run RPM/bootc and architecture coverage with SELinux enforcing. Verify no
   non-loopback listener, secret-bearing output, new unsolicited outbound
-  traffic, or change to startup/renewal/recovery semantics.
+  traffic, or change to certificate startup/renewal/recovery semantics.
 - In the later integration slice, verify all three bundled presets and a
   customer-managed host collector, stable fleet identity, customized config
   preservation, scrape/collection failures, and resource overhead.
