@@ -791,4 +791,7 @@ Raising the level again leaves running pods untouched, but PSA rejects replaceme
 
 ## Infrastructure Needed [optional]
 
-None.
+CI jobs in openshift/release, as described in the [Test Plan](#test-plan):
+
+- **Default test**: a step that adds the `APIServer/cluster` install manifest with `enforceLevel: Restricted`.
+- **Periodic tests**: periodic jobs for the unset field and, optionally, `Baseline`.
