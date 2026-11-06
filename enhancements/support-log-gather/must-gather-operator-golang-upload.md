@@ -78,11 +78,8 @@ Keep connection policy independent of Kubernetes API types so both callers follo
    with no terminal status. Obfuscate-only Jobs need no SFTP connectivity.
 2. Create the existing gather and conditional-upload Job. Gather writes output; upload retains the outer `pgrep` wait.
    Obfuscate-source Jobs skip gather and invoke upload directly.
-3. Run [obfuscation](#obfuscation), finish and copy its log even on failure, and stop before archive or upload if it
-   fails. Only after success, check credentials: all-empty obfuscate-only execution skips archive/upload; partial
-   credentials fail.
-4. Write/close a local tar.gz, connect, and transfer under [transfer and pipelining](#transfer-and-pipelining).
-   Report success and attempt archive removal only after that contract passes; earlier failures exit non-zero.
+3. Run [obfuscation](#obfuscation). Failure stops before archive or upload.
+4. Archive and transfer under [transfer and pipelining](#transfer-and-pipelining).
 5. Reconcile terminal Job state into CR status under [Job lifecycle](#job-lifecycle). Preserve Job retries and
    resource retention.
 
@@ -90,7 +87,8 @@ Keep connection policy independent of Kubernetes API types so both callers follo
 
 No CRD schema, webhook, upload-target union, or finalizer changes. Spec immutability and gather timeout semantics stay
 unchanged. No new timeout flags or timeout environment variables are introduced. Status reasons and metrics change
-as defined in [failure reporting](#failure-reporting-and-metrics). Release notes must cover those changes.
+as defined in [failure reporting](#failure-reporting-and-metrics). Release notes cover the intentional changes under
+[configuration](#compatibility-and-configuration).
 
 ### Topology Considerations
 
@@ -122,7 +120,7 @@ N/A
 #### Compatibility and Configuration
 
 Preserve password authentication, IPv4/IPv6 normalization, disabled SSH host-key checking, shared process namespace,
-`restartPolicy: Never`, and `backoffLimit: 3`.
+and the current Job retry policy.
 
 - Local filename: `${FILENAME_PREFIX}.tar.gz`; external remote path: `${caseid}_${FILENAME_PREFIX}.tar.gz`;
   internal remote path: `${username}/${caseid}_${FILENAME_PREFIX}.tar.gz`.
@@ -132,16 +130,13 @@ Preserve password authentication, IPv4/IPv6 normalization, disabled SSH host-key
 - Script input/workspace defaults remain `/must-gather-output` and `/must-gather-upload`; the template explicitly
   supplies `/must-gather`, `/must-gather-upload`, and `FILENAME_PREFIX`.
 
-Preserve existing timing behavior. `spec.mustGatherTimeout` limits only the gather command and defaults to no limit
-when unset. Preflight retains its existing five-second TCP dial limit to the SFTP target or proxy; this does not bound
-proxy negotiation, SSH authentication, or SFTP initialization. Do not extend that preflight-only limit to upload when
-sharing transport code. This EP adds no explicit upload connection/setup or inactivity limits, no overall duration
-limit for obfuscation, archiving, or upload, and no Job or Pod deadline.
+`spec.mustGatherTimeout` limits only the gather command and defaults to no limit when unset. Preflight keeps its
+current dial limit and per-reconcile retry behavior. That dial limit is not applied to upload. This EP adds no upload
+connection, inactivity, or Job deadline.
 
 Intentional changes are shared routing and exclusions, HTTPS preflight trust, retained tunnel bytes, decoded
 credentials, fatal transfer errors, the CA and cancellation outcomes below, prohibited Digest without a Basic
-fallback, and the status and metric contracts. Release notes must identify these changes,
-proxy ports and authentication, and transfer-success criteria.
+fallback, and the status and metric contracts. Release notes identify these changes.
 
 #### Shared Connection Policy
 
@@ -154,10 +149,10 @@ case conflicts consistently. This intentionally changes upload's lowercase HTTPS
 
 Validate effective proxy URLs and decode credentials once, requiring percent-encoding for reserved userinfo characters.
 Allow HTTP/HTTPS and valid host/port; normalize scheme-less `host[:port]` to HTTP. Reject malformed
-escapes, invalid ports, and unsupported schemes without leaking credentials. Explicit ports win; defaults are HTTP
-3128 and HTTPS 3129, preserving preflight defaults and intentionally standardizing upload's missing HTTPS port.
-The URL scheme controls transport, independently of variable name: `https_proxy=http://proxy:3128` means TCP CONNECT,
-not TLS or implicit port 443.
+escapes, invalid ports, and unsupported schemes without leaking credentials. Explicit ports win. A missing port uses
+today's preflight default for both callers.
+The URL scheme controls transport, independently of variable name: an `http` scheme means TCP CONNECT, not TLS, even
+when the variable is `https_proxy`.
 
 **Transport and authentication.** HTTP proxies use TCP CONNECT; HTTPS proxies require TLS first, verifying the proxy's
 certificate chain and hostname. Never retry in plaintext. Support Basic, and add HTTP Digest for both callers; today both send Basic only.
@@ -166,8 +161,8 @@ prohibited, fail the connection and do not fall back to Basic. Use Basic only wh
 challenge handling. Failing a prohibited Digest algorithm, instead of using it, is an intentional FIPS change.
 
 **Trust and readiness.** Existing CA injection, ConfigMap distribution, mounts, and ownership remain unchanged.
-With `--trusted-ca-configmap`, preflight reads `ca-bundle.crt` from the effective CR-namespace ConfigMap through the
-Kubernetes API; upload reads its mounted copy through `SFTP_CA_BUNDLE_FILE=/etc/pki/tls/certs/ca-bundle.crt`.
+With `--trusted-ca-configmap`, preflight reads the bundle from the effective CR-namespace ConfigMap through the
+Kubernetes API; upload reads the mounted copy of that same bundle.
 Both use the configured bundle as the trust source, containing all roots required by the selected HTTPS proxy.
 Only when no bundle is configured do they use release-image system roots. Configured trust never falls back to
 system roots, unverified TLS, or plaintext.
@@ -190,22 +185,22 @@ can change before upload.
 
 #### Job Lifecycle
 
-Preserve gather's existing shell timeout and polling, Job retries, and one CR per operation. Preflight makes at most
-three attempts per reconcile, and those attempts are not stored on the CR. Only a deadline exceeded and a network
-timeout are retried, including a DNS lookup that times out. The third such failure completes the CR. Authentication,
-certificate failure, connection refused, a definite DNS failure, and the terminal configuration failures under
-[trust and readiness](#shared-connection-policy) complete the CR immediately. CA waits consume none of the three
-attempts.
+Preserve gather's existing shell timeout and polling, Job retries, and one CR per operation. Preflight keeps its
+current per-reconcile retry behavior, and those attempts are not stored on the CR. Only a deadline exceeded and a
+network timeout are retried, including a DNS lookup that times out. The exhausted retry completes the CR.
+Authentication, certificate failure, connection refused, a definite DNS failure, and the terminal configuration
+failures under [trust and readiness](#shared-connection-policy) complete the CR immediately. CA waits consume none of
+the preflight attempts.
 
 A canceled reconcile aborts preflight, does not retry that attempt, and does not complete the CR. The upload process
 stops obfuscation, archive creation, connection, and transfer on cancellation, and does not upload after a canceled
-archive. The process does not retry. Job `backoffLimit` is unchanged: a non-zero Pod exit, including after kubelet
+archive. The process does not retry. Job retry behavior is unchanged: a non-zero Pod exit, including after kubelet
 termination, still counts, and the replacement Pod reruns gather when gather is in the Job.
 
-Clean up a finished Job when `status.active == 0` and condition `Complete` or `Failed` is True, together with the
-existing success or failure counts. `FailureTarget` without `Failed` is not terminal, even when the failure count is
-already past `backoffLimit`. `FailureTarget` may remain beside `Failed`; that pair is terminal. If the Job has none
-of `Complete`, `Failed`, and `FailureTarget`, the existing count predicate applies only when `status.active == 0`. One failed Pod is not terminal.
+An inactive Job is terminal when Kubernetes reports `Complete` or `Failed`. `FailureTarget` alone does not finish the
+CR, even if the failure count is already past the retry limit. When none of `Complete`, `Failed`, or `FailureTarget`
+is present, today's success and failure counts decide, and only while the Job is inactive. One failed Pod is not
+terminal.
 A completed CR is recognized before the ServiceAccount check and the other pre-Job checks, so those checks cannot
 rewrite it. It is not given a new Job. Pending cleanup of an already completed CR finishes without recreating the
 Job. `retainResourcesOnCompletion` is unchanged.
@@ -213,11 +208,8 @@ Job. `retainResourcesOnCompletion` is unchanged.
 #### Archive Creation
 
 Create a complete local tar.gz before connecting, using streaming I/O with bounded memory and retaining existing
-workspace/PVC obfuscation mounts. Preserve relative member names, contents, relevant permissions/ownership/timestamps,
-hard links, symlinks including dangling links, and FIFO entries. Match GNU `tar --ignore-failed-read` behavior for
-unreadable or changing source files, warning while keeping the archive structurally valid. Archive-write or
-finalization failures must prevent upload. Validate compatibility through semantic archive comparisons rather than
-compressed bytes, gzip headers, or entry order.
+workspace and PVC mounts. Match current GNU tar semantics, including special files and unreadable or changing inputs,
+and compare contents rather than gzip bytes or entry order. Archive-write or finalization failures must prevent upload.
 
 #### Transfer and Pipelining
 
@@ -249,9 +241,8 @@ supported FIPS operation without bypassing crypto policy or claiming new certifi
 #### Obfuscation
 
 The `upload` command invokes the existing `obfuscate` subcommand as a child process in the same container when
-`obfuscate=true`, as supplied by the existing MustGather configuration. No new flag or controller-managed step is
-introduced. Preserve existing input/output arguments, optional configuration, and `-v=3` verbosity. The process boundary
-protects uploader cleanup from the obfuscation library's process-exit behavior.
+obfuscation is enabled, using the existing MustGather configuration. No new flag or controller-managed step is
+introduced. The process boundary protects uploader cleanup from the obfuscation library's process-exit behavior.
 
 Preserve combined stdout/stderr in console stdout and `${must_gather_upload}/obfuscation.log`, and copy that log to
 `cleaned/obfuscation.log` on success and failure. A failed child keeps its status even if the log copy also fails.
@@ -273,7 +264,7 @@ errors, including a missing Secret and cleanup retries, keep `LastReconcileCycle
 `MustGather Job pods succeeded`. Job failure keeps `MustGather Job pods failed`. Terminal pre-Job validation uses
 one sanitized `status.reason`, also the condition message, that names the failing check: ServiceAccount, image,
 credentials, proxy settings, trusted CA, or SFTP. SFTP is one reason for authentication, certificate failure,
-connection refused, a definite DNS failure, the third exhausted timeout, a prohibited Digest algorithm, and any
+connection refused, a definite DNS failure, the exhausted preflight timeout, a prohibited Digest algorithm, and any
 proxy CONNECT failure, including proxy authentication failure. It carries no secrets, proxy userinfo,
 host names, or dial details, and it does not distinguish reachable from unreachable. `proxy settings` names only a
 rejected proxy URL. Emit one Warning
@@ -302,29 +293,25 @@ Jobs invoke `/usr/local/bin/must-gather-operator upload` after existing gather c
 obfuscation. Preserve the shared process namespace, mounts, and existing configuration inputs; supply the shared
 trust inputs. Remove obsolete SSH-directory/known-hosts setup.
 
-Remove the production uploader and HTTPS helper scripts and their upload-only package installations across production,
-OpenShift CI, and coverage images. This includes `sshpass`, Ncat, OpenSSH clients, `wget`, `tar`, `gzip`, and the `socat`
-helper dependency. Retain the operator binary, obfuscation configuration, polling/image-setup tools, and coverage support.
-Check built package inventories, including inherited packages; the separate gather image keeps its tools.
+Remove the production uploader and HTTPS helper scripts, and the upload-only tools they require, from production,
+OpenShift CI, and coverage images. Retain the operator binary, obfuscation configuration, polling and image-setup
+tools, and coverage support. Check built package inventories, including inherited packages; the gather image keeps its
+tools.
 
 Move artifact verification to a CI-built/published test-only image with an independently implemented client and archive
 tools. It must follow the documented connection policy and detect production regressions independently.
 
-With implementation, update the living designs: [upload](https://github.com/openshift/must-gather-operator/blob/master/docs/design/upload.md)
-(transport/archive/obfuscation), [Job](https://github.com/openshift/must-gather-operator/blob/master/docs/design/job-template.md)
-(command/environment), [controller](https://github.com/openshift/must-gather-operator/blob/master/docs/design/controller.md)
-(trust/terminal status/metrics), and [API](https://github.com/openshift/must-gather-operator/blob/master/docs/design/api.md)
-(status reasons/unchanged immutable spec), plus domain/architecture guidance. Update predicate/watch design/tests if
-changed. Do not rewrite accepted ADR history;
+With implementation, update the upload, Job, controller, and API design docs with the contracts that change, plus
+domain and architecture guidance. Update predicate or watch design if it changes. Do not rewrite accepted ADR history;
 the [two-container ADR](https://github.com/openshift/must-gather-operator/blob/master/docs/adrs/adr-0002-two-container-job.md)
-still applies. Gather-completion redesign, marker/PID polling, and a new success gate remain independent.
+still applies. Gather-completion redesign remains independent.
 
 ### Risks and Mitigations
 
 - Route/exclusion, port, decoding, auth, and TLS changes can expose configuration mistakes or bypass a formerly used
   proxy: test both adapters and document upgrade effects.
-- Existing timing limitations remain: stalled setup or upload and long-running obfuscation/archiving may require
-  operational intervention. This EP does not add an automatic overall or inactivity cutoff.
+- Existing timing limitations remain: stalled setup or upload and long-running obfuscation or archiving may require
+  operational intervention. See [configuration](#compatibility-and-configuration).
 - Test delayed CA injection, immediate server consumption, and concurrent partial writes against their contracts above.
 - Monitoring automation needs updated reasons and counter semantics. Image tool removal requires the independent
   verifier and checks of every image variant. Ship tests, documentation, and release notes together.
@@ -342,7 +329,7 @@ in-release switch back to the shell uploader. Rollback is the downgrade under [D
   implementations. Smaller blast radius, and the next routing or trust change can diverge again. Rejected: both
   callers need one testable policy.
 - **Separate Go clients:** each caller keeps its own dial timing, and routing or trust can drift between them.
-  Rejected for one package with input adapters. The five-second dial limit stays on preflight only.
+  Rejected for one package with input adapters. The preflight dial limit stays on preflight only.
 - **Dual-runtime flag:** an in-release rollback that keeps two production paths. Rejected. Rollback is the
   downgrade in Drawbacks.
 - **In-process obfuscation or changed gather gating:** unsafe library exits and a new success gate are separate work.
@@ -355,34 +342,26 @@ in-release switch back to the shell uploader. Rollback is the downgrade under [D
 
 Cover the following behaviors in deterministic unit tests:
 
-- **Routing/auth:** no proxy, HTTP only, HTTPS only, both proxies, conflicting cases, exclusions, localhost/loopback, IPv4/IPv6 and ports, and
-  consistent adapters and template forwarding. Include encoded delimiters/`@`, colon passwords, scheme-less inputs,
-  omitted/explicit ports, malformed/unsupported URLs, and redaction. Permitted Digest is preferred over Basic. A
-  prohibited Digest fails the connection and does not use Basic. Rejected proxy URLs stay free of credential material.
-- **TLS/CONNECT:** identical PEM through both adapters, system roots when unconfigured, delayed empty/missing managed
-  bundles, invalid static bundles and unusable non-empty PEM, trusted/untrusted chains, wrong hostname, and prohibited fallback.
-  Cover combined/split CONNECT headers and SSH banner, rejection, and connection/response resource cleanup.
-- **Existing timing/lifecycle:** preserve the preflight-only five-second TCP dial limit, gather-command timeout/default,
-  and at most three attempts for deadline and network timeout. Add no upload timers or Job/Pod deadlines. A canceled
-  preflight does not complete the CR. Canceled archive creation does not upload. A killed Pod still counts toward
-  `backoffLimit` and the replacement reruns gather when gather is present. Out-of-order acknowledgements still satisfy
-  transfer-completion checks.
-- **Transfer:** open denial, local read failure, disk-full/write/close errors, disconnect, short writes and byte-count mismatch, and sparse
-  failures must be non-zero on all routes, retain the archive, and omit success. Immediate consumption after successful
-  writes, byte count, and close must succeed with cleanup and no metadata requirement.
-- **Archive:** GNU semantic fixtures for gather/cleaned roots, long paths, metadata, hard/dangling links, FIFO,
-  unreadable/deleted inputs, short reads, growth, and destination/finalization faults.
-- **Obfuscation/environment:** arguments, combined output, child exit/cancellation, log completion/copy on failure,
-  setup/write/copy errors, three modes, defaults, empty/partial credentials, and ordering. A failed child keeps its
-  status when the log copy also fails. A successful child whose log cannot be persisted does not archive or upload.
-- **Controller/metrics:** existing configuration and terminal Job conditions; condition-only
-  updates; completed CRs without Job recreation; sanitized reasons; persisted-transition counting, status conflicts,
-  repeated events, and cleanup retries. A missing or empty injection-managed bundle creates no Job and sets no
-  terminal status; a present unusable static bundle does. `FailureTarget` without `Failed` does not clean up.
-  A completed CR is not rewritten by the ServiceAccount check. SFTP preflight keeps one reason across authentication
-  and connection refused, and the third timeout completes the CR. A terminal preflight increments both error counters
-  once and does not increment `must_gather_operator_must_gather_total`. A terminal Job failure increments only
-  `must_gather_operator_must_gather_errors`. A repeated reconcile does not increment them again.
+- **Routing/auth:** no proxy, HTTP only, HTTPS only, both proxies, conflicting cases, exclusions, localhost and
+  loopback, addresses and ports, encoded userinfo, scheme-less inputs, omitted and explicit ports, malformed URLs,
+  redaction, permitted Digest, and prohibited Digest, under [Shared Connection Policy](#shared-connection-policy).
+- **TLS/CONNECT:** identical PEM through both adapters, system roots when unconfigured, delayed empty or missing
+  managed bundles, invalid static bundles, trusted and untrusted chains, wrong hostname, prohibited fallback,
+  preserved CONNECT bytes including an early SSH banner, and connection cleanup, under
+  [trust and readiness](#shared-connection-policy).
+- **Timing/lifecycle:** preflight dial limit, gather timeout, exhausted preflight retry, canceled preflight, canceled
+  archive creation, and a killed Pod whose replacement reruns gather, under
+  [configuration](#compatibility-and-configuration) and [Job lifecycle](#job-lifecycle).
+- **Transfer:** open denial, local read failure, write or close errors, disconnect, short writes, and sparse
+  failures. Immediate consumption and apparent remote length follow [transfer and pipelining](#transfer-and-pipelining).
+- **Archive:** semantic fixtures for the [archive outcome](#archive-creation), including special files, unreadable or
+  changing inputs, and finalization faults.
+- **Obfuscation/environment:** child exit and cancellation, log persistence, three modes, and empty versus partial
+  credentials, under [obfuscation](#obfuscation).
+- **Controller/metrics:** terminal Job conditions, a completed CR, a missing or empty injection-managed bundle, an
+  unusable static bundle, `FailureTarget` without `Failed`, one SFTP reason for authentication and connection
+  refused, an exhausted preflight timeout, and the counter cases in
+  [failure reporting](#failure-reporting-and-metrics).
 
 ### Integration / E2E Tests
 
@@ -398,10 +377,8 @@ directory, and handles retries and Job-data retention. Retaining servers permit 
 expected-content checks; stale or corrupt artifacts must fail verification. Expectations follow each fixture's
 contents rather than requiring a universal `must-gather.log`. Production needs no added metadata permissions.
 
-Also test immediate server consumption after successful close: valid transfer must succeed with cleanup and no retry.
-Write/close failures remain fatal even when apparent file size matches. Live smoke checks require protocol and Job/CR
-success under the [production success criteria](#transfer-and-pipelining). Confirm case attachment separately only
-through an existing supported facility; absence or a case-ID substring proves neither failure nor ingestion.
+Test immediate server consumption and write or close failures under [transfer and pipelining](#transfer-and-pipelining).
+Live smoke checks require protocol and Job/CR success under that contract.
 
 Exercise delayed managed-CA readiness followed by successful validation/Job creation, invalid static trust, and mounted
 trust loss under normal retry/cancellation rules. Cover all three workflows, with/without PVC and read-only
@@ -409,7 +386,7 @@ source PVC, direct/HTTP/HTTPS routes, exclusions, custom CA, and terminal Job st
 
 Measure small/multi-GB bundles locally and at injected latency against OpenSSH: throughput, CPU, peak RSS, phase/elapsed
 time, bounded memory growth, and no material unexplained regression. Validate release-image direct/proxy SSH/TLS/auth
-paths on supported FIPS clusters, including a prohibited Digest algorithm that does not fall back to Basic. Run
+paths on supported FIPS clusters, including a prohibited Digest case. Run
 required build/unit/lint/image/CI/QE checks on
 production, OpenShift CI, and coverage images, including verifier operation after tool removal and secret-free errors.
 
@@ -418,13 +395,10 @@ production, OpenShift CI, and coverage images, including verifier operation afte
 Ship in a normal operator release without a feature gate or opt-in, explicitly documenting behavior changes.
 Complete development validation and these release gates before cutover:
 
-- Pass the [test plan](#test-plan): preserved artifacts/obfuscation and positive and negative cases for every intentional
-  change, including shared policy/cancellation, immediate consumption, CA readiness/rejection, `FailureTarget`,
-  validation counters, and prohibited Digest.
-- Confirm existing timing behavior, the Job terminal predicate, and sanitized reasons/metric transitions.
-- Record and review representative resource/throughput and supported FIPS results; pass required CI/QE checks.
-- Remove production scripts/package installs consistently, publish the verifier image, and pass its artifact/fault checks.
-- Update design, configuration, support, monitoring, and upgrade documentation with implementation.
+- Pass the [test plan](#test-plan).
+- Record and review representative resource and throughput results and supported FIPS results; pass required CI and QE checks.
+- Remove the production uploader and its upload-only tools, publish the verifier image, and pass its artifact and fault checks.
+- Update design, support, monitoring, and upgrade documentation. Release notes are the intentional changes under [configuration](#compatibility-and-configuration).
 
 ### Dev Preview -> Tech Preview
 
@@ -465,8 +439,8 @@ Job can use different release policies; alignment applies to new Jobs under matc
 ## Operational Aspects of API Extensions
 
 CR spec, schema, immutability, and existing timeout behavior stay unchanged. Operational changes are terminal handling
-and [status/metric contracts](#failure-reporting-and-metrics); ship release notes and monitoring migration. Metrics
-never prove remote retention or processing.
+and [status/metric contracts](#failure-reporting-and-metrics). Release notes are the intentional changes under
+[configuration](#compatibility-and-configuration). Metrics never prove remote retention or processing.
 
 ## Support Procedures
 
@@ -484,11 +458,11 @@ or upload logs. Pending CA readiness has no terminal condition. For artifact ins
    without exposing credentials.
 3. For HTTPS, inspect certificate names and effective CR-namespace/mounted trust. Distinguish CNO readiness from invalid
    static configuration; never use insecure fallback.
-4. Inspect remote open/write/close and acknowledged bytes under the [success criteria](#transfer-and-pipelining).
-   Use supported case tooling for separate ingestion confirmation; disappearance alone must not trigger a retry.
-5. For collection timeouts inspect `spec.mustGatherTimeout`; for preflight TCP timeouts inspect network reachability.
-   Setup and upload have no new automatic cutoff. Inspect retained Pod/PVC artifacts promptly and account for storage
-   lifetime, partial remote files, and retries that rerun gather without resume.
+4. Follow [transfer and pipelining](#transfer-and-pipelining) for success, partial remote files, and ingestion.
+   Disappearance alone is not a reason to retry.
+5. For collection timeouts inspect `spec.mustGatherTimeout`. For preflight timeouts follow
+   [configuration](#compatibility-and-configuration). Inspect retained Pod or PVC artifacts under the
+   [workspace lifetime limits](#transfer-and-pipelining).
 
 ### Disabling the Feature
 
@@ -513,3 +487,4 @@ and reproducible resource/transfer comparison job. No new production service; te
 - 2026-11-06: Removed proposed timeout controls and Job deadlines, retaining existing gather and preflight timing behavior.
 - 2026-11-06: Stated CA, cancellation, Digest, status, and Job-terminal outcomes once each.
 - 2026-11-06: Named every terminal preflight check, kept SFTP as one reason, and recognized a completed CR before the ServiceAccount check.
+- 2026-11-06: Condensed implementation mechanics to category-level outcomes. Tests, graduation, and support point at the owning sections.
