@@ -787,7 +787,7 @@ Consequences:
   Directly created pods must be recreated by whoever created them.
 - **Namespace labels** stay and keep overriding the cluster-wide default.
 
-Raising the level again needs no repair, as PSA keeps no state, but pods admitted in the meantime get checked on their next creation.
+Raising the level again leaves running pods untouched, but PSA rejects replacement pods that violate it, as described in [Unexpected Workload Rejection](#unexpected-workload-rejection).
 
 ## Infrastructure Needed [optional]
 
