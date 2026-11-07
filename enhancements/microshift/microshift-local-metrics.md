@@ -25,12 +25,13 @@ see-also:
 Add an optional, loopback-only metrics endpoint directly to the MicroShift
 process, with certificate health as its first collector. The endpoint exposes
 Prometheus-format metrics that a host-local OpenTelemetry Collector can scrape;
-it is not an OTLP receiver. It reuses the certificate inventory and status
-calculation introduced by controlled certificate renewal, while keeping
-observation read-only and separate from renewal and recovery. The listener does
-not depend on kube-apiserver readiness, but shares MicroShift's process
-lifetime. An isolated registry allows future MicroShift collectors to use the
-same endpoint without modifying Kubernetes vendor code.
+it is not an OTLP receiver. The certificate collector reuses the managed
+inventory and existing status calculation. Its observations are read-only and do
+not perform renewal or recovery. The listener and initial certificate collector
+do not depend on kube-apiserver readiness, but share MicroShift's process
+lifetime. Future collectors may have their own API dependencies. An isolated
+registry allows them to use the same endpoint without modifying Kubernetes
+vendor code.
 
 ## Motivation
 
@@ -53,37 +54,45 @@ criteria implicitly.
 
 ### User Stories
 
+- As a MicroShift developer, I want to add future bounded collectors to one
+  owned endpoint without adding another listener or patching kube-apiserver.
+- As an observability integrator, I want a local scrape target usable with an
+  existing OTel Collector, without Kubernetes API authentication or new
+  credentials.
 - As a fleet administrator, I want to identify certificates approaching expiry
   and schedule renewal and activation before services are affected.
 - As an administrator, I want pending renewal to be visible without making
   expiring active certificates appear healthy before activation.
 - As an operator, I want to distinguish certificate health from failed
   collection, stale observations, and an unavailable MicroShift process.
-- As an observability integrator, I want a local scrape target usable with an
-  existing OTel Collector, without Kubernetes API authentication or new
-  credentials.
-- As a MicroShift developer, I want to add future bounded collectors to one
-  owned endpoint without adding another listener or patching kube-apiserver.
 
 ### Goals
 
+- Provide one MicroShift-owned, loopback-only endpoint for MicroShift-specific
+  metrics, with certificate health as its first collector.
 - Expose the managed certificate inventory's dates and existing five statuses.
 - Read public certificates and pending metadata without changing certificate
   state or reading private keys.
-- Serve cached observations independently of kube-apiserver readiness.
+- Serve cached observations independently of kube-apiserver readiness after
+  certificate initialization, while the MicroShift process remains running.
 - Make collection failures and observation freshness explicit.
 - Keep dependencies, configuration, labels, and extension points small.
 
 ### Non-Goals
 
-- Automatic renewal, activation, recovery, or changes to restart policy.
+- Changes to certificate renewal, activation, recovery, or certificate-driven
+  restart policy.
 - An endpoint that survives MicroShift exit or early initialization failure.
 - Reusing the API-server `/metrics` handler or the global Prometheus registry.
-- Remote listening, a Kubernetes Service/Route, or Kubernetes authentication.
+- Exposing this metrics endpoint on non-loopback interfaces, through a
+  Kubernetes Service/Route, or with Kubernetes authentication.
 - An embedded OTel SDK, OTLP receiver, exporter process, or systemd unit.
 - Certificate events, live TLS probing, or monitoring arbitrary workload and
   customer-supplied certificates outside the managed inventory.
-- A new status enum, configurable thresholds, or a new persistent status API.
+- New certificate statuses or configurable status thresholds; the collector uses
+  the existing certificate statuses and thresholds. No Kubernetes certificate
+  status resource or persistent local observation store is added. Existing
+  certificate lifetime configuration remains supported.
 - Backend alert evaluation, daily report generation, or remote export by
   MicroShift.
 
@@ -161,8 +170,7 @@ monitoring, component metrics, or cluster-monitoring-operator configuration.
 MicroShift is the target. Collection requires no additional pod and works
 without an installed OTel Collector. Disconnected deployments can scrape
 locally; remote delivery is the collector's responsibility when connectivity is
-available. OpenShift single-node deployments that do not run MicroShift are
-unchanged. Validate both supported MicroShift CPU architectures and RPM/bootc
+available. Validate both supported MicroShift CPU architectures and RPM/bootc
 installations, including SELinux enforcing mode.
 
 #### OpenShift Kubernetes Engine
@@ -250,6 +258,14 @@ One background worker refreshes the snapshot immediately and every minute.
 Scrapes read an immutable snapshot protected by a short mutex; they do not read
 files, acquire certificate locks, generate keys, or invoke CLI commands.
 
+The collection-success gauge reports whether the latest completed refresh read
+both inventory and pending metadata successfully. The last-success timestamp
+records the time of the last complete success. These describe observation
+health, not certificate health or process uptime. The listener can serve before
+the first observation completes, and successful startup does not guarantee later
+reads. The table describes the existing metric families, not separate error
+metrics.
+
 | Latest observation                               | Certificate series           | Pending gauge   | Collection success | Last success |
 | ------------------------------------------------ | ---------------------------- | --------------- | ------------------ | ------------ |
 | Before the first observation                     | Omitted                      | Omitted         | 0                  | 0            |
@@ -258,12 +274,23 @@ files, acquire certificate locks, generate keys, or invoke CLI commands.
 | Pending metadata unreadable or invalid           | Current snapshot if readable | Omitted         | 0                  | Unchanged    |
 | Lock unavailable or activation requires recovery | Omitted                      | Omitted         | 0                  | Unchanged    |
 
-Do not retain old certificate values after a completed failed refresh or convert
-unknown state to healthy. Retain only the last-success timestamp across failed
-refreshes. If a refresh itself stalls, scrapes continue to return the previous
-snapshot; consumers must check its age, not only the success gauge. Wall-clock
-changes can affect both freshness and certificate status and must be considered
-when diagnosing alerts. The last-success value resets on process restart.
+- If an inventory read fails, the completed refresh removes certificate series
+  and reports collection success as 0. Previous backend samples remain
+  historical data and must not be interpreted as current certificate health.
+- If only pending metadata fails, certificate series come from the current
+  successful inventory read. Pending state is omitted as unknown, and collection
+  success is 0 because the observation is incomplete.
+- If a refresh stalls, it has not published a new snapshot. Scrapes continue to
+  return the previous snapshot, which may still report collection success as 1.
+
+For example, an observation succeeds at 12:00 and the next read stalls. HTTP
+scrapes still succeed, but the last-success timestamp remains at 12:00. Repeated
+scrapes do not establish that collection is progressing; consumers must check
+the age of the last complete success as well as the success gauge.
+
+The last-success timestamp is retained across failed refreshes and resets to
+zero on process restart. Wall-clock changes can affect both freshness and
+certificate status and must be considered when diagnosing alerts.
 
 #### Listener ownership and lifecycle
 
@@ -276,22 +303,30 @@ independently and cancels their contexts on shutdown. Do not register the global
 Go/process or Kubernetes registries implicitly. Collectors must publish cached,
 bounded observations rather than doing blocking I/O in `Collect`.
 
+Each collector owns its data dependencies and unavailable-data behavior. A
+future collector needing API access must wait or retry in its background work
+without blocking the listener or other collectors. This proposal does not
+implement an API-dependent collector.
+
 The listener has no etcd/API readiness dependency. It starts after startup
 certificate recovery, activation, and initialization have completed and the
 operation lock has been released. A failure before this phase means no metrics
 endpoint. A later fatal core-service failure can still stop MicroShift and the
-listener; this proposal does not change that policy.
+listener; this proposal does not change that policy. This shared process
+lifetime is intentional. Operators must monitor scrape failure or missing nodes
+separately; core-service failure policy is not relaxed to keep metrics
+available.
 
 First-pass HTTP limits are two concurrent scrapes, a five-second metrics-handler
 timeout, five-second header-read timeout, ten-second read/write timeouts,
 thirty-second idle timeout, and 16 KiB request headers. Gather errors may still
-expose successful families from other registered collectors. Invalid configuration
-or failure to bind an enabled endpoint returns an error through the service
-manager and fails startup without reporting metrics readiness. Once the listener
-has started, a serving failure is logged without stopping the control plane.
-There is no automatic listener retry; an administrator fixes the problem and
-restarts. Operators must configure scrape-failure or missing-data alerts in their
-monitoring backend; MicroShift does not install alert rules.
+expose successful families from other registered collectors. Invalid
+configuration or failure to bind an enabled endpoint returns an error through
+the service manager and fails startup without reporting metrics readiness. Once
+the listener has started, a serving failure is logged without stopping the
+control plane. There is no automatic listener retry; an administrator fixes the
+problem and restarts. Operators must configure scrape-failure or missing-data
+alerts in their monitoring backend; MicroShift does not install alert rules.
 
 Service cancellation closes the listener and stops scheduling observations. The
 first pass uses ordinary filesystem reads: the non-blocking operation lock does
@@ -335,9 +370,6 @@ guide](https://github.com/openshift/microshift/blob/main/docs/user/howto_certifi
 - **Resource pressure:** refresh once per minute, bound labels and requests,
   replace snapshots, and keep scrape work memory-only. Measure overhead on
   supported edge hardware before settling resource budgets.
-- **Process coupling:** metrics disappear with MicroShift. Operators must
-  monitor scrape failure or missing nodes separately; do not relax core-service
-  failure policy just to keep this listener alive.
 - **Platform policy:** verify binding and public-PKI reads on SELinux-enforcing
   RPM and bootc hosts. No policy change is assumed necessary or approved here;
   add only a demonstrated, narrowly scoped permission if testing requires it.
@@ -509,9 +541,11 @@ as zero or a successful HTTP response as proof of healthy certificates.
    diagnose that failure through the existing logs and certificate CLI.
 3. Scrape locally without a proxy. Check collection success and last-success age
    before interpreting certificate metrics; account for system clock changes.
-4. Use `microshift certs status` for detailed active and pending information.
-   Lock contention can temporarily make collection unavailable during a renewal;
-   allow a subsequent refresh after that operation finishes.
+4. Use `microshift certs status` to investigate collection failures and inspect
+   active and pending information. The collector does not log individual
+   observation errors. Lock contention can temporarily make collection
+   unavailable during a renewal; allow a subsequent refresh after that operation
+   finishes.
 5. Do not delete or repair certificate transaction files to restore metrics. Use
    documented certificate administration and startup recovery procedures.
 6. If local scraping works but fleet data is missing, investigate the optional
