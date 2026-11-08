@@ -111,7 +111,7 @@ The user interface will be redesigned, with a new **Observe > Alerting** page th
 - Clicking on a link within the summary will automatically filter the main table by the selected layer and severity (e.g., clicking on the number of critical alerts under 'core' will filter the table by `Layer: Cluster` and `Severity: Critical`).
 
 **Table**
-- The table will list all firing alert messages.
+- The table will list all firing alerts.
 - It will have multiple sorting options: primary sort by **Severity**, secondary by **Layer**, and tertiary by **Component**.
 - If a user switches to a specific layer tab, the **Component** will become the secondary sort.
 - The table will be responsive. On smaller screens, some names will be shortened and the **State** column will be automatically hidden as needed.
@@ -158,6 +158,7 @@ This tab will include sub-tabs for **Alerting rules**, **Silence rules**, and **
 
 **Create an Alerting Rule**
 - This will be a wizard-based process.
+- As they do today, users choose in the creation flow whether the rule queries platform metrics or user workload metrics. The choice determines which monitoring stack evaluates the rule and where the `PrometheusRule` resource is created. Cloning an existing alerting rule pre-fills the selection from the source rule.
 - Users can add new components. The layer is chosen from the predefined set of allowed values.
 - The "Append to" selection will determine which Kubernetes PrometheusRule Custom Resource will contain the alert definition. It should also include a default layer selection.
 - Users can search by namespace or rule name, or create a new Prometheus Rule.
@@ -166,8 +167,8 @@ This tab will include sub-tabs for **Alerting rules**, **Silence rules**, and **
 
 **Edit an Alerting Rule**
 - For user-defined rules
-    - If the PrometheusRule is managed by an operator, the user will only be able to silence the alert.
-    - If the PrometheusRule is managed manually, the pre-populated wizard will allow editing all fields.
+    - If the PrometheusRule resource has an owner (e.g. an operator), the user will only be able to silence the alert.
+    - Otherwise the pre-populated wizard will allow editing all fields.
 - For platform-defined rules, the wizard will have limited editable fields.
 - A toast notification will be presented after the action is completed.
 
@@ -365,7 +366,8 @@ Key flows:
 - Alerting API aggregates rule definitions and alert instances using an in-memory relabeled rules cache (built from PrometheusRules + reconciled AlertRelabelConfig Secret) to present a post-relabel view (labels, disabled status, effective severity, classification) in list/detail endpoints.
 - Alerting API reads/writes `PrometheusRule` and `AlertRelabelConfig` using the Kubernetes API.
 - Alerting API queries alerts/rules using Thanos/Prometheus. For cluster-scoped queries (admin), the Alerting API uses the unrestricted Thanos endpoint (port 9091). For namespace-scoped queries (developer), it uses the tenant-aware endpoint (port 9093). The endpoint is selected based on the caller's RBAC permissions.
-- All requests fanned out from the Alerting API to Thanos/Prometheus and Kubernetes APIs forward the caller's bearer token to enforce proper RBAC. No credentials are stored or cached by the Alerting API.
+- All user-facing requests fanned out from the Alerting API to Thanos/Prometheus and Kubernetes APIs forward the caller's bearer token to enforce proper RBAC. No credentials are stored or cached by the Alerting API.
+- The in-memory relabeled rules cache is maintained through read-only watches on `PrometheusRule` and `AlertRelabelConfig` resources, performed by the Alerting API's service account. This does not bypass user RBAC: the service account is granted only read access for cache maintenance, and the Alerting API applies the caller's namespace scoping before serving any data from the cache (namespace-scoped users only receive rules and alerts for namespaces they can access, mirroring the tenancy enforced by the Thanos querier). Write operations and alert/rule instance queries are always executed with the caller's forwarded token.
 
 Rationale for server‑side aggregation:
 - Centralizes a canonical, post‑relabel “effective view” and transactional write path: the relabel computation (merging `PrometheusRule` definitions with `AlertRelabelConfig` state) is performed server‑side once and cached, while query results are still filtered per‑user based on forwarded credentials. This mediates validated, conflict‑aware updates to `PrometheusRule` and `AlertRelabelConfig`, preventing drift and duplicated logic across UIs.
