@@ -13,7 +13,7 @@ api-approvers:
   - "@jacobbaungard"
   - "@jgbernalp"
 creation-date: 2026-01-12
-last-updated: 2026-06-08
+last-updated: 2026-11-09
 tracking-link:
   - "https://issues.redhat.com/browse/CNV-46597"
   - "https://issues.redhat.com/browse/CNV-62972"
@@ -104,6 +104,8 @@ Fleet administrators struggle with generic per‑cluster alerting rules that cre
 - Deep RBAC beyond native Kubernetes permissions.
 - Operators reacting to user modifications (operator code remains unchanged).
 - Supporting monitoring stacks without the PrometheusRule CRD (e.g., raw Prometheus with file-based rules). prometheus-operator is the minimum spoke requirement.
+- Managing ConfigMap-authored hub alert rules or converting them to PrometheusRules. The hub rule-management API supports PrometheusRules only.
+- Implementing AlertRelabelConfig support for ACM predefined hub rules. ACM observability may add it independently; this feature does not depend on it.
 
 ## Related Enhancement Proposals
 - [Alert Overrides](https://github.com/openshift/enhancements/blob/master/enhancements/monitoring/alert-overrides.md)
@@ -147,7 +149,7 @@ However, the `ALERTS` metric in hub Thanos has significant limitations compared 
 - **No ARC-applied labels**: The `ALERTS` metric is produced by Prometheus rule evaluation, before ARCs are applied. It lacks `openshift_io_alert_rule_id`, `openshift_io_alert_rule_component`, and `openshift_io_alert_rule_layer`.
 - **No silence awareness**: Silenced alerts still appear as `alertstate="firing"` in the `ALERTS` metric — Prometheus does not know about Alertmanager silences.
 - **`managed_cluster` is stripped**: The metrics-collector strips the `managed_cluster` label during federation. Only the `cluster` label (added by MCOA addon write relabel configs) is available on hub Thanos.
-- **No disabled alert awareness**: ARC-dropped alerts never fire, so they are absent from `ALERTS`, but there is no way to distinguish "never fired" from "disabled by ARC."
+- **No disabled alert awareness**: `alert_relabel_configs` only affect alerts dispatched to Alertmanager, not the rules evaluated by Prometheus — ARC-dropped alerts still fire and appear in `ALERTS` like any other alert, so there is no way to distinguish alerts that are delivered from those dropped (disabled) by ARC.
 
 These limitations are why this proposal introduces the `alerts_effective_active_at_timestamp_seconds` metric — it carries post-ARC labels, silence state (`alertstate=silenced`), and excludes disabled alerts, providing the enriched historical view that the raw `ALERTS` metric cannot.
 
@@ -222,9 +224,21 @@ Hub AM silence CRUD is already implemented in the monitoring-plugin via the Aler
 
 > Full detail: [Hub Rule Management](multi-cluster-hub-rule-management.md)
 
-Hub alerting rules are evaluated by MCOA ThanosRuler over federated data from hub Thanos. Today, ThanosRuler is deployed via the Observatorium operator with ConfigMap-based rule files. This proposal requires MCO to adopt prometheus-operator's `ThanosRuler` CR with `ruleSelector` for `PrometheusRule` CRDs — the same CRD used on spokes. This provides per-rule ownership, GitOps annotations, and optimistic concurrency, consistent with the single-cluster approach.
+Hub alerting rules are evaluated over federated data by MCOA's Thanos Operator stack.
+Its ruler is a `monitoring.thanos.io/v1alpha1` `ThanosRuler` with `spec.ruleConfigSelector`, not prometheus-operator's `ThanosRuler` with `ruleSelector`.
+The supported deployment must enable Thanos Operator's PrometheusRule discovery.
+The API manages only `monitoring.coreos.com/v1` PrometheusRules in the ruler's namespace, normally `open-cluster-management-observability`,
+with both metadata labels: `app.kubernetes.io/part-of: multicluster-observability-addon` and `operator.thanos.io/prometheus-rule: "true"`.
 
-**Classification labels**: For operator default rules, a static mapping is used (MVP); for user-created rules, `component` and `layer` are written as labels in the rule definition. Future: `alertRelabelConfigs` support on ThanosRuler.
+Legacy ConfigMap-authored rules are not supported by the rule-management API, and this feature does not convert them.
+Thanos Operator may generate ConfigMaps internally from selected PrometheusRules; these remain operator implementation details and are not managed by the API.
+ACM observability owns providing predefined hub rules as PrometheusRules. Only defaults provided in that form appear in the rule-management view.
+This does not restrict visibility of alerts already delivered to hub Alertmanager.
+
+**Classification labels**: For ACM-provided default PrometheusRules, the backend classifier supplies component and layer metadata without modifying operator-owned rules.
+For user-created rules, classification labels are written in the rule definition.
+ACM observability may independently add AlertRelabelConfig support for its predefined hub rules; that work is out of scope and is not a prerequisite.
+This proposal does not offer individual hub-rule disabling through ARC. Hub Alertmanager silences remain available.
 
 ### Hub Alertmanager as Centralized Notification Hub (summary)
 
@@ -247,10 +261,12 @@ Summary of endpoints (same API surface on hub and spokes):
 | `/alerting/rules` | PATCH/DELETE | Update / delete a hub rule |
 | Alertmanager proxy | GET/POST/DELETE | List / create / expire silences (already implemented via AM proxy) |
 
-#### Implementation impact (MCO adoption)
+#### Implementation impact (ACM observability integration)
 
 - The hub monitoring-plugin uses the same `GET /alerting/alerts` API backed by hub Alertmanager (primary, near real-time) and enriches with spoke rule metadata via the Rule Metadata Cache.
-- Hub rule management uses `PrometheusRule` CRDs via the same `POST/PATCH/DELETE /alerting/rules` API — requires MCO to adopt prometheus-operator's `ThanosRuler` CR.
+- Hub rule management uses PrometheusRules via the same `POST/PATCH/DELETE /alerting/rules` API against the supported MCOA Thanos Operator stack.
+  It uses the namespace and effective selector described above; create operations add both discovery labels, and updates preserve them.
+- ACM observability owns stack enablement and predefined-rule delivery. This feature does not migrate ruler controllers, convert ConfigMap rules, or implement hub ARC support.
 
 ### Data Model and Metrics
 
@@ -264,6 +280,7 @@ The Fleet Health Heatmap is the primary fleet landing page, providing at-a-glanc
 
 ### Migration
 - Existing alerting rules should have an indication of missing recommended labels in the UI.
+- This feature does not migrate ConfigMap-authored hub rules. Rule management requires PrometheusRules selected by the supported MCOA ruler.
 
 ### GitOps / Argo CD Compliance
 - All generated `PrometheusRule` and `AlertRelabelConfig` resources remain declarative and suitable for committing to Git

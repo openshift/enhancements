@@ -13,7 +13,7 @@ api-approvers:
   - "@jacobbaungard"
   - "@jgbernalp"
 creation-date: 2026-03-18
-last-updated: 2026-06-08
+last-updated: 2026-11-09
 tracking-link:
   - "https://issues.redhat.com/browse/CNV-46597"
   - "https://issues.redhat.com/browse/CNV-62972"
@@ -24,23 +24,32 @@ see-also:
 ---
 # Multi-Cluster Hub Rule Management
 
-This proposal covers the management of hub alerting rules — creating, updating, disabling, and deleting rules evaluated by ThanosRuler on the hub over federated metrics. It is Part 2 of the [Multi-Cluster Alerts UI Management](multi-cluster-alerts-ui-management.md) umbrella proposal.
+This proposal covers the management of hub alerting rules: creating, updating, and deleting rules evaluated by ThanosRuler on the hub over federated metrics.
+It is Part 2 of the [Multi-Cluster Alerts UI Management](multi-cluster-alerts-ui-management.md) umbrella proposal.
 
 For shared context on the existing alert forwarding infrastructure, alert data storage lifecycle, and the ACM alerting developer preview, see the [Current State](multi-cluster-alerts-ui-management.md#current-state) section of the parent proposal.
 
 ## Summary
 
-Hub alerting rules are evaluated by MCOA ThanosRuler over federated data from hub Thanos. They produce alerts that are sent to the hub Alertmanager alongside spoke-forwarded alerts. This proposal defines the API and storage model for managing these rules using `PrometheusRule` CRDs — the same CRD used on spoke clusters — requiring MCO to adopt prometheus-operator's `ThanosRuler` CR with `ruleSelector`.
+Hub alerting rules are evaluated by MCOA ThanosRuler over federated data from hub Thanos.
+They produce alerts that are sent to the hub Alertmanager alongside spoke-forwarded alerts.
+This proposal manages only `monitoring.coreos.com/v1` `PrometheusRule` resources.
+It targets MCOA's Thanos Operator stack, whose `monitoring.thanos.io/v1alpha1` `ThanosRuler` selects rules using `spec.ruleConfigSelector`.
+It does not require adoption of prometheus-operator's `ThanosRuler` CR.
 
 The hub monitoring-plugin reuses the **same single-cluster Alerting API** (`/api/v1/alerting/*`) — there are no separate hub-specific endpoints. On the hub, the monitoring-plugin is configured to point to the hub Alertmanager, which receives both spoke-forwarded alerts and ThanosRuler alerts. The enrichment pipeline adds spoke rule metadata to produce a unified, classified fleet view through the same API surface.
 
 The hub manages spoke rules via **direct Kubernetes API** through ManagedClusterProxy as the primary path — working on any managed cluster (OCP or non-OCP) with the PrometheusRule CRD. When the spoke Alerting API is available, it is used as an optimization for enriched operations. See the [parent proposal](multi-cluster-alerts-ui-management.md#hub-centric-spoke-management-via-direct-kube-api) for details.
 
-> **Prerequisite — MCO migration required:** This proposal depends on MCO migrating from the Observatorium-based ThanosRuler deployment to prometheus-operator's `ThanosRuler` CR with `ruleSelector`. Until that migration is complete, hub rule management via the Alerting API cannot ship. See [Open Questions](#open-questions) for timeline considerations.
+> **Deployment prerequisite:** The hub must use MCOA's Thanos Operator stack with PrometheusRule discovery enabled.
+> The legacy Observatorium-based ruler with ConfigMap-authored rules is not a supported target for hub rule management.
+> Enabling and delivering the supported ACM observability stack is an ACM responsibility, not a controller migration implemented by this feature.
 
 ## Motivation
 
-Fleet administrators need to define alerting rules that evaluate over federated data from multiple clusters on the hub's ThanosRuler. Today, hub rules are managed via raw ConfigMap edits with no API — inconsistent with the single-cluster experience where rules are managed as `PrometheusRule` CRDs via the Alerting API.
+Fleet administrators need to define alerting rules that evaluate over federated data from multiple clusters on the hub's ThanosRuler.
+Legacy hub deployments use ConfigMap-authored rules.
+MCOA's Thanos Operator stack already supports PrometheusRule discovery; this proposal adds the API and UI management experience for those resources.
 
 ### User Stories
 
@@ -57,42 +66,91 @@ Fleet administrators need to define alerting rules that evaluate over federated 
 ### Non-Goals
 
 - Detailed spoke rule management implementation (this document covers hub rules; spoke rules are managed via direct kube API through ManagedClusterProxy, or via the spoke Alerting API when available — see the [parent proposal](multi-cluster-alerts-ui-management.md#hub-centric-spoke-management-via-direct-kube-api) for the hub-centric spoke management architecture).
-- Hub rule disable mechanism (users silence hub alerts or create replacement rules; see [Open Questions](#open-questions)).
+- Reading, creating, updating, or deleting ConfigMap-authored alert rules, including a compatibility API or conversion of legacy rules to PrometheusRules.
+- Implementing AlertRelabelConfig support for ACM predefined hub rules. ACM observability may add that support independently; it is not a dependency of this feature.
+- Hub rule disable mechanism. This proposal does not add a hub ARC pipeline; users can silence hub alerts or delete custom rules.
 - Notification routing configuration for hub Alertmanager.
 
 ## Proposal
 
 ### Hub Rule Management
 
-Hub alerting rules are evaluated by MCOA ThanosRuler over federated data from hub Thanos. Today, ThanosRuler is deployed via the Observatorium operator, which only supports ConfigMap-based rule files. This proposal requires MCO to adopt prometheus-operator's `ThanosRuler` CRD, which natively supports selecting `PrometheusRule` CRDs via `ruleSelector` — the same pattern used by the `Prometheus` CR on spokes. This provides a consistent approach between single-cluster and multi-cluster rule management.
+The supported hub evaluator is Thanos Operator's `ThanosRuler`, not prometheus-operator's similarly named resource.
+MCOA creates a ruler named `mcoa` in `open-cluster-management-observability`.
+The relevant ruler configuration is:
 
-#### Current hub rule storage
+```yaml
+apiVersion: monitoring.thanos.io/v1alpha1
+kind: ThanosRuler
+metadata:
+  name: mcoa
+  namespace: open-cluster-management-observability
+spec:
+  ruleConfigSelector:
+    matchLabels:
+      app.kubernetes.io/part-of: multicluster-observability-addon
+```
 
-| ConfigMap | Key | Content | Ownership |
-|-----------|-----|---------|-----------|
-| `thanos-ruler-default-rules` | `default_rules.yaml` | Default alerts (KubePersistentVolumeFillingUp, ViolatedPolicyReport, Thanos health) and recording rules (cluster aggregations for Grafana). Always present. | MCO operator — read-only, operator-managed. The operator overwrites on reconciliation. |
-| `thanos-ruler-custom-rules` | `custom_rules.yaml` | User-defined custom alerting and recording rules. Created on demand. MCO controller watches for updates. | User-managed (direct ConfigMap edit) or GitOps-managed (ArgoCD manages the ConfigMap). |
+This is a configuration excerpt, not a complete ruler manifest. The Alerting API does not create or modify the ruler.
+In the current MCOA implementation, this stack is enabled by the `mcoa-thanos-operator: "true"` annotation on the applicable `AddOnDeploymentConfig`.
+MCOA deploys Thanos Operator with `--enable-feature=prometheus-rule`.
+These are deployment prerequisites, not evidence that every ACM installation already runs this stack.
+
+#### PrometheusRule discovery contract
+
+The hub API creates and manages `monitoring.coreos.com/v1` `PrometheusRule` resources in the ruler's namespace,
+normally `open-cluster-management-observability`. The current controller does not discover rules across namespaces.
+Each managed hub PrometheusRule must carry both of these **resource metadata labels**:
+
+```yaml
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: example-hub-alerts
+  namespace: open-cluster-management-observability
+  labels:
+    app.kubernetes.io/part-of: multicluster-observability-addon
+    operator.thanos.io/prometheus-rule: "true"
+```
+
+This excerpt shows the resource identity and discovery metadata; alert groups are supplied in `spec.groups`.
+The first label matches MCOA's `spec.ruleConfigSelector`; the second is a required label added to the effective selector by Thanos Operator.
+These are not labels on individual alert definitions.
+
+- Create operations add both metadata labels. Updates preserve them and reject changes that would remove the rule from the supported ruler's selection.
+- Hub rule listing uses the same API group, namespace, and effective selector so it does not present unrelated PrometheusRules as hub-evaluated rules.
+- API validation and ownership checks apply before writes. CRUD success alone does not establish that the ruler has loaded or evaluated a rule.
+- If the required stack or discovery capability is unavailable, hub rule management reports that it is unsupported rather than falling back to ConfigMap writes.
+
+Thanos Operator converts selected PrometheusRules into operator-managed ConfigMaps containing rule files for the evaluator.
+Those generated ConfigMaps are an internal implementation detail, not an API source of truth.
+The Alerting API neither parses nor edits them, and it does not support legacy ConfigMap-authored rules.
+This restriction concerns rule management; alerts already delivered to hub Alertmanager remain visible through the alert read path regardless of their rule storage.
+
+Implementation references:
+- [MCOA ruler construction and selector](https://github.com/stolostron/multicluster-observability-addon/blob/cfdf4ae9234f50c6a07f6cccf1955e599282eb79/internal/metrics/thanos/objects.go)
+- [MCOA operator feature flags](https://github.com/stolostron/multicluster-observability-addon/blob/cfdf4ae9234f50c6a07f6cccf1955e599282eb79/internal/addon/manifests/charts/mcoa/charts/metrics/templates/thanos-operator/operator/thanos-operator-deployment.yaml)
+- [PrometheusRule discovery in MCOA's pinned Thanos Operator](https://github.com/thanos-community/thanos-operator/blob/1a9a0ab18a9f/internal/controller/thanosruler_controller.go)
 
 #### Default hub alerts: cluster not reporting
 
-Two related alerts already exist in the hub default rules (`thanos-ruler-hub-metrics-rules` ConfigMap) and use `acm_managed_cluster_labels` as the authoritative cluster inventory:
+The legacy hub default rules include two related alerts that use `acm_managed_cluster_labels` as the authoritative cluster inventory:
 
 - **`ManagedClusterMetricsMissing`** — detects managed clusters whose observability addon is available but no metrics are being received. Per-cluster alert (has `cluster` label), appears in the Fleet Health Heatmap.
 - **`ObservabilityHubInventoryMissing`** — detects when `acm_managed_cluster_labels` itself is absent, indicating MCE's metrics pipeline is broken.
 
-When MCO adopts prometheus-operator's `ThanosRuler` CR, both move from ConfigMap entries to operator-managed `PrometheusRule` CRDs (`managedBy: operator`).
+These predefined rules are exposed in the rule-management API only when ACM observability supplies them as PrometheusRules selected by the supported hub ruler.
+The feature does not convert their existing ConfigMap definitions or assume that such conversion has already happened.
+Providing predefined rules as PrometheusRules is owned by ACM observability.
 
 #### Hub rule ownership model
 
 The API uses `PrometheusRule` CRDs — the same CRD used on spoke clusters. This reuses the same API code and CRD patterns as the single-cluster Alerting API and provides per-rule ownership, GitOps annotations, and optimistic concurrency.
 
-**Prerequisite — MCO adopts prometheus-operator `ThanosRuler` CR:**
-
-MCO migrates from Observatorium-based ThanosRuler to prometheus-operator's `ThanosRuler` CR with `ruleSelector`. This enables ThanosRuler to read `PrometheusRule` CRDs directly — no ConfigMap bridge needed.
-
-- The MCO operator creates `PrometheusRule` CRDs for default rules (with `managedBy: operator` label and ownerReferences) instead of writing ConfigMaps directly
-- `POST /alerting/rules` creates a `PrometheusRule` CRD in `open-cluster-management-observability` for custom hub rules
-- `GET /alerting/rules` lists hub `PrometheusRule` CRDs (operator defaults + user custom) and, via the Rule Metadata Cache, spoke rule metadata — providing a unified fleet view through the same API
+- ACM-provided default PrometheusRules are read-only and identified through operator ownership metadata (`managedBy: operator` and ownerReferences).
+- `POST /alerting/rules` creates a PrometheusRule in `open-cluster-management-observability` with both discovery labels for custom hub rules.
+- `GET /alerting/rules` lists hub PrometheusRules matching the discovery contract (ACM-provided defaults, where available, and custom rules).
+  The Rule Metadata Cache adds spoke rule metadata to the unified fleet view. ConfigMap-authored rules are not included in this rule-management view.
 - `PATCH /alerting/rules` updates a hub `PrometheusRule` CRD. Blocked for operator default rules.
 - `DELETE /alerting/rules` deletes a hub `PrometheusRule` CRD. Blocked for defaults.
 - The `alertRuleId` hash inputs for hub rules are: `kind` (alert/record) + alertname + PromQL expression + `for` duration + sorted business label key-value pairs (excluding `openshift_io_*` and `alertname`). This is consistent with the single-cluster approach defined in the [alert-rule-classification-mapping](alert-rule-classification-mapping.md) enhancement, where the canonical payload is `kind + name + expr + for + labels_block` and the ID is `rid_<base64url(SHA256(canonical_payload))>`. Annotations are excluded from the hash, so annotation-only changes do not alter the rule ID.
@@ -110,7 +168,9 @@ MCO migrates from Observatorium-based ThanosRuler to prometheus-operator's `Than
 
 #### Hub rule disable mechanism
 
-Hub ThanosRuler has no ARC (AlertRelabelConfig) pipeline, so there is no equivalent of the spoke-side `action: Drop` mechanism. Disabling individual hub rules is not supported. Instead:
+This feature does not implement a hub ARC (AlertRelabelConfig) pipeline or the spoke-side `action: Drop` mechanism for hub rules.
+Individual hub-rule disabling is not offered by this proposal. ACM observability may independently add ARC support for its predefined hub rules;
+this proposal neither implements nor depends on that work. Until supported separately:
 
 - To suppress notifications from a hub alert, users create a **silence** on the hub Alertmanager targeting that alert (already supported today via the Alertmanager API and UI).
 - To replace a default hub rule's behavior, users create a **custom hub rule** with the desired expression/thresholds via `POST /alerting/rules` and silence the original default alert.
@@ -124,15 +184,18 @@ On spokes, classification works at two levels (see the [alert-rule-classificatio
 1. **ARC-stamped labels on alerts**: When a classification override or severity change is applied via the Alerting API, an `AlertRelabelConfig` CR is created. ARCs do not change the alerting rules evaluated by Prometheus — they modify the alert labels sent to Alertmanager. Prometheus applies ARC relabel configs globally before dispatching alerts to any Alertmanager, so these labels (`openshift_io_alert_rule_id`, `openshift_io_alert_rule_component`, `openshift_io_alert_rule_layer`) are present on alerts sent to hub AM via `additionalAlertmanagerConfigs`. Only alerts with an associated ARC (or explicit classification labels in their rule definition) have these labels.
 2. **Server-side classifier enrichment**: The monitoring-plugin backend computes `alertComponent` and `alertLayer` as additive enrichment fields for ALL rules using classifier matchers, rule-scoped default labels, and ARC overrides. These fields are returned by the Alerting API (`GET /alerting/rules`, `GET /alerting/alerts`) but are not labels on the alert itself.
 
-The hub-side classifier (`matcher.go`) computes classification for hub alerts locally using the same logic as spokes. Hub ThanosRuler has no ARC pipeline, so hub alerts arrive at hub AM with only the labels explicitly defined in the rule.
+The hub-side classifier (`matcher.go`) computes classification for hub alerts locally using the same logic as spokes.
+This proposal does not add hub-side ARC processing; classification remains available without it.
 
-**Operator default rules (`thanos-ruler-default-rules`):**
+**ACM predefined rules exposed as PrometheusRules:**
 
-The MCO operator owns these rules and overwrites them on every reconciliation. Adding classification labels directly to the rule definitions would be overwritten. For MVP, the console backend maintains a static mapping of known default rule alertnames to their classification (`component`, `layer`). This is acceptable because the default rule set is small and changes only across operator upgrades.
+ACM observability owns these definitions. The Alerting API treats them as read-only and does not modify their labels.
+For MVP, the console backend uses its classifier mapping of known default rule alertnames to compute component and layer metadata.
+This is API enrichment and does not add labels to alerts delivered to Alertmanager.
 
-For a future iteration, support for `alertRelabelConfigs` on ThanosRuler should be added so that the MCO operator can configure classification labels for default rules via relabeling — the same mechanism used for the user-defined monitoring stack. This has already been requested for the user-defined monitoring stack as well.
+ACM observability may add AlertRelabelConfig support for its predefined hub rules independently. That implementation and its delivery timeline are out of scope.
 
-**User-created custom rules (`thanos-ruler-custom-rules`):**
+**User-created custom PrometheusRules:**
 
 When users create hub rules via `POST /alerting/rules`, the API accepts `component` and `layer` as optional metadata and writes them as labels in the `PrometheusRule` CRD's rule definition — the same convention used for single-cluster user-defined rules. ThanosRuler evaluates the rule and the resulting alert carries these labels natively to hub AM. Users are expected to include classification labels in their rule definitions, consistent with how it is done on single-cluster.
 
@@ -145,8 +208,10 @@ Base path: `/api/v1/alerting`
 The hub monitoring-plugin reuses the **same Alerting API** used on single clusters. The monitoring-plugin on the hub is configured to point to the hub Alertmanager as its Alertmanager backend. This means:
 
 - **`GET /alerting/alerts`** returns alerts from hub Alertmanager — which includes both spoke-forwarded alerts (with `managed_cluster` label) and hub ThanosRuler alerts. The enrichment pipeline (classifier + Rule Metadata Cache) adds classification and rule metadata from spoke clusters, exactly as described in the [Alert Visualization](multi-cluster-alerts-visualization.md) proposal.
-- **`GET /alerting/rules`** returns hub alerting rules from `PrometheusRule` CRDs in the hub namespace — both operator-owned defaults and user-created custom rules. Additionally, the Rule Metadata Cache provides rule metadata from spoke clusters. For spokes with the Alerting API, metadata is fetched via `GET /alerting/rules` through ManagedClusterProxy. For spokes without the Alerting API (OCP or non-OCP), rule metadata is retrieved directly from `PrometheusRule` CRDs via the kube API. Both paths feed the same unified rule view.
-- **`POST /alerting/rules`** creates a hub alerting rule (creates a `PrometheusRule` CRD in the hub namespace).
+- **`GET /alerting/rules`** returns hub PrometheusRules matching the discovery contract, including ACM-provided defaults where available and custom rules.
+  The Rule Metadata Cache adds spoke metadata, using the spoke Alerting API through ManagedClusterProxy where available, or direct PrometheusRule reads otherwise.
+  Both paths feed the unified rule view; ConfigMap-authored hub rules are excluded.
+- **`POST /alerting/rules`** creates a hub PrometheusRule in the supported ruler's namespace with both required metadata labels.
 - **`PATCH /alerting/rules`** updates a hub rule (only custom/unmanaged; blocked for operator-managed and GitOps-managed).
 - **`DELETE /alerting/rules`** deletes a hub rule (only custom/unmanaged).
 
@@ -154,6 +219,8 @@ Multi-cluster extensions are handled via query parameters on the same endpoints 
 
 - Semantics:
   - Request/response schemas are identical to the single-cluster Alerting API and include `ruleId`, `labels`, `annotations`, `mapping` (component/impactGroup), `source` (`platform`|`user`|`hub`), `managedBy` (`operator`|`gitops`|`""`), and `disabled` flags.
+  - Shared response fields do not imply identical write capabilities. Hub rules have no disable operation in this proposal;
+    the UI must not offer a disable action based solely on the presence of the `disabled` field.
   - For spoke alerts, the enrichment pipeline adds rule metadata (`alertRuleId`, `source`, `managedBy`, `prometheusRuleName`) from the Rule Metadata Cache — populated by calling each spoke's Alerting API via ManagedClusterProxy.
   - Read paths keep Prometheus/Thanos compatibility where applicable.
 
@@ -162,16 +229,19 @@ This approach has several advantages:
 2. **Consistency** — the hub monitoring-plugin behaves like any spoke monitoring-plugin, just backed by hub AM which aggregates all alerts.
 3. **Natural enrichment** — the hub instance adds spoke rule metadata as additive enrichment fields on the same response schema.
 
-#### Implementation impact (MCO adoption)
+#### Implementation impact (ACM observability integration)
 
-This proposal requires MCO to migrate from the Observatorium-based ThanosRuler deployment to prometheus-operator's `ThanosRuler` CR with `ruleSelector` for `PrometheusRule` CRDs. As part of this migration, the MCO operator creates `PrometheusRule` CRDs for default rules (instead of writing ConfigMaps directly). The Alerting API then operates entirely on `PrometheusRule` CRDs — no ConfigMap parsing needed.
+Use MCOA's existing Thanos Operator stack and its PrometheusRule discovery contract.
+ACM observability owns enabling that stack and supplying predefined rules as PrometheusRules where they should appear in rule management.
+The Alerting API operates entirely on PrometheusRules; it does not migrate legacy rules, manage ConfigMap rule files, or implement ARC support for ACM predefined hub rules.
 
 #### Implementation impact (monitoring-plugin on hub)
 
 The hub monitoring-plugin is deployed with the same Alerting API code as on spokes, configured to use hub Alertmanager as its backend. The key differences in the hub deployment:
 
 1. **Alertmanager backend**: points to hub AM (via the `--alertmanager` flag or `UIPlugin` CR), which receives spoke-forwarded alerts and ThanosRuler alerts.
-2. **PrometheusRule target namespace**: operates on `PrometheusRule` CRDs in `open-cluster-management-observability` (hub namespace) for hub rule CRUD.
+2. **PrometheusRule target**: operates on `monitoring.coreos.com/v1` PrometheusRules in `open-cluster-management-observability`,
+   using both discovery labels described above for hub rule CRUD.
 3. **Spoke rule management**: manages spoke `PrometheusRule` CRDs via direct kube API through ManagedClusterProxy (primary path, works on all cluster types). Uses spoke Alerting API when available for validated writes and classification cache.
 4. **Rule Metadata Cache**: fetches rule metadata from spoke clusters via ManagedClusterProxy — using the spoke Alerting API where available, falling back to direct `PrometheusRule` CRD reads for older OCP and non-OCP spokes.
 5. **Classifier**: the hub-side classifier (`matcher.go`) computes classification for all alerts locally — same logic as spokes, no fan-out needed.
@@ -180,7 +250,8 @@ The hub monitoring-plugin is deployed with the same Alerting API code as on spok
 
 ### GitOps / Argo CD Compliance
 
-- All generated `PrometheusRule` and `AlertRelabelConfig` resources remain declarative and suitable for committing to Git.
+- Hub rule resources generated by this feature are declarative PrometheusRules suitable for committing to Git.
+  Spoke ARC resources follow the single-cluster model; this proposal does not generate ARCs for ACM predefined hub rules.
 - Custom hub rules are `PrometheusRule` CRDs, so per-rule ArgoCD annotations are supported for fine-grained GitOps ownership — consistent with how spoke rules are managed. GitOps-managed `PrometheusRule` CRDs are treated as read-only by the API.
 
 ### Workflow Description
@@ -225,13 +296,15 @@ TBD.
 
 - **Scope and precedence complexity**: hub vs cluster rule precedence must be deterministic. Provide clear scope indicators and UI guardrails. Document and enforce a single precedence policy in the API.
 - **RBAC and ownership across clusters**: enforce hub and per-cluster RBAC. Treat GitOps-owned resources as read-only.
-- **MCO migration dependency**: this proposal requires MCO to adopt prometheus-operator's `ThanosRuler` CR. Timeline depends on MCO team capacity. Hub rule management cannot ship until this migration is complete.
+- **Deployment and discovery mismatch**: hub rule management requires the supported MCOA Thanos Operator stack and both discovery labels.
+  Detect unsupported deployments explicitly and verify that created PrometheusRules are loaded and evaluated in end-to-end tests.
+- **Legacy rule visibility**: ConfigMap-authored rules are outside rule-management scope. Do not imply that the PrometheusRule list includes every legacy hub rule.
+  ACM observability owns providing predefined rules as PrometheusRules.
 
 ## Open Questions
 
-- **MCO migration timeline:** This proposal requires MCO to adopt prometheus-operator's `ThanosRuler` CR with `ruleSelector`. Timeline depends on MCO team capacity and willingness to migrate from the Observatorium-based deployment. Should be resolved during design review with MCO team.
-
-- **Hub rule disable mechanism:** The current design does not support disabling individual hub rules — users silence hub alerts and create custom replacement rules instead. Should we also support `alertRelabelConfigs` on ThanosRuler to enable ARC-like relabeling and `Drop` capabilities for hub alerts — the same mechanism used on spokes? This would provide a consistent disable/relabel model across hub and spokes, but requires ThanosRuler to support `alertRelabelConfigs` (which may need upstream work or MCO support). Alternatively, silencing may be sufficient for hub alerts given the small default rule set. Needs design discussion.
+- **Supported ACM versions and deployment readiness:** Which ACM release/configuration provides the Thanos Operator stack and PrometheusRule discovery contract required here?
+  Confirm with ACM observability, including availability of predefined rules as PrometheusRules. No prometheus-operator ThanosRuler migration is required by this proposal.
 
 - **Non-OCP spoke classification persistence:** Non-OCP clusters lack the AlertRelabelConfig CRD. When the hub creates or updates classification labels on spoke rules, options are: (a) embed labels directly in PrometheusRule annotations, (b) maintain a hub-side ConfigMap mapping, (c) write labels into the PrometheusRule `labels` field. Need to decide the universal approach and whether it should also replace ARC on OCP for consistency.
 
@@ -245,7 +318,15 @@ TBD.
 
 ## Test Plan
 
-TBD.
+Test hub rule management against MCOA's supported Thanos Operator deployment:
+
+- Create a hub PrometheusRule through the API and verify its API group, namespace, both discovery labels, and eventual loading and evaluation by the ruler.
+- Update and delete an unmanaged rule; verify the ruler applies the changes. Reject updates that remove required discovery labels.
+- Verify that rules in other namespaces or without the effective selector labels are not listed as managed hub rules.
+- Verify operator-owned and GitOps-owned PrometheusRules remain read-only.
+- Verify legacy rule ConfigMaps and operator-generated rule-file ConfigMaps are never parsed or modified by rule-management operations.
+- Verify an unsupported hub deployment produces an explicit unsupported-capability response rather than a successful-looking write or a ConfigMap fallback.
+- Verify custom rule CRUD, classification enrichment, and hub silences work without ARC support for ACM predefined rules; do not expose a hub disable action.
 
 ## Graduation Criteria
 
@@ -278,4 +359,3 @@ TBD.
 ## Support Procedures
 
 TBD.
-

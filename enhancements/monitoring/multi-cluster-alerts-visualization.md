@@ -53,12 +53,12 @@ Real-time alerts from spoke clusters arrive at the hub Alertmanager but lack cla
 1. Provide `GET /alerting/alerts` on the hub that assembles a unified, enriched view of all fleet alerts from hub Alertmanager — reusing the same single-cluster API.
 2. Classify all alerts (hub and spoke) using the hub-side classifier (`matcher.go`) without fan-out to spokes.
 3. Enrich alerts with rule metadata (alertRuleId, source, managedBy) via the Rule Metadata Cache.
-4. Reflect silence state on the hub alerts page — hub AM silences are natively reflected (MVP); spoke silence visibility via the silence controller is Phase 2 (see [SilenceRule CRD](multi-cluster-silence-rule-crd.md)).
+4. Reflect silence state on the hub alerts page — hub AM silences are natively reflected (MVP); spoke silence visibility via the silence controller is Phase 2 (a future `SilenceRule` CRD).
 
 ### Non-Goals
 
 - Historical alert queries (see [Alert Effective Metric](multi-cluster-alert-effective-metric.md)).
-- Silence management details — hub AM silence CRUD is already implemented; see [SilenceRule CRD](multi-cluster-silence-rule-crd.md) for a future improvement adding spoke propagation and declarative management.
+- Silence management details — hub AM silence CRUD is already implemented; a future `SilenceRule` CRD would add spoke propagation and declarative management.
 - Write operations on alert rules (see [Hub Rule Management](multi-cluster-hub-rule-management.md)).
 - UI wireframes and feature prioritization (see [UI Design](multi-cluster-alerts-ui-design.md)).
 
@@ -73,8 +73,8 @@ On the hub, `GET /alerting/alerts` must assemble a complete, post-relabel view o
 **Hub Alertmanager** (near real-time, ~30s-1min latency) is the primary data source for `GET /alerting/alerts` on the hub and the Fleet Health Heatmap. Spoke Prometheus sends alerts to hub Alertmanager via `additionalAlertmanagerConfigs` (injected by the MCOA endpoint operator). These alerts carry:
 - `managed_cluster` label (cluster name, from spoke `external_labels`)
 - ARC-applied labels (`openshift_io_alert_rule_id`, component, layer, severity overrides) on alerts whose rules have an associated AlertRelabelConfig (created via the Alerting API). Note: ARCs do not change the alerting rules evaluated by Prometheus — they only modify the alert labels sent to Alertmanager.
-- ARC-dropped (disabled) alerts never fire and never reach hub Alertmanager — correct behavior
-- Silences created on hub AM are already natively reflected in the hub AM response. In the future, spoke-local silences could be replicated to hub AM by the silence controller (from [SilenceRule CRDs](multi-cluster-silence-rule-crd.md) with `managed_cluster` matcher scoping), so hub AM would also suppress spoke-silenced alerts
+- ARC-dropped (disabled) alerts never reach hub Alertmanager — correct behavior (they still fire in Prometheus and appear in the `ALERTS` metric; ARCs only affect dispatch to Alertmanager)
+- Silences created on hub AM are already natively reflected in the hub AM response. In the future, spoke-local silences could be replicated to hub AM by the silence controller (from a `SilenceRule` CRD with `managed_cluster` matcher scoping), so hub AM would also suppress spoke-silenced alerts
 
 #### Classification and caches
 
@@ -101,7 +101,7 @@ The hub console backend maintains two caches for metadata that the classifier ca
 
 5. **Enrich with cluster metadata** from the Cluster Registry Cache: for spoke alerts, look up the `managed_cluster` in the Cluster Registry Cache and attach selected ManagedCluster labels (e.g., `region`, `availability_zone`, `provider`, `env`) as additive enrichment fields on the API response. An allowlist controls which labels are exposed. These fields enable UI filtering and grouping by cluster metadata. The same cluster labels are also enriched at two other levels (all MVP): a hub AM relabel config controller injects them onto alerts in Alertmanager for notification routing, and the existing `acm_managed_cluster_labels` metric (produced by MCE, already federated to hub Thanos) exposes them for `group_left` joins in dashboards (always reflects current labels, even on historical queries). All three mechanisms share a single allowlist. See [UI Design — Goals](multi-cluster-alerts-ui-design.md#goals) for details.
 
-6. **Silence state**: for MVP, silences created on hub AM are natively reflected — alerts suppressed by hub AM silences appear as `state=suppressed` (mapped to `silenced`). Spoke-local silences are not visible on hub AM in MVP. In Phase 2, the silence controller reconciles `SilenceRule` CRDs to hub AM with `managed_cluster` matcher scoping, making spoke-silenced alerts visible as suppressed on the hub. See [SilenceRule CRD](multi-cluster-silence-rule-crd.md).
+6. **Silence state**: for MVP, silences created on hub AM are natively reflected — alerts suppressed by hub AM silences appear as `state=suppressed` (mapped to `silenced`). Spoke-local silences are not visible on hub AM in MVP. In Phase 2, the silence controller reconciles `SilenceRule` CRDs to hub AM with `managed_cluster` matcher scoping, making spoke-silenced alerts visible as suppressed on the hub.
 
 7. **Filter, sort, paginate** based on query parameters (state, severity, cluster, namespace, component, source, alertname, cluster_labels, arbitrary label filters).
 
@@ -155,7 +155,7 @@ Understanding which labels are available at Hub Alertmanager is critical for the
 | Silenced alerts | suppressed state | suppressed (hub AM silences in MVP; + spoke silences via silence controller in Phase 2) |
 
 Key implications:
-- **Hub Alertmanager** has `managed_cluster` for cluster identification, ARC-applied labels for classification, and receives alerts in near real-time. For MVP, hub AM silences are natively reflected. In Phase 2, spoke silences are reconciled to hub AM by the silence controller (from [`SilenceRule` CRDs](multi-cluster-silence-rule-crd.md)) with `managed_cluster` matcher scoping, so hub AM also reflects spoke silence state.
+- **Hub Alertmanager** has `managed_cluster` for cluster identification, ARC-applied labels for classification, and receives alerts in near real-time. For MVP, hub AM silences are natively reflected. In Phase 2, spoke silences are reconciled to hub AM by the silence controller (from `SilenceRule` CRDs) with `managed_cluster` matcher scoping, so hub AM also reflects spoke silence state.
 - **ARC-applied labels** are only present on alerts with an ARC override or explicit rule labels. The majority of platform alerts lack them. The hub-side classifier computes classification for ALL alerts locally (see [Classification and caches](#classification-and-caches)).
 
 ### Workflow Description
