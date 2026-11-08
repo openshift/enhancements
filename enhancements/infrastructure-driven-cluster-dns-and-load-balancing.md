@@ -17,7 +17,7 @@ approvers:
 api-approvers:
   - "@joelspeed"
 creation-date: 2026-09-04
-last-updated: 2026-10-13
+last-updated: 2026-11-08
 status: provisional
 tracking-link:
   - https://redhat.atlassian.net/browse/OCPSTRAT-3602
@@ -36,51 +36,87 @@ superseded-by: []
 
 ## Summary
 
-This enhancement separates infrastructure DNS and cluster-managed endpoint
-configuration from platform identity through shared Infrastructure
-configuration. It provides a common model for DNS-only platform None Single Node
-OpenShift (SNO) and managed API and ingress endpoints for the multi-node outcome
-of a topology transition. The Machine Config Operator (MCO) applies accepted
-networking configuration using the existing infrastructure networking
-components, without changing platform identity or enabling machine provisioning.
-Existing platform-specific configuration remains compatible while the shared
-model is introduced, allowing additional platforms to adopt it without repeating
-the same configuration beneath each platform discriminator.
+This enhancement lets administrators configure infrastructure DNS and
+API/ingress load balancing independently of platform identity. Shared
+configuration on the Infrastructure singleton selects networking ownership
+without changing platform or machine provisioning. The initial implementation
+serves platform None Single Node OpenShift (SNO): DNS-only is the new-install
+default when the feature is enabled, and managed load balancing is an explicit
+installation-time or post-installation choice. The Machine Config Operator (MCO)
+applies this policy using the existing infrastructure networking components. The
+same configuration can support future mutable topologies and additional
+platforms without adding another copy of networking fields under each platform
+discriminator.
 
 ## Motivation
 
 Platform identity currently selects several distinct concerns: provider
 integration, machine provisioning, and infrastructure networking. Administrators
-who manage their own machines may nevertheless need OpenShift-managed DNS or
-endpoints. Selecting a different platform solely to obtain networking entangles
-these concerns and does not provide a path for existing None clusters.
+who manage their own machines may nevertheless need OpenShift-managed DNS or API
+and ingress load balancing. Selecting a different platform solely to obtain
+networking entangles these concerns and does not provide a path for existing
+None clusters.
 
 There are two immediate needs. First, SNO infrastructure DNS differs by
 installation method: standard None can use external DNS, while Assisted
 Installer and Agent-based Installer (ABI) conditionally generate an on-node
 dnsmasq configuration. The [SNO DNS-only proposal][sno-dns-design] standardizes
 this using MCO-managed CoreDNS and discovered node addresses, without VIPs or
-load-balancer pods. Second, an existing None SNO that grows into a multi-node
-cluster needs a choice of endpoint ownership for that outcome. An install-only
-option cannot serve already-deployed clusters.
+load-balancer pods. Second, an administrator of an existing None cluster needs
+to be able to move API and ingress LB ownership to OpenShift without
+reinstalling or changing platform. An install-only option cannot serve
+already-deployed clusters. An explicit managed-LB selection uses reserved
+API/ingress VIPs and starts the stack, including on an unchanged SNO. It does
+not add node failover to a single-node deployment.
 
-The second need does not justify a full load balancer on an unchanged SNO.
-Ordinary SNO remains DNS-only when managed DNS is selected. Managed-LB
-activation is coordinated with the topology transition; topology orchestration
-itself remains in the [mutable-topology
+Decoupling this choice from platform and topology also prepares for mutable
+topologies. A cluster can establish managed API and ingress VIPs before adding
+nodes and retain the same ownership and VIPs as its backends grow. Networking
+configuration does not initiate node addition or a topology transition; those
+operations remain in the [mutable-topology
 enhancement](topologies/mutable-topology.md).
 
 Adding another platform-specific networking object would repeat the duplication
 already present in on-prem APIs. This proposal instead introduces shared intent
 and an explicit compatibility boundary. Platform-agnostic configuration does not
-mean platform-independent implementation: cloud-provided endpoints and on-prem
-VIPs have different address sources, bootstrap dependencies, and resolver
+mean platform-independent implementation: cloud LB addresses and on-prem VIPs
+have different address sources, bootstrap dependencies, and resolver
 integration.
 
 Infrastructure DNS here is node-level resolution for cluster API, internal API,
 and application names, not DNS Operator-managed pod and Service DNS.
 Authoritative external DNS and resolution for off-cluster clients remain
 separate responsibilities.
+
+### API and ingress terminology
+
+In this proposal, an **endpoint** is an API or default-ingress network entry
+point, identified by its DNS name, resolved IP address, and service port. The
+term is limited to the following entry points:
+
+| Entry point | DNS name | Purpose |
+| --- | --- | --- |
+| API | `api.<cluster>.<base-domain>` | Client access to the Kubernetes API |
+| Internal API | `api-int.<cluster>.<base-domain>` | Kubernetes API access for nodes and cluster components |
+| Default ingress | Application hostnames under `*.apps.<cluster>.<base-domain>` | Access to application routes through the default ingress routers |
+
+In the proposed None/on-prem path, managed infrastructure DNS resolves these
+names to discovered node addresses for DNS-only SNO or configured VIPs for
+managed LB. The `api` and `api-int` names share the API VIP list, while
+application names use the ingress VIP list. DNS selects the address a client
+uses; VIP management and the API/ingress serving components provide access
+through that address.
+
+**Managed endpoints** means OpenShift manages those API and ingress VIPs and the
+components serving traffic through them. **Endpoint health** means API requests
+and application routing work through the selected addresses. Address publication
+alone does not establish that health.
+
+The proposed `status.networking.endpoints` object reports only resolved API and
+ingress IP addresses. It does not contain Kubernetes `Endpoints` or
+`EndpointSlice` resources, individual workload Service addresses, or backend
+node membership. Machine Config Server (MCS) access on port 22623 is verified
+separately and is not another address list in this object.
 
 ### User Stories
 
@@ -89,36 +125,45 @@ separate responsibilities.
   installation has a small, predictable networking footprint.
 - As a cluster creator, I want an explicit managed-DNS opt-out, so that I can
   retain my installation method's supported legacy DNS behavior.
-- As an administrator of an existing None SNO, I want to prepare managed
-  networking for a supported multi-node transition, so that the resulting
-  cluster can own its endpoints without a platform migration or reinstall.
+- As an administrator of an existing None cluster, I want to select
+  OpenShift-managed API and ingress load balancing without changing platform or
+  reinstalling the cluster.
+- As an administrator planning a supported topology change, I want to retain
+  configured networking ownership and API/ingress addresses while nodes are
+  added, so that growth does not require another networking API or a platform
+  migration.
 - As an existing on-prem administrator, I want my configuration and supported
   operations preserved during API evolution, so that an upgrade does not
-  unexpectedly change DNS or endpoint ownership.
-- As a platform integrator, I want reusable networking configuration, so that
+  unexpectedly change DNS or LB ownership.
+- As an OpenShift developer, I want reusable networking configuration, so that
   enabling another supported platform does not require duplicating the same DNS
   and LB API fields.
 - As a fleet administrator, I want to distinguish configuration rejection,
-  pending activation, rollout failure, and endpoint failure, so that I can
-  recover a networking change without guessing which configuration is active.
+  rollout in progress, rollout failure, and API/ingress access failure, so that
+  I can recover a networking change without guessing which configuration is
+  active.
 
 ### Goals
 
-- Separate infrastructure DNS and endpoint ownership from platform identity.
+- Separate infrastructure DNS and API/ingress LB ownership from platform
+  identity.
 - Provide DNS-only None SNO with a new-install managed-DNS default when its
   feature is enabled and an explicit installation opt-out.
-- Provide an explicit managed-endpoint path for the None multi-node transition
-  outcome, preserving the administrator-managed path when not selected.
+- Allow an explicit managed-LB selection on None SNO at installation or after
+  installation, preserving administrator ownership when not selected.
 - Preserve existing cluster behavior and supported platform-specific operations
   while introducing the shared API.
-- Establish a networking/topology integration contract with clear acceptance,
-  activation, rollout, and recovery responsibilities.
+- Make complete, accepted networking configuration start reconciliation without
+  a separate activation command or required topology change.
+- Define how future topology transitions consume networking readiness while
+  retaining separate node, etcd, and topology lifecycle responsibilities.
+- Use the shared schema for External on-prem networking as well as None.
 - Make additional platform adoption possible without requiring a new copy of the
   common configuration or replacing the initial API.
 
 ### Non-Goals
 
-- Running the full managed-LB stack on an ordinary, unchanged SNO.
+- Enabling managed load balancing by default on SNO.
 - Implementing node addition, etcd scaling, or topology-transition
   orchestration.
 - Changing platform identity, deprecating None, or migrating None to External.
@@ -138,8 +183,11 @@ separate responsibilities.
 Extend the Infrastructure singleton with shared networking configuration outside
 the platform-specific spec/status unions. Keep platform identity for provider
 integration and retain provider-specific inputs where their semantics differ.
-The shared model separates DNS policy, endpoint ownership, and resolved
-addresses instead of exposing a single "enable baremetal-runtimecfg" switch.
+The shared model separates DNS policy, API/ingress LB ownership, and resolved
+addresses. None is the first implementation target, not a separate networking
+API shape. External on-prem networking uses these same fields; its runtime and
+installer qualification are coordinated with the [External networking
+proposal][external-networking].
 
 Introduce a common interpretation of accepted configuration for consumers.
 Legacy-only clusters continue to derive effective configuration from their
@@ -147,15 +195,31 @@ existing fields and defaults. Explicit shared configuration is used only after
 validation and acceptance for a supported scenario. MCO renders from that
 effective configuration, not from arbitrary unaccepted spec changes.
 
-| Scenario                                    | DNS and endpoints                                                                         | Scope                                                       |
-| ------------------------------------------- | ----------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| Ordinary None SNO                           | Managed DNS uses discovered node addresses; no managed LB or VIP requirement              | Initial new behavior, aligned with 3609                     |
-| None SNO preparing to grow                  | Networking intent may be prepared; preparation alone does not start the LB                | Initial workflow; activation boundary requires joint review |
-| Eligible None multi-node transition outcome | Explicit managed-LB intent selects dedicated VIPs and the on-prem keepalived/HAProxy path | Initial managed-endpoint use case                           |
-| None without managed-networking selection   | Existing administrator/installer-owned behavior                                           | Preserved                                                   |
-| Existing on-prem platforms                  | Existing defaults, VIP ownership, DNS behavior, and supported mutations                   | Compatibility requirement, not automatic adoption           |
-| External                                    | Reuse the shared contract when enablement is separately agreed                            | Aligned extension, not a platform-migration prerequisite    |
-| Cloud cluster-hosted DNS                    | Cloud LB ownership and discovered endpoints remain distinct from on-prem VIP management   | Preserve existing behavior; convergence is staged           |
+| Scenario | DNS and API/ingress access | Scope |
+| --- | --- | --- |
+| New None SNO with the feature enabled | Managed DNS uses discovered node addresses; LB is user-managed, with no VIP requirement | Initial installation default, aligned with 3609 |
+| None SNO with explicit managed-LB selection | Dedicated API/ingress VIPs and keepalived/HAProxy, including while the cluster remains single-node | Initial installation-time and post-installation workflow |
+| None SNO after a supported transition to three-node compact | Retains selected networking ownership and VIPs; runtime components update their backends | Future mutable-topology integration using the same configuration |
+| None without shared networking configuration | Existing administrator/installer-owned behavior | Preserved; no automatic upgrade adoption |
+| Existing on-prem platforms | Existing defaults, VIP ownership, DNS behavior, and supported mutations | Compatibility requirement |
+| External | Shared networking fields outside the External platform object | Schema alignment now; runtime qualification with the External proposal |
+| Cloud cluster-hosted DNS | Existing provider-owned LBs and their discovered addresses | Preserved; cloud mappings require separate integration work |
+
+DNS and LB have separate selectors. The initial None scenarios and the remaining
+combination decision are:
+
+| Infrastructure DNS | Load balancer | Behavior |
+| --- | --- | --- |
+| `UserManaged` | `UserManaged` | Explicit installation opt-out; retain supported administrator/installer networking |
+| `ClusterManaged` | `UserManaged` | DNS-only SNO; the feature-enabled new-install default |
+| `ClusterManaged` | `OpenShiftManagedDefault` | Explicit managed DNS and API/ingress VIPs |
+| `UserManaged` | `OpenShiftManagedDefault` | Open design question: whether to support managed VIPs while infrastructure DNS remains administrator-owned |
+
+The last row requires agreement on resolver and startup dependencies before its
+validation and support policy are finalized. Separate fields do not establish
+that all four combinations are supported, nor establish a permanent requirement
+that managed LB must use managed DNS. External authoritative DNS for off-cluster
+clients remains administrator-owned in either managed-DNS scenario.
 
 The configuration flow is:
 
@@ -166,28 +230,30 @@ Legacy platform configuration       Explicit shared networking intent
           |                                      |
           +-------- effective networking --------+
                               |
-                  activation eligibility
-            (including topology integration)
-                              |
                     MCO rendering and rollout
                               |
-               DNS / eligible managed endpoints
+                    DNS / API and ingress VIPs
+                              |
+                   networking readiness
+            (also consumed by future topology changes)
 ```
 
 This is a logical contract, not a new operator or API object per stage.
 Bootstrap supplies validated initial inputs before in-cluster controllers are
-available. Configuration acceptance, activation eligibility, completed rollout,
-and healthy endpoints are distinct facts.
+available. Acceptance starts reconciliation. Rollout and health checks determine
+when it is complete; there is no accepted configuration waiting for a separate
+activation signal.
 
 ### Workflow Description
 
 The **cluster creator** selects installation policy. The **administrator**
-prepares site networking, requests supported changes, and verifies endpoints.
-The **networking acceptance controller** validates new intent and preserves
-accepted networking. The **topology controller** owns topology decisions under
-its separate enhancement. **MCO** owns node configuration and rollout. The
-placement of networking acceptance in CNO or cluster-config-operator (CCO)
-remains an API/component ownership decision.
+prepares site networking, requests supported changes, and verifies API and
+ingress access. The **Cluster Network Operator (CNO)** extends its existing
+Infrastructure controller to validate new intent, publish accepted networking,
+and report readiness. **MCO** owns node configuration and rollout. The
+**cluster-config-operator (CCO) topology controller** consumes networking
+readiness when needed by a topology transition; it does not enable or accept
+networking on CNO's behalf.
 
 #### New None SNO installation
 
@@ -197,50 +263,109 @@ remains an API/component ownership decision.
 2. The installer resolves that choice into explicit initial configuration and
    supplies consistent bootstrap inputs. It does not default absent policy on
    existing clusters through a global API default.
-3. In managed mode, MCO renders the 3609 node-address DNS path and resolver
-   assets, without VIPs, keepalived, or HAProxy. Assisted/ABI does not generate
-   a competing dnsmasq configuration for this path.
+3. With DNS-only selected, MCO renders the 3609 node-address DNS path and
+   resolver assets, without VIPs, keepalived, or HAProxy. Assisted/ABI does not
+   generate a competing dnsmasq configuration for this path.
 4. With opt-out, standard None retains external DNS requirements and
    Assisted/ABI retains its applicable conditional legacy behavior.
 5. In-cluster reconciliation continues the resolved bootstrap policy.
 
-DNS selection is exposed through normal installation configuration. The exact
-installer field and bootstrap/status mapping are reviewed with the API and 3609
-owners; a custom manifest is not the only intended opt-out interface.
+The installer adds `networking.infrastructure`, separate from `platform` and
+pod/Service networking. Its `dns` and `loadBalancer` policies map to
+`Infrastructure.spec.networking`. These install-config excerpts show the
+feature-enabled DNS-only default and an explicit managed-LB selection:
 
-#### Existing None cluster and topology-associated activation
+```yaml
+platform:
+  none: {}
+networking:
+  infrastructure:
+    dns:
+      management: ClusterManaged
+    loadBalancer:
+      type: UserManaged
+```
+
+```yaml
+platform:
+  none: {}
+networking:
+  machineNetwork:
+    - cidr: 192.0.2.0/24
+  infrastructure:
+    dns:
+      management: ClusterManaged
+    loadBalancer:
+      type: OpenShiftManagedDefault
+      openShiftManagedDefault:
+        apiServerInternalIPs:
+          - 192.0.2.10
+        ingressIPs:
+          - 192.0.2.11
+```
+
+For managed LB, the installer populates the Infrastructure configuration's
+`machineNetworks` from the existing `networking.machineNetwork[].cidr` field;
+the install-config does not duplicate that list. This explicit selection renders
+the managed-LB assets as well as DNS. To opt out of managed DNS, the creator
+sets `dns.management: UserManaged` and `loadBalancer.type: UserManaged`. When an
+explicit `networking.infrastructure` object is supplied, both policy selectors
+are required. Omission and feature-gate defaults are defined below.
+
+#### Existing None cluster: managed-LB opt-in
 
 1. The administrator verifies an eligible starting state, resolves any legacy
    DNS handoff, reserves dedicated API/ingress VIPs, checks for competing
    claimants, and establishes console access and a maintenance/recovery window.
-2. The administrator prepares complete networking intent. Validation checks
-   syntax, address families, networks, supported combinations, and lifecycle
-   eligibility. An invalid candidate cannot change active DNS or endpoints.
-3. The networking and topology controllers establish the reviewed activation
-   boundary. Merely requesting a topology or setting VIP fields does not start
-   the stack. Preparation while still SNO is distinct from activation.
-4. Once eligible, the accepted active configuration drives MCO to use VIP-based
-   DNS answers and the on-prem LB assets. Nodes reconcile through normal MCO
-   rollout; this publication does not make file changes or cutover atomic.
-5. Verify API access with the expected hostname and CA, ingress routes, DNS and
-   upstream forwarding, and MCS reachability/certificates separately. External
-   DNS cutover follows verified endpoint availability.
-6. Networking readiness contributes to the transition completion contract. The
-   resulting multi-node cluster retains platform None and its existing
-   machine-provisioning ownership.
+2. The administrator applies complete `spec.networking` configuration selecting
+   `OpenShiftManagedDefault` and its VIP/network inputs. CRD schema and CEL
+   validate field structure and update rules. CNO validates cluster-dependent
+   requirements, including the supported starting state, consumer availability,
+   legacy DNS handoff, and configuration conflicts.
+3. CNO publishes the accepted configuration and starts reconciliation. A valid
+   SNO request does not wait for additional nodes, three-member etcd, or a
+   topology change. Unsupported requests report rejection and retain the last
+   accepted networking rather than becoming dormant prepared configuration.
+4. MCO renders the requested stack. Startup uses the existing API access path;
+   DNS must not switch to an unserved VIP that the LB itself needs to start.
+   VIPs become available and managed DNS adopts their addresses as part of the
+   automatic rollout. The existing administrator access path is retained until
+   API and ingress access through the new VIPs is verified.
+5. CNO reports completion using `status.networking.conditions[type=Ready]` after
+   matching MCO rollout and DNS/API/ingress health checks. The administrator
+   also verifies external-client access and MCS reachability and certificates
+   before changing external DNS or retiring the old access path.
 
-The precise interleaving is an open cross-enhancement decision, not a complete
-runbook. The current mutable-topology design relies on administrator-provided
-networking while nodes join and become ready. This design must either preserve
-that path through cutover or explicitly revise the dependency ordering with the
-topology owners. Waiting for readiness that itself needs the new endpoints would
-deadlock; activating from desired topology alone would be premature. Any
-necessary temporary single-backend LB state must be explicitly bounded and
-validated, not treated as support for steady-state SNO load balancing.
+Platform identity and machine-provisioning ownership remain unchanged. Applying
+the complete request is the deployment trigger; acceptance and rollout are
+asynchronous, not a second administrator activation step.
+
+#### Future mutable-topology integration
+
+The shared networking object remains unchanged as a None SNO grows to a
+three-node compact cluster. For a managed-LB workflow, enable and verify the LB
+while still SNO, then add nodes using the working API VIP. Runtime components
+discover the additional backends without changing ownership or replacing the
+VIPs. Node-address DNS-only remains a SNO mode; a growth workflow must establish
+suitable managed or administrator-provided API and ingress access first.
+
+The topology controller retains its own admission checks: added nodes must be
+Ready and etcd must have the healthy voting membership required by the target
+topology. These are prerequisites for the topology change, not for enabling LB
+on SNO. Transition completion waits for topology-related MCO rollout and working
+API and ingress access; when managed networking is selected, its current
+`Ready=True` result is part of that check. A prior SNO readiness result alone
+does not prove the expanded cluster is healthy.
+
+An administrator-managed transition continues to use its existing networking and
+does not wait for unrequested managed VIPs. Neither desired topology alone nor
+node addition changes networking ownership. This integration defines how the
+networking capability can serve the separate mutable-topology work; it does not
+implement that transition or qualify new topologies by itself.
 
 #### Legacy configuration and DNS adoption
 
-An upgrade with no shared-policy request preserves effective behavior. Existing
+An upgrade does not automatically migrate a cluster to this feature. Existing
 on-prem settings are interpreted without automatically rewriting user spec.
 Adoption of the shared API is distinct from changing active networking and is
 allowed only for mappings with reviewed ownership and coexistence rules.
@@ -255,79 +380,119 @@ inventory and handoff review; Assisted/ABI findings are not sufficient evidence.
 #### Rejection and partial failure
 
 Reject schema-invalid requests at admission. Rejected persisted intent retains
-the last accepted configuration and remains correctable or withdrawable.
-Prepared but ineligible networking retains active DNS and endpoint ownership.
-After activation, reconciliation repairs the accepted state instead of silently
-reversing ownership. Removing fields or disabling a gate is not a DNS/LB
-teardown or recovery mechanism. Transition and rollout failures expose their
-separate progress and recovery responsibilities.
+the last accepted configuration and remains correctable or withdrawable. Once
+accepted, configuration is reconciled until rollout succeeds or an actionable
+failure is reported. Reconciliation repairs the accepted state rather than
+silently reversing ownership. Admission rejects removal of accepted
+configuration or a change from managed to user-managed ownership, including
+deletion of a parent object. A rejected, never-accepted request remains
+correctable or withdrawable. Disabling a gate is not a teardown or recovery
+mechanism. Networking rollout and topology progress are reported separately.
 
 ### API Extensions
 
-This extends `config.openshift.io/v1` Infrastructure named `cluster`, with
-shared desired and accepted/effective networking configuration outside
-`platformSpec` and `platformStatus`. Exact field names, types, serialization,
-and reporting fields remain API-review items. The contract and examples below
-show the proposed semantics and one candidate serialization, not an existing or
-applicable API schema.
+Extend `config.openshift.io/v1` Infrastructure named `cluster` with
+`spec.networking` and `status.networking`, outside `platformSpec` and
+`platformStatus`. This proposal uses the following types and serialized fields.
 
-| Concept                                  | Contract                                                                                                                                                               |
-| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| DNS policy                               | Select infrastructure DNS ownership independently of LB ownership; omission preserves legacy interpretation on existing clusters                                       |
-| LB ownership                             | Express whether the on-prem endpoint stack is requested; retain existing ownership vocabulary where semantics match, without treating cloud-managed LB as user-managed |
-| Requested addresses/networks             | Administrator-provided dedicated VIPs and validation inputs for the on-prem managed-LB path; not required for node-address DNS-only mode                               |
-| Resolved endpoints                       | Distinguish API, internal API, and ingress; distinguish discovered node addresses, reserved VIPs, and provider-produced addresses                                      |
-| Accepted policy and active configuration | Identify validated intent and the configuration authorized for rendering; represent pending eligibility without premature activation                                   |
-| Runtime readiness                        | Report rollout and verified endpoint health separately from configuration acceptance                                                                                   |
+#### Desired configuration
 
-Node discovery is not represented by storing a node IP as a pretend VIP.
-Provider-discovered endpoint addresses are not copied into administrator intent
-as though they were reserved VIPs. Unknown/not-yet-available addresses must not
-be interpreted as a request to disable DNS. The shared model must preserve cloud
-API/internal-API distinctions, multiple addresses, and private-cluster cases
-without imposing the on-prem VIP-list cardinality globally.
+`spec.networking` is an optional `InfrastructureNetworkingSpec`. When present,
+both `dns` and `loadBalancer` are required; an empty object is invalid.
 
-DNS-only is valid without managed LB. The initial None managed-LB path uses
-managed DNS and VIP-based answers, but that requirement is not imposed on every
-existing platform combination. Existing `DNSRecordsType` controls record
-generation and is not a complete DNS-service/resolver enable switch.
+| Field relative to `spec.networking` | Type | Semantics |
+| --- | --- | --- |
+| `dns` | `InfrastructureDNS` object | Infrastructure DNS policy |
+| `dns.management` | String enum: `ClusterManaged`, `UserManaged` | Required; selects MCO-managed DNS or administrator/installer-owned DNS |
+| `loadBalancer` | `InfrastructureLoadBalancer` discriminated union | API/ingress LB ownership and inputs for the selected implementation |
+| `loadBalancer.type` | `PlatformLoadBalancerType` enum | Required; `UserManaged` or `OpenShiftManagedDefault` |
+| `loadBalancer.openShiftManagedDefault` | `OpenShiftManagedDefaultNetworking` object | Required only with `OpenShiftManagedDefault`; forbidden with `UserManaged` |
+| `loadBalancer.openShiftManagedDefault.apiServerInternalIPs` | Atomic `[]IP` | Required dedicated VIPs serving both API and internal API |
+| `loadBalancer.openShiftManagedDefault.ingressIPs` | Atomic `[]IP` | Required dedicated ingress VIPs |
+| `loadBalancer.openShiftManagedDefault.machineNetworks` | Atomic `[]CIDR` | Required machine networks containing the VIPs |
 
-#### Illustrative Infrastructure YAML
+Each VIP list contains one or two addresses, with at most one address per IP
+family. API and ingress lists use matching families and order. Machine networks
+contain one to 32 unique CIDRs. Validation checks address syntax, family
+consistency, and VIP membership in the configured networks. Site administrators
+reserve the addresses and verify that they are unused; API validation cannot
+establish exclusive ownership on the physical network.
 
-The examples use `spec.networking` for desired policy and `status.networking`
-for controller-owned acceptance and active configuration. Both are siblings of
-the existing platform-specific fields, not members of a new `none` or `external`
-union. These are proposed field names for API review; the examples are not
-manifests to apply to an existing release. Unrelated Infrastructure fields are
-omitted, and all addresses are documentation examples.
+The new managed-LB path uses keepalived/HAProxy. Existing BGP modes and legacy
+VIP mutation rules are unaffected. DNS-only needs neither VIPs nor
+machine-network inputs. Discovered node addresses are runtime observations, not
+reserved VIPs stored in desired configuration.
 
-In this candidate shape:
+`UserManaged` has the same ownership meaning in both selectors: OpenShift does
+not manage that infrastructure service through this API. On SNO, a user-managed
+LB selection does not require an external appliance; clients can use the node
+address. DNS Operator-managed pod and Service DNS is unaffected. Existing
+`DNSRecordsType` controls record generation, not ownership of the DNS service
+and resolver configuration, so it is not an alias for `dns.management`.
 
-- `dns.management: ClusterManaged` selects the MCO-managed infrastructure DNS
-  path. `Unmanaged` opts out of that path at installation, retaining the
-  installer's supported legacy behavior. It does not mean that every DNS service
-  is absent or that a running resolver should be removed.
-- `loadBalancer.type` reuses the existing `UserManaged` and
-  `OpenShiftManagedDefault` vocabulary for these None/on-prem scenarios.
-  Dedicated VIP and network inputs belong to `openShiftManagedDefault`, not to
-  DNS policy or a globally required endpoint list.
-- `accepted` retains the last validated policy and its source generation;
-  `active` identifies the configuration authorized for MCO rendering and its
-  resolved endpoints. Publishing `active` is not proof of completed rollout or
-  endpoint health. Generation values refer to the source Infrastructure spec,
-  not a count of node-address discoveries or status updates.
+#### Accepted configuration and completion
 
-The acceptance owner, status structure, conditions, and representation of
-legacy/shared authority remain review items. The examples illustrate the
-prepared-versus-active distinction without choosing a topology activation signal
-or assigning ownership of unrelated Infrastructure status.
+CNO owns `status.networking`. MCO consumes the accepted configuration as soon as
+it is published; there is no separate `active` snapshot or topology activation
+flag.
+
+| Field relative to `status.networking` | Type | Semantics |
+| --- | --- | --- |
+| `observedGeneration` | `int64` | Latest Infrastructure generation evaluated by CNO |
+| `accepted` | Optional `AcceptedInfrastructureNetworking` object | Last configuration accepted for reconciliation; absent before first acceptance |
+| `accepted.generation` | `int64` | Source Infrastructure generation of the accepted configuration |
+| `accepted.configuration` | `InfrastructureNetworkingSpec` | Validated desired configuration consumed by MCO |
+| `endpoints` | `InfrastructureNetworkingEndpoints` object | Resolved API and ingress IP addresses for the accepted None/on-prem configuration; not a health result or backend list |
+| `endpoints.apiServerInternalIPs` | Atomic `[]IP` | IP addresses shared by both `api` and `api-int` names |
+| `endpoints.ingressIPs` | Atomic `[]IP` | IP addresses for application names served by the default ingress controller |
+| `conditions` | `[]metav1.Condition`, map keyed by `type` | `Accepted` and `Ready`, with generation, reason, message, and transition time |
+
+For DNS-only SNO, resolved targets are discovered node addresses. For managed
+LB, they are the configured VIPs. Publishing these targets is not a health
+assertion. The None/on-prem API does not introduce separate public and internal
+API VIP lists: both names use `apiServerInternalIPs`.
+
+Existing cloud DNS has separate provider-discovered API, internal-API, and
+ingress addresses. Those fields stay on their existing paths until a cloud
+mapping is designed. A later mapping must preserve that distinction and its
+larger address lists, rather than force cloud LB addresses into the on-prem
+managed-LB branch or label a cloud-owned LB `UserManaged`.
+
+CNO reports:
+
+- `Accepted=True` when the current configuration has passed validation and has
+  been published for reconciliation. `Accepted=False` reports a rejected
+  candidate and leaves the previous accepted configuration intact.
+- `Ready=False` while rendering, rollout, or health verification is incomplete,
+  or when the current candidate is rejected.
+- `Ready=True` when MCO has applied the accepted configuration on all affected
+  nodes and the selected DNS and managed API/ingress paths pass health checks.
+  `Ready` is updated when that health changes.
+
+Success requires `Accepted=True` and `Ready=True`, with both conditions'
+`observedGeneration` and `accepted.generation` matching the current
+Infrastructure generation. A condition for an older generation is not success
+for a new request. A generation change unrelated to networking can reuse the
+same rendered configuration after re-evaluation; it need not force a node
+rollout. Existing MCO/MachineConfigPool status from a previous configuration is
+not sufficient evidence for a changed networking request.
+
+CNO correlates MCO's rendered configuration and rollout with the accepted
+policy, then checks managed infrastructure DNS resolution/forwarding, API
+reachability through the VIP using the expected hostname and CA, and ingress
+routing through the configured ingress VIP. Checks apply only to the services
+selected for cluster management. The reporting integration must distinguish
+rollout failure from API/ingress access failure. It does not certify off-cluster
+client paths or external authoritative DNS; those remain administrator
+verification steps.
+
+#### Infrastructure YAML
 
 ##### Example 1: DNS-only None SNO
 
-The installer resolves a new eligible SNO's managed-DNS selection to explicit
-policy. The same policy represents an existing cluster only after any required
-DNS adoption checks and legacy resolver handoff. No VIP or machine-network input
-is needed for node-address DNS.
+The installer writes the feature-enabled new-install default explicitly. The
+same policy can be selected on an existing eligible cluster after its legacy DNS
+handoff.
 
 ```yaml
 apiVersion: config.openshift.io/v1
@@ -344,15 +509,10 @@ spec:
       type: UserManaged
 ```
 
-MCO renders CoreDNS and the corresponding resolver assets, using discovered node
-addresses, without keepalived or HAProxy. In this SNO example, `UserManaged`
-means no OpenShift-managed LB; it does not require an external LB appliance in
-front of the single node. The node IP is not entered as a VIP.
+MCO renders CoreDNS and resolver assets using node discovery, without keepalived
+or HAProxy.
 
 ##### Example 2: Explicit installation-time DNS opt-out
-
-This is the Infrastructure policy produced from an explicit installer opt-out,
-not a replacement for exposing that choice in normal installation configuration.
 
 ```yaml
 apiVersion: config.openshift.io/v1
@@ -364,34 +524,25 @@ spec:
     type: None
   networking:
     dns:
-      management: Unmanaged
+      management: UserManaged
     loadBalancer:
       type: UserManaged
 ```
 
 Standard None retains its external DNS requirements; Assisted/ABI retains its
-applicable conditional legacy DNS behavior. DNS Operator-managed pod and Service
-DNS is unchanged. Applying this choice to an already-active managed resolver is
-not a supported teardown workflow. On an existing cluster, omitting `networking`
-preserves legacy interpretation; omission must not be globally defaulted to
-either of these explicit examples.
+applicable conditional legacy DNS behavior. This policy selects installation
+behavior; it does not remove an already-active managed resolver.
 
-##### Example 3: Prepared managed endpoints, with DNS-only still active
+##### Example 3: Request managed endpoints on an existing None SNO
 
-The administrator reserves separate API and ingress VIPs for the multi-node
-transition outcome and requests `OpenShiftManagedDefault`. Here the request has
-been validated, but the reviewed activation prerequisites are not yet met. The
-cluster is still SNO, with node address `192.0.2.20` and DNS-only active.
-
-The spec is administrator intent. The generation and status below illustrate a
-controller-observed response, not fields for an administrator to write.
+Applying this configuration requests deployment immediately. No topology field
+changes and no separate activation step are needed.
 
 ```yaml
 apiVersion: config.openshift.io/v1
 kind: Infrastructure
 metadata:
   name: cluster
-  generation: 12
 spec:
   platformSpec:
     type: None
@@ -407,6 +558,20 @@ spec:
           - 192.0.2.11
         machineNetworks:
           - 192.0.2.0/24
+```
+
+The administrator keeps the current access path available during rollout.
+Acceptance starts the work; `Ready=True` indicates that rollout and verification
+of DNS, API access through the API VIP, and routing through the ingress VIP have
+succeeded.
+
+##### Example 4: Reconciliation in progress
+
+This controller-owned status excerpt illustrates an accepted request at
+generation 12 while MCO is deploying it. There is one accepted configuration,
+not different prepared and active policies.
+
+```yaml
 status:
   platformStatus:
     type: None
@@ -426,78 +591,30 @@ status:
               - 192.0.2.11
             machineNetworks:
               - 192.0.2.0/24
-    active:
-      generation: 11
-      configuration:
-        dns:
-          management: ClusterManaged
-        loadBalancer:
-          type: UserManaged
-      endpoints:
-        api:
-          - 192.0.2.20
-        apiInternal:
-          - 192.0.2.20
-        ingress:
-          - 192.0.2.20
+    endpoints:
+      apiServerInternalIPs:
+        - 192.0.2.10
+      ingressIPs:
+        - 192.0.2.11
+    conditions:
+      - type: Accepted
+        status: "True"
+        observedGeneration: 12
+        reason: ValidConfiguration
+        message: Networking configuration accepted for reconciliation.
+        lastTransitionTime: "2026-11-08T12:00:00Z"
+      - type: Ready
+        status: "False"
+        observedGeneration: 12
+        reason: RolloutInProgress
+        message: Waiting for MCO to apply the accepted networking configuration.
+        lastTransitionTime: "2026-11-08T12:00:00Z"
 ```
 
-MCO continues to consume `active`, not the prepared VIPs in spec or `accepted`.
-It therefore retains node-address DNS and does not start keepalived/HAProxy.
-Acceptance does not prove that the VIPs are unused, announce them, or change
-external DNS. The administrator still verifies site-network prerequisites.
-
-##### Example 4: Managed endpoints authorized for activation
-
-After the jointly defined topology/networking activation boundary is satisfied,
-the controller publishes the following active configuration for the request
-above. This status-only excerpt omits the unchanged spec and accepted snapshot;
-it is not an administrator patch or a topology-transition command.
-
-```yaml
-status:
-  platformStatus:
-    type: None
-  networking:
-    observedGeneration: 12
-    active:
-      generation: 12
-      configuration:
-        dns:
-          management: ClusterManaged
-        loadBalancer:
-          type: OpenShiftManagedDefault
-          openShiftManagedDefault:
-            apiServerInternalIPs:
-              - 192.0.2.10
-            ingressIPs:
-              - 192.0.2.11
-            machineNetworks:
-              - 192.0.2.0/24
-      endpoints:
-        api:
-          - 192.0.2.10
-        apiInternal:
-          - 192.0.2.10
-        ingress:
-          - 192.0.2.11
-```
-
-This authorizes VIP-based DNS and the keepalived/HAProxy path for MCO rollout;
-it does not assert that all nodes have applied it or that endpoints are healthy.
-The transition's managed multi-node outcome requires those additional checks.
-The exact activation boundary, including whether a bounded temporary
-single-backend state is necessary, remains a cross-enhancement decision.
-Platform identity remains None throughout.
-
-API and internal-API addresses are equal for this on-prem example but remain
-distinct in the resolved representation. A later cloud mapping must preserve
-provider-owned load balancers, independently discovered address lists, and
-private-cluster semantics; it must not manufacture `UserManaged` ownership or
-populate `openShiftManagedDefault` from cloud endpoint observations. Likewise,
-shared placement permits future External reuse without making a platform change
-part of this workflow. These examples do not select a public endpoint-source
-enum or enable those additional platform paths.
+After rollout and health verification, CNO sets `Ready=True` with reason
+`NetworkingReady` for the same generation. Failure leaves `Ready=False` with the
+failing stage and a diagnostic message. This status is also the networking
+signal available to a future topology workflow.
 
 #### Coexistence and authority
 
@@ -508,35 +625,57 @@ types, defaults, feature gates, and supported mutability during coexistence.
 - Legacy-only configuration remains authoritative for legacy-origin behavior.
 - Shared-only configuration is accepted only for supported scenarios and when
   its consumers are ready.
-- Matching legacy/shared representations require an explicit adoption boundary
-  and one authority per adopted configuration group, not two active writers.
+- For a qualified legacy adoption path, CNO accepts a matching shared request
+  and records it in `status.networking.accepted`. That acceptance transfers
+  authority for the adopted networking group to the shared configuration.
 - Conflicting representations block new acceptance and report the conflict; they
   do not silently select the newest write or tear down accepted services.
 - If old readers require compatibility projections, give each projection one
   writer and a defined direction. Do not introduce a bidirectional sync loop.
 
-Read-side normalization is the initial compatibility approach. Whether any
-status projections or explicit adoption marker are needed remains contingent on
-the complete reader/writer inventory. Public-cloud paths whose semantics do not
-yet map safely remain on their existing implementation; they are not silently
-converted to on-prem networking.
+Read-side normalization is the initial compatibility approach. CNO owns any
+required shared-to-legacy status projection, and legacy writers must not compete
+with it for an adopted group. The reader/writer inventory determines which
+projections are necessary before each adoption path is enabled. Public-cloud
+paths remain on their existing implementation until their mappings are defined.
 
-Validation covers optional-parent deletion as well as leaf changes. Invalid
-desired values must remain correctable; preserving accepted configuration does
-not mean freezing a rejected first write. Existing on-prem primary/secondary VIP
-rules remain intact. The new None lifecycle does not grant arbitrary VIP
-replacement or restrict already-supported operations on other platforms.
+For the new None path, accepted policy cannot be removed, including by deleting
+`networking`, `dns`, `loadBalancer`, or its managed configuration branch.
+User-managed ownership can move to managed ownership through a supported
+adoption workflow; the reverse change is rejected. Accepted managed VIPs and
+machine-network inputs are immutable in the initial delivery. Admission
+validation uses the last accepted configuration as the protection boundary, so a
+rejected first request can still be corrected or withdrawn. CNO's status updates
+preserve that boundary during reconciliation and controller restarts.
+
+These new-path rules do not replace existing on-prem primary/secondary VIP rules
+or narrow already-supported mutations. Adopting those legacy paths needs an
+equivalent mutability mapping. General active-DNS teardown, LB teardown, and
+arbitrary VIP replacement require separate lifecycle designs.
 
 #### Feature gating and defaults
 
-Feature gates control API/component availability, not durable administrator
-intent. Align DNS exposure with 3609 and define any separate managed-LB gate
-with API owners. Do not invent a gate name or declare a release default here.
-The managed-DNS default applies to new eligible None SNO installations when its
-feature is enabled. Existing absent or gate-only configuration preserves its
-behavior. Managed LB always requires explicit networking intent and activation
-eligibility; an upgrade, broad FeatureSet, or topology change alone is not an
-opt-in. Gate removal is not an active-service teardown procedure.
+The proposed feature gate is `UnifiedClusterManagedDNSAndLB`, initially exposed
+in `DevPreviewNoUpgrade`. It controls the new shared API and its consumers; the
+Infrastructure policy records durable administrator intent. DNS rendering reuses
+the 3609 implementation. Clusters using the 3609 DNS feature without shared
+configuration retain that behavior until explicit adoption; the new gate does
+not become a second DNS owner.
+
+| Context | Default or omission behavior |
+| --- | --- |
+| New eligible None SNO, shared feature enabled, installer policy omitted | Installer writes `ClusterManaged` DNS and `UserManaged` LB explicitly |
+| New None SNO, explicit DNS opt-out | Installer writes `UserManaged` for both policies and retains its supported legacy DNS path |
+| New install without the shared feature | Existing installer/3609 behavior; no shared API default is introduced |
+| Existing cluster without `spec.networking` | Existing platform/installer/3609 policy remains authoritative; no upgrade adoption |
+| Explicit `spec.networking` | Both policy selectors are required; there is no ambiguous partially defaulted object |
+| Managed LB | Always an explicit `OpenShiftManagedDefault` selection with complete VIP/network inputs |
+
+There is no global default that creates `spec.networking` on existing objects.
+An upgrade, broad FeatureSet, or topology change alone is not an opt-in. Gate
+removal is not an active-service teardown procedure. Feature-gate naming and
+coordination with 3609 are part of API review; the 5.1 deliverable is design
+agreement, not a commitment to an implementation release.
 
 ### Topology Considerations
 
@@ -549,25 +688,28 @@ guest or management nodes to render the standalone stack.
 
 #### Standalone Clusters
 
-The new endpoint workflow targets the None SNO-to-three-node compact outcome.
-Topology controllers retain node/topology lifecycle responsibilities; the
-networking contract supplies the explicitly selected endpoint behavior.
-Compatibility tests cover existing standalone platforms. Generic fresh None
-multi-node and External enablement require separate scope and qualification
-decisions, not merely matching a platform-neutral schema.
+The first new managed-LB workflow is explicit opt-in on None SNO. The API and
+networking ownership do not change when a future supported workflow grows that
+cluster to three-node compact. Topology controllers retain node/topology
+lifecycle responsibilities; the networking contract supplies the selected
+API/ingress LB behavior and its readiness. Compatibility tests cover existing
+standalone platforms. Generic fresh None multi-node and External enablement
+require separate scope and qualification decisions, not merely matching a
+platform-neutral schema.
 
 #### Single-node Deployments or MicroShift
 
-Ordinary SNO uses the DNS-only path without managed-LB resource overhead.
-Measure DNS CPU/memory, startup, upstream refresh, and full-node reboot
-behavior. Measure any transition-only networking overhead separately. No
-measured values are claimed. Cluster-component containers must declare CPU and
-memory requests and should not set limits under [resource
-conventions][resource-conventions].
+SNO defaults to the DNS-only path when the feature is enabled. An explicit
+managed-LB selection adds keepalived, HAProxy, and their supporting containers.
+The default therefore avoids LB overhead for installations that do not request
+it. Qualification checks the combined footprint and reboot behavior on supported
+SNO hardware. Cluster-component containers must declare CPU and memory requests
+and should not set limits under [resource conventions][resource-conventions].
 
-SNO rollout or reboot can interrupt the only control plane and workloads. A
-temporary VIP on one node provides no failover. An unproven one-backend runtime
-path cannot be assumed safe merely because templates render.
+SNO rollout or reboot can interrupt the only control plane and workloads. A VIP
+on one node provides no node failover. The OpenShift runtimecfg guard that
+currently blocks some single-backend updates is addressed below; it is not a
+general limitation of keepalived.
 
 MicroShift does not use this Infrastructure/MCO contract; no configuration
 change is included. Image-based SNO installation is a distinct research and
@@ -582,46 +724,69 @@ No new optional OLM operator is introduced.
 
 #### API, acceptance, and topology integration
 
-openshift/api defines the shared contract, validation, and exposure. CNO already
-has [on-prem VIP reconciliation][cno-sync], but its assumptions about accepted
-VIPs do not provide None's initial configuration or DNS-only state. CNO and CCO
-must agree one networking acceptance writer, field-scoped updates, and the
-handoff to topology eligibility. CCO here means cluster-config-operator, not
-cloud-credential-operator. This does not assign ownership of all Infrastructure
-status to the networking controller.
+openshift/api defines the shared types, feature-gated schema, and admission
+validation, including accepted-policy retention. Extend CNO's existing
+[Infrastructure controller][cno-controller] beyond its platform filter to
+reconcile explicitly configured shared networking. It owns cluster-dependent
+validation, accepted configuration, compatibility mappings, and networking
+conditions. Its existing [VIP synchronization][cno-sync] remains available to
+legacy platforms with their current mutation rules.
+
+MCO reports rendering and rollout for the accepted policy; CNO combines those
+observations with networking health checks. CCO consumes that readiness for
+future topology transitions and continues to own topology status. CCO here means
+cluster-config-operator, not cloud-credential-operator. Each controller uses
+field-scoped updates; networking ownership does not grant CNO ownership of all
+Infrastructure status. No standalone acceptance operator or admission webhook is
+introduced.
 
 The compatibility inventory includes installer initialization, controller
-writes, MCO/ControllerConfig conversion, certificate/endpoint consumers, and
-legacy update paths. Keep platform fields for actual provider integration; do
-not remove every platform check merely to call the design platform agnostic.
+writes, MCO/ControllerConfig conversion, certificate and API/ingress address
+consumers, and legacy update paths. Keep platform fields for actual provider
+integration; do not remove every platform check merely to call the design
+platform agnostic.
 
 #### MCO and baremetal-runtimecfg
 
 MCO consumes accepted effective networking and selects DNS-only versus the
-eligible on-prem stack. The [current renderer][mco-render] excludes None from
+requested on-prem stack. The [current renderer][mco-render] excludes None from
 on-prem paths and has a separate cloud alternate-DNS path. Adding None to one
-platform list is insufficient: templates, resolver assets, endpoint helpers,
-bootstrap, and certificates must use consistent decisions.
+platform list is insufficient: templates, resolver assets, API/ingress address
+helpers, bootstrap, and certificates must use consistent decisions.
 
 runtimecfg supplies init/sidecar commands inside independently rendered CoreDNS,
 keepalived, and HAProxy pods; it is not a standalone service toggle. The 3609
 DNS-only path supplies node discovery without VIPs. Its address and
 upstream-resolver refresh contract must be agreed with its SME.
 
-The current unicast [keepalived monitor rejects updates with fewer than two
-backends][runtime-guard]. This remains an integration constraint, not a mandate
-to implement standalone SNO LB. Revisit it if activation ordering requires a
-temporary single-backend state. HAProxy handles the API path; MCS port 22623 and
-its certificates must be verified separately. Ingress is verified through its
-VIP and router path, not described as another HAProxy backend by assumption.
+The runtimecfg [configuration-update guard][runtime-guard] rejects fewer than
+two backends only when unicast is enabled and `IS_BOOTSTRAP=no`. Update that
+guard to allow the explicitly selected single-node managed-LB mode while
+preserving bootstrap synchronization and rejecting an empty backend set. Test
+both stable single-node operation and subsequent backend growth. This is an
+OpenShift integration change, not a change to keepalived's ability to run on a
+single node. Rendering and backend discovery must continue to work while added
+nodes exist but the observed topology is still SingleReplica.
+
+The current [HAProxy startup check][haproxy-startup] accesses `api-int` before
+starting the proxy. For post-installation enablement, use the reachable existing
+or local API path to initialize the LB, and update managed DNS to VIP targets
+only after API and ingress traffic is served through those VIPs. The rollout
+performs this ordering automatically; publishing new DNS answers must not make
+startup depend on the inactive LB. HAProxy handles the API path; MCS port 22623
+and its certificates are verified separately. Ingress uses its VIP and router
+path, not an assumed HAProxy backend.
 
 #### Installer, Assisted/ABI, and image-based installation
 
-The installer resolves DNS default/opt-out and supplies bootstrap inputs that
-match steady-state semantics. Bootstrap cannot depend on an in-cluster
-controller that requires the DNS being configured. Assisted/ABI selects or omits
-its conditional DNS assets from the same effective policy. Its service database
-is not a Day-2 Infrastructure API.
+The installer maps `networking.infrastructure` and existing machine-network
+inputs to the shared Infrastructure configuration. It validates the selected
+installation mode and seeds matching accepted bootstrap configuration before CNO
+is available. In-cluster CNO takes over validation and status ownership without
+changing policy. Bootstrap cannot depend on an in-cluster controller that
+requires the DNS being configured. Assisted/ABI selects or omits its conditional
+DNS assets from the same effective policy. Its service database is not a Day-2
+Infrastructure API.
 
 MCO and Assisted jointly design installed-asset adoption. Image-based-install
 maintainers must identify their own resolver/address state and mutation
@@ -638,6 +803,16 @@ behavior, must remain intact. New External networking and existing None adoption
 are distinct workflows that can use the same networking contract. Neither
 requires this enhancement to implement platform migration or approve None
 deprecation.
+
+The [on-prem External networking proposal][external-networking] introduces the
+same ownership and VIP concepts. This design places those inputs under shared
+`spec.networking` and their observations under `status.networking`, rather than
+adding another copy to `ExternalPlatformSpec` or `ExternalPlatformStatus`.
+External retains its provider and CCM settings under its platform fields. Its
+installer uses `networking.infrastructure` for on-prem networking, with explicit
+policies and no implied adoption of the None SNO default. External and None
+share the API and rendering contract; platform qualification and any existing
+field compatibility remain work for the respective implementation owners.
 
 [PR #1666][prior-proposal] explored DNS/LB on None and External with duplicated
 platform fields and considered moving networking out of platform configuration
@@ -660,23 +835,25 @@ can follow reviewed mappings without blocking the initial None workflow.
   conflict rejection, and no implicit legacy/new last-write-wins behavior.
 - **Upgrade changes networking:** preserve absence/default semantics and test
   legacy render equivalence before changing consumers.
-- **Premature activation or dependency deadlock:** review node joining, accepted
-  topology, backend availability, endpoint readiness, and external access
-  ordering together; do not substitute node count for the contract.
+- **Startup or topology dependency deadlock:** initialize the LB through a
+  working API path, verify API/ingress access through the VIPs before DNS
+  cutover, and establish usable networking before future node joining. A SNO LB
+  request must not wait for the node/etcd prerequisites of a later topology
+  transition.
 - **Resolver conflicts or bootstrap failure:** single resolver ownership,
   explicit legacy handoff, and distinct cloud/bootstrap integration tests.
 - **VIP conflicts and exposure:** site administrators reserve addresses and
   verify reachability; schema validation does not prove an address is unused.
 - **Access loss:** retain a recovery path, require a maintenance window where
-  disruptive, and verify endpoints before external DNS cutover.
+  disruptive, and verify API/ingress access before external DNS cutover.
 - **Scope/maintenance expansion:** qualify each new platform/mode explicitly; a
   general API is not universal enablement or an unnamed maintenance owner.
 
 Networking and MCO reviewers assess host networking, privileges, mounts,
-resolver ownership, and endpoint exposure. API, installer, and platform owners
-review defaulting, compatibility, and error UX. Retain existing API/MCS TLS and
-certificate behavior; no independent TLS policy or new admission-service
-dependency is proposed.
+resolver ownership, and API/ingress network exposure. API, installer, and
+platform owners review defaulting, compatibility, and error UX. Retain existing
+API/MCS TLS and certificate behavior; no independent TLS policy or new
+admission-service dependency is proposed.
 
 ### Drawbacks
 
@@ -706,7 +883,7 @@ implicitly select provisioning or CCM behavior.
 
 ### Replace all platform networking implementations at once
 
-On-prem fields share substantial structure, but cloud endpoint discovery and
+On-prem fields share substantial structure, but cloud LB address discovery and
 resolver/bootstrap behavior differ. A universal rewrite would enlarge risk and
 delay the initial use case. Preserve legacy paths and converge only with
 reviewed semantic mappings and evidence.
@@ -717,53 +894,61 @@ A gate controls availability, and a MachineConfig changes node files; neither
 provides a durable cross-component ownership and compatibility contract. Reuse
 MCO rather than introduce a separate LB operator.
 
-### Enable full load balancing on ordinary SNO
+### Couple managed-LB activation to topology changes
 
-This consumes resources without adding node failover and is not needed to
-standardize DNS. Prepare networking intent separately and activate the stack
-only within the reviewed multi-node transition workflow.
+Accepting VIP configuration but withholding deployment until a topology change
+adds another activation state and can create circular readiness dependencies.
+Instead, a complete supported request starts deployment immediately. SNO can
+establish stable managed API and ingress VIPs before a later topology
+transition, while DNS-only remains the default for clusters that do not request
+managed LB.
 
 ## Open Questions
 
-1. What shared spec/status shape, endpoint-source representation, and
-   accepted-versus-active reporting do API owners recommend?
-2. Which component accepts networking, owns compatibility mappings/projections,
-   and reports conflicts? How do legacy writers behave after explicit adoption?
-3. At what transition boundary may LB activation occur? How are existing access,
-   node joining, desired/accepted topology, DNS cutover, and completion ordered?
-   Is a temporary single-backend state required at all?
-4. Which legacy on-prem groups adopt the shared API first, and which remain
-   read-compatible only? What evidence permits later deprecation? No number of
-   releases or removal date is assumed.
-5. What installer/bootstrap representation, gates, and refresh behavior align
-   with 3609 while preserving gate-only and explicitly opted-out clusters?
-6. Which Assisted and image-based starting states are eligible for adoption, and
-   who owns their resolver-asset handoff and recovery?
-7. How does External enablement reuse the contract, and which cloud differences
-   require retained provider-specific configuration? Who owns each integration?
-8. What initial address-family, resource, operational, and OKE qualification
-   matrix is agreed by the component, product, and QE owners?
+1. Should `UserManaged` infrastructure DNS with `OpenShiftManagedDefault` LB be
+   supported initially? Networking and MCO owners must resolve its resolver and
+   startup dependencies before validation encodes either outcome. This is
+   separate from administrator ownership of external authoritative DNS.
+2. Can CNO obtain all required per-node DNS, rendered-configuration, and
+   API/ingress health observations through existing interfaces, or does
+   MCO/runtimecfg need additional reporting for the proposed `Ready` condition?
+3. Which installed Assisted/ABI DNS configurations have a supported handoff, and
+   what distinct image-based-install cases can be adopted safely? The owners
+   must define recognition, asset ownership, and recovery for each case.
+4. Which legacy platform integrations migrate in each release of the proposed
+   three-release adoption window? Which readers need compatibility projections,
+   and which cloud-specific fields must remain until separate mappings exist?
+5. How should the shared feature gate be coordinated with 3609's DNS gate and
+   node-address/upstream refresh implementation? The proposed new-install
+   default and preservation of existing gate-only clusters remain requirements.
+6. Which address families and installation methods are qualified first, and when
+   can External and mutable-topology integration use the shared implementation?
 
 ## Test Plan
 
 Use source/rendering fixtures before disruptive integration tests. Cover legacy
 and shared inputs, absence and defaults, matching/conflicting representations,
 rejected-input correction, optional-parent deletion, and concurrent writers.
-Prove supported legacy VIP mutations and cloud endpoint distinctions survive
-normalization. Unknown cloud endpoints must not become fabricated VIPs or a
-request to disable an active resolver.
+Prove supported legacy VIP mutations and distinct cloud API/internal-API address
+lists survive normalization. Unknown cloud LB addresses must not become
+fabricated VIPs or a request to disable an active resolver.
 
 Test new None DNS-only installation, explicit opt-out, existing gate-only DNS,
-and each advertised legacy adoption path. Assert no LB assets on ordinary SNO or
-from prepared-but-ineligible intent. Test address/upstream refresh, startup
-dependencies, restart/reboot recovery, and resource cost.
+and each advertised legacy adoption path. Assert no LB assets without explicit
+opt-in. Test installation-time and post-installation LB selection on unchanged
+SNO, single-backend updates, and `Accepted`/`Ready` generation handling. Verify
+that rejected candidates cannot change rendered networking, and accepted policy
+cannot be removed through a parent deletion. Test address/upstream refresh,
+startup ordering, restart/reboot recovery, and resource cost.
 
-Integration with mutable topology verifies the reviewed activation ordering, DNS
-and external-access cutover, API and ingress traffic, separate MCS access,
-backend changes, failure/retry, and the managed-endpoint multi-node outcome.
-Test preservation of administrator-managed networking when no opt-in exists. The
-platform and provisioning configuration remain unchanged; topology is allowed to
-change through its designated controller.
+Future mutable-topology integration verifies managed networking before node
+addition, continued API/ingress and MCS access during backend growth, and final
+MCO rollout and API/ingress health before transition completion. Test that LB
+activation does not depend on future node or etcd readiness, and that topology
+changes do not implicitly opt in to managed networking. Preserve the
+administrator-managed path when selected. Platform and provisioning
+configuration remain unchanged; topology changes through its designated
+controller.
 
 Include interrupted upgrades, mixed consumers, and legacy-render non-regression
 for each affected platform. Test any compatibility projection against old
@@ -775,12 +960,13 @@ POC, conformance, or payload results are claimed by this proposal.
 
 ### Entering Dev Preview
 
-- API and compatibility semantics, acceptance ownership, and topology
-  integration are reviewed, with unsupported combinations rejected.
+- API and compatibility semantics, CNO/MCO responsibilities, and the DNS/LB
+  combination matrix are reviewed, with unsupported combinations rejected.
 - DNS-only bootstrap/default/opt-out and legacy preservation have evidence.
-- The explicit None managed-endpoint workflow works end to end with defined
-  recovery; any necessary transient backend state is validated.
-- Operators expose acceptance, activation, and rollout failures distinctly.
+- The explicit None SNO managed-LB workflow works end to end at installation and
+  after installation, with single-backend and recovery tests.
+- Operators expose rejection, rollout, and API/ingress access failures
+  distinctly.
 
 ### Dev Preview -> Tech Preview
 
@@ -795,17 +981,25 @@ POC, conformance, or payload results are claimed by this proposal.
 ### Tech Preview -> GA
 
 - API semantics, support matrix, defaults, and upgrade behavior are stable.
-- End-to-end, conformance, upgrade, and disruption tests cover the supported
-  DNS-only and transition-associated endpoint workflows.
+- End-to-end, conformance, upgrade, and disruption tests cover supported
+  DNS-only and managed-LB workflows; additional topology integrations are
+  qualified before they are advertised.
 - Feature graduation preserves explicit policy and legacy behavior.
 - User feedback, support procedures, and resource expectations are addressed.
 
 ### Removing a deprecated feature
 
-This enhancement does not remove None or existing networking fields on a fixed
-schedule. Any deprecation requires a migration path, identified consumers,
-documented support policy, and separate review before removal. Supporting two
-representations temporarily is not an API-removal deadline.
+Plan a three-minor-release adoption window beginning when the shared feature
+reaches GA. During that window, migrate supported producers and consumers,
+provide adoption documentation, and assess remaining legacy usage. New platform
+integrations use the shared schema rather than add more platform-specific
+networking fields.
+
+The end of that window is a compatibility review milestone, not automatic field
+deletion. Deprecation or removal requires an agreed migration path, consumer
+inventory, and compliance with API compatibility policy. Legacy platforms whose
+semantics have not been mapped retain their supported behavior. None deprecation
+and platform migration are outside this enhancement.
 
 ## Upgrade / Downgrade Strategy
 
@@ -828,10 +1022,11 @@ not override preview FeatureSet upgrade restrictions.
 
 ## Version Skew Strategy
 
-Inventory installer/bootstrap, Infrastructure writers, MCO, certificate/endpoint
-consumers, runtimecfg, and topology consumers. Test old readers with legacy
-inputs and any proposed projections, and new readers with old writers. Do not
-accept modes that an older active consumer would misinterpret.
+Inventory installer/bootstrap, Infrastructure writers, MCO, certificate and
+API/ingress address consumers, runtimecfg, and topology consumers. Test old
+readers with legacy inputs and any proposed projections, and new readers with
+old writers. Do not accept modes that an older active consumer would
+misinterpret.
 
 Unknown/missing policy must not activate new defaults or remove active services.
 Controllers preserve field ownership and accepted state through restarts and
@@ -843,9 +1038,11 @@ atomically; the coexistence policy must work throughout the supported skew.
 Configuration remains a cluster singleton with infrequent writes. No per-node
 API fleet, aggregated API server, or network-dependent admission service is
 introduced. Report the candidate generation, accepted configuration authority,
-pending activation, and actionable rejection reasons using reviewed status
-mechanisms. MCO/MachineConfigPool status reports node rollout; topology status
-reports transition progress; endpoint checks establish runtime health.
+and actionable rejection reasons through `status.networking`. `Accepted`
+identifies the policy being reconciled; `Ready` reports matching rollout and
+health checks. MCO/MachineConfigPool status explains node rollout, while
+topology status reports the separate transition. A stale condition generation
+cannot prove completion of a new request.
 
 An acceptance-controller outage blocks new acceptance but does not remove
 rendered services. A rollout, DNS, or VIP failure can still interrupt API
@@ -853,26 +1050,29 @@ access, image pulls, and workloads. Networking, MCO, topology, and affected
 installer/platform teams share escalation according to the failed stage.
 
 QE and component owners measure acceptance/rollout duration, DNS resolution,
-endpoint availability, disruption, and resource consumption. Metric names and
+API/ingress availability, disruption, and resource consumption. Metric names and
 alert thresholds require implementation review; customer addresses must not be
 used as telemetry labels.
 
 ## Support Procedures
 
 Establish the authoritative legacy/shared configuration and the last accepted
-active state before changing anything. Inspect Infrastructure, feature
-configuration, acceptance/activation reporting, topology progress, MCO
-conditions, and MachineConfigPool state.
+policy before changing anything. Inspect Infrastructure, feature configuration,
+`Accepted` and `Ready` conditions and their generations, MCO conditions, and
+MachineConfigPool state. Inspect topology progress separately when a transition
+is underway.
 
 - **Conflicting or rejected input:** correct the unaccepted request or resolve
   its source conflict. Do not clear active fields to force reconciliation.
-- **Waiting for activation:** inspect the agreed topology/backend prerequisites
-  and retained access path; do not manufacture topology status to start LB.
+- **Accepted but not ready:** inspect whether MCO is deploying the accepted
+  configuration or whether DNS/API/ingress checks are failing. No topology
+  status change or second activation command is needed to start a valid SNO
+  request.
 - **DNS failure:** inspect the selected implementation, resolver owner, port 53,
   node/provider addresses, upstreams, manifests, image availability, and logs.
   Use the installation-specific handoff procedure for legacy assets.
-- **Endpoint failure:** inspect VIP ownership and API/ingress paths, test API
-  hostname/CA, and check MCS port 22623 and certificates independently.
+- **API/ingress access failure:** inspect VIP ownership and API/ingress paths,
+  test API hostname/CA, and check MCS port 22623 and certificates independently.
 - **Partial rollout/transition:** repair the failed stage and reconcile from
   accepted state; follow the topology design for node/etcd failure handling. No
   automatic networking reversal or topology recovery is promised here.
@@ -880,7 +1080,7 @@ conditions, and MachineConfigPool state.
   Deleting policy or disabling gates is not a supported removal procedure.
 
 Retain console access for failures that prevent API-based repair. Existing
-workloads may be interrupted by node reboot or endpoint/DNS failure; new
+workloads may be interrupted by node reboot or API/ingress/DNS failure; new
 workloads may fail to resolve names or pull images. Reconciliation resumes from
 accepted state when controllers recover, without selecting new ownership.
 
@@ -893,12 +1093,25 @@ platform-specific bootstrap and image-based evidence before claiming adoption
 support. Lab execution, code changes, and payload qualification are separate
 work, not results of this design document.
 
-[sno-dns-design]: https://github.com/openshift/enhancements/blob/f78b50340589564f8998ed13186d1d1c38abf15b/enhancements/single-node/sno-none-platform-internal-dns.md
+[sno-dns-design]:
+    https://github.com/openshift/enhancements/blob/f78b50340589564f8998ed13186d1d1c38abf15b/enhancements/single-node/sno-none-platform-internal-dns.md
 [prior-proposal]: https://github.com/openshift/enhancements/pull/1666
-[mco-render]: https://github.com/openshift/machine-config-operator/blob/3f863f437e3af4d975300927b3ca7e2bf7dbbb29/pkg/controller/template/render.go
-[cno-sync]: https://github.com/openshift/cluster-network-operator/blob/069ef080db6b20f6704e4dc0c07d48937cef0ef8/pkg/controller/infrastructureconfig/sync_vips.go
-[runtime-guard]: https://github.com/openshift/baremetal-runtimecfg/blob/3057d9978db74dcd5012a293d37d571b524c4e46/pkg/monitor/dynkeepalived.go#L133-L145
-[cloud-api]: https://github.com/openshift/api/blob/38053d30e7e728362c4c6df1e402f6f7eb37d299/config/v1/types_infrastructure.go#L929-L1000
-[cloud-mco]: https://github.com/openshift/machine-config-operator/blob/3f863f437e3af4d975300927b3ca7e2bf7dbbb29/templates/common/cloud-platform-alt-dns/files/coredns.yaml
-[cloud-resolver]: https://github.com/openshift/machine-config-operator/blob/3f863f437e3af4d975300927b3ca7e2bf7dbbb29/templates/common/cloud-platform-alt-dns/files/usr-local-bin-update-dns-server.yaml
-[resource-conventions]: https://github.com/openshift/enhancements/blob/2cf7bf953506ba2a463848e59c8bc574e340406d/CONVENTIONS.md#resources-and-limits
+[external-networking]: https://github.com/openshift/enhancements/pull/2130
+[mco-render]:
+    https://github.com/openshift/machine-config-operator/blob/3f863f437e3af4d975300927b3ca7e2bf7dbbb29/pkg/controller/template/render.go
+[cno-controller]:
+    https://github.com/openshift/cluster-network-operator/blob/069ef080db6b20f6704e4dc0c07d48937cef0ef8/pkg/controller/infrastructureconfig/infrastructureconfig_controller.go
+[cno-sync]:
+    https://github.com/openshift/cluster-network-operator/blob/069ef080db6b20f6704e4dc0c07d48937cef0ef8/pkg/controller/infrastructureconfig/sync_vips.go
+[runtime-guard]:
+    https://github.com/openshift/baremetal-runtimecfg/blob/3057d9978db74dcd5012a293d37d571b524c4e46/pkg/monitor/dynkeepalived.go#L133-L145
+[haproxy-startup]:
+    https://github.com/openshift/machine-config-operator/blob/3f863f437e3af4d975300927b3ca7e2bf7dbbb29/templates/master/00-master/on-prem/files/haproxy.yaml
+[cloud-api]:
+    https://github.com/openshift/api/blob/38053d30e7e728362c4c6df1e402f6f7eb37d299/config/v1/types_infrastructure.go#L929-L1000
+[cloud-mco]:
+    https://github.com/openshift/machine-config-operator/blob/3f863f437e3af4d975300927b3ca7e2bf7dbbb29/templates/common/cloud-platform-alt-dns/files/coredns.yaml
+[cloud-resolver]:
+    https://github.com/openshift/machine-config-operator/blob/3f863f437e3af4d975300927b3ca7e2bf7dbbb29/templates/common/cloud-platform-alt-dns/files/usr-local-bin-update-dns-server.yaml
+[resource-conventions]:
+    https://github.com/openshift/enhancements/blob/2cf7bf953506ba2a463848e59c8bc574e340406d/CONVENTIONS.md#resources-and-limits
