@@ -614,9 +614,9 @@ and managed-service rollout agreements are separate readiness work.
 [router-deployment]: https://github.com/openshift/cluster-ingress-operator/blob/16b5a9ff93247e7d6914948b8a5e2ce35dfa5088/pkg/manifests/assets/router/deployment.yaml
 [deployment-code]: https://github.com/openshift/cluster-ingress-operator/blob/16b5a9ff93247e7d6914948b8a5e2ce35dfa5088/pkg/operator/controller/ingress/deployment.go
 [api-pr]: https://github.com/openshift/api/pull/3134
-[ingress-api]: https://github.com/openshift/api/blob/3854dd04cdfb73535d1da680e630bc0fafc554d7/operator/v1/types_ingresscontroller.go
-[resource-feature]: https://github.com/openshift/api/blob/3854dd04cdfb73535d1da680e630bc0fafc554d7/features/features.go
-[resource-tests]: https://github.com/openshift/api/blob/3854dd04cdfb73535d1da680e630bc0fafc554d7/operator/v1/tests/ingresscontrollers.operator.openshift.io/IngressControllerResourceConfiguration.yaml
+[ingress-api]: https://github.com/openshift/api/blob/ae9d9c44d4e371e1f8ebef31d33ecb69ce3541b0/operator/v1/types_ingresscontroller.go
+[resource-feature]: https://github.com/openshift/api/blob/ae9d9c44d4e371e1f8ebef31d33ecb69ce3541b0/features/features.go
+[resource-tests]: https://github.com/openshift/api/blob/ae9d9c44d4e371e1f8ebef31d33ecb69ce3541b0/operator/v1/tests/ingresscontrollers.operator.openshift.io/IngressControllerResourceConfiguration.yaml
 [haproxy-launcher]: https://github.com/openshift/router/blob/12074b829811275700c93259973041f286beb0fe/images/router/haproxy/start-haproxy
 [router-image]: https://github.com/openshift/router/blob/12074b829811275700c93259973041f286beb0fe/images/router/base/Dockerfile.ocp
 [envoy-qat]: https://gateway.envoyproxy.io/docs/tasks/security/private-key-provider/
