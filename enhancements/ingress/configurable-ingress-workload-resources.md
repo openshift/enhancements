@@ -14,7 +14,7 @@ api-approvers:
   - "@JoelSpeed"
   - "@everettraven"
 creation-date: 2026-10-23
-last-updated: 2026-11-09
+last-updated: 2026-11-10
 status: provisional
 tracking-link:
   # Epic
@@ -222,14 +222,17 @@ CPU/memory requests without limits remain supported. Limits omitted for
 other entries remain unset unless a LimitRange in the router namespace
 applies one.
 
-Define an explicit null as equivalent to omission for these optional
-fields and entries, using pruning/normalization where appropriate;
+Define an explicit null for an optional `request` or `limit` field as
+equivalent to omission, using pruning/normalization where appropriate;
 verify the generated schema and supported patch forms rather than
-assuming Go pointers establish this behavior. Removing an explicit
-request while retaining its limit invokes limit-only behavior, not
-unconditional reset to the baseline. List-entry (`name`) deletion and
-server-side-apply ownership must follow the final schema and receive
-dedicated tests.
+assuming Go pointers establish this behavior. This rule does not extend
+to list elements: the lists are keyed on `name`, a null element has no
+key, and Kubernetes does not prune null elements from arrays, so null
+list elements must be rejected. Remove an entry by its `name` or by
+replacing the list. Removing an explicit request while retaining its
+limit invokes limit-only behavior, not unconditional reset to the
+baseline. List-entry (`name`) deletion and server-side-apply ownership
+must follow the final schema and receive dedicated tests.
 
 Defaults remain owned by the operator's release, not frozen forever to
 the values in the baseline table. Explicit overrides remain authoritative
@@ -247,8 +250,12 @@ include:
   the supported-resource allowlist and reserved names; do not interpret
   every slash-qualified name as a device.
 * Quantity syntax, positive non-zero values of at most 20 characters,
-  and applicable precision and alignment rules for CPU, memory,
-  ephemeral storage, and hugepages.
+  and applicable precision and alignment rules. CPU quantities below
+  `1m` are accepted and rounded up by Kubernetes when the pod is
+  admitted. Extended resources and hugepages must be whole numbers, and
+  hugepages whole multiples of the page size; these checks use the
+  quantity's integer representation, so an integral spelling such as
+  `1536Mi` is required over an equivalent such as `1.5Gi`.
 * Explicit request less than or equal to limit, with equality for
   non-overcommittable resources where Kubernetes requires it.
 * Resource-specific hugepage requirements and equality rules rather than
@@ -290,7 +297,12 @@ on `name`, 1 to 8 entries per target, at least one of `request` or
 allowlist and reserved-domain rejection, positive non-zero quantities of
 at most 20 characters, `request` less than or equal to `limit`, and the
 extended-resource and hugepage whole-number, equality, and page-size
-multiple rules. The [API tests][resource-tests] are a YAML testsuite that
+multiple rules. The whole-number checks test the quantity's integer
+representation, so a page-aligned `limit: 1.5Gi` is rejected for
+`hugepages-2Mi` while the equivalent `1536Mi` is accepted, and a
+sub-milliCPU `cpu: 0.5m` is accepted and rounded up by Kubernetes at pod
+admission. Tests must cover both hugepage spellings and `0.5m`. The
+[API tests][resource-tests] are a YAML testsuite that
 covers these valid and invalid cases at the schema boundary.
 
 The API still defers the effective-baseline check to the consumer:
