@@ -9,7 +9,7 @@ reviewers:
 approvers:
   - "@russelb"
 creation-date: 2020-08-26
-last-updated: 2026-05-25
+last-updated: 2026-10-18
 status: informational
 ---
 
@@ -159,6 +159,7 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 | 8797        | machine-config-daemon                                 |          |                    | node          | 4.0   | metrics                                   |
 | 9259        | cluster-cloud-controller-manager-operator             |          | yes                | cluster infra | 4.9   | healthz                                   |
 | 9260        | cluster-cloud-controller-manager-operator-config-sync |          | yes                | cluster infra | 4.10  | healthz                                   |
+| 9302        | ingress-node-firewall daemon                          |          |                    | sdn           | 4.21  | healthz/readyz probe                      |
 | 9443        | kube-controller-manager                               |          |                    | workloads     |       | recovery-controller                       |
 | 9977        | etcd                                                  |          |                    | etcd          |       | ?                                         |
 | 10248       | kubelet                                               |          |                    | node          |       | healthz                                   |
