@@ -11,7 +11,7 @@ approvers:
 api-approvers:
   - yuqi-zhang
 creation-date: 2026-11-03
-last-updated: 2026-11-03
+last-updated: 2026-11-10
 status: provisional
 tracking-link:
   - https://redhat.atlassian.net/browse/OCPSTRAT-3304
@@ -100,8 +100,9 @@ and the permissions granted to the cluster.
 
 1. The OpenStack administrator provides access to Cinder and the storage backend,
    including the required network connectivity and credentials.
-2. The cluster administrator prepares all workers for direct attachment and
-   supplies any backend-specific configuration.
+2. The cluster administrator prepares all workers, including node-local initiator
+   identities and any administrator-managed MachineConfigs, and supplies required
+   backend files through the Secret references in `backendConfig`.
 3. Before the cluster begins using Cinder storage, the cluster administrator
    enables the Tech Preview feature and selects direct attachment through the
    Cinder `ClusterCSIDriver`, as described in [API Extensions](#api-extensions).
@@ -119,51 +120,137 @@ initialization and lifecycle constraints, and
 
 ### API Extensions
 
-Extend the existing cluster-scoped `operator.openshift.io/v1` `ClusterCSIDriver`
-resource named `cinder.csi.openstack.org` with a Cinder attachment-mode setting.
-The existing `spec.driverConfig` field supports driver-specific configuration,
-but has no Cinder member in the API source used for this proposal.
+Extend `operator.openshift.io/v1` `ClusterCSIDriver` named
+`cinder.csi.openstack.org` with Cinder configuration. These are **proposed API
+changes requiring approval**, not an existing supported API.
 
-The following is a **proposed API shape, not an existing supported API**:
+The excerpts modify `operator/v1/types_csi_cluster_driver.go`; unchanged fields
+and rules are omitted. Secret references use
+`configv1 "github.com/openshift/api/config/v1"`.
 
-```yaml
-apiVersion: operator.openshift.io/v1
-kind: ClusterCSIDriver
-metadata:
-  name: cinder.csi.openstack.org
-spec:
-  driverConfig:
-    driverType: Cinder
-    cinder:
-      attachMode: Direct
+```go
+// Replace the existing CSIDriverType enum marker with gate-aware markers.
+// +openshift:validation:FeatureGateAwareEnum:featureGate="",enum="";AWS;Azure;GCP;IBMCloud;vSphere;SecretsStore
+// +openshift:validation:FeatureGateAwareEnum:featureGate=CinderCSIDirectAttach,enum="";AWS;Azure;GCP;IBMCloud;vSphere;SecretsStore;Cinder
+type CSIDriverType string
+
+const CinderDriverType CSIDriverType = "Cinder"
+
+// Add this rule to CSIDriverConfigSpec, retaining its existing union rules.
+// +openshift:validation:FeatureGateAwareXValidation:featureGate=CinderCSIDirectAttach,rule="has(self.driverType) && self.driverType == 'Cinder' ? has(self.cinder) : !has(self.cinder)",message="cinder must be set if driverType is Cinder, but remain unset otherwise"
+type CSIDriverConfigSpec struct {
+    // cinder configures the Cinder CSI driver.
+    // +openshift:enable:FeatureGate=CinderCSIDirectAttach
+    // +optional
+    Cinder CinderCSIDriverConfigSpec `json:"cinder,omitzero"`
+}
+
+// Add these rules to ClusterCSIDriver, retaining its existing rules.
+// +openshift:validation:FeatureGateAwareXValidation:featureGate=CinderCSIDirectAttach,rule="self.spec.?driverConfig.?driverType.orValue('') == 'Cinder' ? self.metadata.name == 'cinder.csi.openstack.org' : true",message="driverType Cinder requires metadata.name cinder.csi.openstack.org"
+// +openshift:validation:FeatureGateAwareXValidation:featureGate=CinderCSIDirectAttach,rule="self.metadata.name == 'cinder.csi.openstack.org' ? self.spec.?driverConfig.?driverType.orValue('') in ['', 'Cinder'] : true",message="the Cinder resource permits only omitted or Cinder driver configuration"
+// +openshift:validation:FeatureGateAwareXValidation:featureGate=CinderCSIDirectAttach,rule="has(self.status) && has(self.status.cinder) ? self.metadata.name == 'cinder.csi.openstack.org' : true",message="Cinder status is valid only on the Cinder resource"
+type ClusterCSIDriver struct {
+    // Existing fields remain unchanged.
+}
+
+// CinderCSIDriverConfigSpec configures Cinder attachment and backend files.
+// +kubebuilder:validation:XValidation:rule="self.attachMode == 'Direct' || !has(self.backendConfig) || size(self.backendConfig) == 0",message="backendConfig is valid only in Direct mode"
+type CinderCSIDriverConfigSpec struct {
+    // attachMode selects Nova-mediated or worker-side os-brick attachment.
+    // +required
+    AttachMode CinderAttachMode `json:"attachMode"`
+
+    // backendConfig supplies optional read-only files to the os-brick sidecar.
+    // +listType=map
+    // +listMapKey=name
+    // +kubebuilder:validation:MaxItems=16
+    // +optional
+    BackendConfig []CinderBackendConfig `json:"backendConfig,omitempty"`
+}
+
+// CinderAttachMode selects the volume attachment mechanism.
+// +kubebuilder:validation:Enum=Nova;Direct
+type CinderAttachMode string
+
+const (
+    CinderAttachModeNova   CinderAttachMode = "Nova"
+    CinderAttachModeDirect CinderAttachMode = "Direct"
+)
+
+// CinderBackendConfig projects a Secret's files at a supported destination.
+type CinderBackendConfig struct {
+    // name identifies this source, not a backend type or volume selector.
+    // +kubebuilder:validation:MinLength=1
+    // +kubebuilder:validation:MaxLength=63
+    // +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+    // +required
+    Name string `json:"name"`
+
+    // secretRef names an administrator-managed Secret in
+    // openshift-cluster-csi-drivers. All data keys are projected as files.
+    // +required
+    SecretRef configv1.SecretNameReference `json:"secretRef"`
+
+    // mountPath selects an allowlisted read-only sidecar directory.
+    // +kubebuilder:validation:Enum="/etc/ceph"
+    // +required
+    MountPath string `json:"mountPath"`
+}
+
+// Extend the existing status without changing its embedded OperatorStatus.
+type ClusterCSIDriverStatus struct {
+    OperatorStatus `json:",inline"`
+
+    // cinder reports the last successfully rolled-out Cinder attachment mode.
+    // +openshift:enable:FeatureGate=CinderCSIDirectAttach
+    // +optional
+    Cinder CinderCSIDriverStatus `json:"cinder,omitzero"`
+}
+
+// CinderCSIDriverStatus reports applied configuration.
+type CinderCSIDriverStatus struct {
+    // observedAttachMode is the mode of the last completed controller/node
+    // rollout. Omission means no completed rollout has been observed.
+    // +optional
+    ObservedAttachMode CinderAttachMode `json:"observedAttachMode,omitempty"`
+}
 ```
 
-Add `Cinder` to the driver-config discriminator and a matching `cinder` member,
-valid only for `cinder.csi.openstack.org`. The `attachMode` setting accepts `Nova`
-or `Direct`; omission preserves Nova behavior. Direct mode requires the proposed
-`CinderCSIDirectAttach` feature gate in `TechPreviewNoUpgrade`. These additions
-and their validation and feature gating require API approval and an
-`openshift/api` change. In the initial implementation, the mode is selected before
-the cluster begins using Cinder storage and remains fixed afterward. Initial
-Direct-mode selection requires that no Cinder PVCs or PVs exist, as described in
-[Upgrade / Downgrade Strategy](#upgrade--downgrade-strategy). The locking mechanism
-remains an open implementation question.
+Add the proposed gate to the existing registration block in
+`features/features.go`, using the existing feature registration helpers:
 
-Backend configuration remains separate; see
-[Host and backend prerequisites](#host-and-backend-prerequisites). The driver
-also uses the upstream node annotation
-`cinder.csi.openstack.org/connector-properties`, described under
-[Node metadata and permissions](#node-metadata-and-permissions). No new resource
-type, aggregated API, admission webhook, conversion webhook, or finalizer is added.
+```go
+FeatureGateCinderCSIDirectAttach = newFeatureGate("CinderCSIDirectAttach").
+    reportProblemsToJiraComponent("Storage / Kubernetes External Components").
+    contactPerson("mandre").
+    productScope(ocpSpecific).
+    enhancementPR("https://github.com/openshift/enhancements/pull/2174").
+    enable(inTechPreviewNoUpgrade()).
+    mustRegister()
+```
+
+The gate adds the Cinder discriminator and spec/status members to the schema.
+Omitting Cinder configuration preserves Nova behavior; explicit Cinder
+configuration requires `attachMode`. Enabling the gate alone does not select
+Direct. The operator must enforce the initial-selection and fixed-mode policy
+in [Upgrade / Downgrade Strategy](#upgrade--downgrade-strategy); cross-resource
+checks and durable locking are not implemented by these schema rules.
+
+See [Backend configuration Secrets](#backend-configuration-secrets) for the
+backend file contract and [Node metadata and permissions](#node-metadata-and-permissions)
+for the driver-owned connector annotation. No new resource type, aggregated API,
+webhook, or finalizer is added.
 
 ### Topology Considerations
 
 #### Hypershift / Hosted Control Planes
 
-Direct attachment on HyperShift is outside the initial scope. Supporting it
-requires validating the split between the hosted CSI controller and guest worker
-node plugins, including configuration, credentials, and lifecycle management.
-Existing Nova-based Cinder behavior on HyperShift is unchanged.
+Direct attachment on HyperShift is outside the initial scope. The shared API
+fields need not be omitted, but the Cinder operator must reject Direct during
+reconciliation using its cluster flavour: report `Degraded=True` with reason
+`UnsupportedTopology`, leave both Nova workloads unchanged, and never report
+Direct as observed. Supporting Direct requires validating the hosted controller/
+guest worker split, including configuration, credentials, and lifecycle management.
 
 #### Standalone Clusters
 
@@ -194,9 +281,10 @@ applicability must be confirmed before publishing an OKE support claim.
 - **`openshift/cloud-provider-openstack`:** package the direct-mode driver and
   os-brick sidecar with supported storage dependencies and security servicing.
 - **`openshift/csi-operator`:** add feature/configuration handling, workload
-  arguments, sidecar and mounts, RBAC, placement rules, and status reporting.
+  arguments, sidecar and mounts, backend Secret watches and validation, RBAC,
+  placement rules, observed-mode status, and explicit HyperShift refusal.
   Direct mode reuses the existing Cinder credentials and preserves the cloud
-  configuration and credential paths.
+  configuration and credential paths. It does not manage MachineConfigs.
 - **`openshift/cluster-storage-operator`:** pass the release-managed sidecar image
   reference to the Cinder operator.
 - **`openshift/api`:** add the reviewed Cinder configuration and preview gate.
@@ -240,19 +328,11 @@ Every worker needs connectivity to the backend data path as well as Keystone
 and Cinder, with suitable credentials, trusted CAs, and a valid connector address.
 The operator must report invalid configuration or unmet prerequisites.
 
-- **iSCSI:** prepare unique initiator identities, iSCSI services, udev discovery,
-  and any supported multipath configuration. Define host-service ownership and
-  the RHCOS preparation procedure.
+- **iSCSI:** provide unique initiator identities, host iSCSI services, udev
+  discovery, and supported multipath configuration, as described below.
 - **RBD:** provide Ceph monitor access, compatible userspace tools and bindings,
   kernel RBD support, and a suitably scoped keyring. Cinder API credentials do
   not themselves grant Ceph data-path access.
-
-When Ceph configuration is needed, the administrator creates `ceph-config` in
-`openshift-cluster-csi-drivers`, containing `ceph.conf` and its referenced keyring.
-The direct-mode DaemonSet mounts it read-only at `/etc/ceph` in the sidecar.
-The Secret volume is optional for deployments that do not need it. No
-Secret-reference API or automatic Secret-triggered rollout is proposed. See
-[Support Procedures](#support-procedures) for update and rotation requirements.
 
 The node-plugin deployment requires access to host `/dev`, `/sys`, `/run`
 (mounted at `/host/run`), `/etc/iscsi`, and `/lib/modules`. The OpenStack, Storage,
@@ -260,6 +340,60 @@ and Node teams must validate the mounts, mount propagation, host-runtime access,
 and SELinux compatibility on RHCOS. Any required host configuration must have a
 documented, supported setup procedure and must not interfere with CRI-O or
 unrelated storage consumers.
+
+#### Host configuration and service ownership
+
+Administrators own host preparation and MachineConfigs for all participating
+nodes. No new MCO templates or Cinder-operator-managed MachineConfigs are proposed.
+Host systemd owns iSCSI/multipath daemons; the sidecar supplies tools and per-volume
+operations without competing daemons or overwriting host configuration.
+
+Each iSCSI host needs a unique, persistent `/etc/iscsi/initiatorname.iscsi`,
+distinct from its CSI node ID. Shared MachineConfigs must not distribute one
+literal identity. The os-brick connector reads this file; the inspected sidecar
+startup does not generate it. Administrators must verify uniqueness before
+Direct mode and after replacement, and preserve identity across pod/configuration
+rollouts. Target-RHCOS initialization still requires Node-team validation.
+
+Before Tech Preview, OpenStack, Storage, and Node reviewers must validate host
+setup and service actions with active volumes and unrelated storage consumers.
+Administrators may use `MachineConfiguration.spec.nodeDisruptionPolicy` where
+reboot-free application is validated. These host actions are separate from the
+Cinder operator's Secret-triggered node-pod rollouts.
+
+#### Backend configuration Secrets
+
+`spec.driverConfig.cinder.backendConfig` references administrator-managed Secrets
+in `openshift-cluster-csi-drivers`, projecting all data keys as read-only files
+into every direct-mode sidecar. Omission mounts no files; non-empty configuration
+requires Direct mode. There is no fixed-name lookup or new backend credential
+mount in the controller. For example:
+
+```yaml
+backendConfig:
+  - name: backend-files
+    secretRef:
+      name: storage-backend-config
+    mountPath: /etc/ceph
+```
+
+Multiple Secrets may contribute distinct filenames to a destination. The operator
+must reject missing/empty sources, duplicate destination filenames, unsafe paths,
+and unsupported destinations, and restrict file permissions to the required
+sidecar identity. Arbitrary mounts, host writes, and executable hooks are not
+supported. Initially only `/etc/ceph` is allowlisted; for RBD the Secret supplies
+`ceph.conf` and its referenced keyrings. Additional destinations require connector
+and dependency review, not per-backend Secret-reference fields. This interface
+does not itself establish backend support or credential validity.
+
+The operator watches referenced Secrets. Invalid configuration reports
+`Degraded=True` with reason `InvalidBackendConfig` without initiating a new
+rollout or deleting healthy workloads. Valid updates trigger a controlled rolling
+node-pod update using source identity/version metadata, not Secret contents, as
+the rollout identifier. In-place Secret changes can also refresh running pods'
+files before rollout; retaining a pod template does not retain old credentials.
+Safe refresh, restart, and rotation with active volumes must be validated before
+Tech Preview; see [Support Procedures](#support-procedures).
 
 #### Topology and compatibility
 
@@ -296,7 +430,7 @@ availability in os-brick alone does not establish OpenShift support.
 - **Privileged host access:** review SCC usage, socket permissions, mounts,
   SELinux handling, and Node patch permissions with Node/security reviewers.
   Connection cleanup must not disrupt unrelated host sessions or devices.
-- **Configuration changes and outages:** validate cloud/Ceph credential rotation
+- **Configuration changes and outages:** validate cloud/backend credential rotation
   and backend/API failures without disturbing healthy connections. Confirm
   behavior through transport-specific CI and documented recovery procedures.
 
@@ -333,12 +467,15 @@ for VM workers in mixed clusters.
    check coordinated with concurrent provisioning and binding?
 2. What fencing and stale-attachment recovery contract is required, including
    changes to upstream cleanup and missing-state handling?
-3. What RHCOS iSCSI/multipath configuration is needed, who owns the services,
-   and which changes require MachineConfig or reboot?
+3. Which exact RHCOS iSCSI/multipath files, units, and preparation steps are
+   required under the administrator-managed model? How is a unique initiator
+   identity initialized on the target image, and which changes safely use a
+   non-reboot disruption policy with active volumes?
 4. What identity and volume-zone semantics apply when Ironic metadata is missing
    or changes during worker replacement?
 5. How will publish-context credentials, connector metadata, and local recovery
-   state be protected, and how will Ceph configuration/keys be refreshed safely?
+   state be protected, and which transport-specific checks establish safe backend
+   configuration/key rotation and node-pod rollout?
 6. How can customers or storage vendors provide dependencies and host integration
    for additional backends, and what support boundary applies?
 
@@ -347,7 +484,8 @@ for VM workers in mixed clusters.
 The OpenStack and Storage teams, with QE, will run the existing Cinder CSI test
 suite against the operator-managed direct-mode deployment. Initial validation
 will cover iSCSI and RBD on bare-metal and VM workers, including compact clusters.
-Existing Nova and HyperShift test coverage remains unchanged.
+Existing Nova behavior remains covered; HyperShift coverage adds explicit Direct
+mode refusal.
 
 Operator unit and integration tests will cover initial attachment-mode selection,
 enforcement of the initial fixed-mode policy, feature gating, and deployment of
@@ -356,6 +494,19 @@ Initial-selection tests must cover pending Cinder PVCs and retained or staticall
 provisioned Cinder PVs blocking the change, with the deployed mode unchanged and
 a reported reason. Unrelated storage must not block initial Direct-mode selection
 when no Cinder PVCs or PVs exist and the feature gate is enabled.
+
+Additional API, operator, and host tests must cover:
+
+- Gate-on/off schemas, omitted/default configuration, required fields, and
+  invalid discriminator, resource-name, mode, and backend-path combinations.
+- Observed mode during successful, pending, rejected, and failed rollouts;
+  HyperShift refusal must leave both Nova workloads unchanged.
+- Multiple Secret sources, filename collisions, missing/invalid configuration,
+  update/deletion reconciliation, and credential-free diagnostics. Rotation must
+  preserve I/O and post-restart disconnect/expansion with active volumes.
+- Unique initiator identities and persistence across pod restart and host reboot;
+  validated MachineConfigs and disruption policies on workers and workload-bearing
+  control-plane nodes, without competing daemons or disruption to other storage.
 
 For iSCSI and RBD, failure testing will cover a worker that loses cluster
 connectivity while retaining storage access. Recovery must prevent conflicting
@@ -433,16 +584,22 @@ Any required state-format migration must be defined and tested.
 
 ## Operational Aspects of API Extensions
 
-The extension configures one existing cluster-scoped resource and adds node
-annotation writes and Node/CSINode watches. It introduces no request-path webhook
+The extension configures one existing cluster-scoped resource, adds node
+annotation writes and Node/CSINode watches, and watches backend Secrets in
+`openshift-cluster-csi-drivers`. It introduces no request-path webhook
 or aggregated API. Failures should affect storage operations rather than general
 API availability. OpenStack/Storage QE must measure registration bursts and API
 load during scale qualification.
 
 Report configuration and rollout failures through `ClusterCSIDriver` conditions
-and the storage ClusterOperator reporting path. Health signals must cover
-registration, attachment, staging, disconnect, and unmet prerequisites; process
-liveness alone does not establish backend connectivity.
+and the storage ClusterOperator reporting path. `status.cinder.observedAttachMode`
+records the last completed controller/node rollout, retaining its prior value on
+pending, failed, or rejected changes and remaining unset before the first completed
+rollout. It is not the durable mode lock. Interpret it with conditions and
+`observedGeneration`: a processed spec or a previous mode does not establish
+current rollout success. Health signals must cover registration, attachment,
+staging, disconnect, and unmet prerequisites without exposing credentials;
+process liveness alone does not establish backend connectivity.
 
 OpenStack owns cloud/backend integration, Storage owns operator/CSI lifecycle,
 and Node/security owns host-service and SELinux issues.
@@ -470,10 +627,13 @@ state and follow the [data-safety requirements](#risks-and-mitigations) before
 force cleanup. Must-gather must exclude Secret values and raw connection
 information and redact sensitive log/publish-context data.
 
-Administrators manage `ceph-config` updates and key rotation. Validate and document
-configuration refresh, any required node-pod restart, overlapping key validity,
-and effects on active/new connections. Updating a Secret does not establish that
-active sessions reauthenticate.
+Administrators own backend Secret updates and key rotation. Create replacement
+Secrets before changing references, keep overlapping key validity through rollout,
+and verify new attachments and existing-volume cleanup before revoking old keys.
+Updating files or restarting pods does not establish that active sessions
+reauthenticate. Follow validated host-service and disruption-policy procedures;
+do not regenerate initiator identities or restart shared storage services as
+generic troubleshooting.
 
 After outages, reconcile attachment and device state before resuming operations;
 existing connections cannot be assumed to survive reboot or session loss. Retain
@@ -496,6 +656,7 @@ constraints.
 
 [upstream-pr]: https://github.com/kubernetes/cloud-provider-openstack/pull/3215
 
+- [ClusterCSIDriver API source used for the proposal](https://github.com/openshift/api/blob/f6e8a0876ff972521e8bf3bf687079e6511ac001/operator/v1/types_csi_cluster_driver.go)
 - [Cinder operator implementation](https://github.com/openshift/csi-operator/blob/f5d54d11ed1ba2ee3cefb75a4b2c18b30c6df378/pkg/driver/openstack-cinder/openstack_cinder.go)
 - [Upstream controller attachment implementation](https://github.com/kubernetes/cloud-provider-openstack/blob/a016eca9343d71a460c9d2f4d4e4bdb0085ab127/pkg/csi/cinder/controllerserver.go)
 - [Upstream node lifecycle implementation](https://github.com/kubernetes/cloud-provider-openstack/blob/a016eca9343d71a460c9d2f4d4e4bdb0085ab127/pkg/csi/cinder/nodeserver.go)
@@ -503,6 +664,9 @@ constraints.
 - [Connector metadata lookup](https://github.com/kubernetes/cloud-provider-openstack/blob/a016eca9343d71a460c9d2f4d4e4bdb0085ab127/pkg/csi/cinder/connprops.go)
 - [Upstream direct-mode node manifest](https://github.com/kubernetes/cloud-provider-openstack/blob/a016eca9343d71a460c9d2f4d4e4bdb0085ab127/manifests/cinder-csi-plugin/cinder-csi-nodeplugin-direct.yaml)
 - [Upstream os-brick connector implementation](https://github.com/kubernetes/cloud-provider-openstack/blob/a016eca9343d71a460c9d2f4d4e4bdb0085ab127/sidecar/os_brick_grpc/server.py)
+- [Upstream sidecar startup](https://github.com/kubernetes/cloud-provider-openstack/blob/a016eca9343d71a460c9d2f4d4e4bdb0085ab127/sidecar/entrypoint.sh)
+- [os-brick iSCSI initiator lookup](https://github.com/openstack/os-brick/blob/master/os_brick/initiator/connectors/iscsi.py)
+- [Administrator-defined node disruption policy](../machine-config/admin-defined-node-disruption-policy.md)
 - [Cinder operator configuration synchronization](https://github.com/openshift/csi-operator/blob/f5d54d11ed1ba2ee3cefb75a4b2c18b30c6df378/pkg/openstack-cinder/config/configsync.go)
 - [Downstream os-brick image work](https://github.com/openshift/cloud-provider-openstack/blob/master/images/osbrick-sidecar/Dockerfile)
 - [Storage operator Cinder image wiring](https://github.com/openshift/cluster-storage-operator/blob/main/pkg/operator/csidriveroperator/csioperatorclient/cinder.go)
