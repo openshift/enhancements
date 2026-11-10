@@ -4,13 +4,16 @@ authors:
   - "@candita"
 reviewers:
   - "@gcs278"
-  - TBD
+  - "@rhamini3"
+  - "@thealisyed"
 approvers:
-  - TBD
+  - "@gcs278"
+  - "@rhamini3"
+  - "@thealisyed"
 api-approvers:
   - None
 creation-date: 2026-10-01
-last-updated: 2026-10-22
+last-updated: 2026-11-09
 status: provisional
 tracking-link:
   - https://issues.redhat.com/browse/NE-2689
@@ -72,9 +75,8 @@ backing load-balancer infrastructure.
   can manage their own hostnames and certificates without
   affecting other tenants.
 
-* As an SRE, I want to monitor ListenerSet health and
-  listener conflict status through standard Gateway API status
-  conditions so that I can detect and
+* As an SRE, I want to monitor ListenerSet health through
+  standard Gateway API status conditions so that I can detect and
   remediate listener configuration issues.
 
 ### Goals
@@ -84,8 +86,9 @@ backing load-balancer infrastructure.
    without requiring cluster administrator privileges.
 
 2. Change the gateway-service-dns controller to additionally
-   create DNS records for ListenerSet hostnames, so the set of
-   listeners work like classic listeners.
+   provide DNS resolution for ListenerSet hostnames, so the set of
+   listeners are as reachable as inline listeners, and also
+   update the ListenerSet status with a DNSReady condition.
 
 3. Support self-service TLS certificate management, allowing
    users to bring their own certificates for listeners within
@@ -95,11 +98,7 @@ backing load-balancer infrastructure.
    distributing listeners across multiple ListenerSet
    resources.
 
-5. Provide clear conflict detection and status reporting via
-   default Cluster Ingress Operator status updates when
-   listeners within or across ListenerSets conflict.
-
-6. Support cross-namespace attachment of ListenerSets to
+5. Support cross-namespace attachment of ListenerSets to
    Gateways, enabling multi-tenant use cases where each
    namespace manages its own listeners.
 
@@ -134,20 +133,22 @@ The implementation involves the following high-level changes:
   controllers to watch ListenerSet entries in addition to
   Gateway listeners. Add a function to combine the entries in
   ListenerSets with the listeners of a Gateway.  The controllers
-  will reconcile ListenerSets for configuration of the load balancer,
+  will reconcile ListenerSets for
   assignment of DNS entries, and updates of status conditions in
-  ListenerSets and the default Ingress Cluster operator.
+  ListenerSets.
 
 
 - **DNS management**: When a ListenerSet attaches to a
   Gateway, the DNS controller will create and manage DNS
-  records for hostnames defined in the ListenerSet's
-  listeners, following the same patterns used for Gateway
-  listeners today. We currently assign DNS names to
-  resolve to the listener's load balancer IP address.  We
-  watch listeners and load balancer services on a
-  Gateway, and we will need to unpack ListenerSet entries
-  to deduplicate hostnames before assigning DNS records.
+  records for hostnames defined in an `Accepted`: true
+  ListenerSet.  If the ListenerSet is not accepted, then
+  no DNS management will occur.  Other than the check
+  for `Accepted`: true, we follow the same logic used
+  for Gateway listeners today to assign DNS names that
+  resolve to the Gateway's Service.  We  watch listeners
+  and load balancer services on a Gateway, and we will
+  need to unpack ListenerSet entries to deduplicate
+  hostnames in the same way we do for inline listeners.
 
   When a ListenerSet is in a different namespace than the
   Gateway parentRef, the DNS records must be created in the
@@ -161,30 +162,14 @@ The implementation involves the following high-level changes:
   There are special concerns when there are listener hostname
   conflicts because these listeners will be marked `Conflicted`.
   The DNS record should be removed from a listener when it is
-  marked `Conflicted`, because the listener is invalid.
-
-
-  TODO: we could impose our own rules here, but if Istio does
-  as the Gateway API spec says to do, no traffic will be served
-  to any `Conflicted` listener/s per
+  marked `Conflicted`, because the listener is invalid.  This is
+  based on the Gateway API spec, which states that no traffic will
+  be served to any `Conflicted` listener/s. See
   https://github.com/kubernetes-sigs/gateway-api/blob/main/apis/v1/gateway_types.go#L184.
 
-
   **Note:**  If two listeners are already allowed to share a
-  service, we will need to fix a bug in the
-  method of DNS record creation.
-
-
-- **Conflict detection reporting**: Implement listener conflict
-  detection reporting. A ListenerSet
-  with one or more conflicting listeners will continue to
-  function for its non-conflicting listeners; set appropriate
-  status conditions on the default Ingress Cluster operator to report
-  when there is a detected conflict.  Add a
-  new metric called `listenersets_conflicts_total` for
-  ListenerSet conflicts, and an alert for reporting those conflicts.
-  It is easy to envision a cluster with hundreds of conflicts, so
-  they will need to be carefully aggregated.
+  service, we will need to fix a bug in the method of DNS
+  record creation, which assumes one service per listener.
 
 
 - **Status reporting**: Provide Gateway API-compliant status
@@ -247,8 +232,8 @@ records for ListenerSet hostnames.
 5. The ingress controller detects the new ListenerSet and
    reconciles the ListenerSet and its entries.
 
-6. The ingress controller creates DNS records for
-   the specified hostnames.
+6. The ingress controller creates DNS records for the specified
+   hostnames, applying  customary hostname de-duplication.
 
 7. Istio configures the services and updates the ListenerSet
    status and per-listener conditions.
@@ -256,26 +241,27 @@ records for ListenerSet hostnames.
 8. The application developer creates HTTPRoute or other route
    resources referencing the ListenerSet via `parentRefs`.
 
-#### Handling Listener Conflicts
+#### Handling DNS Conflicts
+All listener hostname conflicts are detected and managed by Istio.
+However, we will heed hostname conflicts across one or more
+Gateways because the resulting DNS resolution will be different
+for two or more different Gateways.
 
-1. Istio detects a conflict (e.g., duplicate
-   hostname, port, and/or protocol) between listeners in the same or
-   different ListenerSets, or between a ListenerSet listener
-   and a Gateway listener.
+Because there are nuances, this table helps to enumerate the use cases:
 
-2. The conflicting listener's status is set to `Conflicted`
-   with a descriptive reason.
+| Scenario | DNS behavior |
+|---|---|
+| Same hostname within one ListenerSet | One deduplicated DNSRecord |
+| Same hostname across ListenerSets on one Gateway | One deduplicated DNSRecord |
+| Same hostname on a Gateway's (inline) listener and a listener belonging to the Gateway's ListenerSet | One deduplicated DNSRecord |
+| Different hostnames on one Gateway | One DNSRecord per unique hostname; same Gateway Service target |
+| Same hostname across different Gateways | Oldest DNSRecord wins; records created later get `DomainAlreadyInUse` ([CIO #1543](https://github.com/openshift/cluster-ingress-operator/pull/1543)) |
+| Same hostname from ListenerSets on different Gateways | Same as cross-Gateway behavior; DNSRecord age wins, not Gateway or ListenerSet age ([CIO #1543](https://github.com/openshift/cluster-ingress-operator/pull/1543)) |
 
-3. All non-conflicting listeners in the ListenerSet continue
-   to function normally.
+ListenerSet age, Gateway age, listener precedence, TLS, ports,
+and protocols do not affect DNS conflict resolution.
 
-4. If all listeners are `Conflicted`, then the ListenerSet is
-   marked `ListenersNotValid`.
-
-6. The application developer reviews the listeners and ListenerSet
-   statuses and resolves the conflict by updating their listener
-   and ListenerSet configuration.
-
+### Workflow Diagram
 
 ```mermaid
 sequenceDiagram
@@ -316,10 +302,15 @@ records for it, we can extend the signal for DNS provisioning
 into ListenerSet and its entries' status conditions.
 
 We add the `DNSReady` condition to each entry in the ListenerSet
-(in `status.listeners[].conditions[]`) and as an aggregate
-to the ListenerSet status (in `status.conditions[]`). The
-ListenerSet status summarizes `DNSReady`, and the per-listener
-status describes each listener's DNS state.
+(in `status.listeners[].conditions[]`) and as an aggregate or
+top-level status of
+the ListenerSet status (in `status.conditions[]`).
+The per-listener status describes each listener's DNS state.
+The ListenerSet status summarizes `DNSReady` from each listener
+in the set, and if at least one listener is `DNSReady`: false, then
+the ListenerSet status is `DNSReady`: false, with a message
+reflecting how many DNS readies are desired out of the total set, e.g.
+"5/6 desired listeners are DNSReady" when only 5 of 6 listeners are DNS ready.
 
 ### Topology Considerations
 
@@ -367,8 +358,8 @@ components:
 
 - **openshift/cluster-ingress-operator**: Extend the Gateway
   API controller to watch and provide DNS for ListenerSet resources.
-  Update the DNS management logic to
-  handle ListenerSet hostnames on `Accepted` ListenerSets for
+  Update the DNS management logic to handle ListenerSet hostnames on
+  `Accepted`: True ListenerSets for
   listeners that are not in `Conflict`. Revert the code that disallowed
   ListenerSets in OCP 5.0.  Refactor status updates to reflect
   status of ListenerSets.
@@ -379,13 +370,6 @@ changes, status condition mappings, and integration points
 with the existing Gateway API controller. -->
 
 ### Risks and Mitigations
-
-**Listener conflict complexity**: As the number of
-ListenerSets grows, conflict detection becomes more complex
-and must remain performant. Mitigation: Implement efficient
-indexing of listeners by hostname, protocol, and port, and use
-the controller's existing watch and cache infrastructure to avoid
-full re-scans on each reconciliation.
 
 **ListenerSets allow unbounded number of listeners**: Without
 a limit on the number of listeners per Gateway, we face potential
@@ -404,6 +388,14 @@ to Gateways in other namespaces must respect the Gateway's
 attachment policies. Mitigation: Istio should enforce Gateway
 `allowedListeners` and any namespace selectors to prevent
 unauthorized cross-namespace listener attachment.
+
+**DNS assignment permissions extended to application developers**:
+Because application developers get permissions to create
+ListenerSets, they also get permissions to create DNS records.
+Mitigation: we only create DNS records when an ListenerSet is
+`Accepted`: true to ensure an authorization chain is established
+from the cluster admin (who sets the `allowedListeners`), to the
+application developer that requests the ListenerSet.
 
 **Multi-tenancy isolation**: In multi-tenant environments,
 one tenant's ListenerSet configuration must not affect
@@ -434,13 +426,12 @@ security team or other appropriate party.
   active listeners.
 
 - Documenting the use of ListenerSets could be difficult,
-  given the lack of customer demand in Red Hat.
+  given the limited Red Hat customer demand.
 
 - ListenerSets allow admins to extend DNS provisioning to
   application developers that may not have access to
   resources to troubleshoot why their listeners never
-  become `DNSReady`.  The `allowedListeners` mechanism
-  may help alleviate this issue.
+  become `DNSReady`.
 
 ## Alternatives (Not Implemented)
 
@@ -464,14 +455,15 @@ in the future.
 
 3. Should there be a cluster-wide policy for controlling
    which namespaces can create ListenerSets that attach to
-   Gateways in other namespaces?  Due to `allowedListeners`
-   we may not need this.  Besides, allowing the cluster
-   admin to make this decision is arguably preferred.
+   Gateways in other namespaces?  Cluster admins can use
+   `allowedListeners` to control this on a more fine-grain
+   basis.
 
 4. Do we need a knob for
    cluster administrators to disable the use of ListenerSets
    entirely, or to configure a maximum number of listeners?
-   The answer to open question 3 applies here as well.
+   The answer to open question 3 applies here, though we could
+   potentially add more controls in the future.
 
 5. Do we want to set any new Ingress Controller status conditions,
    metrics, or alerts based on the other ListenerSet conditions?
@@ -479,10 +471,8 @@ in the future.
    NotAllowed, ParentNotAccepted, HostnameConflict, ProtocolConflict,
    ListenerConflict, PortUnavailable, UnsupportedProtocol,
    TooManyListeners, InvalidCertificateRef, InvalidRouteKinds,
-   or RefNotPermitted. Perhaps any conflicts or certificate
-   issues should be aggregated and propagated to status.
-   Feedback is that this is out of scope and could be a followup
-   enhancement.
+   or RefNotPermitted. Feedback is that this is out of scope and
+   could be a followup enhancement if needed.
 
 6. A dummy listener is required on the Gateway even if only ListenerSets
    are configured.  Do we want to use a mutating admission policy to add
@@ -495,7 +485,7 @@ in the future.
 
 The test strategy includes:
 
-- **Unit tests**: Cover conflict detection reporting, ListenerSet
+- **Unit tests**: Cover ListenerSet
   reconciliation, DNS record creation, and status condition
   updates.
 
@@ -511,12 +501,17 @@ The test strategy includes:
 2. Reparent a ListenerSet and verify the old Gateway’s DNSRecords
     are removed and new records target the new Gateway Service.
 3. Create a ListenerSet that is not allowed by allowedListeners;
-    verify Accepted=False and no DNSRecords are created.
-4. Revoke allowedListeners authorization and verify ListenerSet
-    DNSRecords are removed; restore authorization and verify recreation.
-5. Change a ListenerSet hostname and verify the old DNSRecord is removed and the new one created.
-6. Verify top-level and per-listener DNSReady, including mixed success and failure.
-7. Delete the parent Gateway and verify its ListenerSet DNSRecords are cleaned up.
+    verify `Accepted`: False and no DNSRecords are created.
+4. Configure the same ListenerSet to be allowed and ensure
+   DNSRecords are created after the ListenerSet becomes accepted.
+5. Revoke allowedListeners authorization and verify ListenerSet
+   DNSRecords are removed; restore authorization and verify recreation.
+6. Change a ListenerSet hostname and verify the old DNSRecord is
+   removed and the new one created.
+7. Verify top-level and per-listener `DNSReady`, including mixed
+   success and failure.
+8. Delete the parent Gateway and verify its ListenerSet DNSRecords
+   are cleaned up.
 
 - **Upgrade tests**: Verify that clusters with existing
   ListenerSet resources upgrade cleanly.
@@ -548,7 +543,7 @@ Key test scenarios:
 - Conflict detection and status reporting are implemented.
 - Cross-namespace attachment is functional.
 - SLIs defined and exposed as metrics (e.g., ListenerSet
-  reconciliation errors, conflict count).
+  reconciliation errors).
 - Upgrade and downgrade testing completed.
 - Scale testing with multiple ListenerSets per Gateway.
 - User-facing documentation created in
@@ -599,7 +594,6 @@ resources has the following operational characteristics:
 
 - **Health indicators**: The ingress operator will report
   conditions reflecting ListenerSet reconciliation health.
-  New metrics for ListenerSet conflicts will be exposed.
 
 - **Performance impact**: Each ListenerSet adds a small
   amount of watch cache memory and reconciliation work. For
@@ -628,16 +622,10 @@ resources has the following operational characteristics:
   ```
 
 - Check the ingress operator logs for ListenerSet
-  reconciliation errors or conflicts:
+  reconciliation errors:
   ```
   oc logs -n openshift-ingress-operator deployment/ingress-operator
   ```
-
-- Monitor the `listenersets_conflicts_total` metric for
-  failures due to conflicting listener definitions.
-
-- Check for listener conflict alerts that indicate
-  overlapping hostnames or ports across ListenerSets.
 
 **Disabling the feature**:
 
@@ -653,7 +641,7 @@ N/A
 
 N/A
 
-## Infrastructure Needed [optional]
+## Infrastructure Needed
 
 No new infrastructure is needed. The feature uses existing
 OpenShift CI infrastructure for testing across supported
