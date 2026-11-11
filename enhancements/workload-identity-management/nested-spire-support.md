@@ -1,6 +1,5 @@
 ---
-
-## title: nested-spire-support
+title: nested-spire-support
 authors:
   - "@rausingh-rh"
 reviewers:
@@ -16,6 +15,7 @@ last-updated: 2026-11-05
 status: provisional
 tracking-link:
   - https://redhat.atlassian.net/browse/SPIRE-625
+---
 
 # Nested SPIRE Support for Zero Trust Workload Identity Manager
 
@@ -87,8 +87,8 @@ The workflow has four steps. Steps 1 and 3 are **manual** administrator steps. S
 
 **Step 2 - Operator-driven: configure the upstream cluster**
 
-1. Administrator adds downstream cluster names to `spec.nodeAttestor.externalK8sPSAT.clusters` and sets `spec.managedRoute: "true"`, or provides an externally reachable endpoint themselves.
-2. The operator checks the kubeconfig Secrets, configures downstream attestation and registration entries, and restarts the upstream server. It creates a passthrough Route when `managedRoute` is `"true"`. Missing Secrets are reported with the affected cluster name before applying the configuration.
+1. Administrator adds downstream cluster names to `spec.nodeAttestor.externalK8sPSAT.clusters`. Optionally sets `spec.managedRoute: "true"` to have the operator create a passthrough Route exposing the upstream SPIRE server's gRPC endpoint; the default is `"false"`, in which case the administrator manages external reachability to the upstream SPIRE server themselves.
+2. The operator validates that each kubeconfig Secret exists before updating the upstream server's configuration. If a Secret is missing, the operator sets `DownstreamClustersValid=False` with a message identifying the affected cluster and expected Secret name, and skips that cluster's configuration. For clusters with valid Secrets, the operator configures downstream attestation and registration entries, and restarts the upstream server. It creates a passthrough Route when `managedRoute` is `"true"`.
 
 **Step 3 - Manual: bootstrap trust bundle (one-time)**
 
