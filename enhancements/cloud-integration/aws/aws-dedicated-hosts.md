@@ -8,7 +8,7 @@ reviewers:
   - "@patrickdillon" # installer
   - "@nrb" # CAPA / machine-api-provider-aws actuator
 approvers:
-  - "@patrickdillon"
+  - "@rvanderp3"
 api-approvers:
   - "@JoelSpeed"
 creation-date: 2025-04-23
@@ -568,11 +568,10 @@ implementation.
   and billable with no further record once the `AWSMachine` is gone. The
   in-tree `machine-api-provider-aws` actuator does not have this gap, since
   it releases synchronously on any failure between allocation and instance
-  creation. Mitigation: none upstream today; administrators using the CAPA
-  path should periodically reconcile AWS's list of Dedicated Hosts tagged
-  for the cluster against the set of Machines that reference them, and
-  manually release (`ec2:ReleaseHosts`) any host with no corresponding
-  Machine. See [Support Procedures](#support-procedures).
+  creation. Mitigation: none upstream today; dynamically allocated hosts are
+  not guaranteed to carry a cluster-identifying tag (see
+  [Support Procedures](#support-procedures)), so recovery is a manual,
+  careful account-level audit rather than a simple tag-filtered query.
 - **Removing dynamic allocation config from a live Machine before deleting
   it can also orphan its host.** CAPA's release logic requires both
   `status.dedicatedHost.id != nil` *and* `spec.dynamicHostAllocation != nil`
@@ -812,13 +811,42 @@ MachineSet reconciliation recreate the failed Machine is sufficient.
 **Stranded dynamically allocated hosts.** On the CAPA runtime path, a host
 can be left allocated with no corresponding Machine if instance creation
 failed after allocation and the Machine was deleted before a retry
-succeeded (see [Risks and Mitigations](#risks-and-mitigations)). To find
-candidates, list the cluster's Dedicated Hosts
-(`aws ec2 describe-hosts --filter Name=tag:kubernetes.io/cluster/<cluster-id>,Values=owned,shared`)
-and cross-reference each host ID against `status.dedicatedHost.id` across
-current Machines/AWSMachines; any host with no matching Machine, and with
-no instance currently placed on it, is safe to release with
-`aws ec2 release-hosts`.
+succeeded (see [Risks and Mitigations](#risks-and-mitigations)). There is no
+reliable automated way to identify these from AWS state alone:
+
+- OpenShift does not apply an automatic cluster-ownership tag to
+  dynamically allocated hosts; verified against
+  `AllocateDedicatedHost` in `cluster-api-provider-aws`, which only tags a
+  dynamically allocated host with `AWSCluster`/`AWSMachine`
+  `spec.additionalTags` (empty by default) plus any
+  `dynamicHostAllocation.tags` the user set. A stranded host may therefore
+  carry no identifying tag at all, so filtering `describe-hosts` by the
+  cluster's ownership tag can miss it; a full, untagged `aws ec2
+  describe-hosts` inventory for the account/region is needed instead.
+- A BYO host also has no instance on it between Machine deletions and the
+  next scale-up, and carries the `shared` tag applied to it
+  (`openshift/machine-api-provider-aws#181`) — it must never be treated as
+  a release candidate. Only consider a host whose ID is not, and has never
+  been, referenced by any Machine/AWSMachine's `dedicatedHost.id` (BYO) in
+  the cluster's history.
+- A host can legitimately be empty and untagged for a short time while a
+  dynamic allocation is still in progress (the in-tree actuator allocates
+  and tags a host before it launches the instance or records the host ID in
+  status). Releasing it mid-allocation fails that Machine's creation. Pause
+  new dynamic-host scale-ups (for example, scale the affected MachineSet(s)
+  to 0 or suspend the actuator) and wait for any in-flight allocation to
+  either resolve into a running instance or fail and age out (allow at
+  least the observed worst-case allocation latency, on the order of 15-20
+  minutes; see SPLAT-3009) before treating a host as a candidate.
+
+Given these constraints, treat a host as a release candidate only once all
+of the following hold: it predates the pause above by a safe margin, it has
+never been referenced as a BYO host ID by any Machine in the cluster, and no
+currently live Machine/AWSMachine's `status.dedicatedHost.id` references it.
+Because this cannot be fully automated or verified from AWS alone, confirm
+with the account owner before running `aws ec2 release-hosts` against any
+host that isn't unambiguously identifiable as an orphaned dynamic
+allocation.
 
 ## Infrastructure Needed [optional]
 
