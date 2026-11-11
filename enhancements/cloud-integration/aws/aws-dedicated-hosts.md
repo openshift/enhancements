@@ -34,8 +34,9 @@ Two placement modes are supported:
 
 - **User-provided ("BYO") Dedicated Hosts**: the administrator allocates a
   Dedicated Host in the AWS console ahead of time and supplies its host ID.
-  OpenShift places instances on that host but never creates, modifies, or
-  releases it.
+  OpenShift places instances on that host and applies a cluster-association
+  tag to it, but never allocates, resizes, or releases it; host lifecycle
+  stays entirely with the owner.
 - **Dynamically allocated Dedicated Hosts**: OpenShift allocates a Dedicated
   Host automatically (one host per instance, 1:1) when a Machine/instance is
   created, and releases it when the Machine is deleted, with no manual AWS
@@ -234,9 +235,12 @@ sequenceDiagram
 
 **cluster maintainer** is a human user responsible for day-2 operations.
 
-1. The cluster maintainer sets `Placement.Host.Affinity: DedicatedHost` with
+1. The cluster maintainer sets `Placement.Tenancy: host` together with
+   `Placement.Host.Affinity: DedicatedHost` and
    `DedicatedHost.AllocationStrategy: Dynamic` (and optionally tags to apply
    to the host) on a Machine or MachineSet, instead of supplying a host ID.
+   `Placement.Tenancy: host` is required: the admission webhook rejects
+   `Placement.Host` on any Machine where `Placement.Tenancy` is not `host`.
 2. The cluster maintainer scales the MachineSet up.
 3. For each new Machine, the actuator allocates a new Dedicated Host
    (`AllocateHosts`, quantity 1, auto-placement off) sized for the instance
@@ -275,8 +279,16 @@ sequenceDiagram
 
 If the dynamically allocated host cannot be created at all (a failure
 between `AllocateHosts` succeeding and `RunInstances` succeeding), the
-actuator synchronously releases the just-allocated host so it is never
-orphaned and billed indefinitely.
+in-tree `machine-api-provider-aws` actuator synchronously releases the
+just-allocated host so it is never orphaned. The upstream CAPA path does
+not have this synchronous cleanup today: if `RunInstances` fails after
+`AllocateHosts` succeeds, and the Machine is deleted before a subsequent
+reconcile successfully creates the instance, `AWSMachineReconciler.reconcileDelete`
+finds no EC2 instance at all and removes the Machine's finalizer immediately,
+without ever consulting `status.dedicatedHost.id` — the allocated host is
+left behind, still billable, with no further record of it once the Machine
+object is gone. See [Risks and Mitigations](#risks-and-mitigations) for how
+to detect and recover from this.
 
 ### API Extensions
 
@@ -545,6 +557,34 @@ implementation.
   both `machine-api-provider-aws` and `cluster-api-actuator-pkg`
   (`#446`) are the primary safety nets; reviewers for future changes to
   either actuator should check the other.
+- **A dynamically allocated host can be orphaned if instance creation fails
+  on the CAPA path.** Verified directly against
+  `kubernetes-sigs/cluster-api-provider-aws` (`controllers/awsmachine_controller.go`,
+  `reconcileDelete`): if `AllocateHosts` succeeds but the subsequent
+  `RunInstances` fails, and the `AWSMachine` is deleted before a later
+  reconcile successfully creates the instance, `reconcileDelete` finds no
+  EC2 instance and removes the finalizer immediately — it never checks
+  `status.dedicatedHost.id` in that code path, so the host is left allocated
+  and billable with no further record once the `AWSMachine` is gone. The
+  in-tree `machine-api-provider-aws` actuator does not have this gap, since
+  it releases synchronously on any failure between allocation and instance
+  creation. Mitigation: none upstream today; administrators using the CAPA
+  path should periodically reconcile AWS's list of Dedicated Hosts tagged
+  for the cluster against the set of Machines that reference them, and
+  manually release (`ec2:ReleaseHosts`) any host with no corresponding
+  Machine. See [Support Procedures](#support-procedures).
+- **Removing dynamic allocation config from a live Machine before deleting
+  it can also orphan its host.** CAPA's release logic requires both
+  `status.dedicatedHost.id != nil` *and* `spec.dynamicHostAllocation != nil`
+  to still be true at the moment the instance is confirmed terminated; if an
+  administrator strips `dynamicHostAllocation` from an existing
+  dynamic-allocation Machine's spec before deleting it, the release is
+  skipped even though the instance terminates normally. Mitigation:
+  administrators should only change the MachineSet template (so future
+  Machines stop using dynamic allocation) and let existing dynamic-host
+  Machines be deleted/replaced with their original configuration intact,
+  rather than editing an existing Machine's placement fields in place; see
+  [Support Procedures](#support-procedures).
 - **BYO Dedicated Hosts are never automatically released.** Because
   OpenShift tags BYO hosts `shared` rather than `owned`, deleting the
   MachineSet or the cluster does not release the host; a customer who
@@ -741,11 +781,19 @@ Event (once per transition, not per retry): InsufficientDedicatedHostCapacity
 **Disabling the behavior.** The Dedicated Host validation rules are bundled
 into the existing Machine API admission webhook and cannot be disabled
 independently of Machine API validation as a whole. To stop using Dedicated
-Hosts, remove `Placement.Host`/`Placement.Tenancy: host` from affected
-Machines/MachineSets (or the corresponding `hostPlacement` entries in
+Hosts, remove `Placement.Host`/`Placement.Tenancy: host` from the affected
+MachineSet *template* (or the corresponding `hostPlacement` entries in
 `install-config.yaml` before installing); new Machines will provision as
 ordinary shared-tenancy instances. Existing instances already placed on a
-Dedicated Host are unaffected until they are replaced.
+Dedicated Host are unaffected until they are replaced. **Do not** edit the
+placement fields on an existing, already-created dynamic-allocation Machine
+in place before deleting it: on the CAPA runtime path, release-on-delete is
+only triggered when `spec.dynamicHostAllocation` is still present at
+deletion time, so stripping it first leaves the host allocated and
+billable. Delete/replace existing dynamic-allocation Machines with their
+original configuration intact instead, and let the MachineSet controller
+recreate them without Dedicated Host configuration from the updated
+template.
 
 **Impact on existing/new workloads.** Removing Dedicated Host configuration
 has no effect on already-running workloads; it only changes where *future*
@@ -760,6 +808,17 @@ is tried, with no manual intervention required. BYO misconfigurations
 (invalid ID, wrong AZ) are rejected before any AWS resources are touched, so
 there is nothing to clean up; fixing the configuration and letting
 MachineSet reconciliation recreate the failed Machine is sufficient.
+
+**Stranded dynamically allocated hosts.** On the CAPA runtime path, a host
+can be left allocated with no corresponding Machine if instance creation
+failed after allocation and the Machine was deleted before a retry
+succeeded (see [Risks and Mitigations](#risks-and-mitigations)). To find
+candidates, list the cluster's Dedicated Hosts
+(`aws ec2 describe-hosts --filter Name=tag:kubernetes.io/cluster/<cluster-id>,Values=owned,shared`)
+and cross-reference each host ID against `status.dedicatedHost.id` across
+current Machines/AWSMachines; any host with no matching Machine, and with
+no instance currently placed on it, is safe to release with
+`aws ec2 release-hosts`.
 
 ## Infrastructure Needed [optional]
 
