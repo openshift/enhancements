@@ -100,202 +100,16 @@ reason code. Azure Cases 2.1, 2.2, 2.8 and AWS Case
 have no dependency on PR #9781 and can proceed
 independently.
 
-## Glossary
-
-For common HyperShift terms (HC, HCP, HO, CPO, HCCO,
-CPC, CVO) see the
-[parent enhancement glossary](installation-failure-debuggability.md#glossary).
-
-### Azure terms
-
-- **ARO HCP**: Azure Red Hat OpenShift, Hosted Control
-  Planes architecture
-- **CAPZ**: Cluster API Provider Azure — the CAPI
-  provider that manages Azure infrastructure
-- **ARM**: Azure Resource Manager — the deployment and
-  management service for Azure resources
-- **Entra ID**: Microsoft Entra ID (formerly Azure
-  Active Directory) — identity and access management
-- **Managed Identity**: An Azure identity automatically
-  managed by Azure for authenticating to Azure services
-- **Azure Policy**: Governance mechanism that enforces
-  rules on Azure resources during creation and updates
-- **ASO**: Azure Service Operator — bridges Kubernetes
-  and Azure resources
-- **PLS**: Private Link Service — Azure networking
-  resource that enables private connectivity to
-  services behind a Standard Load Balancer
-
-### AWS terms
-
-- **ROSA HCP**: Red Hat OpenShift Service on AWS,
-  Hosted Control Planes architecture
-- **CAPA**: Cluster API Provider AWS — the CAPI
-  provider that manages AWS infrastructure
-- **STS**: AWS Security Token Service — used for
-  temporary credential assumption
-- **OIDC**: OpenID Connect — used for workload
-  identity federation with AWS
-- **SCP**: AWS Service Control Policy — organization-
-  level policy restricting API actions
-- **NACL**: Network Access Control List — subnet-level
-  firewall in AWS VPC
-
-### Case numbering
-
-Azure cases use the 2.x series (Cases 2.1, 2.2, 2.8)
-from the full ARO failure case inventory (Cases
-2.1–2.10). AWS cases use the 3.x series (Cases 3.1,
-3.3, 3.7) from the full ROSA failure case inventory
-(Cases 3.1–3.12). The non-contiguous numbering
-reflects that only the SRE-confirmed cases are
-addressed here; the remaining cases are listed in
-Future Work.
-
 ## Motivation
 
-SRE teams for managed HCP services (ARO HCP and ROSA
-HCP) encounter platform-specific installation failures
-that surface as opaque HyperShift conditions. Whether
-the root cause is an Azure platform issue (policy
-conflict, quota exhaustion, ARM error) or an AWS
-platform issue (IAM misconfiguration, network
-misconfiguration, connectivity failure), the error
-appears as a generic condition with no indication of
-the underlying cloud-specific cause. SREs must
-manually inspect CAPI Machine objects, cloud provider
-API responses, and pod logs across multiple namespaces
-to identify the root cause.
-
-**Azure**: The current Azure error handling in
-HyperShift (`support/azureutil/errors.go`,
-`ClassifyAzureError()`) classifies errors by HTTP
-status code only (429, 403, 409, other). The default
-case includes `ErrorCode` in the message string but
-does not branch on specific error codes such as
-`RequestDisallowedByPolicy` or `QuotaExceeded`. As a
-result, known recoverable errors (like quota
-exhaustion) are treated as transient conflicts with a
-30-second requeue, and policy errors are misclassified
-as permission errors.
-
-**AWS**: ROSA HCP SRE teams have confirmed three
-categories of AWS-specific installation failures that
-are difficult to diagnose today. In each case, the
-root cause is an AWS platform issue, but the error
-surfaces as a generic HyperShift condition with no
-indication of the underlying AWS-specific cause.
-
-### User Stories
-
-#### Azure / ARO user stories
-
-- As an ARO SRE, I want to see the specific Azure
-  Policy name that blocked resource creation (e.g.,
-  `RequestDisallowedByPolicy: Resource 'vm-abc' was
-  disallowed by policy 'deny-public-ip'`) in the
-  condition message so that I can direct the customer
-  to update their policy without manually querying ARM.
-
-- As an ARO SRE, I want to see the specific quota that
-  was exceeded (e.g., `QuotaExceeded: Operation could
-  not be completed as it results in exceeding approved
-  standardDSv3Family Cores quota`) so that I can
-  identify the resource type and region without
-  inspecting Azure portal.
-
-- As a fleet operator, I want to monitor Azure-specific
-  installation failures at scale so that I can identify
-  systemic issues (e.g., an Azure Policy rollout
-  affecting multiple clusters) before they are
-  escalated.
-
-#### AWS / ROSA user stories
-
-- As a ROSA SRE, I want to see the specific AWS IAM
-  error (e.g., `AccessDenied: User is not authorized
-  to perform sts:AssumeRoleWithWebIdentity`) in the
-  `ValidAWSIdentityProvider` condition message so that
-  I can direct the customer to fix their IAM trust
-  policy without manually querying STS.
-
-- As a ROSA SRE, I want to see which subnet is
-  exhausted or misconfigured (e.g., `subnet-0abc1234:
-  InsufficientFreeAddresses`) in the NodePool
-  condition so that I can identify the affected subnet
-  without inspecting individual CAPI Machine objects.
-
-- As a ROSA SRE, I want to see when worker nodes
-  cannot reach the control plane (e.g., `Ignition
-  endpoint unreachable: connection timeout to
-  api-int.cluster.example.com:22623`) so that I can
-  identify security group or NACL issues without
-  SSH-ing into nodes.
-
-- As a fleet operator, I want to monitor AWS-specific
-  installation failures at scale so that I can
-  identify systemic issues (e.g., an IAM policy change
-  affecting multiple clusters) before they are
-  escalated.
-
-### Goals
-
-1. Surface the specific cloud provider error code and
-   message in existing HyperShift conditions for the
-   six in-scope failure cases (three Azure, three AWS),
-   replacing opaque generic messages.
-2. Enable SREs to diagnose platform-specific
-   installation failures from `HostedCluster` and
-   `NodePool` conditions alone, without inspecting
-   CAPI Machine objects, cloud provider portals, or
-   pod logs.
-3. Maintain backward compatibility — no new condition
-   types, no new API fields, no changes to condition
-   `Type` values.
-
-### Non-Goals
-
-1. **New condition types**: This enhancement does not
-   add new conditions. All changes are diagnostic
-   detail on existing conditions.
-2. **Azure cases outside HyperShift scope**: The
-   following ARO failure cases involve components
-   outside the HyperShift Operator and are deferred
-   to separate enhancements:
-   - 2.3: Entra ID soft-delete limit on managed
-     identities (managed identities are created by the
-     ARO RP, not the HyperShift Operator; no Azure
-     identity condition exists on `HostedCluster` for
-     Azure; `ReconcileCredentials()` in `azure.go` only
-     copies pre-existing client IDs into Kubernetes
-     secrets and does not call Entra ID APIs)
-   - 2.4: OneCert timeout/throttling/expiry
-   - 2.5: ASO secret export failure
-   - 2.6: Maestro API URL propagation failure
-   - 2.7: Azure CNS / Swift DHCP failures
-   - 2.9: MCE webhook certificate expiry
-   - 2.10: DNS domain mismatch race condition
-3. **Unconfirmed ROSA failure cases**: Cases 3.2
-   (quota), 3.4 (PrivateLink), 3.5 (Route 53), 3.6
-   (KMS), 3.8 (SCPs), 3.9 (EC2 capacity), 3.10
-   (S3/OIDC), 3.11 (API throttling), 3.12 (ELB) are
-   deferred until verified by ROSA SRE teams. Cases
-   3.1, 3.3, and 3.7 were selected because the ROSA
-   SRE team identified them as the most frequently
-   escalated installation failure categories in their
-   internal incident data.
-4. **Pre-flight validation**: This enhancement
-   surfaces errors after they occur, not before.
-   Pre-flight quota/policy/VPC/IAM validation is a
-   separate concern.
-5. **NodePool day-2 diagnostics**: Only installation-
-   time failures are in scope. However, because the
-   underlying conditions are evaluated on every
-   reconciliation, the enhanced diagnostic messages
-   will also fire during day-2 node scaling events.
-   This is acceptable — the same diagnostic detail
-   that helps SREs during installation also helps
-   during day-2.
+Same motivation as the platform-agnostic Phase 1
+enhancement
+([enhancements PR #2134](https://github.com/openshift/enhancements/pull/2134)):
+opaque HyperShift conditions force SREs to manually
+inspect CAPI Machine objects, cloud provider API
+responses, and pod logs to identify root causes. This
+EP extends that motivation to six platform-specific
+failure cases (three Azure, three AWS).
 
 ## Proposal
 
@@ -305,6 +119,17 @@ responses, and surface them in existing condition
 messages at six points in the installation flow.
 
 ### Azure / ARO Cases
+
+#### Case numbering
+
+Azure cases use the 2.x series (Cases 2.1, 2.2, 2.8)
+from the full ARO failure case inventory (Cases
+2.1–2.10). AWS cases use the 3.x series (Cases 3.1,
+3.3, 3.7) from the full ROSA failure case inventory
+(Cases 3.1–3.12). The non-contiguous numbering
+reflects that only the SRE-confirmed cases are
+addressed here; the remaining cases are listed in
+Future Work.
 
 #### Case 2.1: Azure Policy Conflicts
 
@@ -336,74 +161,40 @@ Message="2/3 machines not ready. First failure:
   /subscriptions/.../deny-public-ip)"
 ```
 
-The diagnostic detail (policy name, error code) comes
-from the CAPZ Machine's `InfrastructureReadyCondition`
-(a CAPI v1beta2 condition in `Machine.Status.Conditions`),
-which is passed through to the `AllMachinesReady`
-condition message. `setAllMachinesReadyCondition()`
-in `conditions.go:783-885` reads `ReadyCondition`
-and, when it is `False`, reads
-`InfrastructureReadyCondition` to extract the
-`Reason` and `Message`. The code applies a step-
-counter filter (`isSetupCounterCondMessage`,
-regex `\d+ of \d+ completed` in
-`nodepool_controller.go:138`): if the
-`InfrastructureReadyCondition.Message` matches the
-step-counter pattern, the controller falls back to
-`ReadyCondition.Message`; if that also matches, only
-the `Reason` string is used. ARM error messages
-(e.g., `RequestDisallowedByPolicy: ...`) do not
-match the step-counter pattern, so they pass through
-unfiltered. No additional HyperShift code changes
-are needed for this case — the enrichment depends on
-CAPZ populating `InfrastructureReadyCondition` with
-the full ARM error including the
-`RequestDisallowedByPolicy` error code and policy
-name.
+The diagnostic detail flows through the CAPZ Machine's
+`InfrastructureReadyCondition` (CAPI v1beta2) →
+`AllMachinesReady` on the NodePool.
+`setAllMachinesReadyCondition()` (`conditions.go:
+783-885`) reads `ReadyCondition` and, when `False`,
+reads `InfrastructureReadyCondition.Reason` and
+`.Message`. A step-counter filter
+(`isSetupCounterCondMessage`, regex
+`\d+ of \d+ completed`) discards CAPI progress
+messages; ARM errors pass through unfiltered. No
+additional HyperShift code changes are needed — the
+enrichment depends on CAPZ populating the condition
+with the full ARM error.
 [PR #9781](https://github.com/openshift/hypershift/pull/9781)
-(merged) added `isTerminalInfraReason()` which
-checks whether the Machine's condition reason is a
-known terminal failure for the platform. For Azure,
-the terminal reasons are `VMProvisionFailed` and
-`Failed`. CAPZ currently surfaces `Failed` (not
-`VMProvisionFailed`) on `InfrastructureReady`
-because the CAPI condition summary picks
-`DisksReady`'s generic `Failed` reason over
+(merged) added `isTerminalInfraReason()` — an exact
+map lookup of the Machine's condition reason against
+per-platform terminal values. For Azure:
+`VMProvisionFailed` and `Failed`. CAPZ currently
+surfaces `Failed` (not `VMProvisionFailed`) because
+the CAPI summary picks `DisksReady`'s `Failed` over
 `VMRunning`'s `VMProvisionFailed`; a follow-up to
 [CAPZ#6737](https://github.com/kubernetes-sigs/cluster-api-provider-azure/pull/6737)
-is needed to reorder the summary so `VMRunning`
-takes priority. Until then, `Failed` is the reason
-HyperShift observes for Azure VM provisioning
-failures.
-When any Machine has a terminal reason, the
-aggregated reason is overridden with
-`Reason=InfrastructureFailure`
-(`NodePoolInfrastructureFailureReason`). The ARM
-error codes (`RequestDisallowedByPolicy`,
-`QuotaExceeded`, etc.) appear in the condition
-**message**, not the **reason** — the reason is set
-by CAPZ at the provider level (e.g.,
-`VMProvisionFailed` or `Failed`), while the message
-carries the ARM error detail.
+is needed. When matched, the aggregated reason is
+overridden with `Reason=InfrastructureFailure`. ARM
+error codes appear in the **message**, not the
+**reason**.
 
 **Implementation**: Verify that CAPZ populates
-`InfrastructureReadyCondition` on the Machine with:
-- `Reason` = `VMProvisionFailed` or `Failed` (the
-  two Azure terminal reasons recognized by
-  `isTerminalInfraReason()` in PR #9781, merged) so
-  that `Reason=InfrastructureFailure` is triggered
-  on the NodePool. Note: CAPZ currently surfaces
-  `Failed` rather than `VMProvisionFailed` on
-  `InfrastructureReady` (see Case 2.1 above).
-- `Message` = full ARM error response, including
-  `ErrorCode` and the `Details` array containing
-  the policy name
-
-If CAPZ already provides this data, no HyperShift
-code changes are needed — the existing Machine →
-NodePool condition pipeline passes the message
-through automatically via
-`setAllMachinesReadyCondition()`.
+`InfrastructureReadyCondition` with `Reason` =
+`VMProvisionFailed` or `Failed` and `Message` = full
+ARM error (including `ErrorCode` and `Details` array).
+If CAPZ provides this data, no HyperShift code changes
+are needed — the existing pipeline passes the message
+through automatically.
 
 #### Case 2.2: Azure Resource Quota Exhaustion
 
@@ -431,20 +222,9 @@ Message="1/3 machines not ready. First failure:
   Region: eastus"
 ```
 
-**Implementation**: As with Case 2.1, the diagnostic
-detail flows through CAPZ `InfrastructureReadyCondition`
-→ NodePool controller (`setAllMachinesReadyCondition()`).
-The quota detail (`QuotaExceeded`, resource type,
-limit) appears in the `InfrastructureReadyCondition`
-**message**. The condition **reason** is a CAPZ-level
-value (e.g., `VMProvisionFailed` or `Failed` — see
-Case 2.1 for the current CAPZ behavior) —
-`isTerminalInfraReason()` (PR #9781, merged) maps
-this to `Reason=InfrastructureFailure` on the
-NodePool. No
-additional HyperShift code changes are needed if
-CAPZ provides the full ARM error in the
-`InfrastructureReadyCondition` message.
+**Implementation**: Same CAPZ → Machine → NodePool
+pipeline as Case 2.1. No additional HyperShift code
+changes for the `AllMachinesReady` path.
 
 Separately, enhance `ClassifyAzureError()` to
 recognize `QuotaExceeded` and `OperationNotAllowed`
@@ -566,23 +346,14 @@ ARNs or account IDs are exposed.
 **Existing condition**: `AllMachinesReady`
 (on `NodePool`)
 
-**Current behavior**: When CAPA fails to provision an
-AWSMachine due to subnet issues, the error surfaces
-via CAPI v1beta2 Machine conditions
-(`ReadyCondition`, `InfrastructureReadyCondition`).
-The NodePool controller's
-`setAllMachinesReadyCondition()` aggregates these
-conditions and surfaces them on the
-`AllMachinesReady` condition.
-[PR #9781](https://github.com/openshift/hypershift/pull/9781)
-(merged, 2026-11-06) added
-terminal infrastructure failure detection via
-`isTerminalInfraReason()` (exact map lookup),
-which classifies persistent failures with
-`Reason=InfrastructureFailure`. The
-message includes the CAPI condition reason and
-message but does not parse the AWS-specific error
-code or identify the affected subnet.
+**Current behavior**: Same CAPI Machine → NodePool
+pipeline as Azure Case 2.1. CAPA sets
+`InfrastructureReadyCondition` on the Machine;
+`isTerminalInfraReason()` (PR #9781, merged) maps
+terminal reasons to `Reason=InfrastructureFailure`.
+The message includes the CAPI condition content but
+does not parse the AWS-specific error code or
+identify the affected subnet.
 
 **Proposed diagnostic detail**: Enhance the existing
 `InfrastructureFailure` message with AWS-specific
@@ -599,37 +370,15 @@ Message="2 of 3 machines are not ready.
   subnet does not have enough free addresses"
 ```
 
-**Implementation**: The NodePool controller's
-`setAllMachinesReadyCondition()` already aggregates
-CAPI v1beta2 Machine conditions
-(`ReadyCondition`, `InfrastructureReadyCondition`)
-and — with PR #9781 merged — classifies
-terminal infrastructure failures via
-`isTerminalInfraReason()` (exact map lookup).
-The diagnostic detail (AWS error code,
-subnet ID) flows through CAPA → the CAPI v1beta2
-`InfrastructureReadyCondition` on the Machine
-object. CAPA sets this condition's `Reason` and
-`Message` fields when an AWS infrastructure
-operation fails. The NodePool controller already
-reads `InfrastructureReadyCondition.Reason` and
-`.Message` (`conditions.go:838-843`) and aggregates
-them via `aggregateMachineReasonsAndMessages()`.
-No additional provider-specific reads are needed
-in the NodePool controller — the enrichment depends
-on CAPA including the AWS error code and affected
-subnet ID in the `InfrastructureReadyCondition`
-message it sets on the Machine.
-
-This preserves the NodePool controller's provider-
-agnostic abstraction boundary: it reads only
-standard CAPI v1beta2 Machine conditions, not
-provider-specific AWSMachine resources.
-
-If CAPA does not currently include the subnet ID
-in the `InfrastructureReadyCondition` message, a
-CAPA enhancement will be filed as a prerequisite
-(see Open Question 2).
+**Implementation**: Same CAPI Machine → NodePool
+pipeline as Azure Case 2.1 — the diagnostic detail
+(AWS error code, subnet ID) flows through CAPA →
+`InfrastructureReadyCondition` → NodePool controller.
+No provider-specific reads are added; the NodePool
+controller reads only standard CAPI v1beta2 Machine
+conditions. If CAPA does not currently include the
+subnet ID, a CAPA enhancement will be filed (see
+Open Question 2).
 
 **Specific AWS errors to surface**:
 - `InsufficientFreeAddressesInSubnet`
@@ -783,17 +532,12 @@ conditions:
 
 #### Condition message stability
 
-Although no formal API fields are added, condition
-`Message` text and `Reason` codes constitute a de
-facto API surface that SRE fleet automation may
-depend on. Consumers **must not** regex-parse
-`Message` text for programmatic decisions — the
-message content is best-effort diagnostic detail and
-may change between releases without notice.
-Automation should switch on `Reason` codes, which
-are stable within a release series.
+Condition `Message` text and `Reason` codes are a de
+facto API surface. Automation **must** switch on
+`Reason` codes (stable within a release series), not
+regex-parse `Message` text (may change without notice).
 
-The exact `Reason` values used by each case are:
+The `Reason` values used by each case are:
 
 | Case | Condition | Reason (stable) | New? |
 |------|-----------|-----------------|------|
@@ -807,33 +551,18 @@ The exact `Reason` values used by each case are:
 | 3.7 | `ReachedIgnitionEndpoint` | `ignitionNotReached` | No (existing)\* |
 | 3.7 | `AllNodesHealthy` | Per-machine reasons aggregated | No (existing) |
 
-\* `ignitionNotReached` uses camelCase rather than
-PascalCase (the convention for OpenShift reason
-codes). This is an existing value in the HyperShift
-codebase (`IgnitionNotReached = "ignitionNotReached"`
-in `nodepool_conditions.go`); changing it would be a
-breaking change and is out of scope for this EP.
+\* `ignitionNotReached` uses camelCase (existing
+value; changing it would be a breaking change).
 
-`Message` field content is enriched with platform-
-specific diagnostic detail (Azure error code, policy
-name, quota type, zone, resource name, IAM role ARN,
-subnet ID, endpoint URL, troubleshooting hints).
-These fields are included on a best-effort basis —
-the message may omit them if the underlying data is
-unavailable (e.g., CAPZ/CAPA does not include the
-relevant detail in the `InfrastructureReadyCondition`
-message). Message format is **not guaranteed stable**
-between releases.
+`Message` content is enriched on a best-effort basis
+and is **not guaranteed stable** between releases.
 
 ### Topology Considerations
 
 #### Hypershift / Hosted Control Planes
 
 This enhancement is exclusively for the HyperShift
-topology on Azure (ARO HCP) and AWS (ROSA HCP). All
-changes are in the HyperShift Operator, NodePool
-controller, the `support/azureutil` package (Azure),
-and the Control Plane Operator (AWS Case 3.1).
+topology on Azure (ARO HCP) and AWS (ROSA HCP).
 
 #### Standalone Clusters
 
@@ -869,124 +598,40 @@ HCP.
 
 #### Data flow architecture
 
-There are two distinct data paths for platform-specific
-errors. Understanding these paths is critical for
-scoping the implementation:
+Three distinct data paths carry platform-specific
+errors to user-visible conditions:
 
-**Path 1: CAPI provider → Machine → NodePool
-(Azure Cases 2.1, 2.2, AllMachinesReady in Case 2.8;
-AWS Case 3.3)**
+**Path 1: CAPI provider → Machine → NodePool**
+(Cases 2.1, 2.2, 2.8 AllMachinesReady, 3.3)
 
-```
-Cloud provider API error
-  → CAPI provider (CAPZ or CAPA) sets
-    Machine.Status.Conditions:
-    InfrastructureReadyCondition=False with
-    Reason and Message from the provider error
-  → NodePool controller's
-    setAllMachinesReadyCondition() reads
-    ReadyCondition; when False, reads
-    InfrastructureReadyCondition.Reason and
-    InfrastructureReadyCondition.Message
-    (filtered by isSetupCounterCondMessage —
-    step-counter messages like "1 of 2 completed"
-    are discarded; ARM/AWS error messages pass
-    through unfiltered)
-  → AllMachinesReady condition on NodePool gets
-    the InfrastructureReadyCondition content
-```
-
-This path does NOT involve `ClassifyAzureError()` or
-any provider-specific parsing in the NodePool
-controller. The NodePool controller reads CAPI v1beta2
-Machine conditions (`Machine.Status.Conditions`), not
-cloud API responses directly.
-`setAllMachinesReadyCondition()` (`conditions.go:783-885`)
-already reads `InfrastructureReadyCondition` when
-`ReadyCondition` is `False` and aggregates the reason
-and message into the `AllMachinesReady` condition.
-A step-counter filter (`isSetupCounterCondMessage`,
-regex `\d+ of \d+ completed`) discards CAPI summary
-progress messages; if the
-`InfrastructureReadyCondition.Message` matches the
-pattern, the controller falls back to
-`ReadyCondition.Message`, and if that also matches,
-only the `Reason` string is used. Cloud provider
-error messages do not match this pattern and pass
-through unfiltered.
-No HyperShift code changes are needed for this
-path — the diagnostic detail depends entirely on
-what the CAPI provider puts in
-`InfrastructureReadyCondition`.
-[PR #9781](https://github.com/openshift/hypershift/pull/9781)
-(merged) added `isTerminalInfraReason()` which
-checks whether the Machine's condition reason
-matches a per-platform terminal set. For Azure, the
-terminal reasons are `VMProvisionFailed` and
-`Failed` (see Case 2.1 for the current CAPZ
-behavior). When matched, the aggregated reason is
-overridden with `Reason=InfrastructureFailure`.
-The cloud error codes
-(e.g., `QuotaExceeded`, `RequestDisallowedByPolicy`,
-`InsufficientFreeAddressesInSubnet`) appear in the
-condition message, not the reason.
+The NodePool controller reads CAPI v1beta2 Machine
+conditions — not cloud API responses directly. A
+step-counter filter (`isSetupCounterCondMessage`)
+discards CAPI progress messages; cloud provider
+errors pass through unfiltered.
+`isTerminalInfraReason()` (PR #9781, merged) maps
+terminal reasons to `Reason=InfrastructureFailure`.
+No HyperShift code changes needed — depends entirely
+on CAPZ/CAPA `InfrastructureReadyCondition` content.
+See Case 2.1 for the full pipeline description.
 
 **Path 2: handleAzureError() → ClassifyAzureError()
-(PLS conditions in Azure Case 2.8)**
+→ PLS conditions** (Case 2.8 PLS)
 
-```
-Azure ARM API error
-  → handleAzureError() calls ClassifyAzureError()
-    in errors.go:79-101
-  → ClassifyAzureError() returns message + requeue
-    interval based on HTTP status code
-  → handleAzureError() sets
-    AzurePrivateLinkServiceAvailable=False and
-    AzurePLSCreated=False with the message
-
-Callers:
-  HO:  controller.go:738 (management cluster PLS)
-  CPO: azureprivatelinkservice/controller.go:1030
-       (hosted control plane PLS)
-```
-
-Both functions are in `openshift/hypershift`.
-`ClassifyAzureError()` is in `support/azureutil/`
-(shared utility package) and has **two callers**:
-1. **HO PLS controller**:
-   `handleAzureError()` in
-   `hypershift-operator/controllers/platform/azure/
-   controller.go:738` — manages PLS resources on
-   the management cluster.
-2. **CPO PLS controller**:
-   `handleAzureError()` in
-   `control-plane-operator/controllers/
-   azureprivatelinkservice/controller.go:1030` —
-   manages PLS resources within the hosted control
-   plane namespace.
-
-Both callers use the same pattern: call
-`ClassifyAzureError()` to classify the error, then
-format the condition message as
+`ClassifyAzureError()` in `support/azureutil/
+errors.go` has two callers: the HO PLS controller
+(`controller.go:738`) and the CPO PLS controller
+(`azureprivatelinkservice/controller.go:1030`).
+Both format messages as
 `fmt.Sprintf("%s: %v", classifiedMessage, err)`.
-Changes to `ClassifyAzureError()` (requeue intervals,
-error code branching) affect both callers. The
-requeue interval changes (e.g., 30s to 10min for
-`QuotaExceeded`) are appropriate for both callers
-since both manage Azure PLS infrastructure resources
-where quota and policy errors require the same
-backoff strategy.
+Changes to `ClassifyAzureError()` affect both.
 
-**Path 3: CPO health check → HostedControlPlane →
-HostedCluster (AWS Case 3.1)**
+**Path 3: CPO health check → HCP → HC**
+(Case 3.1)
 
-```
-AWS STS API error
-  → CPO health check controller calls
-    classifyIdentityProviderError()
-  → Condition set on HostedControlPlane
-  → HO mirrors condition to HostedCluster
-```
+The CPO health check controller sets the condition
+on `HostedControlPlane`; the HO mirrors it to
+`HostedCluster` via direct struct copy.
 
 #### Azure implementation
 
@@ -1092,54 +737,15 @@ Changes are in the `openshift/hypershift` repository:
    include per-node duration and API server
    reachability hints.
 
-#### Error code parsing (Azure)
-
-The `azcore.ResponseError` struct provides:
-- `ErrorCode` (string): The Azure error code (e.g.,
-  `RequestDisallowedByPolicy`)
-- `StatusCode` (int): HTTP status code
-- `RawResponse` (*http.Response): Full HTTP response
-  for parsing `Details` array
-
-The enhanced `ClassifyAzureError()` checks HTTP 429
-first (preserving `Retry-After` handling), then
-branches on `ErrorCode` (more specific than HTTP
-status), then falls back to `StatusCode` (current
-behavior) for unrecognized error codes. The 429-first
-ordering is critical because Azure uses
-`OperationNotAllowed` for both quota exhaustion
-(HTTP 409) and throttling (HTTP 429); without this
-guard, a throttled request would be misclassified as
-a quota error with a 10-minute requeue instead of
-honoring the server's `Retry-After` header.
-
 #### Requeue rate limiter
 
 [PR #9781](https://github.com/openshift/hypershift/pull/9781)
-(merged) also changed the NodePool controller's
-exponential backoff rate limiter max delay from 10
-seconds to 1 minute (`nodepool_controller.go`):
-
-```go
-// Before:
-RateLimiter: workqueue.NewTypedItemExponentialFailureRateLimiter[reconcile.Request](
-    1*time.Second, 10*time.Second),
-// After:
-RateLimiter: workqueue.NewTypedItemExponentialFailureRateLimiter[reconcile.Request](
-    1*time.Second, 1*time.Minute),
-```
-
-This rate limiter governs automatic error-path retries
-(when `Reconcile()` returns an error). It is separate
-from the explicit `RequeueAfter` values returned by
-`ClassifyAzureError()`, which set fixed requeue delays
-for specific HTTP status codes (e.g., 30 seconds for
-429 Too Many Requests, 10 minutes for 403 Forbidden).
-The two mechanisms interact: if `ClassifyAzureError()`
-returns `Result{RequeueAfter: d}` with `err == nil`,
-the rate limiter is not involved; if the reconciler
-returns a non-nil error, the rate limiter caps the
-exponential backoff at 1 minute.
+(merged) changed the NodePool controller's exponential
+backoff max delay from 10 seconds to 1 minute. This
+rate limiter governs automatic error-path retries
+(when `Reconcile()` returns an error) and is separate
+from the explicit `RequeueAfter` values set by
+`ClassifyAzureError()` for specific error codes.
 
 #### Message truncation
 
@@ -1202,109 +808,42 @@ described in the Design Principles section:
 
 #### Diagnostic logic failure modes
 
-The diagnostic enrichment logic itself may encounter
-missing or malformed inputs. In every case, the
-controller falls back to the existing (pre-
-enrichment) behavior — the condition is still set,
-just without the enriched detail:
+The diagnostic enrichment logic falls back to
+existing (pre-enrichment) behavior when inputs are
+missing or malformed — the condition is still set,
+just without enriched detail:
 
-#### Azure failure modes
+**Shared (Path 1 — Azure and AWS)**:
 
-- **Empty `ErrorCode`** (Path 2): If
-  `azcore.ResponseError.ErrorCode` is empty or nil,
-  `ClassifyAzureError()` skips `ErrorCode` branching
-  and falls through to the existing HTTP status code
-  switch. HTTP 429 is always handled first regardless
-  of `ErrorCode` presence (see classification order
-  in Azure implementation). The condition is set with
-  the current generic message (e.g., "Azure API
-  permission denied, check service principal
-  permissions" for HTTP 403). The
-  `hypershift_diagnostic_fallback_total` counter is
-  incremented with `platform=azure`.
+- **Empty or step-counter condition message**: If
+  `InfrastructureReadyCondition.Message` is empty or
+  matches `\d+ of \d+ completed`, the controller
+  falls back to `ReadyCondition.Message`, then to
+  `Reason` alone. Cloud error messages pass through
+  unfiltered.
+- **Machines garbage-collected**: The Machine list is
+  fetched once per reconciliation; deleted machines
+  are simply omitted. Self-corrects next cycle.
 
-- **Missing or malformed `Details` array** (Path 2):
-  If `ExtractPolicyDetails()` receives a
-  `RawResponse` with no `Details` array, a malformed
-  JSON body, or an empty `Details` array, it returns
-  an empty string (no panic). The caller
-  (`ClassifyAzureError()`) uses the `ErrorCode`-only
-  message without policy details. The fallback
-  counter is incremented. Unit tests cover nil body,
-  malformed JSON, and empty `Details` array inputs.
+**Azure-specific (Path 2)**:
 
-- **Empty or step-counter `InfrastructureReadyCondition`
-  message** (Path 1, Azure Cases 2.1/2.2): If a CAPI
-  Machine has `InfrastructureReadyCondition=False` but
-  the `Message` field is empty or matches the step-
-  counter pattern (`\d+ of \d+ completed`), the
-  NodePool controller falls back to
-  `ReadyCondition.Message`; if that is also empty or
-  a step-counter, only the `Reason` string is used
-  (e.g., `"machine-abc: VMProvisionFailed"`). No
-  platform-specific detail is shown, but the machine
-  name and reason still provide a starting point.
-  Cloud provider error messages (e.g.,
-  `RequestDisallowedByPolicy: ...`) do not match the
-  step-counter pattern and are not affected by this
-  filter.
+- **Empty `ErrorCode`**: Falls through to HTTP status
+  code handling. HTTP 429 always handled first.
+- **Missing `Details` array**:
+  `ExtractPolicyDetails()` returns empty (no panic).
+- **Multiple simultaneous errors**: Each
+  `handleAzureError()` call overwrites the condition
+  (existing level-driven behavior).
 
-- **Machines garbage-collected during aggregation**
-  (Path 1): The Machine list is fetched once per
-  reconciliation loop. If a Machine object is deleted
-  between list and condition construction, the
-  controller simply reports the remaining machines.
-  On the next reconciliation, the list is re-fetched
-  and the condition reflects the current set of
-  machines.
+**AWS-specific**:
 
-- **Multiple simultaneous Azure errors** (Path 2):
-  If `handleAzureError()` is called with different
-  Azure errors in rapid succession, each call
-  overwrites the condition. This is the existing
-  behavior — the condition reflects the most recent
-  error. Level-driven reconciliation ensures the
-  condition converges to the current state.
-
-#### AWS failure modes
-
-- **Nil `RolesRef`** (Case 3.1): If
-  `hcp.Spec.Platform.AWS.RolesRef` is nil or the
-  `Platform.AWS` struct is nil, the CPO omits the
-  role ARN prefix from the condition message and logs
-  the omission at `V(2)`. The STS error code and
-  message are still surfaced (existing behavior).
-
-- **Empty or step-counter `InfrastructureReadyCondition`
-  message** (Case 3.3): If a CAPI Machine has
-  `InfrastructureReadyCondition=False` but the
-  `Message` field is empty or matches the step-
-  counter pattern (`\d+ of \d+ completed`), the
-  NodePool controller falls back to
-  `ReadyCondition.Message`; if that is also empty or
-  a step-counter, only the `Reason` string is used
-  (e.g., `"machine-abc: InstanceProvisionFailed"`).
-  No AWS-specific detail is shown, but the machine
-  name and reason still provide a starting point.
-  AWS error messages (e.g.,
-  `InsufficientFreeAddressesInSubnet: ...`) do not
-  match the step-counter pattern and are not affected
-  by this filter.
-
-- **Machines garbage-collected during aggregation**
-  (Case 3.3): Same behavior as Azure Path 1 above.
-
-- **Ignition endpoint URL unavailable** (Case 3.7):
-  If the expected Ignition endpoint URL cannot be
-  constructed (e.g., `infraStatus.APIHost` is empty),
-  the controller omits the URL from the message and
-  falls back to the existing `ignitionNotReached`
-  message without the enriched detail.
+- **Nil `RolesRef`** (Case 3.1): Role ARN omitted;
+  STS error still surfaced.
+- **Ignition URL unavailable** (Case 3.7): Falls back
+  to existing `ignitionNotReached` message.
 
 In all cases the `hypershift_diagnostic_fallback_total`
-counter is incremented when enriched detail is omitted,
-enabling detection of silent degradation (see
-Observability below).
+counter is incremented when enriched detail is omitted.
 
 #### Feature gate
 
@@ -1312,28 +851,6 @@ No feature gate is required. The rationale follows
 the platform-agnostic diagnostic enhancement
 ([PR #2134](https://github.com/openshift/enhancements/pull/2134)):
 
-1. **Message text and requeue intervals**: All changes
-   modify condition `Message` content and adjust
-   requeue intervals for recognized error codes.
-   No new condition types, no new API fields, no new
-   CRD schema changes. The requeue interval changes
-   (e.g., 30s → 10min for quota errors) are behavioral
-   but scoped to error-path retry timing — they do not
-   affect the steady-state reconciliation loop or the
-   condition schema.
-2. **HyperShift API is v1beta1**: HyperShift CRDs
-   live in `openshift/hypershift`, not `openshift/api`.
-   The v1beta1 API does not use standard OCP feature
-   gates from `features.go`.
-3. **Backward compatible**: Unrecognized error codes
-   fall through to the existing handling. No behavioral
-   change for error codes not in the explicit list.
-4. **No per-cluster disable toggle**: Consistent with
-   the parent EP's stance. Changes are purely
-   informational (condition messages) and level-driven
-   — bugs self-correct on the next reconciliation.
-   HyperShift ships independently and can deploy fixes
-   within days.
 
 #### Observability
 
@@ -1506,56 +1023,6 @@ detects silent degradation.
 
 ## Alternatives (Not Implemented)
 
-### Alternative 1: Dedicated platform-specific condition types
-
-Add new condition types like
-`AzurePolicyCompliance=False`,
-`AzureQuotaAvailable=False`, or
-`AWSInfrastructureError` on `NodePool`.
-
-**Rejected**: The parent enhancement establishes the
-pattern of enriching existing conditions rather than
-proliferating new ones. Adding platform-specific
-condition types would require new API fields, CRD
-schema changes, and downstream consumer updates —
-contradicting the design principle of minimal API
-surface change. SREs already monitor
-`AllMachinesReady` and `ValidAWSIdentityProvider` —
-adding parallel conditions creates confusion about
-which to check.
-
-### Alternative 2: Structured annotations
-
-Store cloud error details in annotations (e.g.,
-`hypershift.openshift.io/azure-error-code:
-RequestDisallowedByPolicy` or
-`hypershift.openshift.io/aws-error: "..."`) instead
-of condition messages.
-
-**Rejected**: Annotations are not queryable via
-Prometheus metrics, not visible in standard `oc get`
-output, and not consumed by fleet management tooling
-that reads conditions. Condition messages are the
-established surface for diagnostic information in
-HyperShift.
-
-### Alternative 3: Pre-flight validation
-
-Validate cloud provider policies, quotas, IAM trust
-policies, and subnet capacity before creating
-resources, surfacing issues as pre-flight conditions.
-
-**Rejected**: Pre-flight validation is a separate
-concern (Non-Goal 4). It prevents failures rather
-than diagnosing them. Both approaches are valuable,
-but this EP focuses on improving diagnosis of
-failures that have already occurred — which is the
-more urgent SRE need. Pre-flight validation requires
-cloud API calls that may not reflect the actual
-creation-time state (policies, quotas, and network
-configuration can change between validation and
-creation).
-
 ## Open Questions
 
 ### OQ-1: CAPZ InfrastructureReadyCondition content (tracked)
@@ -1666,168 +1133,67 @@ feature gate is used.
 
 ### Azure test scenarios
 
-1. **Unit tests** for `ClassifyAzureError()` error
-   code branching:
-   - `TestClassifyAzureError_RequestDisallowedByPolicy`:
-     `azcore.ResponseError{ErrorCode:
-     "RequestDisallowedByPolicy", StatusCode: 403}`
-     → message includes policy name, requeue 10min
-   - `TestClassifyAzureError_QuotaExceeded`:
-     `azcore.ResponseError{ErrorCode:
-     "QuotaExceeded", StatusCode: 409}` → message
-     includes resource type and limit, requeue 10min
-   - `TestClassifyAzureError_AllocationFailed`:
-     `azcore.ResponseError{ErrorCode:
-     "AllocationFailed", StatusCode: 409}` → message
-     includes zone, requeue 5min
-   - `TestClassifyAzureError_ConflictingResourceName`:
-     → message includes resource name and purge hint
-   - `TestClassifyAzureError_RoleAssignmentExists`:
-     → transient, requeue 30sec
-   - `TestClassifyAzureError_SkuNotAvailable`:
-     → message includes VM size, requeue 10min
-   - `TestClassifyAzureError_429_OperationNotAllowed`:
-     `azcore.ResponseError{ErrorCode:
-     "OperationNotAllowed", StatusCode: 429}` with
-     `Retry-After: 120` header → must honor
-     `Retry-After` (requeue 2min), NOT enter quota
-     branch (10min). Verifies 429-first ordering.
-   - `TestClassifyAzureError_UnknownErrorCode`:
-     unrecognized `ErrorCode` → falls back to
-     current HTTP-status-based behavior (no
-     regression)
+1. **Unit tests** for `ClassifyAzureError()`: One test
+   per error code (`RequestDisallowedByPolicy`,
+   `QuotaExceeded`, `AllocationFailed`,
+   `ConflictingResourceName`, `RoleAssignmentExists`,
+   `SkuNotAvailable`) verifying message content and
+   requeue interval. Key scenarios: 429 with
+   `OperationNotAllowed` must honor `Retry-After`
+   (not enter quota branch); unknown error codes fall
+   back to HTTP-status-based behavior.
 
-2. **Unit tests** for `ExtractPolicyDetails()`:
-   - `TestExtractPolicyDetails_WithDetailsArray`:
-     ARM response with `Details` array → extracts
-     policy name and assignment
-   - `TestExtractPolicyDetails_NoDetailsArray`:
-     ARM response without `Details` → returns empty
-     (no panic)
-   - `TestExtractPolicyDetails_MalformedBody`:
-     malformed response body → returns empty
-   - `TestExtractPolicyDetails_MultipleDetails`:
-     `Details` array with multiple entries → extracts
-     first policy detail
+2. **Unit tests** for `ExtractPolicyDetails()`: Tests
+   cover valid `Details` array, missing array,
+   malformed body, and multiple entries.
 
-3. **Integration tests** for Azure end-to-end
-   condition propagation (fake Machine objects, no
-   Azure API):
-   - `TestAllMachinesReady_CAPZPolicyFailure`:
-     Machine with `InfrastructureReadyCondition=False,
-     Message="RequestDisallowedByPolicy: ..."` →
-     `AllMachinesReady` on NodePool includes policy
-     name
-   - `TestAllMachinesReady_CAPZQuotaFailure`:
-     Machine with `InfrastructureReadyCondition=False,
-     Message="QuotaExceeded: ..."` →
-     `AllMachinesReady` on NodePool includes quota
-     detail
-   - `TestAllMachinesReady_MultipleMachineFailures`:
-     3 Machines with different ARM errors →
-     aggregated message within `maxGlobalMessageLength`
-     (3000 chars)
-   - `TestPLSCondition_PolicyError`:
-     `handleAzureError()` with
-     `RequestDisallowedByPolicy` →
-     `AzurePLSCreated=False` includes policy name
+3. **Integration tests** (fake Machine objects, no
+   Azure API): Verify end-to-end condition propagation
+   for policy failures, quota failures, multiple
+   machine failures (within 3000-char limit), and PLS
+   condition errors.
 
 ### AWS test scenarios
 
 1. **Unit tests** for each diagnostic code path:
-   - **Case 3.1**: Inject a smithy `AccessDenied`
-     API error into `classifyIdentityProviderError()`
-     with a known role ARN in the HCP spec → assert
-     the `ValidAWSIdentityProvider` condition message
-     includes both the role ARN and the AWS error code.
-     Test all three classification paths:
-     `stsAuthErrorCodes` (→ `ConditionFalse`), other
-     API errors (→ `ConditionUnknown`), and non-API
-     errors (→ `ConditionUnknown` with sanitized
-     message).
-   - **Case 3.3**: Construct CAPI v1beta2 Machine
-     objects with `InfrastructureReadyCondition` set
-     to `False` with reason and message containing
-     AWS error text (e.g.,
-     `InsufficientFreeAddressesInSubnet` with subnet
-     ID) → assert `AllMachinesReady` condition
-     includes the AWS error code and subnet ID via
-     the generic condition aggregation pipeline.
-     Test each listed AWS error code. Test fallback
-     when no known error code is found.
-   - **Case 3.7**: Mock the token secret without the
-     `TokenSecretIgnitionReachedAnnotation` annotation
-     → assert `ReachedIgnitionEndpoint` condition
-     message includes the expected Ignition endpoint
-     URL and troubleshooting hint. Test
-     `AllNodesHealthy` with
-     `MachineNodeHealthyCondition` set to `False` →
-     assert message includes per-node duration and
-     API server reachability hint.
-   - **Message truncation**: Verify per-machine
-     messages respect the 1000-character limit and
-     aggregated messages respect the 3000-character
-     limit.
-   - **Negative/adversarial scenarios**:
-     - Nil `hcp.Spec.Platform.AWS.RolesRef` → assert
-       Case 3.1 falls back to the existing message
-       without panic.
-     - `InfrastructureReadyCondition` with empty
-       `Message` → assert Case 3.3 uses the `Reason`
-       string alone.
-     - Unrecognized AWS error code → assert generic
-       message passthrough and fallback counter
-       increment.
-     - Concurrent multi-category failures → assert
-       aggregated message includes both error types
-       up to the truncation limit.
+   - **Case 3.1**: Inject smithy API errors into
+     `classifyIdentityProviderError()` → assert
+     message includes role ARN and AWS error code.
+     Cover all three classification paths
+     (`stsAuthErrorCodes`, other API errors, non-API).
+   - **Case 3.3**: Construct Machine objects with
+     `InfrastructureReadyCondition` containing AWS
+     errors → assert `AllMachinesReady` includes the
+     error code and subnet ID. Test each listed error
+     code and fallback behavior.
+   - **Case 3.7**: Assert `ReachedIgnitionEndpoint`
+     includes Ignition URL and troubleshooting hint;
+     assert `AllNodesHealthy` includes per-node
+     duration and API server hint.
+   - **Truncation**: Verify 1000-char per-machine
+     and 3000-char aggregate limits.
+   - **Negative scenarios**: Nil `RolesRef`, empty
+     condition message, unrecognized error code,
+     concurrent multi-category failures.
 
-2. **Integration tests** verifying end-to-end
-   condition propagation:
-   - Invalid IAM trust policy →
-     `ValidAWSIdentityProvider` shows STS error with
-     role ARN on `HostedCluster` (mirrored from HCP
-     via HO)
-   - Machine provisioning failure with CAPI v1beta2
-     `InfrastructureReadyCondition` →
-     `AllMachinesReady` shows AWS error on `NodePool`
+2. **Integration tests**: IAM trust policy failure →
+   `ValidAWSIdentityProvider` on HC; Machine failure
+   → `AllMachinesReady` on NodePool.
 
 ### Backward compatibility tests (both platforms)
 
-- Condition `Type` values unchanged
-- `InfrastructureFailure` reason (introduced by
-  PR #9781) still used; this EP enriches the message
-  content without changing the reason code
-- Existing `Reason` values still used in non-error
-  scenarios
+- Condition `Type` values and `Reason` codes unchanged
 - No new conditions created
-- Azure: HTTP 429 handling unchanged — always checked
-  first, before `ErrorCode` branching, so throttled
-  requests with `OperationNotAllowed` still honor
-  `Retry-After`; HTTP 403 without
-  `RequestDisallowedByPolicy` → existing message;
-  HTTP 409 without quota error codes → existing
-  30-second requeue
+- Azure: HTTP 429 always checked first; unrecognized
+  error codes fall back to existing handling
 
 ### Error injection strategy
 
-Cloud provider errors cannot be triggered on demand in
-real cloud environments. The test strategy uses two
-layers:
-
-- **Unit tests**: Construct provider-specific error
-  structs (`azcore.ResponseError` for Azure, smithy
-  API errors for AWS) with specific error codes and
-  response bodies. These are pure Go tests with no
-  cloud API dependency.
-- **Integration tests**: Create fake CAPI Machine
-  objects with pre-populated
-  `InfrastructureReadyCondition` (specific `Reason`
-  and `Message` values simulating CAPI provider error
-  output). Feed these into
-  `setAllMachinesReadyCondition()` to verify
-  end-to-end condition propagation without requiring
-  a real CAPI provider or cloud API.
+Unit tests construct provider-specific error structs
+(`azcore.ResponseError`, smithy API errors) with no
+cloud dependency. Integration tests use fake CAPI
+Machine objects with pre-populated conditions to
+verify end-to-end propagation.
 
 ### CI lane
 
@@ -2223,3 +1589,44 @@ No new infrastructure needed. Changes are to existing
 HyperShift components. Azure and AWS CI environments
 required for integration tests (already available in
 HyperShift CI).
+
+## Glossary
+
+For common HyperShift terms (HC, HCP, HO, CPO, HCCO,
+CPC, CVO) see the
+[parent enhancement glossary](installation-failure-debuggability.md#glossary).
+
+### Azure terms
+
+- **ARO HCP**: Azure Red Hat OpenShift, Hosted Control
+  Planes architecture
+- **CAPZ**: Cluster API Provider Azure — the CAPI
+  provider that manages Azure infrastructure
+- **ARM**: Azure Resource Manager — the deployment and
+  management service for Azure resources
+- **Entra ID**: Microsoft Entra ID (formerly Azure
+  Active Directory) — identity and access management
+- **Managed Identity**: An Azure identity automatically
+  managed by Azure for authenticating to Azure services
+- **Azure Policy**: Governance mechanism that enforces
+  rules on Azure resources during creation and updates
+- **ASO**: Azure Service Operator — bridges Kubernetes
+  and Azure resources
+- **PLS**: Private Link Service — Azure networking
+  resource that enables private connectivity to
+  services behind a Standard Load Balancer
+
+### AWS terms
+
+- **ROSA HCP**: Red Hat OpenShift Service on AWS,
+  Hosted Control Planes architecture
+- **CAPA**: Cluster API Provider AWS — the CAPI
+  provider that manages AWS infrastructure
+- **STS**: AWS Security Token Service — used for
+  temporary credential assumption
+- **OIDC**: OpenID Connect — used for workload
+  identity federation with AWS
+- **SCP**: AWS Service Control Policy — organization-
+  level policy restricting API actions
+- **NACL**: Network Access Control List — subnet-level
+  firewall in AWS VPC
