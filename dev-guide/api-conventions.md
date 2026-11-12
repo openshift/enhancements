@@ -346,35 +346,37 @@ type MyPlatformConfig struct {
   // should choose a sensible default on their behalf.
   // +unionDiscriminator
   // +kubebuilder:validation:Enum:="AWS";"Azure";"GCP"
-  // +kubebuilder:validation:Required
-  PlatformType string `json:"platformType"`
+  // +required
+  PlatformType string `json:"platformType,omitempty"`
 
   // aws is the AWS configuration.
-  // All structures within the union must be optional and pointers.
+  // All structures within the union must be optional and have the omitzero tag.
   // +optional.
-  AWS *MyAWSConfig `json:"aws,omitempty"`
+  AWS MyAWSConfig `json:"aws,omitzero"`
 
   // azure is the Azure configuration.
-  // All structures within the union must be optional and pointers.
+  // All structures within the union must be optional and have the omitzero tag.
   // +optional.
-  Azure *MyAzureConfig `json:"azure,omitempty"`
+  Azure MyAzureConfig `json:"azure,omitzero"`
 
   // gcp is the GCP configuration.
-  // All structures within the union must be optional and pointers.
+  // All structures within the union must be optional and have the omitzero tag.
   // +optional.
-  GCP *MyGCPConfig `json:"gcp,omitempty"`
+  GCP MyGCPConfig `json:"gcp,omitzero"`
 }
 ```
 
 The discriminator here allows the consumer to determine which of the configuration structures they should be consuming, AWS, Azure or GCP.
 
 Important to note:
-* All structs within the union **MUST** be pointers
+* All structs within the union **MUST** have the omitzero tag
 * All structs within the union **MUST** be optional
+* All structs within the union **MUST** not allow the zero value (i.e. each struct should have at least 1 required field, or a `MinProperties` validation to prevent `{}` from being valid)
 * The discriminant should be required
 * The discriminant **MUST** be a string (or string alias) type
 * Discriminant values should be PascalCase and should be equivalent to the camelCase field name (json tag) of one member of the union
 * Empty union members (discriminant values without a paired union member) are also permitted
+* Optional union members (discriminant values with an optional union member) are also permitted (use `+unionMember,optional` to mark the union member as optional)
 
 #### Using union types
 
