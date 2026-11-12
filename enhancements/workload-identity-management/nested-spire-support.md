@@ -32,7 +32,7 @@ Support for nested SPIRE topologies enables scalable, highly available workload 
 ### User Stories
 
 - As an OpenShift cluster administrator, I want to configure a local SPIRE server to use an upstream server as its authority, so that workload identities across clusters chain back to a common root of trust instead of using isolated self-signed CAs.
-- As an OpenShift cluster administrator, I want the operator to manage all infrastructure that nested SPIRE requires, so that I do not have to hand-assemble and maintain those resources myself.
+- As an OpenShift cluster administrator, I want the operator to manage operator-owned infrastructure that nested SPIRE requires, so that I do not have to hand-assemble and maintain those resources myself.
 - As an OpenShift cluster administrator of the upstream cluster, I want to onboard a downstream cluster declaratively, so that the upstream server issues an intermediate signing CA to that cluster.
 - As an SRE, I want to see the health of nested SPIRE through status conditions on each cluster, so that I can detect and remediate configuration or connectivity problems at scale.
 - As an OpenShift security engineer, I want enabling nested SPIRE to maintain the least-privilege posture for all components involved, so that the feature does not introduce unnecessary privilege escalation.
@@ -158,8 +158,9 @@ sequenceDiagram
 **Day-2 operations:**
 
 - **Adding another downstream cluster.** Append an entry to `spec.nodeAttestor.externalK8sPSAT.clusters`. Regenerating `k8s_psat` configuration restarts the upstream server briefly; existing downstreams keep issuing from their cached intermediate CAs.
-- **Removing a downstream cluster.** On the downstream cluster, clearing `spec.upstreamAuthority.spire` removes all operator-created nested SPIRE resources. On the upstream cluster, the operator removes the downstream cluster's attestation configuration and registration entries.
-- **Upstream outage.** The downstream server keeps issuing while its cached intermediate CA is valid. SPIRE retries CA preparation automatically until upstream returns.
+- **Removing a downstream cluster.** Offboard in leaf -> mid-tier -> root order. For each link, first clear `spec.upstreamAuthority.spire` on the downstream cluster and confirm detachment, then remove its entry from the upstream cluster’s `spec.nodeAttestor.externalK8sPSAT.clusters`.
+- **Partial removal.** If the upstream cluster drops a downstream entry from `externalK8sPSAT.clusters` while the downstream sidecar is still running, the sidecar's re-attestation fails and CA renewal stops; the downstream server continues issuing from its cached intermediate CA until that CA expires. If the downstream cluster clears `upstreamAuthority.spire` without removing its entry from the upstream cluster, the upstream retains stale attestation configuration and registration entries until the administrator removes the entry.
+- **Upstream outage.** The downstream server continues issuing from its cached intermediate CA until that CA expires. The upstream agent sidecar retries re-attestation with exponential backoff. Nesting recovers automatically once the upstream server is reachable again.
 - **Upstream root CA rotation.** After attestation, the upstream agent receives live trust bundle updates via the gRPC stream and caches them to its `data_dir`. On container restart within the same pod, the agent uses the cached bundle - the `trustBundleSecret` is not consulted. On pod restart or reschedule, `emptyDir` is wiped and the agent falls back to the `trustBundleSecret`. If the upstream root CA has rotated since the Secret was created and the old root is no longer in the server's certificate chain, TLS verification fails and the agent cannot attest. The administrator must update the `trustBundleSecret` content whenever the upstream root CA rotates.
 
 ### API Extensions
@@ -505,7 +506,7 @@ Not applicable.
 
 **Adopting the feature**: set `spec.upstreamAuthority.spire` and wait for `UpstreamAgentAvailable=True`. SPIRE prepares the next CA using the upstream authority plugin at the next rotation cycle, so the server transitions from `self_signed=true` to `self_signed=false` automatically. If immediate switchover is required, the administrator must manually re-initialize the datastore (scale StatefulSet to 0, delete PVC, scale to 1); the operator does not perform this destructive step automatically. This invalidates all SVIDs and is a maintenance-window operation. The same behavior applies to `certManager` and `vault` plugins.
 
-**Downgrade**: orphans generated resources. The older operator regenerates the ConfigMap without the plugin; the server self-signs after the current CA expires. Delete orphaned resources by label and re-initialize if immediate self-signed CA is needed.
+**Downgrade**: orphans generated resources. The older operator regenerates the ConfigMap without the plugin; the server self-signs after the current CA expires. To clean up orphaned resources, the administrator can delete them by label (`app.kubernetes.io/managed-by=zero-trust-workload-identity-manager`). If immediate self-signed CA is needed, the administrator must re-initialize the SPIRE server's datastore by scaling the `spire-server` StatefulSet to 0, deleting its PVC, and scaling back to 1.
 
 ## Version Skew Strategy
 
