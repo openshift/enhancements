@@ -3,16 +3,14 @@ title: azure-identity-status-reporting
 authors:
   - "@muraee"
 reviewers:
-  - "@csrwng, for overall HyperShift architecture and status API design"
-  - "@bryan-cox, for Azure platform implementation and ARO HCP identity model"
   - "@vismishr, for managed Azure (ARO HCP) identity configuration and CPO reconciliation"
   - "@machi1990, for ARO HCP identity replacement consumer requirements"
 approvers:
-  - "@csrwng"
+  - "@bryan-cox"
 api-approvers:
-  - "@JoelSpeed"
+  - "@everettraven"
 creation-date: 2026-09-24
-last-updated: 2026-11-05
+last-updated: 2026-11-12
 status: provisional
 tracking-link:
   - https://redhat.atlassian.net/browse/CNTRLPLANE-4491
@@ -229,6 +227,93 @@ A change to these inputs requires a new current-generation observation of
 every affected role even if its identity reference is unchanged. They remain
 configuration in spec rather than duplicated identity-reference members.
 
+#### Proposed API field placement
+
+The following YAML excerpts show the affected paths in the existing APIs;
+unrelated required fields are omitted. `credentialsSecretVersion` is a new
+optional string member of the existing `ManagedIdentity` type. That type is
+used by `cloudProvider`, `nodePoolManagement`, `controlPlaneOperator`,
+`imageRegistry`, `ingress`, `network`, `disk`, `file`, and Azure KMS. HO projects
+the HC desired values into the corresponding HCP spec paths. Existing
+data-plane MSI client ID fields remain unchanged.
+
+| Existing API type | Proposed addition |
+| --- | --- |
+| `ManagedIdentity` in `HostedClusterSpec` and `HostedControlPlaneSpec` | `credentialsSecretVersion` beside `credentialsSecretName` and `objectEncoding` at `spec.platform.azure.azureAuthenticationConfig.managedIdentities.controlPlane.<role>` and `spec.secretEncryption.kms.azure.kms`. |
+| `ControlPlaneComponentStatus` | `azureIdentities` beside the existing `conditions` and `observedGeneration`; only control-plane role observations. |
+| `HostedControlPlaneStatus` | `azureIdentities` beside the existing `conditions`; only HCCO-owned data-plane role observations. |
+| `HostedClusterStatus` | `AzureIdentitiesApplied` in the existing `conditions` list; no identity-record list. |
+
+On HC, the new spec member appears in context as follows:
+
+```yaml
+apiVersion: hypershift.openshift.io/v1beta1
+kind: HostedCluster
+metadata:
+  name: example
+spec:
+  platform:
+    type: Azure
+    azure:
+      azureAuthenticationConfig:
+        azureAuthenticationConfigType: ManagedIdentities
+        managedIdentities:
+          controlPlane:
+            managedIdentitiesKeyVault: # existing ControlPlaneManagedIdentities member
+              name: example-key-vault
+              tenantID: 00000000-0000-0000-0000-000000000001
+            cloudProvider: # existing ManagedIdentity member; same addition on the other control-plane roles
+              objectEncoding: utf-8
+              credentialsSecretName: cloud-provider-v2
+              credentialsSecretVersion: 4d71... # NEW on ManagedIdentity
+          dataPlane:
+            diskMSIClientID: 00000000-0000-0000-0000-000000000002 # existing; no version
+  secretEncryption:
+    type: kms
+    kms:
+      provider: Azure
+      azure:
+        kms: # existing ManagedIdentity member
+          objectEncoding: utf-8
+          credentialsSecretName: kms-v2
+          credentialsSecretVersion: 7a35... # NEW on ManagedIdentity
+```
+
+The HCP spec receives the same desired members through HO's projection:
+
+```yaml
+apiVersion: hypershift.openshift.io/v1beta1
+kind: HostedControlPlane
+metadata:
+  name: example
+spec:
+  platform:
+    type: Azure
+    azure:
+      azureAuthenticationConfig:
+        azureAuthenticationConfigType: ManagedIdentities
+        managedIdentities:
+          controlPlane:
+            cloudProvider:
+              objectEncoding: utf-8
+              credentialsSecretName: cloud-provider-v2
+              credentialsSecretVersion: 4d71... # NEW, projected from HC
+          dataPlane:
+            diskMSIClientID: 00000000-0000-0000-0000-000000000002
+  secretEncryption:
+    type: kms
+    kms:
+      provider: Azure
+      azure:
+        kms:
+          objectEncoding: utf-8
+          credentialsSecretName: kms-v2
+          credentialsSecretVersion: 7a35... # NEW, projected from HC
+```
+
+The existing `HCP.status.platform.azure.managedIdentities` spec mirror is
+superseded and is not an authoritative applied-state field.
+
 Add a bounded `status.azureIdentities` map list to CPC for control-plane
 roles and to HCP for HCCO's data-plane roles. HC adds the standard
 `AzureIdentitiesApplied` condition without a per-role list. No ACR or
@@ -246,12 +331,14 @@ after failure or removal as history; readers must check the current outcome
 before treating it as applied. Example, with disk complete and file failing:
 
 ```yaml
+apiVersion: hypershift.openshift.io/v1beta1
 kind: ControlPlaneComponent
 metadata:
   name: cluster-storage-operator
 status:
-  observedGeneration: 42
-  azureIdentities:
+  conditions: [] # existing component conditions (Available, RolloutComplete) omitted
+  observedGeneration: 42 # existing CPC field
+  azureIdentities: # NEW map list on CPC status
   - scope: ControlPlane
     role: Disk
     lastAppliedReference:
@@ -277,9 +364,13 @@ status:
 ```
 
 ```yaml
+apiVersion: hypershift.openshift.io/v1beta1
 kind: HostedControlPlane
+metadata:
+  name: example
 status:
-  azureIdentities:
+  conditions: [] # existing HCP conditions omitted
+  azureIdentities: # NEW map list on HCP status
   - scope: DataPlane
     role: Disk
     lastAppliedReference:
@@ -293,10 +384,13 @@ status:
 ```
 
 ```yaml
+apiVersion: hypershift.openshift.io/v1beta1
 kind: HostedCluster
+metadata:
+  name: example
 status:
-  conditions:
-  - type: AzureIdentitiesApplied
+  conditions: # existing HC condition list
+  - type: AzureIdentitiesApplied # NEW condition type
     status: "False"
     reason: ApplyFailed
     observedGeneration: 28
