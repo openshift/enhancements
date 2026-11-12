@@ -77,7 +77,7 @@ Write tooling that automatically:
 
 The following statement (or a link to this section) can be pasted into bugs when adding `ImpactStatementRequested`:
 
-We're asking the following questions to evaluate whether or not OCPBUGS-# warrants changing update recommendations from either the previous X.Y or X.Y.Z.
+We're asking the following questions to evaluate whether or not OCPBUGS-# warrants changing update recommendations from either the previous minor (x.y) or the previous patch (x.y.z) release.
 The ultimate goal is to avoid recommending an update which introduces new risk or reduces cluster functionality in any way.
 In the absence of a declared update risk (the status quo), there is some risk that the existing fleet updates into the at-risk releases.
 Depending on the bug and estimated risk, leaving the update risk undeclared may be acceptable.
@@ -86,7 +86,7 @@ Sample answers are provided to give more context and the `ImpactStatementRequest
 When responding, please move this ticket to `Code Review`.
 The expectation is that the assignee answers these questions.
 
-Which 4.y.z to 4.y'.z' updates increase vulnerability?
+Which x.y.z to x'.y'.z' updates increase vulnerability?
 * reasoning: This allows us to populate [`from` and `to` in conditional update recommendations][graph-data-block] for "the `$SOURCE_RELEASE` to `$TARGET_RELEASE` update is exposed.
 * example: Customers upgrading from any 4.y (or specific 4.y.z) to 4.(y+1).z'.  Use `oc adm upgrade` to show your current cluster version.
 
