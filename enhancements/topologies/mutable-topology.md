@@ -5,6 +5,7 @@ authors:
   - "@jaypoulz"
   - "@eggfoobar"
   - "@copejon"
+  - "@fracappa"
 reviewers:
   - "@tjungblu, for cluster-etcd-operator"
   - "@dusk125, for cluster-etcd-operator"
@@ -26,12 +27,18 @@ tracking-link:
   - https://issues.redhat.com/browse/OCPEDGE-2280
   - https://issues.redhat.com/browse/OCPEDGE-2640
   - https://issues.redhat.com/browse/OCPEDGE-2992
+see-also:
+  - "/enhancements/topologies/infrastructure-topology-transition.md"
 replaces:
   - https://github.com/openshift/enhancements/pull/1905
 superseded-by: []
 ---
 
 # Mutable Topology
+
+## Related Enhancements
+
+- [Infrastructure Topology Transition](infrastructure-topology-transition.md) — Standalone infrastructure topology transition path (SingleReplica → HA) for clusters with worker-capable nodes
 
 ## Terms
 
