@@ -28,7 +28,7 @@ see-also:
 
 This enhancement defines the standalone infrastructure topology transition path: transitioning `infrastructureTopology` from `SingleReplica` to `HighlyAvailable` on clusters where `status.controlPlaneTopology = HighlyAvailable` and worker-capable nodes are present.
 
-This is a companion enhancement to [Mutable Topology](mutable-topology.md), which defines the umbrella architecture including the topology transition controller in cluster-config-operator, shared API fields, and feature gate. For an overview of control-plane driven topology transitions, see the [parent enhancement](mutable-topology.md). This document covers the infrastructure-specific workflow, prerequisites, operator matrix, risks, and tests.
+This is a companion enhancement to [Mutable Topology](mutable-topology.md), which defines the umbrella architecture including the topology transition controller in cluster-config-operator, shared API fields, and feature gate. For an overview of control-plane driven topology transitions, see the [parent enhancement](mutable-topology.md). This document covers the infrastructure-only workflow, prerequisites, operator matrix, risks, and tests.
 
 The infrastructure transition triggers infrastructure operators (Ingress, Monitoring, Image Registry, Console) to scale workloads from SingleReplica to HA replica counts. Unlike the control-plane topology, where `HighlyAvailable` requires 3 or more control-plane nodes, an infrastructure topology of `HighlyAvailable` requires only 2 or more compatible worker nodes — sufficient to host 2+ replicas of each infrastructure workload.
 
