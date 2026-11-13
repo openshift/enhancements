@@ -10,7 +10,7 @@ approvers:
 api-approvers:
   - "@JoelSpeed"
 creation-date: 2026-10-21
-last-updated: 2026-11-04
+last-updated: 2026-11-12
 status: provisional
 tracking-link:
   - https://issues.redhat.com/browse/NE-2930
@@ -82,11 +82,9 @@ custom search-domain request is out of scope here (see Non-Goals).
   NXDOMAIN rules through the DNS Operator API, reusing the `DNSTemplatePlugin`
   feature gate and the CoreDNS `template` plugin mechanism from NE-2118.
 * Define unambiguous precedence: an exact name always wins over a wildcard
-  for every query type both rules' actions render; among wildcards, the
-  most specific wins; overlapping/conflicting rules — including the one
-  action pairing where an exact rule's action covers fewer query types than
-  an overlapping wildcard rule's (an exact `a` rule vs. a wildcard `cname`
-  rule) — are rejected at submission or reconcile time rather than silently
+  for every query type; wildcard patterns replace exactly one leading
+  label, so two distinct patterns never match the same name; conflicting
+  rules are rejected at submission or reconcile time rather than silently
   resolved or silently answered incorrectly.
 * Validate rules at submission (schema/admission and the validating
   webhook), so an invalid or conflicting rule is rejected before it is ever
@@ -96,25 +94,27 @@ custom search-domain request is out of scope here (see Non-Goals).
   cluster context that changes after a rule was accepted, and pre-apply
   validation failures against the generated Corefile. On either kind of
   failure found at reconcile time, keep serving the last-known-good
-  Corefile and report a clear status condition.
-* Preserve existing resolution behavior for anything not covered by a rule:
-  cluster service/ingress discovery, configured `forwardPlugin` zones, and
-  other query types for a name that only has a rule for one record type —
-  or, where that cannot yet be guaranteed, reject the combination outright
-  rather than silently answer it incorrectly (see the precedence Goal
-  above).
+  Corefile and report a clear status condition, except that a rule newly
+  conflicting with a protected name is excluded immediately.
+* Preserve existing resolution behavior for any name not covered by a rule:
+  cluster service/ingress discovery and configured `forwardPlugin` zones.
+  A name a rule covers is answered by that rule for every query type (an
+  `a` rule answers NODATA for types other than A), so the name's existence
+  is consistent across types.
 * Make the configuration and its effects survive an OpenShift upgrade without
   administrator intervention.
 
 ### Non-Goals
 
 * A general-purpose custom DNS server or arbitrary record types/regex
-  matching — wildcards are limited to replacing exactly one leading name
-  segment (e.g. `*.example.com`); administrators specify names, not regular
+  matching — wildcards are limited to replacing exactly one leading
+  label (e.g. `*.example.com`); administrators specify names, not regular
   expressions.
 * IPv6/AAAA record responses — that is NE-2118's scope; this enhancement
   intentionally does not duplicate or modify that work's AAAA/NOERROR
-  behavior.
+  behavior. An `a` rule's NODATA answer to an AAAA query for its own name
+  is part of that rule's name-existence behavior, not an AAAA record
+  response.
 * RFE-6814's Azure-specific custom search-domain handling — a distinct
   request within the same RFE from the wildcard A/CNAME need addressed by
   this enhancement (see Motivation); tracked separately, not an acceptance
@@ -122,7 +122,8 @@ custom search-domain request is out of scope here (see Non-Goals).
 * Azure's installer/custom-DNS path (OCPSTRAT-991) — unrelated mechanism, not
   evidence this feature already exists.
 * Response generation for record types or response codes beyond A, CNAME, and
-  exact-name NXDOMAIN.
+  exact-name NXDOMAIN, other than the NODATA answer an `a` rule gives for
+  other query types.
 * Distinguishing, in the client-visible response, between a `cname` rule's
   target having no record of the queried type, not existing at all
   (NXDOMAIN), or failing to resolve (SERVFAIL) — the underlying CoreDNS
@@ -142,19 +143,20 @@ permission is required beyond permission to edit `DNS/default`:
 gated only by the existing `DNS/default` edit permission and the
 `DNSTemplatePlugin` feature gate. The implementation itself does add new
 permissions for the operator — to manage the validating webhook's
-Deployment, Service, and serving-certificate resources, and to read the
+Deployment, Service, serving-certificate resources, and
+`ValidatingWebhookConfiguration`, and to read the
 cluster configuration the webhook needs for its protected-domain checks —
 see [Admission Webhook Lifecycle and Failure Handling](#admission-webhook-lifecycle-and-failure-handling).
 
 1. The administrator adds one entry to `spec.responseRules` on `DNS/default`
-   naming a rule, a query name (exact or single-segment wildcard), a TTL, and
+   naming a rule, a query name (exact or single-label wildcard), a TTL, and
    exactly one action (`a`, `cname`, or `nxdomain`).
 2. On submission, schema/admission validation checks each rule's shape
    (name pattern, exactly-one-action, address/target format, TTL bounds, an
    exact `cname` rule's literal self-reference) and cross-rule checks
    decidable from `spec.responseRules` and `spec.servers` together
-   (duplicate/conflicting rule detection, an exact `a` rule overlapping a
-   wildcard `cname` rule, overlap with a configured `forwardPlugin` zone,
+   (duplicate/conflicting rule detection, overlap with a configured
+   `forwardPlugin` zone,
    and overlap with the cluster's fixed `cluster.local` domain or a reverse
    zone) — see [Implementation Details](#implementation-detailsnotesconstraints)
    for the full breakdown.
@@ -212,12 +214,30 @@ see [Admission Webhook Lifecycle and Failure Handling](#admission-webhook-lifecy
    A setup error comes back to the operator as an ordinary Go `error`
    within the same reconcile that rendered the candidate — there is no
    process boundary, scheduling, or polling involved, so the rendered
-   stanzas are known valid or invalid synchronously, before anything is
+   stanzas' setup result is known synchronously, before anything is
    written anywhere.
+
+   Setup success establishes only that each stanza parses and its `match`
+   regex and Go templates compile; answer records are generated when a query
+   executes the template. The operator therefore also renders each rule
+   against representative names (boundary label lengths, the longest
+   allowed name) and checks that the resulting A records, CNAME target, and
+   SOA parse as valid records. Runtime cost is bounded: each `a` rule
+   accepts at most 8 addresses, so an answer fits a 512-byte UDP response
+   even for a maximum-length name; templates contain no loops or lookups;
+   and the only recursive path, the CNAME chase, is bounded by the cycle
+   checks below. The availability guarantee is limited to what these checks
+   establish.
 5. If validation returns an error, the operator does not write the
    candidate: it keeps serving the currently-applied ConfigMap unchanged and
    sets a status condition on `DNS/default` naming the invalid rule(s) and
-   the validation error. If there is no currently-applied ConfigMap to fall
+   the validation error. Exception: a rule that now conflicts with a
+   protected API or ingress name is a safety failure. The operator excludes
+   that rule and applies the remaining configuration immediately, even when
+   a prior ConfigMap exists, because keeping it would keep serving the
+   prohibited override; other valid changes, such as forwarding updates,
+   are applied in the same pass, and the excluded rule is named in the
+   status condition. If there is no currently-applied ConfigMap to fall
    back to — initial creation, or the ConfigMap was deleted/recreated while
    `spec.responseRules` holds a rule that reconcile-time validation (step
    3) would now reject because cluster context changed since it was
@@ -265,8 +285,9 @@ resource:
 // responseRules is an optional list of rules that configure CoreDNS to
 // return custom A, CNAME, or NXDOMAIN responses for specific DNS names.
 // Rules are evaluated independently; an exact-name rule always takes
-// precedence over a wildcard rule for the same query, and among wildcard
-// rules the most specific match wins. Queries that do not match any rule
+// precedence over a wildcard rule for the same query. A wildcard replaces
+// exactly one leading label, so distinct wildcard patterns never overlap.
+// Queries that do not match any rule
 // continue through normal CoreDNS resolution.
 //
 // +optional
@@ -347,18 +368,30 @@ for its operational impact.
 
 #### Hypershift / Hosted Control Planes
 
-**Open question, sharpened by the validating webhook, to confirm with HCP
-reviewers.** `DNS/default` is a guest-cluster resource, so the webhook must
-validate submissions against the guest cluster's API server, while the DNS
-Operator itself (like other HCP-aware operators) typically runs in the
-management cluster: HCP's established split is "operator in management,
-webhook in guest." Where the webhook Deployment/Service actually runs,
-which cluster's `Ingress`/`Infrastructure` config it reads for the
-protected ingress-domain and API-hostname checks, and whether
-per-guest-cluster webhook registration is required, are not yet resolved
-here. Beyond the webhook's own placement, no other unique
-consideration has been identified; the DNS Operator's existing HCP behavior
-for everything else is assumed to extend unchanged.
+On HCP, HyperShift's control-plane-operator runs the DNS Operator in the
+hosted control plane namespace on the management cluster, managing the
+guest cluster through a kubeconfig. The webhook runs in the guest cluster:
+the operator creates its Deployment, Service, and
+`ValidatingWebhookConfiguration` in the guest through that kubeconfig, the
+same code path as on standalone clusters, and the hosted kube-apiserver
+reaches the webhook Service through its konnectivity egress path, as it
+does for any guest webhook. The webhook reads `Ingress/cluster` and
+`Infrastructure/cluster` from the guest cluster, where `DNS/default` also
+lives. Its pod runs on guest worker nodes; if no worker is available,
+matching writes are rejected (fail closed) while removing all rules
+remains possible.
+
+HCP support needs two changes: the webhook's RBAC, ServiceAccount, and
+NetworkPolicy manifests gain the `include.release.openshift.io/hypershift`
+annotation, and the operator takes the webhook image from an environment
+variable instead of reading its own Deployment, which does not exist in
+the guest cluster. The variable is set by the payload manifest on
+standalone clusters and by HyperShift's control-plane-operator on HCP, a
+small change in the HyperShift repository. Until both changes land, when
+`Infrastructure.status.controlPlaneTopology` is `External` the operator
+does not create the webhook or serve any `spec.responseRules`, and sets a
+status condition stating that response rules are not yet supported on
+this topology, so rules are never served without admission validation.
 
 #### Standalone Clusters
 
@@ -366,11 +399,12 @@ This is the primary target; no additional considerations.
 
 #### Single-node Deployments or MicroShift
 
-The `spec.responseRules` field itself is fully applicable: per NE-2118's
-own topology considerations, MicroShift runs CoreDNS and can use the DNS
-Operator to configure it, the same as any other standalone/single-node
-cluster, with no additional exposure path needed. The validating webhook's
-applicability to MicroShift is **unverified** — whether MicroShift's API
+On single-node OpenShift, `spec.responseRules` behaves as on standalone
+clusters; the webhook adds one Deployment. Applicability to MicroShift is
+**unconfirmed**: MicroShift manages DNS through its own configuration and
+Corefile path rather than the DNS Operator, so whether this `DNS/default`
+API applies at all needs a MicroShift reviewer. The validating webhook's
+applicability to MicroShift is a separate **unverified** question — whether MicroShift's API
 server supports `ValidatingWebhookConfiguration` registration the same way
 standalone OpenShift does, and the resource/availability cost of an
 additional webhook Deployment on a single-node footprint, has not been
@@ -387,25 +421,30 @@ dependency on OKE-excluded functionality.
 Each rule compiles to one or more CoreDNS `template` plugin stanzas in the
 default server block:
 
-* `a` → `template IN A <zone> { match <name-regex> ; answer "{{ .Name }} <ttl> IN A <addr> ..." ; fallthrough }`,
-  with one `answer` line per configured address, to support "one or multiple
-  IPv4 addresses" per rule.
-* `cname` → answers the record types a client actually sends for an aliased
-  name, as well as a literal `CNAME`-type query:
-  * `template IN A <zone> { match <name-regex> ; answer "{{ .Name }} <ttl> IN CNAME <target>" ; fallthrough }`
-  * `template IN AAAA <zone> { match <name-regex> ; answer "{{ .Name }} <ttl> IN CNAME <target>" ; fallthrough }`
-  * `template IN CNAME <zone> { match <name-regex> ; answer "{{ .Name }} <ttl> IN CNAME <target>" ; fallthrough }`
+* `a` → two stanzas:
+  * `template IN A <zone> { match <name-regex> ; answer "{{ .Name }} <ttl> IN A <addr>" ... ; fallthrough }`,
+    with one `answer` line per configured address;
+  * `template ANY ANY <zone> { match <name-regex> ; authority "<zone> <ttl> IN SOA ns.invalid. admin.invalid. 1 60 60 60 <ttl>" ; fallthrough }`,
+    rendered after the `IN A` stanza, so every other query type for the
+    name gets NOERROR with no answer (NODATA), negatively cached for
+    `ttlSeconds` through the SOA minimum field, as for `nxdomain`.
+* `cname` → `template ANY ANY <zone> { match <name-regex> ; answer "{{ .Name }} <ttl> IN CNAME <target>" ; fallthrough }`,
+  so every query type for the name gets the CNAME, as RFC 1034 specifies.
 
-  This is a deliberate scope limit, not full RFC 1034 CNAME redirection: a
-  query of a different type against a `cname`-ruled name (for example MX or
-  TXT, but not `ANY` — see below) is not intercepted by this rule and
-  continues through normal resolution, which typically returns
-  NXDOMAIN/NODATA since the aliased name is not otherwise published.
-  Administrators who need CNAME semantics for every query type should
-  publish the alias in authoritative DNS instead of using this mechanism.
+  Every action therefore answers every query type for the names it
+  matches, so a ruled name never falls through to upstream resolution for
+  some types and not others. This keeps name existence consistent: a
+  caching resolver never receives an upstream NXDOMAIN for one type of a
+  ruled name and the synthetic answer for another, which RFC 2308 negative
+  caching would apply to the whole name. The trade-off is that real
+  records of other types published upstream for a ruled name (for example
+  MX, TXT, or SRV) are hidden while the rule exists (see Risks). The
+  `template` plugin behavior these stanzas rely on is taken from its source
+  (`plugin/template/template.go`) and is verified by the tests in the Test
+  Plan.
 
-  Both `a` and `cname` stanzas are also matched by a client `ANY`-type
-  query against the ruled name, not only by their own configured type.
+  A client `ANY`-type query against a ruled name matches the first stanza
+  for that name, whatever that stanza's configured type.
   CoreDNS's `template` plugin treats a stanza's configured type and the
   incoming query's type as matching whenever *either* side is `ANY`
   (confirmed in `plugin/template/template.go`'s `match()`: the type check
@@ -413,8 +452,7 @@ default server block:
   are non-`ANY` and unequal). Consequently an `ANY` query against a ruled
   name is intercepted and answered by whichever stanza for that name is
   declared first in the Corefile (exact before wildcard, per the ordering
-  rule below) — it does not fall through to normal resolution the way a
-  genuinely different type (MX, TXT) does. For an `a` rule this returns the
+  rule below). For an `a` rule this returns the
   configured A record(s), the same as an `A` query would get. For a
   `cname` rule this returns the bare synthesized `CNAME` record with **no**
   address bundled in: the internal CNAME-chase described next only
@@ -424,9 +462,7 @@ default server block:
   enhancement exposes for `ANY`, not a gap to close — returning one
   representative record rather than enumerating every type matches modern
   authoritative-server guidance (RFC 8482) and needs no additional
-  mechanism. Elsewhere in this document, "other query types are
-  unaffected" means query types other than `A`, `AAAA`, `CNAME`, and
-  `ANY`; `ANY` is explicitly covered here, not an unaffected type.
+  mechanism.
 
   CoreDNS writes the `CNAME` record into the answer section, and the
   `template` plugin's own built-in CNAME-following behavior — independent
@@ -439,9 +475,10 @@ default server block:
   every `template` stanza automatically re-resolves a matched answer's
   target whenever the query is `A`/`AAAA` and the templated answer is a
   `CNAME`, confirmed against the CoreDNS `template` plugin source
-  (`plugin/template/template.go`, `plugin/pkg/upstream/upstream.go`). The
-  client's resolver does not need to, and does not, issue a separate
-  follow-up query itself.
+  (`plugin/template/template.go`, `plugin/pkg/upstream/upstream.go`).
+  CoreDNS attempts to resolve the target and include the result in the
+  response; whether a client sends its own follow-up query depends on the
+  resolver and the response it receives.
 
   This single response, however, cannot tell the client *why* `<target>`
   contributed nothing. The chase copies only the target response's
@@ -493,8 +530,8 @@ default server block:
   configuration has a terminating path and is not a cycle, even though the
   wildcard's target falls within its own pattern. The operator must walk
   each rule's target through the chain of **winning** rules — the exact
-  rule for that name if one exists, otherwise the most specific matching
-  wildcard rule, per the same precedence [Goals](#goals) establish —
+  rule for that name if one exists, otherwise the one matching wildcard
+  rule, per the same precedence [Goals](#goals) establish —
   rather than through every rule whose pattern merely overlaps. A
   configuration is rejected only when that winning-rule chain revisits a
   stanza already seen earlier in the chain (a genuine, unresolvable
@@ -539,6 +576,13 @@ stanza would turn every other query served by the default block into
 exact name the regex matches while every other query keeps its normal
 resolution path.
 
+`nxdomain` matches the exact name only, but a resolver implementing
+[RFC 8020](https://www.rfc-editor.org/rfc/rfc8020.html#section-2) may treat
+descendants (for example `child.blocked.example.com`) as nonexistent after
+caching the answer. This enhancement does not guarantee descendants keep
+resolving; administrators who need that should not use `nxdomain` for the
+parent name. A response action that preserves descendants is out of scope.
+
 **Stanza order determines precedence, and the operator must enforce it.**
 When two `template` stanzas in the same zone both match a query, CoreDNS
 answers from whichever stanza is declared first in the Corefile and never
@@ -552,83 +596,36 @@ regardless of the order rules appear in `spec.responseRules`, or the
 exact-over-wildcard precedence stated in [Goals](#goals) is not actually
 enforced — it would depend on administrator list order instead.
 
-**Exact-name precedence only holds for query types the exact rule's own
-action actually renders, and one action pairing cannot be made to work
-around that today.** An exact rule's action determines which stanza types
-it renders (`a` renders only `IN A`; `cname` renders `IN A`/`IN AAAA`/`IN
-CNAME`; `nxdomain` renders `ANY ANY`, which matches every type). When an
-exact rule's action covers fewer types than an overlapping wildcard rule's
-action, a query of a type the exact rule does not render has no exact-rule
-stanza to win the type-scoped ordering above, and falls straight to the
-wildcard rule's stanza for that type even though the query is for the
-exact name. For example, an exact `a` rule for `app.example.com` renders
-only `IN A`; an overlapping wildcard `cname` rule for `*.example.com`
-renders `IN AAAA` and `IN CNAME` stanzas that also match
-`app.example.com`, so an AAAA or CNAME query for `app.example.com` would
-be answered by the wildcard rule instead of being left to normal
-resolution as the exact rule's scope implies.
+Because every action renders a stanza for every query type at its names
+(see the stanza list above), rendering exact-name stanzas first gives
+exact-over-wildcard precedence for every query type and every combination
+of actions: an exact rule answers all queries for its name, and an
+overlapping wildcard rule answers every other name it matches. Within an
+`a` rule, the `IN A` stanza is rendered before its NODATA stanza.
 
-This gap does not extend to an `ANY` query against the exact name: since
-`ANY` satisfies every stanza's type check regardless of the stanza's own
-configured type (see the `ANY`-query discussion above), the
-stanza-ordering rule alone decides the answer for `ANY`, and the exact
-rule's stanza — rendered first — wins. The unresolved gap is specifically
-about concrete types (here, `AAAA` and `CNAME`) that the wildcard's action
-renders but the exact rule's narrower action does not.
-
-This cannot be closed by adding a "guard" stanza — an empty, answer-less
-`template` stanza for the exact name placed ahead of the wildcard's
-stanza, relying on `fallthrough` to pass the query on to normal
-resolution. The CoreDNS `template` plugin's `fallthrough` option only
-applies on the path where a stanza's `match` regex does **not** match;
-when the regex matches — as it would for the guard's own exact-name match
-— the plugin always returns the response built from that stanza's
-`answer`/`authority`/`additional`/`rcode` directives, defaulting to an
-**empty `NOERROR`** when none are set, and never proceeds to the next
-plugin regardless of `fallthrough`
-([CoreDNS template plugin docs](https://coredns.io/plugins/template/)).
-A guard stanza would therefore turn every AAAA/CNAME query against the
-exact name into an empty, answerless `NOERROR` — not a pass-through to
-normal resolution, and worse than the unguarded wildcard answer it was
-meant to replace.
-
-`a` and `cname` are the only two actions where this gap can occur:
-`cname`'s rendered types (`A`, `AAAA`, `CNAME`) are a superset of `a`'s
-(`A`), `nxdomain`'s `ANY ANY` stanza already matches every type, and two
-rules sharing the same action always render the same type set. So the gap
-is limited to one pairing — an exact `a` rule overlapping a wildcard
-`cname` rule — and, absent a real precedence mechanism for it, **this
-pairing must be rejected at admission**: an exact `a` rule whose name is
-also matched by an overlapping wildcard `cname` rule (or vice versa) is
-invalid, rejected by the API server at submission with a message naming
-both rules and the unresolved query types, rather than ever being accepted
-and surfaced later as a status condition. This is listed as an open
-question below; closing it will likely require either a future CoreDNS
-`template` capability to match-without-answering, or restructuring how
-these two actions render so the gap cannot occur, rather than a change to
-the generated Corefile alone.
+All names and targets are canonicalized once, before any check: lowercased,
+a single trailing dot removed, each label 1–63 octets and the whole name at
+most 253 octets, with regex metacharacters escaped when the `match` regex
+is rendered. Matching, protected-name, duplicate, forwarding-overlap, and
+cycle checks all use this canonical form.
 
 Validation is layered across schema/static admission, the validating
 webhook, and operator reconciliation. Generated template-stanza validation
 is an additional pre-apply check described in Workflow step 4.
 
 * **Schema/CRD (submission time), per rule:** name pattern (exact or
-  single-segment wildcard), exactly-one-of `a`/`cname`/`nxdomain`,
+  single-label wildcard), exactly-one-of `a`/`cname`/`nxdomain`,
   `nxdomain` rejected when the name is a wildcard, address/target format,
-  TTL bounds, and an exact-name `cname` rule's target rejected when it
+  at most 8 addresses per `a` rule, TTL bounds, and an exact-name `cname` rule's target rejected when it
   equals the rule's own query name — an exact rule's precedence never
   depends on any other rule, so this one case of self-reference is a fixed,
   unconditional error decidable from the rule alone.
 * **Schema/CRD (submission time), cross-rule:** everything else decidable
   from `spec.responseRules` and `spec.servers` alone, since both are
   fields on the one `DNS/default` object being submitted and need no
-  cluster context beyond the object itself: cross-rule duplicate/conflict
-  detection between rules of equal specificity that specify different
-  actions; rejection of an exact `a` rule overlapping a wildcard `cname`
-  rule for the same name (the one action pairing where the exact rule's
-  action covers fewer query types than the overlapping wildcard's, with no
-  available mechanism to reserve the uncovered types — see below); and
-  rejection of a rule whose name overlaps a configured `forwardPlugin` zone
+  cluster context beyond the object itself: rejection of two rules with the
+  same normalized selector, regardless of action or value; and rejection
+  of a rule whose name overlaps a configured `forwardPlugin` zone
   (`spec.servers[].zones` — CoreDNS routes each query to the server block
   with the longest matching zone, so such a rule would never reach the
   default block's `template` stanzas and would silently have no effect),
@@ -687,33 +684,33 @@ is an additional pre-apply check described in Workflow step 4.
 Precedence computation — determining which stanza renders first when an
 exact and a wildcard rule both match a query — is not a rejection, and
 happens once the rule set is already known valid; see the stanza-ordering
-discussion below.
-  Cross-rule conflict detection explicitly covers `a`/`cname` overlap, but
-  only between rules of **equal specificity**: two rules with the same exact
-  name, or two wildcard rules with the same pattern, that specify different
-  actions are rejected as a conflict (for example, two `*.example.com`
-  rules, one `a` and one `cname`). An exact-name rule and a wildcard rule of
-  **different** specificity that both match the same query are not
-  automatically a conflict: when the exact rule's action renders every type
-  the wildcard rule's action renders (for example, a `cname` rule for
-  `app.example.com` alongside an `a` rule for `*.example.com`: `cname`'s
-  type set is a superset of `a`'s), the stanza-ordering rule above is
-  sufficient — `app.example.com` gets the `cname` answer for every type
-  `cname` covers, and every other name under `*.example.com` gets the `a`
-  answer. The one pairing where the exact rule's action covers **fewer**
-  types than the overlapping wildcard rule's action — an exact `a` rule
-  overlapping a wildcard `cname` rule — has no such guarantee available
-  today (see the discussion above) and is rejected as a conflict rather
-  than silently answered incorrectly for the uncovered types.
+discussion above.
+
+Two rules with the same normalized selector (the same exact name, or the
+same wildcard pattern) are rejected regardless of action or value, so an
+answer never depends on render order; multiple addresses belong in one
+`a` rule. An exact-name rule and a wildcard rule that both match a name
+are not a conflict: every action covers every query type at its names
+and exact-name stanzas are rendered first, so the exact rule answers its
+own name and the wildcard rule answers every other name it matches.
 
 ### Admission Webhook Lifecycle and Failure Handling
 
-The DNS Operator manages a dedicated validating webhook Deployment,
-Service, and serving-certificate lifecycle. The owner of the
-`ValidatingWebhookConfiguration` and its installation/removal sequencing
-must be selected as part of the lifecycle decision described under
-Version Skew Strategy; ownership is not assumed to follow from ownership
-of the serving Deployment.
+The DNS Operator owns the webhook at runtime, including the
+`ValidatingWebhookConfiguration`; only the webhook's RBAC, ServiceAccount,
+NetworkPolicy, and ServiceMonitor ship as payload manifests. When the
+`DNSTemplatePlugin` gate is enabled, the operator creates a Service
+annotated for a service-ca serving certificate, a ConfigMap annotated for
+CA-bundle injection, and the webhook Deployment (the operator's own image,
+taken from an environment variable, with `--response-webhook-only`, one
+replica). It waits until the
+certificate and CA bundle are populated and the Deployment has an available
+replica, and only then registers the webhook (`failurePolicy: Fail`, 5s
+timeout, `sideEffects: None`, matching CREATE and UPDATE of `DNS/default`
+with non-empty `spec.responseRules`), so the fail-closed registration never
+exists before its endpoint. With one replica, a restart of the webhook pod
+rejects matching writes until it is available again; the replica count is
+to be decided before GA.
 
 The webhook reads `Ingress/cluster`'s `spec.domain` and the API endpoint
 hostnames derived from `Infrastructure/cluster`'s `status.apiServerURL`
@@ -763,9 +760,11 @@ prevented by admission.
   ever written to the `dns-default` ConfigMap. A setup error is a
   definitive signal: there is no scheduling, image pull, or asynchronous
   readiness step that could produce an ambiguous result, so every
-  validation attempt within a reconcile either confirms the rendered
-  stanzas or rejects them outright. On a rejection, the operator keeps the
-  last-known-good Corefile; if none exists yet, it excludes only the
+  validation attempt within a reconcile either passes or rejects the
+  rendered stanzas outright; passing establishes only what Workflow step 4
+  describes. On a rejection, the operator keeps the last-known-good
+  Corefile (except for a rule newly conflicting with a protected name,
+  which is excluded immediately); if none exists yet, it excludes only the
   specific rule(s) the failure is attributable to and revalidates the
   reduced set from scratch, or, if the failure isn't attributable to a
   specific rule, falls back to a revalidated candidate with
@@ -784,18 +783,13 @@ prevented by admission.
   Cycle detection follows the rule that actually wins precedence at each
   step; a terminating higher-precedence exact-name override remains valid.
   The operator repeats these checks defensively during reconciliation.
-* **Exact-name precedence silently not applying to a query type the exact
-  rule's action doesn't render.** The only pairing where this can happen is
-  an exact `a` rule overlapping a wildcard `cname` rule (`cname`'s type set
-  is a superset of `a`'s in every other direction, and `nxdomain`'s `ANY
-  ANY` stanza already covers every type). There is no CoreDNS `template`
-  mechanism to make a stanza match a name without producing a response —
-  `fallthrough` only applies when the regex does *not* match, so an
-  answer-less stanza for the exact name would return an empty `NOERROR`
-  rather than passing through to normal resolution. Mitigated by rejecting
-  this one pairing at admission until a real precedence mechanism for
-  it exists (see [Implementation Details](#implementation-detailsnotesconstraints)
-  and [Open Questions](#open-questions-optional)).
+* **Real records hidden by a rule.** A rule answers every query type for
+  the names it matches, so records of other types published upstream for
+  those names (for example MX, TXT, or SRV) are not served while the rule
+  exists; for a wildcard rule this applies to every name the pattern
+  matches. Mitigated by documenting this in user-facing docs and by keeping
+  wildcard patterns narrow; administrators who need other record types at a
+  name should publish that name in authoritative DNS instead.
 * **The validating webhook being unavailable blocks an otherwise-valid
   `DNS/default` update.** Because the webhook fails closed
   (`failurePolicy: Fail`), an outage rejects any matching update (one that
@@ -826,7 +820,8 @@ prevented by admission.
   other query it serves.
 * **Stale answers after a rule is removed/changed.** Bounded by
   `min(ttlSeconds, spec.cache.positiveTTL)` for `a`/`cname` and by
-  `min(ttlSeconds, spec.cache.negativeTTL)` for `nxdomain` — the generated
+  `min(ttlSeconds, spec.cache.negativeTTL)` for `nxdomain` and for the
+  NODATA answers of `a` rules — the generated
   Corefile's `cache` directive (`cache {{.PositiveTTL}} { denial 9984
   {{.NegativeTTL}} }`) sets no `MINTTL` argument on either the success or
   denial cap, so each falls back to the `cache` plugin's own documented
@@ -887,7 +882,7 @@ all, even while the webhook itself is unavailable.
   The in-process call has no such dependency: it runs in the same process,
   against only the stanzas this enhancement renders, with no Pod,
   scheduling, or image pull involved, so it returns a definitive
-  valid/invalid result synchronously, with no extra RBAC or classification
+  pass/fail result for the checks in Workflow step 4 synchronously, with no extra RBAC or classification
   logic to maintain.
 * **A `ValidatingAdmissionPolicy` with a `paramRef`** to the cluster's
   `Ingress` and `Infrastructure` config objects, instead of a dedicated
@@ -906,16 +901,8 @@ all, even while the webhook itself is unavailable.
 
 ## Open Questions [optional]
 
-1. HCP/Hypershift-specific considerations are not yet captured.
-2. An exact `a` rule overlapping a wildcard `cname` rule for the same name
-   is rejected at admission (see
-   [Implementation Details](#implementation-detailsnotesconstraints))
-   because the CoreDNS `template` plugin has no way to make a stanza match
-   a name without producing a response, so AAAA/CNAME queries against the
-   exact name cannot be reserved for normal resolution the way the A query
-   is. A real precedence mechanism for this pairing — for example,
-   restructuring how `a` and `cname` rules render, or a future CoreDNS
-   `template` capability — is not yet designed.
+1. HCP support depends on a small HyperShift change that passes the webhook
+   image to the DNS Operator (see Topology Considerations).
 
 ## Test Plan
 
@@ -929,12 +916,11 @@ all, even while the webhook itself is unavailable.
   rule type, including: an exact rule's
   `template` stanza is always rendered before an overlapping wildcard
   rule's stanza regardless of the order the rules appear in
-  `spec.responseRules`; an exact `a` rule overlapping a wildcard `cname`
-  rule for the same name is rejected at admission (schema/CEL) rather than
-  ever reaching reconcile time or the Corefile; a `cname` rule renders
-  `template` stanzas for `A`, `AAAA`, and `CNAME` query types only, with a
-  query of a different type (e.g. MX, TXT) against the same name left
-  unaffected; an `ANY` query against an `a` rule and against a `cname` rule
+  `spec.responseRules`; an `a` rule renders an `IN A` stanza followed by a
+  NODATA stanza whose SOA minimum equals `ttlSeconds`, so an MX or TXT query
+  for the name gets NOERROR with no answer; a `cname` rule renders one `ANY`
+  stanza, so every query type for the name gets the CNAME; an `ANY` query
+  against an `a` rule and against a `cname` rule
   is answered by the first-declared matching stanza rather than falling
   through — an A-record answer and a bare `CNAME` with no chased address,
   respectively; literal self-reference, cross-rule cycles, and an
@@ -962,7 +948,12 @@ all, even while the webhook itself is unavailable.
   `spec.responseRules`-derived stanzas are rendered before `spec.template`'s
   stanza. Also includes a dedicated test that an `nxdomain` rule's rendered
   SOA record's minimum field equals the rule's `ttlSeconds`, not a fixed
-  value, for both the default `ttlSeconds` and an explicitly-set one.
+  value, for both the default `ttlSeconds` and an explicitly-set one. Also
+  includes tests that two rules with the same normalized selector are
+  rejected regardless of action or value; that names differing only in case
+  or a trailing dot are treated as the same name by every check; and that
+  each rule's rendered answers for boundary-length names, multi-address A
+  lists, CNAME targets, and SOAs parse as valid records.
 * A pre-merge test (NE-1728) that the complete rendered Corefile — every
   server block CoreDNS actually runs, including `kubernetes`, `forwardPlugin`,
   `cache`, `reload`, and any configured `spec.template`/`spec.responseRules`
@@ -978,21 +969,23 @@ all, even while the webhook itself is unavailable.
 * E2E tests (NE-1729) against a running cluster: positive resolution for `a`/
   `cname`/`nxdomain`, negative cases (rule rejected, last-good Corefile
   retained), update and removal of rules, and upgrade persistence of
-  `spec.responseRules` and its effect. Includes a downgrade-then-upgrade
-  round trip: back up `spec.responseRules` before downgrading, confirm the
-  downgraded operator serves CoreDNS without the rules and that the
-  `ValidatingWebhookConfiguration` is removed immediately on downgrade (not
-  merely the webhook's Deployment and Service), then confirm reapplying the
+  `spec.responseRules` and its effect. Includes, as a GA criterion, a
+  downgrade-then-upgrade round trip between releases that contain the
+  webhook removal logic: back up `spec.responseRules` before downgrading,
+  confirm the downgraded operator serves CoreDNS without the rules and that
+  the `ValidatingWebhookConfiguration` is removed before the webhook's
+  Deployment and Service, then confirm reapplying the
   backed-up rules after upgrading restores the configured behavior and
-  re-registers the webhook. Also includes an explicit precedence test: a
-  `cname` exact-name
-  rule and an overlapping `a` wildcard rule (the pairing where precedence
-  is actually guaranteed, since `cname`'s rendered types are a superset of
-  `a`'s), confirming the exact-name answer wins for its one name across
-  every type `cname` covers and the wildcard answer is returned for every
-  other matching name; and a rejection test confirming an exact `a` rule
-  overlapping a wildcard `cname` rule is refused at admission rather than
-  producing an incorrect or empty answer. Also includes a coexistence
+  re-registers the webhook. Also includes precedence tests for an exact
+  `cname` rule over a wildcard `a` rule and an exact `a` rule over a
+  wildcard `cname` rule, confirming for A, AAAA, CNAME, MX, and TXT queries
+  that the exact rule answers its own name and the wildcard answers every
+  other matching name. Also includes caching-resolver tests through a
+  recursive resolver in front of CoreDNS: AAAA then A, and TXT then A,
+  against a ruled name, confirming the A answer is not withheld; and
+  `blocked.example.com` then `child.blocked.example.com` for an `nxdomain`
+  rule, recording whether the child is treated as nonexistent. Also
+  includes a coexistence
   test with `spec.template` (NE-2118) configured alongside
   `spec.responseRules`, confirming `spec.responseRules` answers take
   precedence for the query types and names they cover. Also includes a
@@ -1004,15 +997,19 @@ all, even while the webhook itself is unavailable.
   includes explicit recovery tests: an operator restart while
   `spec.responseRules` holds a rule that reconcile-time validation would
   now reject (confirming the operator keeps serving its last-known-good
-  Corefile rather than looping or crashing); `dns-default` ConfigMap
+  Corefile rather than looping or crashing); a protected API or ingress
+  name changed to cover an accepted rule, confirming by querying CoreDNS
+  that the override is no longer served and that a forwarding change made
+  at the same time is applied; `dns-default` ConfigMap
   recreation under the same condition, confirming the operator excludes
   only the attributable rule, revalidates the reduced set (reconcile-time
   checks plus a fresh in-process validation pass), and applies it; and the
-  same ConfigMap recreation with validation failing for a reason not
-  attributable to any single rule (for example, a `Setup()` error outside
-  the `spec.responseRules`-derived stanzas), confirming the operator falls
-  back to a revalidated candidate with `spec.responseRules` omitted
-  entirely rather than producing no Corefile at all.
+  same ConfigMap recreation with a validation error that maps to no single
+  rule (injected into the validator by the test), confirming the operator
+  falls back to a revalidated candidate with `spec.responseRules` omitted
+  entirely rather than producing no Corefile at all. Errors in plugins
+  outside the rendered stanzas are not visible to this validator and are
+  covered by the whole-Corefile test above.
 * Admission webhook integration/E2E tests against a running cluster: an
   ingress-domain conflict (sourced from `Ingress/cluster`'s `spec.domain`)
   and an API-hostname conflict (sourced from `Infrastructure/cluster`'s
@@ -1040,7 +1037,12 @@ all, even while the webhook itself is unavailable.
   all preserve the documented admission behavior. Also includes a test that
   a change to either `Ingress/cluster` or `Infrastructure/cluster` made
   after a rule was already admitted triggers reconciliation and preserves
-  the documented DNS retention/fallback guarantees.
+  the documented DNS retention/fallback guarantees. Also includes, on a
+  hosted (HCP) cluster, that the webhook is created in the guest cluster
+  and rejects a protected-domain conflict through the hosted
+  kube-apiserver; and, before HCP support lands, that a cluster with an
+  `External` control-plane topology serves no `spec.responseRules` and
+  reports the unsupported condition.
 * Transition-window tests exercise matching `DNS/default` writes during
   initial enablement, upgrade, and any supported removal/downgrade path,
   not only before/after snapshots:
@@ -1119,8 +1121,9 @@ The required teardown order is:
 1. Prevent acceptance of unvalidated non-empty `responseRules`. While the
    API still accepts the field, equivalent admission protection must
    remain effective; reconciliation alone is not a substitute.
-2. Remove the `ValidatingWebhookConfiguration` through an explicitly
-   identified cleanup component or supported procedure.
+2. The DNS Operator removes the `ValidatingWebhookConfiguration` once the
+   DNS CRD schema no longer accepts `responseRules`, and waits until it is
+   gone.
 3. Confirm registration removal before removing the webhook's serving
    Deployment, Service, or required certificate resources.
 
@@ -1128,25 +1131,20 @@ Cleanup must not rely on an older DNS Operator release having newly
 introduced cleanup logic. Likewise, omitting or feature-gate-excluding an
 object from a payload is not assumed to delete that object.
 
-Payload-managed registration is a candidate, not a confirmed cleanup
-mechanism. If CVO performs deletion, the design must identify the explicit
-deletion request, the component or release that supplies it, and the
-ordering relative to API-field availability and webhook teardown. The
-documented `release.openshift.io/delete` mechanism must not be confused
-with automatic pruning of an excluded manifest.
-
-Automatic downgrade cleanup is not claimed until the responsible component
-or procedure, supported source/target transitions, and ordering have been
-confirmed and covered by transition-window tests. Any transition that
-cannot preserve the admission contract must be explicitly excluded from
-the supported feature lifecycle unless an exception is agreed.
+Registration is operator-managed, so `release.openshift.io/delete` is not
+involved. Cleanup is done by an operator release that contains this removal
+logic; a downgrade to a release without it is not covered and must be
+excluded from the supported lifecycle unless an exception is agreed. Dev
+Preview and Tech Preview clusters use `NoUpgrade` feature sets and cannot
+be upgraded, downgraded, or have the gate disabled, so transition
+sequencing is a GA graduation criterion.
 
 ## Version Skew Strategy
 
 The validating webhook introduces coordination between API-field
 availability, admission registration, and the webhook serving components.
-These resources must not be treated as an atomic update merely because
-they are delivered in the same release payload.
+These resources are created in sequence by the operator and must not be
+treated as an atomic update.
 
 Before the API accepts non-empty `responseRules`, the registration must be
 effective for matching requests. If the registered webhook is temporarily
@@ -1159,17 +1157,12 @@ unvalidated non-empty `responseRules` before unregistering the webhook,
 then remove its serving components. The status-update and remove-all-rules
 exclusions described above remain available throughout the transition.
 
-**Blocking lifecycle decision:** before this design is considered
-complete, identify the registration owner and the concrete installation,
-feature-enablement, upgrade, and removal sequence. This includes the
-ordering relative to the API schema/feature-gate changes and compatibility
-between operator and webhook versions during rollout.
-
-Shipping the registration as a payload manifest alongside the gated API
-manifest is one candidate. It must be confirmed to enforce the required
-ordering; co-location in the payload is not itself proof. The agreed
-mechanism and its transition-window test coverage must replace this open
-decision before the feature's lifecycle guarantees are declared complete.
+**Lifecycle decision:** the DNS Operator is the registration owner (see
+[Admission Webhook Lifecycle and Failure Handling](#admission-webhook-lifecycle-and-failure-handling)).
+The webhook uses the operator's own image, so operator and webhook versions
+differ only while the webhook Deployment rolls out. The transition-window
+tests in the Test Plan exercise the sequence by delaying certificate or
+Deployment readiness, and by keeping the CRD schema in place during removal.
 
 ## Operational Aspects of API Extensions
 
@@ -1190,8 +1183,9 @@ decision before the feature's lifecycle guarantees are declared complete.
   reconciliation or CoreDNS at all. A rule that was valid when accepted but
   whose generated Corefile stanza later fails validation, or whose
   protected-domain context changes after acceptance, is caught at
-  reconcile time: the operator keeps serving the last-known-good Corefile,
-  falling back first to excluding only the attributable rule(s) and
+  reconcile time: the operator keeps serving the last-known-good Corefile
+  (except for a rule newly conflicting with a protected name, which is
+  excluded immediately), falling back first to excluding only the attributable rule(s) and
   revalidating, then to omitting `spec.responseRules` entirely and
   revalidating, before ever treating this as a problem outside this
   enhancement's scope. CoreDNS availability is not impacted by a single bad
