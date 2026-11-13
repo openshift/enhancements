@@ -2,7 +2,7 @@
 
 **Purpose**: Visual navigation map showing how concepts connect
 
-**Last Updated**: 2026-06-23
+**Last Updated**: 2026-10-23
 
 ---
 
@@ -130,6 +130,6 @@ E2E framework specifics
 
 ## Cross-References
 
-- Official docs: See ../../dev-guide/ and ../../guidelines/
+- Official docs: See ../dev-guide/ and ../guidelines/
 - Component repos: See references/repo-index.md
-- Enhancement proposals: See ../../enhancements/
+- Enhancement proposals: See ../enhancements/
