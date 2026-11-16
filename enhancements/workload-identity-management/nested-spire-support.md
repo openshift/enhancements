@@ -11,7 +11,7 @@ approvers:
 api-approvers:
   - "@tgeer"
 creation-date: 2026-09-18
-last-updated: 2026-11-05
+last-updated: 2026-11-16
 status: provisional
 tracking-link:
   - https://redhat.atlassian.net/browse/SPIRE-625
@@ -363,10 +363,10 @@ Downstream:
 Upstream:
 
 - `ManagedGRPCRouteAvailable`: managed Route exists with the expected spec and is admitted. Reasons: `RouteAdmitted`, `RouteNotAdmitted`, `RouteCreationFailed`. Omit when `managedRoute` is `"false"`; this condition does not verify external connectivity.
-- `DownstreamClustersValid`: each external cluster has a kubeconfig Secret with a non-empty `kubeconfig` key, and both generated clusterStaticEntries have `status.rendered=true` and `status.masked=false`. Reasons: `Ready`, `KubeConfigMissing`, `KubeConfigInvalid`, `ClusterNameConflict`, `EntryNotApplied`, `EntryMasked`.
+- `DownstreamClustersValid`: each external cluster has a kubeconfig Secret with a non-empty `kubeconfig` key, and both generated `ClusterStaticEntry` resources exist and have been reconciled to the desired configuration and controller ownership. This condition checks Kubernetes resource reconciliation only; it does not inspect `ClusterStaticEntry` status or verify that SPIRE has applied the registrations. Reasons include `Ready`, `KubeConfigMissing`, `KubeConfigInvalid`, `ClusterNameConflict`, `EntryReconcileFailed`, and `ResourceConflict`.
 - Error messages identify the cluster and Secret, for example: `cluster01: Secret nested-spire-cluster01-kubeconfig not found`.
 
-Readiness conditions do not prove CA issuance or a full requested TTL. Diagnose CA acquisition failures through SPIRE server logs.
+Readiness conditions do not prove successful registration in SPIRE, CA issuance, or a full requested TTL. Diagnose registration failures through spire-controller-manager logs and CA acquisition failures through SPIRE server logs.
 
 #### Constraints
 
