@@ -10,7 +10,7 @@ approvers:
 api-approvers:
   - "@JoelSpeed"
 creation-date: 2026-01-30
-last-updated: 2026-10-05
+last-updated: 2026-11-16
 tracking-link:
   - "https://issues.redhat.com/browse/STOR-2789"
 see-also:
@@ -142,20 +142,17 @@ Test configurations: standalone and hypershift clusters. Hypershift tests will o
 
 ## Graduation Criteria
 
-| OCP Version | OCP Status |
-|-------------|------------|
-| 5.1         | Alpha (DP) |
-| 5.2         | Beta (TP)  |
-| 5.3         | Beta (TP)  |
-| 5.4         | GA         |
+| OCP Version | OCP Status    |
+|-------------|---------------|
+| 5.1         | v1alpha1 (TP) |
+| 5.2         | v1 (GA)       |
 
 ### Dev Preview -> Tech Preview
 
-- API promoted to v1beta1.
 - Ability to utilize the enhancement end to end
 - End user documentation, relative API stability
-- e2e tests implemented
-- Promote ControllerManagerConfig feature gate
+- e2e tests implemented for standalone clusters
+- Promote ControllerManagerConfig feature gate to TechPreview
 
 ### Tech Preview -> GA
 
@@ -164,7 +161,7 @@ Test configurations: standalone and hypershift clusters. Hypershift tests will o
 - High severity bugs are fixed.
 - Reliable CI signal, minimal test flakes.
 - User facing documentation created in [openshift-docs](https://github.com/openshift/openshift-docs/)
-- Promote ControllerManagerConfig feature gate
+- Promote ControllerManagerConfig feature gate to GA
 
 ### Removing a deprecated feature
 
