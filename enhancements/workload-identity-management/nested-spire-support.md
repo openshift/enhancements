@@ -351,8 +351,9 @@ spec:
   selectors:
   - unix:path:/spire-server
   downstream: true
-  x509SVIDTTL: 1h
 ```
+
+The operator leaves `x509SVIDTTL` unset so the downstream server's identity certificate inherits the upstream `SpireServer.spec.defaultX509Validity` (default `1h`). This is separate from the downstream intermediate CA lifetime, which is configured through `spec.caValidity`.
 
 #### Status conditions
 
