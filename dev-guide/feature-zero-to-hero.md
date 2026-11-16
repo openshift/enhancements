@@ -324,6 +324,25 @@ Once your tests are implemented, ensure you also add presubmit jobs for componen
 
 For additional resources on creating Prow jobs to run your tests, see https://docs.ci.openshift.org/docs/
 
+#### Spot-Check Jobs for Dedicated Feature Jobs
+
+If your feature has its own dedicated Prow jobs (for example, a custom test suite or a specific install configuration), they would need to run often to meet promotion requirements, but would be costly to keep running at that rate forever.
+Spot-check jobs let these jobs keep providing regression signal in Component Readiness after promotion while running rarely.
+This does not apply to tests in the main suites, which already report into Component Readiness through the normal jobs.
+
+To onboard your jobs, open a PR to [`pkg/variantregistry/ocp.go`](https://github.com/openshift/sippy/blob/main/pkg/variantregistry/ocp.go) in openshift/sippy adding an entry to `componentCapabilityPatterns` with a substring of your job names, your OCPBUGS component, and a capability (your feature gate name works well), then run `make update-variants`.
+The job tier should be `standard` (the default).
+`candidate` can be used in early stages, but by the time you promote your feature the tier should be `standard`.
+
+After your feature is promoted, reduce the job frequency (typically weekly) and set the entry's job tier to `spotcheck-30d`.
+This step is manual today but may be automated in the future.
+
+A spot-check job must pass at least once per 30 day window.
+A single failure is treated as awaiting a retry, but two or more failures with no pass will mark your component and capability as regressed in Component Readiness, so these jobs must be kept working.
+In the future we may automate running these jobs once a month and retrying them on failure.
+
+See [Spot-check jobs](https://github.com/openshift/sippy/blob/main/docs/features/spot-check-jobs.md) in the Sippy repo for implementation details.
+
 ### Writing Your Tests
 
 Once you’ve decided on the types of tests you’ll need for your feature, it is time to write them.
