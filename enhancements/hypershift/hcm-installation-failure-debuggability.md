@@ -1208,26 +1208,21 @@ changes).
   available for ROSA-side dashboards independently
   of the fallback alert.
 
-##### Structured logging
+##### Structured logging (deferred)
 
-When a terminal failure condition is set with a
-classified platform error, emit a structured log
-line with a stable format for Loki/LogQL aggregation:
-
-```
-level=info msg="platform failure classified"
-  cluster=<namespace/name>
-  condition=AllMachinesReady
-  reason=InfrastructureFailure
-  error_code=RequestDisallowedByPolicy
-  platform=azure
-```
-
-This provides a low-cost mechanism for fleet
-operators to aggregate installation failure causes
-across the fleet using LogQL queries, satisfying
-the fleet operator user story without requiring
-condition-message parsing.
+A structured log line emitted when a terminal
+failure condition is set (with fields like
+`cluster`, `condition`, `reason`, `error_code`,
+`platform`) would provide a low-cost mechanism
+for fleet operators to aggregate installation
+failure causes via LogQL. This is deferred to a
+follow-up RFE to align on log format, field naming
+conventions, and interaction with existing
+structured logging patterns across HyperShift. The
+Prometheus counter
+(`hypershift_install_platform_failure_total`) and
+OTel span events provide fleet-wide aggregation
+in the interim.
 
 ##### OpenTelemetry tracing integration
 
