@@ -642,7 +642,11 @@ operators. HyperShift's existing configuration-reference discovery covers
 `spec.operatorConfiguration`. Discovery and synchronization must therefore be
 extended to include that reference, even when `spec.configuration` is absent.
 Source CA updates and deletion/recreation must trigger reconciliation so trust
-changes propagate without requiring an edit to the HostedCluster.
+changes propagate without requiring an edit to the HostedCluster. Unlike the
+existing synchronization of `spec.configuration` references, a missing or invalid
+component proxy CA must not fail the whole HostedCluster reconciliation; it is
+validated first and reported through `ValidProxyConfiguration`, as described
+under [Referenced CA Bundles](#referenced-ca-bundles).
 
 Console Operator reads the component proxy from its own
 `console.operator.openshift.io/cluster` resource on both topologies — it needs no
@@ -787,17 +791,18 @@ New components and artifacts:
 | Proxy field on `operatorv1.Console` | both | Console's own login-proxy configuration. |
 | `operatorConfiguration.authentication.proxy` on HostedCluster/HostedControlPlane | HyperShift | Single hosted entry point that fans out to webhook and Console. |
 | HCCO reconciler for the guest Console proxy | HyperShift | Writes the guest Console proxy field + guest `openshift-config` CA copy, verifying the written field persisted ([Cross-Cluster Write Skew](#cross-cluster-write-skew)). |
+| Proxy configuration controller in library-go | both | Moved from CAO; shared by CAO and Console Operator to check proxy reachability ([Reachability Checks](#reachability-checks)). |
 
 Existing components whose behavior changes:
 
 | Affected | Change |
 | --- | --- |
-| CAO | Resolves the component proxy; injects env + mounts CA on the webhook Deployment and sets `trustedCAFilePath` in its configuration (standalone). |
+| CAO | Resolves the component proxy; injects env + mounts CA on the webhook Deployment and sets `trustedCAFilePath` in its configuration (standalone); switches to the library-go proxy configuration controller and probes External OIDC providers. |
 | oauth-apiserver (webhook) | Reads the generic outbound CA bundle through `trustedCAFilePath` for HTTPS endpoint and HTTPS proxy trust; outbound clients honor the proxy environment on both topologies. |
 | CPO | Resolves the component proxy; sets the proxy env and mounts the CA on the webhook Deployment and sets `trustedCAFilePath` in its configuration (HyperShift). |
-| Console Operator | Reads the Console operator proxy field; renders `auth.proxy` and mounts the CA. |
+| Console Operator | Reads the Console operator proxy field; renders `auth.proxy` and mounts the CA; adopts the library-go proxy configuration controller to probe its issuer. |
 | Console | Applies `auth.proxy` to its OIDC clients only. |
-| HyperShift operator | Validates the control-plane and guest release targets and the gates on both sides, blocking propagation of the proxy configuration through the HostedCluster's `ValidProxyConfiguration` condition when either is unsupported ([Hosted Support Validation](#hosted-support-validation)); copies `operatorConfiguration` HC→HCP; synchronizes the referenced CA HC→HCP. |
+| HyperShift operator | Validates the control-plane and guest release targets and the gates on both sides, blocking propagation of the proxy configuration through the HostedCluster's `ValidProxyConfiguration` condition when either is unsupported ([Hosted Support Validation](#hosted-support-validation)); validates the referenced component proxy CA under the same condition ([Referenced CA Bundles](#referenced-ca-bundles)); copies `operatorConfiguration` HC→HCP; synchronizes the referenced CA HC→HCP. |
 
 Configuration that must hold for it to work:
 
@@ -1045,6 +1050,66 @@ system-root behavior when no issuer CA is specified.
 
 #### Proxy Configuration Validation
 
+A proxy configuration crosses several components before an operand uses it, and
+no single component sees the whole path. Validation is therefore layered: each
+layer checks what its owner can observe and reports through that owner's existing
+status mechanism.
+
+| Layer | Checks | Standalone | HyperShift | Reported through | Today |
+| --- | --- | --- | --- | --- | --- |
+| [Admission](#admission) | Shape of the proxy settings | Authentication and Console operator CRDs | HostedCluster and HostedControlPlane CRDs; guest Console operator CRD for HCCO's write | Rejected write | Exists for `Authentication.spec.proxy`; new for the Console, HostedCluster, and HostedControlPlane fields |
+| [Hosted support](#hosted-support-and-propagation) | Release floors and gates on both payloads | Not applicable; operators co-ship with their operands | HyperShift operator | HostedCluster `ValidProxyConfiguration` | New; extends the existing `ValidProxyConfiguration` condition |
+| [Referenced CA bundles](#referenced-ca-bundles) | ConfigMap present, `ca-bundle.crt` parses | CAO, Console Operator | HyperShift operator for the source bundle; Console Operator for its guest copy | Standalone: operator `Degraded`. HyperShift: HostedCluster `ValidProxyConfiguration` for the source bundle; guest `console` ClusterOperator `Degraded` for Console's copy | New for this feature; on HyperShift only the cluster-wide proxy CA bundle check exists |
+| [Propagation](#hosted-support-and-propagation) | `spec.authProxy` written to the guest Console operator resource was not pruned by an older or ungated guest CRD | Not applicable | HCCO read-back | HostedControlPlane `ConfigOperatorReconciliationSucceeded` | New |
+| [Reachability](#reachability-checks) | Proxy and endpoints reachable with the effective settings and trust | CAO, Console Operator | Console Operator; the hosted webhook is not covered | Operator `Degraded`, Warning events | Exists in CAO for integrated OAuth only; new under External OIDC and in Console Operator |
+| [Operand runtime](#operand-runtime) | Trust bundle reloads | Webhook, Console | Webhook, Console | Operand logs | New |
+
+##### Admission
+
+API admission validates the shape of the proxy settings: at least one of
+`httpProxy` or `httpsProxy` is set, and the fields follow the validation of
+`operatorv1.AuthenticationProxyConfig`, which the Console operator field and the
+HostedCluster and HostedControlPlane fields mirror. Admission does not check
+network reachability or the contents of referenced ConfigMaps; those are the
+operators' responsibility, as described below.
+
+##### Referenced CA Bundles
+
+Before a referenced proxy CA reaches an operand, its owner checks that the
+ConfigMap exists and that its `ca-bundle.crt` key holds a parseable PEM bundle.
+Mounting an invalid bundle would only move the failure into the operand, where it
+can be reported only as a log line.
+
+On standalone, CAO and Console Operator perform this check before mounting the
+bundle and set `Degraded` with an actionable message when it fails.
+
+On HyperShift, the checks run at both ends of the
+[distribution path](#hypershift--hosted-control-planes):
+
+- **The HyperShift operator checks the source bundle** in the HostedCluster
+  namespace before propagating, in the same way it already checks the hosted
+  cluster-wide proxy CA bundle (`spec.configuration.proxy.trustedCA`). A missing
+  ConfigMap or an invalid bundle sets `ValidProxyConfiguration` to `False` with
+  reason `ProxyCABundleInvalid` and a message naming the ConfigMap. Like an
+  [unsupported release](#hosted-support-validation), it withholds only the proxy
+  change: the HostedControlPlane keeps its previously propagated proxy block and
+  CA copy, or none if it never had one, and the rest of the HostedCluster
+  continues to reconcile. It does not fail the HostedCluster reconciliation,
+  which is what the existing synchronization of `spec.configuration` references
+  does for a missing ConfigMap. This is the only management-side check of the
+  bundle the webhook consumes; CPO mounts the HyperShift operator's copy only
+  once it exists in the HCP namespace, as described under
+  [Asynchronous Reconciliation Hazards](#asynchronous-reconciliation-hazards),
+  and does not report while it waits.
+- **Console Operator checks its guest copy** as on standalone. A failure
+  degrades the guest `console` ClusterOperator, which is visible with guest
+  credentials; HyperShift does not surface individual guest ClusterOperators on
+  the HostedCluster. Because HCCO copies a bundle the HyperShift operator has
+  already validated, this check catches only problems introduced inside the
+  guest.
+
+##### Reachability Checks
+
 The [integrated authentication proxy enhancement](proxy-support-for-integrated-auth-stack.md)
 extended CAO's proxy configuration controller to check, through the effective
 proxy, that the OAuth route and the configured identity providers are reachable.
@@ -1052,15 +1117,25 @@ That controller is skipped once External OIDC is in use, and Console Operator ha
 no equivalent, so neither operator can report a misconfigured proxy for this
 feature; the failure surfaces only as failed authentication.
 
-The controller and its `noProxy` matching therefore move into library-go as a
-reusable proxy configuration checker, and both operators are refactored to use
-it. The checker takes the effective proxy, the CA bundles to trust, and the
-endpoints to probe, and keeps the existing semantics: proxy-level failures, such
-as a refused connection to the proxy, a failed TLS handshake with it, or an
+The controller and its `noProxy` matching therefore move from CAO into library-go
+as a reusable proxy configuration controller, and both CAO and Console Operator
+use it. Each operator supplies:
+
+- a proxy resolver returning its effective proxy settings and building transports
+  with them, so the check uses exactly the proxy and trust the operand receives,
+  whether that is the component proxy or the cluster-wide fallback;
+- the CA bundles to trust when probing;
+- the endpoints to probe, and a precondition deciding whether the check applies
+  in the current authentication mode.
+
+The controller keeps the existing semantics: proxy-level failures, such as a
+refused connection to the proxy, a failed TLS handshake with it, or an
 unreadable CA bundle, set the operator `Degraded`, while an unreachable endpoint
 behind a working proxy emits a Warning event, since an external IdP can be down
 for reasons unrelated to the proxy. Endpoint probes run when the effective
-configuration changes rather than on every resync.
+configuration changes rather than on every resync. The `Degraded` condition type
+is derived from the controller instance name, so each operator reports under its
+own condition. When no proxy is configured, the controller does nothing.
 
 - CAO keeps its integrated OAuth checks and, under External OIDC, probes each
   provider's discovery endpoint through the webhook's effective proxy and trust.
@@ -1071,13 +1146,48 @@ The checks run from the operator Pods, not the operands. On standalone both
 operators share the control-plane network with their operands, and on
 HyperShift Console Operator shares the guest network with Console, so a failed
 check is a reliable signal; a passing check does not prove every endpoint
-reachable from every replica. The hosted webhook is not covered. HyperShift has
-no proxy reachability checks for any component today — its proxy validation
-covers only the CA bundle, through `ValidProxyConfiguration`. CPO shares the
-management-cluster network with the webhook, so such a check could be added
-later, but this proposal does not add one; hosted webhook failures remain
-visible in its logs, as described under
-[Diagnosing Hosted Clusters](#diagnosing-hosted-clusters).
+reachable from every replica.
+
+The hosted webhook is not covered. HyperShift has no proxy reachability checks
+for any component today. CPO shares the management-cluster network with the
+webhook, so it could adopt the same library-go controller later, but this
+proposal does not add that; hosted webhook failures remain visible in its logs,
+as described under [Diagnosing Hosted Clusters](#diagnosing-hosted-clusters).
+
+##### Hosted Support and Propagation
+
+HyperShift adds two checks that have no standalone equivalent, because the
+hosted control plane and the guest can run different payloads and the
+configuration crosses a cluster boundary:
+
+- **Before propagation**, the HyperShift operator validates the control-plane and
+  guest release targets against minimum supported releases and confirms the
+  gates permit the configuration on both sides. When either falls short it sets
+  `ValidProxyConfiguration` to `False` with reason `AuthenticationProxyUnsupported`
+  and blocks propagation of the whole proxy block, so neither the webhook nor
+  Console is configured; lookup or parsing failures set the condition `Unknown`
+  and retry. The condition aggregates this with the
+  [CA bundle checks](#referenced-ca-bundles) above. See
+  [Hosted Support Validation](#hosted-support-validation).
+- **After propagation**, HCCO re-reads the guest Console resource through an
+  uncached client and confirms the proxy field persisted, reporting a pruned
+  field through its own `ConfigOperatorReconciliationSucceeded` condition. See
+  [Cross-Cluster Write Skew](#cross-cluster-write-skew).
+
+One case cannot be detected: a HyperShift operator that predates the feature, or
+was installed without the preview feature set, serves a HostedCluster CRD
+without the field, and the API server prunes the proxy block on write without an
+error. Support must confirm the field persisted on the HostedCluster, as
+described under [Diagnosing Hosted Clusters](#diagnosing-hosted-clusters).
+
+##### Operand Runtime
+
+The webhook and Console reload the proxy CA bundle in place, as described under
+[Configuration Updates and CA Reload](#configuration-updates-and-ca-reload). An
+invalid update is logged, the last successfully loaded bundle is retained, and
+certificate verification is never disabled. Operand logging is the last line of
+detection; the operator checks above exist so that problems become visible
+through conditions before they reach the operand.
 
 #### Configuration Updates and CA Reload
 
@@ -1103,9 +1213,9 @@ trust updates atomically to the clients using those bundles without restarting.
 New TLS connections must use the updated trust. Invalid updates are reported
 while retaining the last successfully loaded trust bundle; certificate
 verification must not be disabled. By reported we mean logging reload errors,
-because not much more can be trivially done in the operand. The operator should
-perform the checks necessary to ensure the ConfigMap is valid before mounting it
-for the operator and degrade on any issues found so that the issue becomes visible.
+because not much more can be trivially done in the operand; operators validate
+the ConfigMap before mounting it, as described under
+[Referenced CA Bundles](#referenced-ca-bundles).
 
 On HyperShift, CPO mounts the CA ConfigMap as a volume rather than through
 `subPath`, so that content updates reach running webhook Pods, and excludes it
@@ -1455,9 +1565,16 @@ verify:
   `ValidProxyConfiguration` condition to `False` with a message naming the
   failing target, leave the HostedControlPlane proxy block unwritten, and leave
   `ValidConfiguration` and the rest of HostedCluster reconciliation unaffected.
-- `ValidProxyConfiguration` aggregates both checks: an invalid cluster-wide
-  proxy CA bundle and an unsupported component proxy each set it `False` on
-  their own, and when both fail the condition reports both.
+- `ValidProxyConfiguration` aggregates all checks: an invalid cluster-wide
+  proxy CA bundle, an invalid component proxy CA bundle, and an unsupported
+  component proxy each set it `False` on their own, and when several fail the
+  condition reports each of them.
+- Component proxy CA validation: a missing source ConfigMap, a ConfigMap without
+  `ca-bundle.crt`, and an unparseable bundle each set `ValidProxyConfiguration`
+  to `False` with reason `ProxyCABundleInvalid` naming the ConfigMap, leave
+  `ReconciliationSucceeded` and the rest of HostedCluster reconciliation
+  unaffected, and leave the HostedControlPlane proxy block and its CA copy at
+  their previously propagated state; correcting the ConfigMap propagates it.
 - An unresolvable or unparseable release image sets the condition `Unknown` and
   retries rather than blocking permanently or propagating.
 - A prerelease build of the minimum supported release — an engineering or
@@ -1777,9 +1894,10 @@ reporting the payload unsupported.
 `ValidProxyConfiguration` today reports only the validity of the cluster-wide
 proxy CA bundle (`spec.configuration.proxy.trustedCA`, reason
 `ProxyCABundleInvalid`). This proposal extends it to cover the component proxy as
-well: the condition is `True` only when both checks pass, and when either fails
-it carries the reason and message of the failing check — both, if both fail — so
-neither result masks the other.
+well, both its release and gate support and its own CA bundle (see
+[Referenced CA Bundles](#referenced-ca-bundles)): the condition is `True` only
+when every check passes, and when any fails it carries the reason and message of
+each failing check, so no result masks another.
 
 A third version participates but cannot be validated here: the HyperShift
 operator's own. It is installed independently of both payloads, and
@@ -1918,10 +2036,12 @@ admission/conversion webhook, aggregated API server, or finalizer. The TokenRevi
 webhook belongs to the prerequisite External OIDC enhancement.
 
 API admission validates the shape of proxy settings, not network reachability or
-the contents of referenced ConfigMaps. Operators check referenced configuration
-and reconcile it into operand configuration and CA mounts, reporting
-configuration/synchronization failures through their existing status mechanisms.
-Endpoint requests are performed by the operands. Proxy outages or invalid trust can impair OIDC
+the contents of referenced ConfigMaps. Operators check referenced configuration,
+probe reachability where they share the operand's network, and reconcile it into
+operand configuration and CA mounts, reporting failures through their existing
+status mechanisms, as summarized under
+[Proxy Configuration Validation](#proxy-configuration-validation). Endpoint
+requests are performed by the operands. Proxy outages or invalid trust can impair OIDC
 authentication and Console login without making the Kubernetes API unavailable
 to client-certificate or service-account authentication.
 
@@ -1999,8 +2119,12 @@ the HCP namespace on the management cluster and egresses directly from there.
   blocked propagation of the proxy configuration, none of it was applied, and the
   cluster keeps its previous proxy behavior while the rest of the HostedCluster
   continues to reconcile
-  ([Hosted Support Validation](#hosted-support-validation)). `Unknown` means
-  release lookup or version parsing failed and is being retried. Before GA, also
+  ([Hosted Support Validation](#hosted-support-validation)). `False` with
+  `ProxyCABundleInvalid` naming the component proxy's ConfigMap means its source
+  CA is missing or invalid in the HostedCluster namespace, and the change was
+  withheld in the same way ([Referenced CA Bundles](#referenced-ca-bundles)).
+  `Unknown` means release lookup or version parsing failed and is being
+  retried. Before GA, also
   confirm both gate sides — the management-side HyperShift gate and the hosted
   `featureGate.featureSet`; once the gates reach their default feature sets, the
   release floors are the only remaining constraint
@@ -2021,9 +2145,10 @@ the HCP namespace on the management cluster and egresses directly from there.
   namespace, the HyperShift operator's copy in the HCP namespace, the HCCO copy in
   guest `openshift-config`, and Console Operator's copy in `openshift-console`
   ([distribution path](#hypershift--hosted-control-planes)). A content update that
-  stalls at any hop leaves the remaining hops on the old bundle. Trust reload
-  errors appear in the webhook logs, and a failed reload keeps the previously
-  loaded bundle.
+  stalls at any hop leaves the remaining hops on the old bundle. An invalid
+  guest copy degrades the guest `console` ClusterOperator, visible with guest
+  credentials. Trust reload errors appear in the webhook logs, and a failed
+  reload keeps the previously loaded bundle.
 - **If the guest `console.operator.openshift.io/cluster` proxy field is absent
   while the HostedCluster has one set,** the guest API server pruned HCCO's write
   because the guest payload or its feature set no longer serves the field. The
