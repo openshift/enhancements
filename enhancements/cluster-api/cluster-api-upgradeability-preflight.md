@@ -78,6 +78,12 @@ These conflicts should be detected in N, before an upgrade is initiated, rather 
 
 The proposal has two distinct parts: component changes that make the assessment infrastructure available in Release N, and the preflight controller that uses that infrastructure to assess N+1.
 
+### Context
+
+As described in [Installing Cluster API components](https://github.com/openshift/enhancements/blob/master/enhancements/cluster-api/installing-cluster-api-components-in-ocp.md), Cluster API components are installed by 2 controllers running in the `cluster-api-operator` namespace:
+* The revision controller: Constructs a revision definition for the current release defining which Cluster API manifests must be applied.
+* The installer controller: Continuously reconciles the current revision against cluster state.
+
 ### Component changes that enable preflight
 
 1. **Deploy the CAPI operator infrastructure.** A `ClusterAPIOperator` feature gate,
@@ -92,7 +98,7 @@ The proposal has two distinct parts: component changes that make the assessment 
 ### Preflight controller
 
 1. **Add the Upgradeable controller.** A new controller runs alongside the CAPI installer and revision controllers, in the existing CAPI installer binary and Deployment.
-2. **Discover the target release.** The controller watches `ClusterVersion/version.status.availableUpdates` and selects the newest listed patch release in the next minor stream, assessing one target at a time. Checking the selected release does not certify other releases.
+2. **Discover the target release.** The controller watches `availableUpdates` and `conditionalUpdates` from `ClusterVersion/version.status`, and selects the newest listed patch release in the next minor stream, assessing one target at a time. Checking the selected release does not certify other releases.
 3. **Read target requirements and create `CompatibilityRequirement` objects.** Using current-release code, the controller extracts the target's Cluster API component requirements (this works with disconnected environments too, details below).
 4. **Collect results and set `Upgradeable`.** The controller combines the compatibility
    checker's results with its own CRD ownership checks to compute the `cluster-api`
@@ -160,7 +166,7 @@ No new configuration is selected. The proposal reuses:
 
 #### Hypershift / Hosted Control Planes
 
-TBD.
+This feature is not applicable to Hosted Control Planes, as they do not run CAPI.
 
 #### Standalone Clusters
 
@@ -229,6 +235,20 @@ This introduces a continuously running controller, transient extraction pods, a 
 - **Manual preflight command.** Would reduce continuous orchestration but requires administrators to discover, invoke, and repeat it; does not meet the automation goals.
 - **Backport future transport bundles into N.** The earlier model in the compatibility proposal; avoids the cross-release data contract but requires recurring synchronization and backport work.
 - **Target-release checks at CVO acceptance.** Potential future integration[^target-release-preflight] does not currently provide an available contract; this enhancement does not depend on it.
+- **Direct fetching of release payloads (no pods)** This requires implementing, and maintaining for the lifetime of the software, all mechanisms used by OpenShift to pull payload images in all supported configurations.
+  Today this includes pull secret handling, mirroring, and signature verification, and this may be extended in the future.
+  By using pods with ImageVolumes we delegate this work to CRI-O, which is already correctly configured.
+- **No available update sets something other than Upgradeable=True** Setting Upgradeable=False when there is no available update is a safer option because it closes a window between a target release being made available and the upgradeability status being updated. However, this window is extremely short (typically ~1 minute), and it causes a warning to be displayed to the User in the console which is not actionable. The states we rejected are:
+  - Upgradeable=False: Displays an incorrect and unactionable warning in the console.
+  - Upgradeable=Unknown: Causes installation failure due to unexpected ClusterOperator status when there is no available update.
+  - Upgradeable unset: Violates a general API principal for Conditions that if a Condition is expected to be set it will always be present.
+- **Per platform filtering of manifests included in the preflight**
+This is a desirable feature in theory.
+In practice it requires parsing profile metadata from a future release.
+We do not yet have enough experience of this interface to confidently assert a forward compatibility guarantee for it.
+In addition, while the feature sounds intuitively useful, for the CAPI CRDs at least it is improbable that an affected cluster would ever be deployed in practice, although it is more likely that some non-CAPI resources such as Azure's ASO or OpenStack's ORC might generate undesirable conflicts.
+We can address this in the future if it ever becomes a real issue, but in the meantime the workaround is for the administrator to either add entries to unmanagedCRDs, or override the warning after evaluating the reported conflict.
+This will be easier to implement robustly in the future when we have CVO preflights and can also execute code from the future release.
 
 ## Open Questions [optional]
 
