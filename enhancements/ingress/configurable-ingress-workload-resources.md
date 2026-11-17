@@ -14,7 +14,7 @@ api-approvers:
   - "@JoelSpeed"
   - "@everettraven"
 creation-date: 2026-10-23
-last-updated: 2026-11-10
+last-updated: 2026-11-20
 status: provisional
 tracking-link:
   # Epic
@@ -38,9 +38,15 @@ an `IngressController`. Each target accepts a list of named resource
 entries with optional request and limit quantities, covering CPU, memory,
 ephemeral storage, hugepages, and extended resources such as
 `qat.intel.com/cy`. Omission retains the operator's existing defaults
-and does not introduce default limits. This proposal concerns resources
-of the router pods, not resources of the Ingress Operator, and allocating
-a device does not enable cryptographic acceleration.
+and does not introduce default limits. Setting the field is opt-in and
+explicitly unsupported: the platform defaults remain the supported
+configuration, and the administrator is responsible for choosing values
+that suit the cluster. A scheduling failure that those values explain is
+attributed to them through the `IngressController`'s `Degraded`
+condition, a warning event, a metric, and an alert. This proposal
+concerns resources of the router
+pods, not resources of the Ingress Operator, and allocating a device does
+not enable cryptographic acceleration.
 
 ## Motivation
 
@@ -59,8 +65,9 @@ target unambiguous and preserve existing behavior for unconfigured clusters.
   resource for a specific workload without allocating it to every
   container in the pod.
 * As a cluster administrator, I want to observe and correct workload
-  resource overrides through supported configuration and existing ingress
-  health signals, so that a mis-sized limit can be detected and remediated
+  resource overrides through supported configuration and through status
+  conditions, events, metrics, and alerts, so that a mis-sized limit can be
+  detected and remediated
   without editing operator-managed Deployments.
 * As a cluster administrator, I want to remove overrides and return to
   supported defaults, and to understand the scheduling and availability
@@ -74,6 +81,10 @@ target unambiguous and preserve existing behavior for unconfigured clusters.
   allowlist containing only CPU and memory.
 * Define partial configuration, reset, validation, and reconciliation
   behavior without changing omitted/default behavior.
+* Define ownership of administrator-chosen values: configured values are
+  unsupported, tailoring them to the cluster is the administrator's duty,
+  and the result stays visible through status conditions, events, a metric,
+  and an alert.
 * Make device-allocation, security, and rollout risks explicit.
 
 ### Non-Goals
@@ -138,9 +149,9 @@ This describes a draft API, not operator support or availability:
 Each target is a list of entries keyed on `name`, where each entry has
 an optional `request` and `limit`; names and quantities are validated by
 the schema and CEL rules described below. Neither target is a pod-wide
-total or a value copied to every container; setting `spec.resources`
-alone, without a target, configures nothing, and the parent requires at
-least one target. Either list can contain valid named extended
+total or a value copied to every container; `spec.resources` requires at
+least one target (`MinProperties=1`), so an empty object is rejected
+rather than treated as omitted. Either list can contain valid named extended
 resources; their use does not imply that the selected application can
 consume the allocation.
 
@@ -192,6 +203,29 @@ non-zero, and at most 20 characters. The
 `IngressControllerResourceConfiguration` in `DevPreviewNoUpgrade` only,
 with `bentito` as the contact; `claims` is not exposed.
 
+The field documentation states the support boundary, and the proposal
+adopts its wording:
+
+* `spec.resources`: "The values set here are not validated against what the
+  workload needs; setting them too low or too high can make the router
+  unavailable, and Red Hat does not support issues caused by such values. See
+  the request and limit fields for the specific risks of each. The cluster
+  administrator is responsible for choosing appropriate values."
+* `request`: "Issues caused by an inappropriate value are not supported, and
+  the cluster administrator is responsible for choosing it; the platform
+  default described on spec.resources is the supported configuration." The
+  value is static: the platform never adjusts it as route count,
+  configuration size or traffic grows.
+* `limit`: setting a limit on a cluster component such as the router "is
+  discouraged, the platform does not validate it against what the container
+  needs, and the cluster administrator accepts responsibility for any
+  unavailability it causes"; the platform default of no limit is the
+  supported configuration.
+
+Because this is schema documentation, `oc explain
+ingresscontroller.spec.resources` shows it to administrators who enable
+the gate.
+
 #### Defaults, partial configuration, and reset
 
 For each target, compute effective resources independently from its
@@ -214,7 +248,8 @@ the stored custom resource. This is the proposed contract:
 Limit-only behavior intentionally mirrors Kubernetes request defaulting
 from a limit in the effective workload, not in CR storage. The API
 stores the explicit limit without an inferred request; the operator must
-resolve it before changing workloads. It takes precedence over a baseline
+resolve it before changing workloads, and the resolved request is visible
+on the managed Deployment, not in status. It takes precedence over a baseline
 request for that entry, so a limit below the baseline does not generate
 request greater than limit. It also increases reserved capacity when the
 limit exceeds the baseline; this consequence must be documented to users.
@@ -309,12 +344,18 @@ The API still defers the effective-baseline check to the consumer:
 hugepage alignment to the declared page size is checked, but whether the
 resolved page size is supported on the node, and whether the effective
 configuration is usable for the workload, are not. Before any workload
-change, the operator must validate the complete effective configuration,
-report invalid or unsupported settings through existing conditions, and
-retain the last valid workload. If none exists, it must not create an
-invalid workload. It must not silently round quantities; corrected
-supported settings must resume reconciliation. These are required
-safeguards, not a claim that runtime support exists.
+change, the operator must validate the structural result of its own
+resolution — for example a hugepage size that no eligible node advertises
+— and retain the last valid workload; if none exists, it must not create
+an invalid workload. It must not silently round quantities, and corrected
+supported settings must resume reconciliation. This is a safeguard for
+structural validity, not a judgement of fitness: the operator does not and
+must not decide whether a value is appropriate for the workload, and it
+enforces no minimum, because the requirement depends on route count,
+configuration size, TLS, compression and traffic. Those choices belong to
+the cluster administrator, as the field documentation states. These
+safeguards are required, but they are not a claim that runtime support
+exists.
 
 ### Topology Considerations
 
@@ -387,8 +428,9 @@ to the managed Deployment are not the supported configuration mechanism.
   extended-resources rules under Validation). Capacity,
   node placement, restartable-sidecar scheduling accounting, one-shot
   init-container requirements, and surge can stall rollout. Report the
-  failure through existing Deployment/operator status and pod events,
-  without silently relaxing configuration.
+  failure through Deployment/operator status, pod events, and the
+  attribution signals described under Support boundary, without silently
+  relaxing configuration.
 * **Admission and QoS:** ResourceQuota, LimitRange, and management-workload
   admission may reject or mutate pods. Compare CR, desired Deployment,
   and admitted pods separately. QoS is determined by the whole pod,
@@ -399,16 +441,97 @@ to the managed Deployment are not the supported configuration mechanism.
   plugin. Request networking, API, and device-security review. Allocation
   must not bypass compatibility, security, or FIPS eligibility checks.
 * **Supportability:** [OpenShift conventions][resource-conventions]
-  advise against limits on cluster components. User-configured limits
-  are an explicit policy tradeoff requiring review, not new default
-  limits or an assertion that arbitrary settings are safe.
+  advise against limits on cluster components, and this proposal adds no
+  default limits. The feature is nonetheless exposed as an explicitly
+  unsupported opt-in: configured values are not supported, and the
+  administrator owns them. Ownership is defined in the next subsection.
 * **Crypto expectations:** allocation alone neither activates QAT in
   HAProxy/OpenSSL nor proves a compatible cryptographic or compliance
   configuration. Any such integration requires a separate design.
 
+#### Support boundary for administrator-chosen values
+
+Administrators already resize router pods by editing the managed
+Deployment or by other unsupported means, and the operator reverts those
+edits without recording the intent. This API replaces that invisible
+workaround with a stored and validated value. It changes no
+default, and the field is opt-in and confined to `DevPreviewNoUpgrade`,
+so a cluster that does not set `spec.resources` behaves as it does today.
+
+The supported configuration is to leave `spec.resources` unset: the
+platform defaults described on that field are what Red Hat supports.
+Any change to the field is unsupported, and the field documentation says
+so in the terms quoted above. Ownership is split, and the API field
+documentation states the split:
+
+* The operator owns validation at the API boundary, propagation to both
+  container paths, the per-release defaults, not creating an invalid
+  workload, and surfacing the result through the signals described below.
+* The cluster administrator owns the chosen values and the capacity they
+  assume. A validly stored but unsuitable request or limit is an
+  administrator error rather than an operator defect, and it is outside
+  Red Hat support.
+
+The administrator therefore has to size the values for the cluster the
+IngressController runs on: node capacity, replica count, rollout surge
+headroom, route count and configuration size, and expected traffic. The
+values are static — the platform never re-evaluates them — so a
+configuration that fits today can stop fitting as the cluster grows, and
+revisiting it is the administrator's responsibility. No minimum is
+enforced, because the requirement is workload-specific.
+
+The project is therefore not responsible for a value that makes routes
+fail, but the result stays visible and recoverable. The operator must not
+suppress, round, or silently revert a configured value. A scheduling
+failure that an override can explain is attributed to it through the
+signals described in the next subsection. Failures the platform cannot
+attribute remain visible through existing signals: unavailable replicas,
+unschedulable pods, or a stalled rollout appear in Deployment status and
+in the `IngressController` and `ingress` `ClusterOperator` conditions;
+CPU throttling and OOM restarts appear in pod status, pod events, restart
+counts, and container metrics, and the field documentation warns about
+them. Correcting or removing the override is the recovery path, and the
+condition message and gauge clear through normal reconciliation. No new
+condition type, no new condition reason, and no new API status field is
+introduced, and no restart heuristic is added.
+
 Networking, API, hosted-control-plane, and security review is required
 before implementation readiness; the reviewers listed in the frontmatter
 must confirm that ownership.
+
+#### Signals for resource misconfiguration
+
+Because the platform does not judge whether a configured value fits the
+cluster, the operator attributes the scheduling failures it can detect to
+`spec.resources`. When `spec.resources` overrides at least one resource
+and a pod of the current Deployment revision is pending with a
+`PodScheduled=False` condition whose reason is `Unschedulable` and whose
+message reports an `Insufficient` quantity for an overridden resource
+name, the operator reports that pod. Pods from an earlier revision and
+shortages of a resource that `spec.resources` does not set are ignored,
+so an unrelated scheduling failure is not blamed on the override. The
+operator adds no new condition type; it reuses existing signals and adds
+one metric and one alert:
+
+| Signal | Behavior |
+| --- | --- |
+| `Degraded` condition on the `IngressController` | When it is already `True`, a sentence is appended naming `spec.resources` as a possible cause and pointing at reducing the values or adding capacity. The condition type and reason are unchanged; existing deployment conditions already make an unavailable router `Degraded`. |
+| Warning event `ResourceConfigurationUnschedulable` | Recorded on the `IngressController` with the pending pod and the scheduler message, only when the status actually changes, so a persistent problem does not emit an event on every status sync. |
+| Gauge `ingress_controller_resource_configuration_unschedulable` | `1` while such a pod exists and `0` otherwise, labeled with the `IngressController` name. If listing pods fails, the last value is kept rather than published as `0`, so a transient error cannot look like recovery; the metric is deleted when the `IngressController` is deleted. |
+| Alert `IngressControllerResourceConfigurationUnschedulable` | Fires at `warning` severity when the gauge has been `1` for 15 minutes. Its description says the values are administrator-chosen and not validated against capacity, matching the support boundary, and it does not claim that the override caused the shortage. |
+
+The pod watch enqueues the owning `IngressController` when a pod becomes
+unschedulable or its scheduling message changes, so a scheduler message
+that changes from a taint failure to `Insufficient cpu` refreshes the
+diagnosis without the pod leaving the unschedulable state.
+
+These signals detect only scheduling failures caused by an overridden
+resource. CPU throttling, OOM termination, and a limit that is too low for
+the traffic served remain visible through pod status, pod events, restart
+counts, container metrics, and the existing conditions, as the risks above
+describe. Attribution is a diagnosis aid, not a fitness judgement: a
+pod that fits but performs badly is not reported here, and the
+administrator still owns the value.
 
 ### Drawbacks
 
@@ -438,28 +561,28 @@ CPU/memory structure and must evolve with supported Kubernetes semantics.
 * **Unmanaged Deployment edits or unsupported overrides:** lack a stable,
   validated contract and reconciliation guarantees. They are not a
   replacement for this API.
+* **Existing signals only:** relying on `Degraded` and pod events without
+  an attributed message, metric, or alert was considered. Rejected because
+  the existing `Degraded` condition does not distinguish an
+  administrator-chosen value from a platform or capacity defect, and a
+  gauge lets the alert require a sustained, attributable failure instead of
+  firing on every transient scheduling error.
+* **Distinct `Degraded` reason instead of a metric and alert:** raised in
+  review. It would add a new condition reason and a larger redesign of how
+  `Degraded` is computed; it remains a reasonable follow-up rather than
+  part of this change.
+* **No resource overrides:** keep the API surface minimal and size nodes
+  instead. Rejected: it leaves the unsupported Deployment-edit workaround
+  in place, which the operator silently reverts, gives the operator no
+  record of the intended values to validate or report, and cannot raise
+  the router's own requests for scheduling or device allocation.
 
 ## Open Questions
 
-1. Confirm the settled list representation (`name`/`request`/`limit`
-   entries, 1 to 8 per target, 20-character quantity bound) and the
-   `DevPreviewNoUpgrade`-only gate with the networking and API reviewers;
-   confirm null handling and list-entry ownership.
-2. Approve the operator-side safeguards for effective baselines, including
-   limit-only resolution without persisted requests, so invalid effective
-   configurations do not reach a workload.
-3. Reconcile this EP's no-silent-loss requirement with the API comment that
-   disabling the gate may prune fields and reset overrides. Existing tests
-   cover schema filtering, not preservation of previously configured objects
-   across transitions. Preservation policy and transition tests remain unresolved.
-4. Resolve user opt-in limits, supported preview platforms, and hosted or
-   managed-service constraints. Confirm whether support covers both default
-   and non-default IngressControllers; API schema acceptance alone does not
-   establish runtime support.
-5. Decide before Tech Preview whether status should surface the effective
-   per-container resources, including the request derived from a limit-only
-   entry. Today the Deployment is the source of truth and the stored spec
-   never shows that derived request.
+1. Do HyperShift-hosted router pods and managed services support
+   `spec.resources` in the Dev Preview? Schema acceptance alone does not
+   establish runtime support. Owner: networking and hosted-control-plane
+   reviewers.
 
 ## Test Plan
 
@@ -470,8 +593,7 @@ boundaries, limit-only storage, integer and string quantity forms,
 duplicate and oversized lists, invalid and unsupported names, reserved
 domains and the `requests.` prefix, request greater than limit, and
 extended-resource and hugepage rules. They do not prove effective
-workload defaulting or operator runtime behavior, and schema filtering
-does not prove preservation.
+workload defaulting or operator runtime behavior.
 
 The following remain future product acceptance tests:
 
@@ -484,9 +606,13 @@ The following remain future product acceptance tests:
   Check claims as unknown fields under Strict and Ignore, not as a supported API.
 * Operator safeguard tests for admitted-but-invalid names/hugepages and
   invalid effective baselines: preserve the last valid workload, create no
-  invalid workload when none exists, report conditions, and recover after
-  correction. Test configured-object gate transitions against the reviewed
-  preservation policy.
+  invalid workload when none exists, and recover after correction. Include
+  `Degraded` on unschedulable pods and a stalled rollout. Cover the
+  resource-unschedulable signals: only current-revision pods and
+  `Insufficient` messages for an overridden resource count; the `Degraded`
+  message names `spec.resources`; the event is recorded only when status
+  changes; and the gauge reports `1` and `0`, keeps its last value when the
+  pod list fails, and is removed with the `IngressController`.
 * Operator unit tests for independent target resources, baseline defaults,
   ordinary and restartable-init-container paths, optional syslog isolation,
   resource hashing/copying, and quantity-equivalent idempotence.
@@ -522,7 +648,8 @@ and promotion policy before marking it implementable.
 
 Demonstrate independent sizing of both workloads, validated generic
 resource entries, baseline preservation, and observable rollout failure and
-recovery. Provide end-user documentation and automated API/operator tests
+recovery, including the attributed `Degraded` message, event, metric, and
+alert. Provide end-user documentation and automated API/operator tests
 with the required labels and agreed supported-platform coverage.
 
 ### Tech Preview -> GA
@@ -550,8 +677,11 @@ controller that consumes it, following the supported release lifecycle.
 Before a supported transition that cannot honor the new settings, define
 how operators detect and handle configured objects and how administrators
 can reset them. Do not promise arbitrary OpenShift downgrades or migration
-back to historical single-container router layouts. Gate-disable and
-field-preservation behavior must be specified and tested before promotion.
+back to historical single-container router layouts. No supported transition
+removes a stored value: `DevPreviewNoUpgrade` cannot be left once enabled,
+and `CustomNoUpgrade` keeps feature-gated fields in the schema, so only a
+future field removal could discard values, and that must follow the
+deprecation policy.
 
 ## Version Skew Strategy
 
@@ -559,8 +689,7 @@ An old controller cannot be assumed to honor new fields. Test supported
 API/controller skew and upgrade ordering, distinguishing stored API values
 from resources actually reconciled into pods. The feature must not be
 advertised as effective where the controller ignores its configuration.
-CRD pruning/defaulting and feature-gate transitions must not silently
-remove stored settings. Define supported combinations before implementation;
+CRD pruning and defaulting must not silently remove stored settings. Define supported combinations before implementation;
 this draft does not assert compatibility for unsupported skew.
 
 ## Operational Aspects of API Extensions
@@ -574,9 +703,15 @@ The main availability risk is the resulting pod configuration: scheduling
 failure, CPU throttling, OOM termination, or slower route propagation.
 Observe IngressController/ClusterOperator conditions, Deployment progress
 and available replicas, pod readiness/events/restarts, container resource
-metrics, route-update behavior, and ingress traffic success and latency.
-Use existing signals where available; this proposal invents no new metric,
-condition reason, or automatic recovery guarantee.
+metrics, the `ingress_controller_resource_configuration_unschedulable`
+gauge and the `IngressControllerResourceConfigurationUnschedulable` alert,
+route-update behavior, and ingress traffic success and latency.
+Resource-caused failures that the existing deployment conditions observe
+surface as `Degraded` on the IngressController and the `ingress`
+ClusterOperator. The metric and alert add attribution for scheduling
+failures of an overridden resource, and the alert is warning-level; this
+proposal adds no new condition reason, restart heuristic, or automatic
+recovery guarantee.
 
 Networking owns the proposed reconciliation path; API and platform owners
 must review validation and admission/skew effects, and device specialists
@@ -595,9 +730,21 @@ oc describe pod -n openshift-ingress <pod>
 oc get clusteroperator ingress -o yaml
 ```
 
-For Pending pods, inspect scheduler events, node placement, device-plugin
-health and advertised resources, replica count, and surge capacity. For
-unhealthy running pods, correlate CPU throttling, OOM/restarts, probe
+For Pending pods, first check whether the platform has already attributed
+the failure to `spec.resources`, then inspect scheduler events, node
+placement, device-plugin health and advertised resources, replica count,
+and surge capacity:
+
+```sh
+oc describe ingresscontroller -n openshift-ingress-operator <name>
+oc get events -n openshift-ingress-operator --field-selector reason=ResourceConfigurationUnschedulable
+```
+
+The `Degraded` condition carries the appended `spec.resources` sentence,
+and the event carries the pending pod and the scheduler message. The
+corresponding gauge is queried in the platform monitoring stack as
+`ingress_controller_resource_configuration_unschedulable{name="<name>"} == 1`.
+For unhealthy running pods, correlate CPU throttling, OOM/restarts, probe
 failures, controller logs, and traffic or route-update symptoms. Check
 namespace quota, LimitRange, and admission mutations separately.
 
@@ -626,9 +773,9 @@ and managed-service rollout agreements are separate readiness work.
 [router-deployment]: https://github.com/openshift/cluster-ingress-operator/blob/16b5a9ff93247e7d6914948b8a5e2ce35dfa5088/pkg/manifests/assets/router/deployment.yaml
 [deployment-code]: https://github.com/openshift/cluster-ingress-operator/blob/16b5a9ff93247e7d6914948b8a5e2ce35dfa5088/pkg/operator/controller/ingress/deployment.go
 [api-pr]: https://github.com/openshift/api/pull/3134
-[ingress-api]: https://github.com/openshift/api/blob/ae9d9c44d4e371e1f8ebef31d33ecb69ce3541b0/operator/v1/types_ingresscontroller.go
-[resource-feature]: https://github.com/openshift/api/blob/ae9d9c44d4e371e1f8ebef31d33ecb69ce3541b0/features/features.go
-[resource-tests]: https://github.com/openshift/api/blob/ae9d9c44d4e371e1f8ebef31d33ecb69ce3541b0/operator/v1/tests/ingresscontrollers.operator.openshift.io/IngressControllerResourceConfiguration.yaml
+[ingress-api]: https://github.com/openshift/api/blob/8b8462eddd2d8d0ddd4c4b73cf0bd0bfdecfcf07/operator/v1/types_ingresscontroller.go
+[resource-feature]: https://github.com/openshift/api/blob/8b8462eddd2d8d0ddd4c4b73cf0bd0bfdecfcf07/features/features.go
+[resource-tests]: https://github.com/openshift/api/blob/8b8462eddd2d8d0ddd4c4b73cf0bd0bfdecfcf07/operator/v1/tests/ingresscontrollers.operator.openshift.io/IngressControllerResourceConfiguration.yaml
 [haproxy-launcher]: https://github.com/openshift/router/blob/12074b829811275700c93259973041f286beb0fe/images/router/haproxy/start-haproxy
 [router-image]: https://github.com/openshift/router/blob/12074b829811275700c93259973041f286beb0fe/images/router/base/Dockerfile.ocp
 [envoy-qat]: https://gateway.envoyproxy.io/docs/tasks/security/private-key-provider/
