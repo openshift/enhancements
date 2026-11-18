@@ -81,7 +81,7 @@ Two complementary mechanisms:
 1. Common helpers let collectors report expected skips and meaningful errors at detection points.
 2. A parent wrapper records every top-level work unit, including collectors that have not yet adopted explicit reporting.
 
-After all units reach a terminal condition, the parent writes versioned `status.json`. When present, the report is the authoritative description of collection completeness. The archive remains best effort. Phase 2 consumes the same contract; the full report stays in the archive while the CR exposes a bounded aggregate.
+After all units reach a terminal condition, the parent writes versioned `status.json`. When present, the report is the primary source for understanding collection outcomes. The archive remains best effort. Phase 2 consumes the same contract; the full report stays in the archive while the CR exposes a bounded aggregate.
 
 
 ### Two status layers
@@ -89,7 +89,7 @@ After all units reach a terminal condition, the parent writes versioned `status.
 | Layer | What it reports | Source | Phase |
 |-------|-----------------|--------|-------|
 | **Job/Pod** | Job phase, termination, OOMKilled, timeout, image pull | Job/Pod status and events | Phase 2 |
-| **Collector** | Per-collector success/skip/error; overall completeness | `/must-gather/status.json` | Phase 1 + Phase 2 consumption |
+| **Collector** | Per-collector success/skip/error; overall collection status | `/must-gather/status.json` | Phase 1 + Phase 2 consumption |
 
 | Requirement | Layer | Phase 1 | Phase 2 |
 |-------------|-------|---------|---------|
@@ -436,6 +436,7 @@ Archive report does not depend on OKE-excluded features; verify operator path ag
 
 * `report_error <code> <message> [severity]` — any call marks the collector as `error`. Optional `severity` (`warning` default, `error` for fatal) is recorded in the message for human triage but does not change the collector outcome.
 * `report_skip <code> <message>` — intentional non-applicability.
+* Success is inferred: exit `0` with no `report_error` or `report_skip` calls. No explicit `report_success` helper — success is the default outcome, keeping instrumentation opt-in for skip/error only.
 * Init/finalize of per-collector result data; normalize exits into three outcomes; atomic report generation and validation.
 
 Reporting failures must not block unrelated collection. The parent must distinguish "collector data failed" from "status report could not be finalized."
