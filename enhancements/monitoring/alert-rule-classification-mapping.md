@@ -11,7 +11,7 @@ approvers:
 api-approvers:
   - "none"
 creation-date: 2026-01-07
-last-updated: 2026-11-15
+last-updated: 2026-11-19
 tracking-link:
   - "https://issues.redhat.com/browse/CNV-75208"
 ---
@@ -24,7 +24,7 @@ This enhancement defines how OpenShift monitoring assigns each alerting rule (an
 
 It documents the defaulting and fallback behavior, how users can override classification through AlertRelabelConfig (ARC) custom resources, and how the Alerts API exposes the effective values in a Prometheus compatible response for UI filtering and display.
 
-This design is part of enhancement: [Alerts UI Management](alerts-ui-management.md).
+This design is part of the [Alerts UI Management](https://github.com/openshift/enhancements/pull/1822) enhancement proposal (the link targets the open PR and will resolve to `enhancements/monitoring/alerts-ui-management.md` once that proposal is merged).
 
 ## Background
 This proposal builds on existing OpenShift practices that use alert metadata for higher-level views and health computations.
@@ -96,7 +96,12 @@ so overrides take effect as relabel configs applied by Prometheus.
     `openshift_io_alerting_rule_name` when the rule is owned by an AlertingRule CR, and `openshift_io_rule_managed_by` /
     `openshift_io_relabel_config_managed_by` for GitOps- or operator-managed rules).
     Rules with the same `openshift_io_alert_rule_id` across groups are deduplicated.
-    Rules dropped by relabel configs (Drop actions) are excluded from the response.
+    Rules disabled by relabel configs (Drop actions) remain discoverable so the UI can offer restore:
+    every alerting rule in the response carries an `alertingRuleEnabled` boolean that reports whether
+    the current relabel configuration retains the rule's labels (including `alertname`).
+    Rules targeted by Drop actions are returned with `alertingRuleEnabled: false`
+    (Prometheus keeps evaluating the rule; its alert instances are suppressed from the alerts response),
+    and the UI restores them with PATCH `alertingRuleEnabled: true`.
     Note: alerts nested within rules in this endpoint do **not** carry the additive enrichment fields
     (`alertRuleId`, `alertComponent`, etc.) — classification is conveyed through the parent rule's `labels` map.
     Alert labels within rules do have relabel configs applied.
@@ -236,18 +241,22 @@ Rule scoped default classification labels:
 
 ### Precedence and matching semantics
 The backend computes the effective classification using this order, highest priority first:
-1) Dynamic `_from` labels on the relabeled rule (`openshift_io_alert_rule_component_from`, `openshift_io_alert_rule_layer_from`): these reference an alert label whose runtime value becomes the classification. Takes precedence over static classification.
-2) CVO-style per-alert-instance classification: for known alert families (e.g., `ClusterOperatorDown`, `ClusterOperatorDegraded`), the backend computes component from alert labels (e.g., `labels.name`) at request time, overriding any static rule classification.
-3) Rule-scoped default labels on the relabeled rule: `openshift_io_alert_rule_component`, `openshift_io_alert_rule_layer`. These may reflect either the original rule labels or user overrides applied via ARC relabeling.
-4) Classifier-based mapping (matchers): heuristic matching against rule/alert labels.
-5) Fallback: `component=others`, derive `layer` from source (platform → `cluster`, user → `namespace`).
+1) Explicit user overrides persisted as ARCs and set through the PATCH API, recognizable by the `openshift_io_alert_rule_classification_managed_by=monitoring-plugin` provenance label.
+   A static override (`openshift_io_alert_rule_component` / `openshift_io_alert_rule_layer`) wins over every other mechanism for the field it sets: dynamic `_from` resolution (step 2) and built-in per-instance enrichment (step 3) are skipped for that field, so an admin override always takes effect.
+   For example, a static component override on `ClusterOperatorDown` is not replaced by the CVO `labels.name` enrichment.
+   A user-set `_from` label is itself an explicit override and resolves that field dynamically from the chosen alert label.
+2) Dynamic `_from` labels on the relabeled rule (`openshift_io_alert_rule_component_from`, `openshift_io_alert_rule_layer_from`): these reference an alert label whose runtime value becomes the classification. Takes precedence over static classification.
+3) CVO-style per-alert-instance classification: for known alert families (e.g., `ClusterOperatorDown`, `ClusterOperatorDegraded`), the backend computes component from alert labels (e.g., `labels.name`) at request time, overriding any static rule classification. Skipped for fields covered by an explicit user override.
+4) Rule-scoped default labels on the relabeled rule: `openshift_io_alert_rule_component`, `openshift_io_alert_rule_layer`. These may reflect either the original rule labels or user overrides applied via ARC relabeling.
+5) Classifier-based mapping (matchers): heuristic matching against rule/alert labels.
+6) Fallback: `component=others`, derive `layer` from source (platform → `cluster`, user → `namespace`).
 
-Note: user overrides stored as ARCs are applied during Prometheus relabeling (step 3), so they appear as labels on the relabeled rule and naturally take precedence over classifier heuristics (step 4).
+Note: user overrides stored as ARCs are applied during Prometheus relabeling (step 4), so they appear as labels on the relabeled rule and take precedence over classifier heuristics (step 5). The `openshift_io_alert_rule_classification_managed_by` provenance label distinguishes them from rule-authored labels and is what gives them priority over `_from` labels and CVO enrichment (step 1).
 
 ### Dynamic mapping configuration (`*_from`) — Implemented
 - If `openshift_io_alert_rule_component_from` is present on the relabeled rule (set via ARC override or directly on the rule), the backend derives the effective alert-instance component from the specified alert label key at request time. The value must be a valid Prometheus label name (`^[A-Za-z_][A-Za-z0-9_]*$`). The resolved value must pass component validation.
 - If `openshift_io_alert_rule_layer_from` is present on the relabeled rule, the backend derives the effective alert-instance layer from the specified alert label key at request time. The resolved value must be one of `cluster|namespace`.
-- `_from` takes precedence over static classification labels on the same rule.
+- `_from` takes precedence over static classification labels authored on the same rule. An explicit static user override set through the PATCH API is higher precedence than `_from` and suppresses it for that field (see [precedence](#precedence-and-matching-semantics)).
 - Invalid `_from` values are ignored and the static classification is used.
 - Users can set `_from` labels via the PATCH API classification payload alongside static component/layer values.
 
@@ -268,7 +277,8 @@ This would be an **optional enhancement** and should not replace deterministic m
 ### Alert-specific dynamic classification (examples: CVO alerts)
 Some alert families cannot be classified purely from the alerting rule definition because the component is derived from runtime alert labels that vary per alert instance. A common example is Cluster Version Operator alerts where the component is derived from the alert label `name` which identifies the ClusterOperator.
 
-For these alerts, the backend computes component and layer per alert instance using alert labels, overriding any static rule classification. This is implemented in both the classifier matchers (rule-level) and the alerts enrichment path (alert-level).
+For these alerts, the backend computes component and layer per alert instance using alert labels, overriding any static rule classification. An explicit user override set through the PATCH API takes precedence over this built-in enrichment for the fields it sets (see [precedence](#precedence-and-matching-semantics)).
+This enrichment is implemented in both paths: the classifier matchers (rule-level) and the alerts enrichment path (alert-level).
 
 Implementation:
 - The classifier matchers evaluate CVO alerts first (highest priority). At the rule level, this matches by alertname.
@@ -322,9 +332,13 @@ Notes:
 
 ARC structure:
 - The ARC contains an ordered list of `RelabelConfig` entries:
-  1. A matcher rule that identifies the target alert by its original labels (alertname + business labels) and assigns the `openshift_io_alert_rule_id` label.
-  2. One `Replace` action per label override, keyed by `openshift_io_alert_rule_id`, setting the target label to the desired value.
+  1. A matcher rule that identifies the target alert by its original labels and assigns the `openshift_io_alert_rule_id` label. The matcher uses `alertname` plus **all** of the rule's business labels
+     (excluding the `namespace` label and `openshift_io_*` system labels), sorted alphabetically into an anchored regex, so the override is scoped to the target rule rather than to every rule sharing the alert name.
+  2. One `Replace` action per label override, keyed by `openshift_io_alert_rule_id`, setting the target label to the desired value. Relabel matchers operate on alert labels only, so `expr` and `for` cannot participate in the matcher:
+     two rules that share alertname and business labels but differ only in expression cannot be distinguished by relabeling.
   3. Optionally, preserved `Drop` actions for disabled rules.
+- Ambiguity rejection: before creating or updating an ARC, the backend verifies that the matcher (alertname + business labels) uniquely identifies the target rule among platform rules in cluster-monitoring namespaces.
+  If another rule produces alerts with the same label set, the PATCH request is rejected with a validation error and the user is directed to differentiate the rules first (for example, by adding a distinguishing business label), so an override never silently applies to multiple rules.
 - The Cluster Monitoring Operator (CMO) reconciles ARCs into the Prometheus relabel pipeline. The plugin reads the reconciled output from the `alert-relabel-configs` Secret to build the relabeled rules cache.
 
 Concurrency:
@@ -344,6 +358,8 @@ metadata:
     monitoring.openshift.io/alertRuleId: "rid_abc123..."
 spec:
   configs:
+    # Matcher: alertname plus all business labels of the target rule
+    # (namespace and openshift_io_* labels are excluded), anchored.
     - sourceLabels: [alertname, severity]
       regex: "^ClusterOperatorDown;critical$"
       targetLabel: openshift_io_alert_rule_id
@@ -390,9 +406,13 @@ spec:
 - Overrides (ARCs) reference the rule ID via their relabel config matcher and annotation.
 - Changes to rule spec fields included in the hash (name, expr, for, business labels) result in a new computed ID. Existing ARC overrides keyed by the old ID will not match the new rule.
 - Annotation-only edits and `openshift_io_*` label changes do not alter the rule ID.
-- If a rule is copied, the copied rule computes a new ID (assuming at least one hash input differs). If the copy is byte-identical, it produces the same ID; the relabeled rules cache detects this and logs a warning.
-- If a rule is edited out of band (direct PrometheusRule edits), the next relabel sync recomputes the ID. Existing ARC overrides keyed by the old ID will appear orphaned.
-- Orphaned ARCs are garbage-collected: when a relabel sync no longer finds a rule matching an ARC, the ARC is annotated with `monitoring.openshift.io/orphaned-since` and deleted after a grace period (one resync interval, 15 minutes). GitOps-managed ARCs are never deleted automatically; their cleanup is left to the user.
+- A copied rule computes a new ID (assuming at least one hash input differs). If the copy is byte-identical, it produces the same ID; the relabeled rules cache detects this and logs a warning.
+- Stale-override gating: the effective classification view is keyed on the **current** computed rule ID, not on the alert labels an ARC originally matched. On every relabel sync the backend recomputes each rule's ID from its current spec,
+  and an ARC's `Replace` entries are honored only when the ARC's recorded rule ID equals that current ID.
+- As a result, when a rule is edited out of band (direct PrometheusRule edits) and its ID changes, the stale ARC immediately stops applying its replacement in the API view instead of continuing to apply until cleanup.
+  Alerts may still carry the stale `openshift_io_alert_rule_id` label through the Prometheus relabel pipeline until the ARC is deleted; API-side correlation and classification are unaffected because they use the authoritative computed IDs.
+- Orphaned ARCs are garbage-collected: when a relabel sync no longer finds a rule whose current computed ID matches an ARC's recorded ID, the ARC is annotated with `monitoring.openshift.io/orphaned-since` and deleted after a grace period (one resync interval, 15 minutes).
+  GitOps-managed ARCs are never deleted automatically; they remain excluded from the effective view once stale and their cleanup is left to the user.
 
 ### Rule id uniqueness and collisions
 - The rule id must be unique across all rules returned by the Alerting API. If two different rules share the same `openshift_io_alert_rule_id`, overrides and UI actions become ambiguous.
@@ -412,8 +432,8 @@ spec:
 - Classification for alerts is computed by:
   1. Correlating the alert to its base relabeled rule via subset label matching (preferring rules with more matching labels).
   2. If correlation succeeds, classifying from the relabeled rule labels (which include any ARC overrides).
-  3. Applying CVO-style per-instance classification (overrides static classification for known alert families).
-  4. Applying dynamic `_from` classification (rule labels point to alert labels for runtime resolution).
+  3. Applying CVO-style per-instance classification (overrides static classification for known alert families, unless an explicit user override covers the field).
+  4. Applying dynamic `_from` classification (rule labels point to alert labels for runtime resolution), unless an explicit static user override covers the field.
   5. When correlation fails, classifying directly from alert labels using the classifier matchers and fallback.
 - For platform alerts (non-user-source), relabel configs from the `alert-relabel-configs` Secret are applied to alert labels before classification.
 
@@ -462,6 +482,9 @@ The Classification Component runs within the Hosted Cluster (Guest). It classifi
   - Validation: component regex, layer allowed values, `_from` Prometheus label name format.
   - ARC creation, update, and deletion for classification overrides.
   - Three-state PATCH semantics: omitted (no change), null (clear), string (set).
+  - User override precedence: a static override set via the PATCH API beats `_from` resolution and CVO per-instance enrichment for the field it sets.
+  - ARC matcher ambiguity: override requests are rejected when two platform rules share alertname and business labels.
+  - Stale ARC gating: ARC relabel entries are ignored when the ARC's recorded rule ID no longer matches the rule's current computed ID.
   - Alert-to-rule correlation via subset matching with most-specific-match preference.
   - Rule deduplication by `openshift_io_alert_rule_id`.
 - Integration/e2e (as available):
