@@ -214,11 +214,15 @@ Add an optional `credentialsSecretVersion` to the HC Azure managed-identity
 reference (including KMS), and propagate it to HCP. It is the immutable Key
 Vault object version RP expects for `credentialsSecretName`, not a
 certificate value. RP must set it for every new Key Vault-backed reference
-or replacement; changing the version changes HC generation. The field is
-optional for API compatibility, but a legacy name-only reference remains
-`Unknown/VersionUnavailable` until RP supplies the version. The SPC writer
-maps `credentialsSecretVersion` to the CSI provider's existing `objectVersion`
-field. Status uses `credentialsSecretVersion` too. Client IDs do not have a
+or replacement. Changing the version changes HC generation. The API still
+accepts existing references that identify the Key Vault secret by name alone.
+HyperShift continues to reconcile them by name. The role's `Applied` condition
+is `Unknown` with reason `VersionUnavailable` because the same name can refer
+to several versions and the spec gives HyperShift no expected version to verify.
+
+When RP supplies `credentialsSecretVersion`, the SPC writer pins the secret
+to that version using the CSI provider's existing `objectVersion` field.
+Status uses `credentialsSecretVersion` too. Client IDs do not have a
 Key Vault version.
 
 The completion check also compares the applied SPC's Key Vault location and
@@ -576,10 +580,11 @@ RP records the returned immutable Key Vault object version when it writes a
 reference or replacement, then sends the name and version through HC. The
 SPC pins that version. A same-name replacement without a new expected
 version cannot be distinguished from the old credential and must not advance
-to `Applied=True` or authorize cleanup. A legacy name-only reference remains
-`Unknown/VersionUnavailable` until RP supplies the version. The version
-field is an implementation prerequisite, not an open question for this
-design.
+to `Applied=True` or authorize cleanup. On the first replacement of a
+name-only reference, RP can set the replacement version directly, without
+first recording the old version in HC. The role reports `Applied=True` only
+after its observer verifies the replacement against the role's completion
+criteria.
 
 CAPZ needs a stronger boundary than an AzureClusterIdentity or SPC write.
 The pinned CAPZ credential cache keys UAMI credentials by authority host and
@@ -814,6 +819,12 @@ enhancement. That decision does not block this proposal.
   ordering, cross-controller KMS observation and version pinning, HCCO guest
   reads/HCP patches, Key Vault location/encoding changes, KMS Secret ordering
   during creation and upgrade, and untouched CPC availability/version rollups.
+- Upgrade a cluster with two name-only Key Vault roles. Verify that their
+  references remain valid and reconcile by name, and that both roles and the
+  HC aggregate report `Unknown/VersionUnavailable`. Replace one credential
+  under the same name and set its version in HC. Verify that the role reports
+  `Applied=True` only after its observer confirms the replacement. The other
+  role and the HC aggregate still report `Unknown/VersionUnavailable`.
 - Supported-upgrade and skew tests with both controllers retaining reporting,
   missing or pruned status fields, and independently advancing role outcomes.
   Verify that missing observations remain Unknown and that legacy KMS writers
