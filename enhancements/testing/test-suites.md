@@ -92,15 +92,17 @@ candidate --(3 weeks, >=95%)--> active --(2 releases, >=98%)--> stable --(design
 
 | Suite | Contains | Runs on | Component Readiness | Promotion out |
 |-------|----------|---------|---------------------|---------------|
-| `candidate` | New tests (the default). Equivalent to today's informing tests. | Dedicated periodic jobs only | No | Agent: at least 3 weeks in `candidate` (one full sprint), `>= 95%` pass rate |
+| `candidate` | New and recently-added tests, plus today's informing tests | Dedicated periodic jobs only | No | Agent: at least 3 weeks in `candidate` (one full sprint), `>= 95%` pass rate |
 | `active` | Tests graduated from `candidate`; existing flaky tests | Periodic jobs only | Yes | Agent: `>= 98%` pass rate, and at least 2 OCP releases since the test first appeared (added at any point in 5.0, eligible in 5.2) |
 | `stable` | Tests with proven stability | Payloads and periodics | Yes | Human or agent designates the test as critical product functionality |
 | `minimal` | Core cluster functionality; logically part of `stable` | Presubmits, payloads, periodics, and every `stable` run | Yes | — |
 
 Each suite is split into parallel and serial forms, and `candidate`,
-`active`, and `stable` are explicitly sharded, for example
+`active`, and `stable` carry their shard in the suite name, for example
 `openshift/conformance/parallel/active-02` or
-`openshift/conformance/serial/stable-01`.
+`openshift/conformance/serial/stable-01`. Every sharded suite starts with
+a single `01` shard; the agent adds shards only when a suite's runtime
+demands it (see [Shards](#shards)).
 
 `minimal` is part of `stable`: it is effectively the one stable "shard"
 that also runs on presubmits. A test promoted to `minimal` *moves* out of
@@ -148,19 +150,18 @@ or staff engineer, who approves agent PRs.
 
 #### Adding a test
 
-The author writes the test with no suite metadata. A test that is
-selected by today's conformance qualifier (and is not already in another
-suite) defaults into `candidate`, placed in a candidate shard
-automatically (see [Shards](#shards)); a test that does not run as
-conformance today is not swept in. Nothing else is required:
+The author writes the test with no suite metadata:
 
 ```go
 g.It("should do the thing", func() { ... })
 ```
 
-The implicit default is temporary. Within a day or a week, the agent
-opens a PR that writes the test's candidate shard into its source, so
-any test's suites can be read from its definition:
+If the test is selected by today's conformance qualifier (and is not
+already in another suite), the agent picks it up on its next run and opens
+a PR that assigns it a candidate shard, so a test's suites can always be
+read from its definition (see [Shards](#shards)). A test that does not run
+as conformance today is not swept in. The author writes no suite metadata;
+the agent is what makes membership explicit:
 
 ```go
 g.It("should do the thing",
@@ -215,7 +216,10 @@ g.It("should never lose etcd quorum during upgrade",
 
 This requires explicit approval (approver set TBD, see
 [Open Questions](#open-questions-optional)). The agent reports any test
-that first appeared outside `candidate` without an approved override.
+that first appears in a lifecycle suite other than `candidate` without an
+approved override; dedicated suites (see
+[Dedicated suites](#dedicated-suites)) are not managed by the agent and
+are exempt.
 
 Because the agent never demotes (see [No Demotion](#no-demotion)), an
 override is a deliberate, one-way commitment: the test gates payloads from
@@ -309,50 +313,36 @@ from any repository can join any registered suite.
 
 #### Validation
 
-Origin sees every extension's tests and every registered suite, so it
-validates membership when it aggregates specs. A test is rejected if:
+Membership consistency is a property of a test's own source — its
+`ote.Suites(...)` declarations and its name are in the same file — so
+CodeRabbit checks it in PR review:
 
-1. It names a suite that is not registered.
-2. It is in more than one lifecycle suite (`candidate`, `active`,
-   `stable`, or `minimal`) or shard.
-3. It is in both a lifecycle suite and a dedicated suite.
-4. Its suite's mode disagrees with its name: a `[Serial]` test in a
-   parallel suite, or the reverse.
-
-This is the only enforcement needed. The previous design derived these
-guarantees from qualifiers combining several tags; with explicit
-membership they become direct checks.
-
-Because rule 1 rejects a test naming a suite that is not registered, a
-suite (in particular a new shard) must be registered before any test
-references it. The agent enforces this ordering for itself — it registers
-a new shard's static suite in origin and its job in `openshift/release`
-before writing tests into it (see [Shards](#shards)). A human using the
-straight-to-`stable` override must target an already-registered shard for
-the same reason.
+- **Membership consistency:** a test should be in exactly one lifecycle
+  suite/shard, not in both a lifecycle and a dedicated suite, and its
+  suite's mode should match its name (`[Serial]` in a serial suite,
+  parallel otherwise).
 
 #### Shards
 
 - **`active` and `stable`**: the agent writes the shard explicitly as part
   of the suite name, and rebalances by rewriting it. Target: every shard
-  within 10% of mean runtime, using per-test runtimes from Sippy.
-- **`candidate`**: assigned automatically, in memory, when origin
-  aggregates specs from all extension binaries. A test defaults into
-  `candidate` only if it (a) is selected by today's conformance
-  qualifier — the same positive membership rule the existing
+  within 10% of mean runtime, using per-test runtimes from Sippy. Every
+  sharded suite (`candidate`, `active`, `stable` — `minimal` is never
+  sharded) starts with a single `01` shard; the agent adds shards only
+  when a suite's runtime demands it, so suites that stay short (likely
+  `active`) may never be sharded further.
+- **`candidate`**: the agent assigns the shard explicitly, the same way it
+  does for `active` and `stable` — by writing `ote.Suites(candidate-NN)`
+  into the test's source and rebalancing by rewriting it. A test becomes a
+  candidate only if it (a) is selected by today's conformance qualifier —
+  the same positive membership rule the existing
   `openshift/conformance/parallel` / `.../serial` suites use — and (b) is
   not already placed in another registered suite. This deliberately uses
   the *current conformance selection*, not "any unclaimed test": a test
   that does not run as conformance today (for example a disabled,
   niche-job-only, or dedicated-suite test) is **not** swept into
-  `candidate`, matching current behavior. A qualifying test is placed in a
-  `candidate-NN` shard for its mode (from `[Serial]`) by consistent hashing
-  of its name, so new conformance tests need no source edit to start
-  running. The agent then makes the assignment explicit by writing the
-  *same* shard origin chose into the test's source, so the test does not
-  move. From then on, candidate shards are explicit and rebalanced like any
-  other. Hashing only covers the window between merge and the agent's next
-  run.
+  `candidate`, matching current behavior. A new conformance test starts
+  running in `candidate` once the agent adds its suite.
 - **Registry**: a shard exists only when both its static suite in origin
   and its CI job in `openshift/release` have merged. The agent never
   assigns a test to an unregistered shard; it registers new shards first.
@@ -380,21 +370,27 @@ the same reason.
 
 #### The lifecycle agent
 
-A scheduled prow job that on each run:
+A scheduled prow job that works from source. Every static OTE extension
+registers itself in origin, so origin holds the authoritative list of
+test-producing repositories. The agent starts from that list and walks
+each repository's test source to determine, per test, its current suites
+(`ote.Suites(...)`) and whether it is conformance-selected. On each run it:
 
-1. Enumerates tests and their current suites, as resolved by origin.
-2. Opens PRs that make implicit candidate membership explicit (daily or
-   weekly; the other tasks can run less often).
-3. Opens promotion PRs for eligible tests.
+1. Reads the list of registered OTE repositories from origin and walks
+   each repo's source to build the current test-to-suite picture.
+2. Opens PRs assigning a candidate shard to conformance-selected tests
+   that have none yet (daily or weekly; the other tasks can run less
+   often).
+3. Opens promotion PRs for eligible tests, using pass-rate and age data
+   from Sippy and Component Readiness.
 4. Opens shard rebalancing PRs, registering new shards first if needed.
 5. Notifies owning teams about broken or stalled `candidate` tests.
 
 The agent never merges. Promotion and rebalancing PRs follow a
 response-window policy: the owning team has a defined number of days to
-respond, after which an architect or staff engineer may approve. To open
-PRs, the agent must map each test to its source repository; until a
-complete test-source index exists, it operates on tests resolvable through
-`ci-test-mapping` and OTE source metadata.
+respond, after which an architect or staff engineer may approve. Walking
+the registered repositories gives both the repository list and each test's
+source location, which the agent needs to edit the test in place.
 
 #### Upstream Kubernetes tests
 
@@ -432,20 +428,28 @@ Existing tests are seeded from history instead of restarting everyone in
 `candidate`:
 
 - Tests marked `Informing()` today go to `candidate`.
-- Tests that meet the `stable` bar historically, including today's gating
-  conformance tests at `>= 98%`, go to `stable`.
+- Recently-added tests go to `candidate` as well: they have not yet
+  proven themselves, so they follow the normal path rather than starting
+  in `active`.
+- Tests that meet the `stable` bar historically — a `>= 98%` pass rate,
+  at least 2 OCP releases since first appearance, and no per-variant
+  regressions — including today's gating conformance tests, go to
+  `stable`.
 - Upstream `[Conformance]` tests go to `minimal`. Downstream tests are
   designated core afterward, case by case.
 - Everything else goes to `active`.
 
-Seeding must complete before the candidate default is enabled. Otherwise
-every not-yet-migrated conformance test defaults into `candidate` (the
-default is scoped to today's conformance selection, so only conformance
-tests are affected — but a mature test not yet seeded would still start
-over in `candidate`).
+Seeding must complete before the agent begins assigning candidate shards.
+The agent's candidate assignment is scoped to today's conformance
+selection, so only conformance tests are affected — but a mature test not
+yet seeded would be assigned `candidate` and start over, so history-based
+seeding must run first.
 
-`[Suite:...]` name strings and the per-test `Informing()` /
-`Blocking()` lifecycle are deprecated along with the old suites.
+`[Suite:...]` name strings are deprecated along with the old suites. The
+per-test `Informing()` / `Blocking()` lifecycle is kept: other systems
+still consume it, and the agent still removes `Informing()` when
+promoting a test out of `candidate` (see
+[The Suites](#the-suites)).
 
 ### Risks and Mitigations
 
@@ -507,7 +511,8 @@ migration seeding so existing stable tests keep gating from day one.
 ## Test Plan
 
 - Verify origin's aggregation produces the expected membership for each
-  suite, and rejects invalid membership.
+  suite, and that CodeRabbit flags membership-consistency violations in
+  review.
 - Run the new suites in non-gating jobs alongside existing jobs to
   compare coverage and runtime before cutover.
 - Dry-run the agent against historical Sippy data and review its
@@ -517,8 +522,8 @@ migration seeding so existing stable tests keep gating from day one.
 
 ### Dev Preview -> Tech Preview
 
-- `ote.Suites`, origin aggregation and validation, and the new suites are
-  available.
+- `ote.Suites`, the static suite registrations in origin, and the new
+  suites are available.
 - Non-gating validation jobs run alongside existing jobs.
 - The agent runs in dry-run mode.
 - At least one component team has migrated.
@@ -557,8 +562,8 @@ Not applicable; does not affect production clusters.
 | Dependency | Owner | Needed by |
 |------------|-------|-----------|
 | `ote.Suites` decorator | TBD (QSE + Test Platform) | Tech Preview |
-| Origin aggregation: candidate default, shard hashing, validation | TBD (QSE + Test Platform) | Tech Preview |
+| Origin static suite registrations | TBD (QSE + Test Platform) | Tech Preview |
 | `candidate` periodic jobs and non-gating validation jobs | TBD (QSE + Test Platform) | Tech Preview |
 | Sippy pass-rate, first-seen, runtime, and per-variant queries | TBD (TRT) | Before the agent leaves dry-run |
-| Test-source index mapping tests to repositories | TBD (TRT) | Full agent coverage |
+| Registered OTE repository list in origin, and walking it to map tests to source | TBD (QSE + Test Platform) | Full agent coverage |
 | Lifecycle agent prow job | TBD (QSE) | GA |
