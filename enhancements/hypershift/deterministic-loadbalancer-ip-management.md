@@ -359,20 +359,31 @@ provider is a conscious decision that includes E2E testing.
 | `lbipam.cilium.io/` | Cilium LB IPAM | `ips`, `sharing-key` |
 | `loadbalancer.openstack.org/` | OpenStack Octavia | `floating-network-id`, `floating-subnet-id` |
 
+A matching prefix is necessary but not sufficient. The rule also denies specific
+keys that sit inside an allowlisted prefix — `networking.gke.io/load-balancer-type`
+is rejected because its value changes how the address is provisioned — and a
+malformed qualified name is rejected regardless of its prefix.
+
 Annotations not matching any prefix produce a CEL validation error. Adding a
 new provider requires adding its prefix to the CEL rule — a conscious decision
 that includes E2E testing.
 
-> **CI coverage note:** CI E2E tests cover MetalLB only. Other providers in the
-> allowlist are included based on upstream documentation and customer RFEs, not
-> HyperShift CI testing. One-time provider validation (F5, Cilium) is documented
-> under Test Plan.
+> **CI coverage note:** CI covers MetalLB and AWS. The AWS `deterministic-lb`
+> lane requests a reserved EIP and public subnet through the EIP and subnet
+> annotations, so the passthrough is exercised end to end on a second provider.
+> The remaining prefixes in the allowlist are included based on upstream
+> documentation and customer RFEs, not HyperShift CI testing. One-time provider
+> validation (F5, Cilium) is documented under Test Plan.
 
 **Implementation order:** The initial API PR
-([hypershift#9913](https://github.com/openshift/hypershift/pull/9913)) introduces
-the types with `MinProperties=1`, `MaxProperties=10`, and the feature gate. The
-allowlist CEL rule (`startsWith()` prefixes) and key/value size bounds are added
-in a subsequent PR during implementation, once the base types are merged.
+([hypershift#9913](https://github.com/openshift/hypershift/pull/9913)) introduced
+the types with `MinProperties=1`, `MaxProperties=10` and the feature gate. The
+allowlist CEL rule (`startsWith()` prefixes) and the key and value size bounds
+landed in [hypershift#10142](https://github.com/openshift/hypershift/pull/10142).
+The CLI flags, the envtest cases that pin the accepted and rejected keys, and the
+AWS E2E lane followed in
+[hypershift#10237](https://github.com/openshift/hypershift/pull/10237) and
+[hypershift#10341](https://github.com/openshift/hypershift/pull/10341).
 
 ### Topology Considerations
 
@@ -586,9 +597,11 @@ passthrough approach.
 
 ## Open Questions
 
-1. Should `loadBalancerClass` immutability be enforced at the HC level (CEL) or
-   inherited from the Kubernetes Service semantics (fail at Service creation)?
-   Recommendation: enforce at HC level via CEL for clearer UX.
+1. ~~Should `loadBalancerClass` immutability be enforced at the HC level (CEL) or
+   inherited from the Kubernetes Service semantics?~~ Resolved: the whole-list
+   equality rule on `spec.services` already rejects any change on every platform
+   except IBMCloud, so no per-field rule is needed. It gives the guarantee
+   Service semantics would, earlier in the lifecycle and with a clearer error.
 
 ## Test Plan
 
@@ -603,8 +616,12 @@ passthrough approach.
 ### E2E Tests
 
 - Day 1: Create HC with MetalLB annotations in `serviceAnnotations`, verify
-  annotations on KAS Service, verify MetalLB assigns expected IP (requires
-  MetalLB in CI).
+  annotations on KAS Service, verify MetalLB assigns expected IP.
+- Day 1 (AWS): the `deterministic-lb` lane creates a dedicated HC with a reserved
+  EIP and public subnet, waits for the KAS Service to carry the requested
+  address and asserts no drift across reconciliation. The lane refuses to run
+  without the pre-step values, and the v2 runner fails when the label filter
+  selects no specs, so a lane that never reaches the assertions reports red.
 - `loadBalancerClass`: Create HC with `loadBalancerClass`, verify it's set on
   KAS Service and the correct LB controller processes it.
 
@@ -763,5 +780,9 @@ monitoring without either of those problems.
 
 ## Infrastructure Needed
 
-- MetalLB availability in CI for E2E testing (TBD — may require CI team coordination).
+- AWS `deterministic-lb` lane with a reserved EIP and public subnet
+  ([openshift/release#88475](https://github.com/openshift/release/pull/88475),
+  [hypershift#10341](https://github.com/openshift/hypershift/pull/10341)).
+- MetalLB availability in CI for the remaining Day 1 cases (TBD — may require CI
+  team coordination).
 - F5 BIG-IP VE Trial license for one-time validation (free, time-limited).
