@@ -210,10 +210,23 @@ current observations for every requirement; absence of a failing result is not s
 
 ### Risks and Mitigations
 
-- **Untrusted payload data or overly privileged extraction:** Extraction uses current-release
-  code constrained to reading data; trust and least-privilege wiring require security
-  review. Image extraction uses the same trusted source that CVO uses via CRIO secure
-  defaults configured by MCO.
+- **Untrusted payload data or overly privileged extraction:**
+  We may read any image published in `availableUpdates` or `conditionalUpdates` on the `ClusterVersion` object.
+  These images came from the cluster's configured cincinnati endpoint, but have not yet been validated by CVO and we do not perform any additional checking on them.
+  We perform the following operations based on this image:
+  * Pull and mount the release image
+  * Parse the release metadata json
+  * Parse a manifest from the release
+  * Pull and mount further payload images referenced from the release
+  * Parse manifest yamls from payload images
+  * Inject manifest yamls into a CompatibilityRequirement object
+
+  In mitigation:
+  * We do not execute code from the pulled release payload, or directly create any cluster resource from it
+  * A false result from the preflight check is not fatal even if it causes to subsequently upgrade to an incompatible release; the future release still handles this safely.
+
+  The most significant risk is likely that a malicious release payload published by cincinnati could exhaust disk space on a control plane node when it is pulled.
+
 - **Snapshot weakness:** An external CRD manager can change a definition after preflight
   passes and the upgrade is accepted, but before target controllers start. Future
   requirements warn rather than enforce N+1's rules, so a change compatible with N can
@@ -261,18 +274,23 @@ This will be easier to implement robustly in the future when we have CVO preflig
 
 ## Test Plan
 
-This will be tested by a new set of tests which run by default in the serial suite, ensuring wide coverage. The test will create a fake cincinnati server exposing a single Y+1 update using the value of $OPENSHIFT_UPGRADE_RELEASE_IMAGE_OVERRIDE. It will wait for Upgradeable=True because a fresh install must always be compatible with release:next before doing one of the following:
+This will be tested by a new set of tests which run by default in the serial suite, ensuring wide coverage. The test will create a fake cincinnati server exposing a single Y+1 update. The update will initially expose the cluster's current release because this is guaranteed to be available in current jobs without infrastructure changes, but in future we hope to use real Y+1 release in stable branches. It will wait for Upgradeable=True because a fresh install must always be compatible with release:next before doing one of the following:
 
   - If Cluster CRD is not currently present (upgrade to initial release containing CAPI)
-    - Add it and wait for Upgradeable=False
-    - Add it to unmanaged and wait for Upgradeable=True
-    - Modify it and wait for upgradeable=False
-    - Modify it back and wait for Upgradeable=True
+    - Create it from the target payload with an incompatible schema
+    - Wait for Upgradeable=False
+    - Declare it unmanaged and wait for a new revision, still incompatible
+    - Restore the CRD and
+    - Wait for Upgradeable=True
 
   - If Cluster CRD is current present (upgrade from CAPI release to subsequent CAPI release):
-    - TBD - We should be prevented from making incompatible changes here, so this could be hard to test.
+    - Make the current CRD incompatible and (through shenanigans) no longer managed by capi-installer
+    - Wait for Upgradeable=False
+    - Declare it unmanaged and wait for a new revision, still incompatible
+    - Restore the CRD to the target payload version
+    - Wait for Upgradeable=True
 
-We unregistery and clean up the fake cincinnati server, but note that this does still leave the cluster in a dirty state because we will have added a value to unmanagedCRDs, and it is not permitted to remove these. Given that this should not impact any other test it should be safe in practice to run this in serial. However, if we have time I would consider a change to CAPI operator which would permit a CRD to be removed from unmanagedCRDs if it is *identical* to the managed version. This may also be a useful break-glass mechanism for when somebody inevitably regrets a change on their production cluster.
+In both cases we are able to restore the Cluster CRD and the ClusterAPI to their original states. Restoring ClusterAPI requires further shenanigans, see the code for detail.
 
 ## Graduation Criteria
 
