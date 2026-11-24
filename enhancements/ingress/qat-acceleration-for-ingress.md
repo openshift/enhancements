@@ -189,12 +189,13 @@ software: getting it wrong surfaces the same way as any other device
 problem - the haproxy container fails to start (see below) - rather than
 through a dedicated check.
 
-This enhancement has a hard dependency on
+This enhancement depends on
 [NE-727](https://redhat.atlassian.net/browse/NE-727)'s `spec.resources`
-field landing in OCP 5.1: it is the only administrator-facing trigger this
-design has, and this enhancement has no QAT-specific API of its own to fall
-back on (see Open Questions for the contingency if NE-727 does not land in
-time).
+field as its administrator-facing trigger, and this enhancement has no
+QAT-specific API of its own to fall back on - but that dependency does not
+block shipping if NE-727 slips past OCP 5.1: see Open Questions for the
+`qatCryptoLimit`-based contingency that lets this enhancement proceed
+regardless.
 
 This enhancement spans the router image/binary, the router's control-plane
 logic, and the cluster-ingress-operator:
@@ -811,20 +812,18 @@ day-to-day use.
     addressing that administrators would have to get right, this must be
     confirmed, in coordination with the NE-727 enhancement/implementation,
     before this enhancement's implementation begins.
-12. This enhancement depends entirely on
+12. **Resolved**: This enhancement does not need to slip if
     [NE-727](https://redhat.atlassian.net/browse/NE-727)'s `spec.resources`
-    field landing in OCP 5.1 (see Infrastructure Needed); without it, there
-    is no way for an administrator to trigger `ROUTER_QAT`. If NE-727 slips
-    past OCP 5.1, would it be valid to fall back to the
-    `spec.unsupportedConfigOverrides`-based opt-in from the earlier
-    iteration of this proposal (see Alternatives) as an interim mechanism,
-    or should this enhancement itself slip to the release where NE-727
-    ships? Note that this fallback would not be a drop-in replacement:
-    without NE-727, nothing applies `qat.intel.com/cy` requests and limits
-    to the haproxy container automatically, so the fallback would need its
-    own, manually-configured path to get the matching requests/limits onto
-    the haproxy container, rather than inheriting NE-727's generic
-    mechanism.
+    field does not land in time for OCP 5.1. If it has not landed by then,
+    the cluster-ingress-operator instead reads the desired VF quantity from
+    an unsupported `qatCryptoLimit` key under the IngressController's
+    existing `spec.unsupportedConfigOverrides` field, and applies the exact
+    same mirroring this enhancement already defines for the NE-727 case -
+    `ROUTER_QAT` on the router container and matching `qat.intel.com/cy`
+    requests/limits on the haproxy container - sourced from that value
+    instead. This is a contingency fallback for early adopters, not a
+    redesign: once NE-727 ships, administrators are expected to move to its
+    `spec.resources` field as the supported mechanism.
 
 ## Test Plan
 
