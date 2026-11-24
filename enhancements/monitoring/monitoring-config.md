@@ -19,10 +19,11 @@ api-approvers:
   - "@deads2k"
   - "@JoelSpeed"
 creation-date: 2024-04-26
-last-updated: 20204-26
+last-updated: 2026-11-24
 tracking-link:
 - "https://issues.redhat.com/browse/MON-1100"
-  
+- "https://issues.redhat.com/browse/MON-4609"
+
 ---
 
 # CRD ClusterMonitoring
@@ -45,7 +46,7 @@ tracking-link:
 * The specification is well known and largely self-documenting.
 * The Kubernetes API Server validates custom resources based on their API specification, so users get immediate feedback on errors instead of checking the ClusterOperator object and the cluster monitoring operator's logs. Common expressions language even allows to write complex validation logic, including cross-field tests.
 * Many users expect to interact with operators through a CRD.
-* Custom resources play better with GitOps workflows. 
+* Custom resources play better with GitOps workflows.
 * CRDs supports multiple actors managing the same resource which is a key property for the Observability service of Advanced Cluster Management.
 
 ### User Stories
@@ -86,7 +87,7 @@ In managed OpenShift clusters like OSD/ROSA, two separate CRDs are necessary bec
 - Replace configmaps with CRD:
 
 Current Config struct in CMO
-  
+
 ```
   type Config struct {
 	Images                               *Images `json:"-"`
@@ -98,7 +99,7 @@ Current Config struct in CMO
 }
 ```
 
-We will strive to maintain the previous structure as much as possible while adapting it to OpenShift API standards. 
+We will strive to maintain the previous structure as much as possible while adapting it to OpenShift API standards.
 
 [Current ClusterMonitoringConfiguration struct:](
 https://github.com/openshift/cluster-monitoring-operator/blob/eca25a9571d721a90f1b7f8d26931c679ae93aec/pkg/manifests/types.go#L36)
@@ -132,10 +133,34 @@ To initiate the process, let's establish a feature gate that will serve as the e
 One proposal for a minimal DoD was:
 - Feature gate in openshift/api
 - API types moved to openshift/api
-- Client-go codegen 
+- Client-go codegen
 - Reconcile logic: https://github.com/openshift/cluster-monitoring-operator/pull/2350
 - Add merge ConfigMap / CustomResource for phase 1
-        
+
+
+### Configuration source and enablement
+
+The `ClusterMonitoring` CRD is served as `v1alpha1` and is gated by the
+`ClusterMonitoringConfig` FeatureGate.
+
+Per-cluster activation is driven by the existence of the custom resource itself.
+This is the steady-state behavior from phase 2 onward (see [Migration
+path](#migration-path)); phase 1 instead merges the two sources by top-level key
+with the ConfigMap taking precedence.
+
+- If the `ClusterMonitoring` custom resource (named `cluster`, in the `openshift-monitoring`
+  namespace) exists, CMO uses the custom resource as its configuration source.
+- If the CR does not exist, CMO falls back to the `cluster-monitoring-config`
+  ConfigMap.
+
+There is no dedicated `configurationSource` field on the API to select between
+the ConfigMap and the CRD. An enum field of that shape was considered and
+rejected in [openshift/api#2938](https://github.com/openshift/api/pull/2938): we
+do not want to ship an API knob that we intend to remove later, and the presence
+of the CR is a cleaner signal of admin intent. Using an annotation on the
+ConfigMap as the switch was also rejected (annotations should not be used as an
+API).
+
 
 ### Example configuration
 
@@ -215,48 +240,122 @@ No special considerations.
 
 ### Migration path
 
-Migration path it will be split in three phases
+The migration is split into five phases. The first two happen while the feature
+is in Tech Preview (TP); the last two happen once the feature is GA. Each phase
+narrows the gap between "ConfigMap is the source of truth" and "the CR is the
+only source of truth", always leaving admins an escape hatch until the final GA
+phase.
 
-- Phase 1: Pre-GA (Gradual Migration for Developers)
-  - In this phase only developers are expected to use CRD.
-  - Both ConfigMap and CRD will coexist for a while until the transition is complete.
-  - Work with a Feature flag.
-  - Two options: ConfigMap or CRD.
-      Preference is to use ConfigMap over CRD during this phase.
-  - The merge process look at top-level fields
-  - Behavior: If an entry exists in the ConfigMap, ignore the CRD.
-      If there’s no entry in the ConfigMap, use the CRD.
-  - Merge Process (only for phase 1)
-      Top-level fields (e.g., AlertmanagerMainConfig *AlertmanagerMainConfig || spec.AlertmanagerMainConfig):
-      If a field is nil in the ConfigMap, use the CRD; otherwise, stick with the ConfigMap.
+- Phase 1 [TP]: Merge CR and ConfigMap by top-level keys
+  - In this phase only developers are expected to use the CR, and both the
+    ConfigMap and the CR coexist. The feature is gated by the
+    `ClusterMonitoringConfig` FeatureGate.
+  - The two sources are merged at the top-level fields, and the ConfigMap takes
+    precedence over the CR.
+  - Behavior: if a top-level field exists in the ConfigMap, that value is used
+    and the CR value for that field is ignored; if the field is absent from the
+    ConfigMap, the CR value is used.
+  - Merge process (phase 1 only): for each top-level field (e.g.
+    `AlertmanagerMainConfig` in the ConfigMap vs. `spec.alertmanagerMain` in the
+    CR), if the field is nil in the ConfigMap, use the CR; otherwise, use the
+    ConfigMap.
 
-- Phase 2: Transition (User Control)
-  Keep dual support for a at least 2 releases.
-  - New Logic:
-    Allow users to choose the source of configuration (ConfigMap or CRD, warn about CRD preference).
-    If a CRD exists, prioritize it over the ConfigMap.
-    Add logic for users to manually switch to CRD if desired.
-    No merge process.
+- Phase 2 [TP]: Introduce CR-over-ConfigMap preference
+  - The merge process is dropped. The configuration source is selected solely by
+    the existence of the custom resource.
+  - If the `ClusterMonitoring` custom resource exists, CMO uses it and ignores
+    the ConfigMap. If the custom resource does not exist, CMO uses the ConfigMap.
+  - Admins opt in by creating the CR and opt out by deleting it.
+  - Dual support is kept for at least 2 ELC releases.
 
     ![h](assets/monitoring_config_phase2.png)
 
-- Phase 3: Full Migration (CRD as Default)
-    After a few releases, the migration from ConfigMap to CRD will be complete.
-    ConfigMap will be deprecated, with CRD becoming the default configuration source.
-  
-  - To start with deprecation we follow these steps:
-    Documentation and release notes to warn user about changes.
-    Cluster Fleet Evaluation to check how many user already use CRD instead of ConfigMap
-    Eventually you can mark CMO as upgradeable=false if the ConfigMap exist
+- Phase 3: Graduate the feature and deprecate the ConfigMap
+  - The feature graduates to GA and the `cluster-monitoring-config` ConfigMap is
+    formally deprecated. The CR becomes the recommended configuration source.
+  - CR existence continues to select the source; the ConfigMap keeps working so
+    this phase does not strand any cluster.
+  - Deprecation steps:
+    - Documentation and release notes warn users about the upcoming change.
+    - A deprecation **alerting rule** fires at `info` severity when a cluster is
+      still configured through the `cluster-monitoring-config` ConfigMap, pointing
+      admins to the migration docs. It escalates to `warning` severity in phase 4,
+      when the migration starts blocking upgrades.
+    - Cluster Fleet Evaluation / telemetry is used to track how many clusters
+      already use the CR instead of the ConfigMap.
 
+- Phase 4 [GA]: Block upgrade when the CR does not exist
+  - CMO sets `Upgradeable=false` when a cluster is still configured through the
+    ConfigMap (i.e. no `ClusterMonitoring` CR exists), preventing the cluster
+    from upgrading past this release until the admin has migrated.
+  - This is the point of no return for the escape hatch, so it must not land
+    before clusters have had a full deprecation window to react (see
+    [ELC and skip-level updates](#elc-and-skip-level-updates)).
+
+- Phase 5 [GA]: Remove ConfigMap support
+  - CMO no longer reads the `cluster-monitoring-config` ConfigMap. The
+    `ClusterMonitoring` CR is the only supported configuration source.
+
+#### ELC and skip-level updates
+
+The migration must account for the EUS lifecycle (ELC) and skip-level / EUS-to-EUS
+upgrades, where a cluster can jump across several releases in a single upgrade
+path. Phases that remove an escape hatch must be spread far enough apart that a
+cluster upgrading across EUS boundaries always lands on at least one release
+where the ConfigMap still works and is only being warned about, before reaching a
+release that blocks the upgrade.
+
+Concretely, the transition from phase 3 (deprecation + alert) to phase 4 (block
+upgrade when the CR is missing) should span **at least 2 ELC releases**, so that
+no skip-level upgrader is blocked without having first seen a release that
+surfaced the deprecation warning. The same reasoning applies before phase 5
+removes ConfigMap support entirely.
+
+#### Migration tool
+
+To help admins move off the ConfigMap, phase 3 will ship a migration tool
+(delivery form to be decided). The tool reads an existing
+`cluster-monitoring-config` ConfigMap and prints the equivalent
+`ClusterMonitoring` YAML manifest for the admin to review and apply. It is
+output-only and does not apply the resource directly. The tool is a best-effort
+aid scoped to basic/common configurations; it will not cover all corner cases,
+which admins are expected to translate manually.
+
+Beyond generating the manifest, the tool and workflow give admins confidence the
+migration will run cleanly before they switch sources:
+
+- **Client-side / dry-run validation**: the generated CR can be validated against
+  the API server without persisting it (`oc apply --dry-run=server`), so schema
+  and CEL validation run and surface problems before the CR is created.
+- **Coverage report**: the tool reports any ConfigMap fields it could not
+  translate, so unsupported or corner-case settings are flagged explicitly
+  instead of being silently dropped.
+- **Safe trial with rollback**: because the source is selected by CR existence,
+  admins can create the CR, confirm CMO reconciles cleanly (the
+  `monitoring` ClusterOperator stays `Available` with no new `Degraded`
+  conditions), and fall back by deleting the CR if anything looks wrong (see
+  [Risks and Mitigations](#risks-and-mitigations)).
 
 - Extensive testing will be required to validate the new behavior.
 - Some fields in CRD and ConfigMap diverge due to API requirements. Helper functions will be needed to resolve this.
 
 ### Risks and Mitigations
 
-- Issues when ConfigMap and CRD coexist, as ConfigMap and CRD will be merged in a single structure, this could be error prone and an extensive testing should be done.
+- Issues when ConfigMap and CRD are merged in a single structure (phase 1 only), which could be error prone and requires extensive testing. From phase 2 onward the sources are no longer merged (CR existence selects the source), so this risk is limited to phase 1.
 - Mismatch in the configuration of operators with ConfigMap and CR
+- Migration may not always be smooth, given that almost all clusters already
+  have a `cluster-monitoring-config` ConfigMap. Admins need a reliable escape
+  hatch to fall back to the ConfigMap. Since the switch is CR existence, the
+  rollback path is to back up and delete the CR:
+
+  ```
+  oc get clustermonitoring/cluster -o yaml -n openshift-monitoring > clustermonitoring-backup.yaml
+  oc delete clustermonitoring/cluster -n openshift-monitoring
+  ```
+
+  CMO then falls back to the ConfigMap. Re-applying the backup returns to CRD
+  mode. We deliberately do not use an annotation on the ConfigMap as a switch
+  (annotations should not be used as an API).
 
 ### Drawbacks
 
@@ -273,8 +372,7 @@ Migration path it will be split in three phases
 
 ### Open questions
 
-- Merge CRD and ConfigMap could be error prone and will need extra test
-- Should we provide an escape hatch (via some annotation?) telling CMO to ignore the custom resource and only use the ConfigMap in case something goes bad?
+- Merging CRD and ConfigMap could be error prone and will need extra tests (phase 1 only; from phase 2 onward the sources are not merged)
 - How do we tell cluster admins that they need to migrate? CMO conditions could be an option as well as alerting and Insights?- How do we know how many clusters have migrated to the new CRD? Telemetry?
 
 ## Graduation Criteria
@@ -298,9 +396,21 @@ Feature will not affect standard upgrade or downgrade process of the cluster.
 
 ## Version Skew Strategy
 
-N/A
+The configuration source is resolved entirely within CMO on a single cluster, so
+there is no cross-component version skew to coordinate. The main
+version-sensitive concern is the migration schedule across releases: phases that
+remove the ConfigMap escape hatch (phase 4 blocking upgrades, phase 5 removing
+ConfigMap support) must be spaced to survive skip-level and EUS-to-EUS upgrades.
+See [ELC and skip-level updates](#elc-and-skip-level-updates).
 
 ## Implementation History
+
+- API types for `ClusterMonitoring` landed in openshift/api as `v1alpha1`,
+  gated by the `ClusterMonitoringConfig` FeatureGate.
+- [openshift/api#2938](https://github.com/openshift/api/pull/2938) proposed a
+  `configurationSource` enum field to select between the ConfigMap and the CRD.
+  It was closed in November 2026 after a team decision: the configuration source
+  is instead driven by the existence of the CR.
 
 ## Operational Aspects of API Extensions
 
