@@ -94,12 +94,15 @@ restrict where collected cluster data may be uploaded.
   not profile a cluster, size the workload for it, or adjust the values over time.
   A limit set too low means the gather container is OOM-killed and the run fails —
   that is the administrator's call to make and correct.
-- Automatically resizing a PVC that is filling up. The policy sets a fixed `size`
-  and the volume is not grown mid-run, nor is a full-utilization threshold acted
-  on. Doing this well needs per-run volume-usage metrics the operator does not
-  publish yet; once those exist a follow-up can add a full threshold and opt-in
-  online expansion as additive fields. Until then, a run that outgrows its volume
-  fails and the administrator raises `size`.
+- **Automatic** resizing of a PVC that is filling up. The operator never grows a
+  volume on its own: it does not watch utilization, does not act on a
+  full-threshold, and does not expand a volume mid-run. Doing this well needs the
+  per-run volume-usage metrics the operator does not publish yet; once those exist
+  a follow-up can add a full threshold and opt-in automatic expansion as additive
+  fields. Until then, resizing is strictly **user-driven** — the administrator
+  raises `size` and the operator honors it when the StorageClass supports
+  expansion (see [Storage resizing](#storage-resizing-user-driven)). A run that
+  outgrows its volume still fails; growing the volume affects subsequent runs.
 - Replacing the operator-managed base NetworkPolicies from 
   [must-gather-operator-network-policy](./must-gather-operator-network-policy.md).
   The policy's `networkPolicy` config is purely additive in nature. It guardrails 
@@ -300,9 +303,14 @@ type ManagedPersistentVolumeConfig struct {
 	// +kubebuilder:validation:Format=duration
 	RetentionPeriod *metav1.Duration `json:"retentionPeriod,omitempty"`
 
-	// A future revision may add volume-utilization handling here (a full
-	// threshold and opt-in online expansion). It is deliberately absent until
-	// the operator exposes per-run volume-usage metrics to drive it; see
+	// size is mutable: raising it requests expansion of the PVCs the operator
+	// manages, and is honored only when the StorageClass has
+	// allowVolumeExpansion: true. Shrinking is rejected, as CSI does not
+	// support it. See "Storage resizing (user-driven)".
+	//
+	// A future revision may add *automatic* volume-utilization handling here (a
+	// full threshold and opt-in online expansion). It is deliberately absent
+	// until the operator exposes per-run volume-usage metrics to drive it; see
 	// Non-Goals.
 }
 
@@ -351,6 +359,57 @@ type NetworkPolicyProfile struct {
 	Spec networkingv1.NetworkPolicySpec `json:"spec,omitzero"`
 }
 ```
+
+##### Storage resizing (user-driven)
+
+Resizing the PVC is an explicit user action, and not initiated by the operator automatically.
+The administrator edits `spec.storage.persistentVolume.size` on the
+`MustGatherPolicy` and the operator propagates the new request to the PVCs it manages,
+whether that request is actually satisfied is up to the storage backend and storage csi controller.
+
+Resizing is a property of the policy, not of any one run, so it is reported on
+the `MustGatherPolicy` status: the policy controller records the size it last
+reconciled onto the PVCs it manages, so a pending or failed resize is
+distinguishable from a converged one.
+
+```go
+// api/v1alpha1/mustgatherpolicy_types.go
+
+type MustGatherPolicyStatus struct {
+	// ... observedGeneration / conditions as below ...
+
+	// observedStorageSizeOnSync is the PVC capacity the controller most
+	// recently reconciled onto the volumes this policy manages. It differs
+	// from spec.storage.persistentVolume.size while a user-requested resize
+	// is pending or has failed, and is the value that size is compared
+	// against to decide whether a resize is outstanding.
+	// +optional
+	ObservedStorageSizeOnSync *resource.Quantity `json:"observedStorageSizeOnSync,omitempty"`
+}
+```
+
+Two conditions on the `MustGatherPolicy` report the resize, both following the
+usual `metav1.Condition` semantics and aggregated across the volumes the policy
+manages (as `Degraded` already is, with the failing namespaces named in the
+message):
+
+| Condition | Status | Reason | Meaning |
+|-----------|--------|--------|---------|
+| `RequiresResizing` | `True` | `SizeIncreased` | The resolved desired size exceeds `observedStorageSizeOnSync`; a resize is outstanding. |
+| `RequiresResizing` | `False` | `SizeConverged` | Desired size equals `observedStorageSizeOnSync`; nothing to do. |
+| `RequiresResizing` | `False` | `ExpansionNotSupported` | A larger size was requested but the StorageClass does not allow expansion; paired with `Degraded`. The request will not be retried against this volume. |
+| `ResizingCompleted` | `True` | `ResizeSucceeded` | The CSI driver finished expanding every managed volume and its filesystem; `observedStorageSizeOnSync` has been updated to the new capacity. |
+| `ResizingCompleted` | `False` | `ResizeInProgress` | The PVC patches were accepted and the driver is expanding (including `FileSystemResizePending` while a gather pod holds the volume). |
+| `ResizingCompleted` | `False` | `ResizeFailed` | The driver reported a failure; the message carries the affected PVCs and the event. |
+
+`ResizingCompleted=True` is only meaningful once a resize has been requested; on
+a policy whose volumes were provisioned at the current size from the start,
+neither condition is set. The administrator's loop is therefore: raise `size`,
+watch `RequiresResizing` flip to `True` on the policy, then `ResizingCompleted`
+reach `True` with `observedStorageSizeOnSync` matching the new value. Nothing
+about resizing is recorded on `MustGather` — a run only reads the resolved size,
+and `MustGather.status` stays limited to the two `observedGeneration` values and
+the policy reference.
 
 ##### NetworkPolicy layering (additive only)
 
@@ -566,12 +625,21 @@ type MustGatherPolicyStatus struct {
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
+	// observedStorageSizeOnSync is the PVC capacity most recently reconciled
+	// onto the volumes this policy manages; see "Storage resizing
+	// (user-driven)".
+	// +optional
+	ObservedStorageSizeOnSync *resource.Quantity `json:"observedStorageSizeOnSync,omitempty"`
+
 	// conditions represent the latest available observations of the policy rollout.
-	//   Available:   the policy is valid and in effect for subsequent runs.
-	//   Progressing: existing per-namespace children are being re-rendered for the
-	//                current generation.
-	//   Degraded:    one or more of those namespaces failed; the message carries
-	//                the count, e.g. "2 of 7 namespaces failed".
+	//   Available:         the policy is valid and in effect for subsequent runs.
+	//   Progressing:       existing per-namespace children are being re-rendered for
+	//                      the current generation.
+	//   Degraded:          one or more of those namespaces failed; the message carries
+	//                      the count, e.g. "2 of 7 namespaces failed".
+	//   RequiresResizing:  a user-requested size change is outstanding against the
+	//                      managed PVCs.
+	//   ResizingCompleted: that resize has been applied to every managed PVC.
 	// +listType=map
 	// +listMapKey=type
 	// +optional
@@ -668,6 +736,16 @@ retention that must defer deletion.
   run's namespace, tracked by discovery labels (not an ownerReference) so retention
   can outlive the run.
 
+- **User-driven resizing only.** Raising
+  `spec.storage.persistentVolume.size` requests expansion of the managed PVCs and
+  is honored only where the StorageClass sets `allowVolumeExpansion: true`;
+  shrinking is rejected. The operator never initiates a resize on its own (see
+  Non-Goals) and never deletes a PVC to apply a new size. Progress is reported
+  on the policy — `MustGatherPolicy.status.observedStorageSizeOnSync` and the
+  `RequiresResizing` /
+  `ResizingCompleted` conditions — see
+  [Storage resizing](#storage-resizing-user-driven).
+
 - **Cleanup.** See
   [Deletion handling](#deletion-handling-ownerreferences-and-finalizers):
   ownerReference GC with a finalizer backstop for the policy's NetworkPolicies, and
@@ -737,6 +815,9 @@ services; the new controller ships in the existing operator binary.
   otherwise (opt-in / OFF by default verified).
 - Storage, resources, upload-target allow list, and gather-pod `NetworkPolicy`
   inheritance implemented and covered by e2e.
+- User-driven resizing honored on expansion-capable StorageClasses, with
+  `MustGatherPolicy.status.observedStorageSizeOnSync` and the `RequiresResizing` /
+  `ResizingCompleted` conditions reported, and rejected clearly elsewhere.
 
 ### Tech Preview -> GA (Phase 2)
 
@@ -761,7 +842,13 @@ webhook is needed and stored objects convert transparently.
   `MustGather` controller materializes a namespace's NetworkPolicy on the first run
   there, manages per-run PVCs, and emits metrics for provisioned/retained/reclaimed
   volumes.
-- Failure modes to define: invalid or unavailable StorageClass; upload target not
+- A user-requested size change is reconciled onto existing managed PVCs where
+  the StorageClass allows expansion, and reported on the policy through
+  `status.observedStorageSizeOnSync` with the `RequiresResizing` /
+  `ResizingCompleted` conditions. No resize is ever operator-initiated.
+- Failure modes to define: invalid or unavailable StorageClass; a size increase
+  against a StorageClass without `allowVolumeExpansion` (rejected, reported, not
+  retried); a shrink request (rejected); upload target not
   in the allow list (fail the run clearly); `NetworkPolicy` unsupported on the
   platform; PVC filled by a run (the run fails; the volume is not grown — see
   Non-Goals); the per-namespace NetworkPolicy failing to be created before a run
@@ -785,6 +872,16 @@ webhook is needed and stored objects convert transparently.
   `ProvisioningFailed` events from the CSI driver (bad or missing StorageClass,
   quota exhausted). The operator surfaces this on the `MustGather` and in the
   provisioned/reclaimed PVC metrics.
+- Resize not taking effect: on the `MustGatherPolicy`,
+  `status.observedStorageSizeOnSync` lags `spec.storage.persistentVolume.size`
+  and `RequiresResizing=True`. If `ResizingCompleted=False` with reason
+  `ResizeInProgress`, the driver is still working (a volume held by a running
+  gather pod on an offline-expansion-only driver stays
+  `FileSystemResizePending` until the pod exits). Reason
+  `ExpansionNotSupported` means the StorageClass lacks
+  `allowVolumeExpansion: true` — check with
+  `oc get storageclass <name> -o jsonpath='{.allowVolumeExpansion}'`; the new
+  size will apply to volumes provisioned for later runs regardless.
 - Gather container OOM-killed: pod termination reason `OOMKilled` on the gather
   job; the memory limit in the policy is too low for the cluster (see
   Non-Goals). The run is not retried.
@@ -820,7 +917,14 @@ CR first; the CRs hold only configuration, so no gathered data is lost.
 - **Integration (envtest):** policy create/update/delete drives NetworkPolicy
   fan-out and finalizer cleanup; `Namespace` creation converges; deletion leaves no
   orphaned children; PVC retention/reclaim and the `pvc-retention` finalizer honor
-  `retentionPeriod` including early `MustGather` delete.
+  `retentionPeriod` including early `MustGather` delete; a `size` increase
+  drives the PVC patch and the `RequiresResizing`/`ResizingCompleted`
+  transitions, with `observedStorageSizeOnSync` converging.
+- **e2e (resizing):** on a StorageClass with `allowVolumeExpansion: true`, raising
+  the policy's `size` expands an existing volume and both conditions converge;
+  on one without it, the request is rejected, reported with
+  `ExpansionNotSupported`, no data is lost, and the next run's PVC is
+  provisioned at the new size. A shrink request is rejected.
 - **e2e:** end-to-end inheritance of storage, resources, upload-target allow list,
   and gather-pod NetworkPolicy; `status.inheritsPolicy` populated/unset correctly
   (opt-in verified); upload to a disallowed target fails clearly;
