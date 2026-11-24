@@ -18,6 +18,7 @@ tracking-link:
   - https://redhat.atlassian.net/browse/MG-348
 status: implementable
 see-also:
+  - "/enhancements/support-log-gather/must-gather-operator-network-policy.md"
 
 ---
 
@@ -39,7 +40,9 @@ Delivered in two phases:
   override.
 
 All `MustGather` changes are strictly additive — a `status` field in Phase 1, an
-optional `spec` field in Phase 2 — so no existing consumer breaks.
+optional `spec` field in Phase 2 — so no existing consumer breaks. The  `NetworkPolicy`
+is strictly additive and layered on top of base policies defined in
+[must-gather-operator-network-policy](./must-gather-operator-network-policy.md).
 
 ## Motivation
 
@@ -97,6 +100,12 @@ restrict where collected cluster data may be uploaded.
   publish yet; once those exist a follow-up can add a full threshold and opt-in
   online expansion as additive fields. Until then, a run that outgrows its volume
   fails and the administrator raises `size`.
+- Replacing the operator-managed base NetworkPolicies from 
+  [must-gather-operator-network-policy](./must-gather-operator-network-policy.md).
+  The policy's `networkPolicy` config is purely additive in nature. It guardrails 
+  and covers DNS, API server, SFTP, and proxy egress completely to avoid
+  silently breaking existing gathers jobs.
+
 - Automatically retrying a failed run. A `MustGather` is attempted once; it is not
   retried, not even when `metadata.generation` changes (for example, when the spec
   is edited after a failure). Re-running means creating a new `MustGather`.
@@ -131,13 +140,18 @@ exists, so runs behave exactly as they do today.
    setting the storage profile (storage class, size, retention), resource
    requests/limits, the upload-target allow list, and the gather-pod
    `NetworkPolicy`.
-2. The policy controller validates the policy, fans the `NetworkPolicy` out to
-   every namespace, and reports `Available` with `observedGeneration`.
+2. The policy controller validates the policy and reports `Available` with
+   `observedGeneration`. It writes no `NetworkPolicy` yet — none is needed until a
+   run exists.
 3. The must-gather user creates a `MustGather` in their namespace, leaving the
    storage, resources, and upload fields unset.
 4. The `MustGather` controller resolves the policy, merges its defaults with the
-   spec, provisions a PVC from the storage profile, and starts the gather job
-   with the policy's resources and `NetworkPolicy` applied.
+   spec, provisions a PVC from the storage profile, ensures the policy's
+   `NetworkPolicy` exists in that namespace (creating it on the first run there,
+   exactly as the base Tier 1 policy is created), and starts the gather job with
+   the policy's resources applied. The gather pod is selected by the operator's
+   own base NetworkPolicies *and* the policy's additional one; the effective
+   allow list is the union of the two.
 5. The must-gather user reads `status.inheritsPolicy` to see which policy and
    revision was applied, and collects the archive from the PVC.
 6. After the run completes, the `MustGather` controller reclaims the PVC once
@@ -250,9 +264,9 @@ type MustGatherPolicySpec struct {
 	// +optional
 	UploadTargets *UploadTargetPolicy `json:"uploadTargets,omitempty"`
 
-	// networkPolicy, when set, is materialized as a NetworkPolicy applied to the
-	// gather pods to constrain their traffic (typically egress to approved upload
-	// endpoints). The operator owns and manages the podSelector.
+	// networkPolicy, when set, is materialized as an additional NetworkPolicy
+	// applied to the gather pods (typically to permit egress to additional
+	// endpoints). It is additive to the apisever and upload targets' connectivity. 
 	// +optional
 	NetworkPolicy *NetworkPolicyProfile `json:"networkPolicy,omitempty"`
 }
@@ -327,7 +341,8 @@ type SFTPUploadTargetPolicy struct {
 	AllowedHosts []string `json:"allowedHosts,omitempty"`
 }
 
-// NetworkPolicyProfile carries a NetworkPolicy spec to apply to gather pods.
+// NetworkPolicyProfile carries a NetworkPolicy spec to apply to gather pods, in
+// addition to the operator-managed base policies.
 type NetworkPolicyProfile struct {
 	// spec is the NetworkPolicySpec applied to the gather pods. The operator
 	// injects/overwrites the podSelector so it targets only the gather pods it
@@ -336,6 +351,45 @@ type NetworkPolicyProfile struct {
 	Spec networkingv1.NetworkPolicySpec `json:"spec,omitzero"`
 }
 ```
+
+##### NetworkPolicy layering (additive only)
+
+[must-gather-operator-network-policy](./must-gather-operator-network-policy.md)
+already defines the NetworkPolicies the operator manages on its own. This
+enhancement's `spec.networkPolicy` sits on top of those as one more layer; it is
+never an override, and the operator never skips or mutates the base policies
+because a `MustGatherPolicy` exists.
+
+| Layer | Object | Owner | Lifetime | Source |
+|-------|--------|-------|----------|--------|
+| 0 | *(none)* — implicit deny-all once any policy selects the pod | Kubernetes | — | NetworkPolicy semantics |
+| 1 | `must-gather-default` — DNS + API server egress | `MustGather` controller | per namespace, long-lived | [network-policy EP](./must-gather-operator-network-policy.md) Tier 1 |
+| 2 | `must-gather-<cr-name>-sftp` / `-netpol` — SFTP, proxy, per-image egress | `MustGather` controller | per run | [network-policy EP](./must-gather-operator-network-policy.md) Tier 2 |
+| 3 | `must-gather-custom` — rules from `MustGatherPolicy.spec.networkPolicy` | owned by `MustGatherPolicy`, created by the `MustGather` controller | per namespace, created lazily on the first run there, tied to the policy | this enhancement |
+
+Layers 1 and 3 are both created lazily, on the first must-gather run in a
+namespace; a namespace that never runs one carries neither object.
+
+Kubernetes evaluates all NetworkPolicies selecting a pod as a union of their allow
+rules, so layer 3 can only *add* permitted traffic. Three consequences follow, and
+they are the reason additive-only is the behaviour chosen for this release:
+
+- **A gather run cannot be broken by an incomplete policy.** An admin who writes a
+  `networkPolicy` that forgets DNS or port 6443 still gets a working run, because
+  layers 1 and 2 supply those rules independently.
+- **Layer 3 is not a tightening mechanism.** It cannot be used to *remove* the base
+  DNS, API-server, SFTP, or proxy egress. An administrator who wants a strictly
+  narrower posture than the base policies cannot express it here; that is the
+  deferred "custom policy only" mode (see Non-Goals), which needs completeness
+  guardrails before it is safe to offer.
+- **Deleting the `MustGatherPolicy` is safe.** Layer 3 disappears with it (see
+  [Deletion handling](#deletion-handling-ownerreferences-and-finalizers)) and runs
+  fall back to layers 1–2, which is exactly today's behaviour.
+
+An administrator who nevertheless wants only the custom rules in effect can delete
+the operator-managed base policies by hand; the operator recreates `must-gather-default`
+on the next run in that namespace, so this is not a supported configuration — it is
+noted only to be explicit that nothing in this design prevents it.
 
 Phase 1 adds a status field to `MustGather`; the spec is untouched:
 
@@ -439,26 +493,37 @@ version; `v1alpha1` stays served.
 
 #### Child objects: ownership, discovery, and status
 
-Applying a policy produces two kinds of child objects:
+Applying a policy produces two kinds of child objects, **both created lazily** — the
+policy itself writes nothing into any namespace until a run needs it there:
 
-- a **NetworkPolicy** in **every namespace**, and
-- a **PVC** provisioned **lazily, per `MustGather` run** (the policy holds only the
-  storage *profile*).
+- a **NetworkPolicy**, created in a namespace the first time a `MustGather` runs in
+  it, and persisting in that namespace while the policy exists; and
+- a **PVC**, provisioned per `MustGather` run (the policy holds only the storage
+  *profile*).
 
-Fan-out to every namespace is unbounded, so the policy status must not enumerate
-its children: a per-namespace `(name, namespace)` list on a cluster-scoped
-singleton grows with the namespace count, can exceed the etcd object-size limit,
-and makes every status write a conflict hotspot. Other OpenShift fan-out designs
+Lazy creation matches the base Tier 1 policy in
+[must-gather-operator-network-policy](./must-gather-operator-network-policy.md),
+which is likewise created on the first run in a namespace. A cluster with 400
+namespaces and must-gather runs in 3 of them holds 3 of these NetworkPolicies, not
+400. Eagerly writing to every namespace was considered and rejected (see
+[Alternatives](#alternatives-not-implemented)).
+
+The set of namespaces that have ever run a must-gather is still unbounded and only
+grows, so the policy status must not enumerate its children: a per-namespace
+`(name, namespace)` list on a cluster-scoped singleton grows without bound, can
+exceed the etcd object-size limit, and makes every status write a conflict hotspot.
+Other OpenShift multi-namespace designs
 ([trust-manager](../cert-manager/trust-manager-controller.md),
 [cert-manager network policies](../cert-manager/cert-manager-network-policies.md),
 [external-secrets network policy](../external-secrets-operator/external-secrets-network-policy.md))
 track children via ownerReferences and labels instead. Three mechanisms cover it:
 
 **1. OwnerReferences (lifecycle / GC).**
-Each namespaced `NetworkPolicy` is owned by the cluster-scoped `MustGatherPolicy`.
-A namespaced dependent with a cluster-scoped owner is garbage-collected, so
-deleting the policy cascades to every NetworkPolicy — the mechanism OLM uses to
-clean up across namespaces (see [olm/simplify-apis](../olm/simplify-apis.md)).
+Each namespaced `NetworkPolicy` is owned by the cluster-scoped `MustGatherPolicy`
+even though it is the `MustGather` controller that materializes it, because its
+lifetime tracks the policy and not the run: it is created on the first run in the
+namespace and left in place for subsequent runs. A namespaced dependent with a
+cluster-scoped owner is garbage-collected, so deleting the policy cascades to every
 
 > [etcd/automated-backups](../etcd/automated-backups.md) cautions that
 > cluster-scoped→namespaced GC "will not be enforced." That inverts the rule: a
@@ -484,8 +549,11 @@ Every child carries labels so enumeration is a selector query, not a status read
 them. The `policy-generation` label acts as a per-child observed generation:
 children below `policy.metadata.generation` are stale, and a selector finds them.
 
-**3. Conditions + observedGeneration (rollout summary).**
-The policy status stays O(1) regardless of namespace count:
+**3. Conditions + observedGeneration rollout**
+Rollout consists re-rendering the children that already exist, not reaching
+every namespace: on a policy update the controller lists its children by selector
+and rewrites each one. A namespace that has never run a must-gather has no child
+and is not part of any rollout. This is captured in the status as a part of:
 
 ```go
 // api/v1alpha1/mustgatherpolicy_types.go
@@ -499,10 +567,11 @@ type MustGatherPolicyStatus struct {
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
 	// conditions represent the latest available observations of the policy rollout.
-	//   Available:   the policy has been applied cluster-wide.
-	//   Progressing: rollout to namespaces is in progress.
-	//   Degraded:    one or more namespaces failed; the message carries the count,
-	//                e.g. "2 of 42 namespaces failed".
+	//   Available:   the policy is valid and in effect for subsequent runs.
+	//   Progressing: existing per-namespace children are being re-rendered for the
+	//                current generation.
+	//   Degraded:    one or more of those namespaces failed; the message carries
+	//                the count, e.g. "2 of 7 namespaces failed".
 	// +listType=map
 	// +listMapKey=type
 	// +optional
@@ -515,8 +584,9 @@ A later revision could add a `MaxItems`-capped list of only the failing namespac
 (as [subscription-injection](../subscription-content/subscription-injection.md)
 does); Phase 1 stays conditions-only.
 
-A run's NetworkPolicy is the fanned-out one already present in its namespace (owned
-by the policy), not a per-run object. The only per-run child is the **PVC**, tracked
+A run's NetworkPolicy is the namespace-scoped one owned by the policy, lazy and created
+on first run in that namespace and reused by every run after it i.e. not a per-run
+object. The only per-run child is the **PVC**, tracked
 by discovery labels (not an ownerReference, so retention can outlive the run), so its
 name need not be copied into `MustGather.status`. That keeps `MustGather.status` to
 the two `observedGeneration` values and the policy reference.
@@ -526,7 +596,7 @@ the two `observedGeneration` values and the policy reference.
 Two cleanup paths, one per owner. Each pairs an `ownerReference` (GC fast path) with
 a finalizer (backstop for what GC can't express).
 
-**Policy → fanned-out NetworkPolicies.** Each child gets a controller
+**Policy → materialized NetworkPolicies.** Each child gets a controller
 `ownerReference` to the `MustGatherPolicy`, carrying the owner `UID` (so a recreated
 same-name policy never adopts stale children) and `blockOwnerDeletion: true`. This
 is the supported GC direction — cluster-scoped owner, namespaced dependent — so the
@@ -536,12 +606,6 @@ also carries `must-gather.openshift.io/cleanup-networkpolicies`. On
 `policy-uid=<uid>` selector, delete all, wait for the selector to go empty, then
 drop the finalizer. Idempotent, and correct whether or not cross-scope GC is
 enforced on the target version — if GC ran, the finalizer step is a no-op.
-
-Selector-driven cleanup (not the owner graph) also recovers children orphaned by a
-mid-fan-out crash; a startup reconcile re-stamps missing owners/labels. Gate the
-create path on `deletionTimestamp == nil` so the `Namespace` watch stops
-materializing children once deletion starts, and treat `NotFound` (child in a
-`Terminating` namespace) as success.
 
 **MustGather → per-run PVC.** The only per-run child is the PVC, a same-namespace
 dependent for which a direct `ownerReference` would normally suffice — except it must
@@ -574,9 +638,10 @@ retention that must defer deletion.
   `obfuscate` are excluded for now (see Non-Goals).
 
 - **Two controllers.** A new controller owns `MustGatherPolicy`: validation,
-  rollout status, and fan-out/cleanup of the per-namespace NetworkPolicies. The
-  `MustGather` controller manages the per-run PVC — provisioning it from the profile
-  and applying the policy's retention settings.
+  rollout status, and re-render/cleanup of the per-namespace NetworkPolicies that
+  already exist. The `MustGather` controller is what first materializes a
+  NetworkPolicy in a namespace, and manages the per-run PVC — provisioning it from
+  the profile and applying the policy's retention settings.
   Retention/reclaim must not race with a run still mounting the volume.
 
 - **Singleton enforcement (Phase 1).** A CEL `XValidation` rule pins
@@ -590,13 +655,14 @@ retention that must defer deletion.
   breaking change. With sub-fields, a new type costs one enum value plus one
   struct, and CEL gates each sub-field on its type being allowed.
 
+- **NetworkPolicy is additive only.** The policy's `networkPolicy` is materialized
+  as an extra object alongside the base policies from
+  [must-gather-operator-network-policy](./must-gather-operator-network-policy.md),
+  which the operator keeps creating and reconciling unchanged.
+
 - **NetworkPolicy ownership.** The operator sets the `podSelector` itself so each
   `NetworkPolicy` targets only its gather pods; a user-supplied `podSelector` is
   ignored, keeping unrelated workloads unaffected.
-
-- **NetworkPolicy fan-out.** The policy controller writes the `NetworkPolicy` to
-  every namespace and watches `Namespace` creation so new namespaces converge.
-  Each object is owned by the policy and carries the discovery labels.
 
 - **Lazy PVC provisioning.** The PVC is created only when a run needs one, in the
   run's namespace, tracked by discovery labels (not an ownerReference) so retention
@@ -646,10 +712,13 @@ on OKE on the same terms as today; the policy adds nothing OKE-specific.
 
 - [Must-Gather Operator: PVC destination for gathered data](./must-gather-operator-pvc-destination.md)
 - [Must Gather Operator](./must-gather-operator.md)
+- [Network policies for operator and must-gather jobs](./must-gather-operator-network-policy.md)
+  — defines the base NetworkPolicy layers this enhancement adds to, and names
+  `MustGatherPolicy` as the admin config resource for `imageNetworkPolicies`.
 
 ## Alternatives (Not Implemented)
 
-- **Per-namespace policy object** instead of cluster-scoped fan-out. Rejected: it
+- **Per-namespace policy object** instead of a cluster-scoped one. Rejected: it
   pushes policy authoring onto every namespace owner and defeats the central-control
   goal.
 
@@ -687,15 +756,17 @@ webhook is needed and stored objects convert transparently.
 
 ## Operational Aspects of API Extensions
 
-- The policy controller fans out NetworkPolicies and reports
-  `Available`/`Progressing`/`Degraded` plus `observedGeneration`. The `MustGather`
-  controller manages per-run PVCs and emits metrics for
-  provisioned/retained/reclaimed volumes.
+- The policy controller re-renders the NetworkPolicies that already exist and
+  reports `Available`/`Progressing`/`Degraded` plus `observedGeneration`. The
+  `MustGather` controller materializes a namespace's NetworkPolicy on the first run
+  there, manages per-run PVCs, and emits metrics for provisioned/retained/reclaimed
+  volumes.
 - Failure modes to define: invalid or unavailable StorageClass; upload target not
   in the allow list (fail the run clearly); `NetworkPolicy` unsupported on the
   platform; PVC filled by a run (the run fails; the volume is not grown — see
-  Non-Goals); a subset of namespaces failing
-  fan-out (reported via `Degraded`).
+  Non-Goals); the per-namespace NetworkPolicy failing to be created before a run
+  (the run does not start); a subset of existing children failing to re-render
+  after a policy update (reported via `Degraded`).
 
 ## Support Procedures
 
@@ -717,9 +788,12 @@ webhook is needed and stored objects convert transparently.
 - Gather container OOM-killed: pod termination reason `OOMKilled` on the gather
   job; the memory limit in the policy is too low for the cluster (see
   Non-Goals). The run is not retried.
-- `NetworkPolicy` fan-out trouble: the `MustGatherPolicy` reports `Degraded` with
-  the namespaces that failed, and `observedGeneration` lags `metadata.generation`
-  while a rollout is incomplete.
+- `NetworkPolicy` trouble: a namespace whose child failed to re-render after a
+  policy update shows up in the `MustGatherPolicy` `Degraded` message, and
+  `observedGeneration` lags `metadata.generation` while a rollout is incomplete.
+  A namespace with no child at all is normal — it simply has not run a must-gather
+  yet; `oc get networkpolicy -A -l must-gather.openshift.io/policy-name=cluster`
+  shows exactly which namespaces have one.
 
 **Disabling the API extension.** Deleting the `MustGatherPolicy` disables policy
 inheritance: the policy controller removes the `NetworkPolicy` objects it owns,
@@ -729,10 +803,13 @@ unset. Cluster health is unaffected — no other component depends on the policy
 Consequences for running workloads: in-flight `MustGather` runs keep the merged
 configuration they already resolved and their PVCs, which are retained by
 discovery label and the `pvc-retention` finalizer rather than by the policy, so
-no collected data is lost. Removing the policy removes the egress restriction on
-future gather pods and the upload allow list, so uploads that were previously
-blocked become possible again — that is the relevant risk when disabling it, not
-cluster health. Removing the `MustGatherPolicy` CRD itself requires deleting the
+no collected data is lost. Removing the policy drops the policy's *additional*
+NetworkPolicy layer and the upload allow list, so uploads that the allow list
+previously blocked become possible again — that is the relevant risk when
+disabling it, not cluster health. The base NetworkPolicies from
+[must-gather-operator-network-policy](./must-gather-operator-network-policy.md)
+are owned by the `MustGather` controller, not by the policy, so they survive and
+keep enforcing their deny-by-default posture. Removing the `MustGatherPolicy` CRD itself requires deleting the
 CR first; the CRs hold only configuration, so no gathered data is lost.
 
 ## Test Plan
@@ -747,7 +824,7 @@ CR first; the CRs hold only configuration, so no gathered data is lost.
 - **e2e:** end-to-end inheritance of storage, resources, upload-target allow list,
   and gather-pod NetworkPolicy; `status.inheritsPolicy` populated/unset correctly
   (opt-in verified); upload to a disallowed target fails clearly;
-  `Degraded` reported when a subset of namespaces fail fan-out.
+  `Degraded` reported when a subset of namespaces fail to roll-out.
 - **Upgrade:** `v1alpha1`→`v1` identity conversion with stored objects; mixed
   operator/API-server skew during graduation.
 
@@ -764,12 +841,6 @@ CR first; the CRs hold only configuration, so no gathered data is lost.
 - **GC direction assumption.** Cleanup assumes cluster-scoped-owner →
   namespaced-dependent GC. *Mitigation:* the finalizer backstops it; re-verify
   against the target Kubernetes version.
-
-### Drawbacks
-
-- Fan-out adds reconcile load proportional to namespace count and a `Namespace`
-  watch, for a feature many namespaces never use.
-- A second controller and a finalizer widen the operational surface.
 
 ### Removing a deprecated feature
 
