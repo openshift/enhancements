@@ -88,7 +88,7 @@ bootstrapping:
   version — so that I can diagnose a stuck rollout without decoding Secret data.
 * As an SRE responsible for operating this at scale, I want payload generation
   and serving to be observable through status conditions and metrics and to
-  self-heal (leader failover on pod loss, cold cache rehydrate on restart), so
+  self-heal (leader failover on pod loss, stateless serving replicas), so
   that I can monitor fleet health and remediate without manual payload surgery.
 
 ### Goals
@@ -207,18 +207,23 @@ Starting state: a NodePool exists and references user/core/NTO configs.
    Before pulling the release image it reads the target `(owner, rolloutGeneration)`
    store entry; if its recorded `configHash` already matches, it reuses those bytes
    and skips the pull, otherwise it runs the MCO pipeline (which pulls the release image).
-4. If the rollout hash changed, it moves `status.current` to `status.previous` —
-   deleting from the store any payload already occupying `status.previous`
-   (delete-on-evict), so at most two payloads (current + previous) are ever live
-   per CR even when rollouts overtake each other (A->B->C) — mints a new signed,
-   audience-bound, expiring, name-scoped token (for authentication only, not payload
-   identification), calls `PayloadStore.Put` keyed by the new `(owner, rolloutGeneration)`, **authors
-   the pointer-ignition userdata Secret** (named `<ignitionpayload-name>-<rolloutGeneration>`,
-   embedding the per-payload endpoint `GET /ignition/<ignitionpayload-name>`, the CA, the
-   token, and a static `rollout-generation` header carrying this rollout's generation — see Node
-   authentication and token handling), and sets
-   `status.current` with the new hashes, `rolloutGeneration + 1`, and the
-   `userDataSecret`. **The token itself is never written to status.** Otherwise
+4. If the rollout hash changed, it rolls out as **prepare -> commit -> reclaim**, so no failure
+   at any step leaves status naming a generation whose payload or userdata Secret is gone.
+   *Prepare:* it mints a new signed, audience-bound, expiring, name-scoped token (for
+   authentication only, not payload identification), calls `PayloadStore.Put` keyed by the new
+   `(owner, rolloutGeneration)`, and **authors the pointer-ignition userdata Secret** (named
+   `<ignitionpayload-name>-<rolloutGeneration>`, embedding the per-payload endpoint
+   `GET /ignition/<ignitionpayload-name>`, the CA, the token, and a static `rollout-generation`
+   header carrying this rollout's generation — see Node authentication and token handling). Both
+   writes are idempotent and invisible until committed, so a render failure leaves the advertised
+   current and previous generations — and their payloads and userdata Secrets — untouched.
+   *Commit:* a single optimistic-locked status patch moves `status.current` to `status.previous`
+   and sets `status.current` with the new hashes, `rolloutGeneration + 1`, and the
+   `userDataSecret`. *Reclaim:* only then does the per-CR sweep (see PayloadStore) delete what the
+   committed status no longer names — including the evicted old `status.previous`
+   (delete-on-evict), so at most two generations (current + previous) are ever advertised per CR
+   even when rollouts overtake each other (A->B->C). **The token itself is never written to
+   status.** Otherwise
    (management-side/cloud-config change only) it refreshes the bytes behind the
    *current* `(owner, rolloutGeneration)` entry, refreshes that userdata Secret's content in place, and updates only
    `status.current.configHash`. On the first reconcile after the hash *formula* itself
@@ -236,19 +241,24 @@ Starting state: a NodePool exists and references user/core/NTO configs.
    `Authorization: Bearer <token>` and the static `rollout-generation` header (both from the
    userdata it was provisioned with). The server validates the token (signature, audience,
    expiry) and that its scope authorizes the path's name, then resolves the payload by
-   `PayloadStore.Get(owner, rolloutGeneration)` from the path and header. It serves from its
-   per-pod local cache; on a cache miss it reads through to `PayloadStore.Get`, serves the
-   result, and populates the cache — so there is no window between `PayloadStore.Put` and
-   informer propagation in which an authorized request returns HTTP 511. On the first
-   successful serve where the node's presented `rollout-generation` matches
-   `status.current.rolloutGeneration` it sets `IgnitionReached: True` on the CR via one
-   idempotent status update; a node presenting a `status.previous` generation during drain does not
-   flip the condition, so a node still booting on the old generation cannot mark the new one
-   reached.
+   `PayloadStore.Get(owner, rolloutGeneration)` from the path and header. Every read is
+   authoritative (no serving-side cache), so a payload is servable as soon as `PayloadStore.Put`
+   returns, a management-side refresh is served on the next request, and a deleted entry is never
+   served. On a miss it reads the live generation range (`status.previous`..`status.current`) from
+   the CR: a generation below that floor has been retired and, since generations only increment,
+   will never be served again, so it returns HTTP 410 and Ignition gives up (it retries only on
+   >=500); any other miss returns HTTP 511 so Ignition backs off and retries. When the node's
+   presented `rollout-generation` matches `status.current.rolloutGeneration` the server sets
+   `IgnitionReached: True` on the CR; a node presenting a `status.previous` generation during
+   drain does not flip the condition, so a node still booting on the old generation cannot mark
+   the new one reached. The write is off the request path: each replica enqueues the served
+   `(owner, rolloutGeneration)` into an in-memory, de-duplicating work queue drained by a single
+   worker, so a burst of serves of one generation costs one status write per replica and the
+   HTTP response never waits on the API.
 7. When a rollout drains (old MachineDeployment scaled to 0), the NodePool controller
-   advances `spec.retiredRolloutGeneration`. The PayloadController then frees the old payload
-   from the store, deletes the retired userdata Secret, and clears `status.previous` only
-   when `status.previous.rolloutGeneration <= spec.retiredRolloutGeneration` — so if rollouts
+   advances `spec.retiredRolloutGeneration`. The PayloadController then clears `status.previous`,
+   after which the per-CR sweep frees the retired payload and deletes its userdata Secret. It does
+   so only when `status.previous.rolloutGeneration <= spec.retiredRolloutGeneration` — so if rollouts
    overtake each other (A->B->C), an earlier generation's (A) drain signal does not clear a
    still-draining `status.previous` (B), keeping this step consistent with the
    `retiredRolloutGeneration` contract in the CRD spec.
@@ -274,7 +284,8 @@ sequenceDiagram
     alt rollout hash changed
         PC->>PS: Put(owner, rolloutGeneration, payload)
         PC->>PC: author userdata Secret (name = <np>-rolloutGeneration; embeds path, CA, token, rollout-generation header)
-        PC->>CR: status.current = {hashes, gen+1, userDataSecret}
+        PC->>CR: commit: status.previous = current; status.current = {hashes, gen+1, userDataSecret}
+        PC->>PS: reclaim: delete entries + userdata status no longer names (evicted old previous)
         NP->>NP: point MachineDeployment at userDataSecret
     else management/cloud-config change only
         PC->>PS: Put(owner, rolloutGeneration, refreshed payload)
@@ -283,11 +294,12 @@ sequenceDiagram
     end
     Node->>SRV: GET /ignition/<name> (Bearer token + rollout-generation header)
     SRV->>SRV: validate token; authorize name; resolve (owner, rolloutGeneration) from path+header
-    SRV->>PS: hydrate local cache
+    SRV->>PS: Get(owner, rolloutGeneration) (authoritative read; 410 if retired, 511 on other miss)
     SRV-->>Node: serve payload
-    SRV->>CR: set IgnitionReached=True if presented generation == status.current.rolloutGeneration (one-shot)
+    SRV->>CR: enqueue; worker sets IgnitionReached=True if presented generation == status.current.rolloutGeneration
     NP->>CR: advance spec.retiredRolloutGeneration after drain
-    PC->>PS: Delete(owner, previous rolloutGeneration); delete previous userdata; clear status.previous
+    PC->>CR: clear status.previous
+    PC->>PS: reclaim: delete previous entry + userdata (no longer named by status)
 ```
 
 **Consumers other than the NodePool controller.** The workflow above is written
@@ -737,15 +749,15 @@ fixed-length digests of `owner` and `configHash` as labels (digested so selector
 store uses a direct, **uncached** client so reads always observe the latest write regardless of
 informer-cache state (and it performs writes, so a read-only API reader is insufficient).
 
-Server replicas hydrate a per-pod local cache (emptyDir/memory) via an informer; a cache miss
-reads through to `PayloadStore.Get`, so a payload is servable as soon as `Put` returns, before
-the informer propagates it. On a management-side refresh (Policy A) the generator **overwrites
-the current `(owner, rolloutGeneration)` entry in place** with the new bytes (new `configHash`); the
-informer delivers an update and each replica replaces its cached bytes (last-write-wins), so a
-scale-up node served by any replica gets current content with no roll. Deletions propagate the
-same way: a freed entry converges to HTTP 511 on every replica within informer lag. Because an
-entry is deleted only after its rollout has drained (its nodes are gone) or at CR teardown, no
-live consumer depends on it during that bounded window. v2 swaps in a `DatabaseBackedStore`
+Server replicas read the store authoritatively on every request — `PayloadStore.Get` through an
+uncached reader, with no per-pod payload cache and no Secret informer. Node fetches arrive at
+boot rate (one per boot plus retries), so the read cost is modest, and it buys exact
+semantics: a payload is servable as soon as `Put` returns; on a management-side refresh (Policy A)
+the generator **overwrites the current `(owner, rolloutGeneration)` entry in place** with the new
+bytes (new `configHash`) and the very next fetch through any replica gets current content with no
+roll (so a rotated credential is never served stale); and a deleted entry is never served again.
+A cache could be reintroduced later as an optimization only if it preserves these semantics.
+v2 swaps in a `DatabaseBackedStore`
 keyed the same way, removing the etcd object-size cap without changing the CRD contract or the
 serving hot path.
 
@@ -757,13 +769,18 @@ pull (the new leader re-pulls only if the crash preceded `PayloadStore.Put`), an
 steady-state guarantee is exactly one pull per config version at any replica count. Entries no
 longer named by `status.current`/`status.previous` — e.g. a rollout interrupted between `Put`
 and the `status` write, or an overtaken one — are reclaimed at CR teardown, when the
-store-cleanup finalizer deletes everything `ListByOwner` returns, and, as defense-in-depth, by
-an inline per-CR sweep each reconcile: after resolving `status.current`/`status.previous` the
-leader calls `ListByOwner` and deletes any `(owner, rolloutGeneration)` entry named by neither (nor
-the one being generated this pass). This is not the old background `secretsJanitor`: it is
-level-triggered, single-active (leader election), and scoped to the one CR already being
-reconciled, so it cannot race a concurrent generator. With it, the live per-CR entry count
-stays bounded to the two status-referenced rollouts plus at most the one in flight.
+store-cleanup finalizer deletes everything `ListByOwner` returns, and otherwise by an inline
+per-CR sweep after each status commit: after resolving `status.current`/`status.previous` the
+leader calls `ListByOwner` and deletes any `(owner, rolloutGeneration)` entry named by neither, and
+likewise deletes any userdata Secret the CR controls (matched by controller reference, not by name)
+that status does not name. The sweep runs only after a status commit, so its keep-set is always the
+committed status; it is the single reclaim path outside teardown — eviction on rollout, retirement,
+and interrupted generations are all freed the same way, never before the status that stops
+referencing them has been committed, and a crash mid-reclaim is finished by the next reconcile.
+This is not the old background `secretsJanitor`: it is level-triggered, single-active (leader
+election), and scoped to the one CR already being reconciled, so it cannot race a concurrent
+generator. With it, the live per-CR entry count stays bounded to the two status-referenced
+rollouts plus at most the one in flight.
 
 **Rollout detection lives with generation.** Because a rollout must not be
 triggered for a config that cannot produce a payload, rollout detection is
@@ -872,7 +889,17 @@ unchanged path + header still resolve the same entry). Already-booted nodes neve
 the *userdata* must stay fresh for not-yet-created/not-yet-booted instances. Two first-boot
 realities size the parameters: clocks may be wrong before NTP (validation allows generous skew /
 `nbf`), and the instance-creation→boot gap plus the re-issue cadence must fit comfortably within
-the token TTL.
+the token TTL. Because a token can already be up to one re-issue interval old when CAPI bakes it
+into an instance, the creation→first-fetch budget is `TTL − re-issue interval`. The default TTL is
+12h, re-issued at half (6h), so every instance has at least 6h from creation to its first fetch —
+on par with the legacy ignition-server (11h token lifetime, rotated at half). An instance that
+misses the budget (e.g. a VM pending on capacity for hours, or a long serving outage while it
+retries) receives a terminal HTTP 401; its bootstrap data cannot be rewritten, so it must be
+replaced and recreated from the refreshed userdata. This is a pre-existing gap — the legacy server
+returns 511 for an expired token, so such a node retries forever — and today only `autoRepair`
+pools recover, via the `MachineHealthCheck` `nodeStartupTimeout`. Automatic replacement for every
+pool (a Machine with no `nodeRef` past `creationTimestamp` + TTL provably holds an expired token)
+is tracked as follow-up work.
 
 The standalone HAProxy Deployment remains the only externally reachable hop (see Risks). Moving
 beyond a bearer token entirely — to possession-proof mTLS — is future work (see Alternatives);
@@ -914,7 +941,7 @@ the CRD to the default feature set.
 ### Risks and Mitigations
 
 - **v1 serving tier is not KAS-free.** With `SecretBackedStore`, server
-  replicas need management-cluster KAS access to run the Secret informer and to
+  replicas need management-cluster KAS access to read payload Secrets and to
   write `IgnitionReached`. *Mitigation:* the serving tier stays behind the
   standalone HAProxy proxy Deployment — the only externally reachable hop, kept
   off KAS-connected nodes. Reviewers of this enhancement should confirm this
@@ -947,7 +974,7 @@ the CRD to the default feature set.
   CPO-hosted server does today. This is the same class of fleet-wide roll CPOv2
   already drives for the per-HCP CAPI managers on an HO bump; this change
   increases its amplitude. *Availability impact is bounded:* the serving tier is
-  stateless (local cache; nodes fetch once at boot and retry HTTP 511 with
+  stateless (authoritative store reads; nodes fetch once at boot and retry HTTP 511 with
   backoff) and the generator is leader-elected, so a roll is a seconds-long
   generation pause that does not affect already-booted nodes. The residual
   concern is peak management-cluster resource consumption at the upgrade instant
@@ -1073,10 +1100,12 @@ The general strategy:
 - **Unit/integration tests** for the NodePool controller's reduced role: config
   projection, ref-list classification, `retiredRolloutGeneration` advancement,
   finalizer-driven CR delete and cascade of owned ConfigMaps.
-- **Integration tests** for the `PayloadStore` (SecretBackedStore + informer
-  hydration; cold rehydrate on restart; a management-side same-token refresh is
-  observed through *every* ignition-server replica — last-write-wins cache
-  replacement plus read-through on miss, so no replica serves stale bytes) and
+- **Integration tests** for the `PayloadStore` (SecretBackedStore; a management-side
+  same-generation refresh is served on the next request through *every* ignition-server
+  replica, and a deleted generation is never served, so no replica serves stale bytes;
+  a render failure during a rollout leaves the advertised previous generation servable;
+  the `IgnitionReached` write is gated and `resourceVersion`-pinned against a concurrent
+  rollout) and
   the two-Deployment leader-election split (exactly one release-image pull per
   config version at any replica count).
 - **e2e tests**: node provisioning through `GET /ignition/<name>`, a rollout-triggering
@@ -1107,8 +1136,8 @@ targeting a release. -->
 - `PayloadGenerated` and `IgnitionReached` conditions and the
   `kubectl get ignitionpayload` view implemented.
 - Sufficient unit/integration coverage; SLIs enumerated and exposed as metrics
-  (generation latency, store size per NodePool, informer lag, leader failovers).
-- Symptoms-based alerts drafted for stuck generation and cache staleness.
+  (generation latency, store size per NodePool, serving-tier store read latency, leader failovers).
+- Symptoms-based alerts drafted for stuck generation and stuck `IgnitionReached`.
 
 ### Tech Preview -> GA
 
@@ -1292,7 +1321,7 @@ older releases' CPO, reached only by clusters that never upgraded.
   `status.current.rolloutGeneration` for a new rollout it resets `IgnitionReached` to
   `False`, and the first server replica to serve the new token flips it back to
   `True`. Fleet-level metrics should expose
-  generation latency, store size per NodePool, informer lag on the serving tier,
+  generation latency, store size per NodePool, serving-tier store read latency,
   and leader failovers.
 - **Impact on existing SLIs.** The design *reduces* the load the old system
   placed on the registry and management KAS (in steady state, one release-image
@@ -1306,8 +1335,9 @@ older releases' CPO, reached only by clusters that never upgraded.
 - **Failure modes.** (a) Generator down at single replica -> new
   rollouts/scale-up refreshes stall (mitigated by leader election). (b)
   Validation failure -> `PayloadGenerated: False`, no rollout. (c) PayloadStore
-  unavailable -> serving tier serves from local cache; new payloads cannot be
-  written until it recovers. (d) Finalizer stuck (consumer down) -> CR deletion
+  unavailable -> fetches fail with HTTP 5xx and booting nodes back off and retry until it
+  recovers (already-booted nodes are unaffected); new payloads cannot be written meanwhile.
+  (d) Finalizer stuck (consumer down) -> CR deletion
   blocked; requires the consumer to recover or manual finalizer removal.
 - **Escalation.** The HyperShift team (and, for the trust boundary, the security
   team) are the likely escalation owners; add them as reviewers.
@@ -1321,8 +1351,9 @@ older releases' CPO, reached only by clusters that never upgraded.
   per-ConfigMap projection). Nodes returning HTTP 511 on `GET /ignition/<name>`
   indicate a store miss for the requested identity — check that the MachineDeployment's bootstrap
   Secret matches `status.current.userDataSecret.name`, that the path name and `rollout-generation` header
-  baked into that userdata Secret resolve to a live PayloadStore entry, and that the serving tier's
-  cache has hydrated (informer lag metric / ignition-server logs). Because the path carries the
+  baked into that userdata Secret resolve to a live PayloadStore entry, and the ignition-server logs
+  for store read errors. Nodes returning HTTP 410 requested a retired generation (below
+  `status.previous`) and must be replaced. Because the path carries the
   IgnitionPayload name, the ignition-server access logs show exactly which CR each request hit —
   so a payload that was served but whose `IgnitionReached` did not flip is directly diagnosable
   (compare the request's `rollout-generation` against `status.current.rolloutGeneration`). Generator
@@ -1335,10 +1366,10 @@ older releases' CPO, reached only by clusters that never upgraded.
   user-set HostedCluster `DisableIgnitionServerAnnotation`, which the HO honors by not
   deploying the new system (and the `< 5.1` CPO honors for the legacy server); that
   stops node provisioning for that cluster.
-- **Graceful recovery.** The serving hot path reads a local cache, so pod
-  restarts trigger a cold rehydrate (seconds) with no payload loss or
-  regeneration; a leader loss is recovered on lease expiry. Payloads persist in
-  the store, so a generator crash loses nothing — only brand-new config versions
+- **Graceful recovery.** The serving tier holds no payload state, so pod
+  restarts need no rehydrate and cause no payload loss or regeneration; a leader
+  loss is recovered on lease expiry. Payloads persist in the store, so a generator
+  crash loses nothing — only brand-new config versions
   wait for the new leader. Functionality resumes consistently when components
   return.
 
