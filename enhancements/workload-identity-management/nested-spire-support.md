@@ -93,7 +93,9 @@ The workflow has four steps. Steps 1 and 3 are **manual** administrator steps. S
 **Step 3 - Manual: bootstrap trust bundle (one-time)**
 
 1. Copy the upstream cluster's root trust bundle from the `spire-bundle` ConfigMap.
-2. On the downstream cluster, create a Secret containing the trust bundle PEM.
+2. On the downstream cluster, create a Secret containing the trust bundle PEM in the operator namespace.
+
+Creating Secrets in the operator namespace requires `create`/`update` permissions on `secrets` in that namespace. In practice this requires cluster-admin or namespace-admin privileges because the operator namespace is not user-facing. The same applies to the kubeconfig Secrets created in Step 1.
 
 **Step 4 - Operator-driven: configure the downstream cluster**
 
@@ -279,16 +281,30 @@ Not applicable.
 
 ### Implementation Details/Notes/Constraints
 
-#### Why a sidecar upstream agent with unix workload attestor
+#### Upstream agent sidecar and workload attestor
 
 The `UpstreamAuthority spire` plugin fetches an SVID from a local Workload API Unix socket. There is no option to bypass the socket. The existing `spire-agent` DaemonSet cannot provide that SVID because it is attested to the *local* SPIRE server. A second agent, attested to the upstream server, is required.
 
-The upstream agent runs as a sidecar container (`spire-agent-upstream`) in the downstream cluster's `spire-server` StatefulSet. The sidecar and the downstream server share the Workload API socket via an `emptyDir` volume. This approach:
+The upstream agent runs as a sidecar container (`spire-agent-upstream`) in the downstream cluster's `spire-server` StatefulSet. The sidecar and the downstream server share the Workload API socket via an `emptyDir` volume. A sidecar is chosen over a separate Deployment or DaemonSet because it guarantees co-location with the downstream server, shares the pod's network and process namespace without extra SCCs, and avoids a second CSI driver. See [Alternatives](#alternatives-not-implemented) for the full comparison. This approach:
 
 - Uses the `unix` workload attestor with `discover_workload_path: true` and `shareProcessNamespace: true` to produce a `unix:path:/spire-server` selector. The path is baked into the container image and portable across clusters.
 - Keeps the `spire-server` pod on the `restricted` SCC.
 
 The sidecar shares the `spire-server` ServiceAccount. The `unix` workload attestor and `k8s_psat` node attestor do not require any additional RBAC beyond what the `spire-server` SA already has.
+
+**Workload attestor selection: unix vs k8s.**
+
+The upstream agent needs a workload attestor to verify the identity of the downstream SPIRE server process connecting to the Workload API socket. Both attestors require `shareProcessNamespace: true` in the sidecar setup. The upstream agent obtains the connecting PID via `SO_PEERCRED` on the Unix socket, which requires a shared PID namespace. `shareProcessNamespace` shares PID namespace among containers in the pod. Two attestors were evaluated:
+
+| Criterion               | `unix` ([doc](https://github.com/spiffe/spire/blob/main/doc/plugin_agent_workloadattestor_unix.md))                                                                                                         | `k8s` ([doc](https://github.com/spiffe/spire/blob/main/doc/plugin_agent_workloadattestor_k8s.md))                                                                                                                                                                                     |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Mechanism               | Verifies the binary path of the connecting process via the kernel-maintained `/proc/<pid>/exe` symlink. Only a process whose executable matches the selector (e.g., `unix:path:/spire-server`) is attested. | Resolves PID → pod via cgroup, then queries kubelet for pod metadata (namespace, SA, container name). Any process running inside the matching container is attested, regardless of what binary it is.                                                                                 |
+| OpenShift compatibility | No external dependencies.                                                                                                                                                                                   | Requires kubelet secure port (10250) with auth (read-only port disabled since K8s v1.33). On OpenShift the API server CA and kubelet serving CA are different; mounting the kubelet CA requires either an admin-provisioned ConfigMap or `hostPath` (not allowed by `restricted-v2`). |
+| Extra RBAC              | None.                                                                                                                                                                                                       | The upstream agent sidecar shares the `spire-server` SA, which lacks `nodes/proxy` needed for direct kubelet access. Adding it would widen the `spire-server` ClusterRole beyond what the server itself requires.                                                                     |
+
+`k8s` is **not chosen** because the API server CA and kubelet serving CA differ on OpenShift (mounting the kubelet CA via `hostPath` breaks `restricted-v2`), it requires additional RBAC (`nodes/proxy`), and provides strictly weaker attestation (per-container, not per-process).
+
+`unix` is **chosen** because it has no external dependencies, no extra RBAC, and rejects any process whose binary path does not match `/spire-server`. see [Drawbacks](#drawbacks).
 
 #### Resources created by the operator on the downstream cluster
 
@@ -389,6 +405,9 @@ Readiness conditions do not prove successful registration in SPIRE, CA issuance,
     [AWS IAM](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_create_oidc.html) allows up to 100 RSA and 100 EC keys; token exchange fails if the token's signing key type exceeds its limit. [GCP](https://docs.cloud.google.com/iam/docs/workload-identity-federation-with-other-providers#oidc) has no downloaded-key count limit; manually uploaded JWKS files allow at most 8 keys.
     These consumer limits can restrict cluster count even when X.509 issuance works ([spiffe/spire#4699](https://github.com/spiffe/spire/issues/4699)).
 
+9. **Only one upstream authority at a time.** SPIRE does not support two simultaneous upstream CAs. The `UpstreamAuthorityConfig` CEL validation enforces exactly one of `certManager`, `vault`, or `spire`. Switching between upstream authorities (e.g., from `certManager` to `spire` or vice versa) triggers a CA transition: the server continues using the current CA until the next rotation cycle, then activates the new authority. During the transition window, workloads receive SVIDs from the old CA. There is no mechanism to run both upstream authorities in parallel or perform a zero-downtime CA migration.
+10. **Credential Secrets require namespace-admin privileges.** Both `trustBundleSecret` and `nested-spire-<name>-kubeconfig` Secrets must be created in the operator namespace, which requires `create`/`update` permissions on `secrets` in that namespace - effectively cluster-admin or namespace-admin access.
+
 #### Network policies for nested SPIRE
 
 **Upstream agent sidecar** (downstream cluster): the sidecar shares the downstream cluster's `spire-server` pod's network namespace. When nested SPIRE is enabled, the `spire-server` pod's NetworkPolicy gains egress to the upstream server gRPC port (`serverPort`, default 443/TCP). The downstream server accesses the upstream agent via Unix socket (`emptyDir` mount), which requires no NetworkPolicy.
@@ -415,7 +434,7 @@ Each attestation attempt triggers a `TokenReview` against the downstream API ser
 | Kubeconfig Secret targets wrong cluster's API server                                                                                                         | Medium: TokenReview failure (`Unauthorized`, `Forbidden`, or `token not authenticated` depending on the misconfiguration)         | Document that the Secret `nested-spire-<name>-kubeconfig` must contain credentials for the API server of the cluster identified by that `name` in `nodeAttestor.externalK8sPSAT.clusters[]`; error is diagnosable via server logs                                                                |
 | Deeper chains and larger cluster lists increase resource use and recovery time. | Medium | Validate the proposed cluster-count bound and root → intermediate → leaf topology before GA; document tested limits. Apply certificate-chain and OIDC consumer constraints. |
 | Each external cluster list change rolls the upstream server                                                                                                   | Low: brief unavailability                     | Batch onboarding during maintenance windows                                                                                                                          |
-| Impersonation of downstream server via unix socket                                                                                                           | High: intermediate CA minting                 | If a process other than the real spire-server connects to the upstream agent's unix socket and passes verification, it receives an intermediate CA. The socket is pod-scoped (`emptyDir`) - only processes inside the pod can connect. The upstream agent verifies the connecting process's executable path via `/proc/<pid>/exe` (kernel-reported, not spoofable). `unix:sha256` is not used because the binary hash changes on every image upgrade. To impersonate, an attacker must get a process with the same executable path as the spire-server binary. `kubectl exec` into the container runs a shell (e.g., `/bin/sh`) - different path, rejected. Overwriting the spire-server binary with a malicious one is blocked by `readOnlyRootFilesystem: true`. The remaining realistic vector is injecting a malicious container into the pod with a binary at the same path - mitigated by pod admission policies and RBAC restricting `pods`/`pods/exec` in the operator namespace. |
+| Impersonation of downstream server via unix socket                                                                                                           | High: intermediate CA minting                 | If a process other than the real spire-server connects to the upstream agent's unix socket and passes verification, it receives an intermediate CA. The Workload API unix socket exposed by the upstream agent is pod-scoped (`emptyDir`) - only processes inside the pod can connect. The upstream agent verifies the connecting process's executable path via `/proc/<pid>/exe` (kernel-reported, not spoofable). `unix:sha256` is not used because the binary hash changes on every image upgrade. To impersonate, an attacker must get a process with the same executable path as the spire-server binary. Overwriting the spire-server binary with a malicious one is blocked by `readOnlyRootFilesystem: true`. |
 | StatefulSet rollout restarts server and sidecar together                                                                                                     | Low: brief I/O disruption                     | Issuance and renewal pause on the restarting server. Existing SVIDs remain usable until expiry; other running downstream servers can issue while their CAs remain valid. |
 
 ### Drawbacks
