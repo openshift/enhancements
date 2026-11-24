@@ -1,0 +1,63 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+
+inheritance: true
+language: en-US
+
+reviews:
+  profile: chill
+  high_level_summary: true
+  poem: false
+  collapse_walkthrough: false
+  request_changes_workflow: false
+
+  path_filters:
+    - "!this-week/**"
+    - "!enhancements/**/*.drawio.svg"
+    - "!tools/go.sum"
+
+  path_instructions:
+    - path: "enhancements/**"
+      instructions: |
+        Enhancement proposals: verify YAML frontmatter completeness (title, authors,
+        reviewers, approvers, api-approvers, tracking-link). The metadata linter validates
+        these fields. Status, creation-date, and last-updated are required by the template
+        but checked manually. Check all required sections from guidelines/enhancement_template.md
+        are present. Verify topology considerations when architecture changes affect
+        deployment topologies.
+    - path: "dev-guide/**"
+      instructions: |
+        Authoritative platform conventions. Changes here affect all component repos.
+        Verify backward compatibility of convention changes.
+    - path: "guidelines/**"
+      instructions: |
+        Enhancement process rules and templates. Changes here affect all enhancement
+        proposals. Verify backward compatibility and cross-reference with existing EPs.
+    - path: "CONVENTIONS.md"
+      instructions: |
+        Cross-project coding standards. Changes here affect all component repos.
+        Verify backward compatibility of convention changes.
+    - path: "ai-docs/**"
+      instructions: |
+        AI-optimized platform knowledge. Verify factual accuracy against authoritative
+        sources (dev-guide/, guidelines/, CONVENTIONS.md). Check internal links resolve
+        and cross-file concept references are consistent.
+    - path: "tools/**"
+      instructions: |
+        Go CLI tooling. Check go.mod Go version, cobra command registration,
+        and that tests pass.
+    - path: "hack/**"
+      instructions: |
+        CI scripts. Changes affect all PR validation. Verify with make lint.
+
+  auto_review:
+    enabled: true
+    drafts: false
+
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "REVIEW.md"
+      - "AGENTS.md"
+  learnings:
+    scope: local
