@@ -14,8 +14,8 @@ api-approvers:
   - "@JoelSpeed"
   - "@everettraven"
 creation-date: 2026-10-23
-last-updated: 2026-11-20
-status: provisional
+last-updated: 2026-11-25
+status: implementable
 tracking-link:
   # Epic
   - "https://redhat.atlassian.net/browse/NE-727"
@@ -137,11 +137,11 @@ affect the final pod. No container split is proposed by this enhancement.
 
 ### API Extensions
 
-The [API PR #3134 draft][api-pr] adds optional `spec.resources` to
+The merged [API PR #3134][api-pr] adds optional `spec.resources` to
 `operator.openshift.io/v1` `IngressControllerSpec`, with two optional targets.
-This describes a draft API, not operator support or availability:
+The schema defines the API, not operator support or availability:
 
-| Proposed field | Target |
+| Field | Target |
 | --- | --- |
 | `spec.resources.router` | Router/controller only |
 | `spec.resources.haproxy` | HAProxy data plane only |
@@ -579,10 +579,15 @@ CPU/memory structure and must evolve with supported Kubernetes semantics.
 
 ## Open Questions
 
-1. Do HyperShift-hosted router pods and managed services support
-   `spec.resources` in the Dev Preview? Schema acceptance alone does not
-   establish runtime support. Owner: networking and hosted-control-plane
-   reviewers.
+None. The API contract was resolved by the merged list-based schema
+([openshift/api#3134][api-pr]). HyperShift-hosted router pods and managed
+services are scoped out of the Dev Preview rather than left open: the
+Dev Preview targets self-managed clusters, and although the feature-gated
+schema is also enabled in hosted `DevPreviewNoUpgrade` feature sets,
+runtime behavior of hosted router pods is unverified. Supporting hosted
+deployments requires sign-off from the hosted-control-plane owners, as
+described under Topology Considerations, before promotion beyond Dev
+Preview.
 
 ## Test Plan
 
@@ -640,9 +645,10 @@ checkout of its exact recorded base.
 
 ## Graduation Criteria
 
-This is provisional and targets no release yet. Resolve open API and
-metadata questions, obtain the required reviews, and agree feature-gate
-and promotion policy before marking it implementable.
+The API contract is merged ([openshift/api#3134][api-pr]) behind the
+`IngressControllerResourceConfiguration` feature gate in
+`DevPreviewNoUpgrade`, and this enhancement is implementable. Promotion
+follows the feature-gate lifecycle under the criteria below.
 
 ### Dev Preview -> Tech Preview
 
