@@ -359,20 +359,31 @@ provider is a conscious decision that includes E2E testing.
 | `lbipam.cilium.io/` | Cilium LB IPAM | `ips`, `sharing-key` |
 | `loadbalancer.openstack.org/` | OpenStack Octavia | `floating-network-id`, `floating-subnet-id` |
 
+A matching prefix is necessary but not sufficient. The rule also denies specific
+keys that sit inside an allowlisted prefix — `networking.gke.io/load-balancer-type`
+is rejected because its value changes how the address is provisioned — and a
+malformed qualified name is rejected regardless of its prefix.
+
 Annotations not matching any prefix produce a CEL validation error. Adding a
 new provider requires adding its prefix to the CEL rule — a conscious decision
 that includes E2E testing.
 
-> **CI coverage note:** CI E2E tests cover MetalLB only. Other providers in the
-> allowlist are included based on upstream documentation and customer RFEs, not
-> HyperShift CI testing. One-time provider validation (F5, Cilium) is documented
-> under Test Plan.
+> **CI coverage note:** CI covers MetalLB and AWS. The AWS `deterministic-lb`
+> lane requests a reserved EIP and public subnet through the EIP and subnet
+> annotations, so the passthrough is exercised end to end on a second provider.
+> The remaining prefixes in the allowlist are included based on upstream
+> documentation and customer RFEs, not HyperShift CI testing. One-time provider
+> validation (F5, Cilium) is documented under Test Plan.
 
 **Implementation order:** The initial API PR
-([hypershift#9913](https://github.com/openshift/hypershift/pull/9913)) introduces
-the types with `MinProperties=1`, `MaxProperties=10`, and the feature gate. The
-allowlist CEL rule (`startsWith()` prefixes) and key/value size bounds are added
-in a subsequent PR during implementation, once the base types are merged.
+([hypershift#9913](https://github.com/openshift/hypershift/pull/9913)) introduced
+the types with `MinProperties=1`, `MaxProperties=10` and the feature gate. The
+allowlist CEL rule (`startsWith()` prefixes) and the key and value size bounds
+landed in [hypershift#10142](https://github.com/openshift/hypershift/pull/10142).
+The CLI flags, the envtest cases that pin the accepted and rejected keys, and the
+AWS E2E lane followed in
+[hypershift#10237](https://github.com/openshift/hypershift/pull/10237) and
+[hypershift#10341](https://github.com/openshift/hypershift/pull/10341).
 
 ### Topology Considerations
 
@@ -417,10 +428,47 @@ For this feature, `serviceAnnotations` entries from the APIServer's
 `LoadBalancerPublishingStrategy` are applied directly as per-key writes.
 No translation layer, no vendor-specific logic in CPO.
 
-**Conflict resolution:** If an annotation key from `serviceAnnotations` already
-exists on the Service with a different value (e.g., set by an external controller),
-the user-specified value always wins — CPO overwrites it on every reconciliation.
+**Conflict resolution:** `serviceAnnotations` are written per key *before* CPO
+writes its own platform annotations, which gives two different outcomes:
+
+- For keys CPO does not manage (for example an annotation set by an external
+  controller), the user-specified value wins — CPO rewrites it on every
+  reconciliation.
+- For keys CPO manages itself (`aws-load-balancer-type`,
+  `aws-load-balancer-cross-zone-load-balancing-enabled`,
+  `aws-load-balancer-attributes`, `aws-load-balancer-internal`,
+  `external-dns.alpha.kubernetes.io/hostname`), **CPO wins**. Letting a user value
+  survive on those keys would break the Service: setting
+  `aws-load-balancer-internal` on the public KAS Service, for instance, would turn
+  the public NLB internal and the cluster would lose its API endpoint.
+
+In practice the second case cannot be reached: the CEL allowlist on
+`serviceAnnotations` only accepts the provider prefixes listed below, and none of
+them match a CPO-managed key. The precedence rule is the defence in depth that
+makes the collision harmless if the allowlist ever grows.
+
 Annotations on keys *not* in `serviceAnnotations` are left untouched.
+
+#### Which Service receives the fields
+
+`serviceAnnotations` carry an address, so only the Service exposing the cluster's
+*primary* endpoint may request it. Requesting the same address on two Services
+leaves whichever load balancer loses the race pending forever.
+
+| Field | `Public` | `PublicAndPrivate` | `Private` |
+| --- | --- | --- | --- |
+| `serviceAnnotations` | `kube-apiserver` | `kube-apiserver` (removed from `kube-apiserver-private`) | `kube-apiserver-private` |
+| `loadBalancerClass` | every LoadBalancer Service | every LoadBalancer Service | every LoadBalancer Service |
+
+Because `endpointAccess` is mutable, the keys are actively *removed* from the
+non-primary Service rather than merely not written, so a `Private` to
+`PublicAndPrivate` transition hands the address over to the public Service instead
+of having both request it.
+
+`loadBalancerClass` selects the provisioning controller rather than an address, so
+every LoadBalancer Service needs it. Kubernetes only accepts the field on create,
+or when a Service becomes a LoadBalancer, and rejects it on non-LoadBalancer
+Services; CPO sets it accordingly and never clears it.
 
 #### Provider examples
 
@@ -549,9 +597,11 @@ passthrough approach.
 
 ## Open Questions
 
-1. Should `loadBalancerClass` immutability be enforced at the HC level (CEL) or
-   inherited from the Kubernetes Service semantics (fail at Service creation)?
-   Recommendation: enforce at HC level via CEL for clearer UX.
+1. ~~Should `loadBalancerClass` immutability be enforced at the HC level (CEL) or
+   inherited from the Kubernetes Service semantics?~~ Resolved: the whole-list
+   equality rule on `spec.services` already rejects any change on every platform
+   except IBMCloud, so no per-field rule is needed. It gives the guarantee
+   Service semantics would, earlier in the lifecycle and with a clearer error.
 
 ## Test Plan
 
@@ -566,8 +616,12 @@ passthrough approach.
 ### E2E Tests
 
 - Day 1: Create HC with MetalLB annotations in `serviceAnnotations`, verify
-  annotations on KAS Service, verify MetalLB assigns expected IP (requires
-  MetalLB in CI).
+  annotations on KAS Service, verify MetalLB assigns expected IP.
+- Day 1 (AWS): the `deterministic-lb` lane creates a dedicated HC with a reserved
+  EIP and public subnet, waits for the KAS Service to carry the requested
+  address and asserts no drift across reconciliation. The lane refuses to run
+  without the pre-step values, and the v2 runner fails when the label filter
+  selects no specs, so a lane that never reaches the assertions reports red.
 - `loadBalancerClass`: Create HC with `loadBalancerClass`, verify it's set on
   KAS Service and the correct LB controller processes it.
 
@@ -594,6 +648,9 @@ passthrough approach.
 - `loadBalancerClass` support functional.
 - Unit test coverage for annotation passthrough and CEL allowlist validation.
 - Basic E2E test with MetalLB (if available in CI).
+- `DeterministicLBIPSupported` condition reported by HO. The skew it detects is a
+  Day 1 failure mode that exists from the first TechPreview release, so it is a
+  TechPreview requirement rather than a GA one.
 
 ### Tech Preview -> GA
 
@@ -658,10 +715,33 @@ upgrades before CPO (HO deploys CPO), so the only version skew scenario is:
   HO reads it via `GetControlPlaneOperatorImageLabels()` (the same mechanism
   used for `supports-kas-custom-kubeconfig`, `restricted-psa`, etc.). When
   `serviceAnnotations` or `loadBalancerClass` are present on HC but the CPO
-  image label is absent, HO sets `ValidConfiguration=False` with a message
-  directing the user to upgrade the HC release. This condition is a
-  prerequisite for GA.
+  image label is absent, HO sets the dedicated condition
+  `DeterministicLBIPSupported=False` with reason `UnsupportedControlPlaneOperator`
+  and a message directing the user to upgrade the HC release. The condition is
+  informational: reconciliation continues with the fields ignored, and the
+  condition clears by itself once the CPO image is upgraded.
 - **Both at new version**: Feature fully functional.
+
+### Why a dedicated condition instead of `ValidConfiguration`
+
+An earlier revision of this enhancement specified `ValidConfiguration=False` for
+this case. That does not work as a gate, and it is the wrong severity:
+
+- The skew check can only run once the CPO image labels have been resolved, which
+  happens in `CPOImageAndNamespace`. That is *after* the point where the
+  reconciler blocks on `ValidConfiguration`. On the next reconcile the condition
+  is recomputed from scratch by `validateConfigAndClusterCapabilities`, which has
+  no access to image labels, so it is `True` again by the time the block is
+  evaluated. The condition would therefore flap between `True` and `False` on
+  every reconcile and never actually block anything.
+- Making it block would require reporting the check as a critical step, which
+  halts the rest of control plane reconciliation (the pattern used by
+  `ManagedHSMVersionCheck`). That is disproportionate here: these are optional
+  fields whose only failure mode is being silently ignored, and halting the whole
+  control plane over them would be a far worse outcome than an unhonored address.
+
+A dedicated, non-blocking condition surfaces the skew to the user and to
+monitoring without either of those problems.
 
 ## Operational Aspects of API Extensions
 
@@ -684,11 +764,25 @@ upgrades before CPO (HO deploys CPO), so the only version skew scenario is:
   assignment errors.
 - **Diagnose**: `oc get svc kube-apiserver -n <hcp-namespace> -o yaml` — verify
   annotations are correct and match the LB provider's expected format.
-- **Disable**: Remove `serviceAnnotations` and `loadBalancerClass` from the
-  APIServer service entry. CPO stops setting LB-related annotations. LB provider
-  falls back to default behavior (dynamic IP).
+- **Disable**: not available during TechPreview, and deliberately so. Two things
+  prevent it:
+  - `spec.services` is immutable on every platform except IBMCloud
+    (`self.platform.type != "IBMCloud" ? self.services == oldSelf.services : true`),
+    so the fields cannot be removed from an existing HostedCluster at all.
+  - Even where removal is possible, CPO does not clean up annotations on a spec
+    change. The keys would stay on the Service and the provider would keep the
+    static address instead of falling back to a dynamic one.
+
+  The supported way to stop using a requested address during TechPreview is to
+  recreate the HostedCluster without the fields. A real disable procedure belongs
+  to Day 2, where `serviceAnnotations` becomes mutable and the sidecar mechanism
+  exists to drain connections; it is specified there, not here.
 
 ## Infrastructure Needed
 
-- MetalLB availability in CI for E2E testing (TBD — may require CI team coordination).
+- AWS `deterministic-lb` lane with a reserved EIP and public subnet
+  ([openshift/release#88475](https://github.com/openshift/release/pull/88475),
+  [hypershift#10341](https://github.com/openshift/hypershift/pull/10341)).
+- MetalLB availability in CI for the remaining Day 1 cases (TBD — may require CI
+  team coordination).
 - F5 BIG-IP VE Trial license for one-time validation (free, time-limited).
