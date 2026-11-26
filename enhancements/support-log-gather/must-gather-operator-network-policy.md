@@ -24,7 +24,8 @@ see-also:
 
 ## Summary
 
-This enhancement adds Kubernetes NetworkPolicy resources to the must-gather-operator to restrict network access for both the operator pod and the must-gather job pods it creates. The operator pod receives a static NetworkPolicy deployed alongside its manifests. Job pods receive a two-tier dynamic NetworkPolicy model: a long-lived namespace-level default policy for base traffic (DNS, API server), and short-lived per-job policies for SFTP/proxy egress and admin-declared custom image egress. The design follows a least-privilege approach where all traffic not explicitly allowed is denied.
+This enhancement adds Kubernetes NetworkPolicy resources to the must-gather-operator to restrict network access for both the operator pod and the must-gather job pods it creates. The operator pod receives a static NetworkPolicy deployed alongside its manifests.
+Job pods receive a two-tier dynamic NetworkPolicy model: a long-lived namespace-level default policy for base traffic (DNS, API server), and short-lived per-job policies for SFTP/proxy egress and admin-declared custom image egress. The design follows a least-privilege approach where all traffic not explicitly allowed is denied.
 
 ## Motivation
 
@@ -84,7 +85,8 @@ The design introduces NetworkPolicy at two layers:
 
 This enhancement does not introduce new CRDs. It adds NetworkPolicy resources managed by the operator.
 
-The future admin config resource (`MustGatherPolicy`, see [must-gather-operator-policy](./must-gather-operator-policy.md)) will include a `networkPolicies` field for declaring custom image egress rules (see Layer 2 Tier 2 section below). Because each custom gather image needs its own rule set, this is a list of NetworkPolicies rather than a single one, and so it arrives with **Phase 2 (`v1`)** of that enhancement -- Phase 1's singleton carries one `spec.networkPolicy` for the whole cluster. The API shape for this field is illustrative and will be finalized then.
+The future admin config resource (`MustGatherPolicy`, see [must-gather-operator-policy](./must-gather-operator-policy.md)) will include a `networkPolicies` field for declaring custom image egress rules (see Layer 2 Tier 2 section below). Because each custom gather image needs its own rule set, this is a list of NetworkPolicies rather than a single one, and so it arrives with **Phase 2 (`v1`)** of that enhancement -- Phase 1's singleton carries one `spec.networkPolicy` for the whole cluster.
+The API shape for this field is illustrative and will be finalized then.
 
 ### Topology Considerations
 
@@ -251,7 +253,8 @@ Short-lived NetworkPolicies are created for:
 
 All Tier 2 policies are named using the MustGather CR name (e.g., `must-gather-<cr-name>-netpol`). Since the MustGather CR name is unique within a namespace and the spec is immutable, this guarantees each policy is unique per job. No hashing, random numbers, or shared-policy reference counting is needed.
 
-**CR name length constraint:** The CR name is used in both Kubernetes label values (max 63 characters) and derived NetworkPolicy names (prefixed with `must-gather-` and suffixed with `-sftp` or `-netpol`). MustGather CR names should not exceed 53 characters to stay within these limits. In practice, must-gather CR names are short (e.g., `must-gather-abc123`) and this is not expected to be an issue as long as user adheres to the limit.
+**CR name length constraint:** The CR name is used in both Kubernetes label values (max 63 characters) and derived NetworkPolicy names (prefixed with `must-gather-` and suffixed with `-sftp` or `-netpol`). MustGather CR names should not exceed 53 characters to stay within these limits.
+In practice, must-gather CR names are short (e.g., `must-gather-abc123`) and this is not expected to be an issue as long as user adheres to the limit.
 
 Each job pod carries two labels:
 - `must-gather.openshift.io/network-policy: default` -- for Tier 1 selection (shared, long-lived)
@@ -271,7 +274,8 @@ When a MustGather CR specifies an SFTP upload target, the operator creates a sho
 Each custom gather image needs its own egress rule set -- a storage vendor's image talks to a vendor endpoint on 443, a network debug image talks to kubelet on 10250 -- so this is inherently a **list** of NetworkPolicies on the admin config resource, not a single one. That is more than
 [must-gather-operator-policy](./must-gather-operator-policy.md) Phase 1 (`v1alpha1`) offers: its singleton `MustGatherPolicy` carries one `spec.networkPolicy`, applied to every run in the cluster regardless of image.
 
-Per-custom-gather NetworkPolicies therefore land in **Phase 2 (`v1`) of that enhancement**, which is where multiple policies may coexist and a `MustGather` selects the one it inherits via `spec.inheritsPolicy`. The `spec.networkPolicies` list sketched below is the Phase 2 shape; it is illustrative, and the keying of an entry to an image is settled when Phase 2 is designed. Until then, admins who need per-image egress use the Phase 1 singleton's single additive policy, whose rules are the union of what every custom image requires -- coarser than per-image, but functional.
+Per-custom-gather NetworkPolicies therefore land in **Phase 2 (`v1`) of that enhancement**, which is where multiple policies may coexist and a `MustGather` selects the one it inherits via `spec.inheritsPolicy`. The `spec.networkPolicies` list sketched below is the Phase 2 shape; it is illustrative, and the keying of an entry to an image is settled when Phase 2 is designed.
+Until then, admins who need per-image egress use the Phase 1 singleton's single additive policy, whose rules are the union of what every custom image requires -- coarser than per-image, but functional.
 
 When the admin config resource (`MustGatherPolicy`) reaches Phase 2, the admin can declare custom egress rules per image:
 
@@ -354,7 +358,8 @@ Kubernetes unions all matching policies. The pod's effective egress is the combi
 
 **Why not per-job policies for everything?** The default must-gather image is the common case. Creating and deleting a NetworkPolicy for every single run adds unnecessary API churn. A long-lived namespace-level policy handles this cleanly.
 
-**Why per-CR naming instead of per-image shared policies?** The MustGather CR name is unique within a namespace and the spec is immutable, so per-CR naming guarantees each Tier 2 policy is unique per job. This eliminates the need for hashing, random numbers, or shared-policy reference counting (OwnerReferences). Two CRs using the same custom image each get their own policy with identical rules -- the slight duplication is negligible since NetworkPolicies are lightweight metadata objects.
+**Why per-CR naming instead of per-image shared policies?** The MustGather CR name is unique within a namespace and the spec is immutable, so per-CR naming guarantees each Tier 2 policy is unique per job. This eliminates the need for hashing, random numbers, or shared-policy reference counting (OwnerReferences).
+Two CRs using the same custom image each get their own policy with identical rules -- the slight duplication is negligible since NetworkPolicies are lightweight metadata objects.
 
 **Why admin config and not user CR?** Users should not control NetworkPolicy. It is a security boundary. The admin who curates the ImageStream allowlist already controls which images can run and should also own the network posture for those images.
 

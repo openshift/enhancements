@@ -946,6 +946,10 @@ CR first; the CRs hold only configuration, so no gathered data is lost.
   namespaced-dependent GC. *Mitigation:* the finalizer backstops it; re-verify
   against the target Kubernetes version.
 
+### Drawbacks
+
+None
+
 ### Removing a deprecated feature
 
 N/A — nothing is removed; all changes are additive.
