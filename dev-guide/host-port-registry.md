@@ -9,7 +9,7 @@ reviewers:
 approvers:
   - "@russelb"
 creation-date: 2020-08-26
-last-updated: 2026-05-25
+last-updated: 2026-10-28
 status: informational
 ---
 
@@ -135,6 +135,8 @@ Ports are assumed to be used on all nodes in all clusters unless otherwise speci
 | 10443     | haproxy                                         |          |                    | net edge      | 3.0   | HAProxy internal `fe_no_sni` frontend; localhost only; baremetal only; only on nodes running router pod replicas |
 | 10444     | haproxy                                         |          |                    | net edge      | 3.0   | HAProxy internal `fe_sni` frontend; localhost only; baremetal only; only on nodes running router pod replicas    |
 | 17697     | kube-apiserver                                  |          | yes                | apiserver     |       | ?                                                                                                                |
+| 18080     | coredns                                         | HTTP     | no                 | opnet         | 4.3   | healthz; on-prem platforms, SNO, and AWS/Azure/GCP with `ClusterHosted` DNS                                      |
+| 18081     | coredns                                         | HTTP     | yes                | opnet         | 5.1   | readyz; SNO only                                                                                                 |
 | 22623     | machine-config-server                           |          | yes                | node          |       |                                                                                                                  |
 | 22624     | machine-config-server                           |          | yes                | node          |       |                                                                                                                  |
 | 22625     | internalreleaseimage                            | HTTPS    | yes                | agent         | 5.0   |                                                                                                                  |
