@@ -10,7 +10,7 @@ approvers:
 api-approvers:
   - "@JoelSpeed"
 creation-date: 2026-10-21
-last-updated: 2026-11-12
+last-updated: 2026-11-25
 status: provisional
 tracking-link:
   - https://issues.redhat.com/browse/NE-2930
@@ -88,7 +88,9 @@ custom search-domain request is out of scope here (see Non-Goals).
   resolved or silently answered incorrectly.
 * Validate rules at submission (schema/admission and the validating
   webhook), so an invalid or conflicting rule is rejected before it is ever
-  persisted, and again before the generated Corefile is applied, so an
+  persisted (apart from the brief interval described in
+  [Version Skew Strategy](#version-skew-strategy)), and again before the
+  generated Corefile is applied, so an
   invalid rule cannot make CoreDNS unusable. Reconciliation independently
   repeats this validation and additionally handles cases submission cannot:
   cluster context that changes after a rule was accepted, and pre-apply
@@ -153,20 +155,23 @@ see [Admission Webhook Lifecycle and Failure Handling](#admission-webhook-lifecy
    exactly one action (`a`, `cname`, or `nxdomain`).
 2. On submission, schema/admission validation checks each rule's shape
    (name pattern, exactly-one-action, address/target format, TTL bounds, an
-   exact `cname` rule's literal self-reference) and cross-rule checks
+   exact `cname` rule's literal self-reference, a `cname` target under
+   `cluster.local`) and cross-rule checks
    decidable from `spec.responseRules` and `spec.servers` together
    (duplicate/conflicting rule detection, overlap with a configured
    `forwardPlugin` zone,
-   and overlap with the cluster's fixed `cluster.local` domain or a reverse
-   zone) — see [Implementation Details](#implementation-detailsnotesconstraints)
+   overlap with the cluster's fixed `cluster.local` domain or a reverse
+   zone, and an `nxdomain` rule for an ancestor of any of these) — see
+   [Implementation Details](#implementation-detailsnotesconstraints)
    for the full breakdown.
 
    An operator-managed validating admission webhook then checks the
    submitted rules against the cluster's own protected API/ingress domain
    as actually configured on the cluster — not an administrator's custom
    application domain, which is the motivating use case this enhancement
-   exists to support — and performs precedence-aware `cname` self-reference
-   and cycle detection across the complete submitted rule set. Both checks
+   exists to support — including an `nxdomain` rule for an ancestor of
+   that domain or hostname — and performs precedence-aware `cname`
+   self-reference and cycle detection across the complete submitted rule set. Both checks
    need something static schema/CEL validation cannot provide: the first
    needs state beyond the submitted object (a separate cluster resource);
    the second needs only `spec.responseRules` itself, but requires
@@ -226,8 +231,8 @@ see [Admission Webhook Lifecycle and Failure Handling](#admission-webhook-lifecy
    accepts at most 8 addresses, so an answer fits a 512-byte UDP response
    even for a maximum-length name; templates contain no loops or lookups;
    and the only recursive path, the CNAME chase, is bounded by the cycle
-   checks below. The availability guarantee is limited to what these checks
-   establish.
+   checks and the `cluster.local` target restriction below. The
+   availability guarantee is limited to what these checks establish.
 5. If validation returns an error, the operator does not write the
    candidate: it keeps serving the currently-applied ConfigMap unchanged and
    sets a status condition on `DNS/default` naming the invalid rule(s) and
@@ -547,6 +552,24 @@ default server block:
   terminating higher-precedence exact-name override, as above, remains
   valid. The operator repeats these checks defensively during
   reconciliation.
+
+  Cycle detection follows only response rules, but the CNAME chase can
+  also re-enter the `kubernetes` plugin. In the target CoreDNS build, the
+  `template` plugin always chases a CNAME answer to an A or AAAA query
+  through `upstream.Lookup`, which sends the target back through the
+  server's plugin chain with no depth limit, and the `kubernetes` plugin
+  chases an `ExternalName` Service's target the same way. Given a rule
+  `alias.customer.test` → CNAME `frontend.tenant.svc.cluster.local`, where
+  that Service is an `ExternalName` pointing to `alias.customer.test`, the
+  lookup loops with the same server-wide failure as a rule cycle. The
+  Service can be created or changed after the rule is admitted, so no
+  check over `spec.responseRules` can detect it. `cname` targets under
+  `cluster.local` are therefore rejected at submission: `ExternalName`
+  Services exist only under `cluster.local`, and no other plugin in the
+  default server block re-enters the chase, so this closes the path.
+  Aliasing a name to an in-cluster Service is out of scope for Dev Preview;
+  supporting it requires a per-query hop limit carried across plugin
+  re-entry in CoreDNS (see [Open Questions](#open-questions-optional)).
 * `nxdomain` → `template ANY ANY <zone> { match <exact-name-regex> ; rcode NXDOMAIN ; authority "<zone> <ttl> IN SOA ns.invalid. admin.invalid. 1 60 60 60 <ttl>" ; fallthrough }`
 
 **Negative-caching duration for `nxdomain` is the rule's own `ttlSeconds`,
@@ -582,6 +605,21 @@ descendants (for example `child.blocked.example.com`) as nonexistent after
 caching the answer. This enhancement does not guarantee descendants keep
 resolving; administrators who need that should not use `nxdomain` for the
 parent name. A response action that preserves descendants is out of scope.
+
+For the same reason, an `nxdomain` rule whose name is a proper ancestor of
+a protected name is rejected: an ancestor of `cluster.local` (`local`), of
+a reverse zone (`arpa`), of a configured `forwardPlugin` zone, of the
+cluster's ingress domain, or of an API endpoint hostname (for example
+`example.com` when the ingress domain is `apps.example.com`). Ancestry is
+decided by comparing whole labels of the canonical form defined below, not
+string suffixes, so `example.com` is not an ancestor of
+`badexample.com`. Schema validation checks the fixed names and
+`forwardPlugin` zones at submission. The webhook checks the ingress domain
+and API hostnames, and the operator checks them again at reconcile time; a
+rule that becomes an ancestor after a cluster configuration change is
+excluded immediately, like any other protected-name conflict. `a` and
+`cname` rules are not restricted this way, because NODATA and CNAME answers
+do not imply that descendants are nonexistent.
 
 **Stanza order determines precedence, and the operator must enforce it.**
 When two `template` stanzas in the same zone both match a query, CoreDNS
@@ -619,7 +657,9 @@ is an additional pre-apply check described in Workflow step 4.
   at most 8 addresses per `a` rule, TTL bounds, and an exact-name `cname` rule's target rejected when it
   equals the rule's own query name — an exact rule's precedence never
   depends on any other rule, so this one case of self-reference is a fixed,
-  unconditional error decidable from the rule alone.
+  unconditional error decidable from the rule alone; and a `cname` target
+  that falls under the cluster's fixed `cluster.local` domain (see the
+  `ExternalName` discussion above).
 * **Schema/CRD (submission time), cross-rule:** everything else decidable
   from `spec.responseRules` and `spec.servers` alone, since both are
   fields on the one `DNS/default` object being submitted and need no
@@ -630,13 +670,16 @@ is an additional pre-apply check described in Workflow step 4.
   with the longest matching zone, so such a rule would never reach the
   default block's `template` stanzas and would silently have no effect),
   or falls under the cluster's fixed `cluster.local` domain or a reverse
-  zone (`in-addr.arpa.`/`ip6.arpa.`) — unlike the cluster's actual
+  zone (`in-addr.arpa.`/`ip6.arpa.`); and rejection of an `nxdomain` rule
+  whose name is an ancestor of a configured `forwardPlugin` zone, of
+  `cluster.local`, or of a reverse zone — unlike the cluster's actual
   ingress/API domain below, these are fixed values, not cluster-specific
   configuration, so they need no external state either.
 * **Validating webhook (submission time):** reject conflicts with the
   cluster's own protected ingress domain and API endpoint hostnames as
   actually configured on the cluster — state on separate objects, not
-  visible to schema/CEL validation on `DNS/default` alone — and reject
+  visible to schema/CEL validation on `DNS/default` alone — including an
+  `nxdomain` rule for an ancestor of that domain or hostname, and reject
   `cname` cycles using the effective exact-name/wildcard precedence: a
   rule that forms a cycle with one or more other `cname` rules, or a
   wildcard rule whose target falls within its own pattern and is not
@@ -703,12 +746,13 @@ NetworkPolicy, and ServiceMonitor ship as payload manifests. When the
 annotated for a service-ca serving certificate, a ConfigMap annotated for
 CA-bundle injection, and the webhook Deployment (the operator's own image,
 taken from an environment variable, with `--response-webhook-only`, one
-replica). It waits until the
-certificate and CA bundle are populated and the Deployment has an available
-replica, and only then registers the webhook (`failurePolicy: Fail`, 5s
-timeout, `sideEffects: None`, matching CREATE and UPDATE of `DNS/default`
-with non-empty `spec.responseRules`), so the fail-closed registration never
-exists before its endpoint. With one replica, a restart of the webhook pod
+replica). It registers the webhook (`failurePolicy: Fail`, 5s timeout,
+`sideEffects: None`, matching CREATE and UPDATE of `DNS/default` with
+non-empty `spec.responseRules`, annotated for CA-bundle injection) at the
+same time, without waiting for the certificate, CA bundle, or an available
+replica. Until those are ready, calls to the webhook fail and matching
+writes are rejected, so rules are not accepted before the webhook can
+validate them. With one replica, a restart of the webhook pod
 rejects matching writes until it is available again; the replica count is
 to be decided before GA.
 
@@ -740,14 +784,24 @@ distinguishable to the administrator. While validation is unavailable,
 otherwise-valid matching updates may also be rejected; this is the
 availability tradeoff of the submission-time guarantee.
 
-The webhook endpoint and certificate trust are established before its
-fail-closed registration is activated. Its Deployment, Service, and
-certificate resources are outside its own admission scope, so their
-recovery is not blocked by this webhook. Operator/webhook upgrade
-sequencing must preserve validation availability and compatibility for
-supported API versions. Relevant configuration changes after admission
+The fail-closed registration exists before the webhook endpoint and
+certificate trust are ready. Registering this early is safe because the
+webhook's scope is narrow: its Deployment, Service, and certificate
+resources are outside its own admission scope, so it cannot block its own
+startup or their recovery, and status updates and removal of all
+`responseRules` are excluded by the API server without calling it.
+Operator/webhook upgrade sequencing must preserve validation availability
+and compatibility for supported API versions. Relevant configuration changes after admission
 are handled by operator reconciliation, not assumed to have been
 prevented by admission.
+
+The only interval this does not cover is between the CVO applying a CRD
+that exposes `spec.responseRules` and the operator's first reconcile after
+the feature gate is enabled, typically seconds. A rule written in that
+interval is never served unless it passes the operator's reconcile-time
+protected-name and cycle checks, which run before rendering (Workflow
+step 5), and is reported through the `DNS/default` status condition if it
+fails them.
 
 ### Risks and Mitigations
 
@@ -782,7 +836,10 @@ prevented by admission.
   self-match are rejected before persistence by admission validation.
   Cycle detection follows the rule that actually wins precedence at each
   step; a terminating higher-precedence exact-name override remains valid.
-  The operator repeats these checks defensively during reconciliation.
+  The operator repeats these checks defensively during reconciliation. The
+  same loop can form through an `ExternalName` Service that points back to
+  a rule's name, which can change after admission; `cname` targets under
+  `cluster.local` are rejected for this reason (see Open Question 2).
 * **Real records hidden by a rule.** A rule answers every query type for
   the names it matches, so records of other types published upstream for
   those names (for example MX, TXT, or SRV) are not served while the rule
@@ -903,6 +960,12 @@ all, even while the webhook itself is unavailable.
 
 1. HCP support depends on a small HyperShift change that passes the webhook
    image to the DNS Operator (see Topology Considerations).
+2. Aliasing a name to an in-cluster Service (`cname` targets under
+   `cluster.local`) is rejected for Dev Preview because an `ExternalName`
+   Service can create a CNAME loop after admission. Supporting it requires
+   a per-query hop limit carried across plugin re-entry in CoreDNS,
+   returning SERVFAIL for the looping query only. This is a change to
+   openshift/coredns (or upstream) and is to be decided before GA.
 
 ## Test Plan
 
@@ -910,8 +973,11 @@ all, even while the webhook itself is unavailable.
 
 * Unit/pre-merge tests (NE-1728) for schema validation (malformed names,
   invalid addresses/targets, wildcard NXDOMAIN rejection, conflicting rules,
-  a rule overlapping a configured `forwardPlugin` zone, and a rule falling
-  under `cluster.local` or a reverse zone — all rejected by the API server
+  a rule overlapping a configured `forwardPlugin` zone, a rule falling
+  under `cluster.local` or a reverse zone, a `cname` target under
+  `cluster.local`, and an `nxdomain` rule for an ancestor of a fixed
+  protected name or `forwardPlugin` zone such as `local` or `arpa` — all
+  rejected by the API server
   at submission, not merely reported later) and for Corefile rendering per
   rule type, including: an exact rule's
   `template` stanza is always rendered before an overlapping wildcard
@@ -1000,7 +1066,11 @@ all, even while the webhook itself is unavailable.
   Corefile rather than looping or crashing); a protected API or ingress
   name changed to cover an accepted rule, confirming by querying CoreDNS
   that the override is no longer served and that a forwarding change made
-  at the same time is applied; `dns-default` ConfigMap
+  at the same time is applied; an ingress domain changed to fall under an
+  accepted `nxdomain` rule, confirming the rule is excluded and that a
+  name under the ingress domain still resolves through a caching resolver,
+  while an `nxdomain` rule for an unrelated exact name still returns
+  NXDOMAIN; `dns-default` ConfigMap
   recreation under the same condition, confirming the operator excludes
   only the attributable rule, revalidates the reduced set (reconcile-time
   checks plus a fresh in-process validation pass), and applies it; and the
@@ -1046,16 +1116,22 @@ all, even while the webhook itself is unavailable.
 * Transition-window tests exercise matching `DNS/default` writes during
   initial enablement, upgrade, and any supported removal/downgrade path,
   not only before/after snapshots:
-  * The API must never persist new or updated non-empty `responseRules`
-    without the required admission validation being effective.
-  * Before enabling acceptance of the field, demonstrate that an actual
-    protected-domain conflict is rejected; do not rely only on checking
-    that the `ValidatingWebhookConfiguration` object exists.
+  * With certificate or Deployment readiness delayed, the webhook is
+    already registered, and a write with non-empty `responseRules`,
+    including a protected-domain conflict, is rejected and nothing is
+    stored; status updates and removing all rules still succeed.
+  * A protected-domain conflict and a `cname` cycle written before the
+    operator's first reconcile after enablement are not served, confirmed
+    by querying CoreDNS, and the `DNS/default` status condition names
+    each one.
+  * Once the webhook is ready, demonstrate that an actual
+    protected-domain conflict is rejected at admission; do not rely only
+    on checking that the `ValidatingWebhookConfiguration` object exists.
   * With registration active but the serving endpoint unavailable,
     matching requests fail closed rather than bypassing validation.
-  * During removal, admission protection remains effective for as long
-    as non-empty `responseRules` can still be accepted. Registration is
-    removed only after those writes can no longer be accepted unchecked.
+  * During removal, the webhook stays registered for as long as the API
+    accepts non-empty `responseRules`, and is removed only after the
+    schema no longer accepts the field.
   * Confirm registration removal before its serving resources disappear.
   * Status updates and removal of all `responseRules` remain possible
     throughout the transition under the documented matching exclusions.
@@ -1098,6 +1174,11 @@ tracked against that document rather than reconciled here.
   rules, and on the validating webhook's availability/latency SLIs under
   real cluster conditions.
 - User-facing documentation in openshift-docs.
+- Decision on the CoreDNS CNAME hop limit (Open Question 2): either
+  implemented and verified, with the `cluster.local` target restriction
+  lifted and a test that changing an `ExternalName` Service cannot make an
+  alias lookup run unbounded or disrupt unrelated queries, or the
+  restriction kept and documented.
 
 ### Removing a deprecated feature
 
@@ -1118,9 +1199,8 @@ corresponding restore behavior must be documented and tested.
 
 The required teardown order is:
 
-1. Prevent acceptance of unvalidated non-empty `responseRules`. While the
-   API still accepts the field, equivalent admission protection must
-   remain effective; reconciliation alone is not a substitute.
+1. Prevent acceptance of unvalidated non-empty `responseRules`: the
+   webhook stays registered while the API still accepts the field.
 2. The DNS Operator removes the `ValidatingWebhookConfiguration` once the
    DNS CRD schema no longer accepts `responseRules`, and waits until it is
    gone.
@@ -1146,15 +1226,22 @@ availability, admission registration, and the webhook serving components.
 These resources are created in sequence by the operator and must not be
 treated as an atomic update.
 
-Before the API accepts non-empty `responseRules`, the registration must be
-effective for matching requests. If the registered webhook is temporarily
-unavailable, `failurePolicy: Fail` rejects those requests rather than
-allowing unchecked rules. Merely observing the registration object is not
-sufficient test evidence; admission behavior must be exercised.
+The CRD exposes `spec.responseRules` as soon as the feature gate is
+enabled, while the webhook still needs its serving certificate and an
+available replica before it can validate requests. The operator therefore
+registers the webhook as soon as the feature gate is enabled, before its
+endpoint is ready, and `failurePolicy: Fail` rejects matching requests
+until the webhook can validate them (see
+[Admission Webhook Lifecycle and Failure Handling](#admission-webhook-lifecycle-and-failure-handling)).
+The interval before the operator's first reconcile, typically seconds, is
+covered by reconcile-time validation: a rule written then is never served
+unless it passes the same protected-name and cycle checks. Merely
+observing the registration object is not sufficient test evidence;
+admission behavior must be exercised.
 
-The inverse ordering applies during removal: prevent acceptance of
-unvalidated non-empty `responseRules` before unregistering the webhook,
-then remove its serving components. The status-update and remove-all-rules
+The inverse ordering applies during removal: unregister the webhook only
+after the schema no longer accepts non-empty `responseRules`, then remove
+its serving components. The status-update and remove-all-rules
 exclusions described above remain available throughout the transition.
 
 **Lifecycle decision:** the DNS Operator is the registration owner (see
@@ -1180,7 +1267,11 @@ Deployment readiness, and by keeping the CRD schema in place during removal.
 * Failure mode: there are two distinct paths, not one. An invalid or
   conflicting submitted rule is rejected by schema/admission or the
   validating webhook before it is ever persisted, so it never reaches
-  reconciliation or CoreDNS at all. A rule that was valid when accepted but
+  reconciliation or CoreDNS at all; a rule written in the brief interval
+  before the operator first registers the webhook is caught by
+  reconcile-time validation instead (see
+  [Version Skew Strategy](#version-skew-strategy)). A rule that was valid
+  when accepted but
   whose generated Corefile stanza later fails validation, or whose
   protected-domain context changes after acceptance, is caught at
   reconcile time: the operator keeps serving the last-known-good Corefile
@@ -1201,8 +1292,9 @@ Deployment readiness, and by keeping the CRD schema in place during removal.
   and it does not itself create a new rejected-rule status entry. A
   `DNS/default` status condition, by contrast, only ever reflects a rule
   that was accepted at submission but later failed reconcile-time
-  validation (a generated-stanza error, or a protected-domain context
-  change after acceptance) — it is visible via the status condition,
+  validation (a generated-stanza error, a protected-domain context
+  change after acceptance, or a rule written before the operator first
+  registered the webhook) — it is visible via the status condition,
   naming the offending rule and the reason, and removing the offending
   entry from `spec.responseRules` and resubmitting clears it on the next
   reconcile.
